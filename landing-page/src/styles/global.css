@@ -1,0 +1,172 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 220 26% 14%;
+    --foreground: 40 10% 92%;
+
+    --card: 220 24% 18%;
+    --card-foreground: 40 10% 92%;
+
+    --popover: 220 24% 18%;
+    --popover-foreground: 40 10% 92%;
+
+    --primary: 35 95% 55%;
+    --primary-foreground: 220 26% 10%;
+
+    --secondary: 220 20% 22%;
+    --secondary-foreground: 40 10% 85%;
+
+    --muted: 220 18% 20%;
+    --muted-foreground: 220 10% 55%;
+
+    --accent: 35 95% 55%;
+    --accent-foreground: 220 26% 10%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 220 15% 25%;
+    --input: 220 15% 25%;
+    --ring: 35 95% 55%;
+
+    --radius: 0.75rem;
+
+    --glow-orange: 35 95% 55%;
+    --navy-deep: 220 30% 10%;
+    --navy-mid: 220 26% 14%;
+    --surface-elevated: 220 22% 20%;
+    --glass-bg: 220 24% 18% / 0.6;
+    --glass-border: 220 15% 35% / 0.4;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: 'Inter', sans-serif;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Space Grotesk', 'Inter', sans-serif;
+  }
+
+  code, pre, .font-mono {
+    font-family: 'JetBrains Mono', monospace;
+  }
+}
+
+@layer utilities {
+  .text-gradient-orange {
+    @apply bg-clip-text text-transparent;
+    background-image: linear-gradient(135deg, hsl(35 95% 55%), hsl(25 100% 65%));
+  }
+
+  .glow-orange {
+    box-shadow: 0 0 40px -10px hsl(35 95% 55% / 0.4),
+                0 0 80px -20px hsl(35 95% 55% / 0.2);
+  }
+
+  .glow-orange-sm {
+    box-shadow: 0 0 20px -5px hsl(35 95% 55% / 0.3);
+  }
+
+  .glow-orange-lg {
+    box-shadow: 0 0 60px -10px hsl(35 95% 55% / 0.5),
+                0 0 120px -30px hsl(35 95% 55% / 0.25),
+                0 0 200px -60px hsl(35 95% 55% / 0.1);
+  }
+
+  .bg-grid-pattern {
+    background-image:
+      linear-gradient(hsl(220 15% 25% / 0.3) 1px, transparent 1px),
+      linear-gradient(90deg, hsl(220 15% 25% / 0.3) 1px, transparent 1px);
+    background-size: 60px 60px;
+  }
+
+  .bg-gradient-radial-hero {
+    background: radial-gradient(ellipse 80% 60% at 50% 0%, hsl(35 95% 55% / 0.08) 0%, transparent 70%);
+  }
+
+  .glass {
+    background: hsl(var(--glass-bg));
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid hsl(var(--glass-border));
+  }
+
+  .glass-strong {
+    background: hsl(220 24% 16% / 0.85);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border: 1px solid hsl(220 15% 30% / 0.5);
+  }
+
+  .gradient-mesh {
+    background:
+      radial-gradient(ellipse 50% 40% at 20% 30%, hsl(35 95% 55% / 0.06) 0%, transparent 70%),
+      radial-gradient(ellipse 40% 50% at 80% 60%, hsl(25 100% 65% / 0.04) 0%, transparent 70%),
+      radial-gradient(ellipse 60% 40% at 50% 80%, hsl(220 60% 50% / 0.03) 0%, transparent 70%);
+  }
+
+  .ide-shadow {
+    box-shadow:
+      0 25px 60px -15px hsl(220 30% 5% / 0.6),
+      0 0 40px -10px hsl(35 95% 55% / 0.15),
+      inset 0 1px 0 hsl(220 15% 30% / 0.3);
+  }
+
+  .cursor-glow {
+    pointer-events: none;
+    position: fixed;
+    width: 400px;
+    height: 400px;
+    border-radius: 50%;
+    background: radial-gradient(circle, hsl(35 95% 55% / 0.06) 0%, transparent 70%);
+    transform: translate(-50%, -50%);
+    z-index: 0;
+    transition: opacity 0.3s;
+  }
+
+  /* Scroll reveal animation utility */
+  .scroll-reveal {
+    opacity: 0;
+    transform: translateY(20px);
+    transition: opacity 0.6s ease, transform 0.6s ease;
+  }
+  .scroll-reveal.visible {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  .scroll-reveal-scale {
+    opacity: 0;
+    transform: scale(0.8);
+    transition: opacity 0.6s ease, transform 0.6s ease;
+  }
+  .scroll-reveal-scale.visible {
+    opacity: 1;
+    transform: scale(1);
+  }
+  .scroll-reveal-line-x {
+    transform: scaleX(0);
+    transition: transform 0.5s ease;
+  }
+  .scroll-reveal-line-x.visible {
+    transform: scaleX(1);
+  }
+  .scroll-reveal-line-y {
+    transform: scaleY(0);
+    transition: transform 0.5s ease;
+  }
+  .scroll-reveal-line-y.visible {
+    transform: scaleY(1);
+  }
+}

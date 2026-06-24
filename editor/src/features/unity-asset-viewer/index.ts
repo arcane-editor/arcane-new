@@ -1,0 +1,6 @@
+// Structured Unity asset viewer (F-3.2 T7.2). Renders scenes/prefabs/.asset/.mat
+// as a navigable tree via the Rust `unity_parse_asset` parser, with a raw/edit
+// fallback handled by the editor host.
+export { AssetViewer } from './components/AssetViewer';
+export { InputActionsViewer, isInputActionsFile } from './components/InputActionsViewer';
+export { isUnityAssetFile } from './services/asset-model';

@@ -1,0 +1,140 @@
+// macOS native menu bar.
+// Items emit Tauri events; the JS side listens and dispatches the
+// matching command via the existing command registry.
+
+use tauri::{
+    menu::{AboutMetadata, Menu, MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder},
+    AppHandle, Emitter, Wry,
+};
+
+#[cfg(target_os = "macos")]
+pub fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
+    let app_handle = app.clone();
+    let pkg_info = app_handle.package_info();
+    let about = PredefinedMenuItem::about(
+        &app_handle,
+        Some("About Arcane"),
+        Some(AboutMetadata {
+            name: Some(pkg_info.name.clone()),
+            version: Some(pkg_info.version.to_string()),
+            ..Default::default()
+        }),
+    )?;
+
+    // App menu
+    let app_submenu = SubmenuBuilder::new(&app_handle, &pkg_info.name)
+        .item(&about)
+        .separator()
+        .item(&PredefinedMenuItem::services(&app_handle, None)?)
+        .separator()
+        .item(&PredefinedMenuItem::hide(&app_handle, None)?)
+        .item(&PredefinedMenuItem::hide_others(&app_handle, None)?)
+        .item(&PredefinedMenuItem::show_all(&app_handle, None)?)
+        .separator()
+        .item(&PredefinedMenuItem::quit(&app_handle, None)?)
+        .build()?;
+
+    // File menu
+    let new_file = MenuItemBuilder::with_id("file.new", "New File")
+        .accelerator("CmdOrCtrl+N")
+        .build(&app_handle)?;
+    let new_window = MenuItemBuilder::with_id("file.newWindow", "New Window")
+        .accelerator("CmdOrCtrl+Shift+N")
+        .build(&app_handle)?;
+    let open_folder = MenuItemBuilder::with_id("file.openFolder", "Open Folder…")
+        .accelerator("CmdOrCtrl+O")
+        .build(&app_handle)?;
+    let open_folder_new_window = MenuItemBuilder::with_id(
+        "file.openFolderNewWindow",
+        "Open Folder in New Window…",
+    )
+    .build(&app_handle)?;
+    let open_recent = MenuItemBuilder::with_id("file.openRecent", "Open Recent…")
+        .build(&app_handle)?;
+    let save_file = MenuItemBuilder::with_id("file.save", "Save")
+        .accelerator("CmdOrCtrl+S")
+        .build(&app_handle)?;
+    let close_tab = MenuItemBuilder::with_id("file.closeTab", "Close Tab")
+        .accelerator("CmdOrCtrl+W")
+        .build(&app_handle)?;
+    let close_all_tabs = MenuItemBuilder::with_id("tab.closeAll", "Close All Tabs")
+        .accelerator("CmdOrCtrl+Shift+W")
+        .build(&app_handle)?;
+    let file_submenu = SubmenuBuilder::new(&app_handle, "File")
+        .item(&new_file)
+        .item(&new_window)
+        .separator()
+        .item(&open_folder)
+        .item(&open_folder_new_window)
+        .item(&open_recent)
+        .separator()
+        .item(&save_file)
+        .separator()
+        .item(&close_tab)
+        .item(&close_all_tabs)
+        .build()?;
+
+    // Edit menu
+    let edit_submenu = SubmenuBuilder::new(&app_handle, "Edit")
+        .item(&PredefinedMenuItem::undo(&app_handle, None)?)
+        .item(&PredefinedMenuItem::redo(&app_handle, None)?)
+        .separator()
+        .item(&PredefinedMenuItem::cut(&app_handle, None)?)
+        .item(&PredefinedMenuItem::copy(&app_handle, None)?)
+        .item(&PredefinedMenuItem::paste(&app_handle, None)?)
+        .item(&PredefinedMenuItem::select_all(&app_handle, None)?)
+        .build()?;
+
+    // View menu
+    let toggle_left = MenuItemBuilder::with_id("view.toggleSidebar", "Toggle Left Sidebar")
+        .accelerator("CmdOrCtrl+B")
+        .build(&app_handle)?;
+    let toggle_right = MenuItemBuilder::with_id("view.toggleRightSidebar", "Toggle Right Sidebar")
+        .accelerator("CmdOrCtrl+K")
+        .build(&app_handle)?;
+    let toggle_bottom = MenuItemBuilder::with_id("view.toggleBottomPanel", "Toggle Bottom Panel")
+        .accelerator("CmdOrCtrl+J")
+        .build(&app_handle)?;
+    let cmd_palette = MenuItemBuilder::with_id("palette.commands", "Command Palette")
+        .accelerator("CmdOrCtrl+Shift+P")
+        .build(&app_handle)?;
+    let quick_open = MenuItemBuilder::with_id("palette.quickOpen", "Quick Open File…")
+        .accelerator("CmdOrCtrl+P")
+        .build(&app_handle)?;
+    let theme_picker = MenuItemBuilder::with_id("theme.openPicker", "Color Theme…")
+        .accelerator("CmdOrCtrl+Shift+T")
+        .build(&app_handle)?;
+    let view_submenu = SubmenuBuilder::new(&app_handle, "View")
+        .item(&cmd_palette)
+        .item(&quick_open)
+        .separator()
+        .item(&toggle_left)
+        .item(&toggle_right)
+        .item(&toggle_bottom)
+        .separator()
+        .item(&theme_picker)
+        .item(&PredefinedMenuItem::fullscreen(&app_handle, None)?)
+        .build()?;
+
+    // Window menu
+    let window_submenu = SubmenuBuilder::new(&app_handle, "Window")
+        .item(&PredefinedMenuItem::minimize(&app_handle, None)?)
+        .item(&PredefinedMenuItem::maximize(&app_handle, None)?)
+        .separator()
+        .item(&PredefinedMenuItem::close_window(&app_handle, None)?)
+        .build()?;
+
+    let menu = MenuBuilder::new(&app_handle)
+        .item(&app_submenu)
+        .item(&file_submenu)
+        .item(&edit_submenu)
+        .item(&view_submenu)
+        .item(&window_submenu)
+        .build()?;
+
+    Ok(menu)
+}
+
+pub fn handle_menu_event(app: &AppHandle, event_id: &str) {
+    let _ = app.emit("menu-action", event_id.to_string());
+}

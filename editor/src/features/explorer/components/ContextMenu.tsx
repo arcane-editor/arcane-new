@@ -1,0 +1,132 @@
+import { FilePlus, FolderPlus, FileCode, Pencil, Trash2 } from 'lucide-react';
+
+interface ContextMenuProps {
+  x: number;
+  y: number;
+  isDir: boolean;
+  onNewFile: () => void;
+  onNewFolder: () => void;
+  /** Optional Unity "New C# Script…" action (shown when provided). */
+  onNewScript?: () => void;
+  onRename: () => void;
+  onDelete: () => void;
+  onClose: () => void;
+}
+
+function ContextMenu({
+  x,
+  y,
+  onNewFile,
+  onNewFolder,
+  onNewScript,
+  onRename,
+  onDelete,
+  onClose,
+}: ContextMenuProps) {
+  function handleItem(cb: () => void) {
+    cb();
+    onClose();
+  }
+
+  return (
+    <>
+      {/* Transparent overlay to close menu on outside click */}
+      <div
+        style={{
+          position: 'fixed',
+          inset: 0,
+          zIndex: 900,
+        }}
+        onClick={onClose}
+        onContextMenu={(e) => { e.preventDefault(); onClose(); }}
+      />
+      {/* Menu */}
+      <div
+        style={{
+          position: 'fixed',
+          left: x,
+          top: y,
+          zIndex: 901,
+          background: 'var(--bg-dropdown, var(--bg-sidebar))',
+          border: '1px solid var(--border)',
+          borderRadius: '4px',
+          padding: '4px 0',
+          minWidth: '160px',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+          fontSize: '13px',
+          color: 'var(--text-primary)',
+        }}
+      >
+        <button
+          className="context-menu-item"
+          onClick={() => handleItem(onNewFile)}
+          style={menuItemStyle}
+          onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg-hover)')}
+          onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+        >
+          <FilePlus size={14} style={{ marginRight: 8, flexShrink: 0 }} />
+          New File
+        </button>
+        <button
+          className="context-menu-item"
+          onClick={() => handleItem(onNewFolder)}
+          style={menuItemStyle}
+          onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg-hover)')}
+          onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+        >
+          <FolderPlus size={14} style={{ marginRight: 8, flexShrink: 0 }} />
+          New Folder
+        </button>
+        {onNewScript && (
+          <button
+            className="context-menu-item"
+            onClick={() => handleItem(onNewScript)}
+            style={menuItemStyle}
+            onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg-hover)')}
+            onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+          >
+            <FileCode size={14} style={{ marginRight: 8, flexShrink: 0 }} />
+            New C# Script…
+          </button>
+        )}
+        <div style={{ borderTop: '1px solid var(--border)', margin: '4px 0' }} />
+        <button
+          className="context-menu-item"
+          onClick={() => handleItem(onRename)}
+          style={menuItemStyle}
+          onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg-hover)')}
+          onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+        >
+          <Pencil size={14} style={{ marginRight: 8, flexShrink: 0 }} />
+          Rename
+        </button>
+        <button
+          className="context-menu-item"
+          onClick={() => handleItem(onDelete)}
+          style={{ ...menuItemStyle, color: 'var(--color-error, #f44747)' }}
+          onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg-hover)')}
+          onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+        >
+          <Trash2 size={14} style={{ marginRight: 8, flexShrink: 0 }} />
+          Delete
+        </button>
+      </div>
+    </>
+  );
+}
+
+const menuItemStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  width: '100%',
+  padding: '5px 12px',
+  background: 'transparent',
+  border: 'none',
+  cursor: 'pointer',
+  fontSize: '13px',
+  color: 'inherit',
+  textAlign: 'left',
+  fontFamily: 'inherit',
+};
+
+export default ContextMenu;

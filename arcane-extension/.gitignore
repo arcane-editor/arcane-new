@@ -1,0 +1,9 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+*.tgz
+
+# Dev config (generated per-project, not part of source)
+.arcane-dev-path

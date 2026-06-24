@@ -1,0 +1,83 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Arcane Editor — monorepo root .gitignore
+#
+# Subfolders (arcane-server, arcane-release-worker, editor, landing-page,
+# arcane-extension) keep their own .gitignore for stack-specific artifacts.
+# These patterns apply repo-wide as a safety net so nothing sensitive or
+# generated is ever committed, regardless of which folder it lives in.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Secrets / environment — NEVER commit ─────────────────────────────────────
+# (If any of these already leaked, rotate the keys at the provider — gitignore
+#  only stops future commits, it does not scrub history.)
+.env
+.env.*
+.dev.vars
+.dev.vars.*
+.env.vars
+.env.vars.*
+*.pem
+*.key
+# …but DO keep example/templates
+!.env.example
+!.env.*.example
+!.env.sample
+!.dev.vars.example
+!.env.vars.example
+
+# ── Dependencies ─────────────────────────────────────────────────────────────
+node_modules/
+.pnp
+.pnp.*
+
+# ── Build output (JS/TS — Vite, Astro, Workers, tsc) ─────────────────────────
+dist/
+dist-ssr/
+out/
+.output/
+.astro/
+*.tsbuildinfo
+*.local
+
+# ── Rust / Tauri (editor/src-tauri) ──────────────────────────────────────────
+target/
+gen/schemas/
+
+# ── Cloudflare Workers (arcane-server, arcane-release-worker) ────────────────
+.wrangler/
+
+# ── Python (editor/tooling/arcane-graph-sidecar) ─────────────────────────────
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# ── Caches / coverage ────────────────────────────────────────────────────────
+.cache/
+.eslintcache
+.turbo/
+.vite/
+coverage/
+*.lcov
+
+# ── Logs ─────────────────────────────────────────────────────────────────────
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ── Editor / IDE ─────────────────────────────────────────────────────────────
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# ── OS ───────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db

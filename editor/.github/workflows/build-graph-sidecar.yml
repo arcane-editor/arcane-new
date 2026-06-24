@@ -1,0 +1,58 @@
+name: Build arcane-graph sidecar
+
+on:
+  push:
+    paths:
+      - 'tooling/arcane-graph-sidecar/**'
+      - '.github/workflows/build-graph-sidecar.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            target: aarch64-apple-darwin
+          - os: macos-13
+            target: x86_64-apple-darwin
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - os: windows-2022
+            target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build sidecar
+        shell: bash
+        run: |
+          cd tooling/arcane-graph-sidecar
+          python -m venv .venv
+          source .venv/bin/activate || source .venv/Scripts/activate
+          pip install --upgrade pip
+          pip install graphifyy pyinstaller
+          python -m PyInstaller pyinstaller.spec
+          mkdir -p ../../src-tauri/binaries
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            cp dist/arcane-graph.exe "../../src-tauri/binaries/arcane-graph-${{ matrix.target }}.exe"
+          else
+            cp dist/arcane-graph "../../src-tauri/binaries/arcane-graph-${{ matrix.target }}"
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: arcane-graph-${{ matrix.target }}
+          path: src-tauri/binaries/arcane-graph-${{ matrix.target }}*

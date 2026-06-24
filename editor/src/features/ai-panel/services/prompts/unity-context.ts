@@ -1,0 +1,48 @@
+/**
+ * Shared Unity context block injected into every system prompt.
+ *
+ * This is intentionally compact: we want strong priors without bloating the
+ * system prompt for every turn. Specific lifecycle/API details the model needs
+ * are listed; nuanced edge cases are surfaced via the gotchas section so the
+ * model knows where to be careful.
+ */
+
+export const UNITY_CONTEXT = `## Unity project context
+
+You are working inside a Unity project. Treat .cs files in this workspace as
+Unity scripts unless their location or contents make clear they're not
+(e.g. csproj files, Editor-only utilities, plain .NET libraries under Packages/).
+
+### Component lifecycle (most-common methods)
+\`Awake\` → \`OnEnable\` → \`Start\` → repeated \`Update\` / \`FixedUpdate\` / \`LateUpdate\` → \`OnDisable\` → \`OnDestroy\`.
+- \`Awake\` runs once when the script instance is loaded; use it to initialize internal state and cache \`GetComponent<T>()\` references on **this** GameObject.
+- \`Start\` runs on the first frame the script is enabled; use it for setup that depends on **other** GameObjects existing (their \`Awake\` has already run).
+- \`Update\` runs every frame — multiply per-frame deltas by \`Time.deltaTime\`.
+- \`FixedUpdate\` runs at the physics tick — use it for \`Rigidbody\` forces and movement; multiply by \`Time.fixedDeltaTime\`.
+- \`LateUpdate\` runs after all \`Update\`s — use it for camera follow / cleanup that must observe final positions.
+
+### Conventions
+- PascalCase for public members and methods; \`_camelCase\` for private fields.
+- Prefer \`[SerializeField] private\` over \`public\` fields. Public fields create coupling and pollute the inspector with no enforcement of accessor semantics.
+- Match \`namespace\` to the assembly definition (asmdef) the script lives in. If no asmdef is present, follow the folder structure under \`Assets/Scripts\`.
+- Place new MonoBehaviours under \`Assets/Scripts/\` unless the project's existing layout suggests otherwise (e.g. feature-folders).
+
+### Common API crib
+- Movement: \`transform.Translate(direction * speed * Time.deltaTime)\` for non-physics, \`rigidbody.AddForce(...)\` or \`rigidbody.MovePosition(...)\` inside \`FixedUpdate\` for physics.
+- Vector math: \`Vector3.Lerp(a, b, t)\`, \`Vector3.MoveTowards(a, b, maxDelta)\`, \`Vector3.Distance(a, b)\`, \`Quaternion.Slerp(...)\`, \`Quaternion.LookRotation(forward, up)\`.
+- Input (legacy): \`Input.GetAxis("Horizontal")\`, \`Input.GetKey(KeyCode.Space)\`, \`Input.GetMouseButtonDown(0)\`. Prefer the new Input System if the project already references it.
+- Spawning: \`Instantiate(prefab, position, rotation)\` or \`Instantiate(prefab, parent)\`. Always destroy with \`Destroy(go)\` (end-of-frame) or \`Destroy(go, delay)\`.
+- Lookup: \`GetComponent<T>()\` on the same GameObject; \`GetComponentInChildren<T>()\` / \`GetComponentInParent<T>()\` for traversal. Avoid \`FindObjectOfType<T>()\` in hot paths.
+- Coroutines: \`StartCoroutine(MyCoroutine())\` returns an \`IEnumerator\`; yield \`new WaitForSeconds(t)\`, \`null\` (next frame), or \`new WaitForFixedUpdate()\`.
+
+### Gotchas
+- Destroyed Unity objects are not \`null\` in the C# sense — Unity overloads \`==\` so \`if (obj == null)\` works, but \`obj?.Foo()\` does **not** treat a destroyed object as null. Prefer explicit \`!= null\` checks for Unity types.
+- \`Destroy(go)\` is queued to end-of-frame; the object is still alive for the rest of the current frame.
+- \`async/await\` continuations do **not** stop when a GameObject is disabled or destroyed. Coroutines do (via \`StopCoroutine\` or component disable). For per-frame logic that needs lifecycle awareness, use coroutines, not \`async\`.
+- Do not edit \`.meta\` files by hand — Unity manages them. Renaming/moving an asset must take its \`.meta\` along (the editor handles this; tools like \`mv\` need to move both).
+- ScriptableObjects are project-wide assets, not per-scene; use \`CreateAssetMenu\` for editor authoring.
+
+### Tests
+- Unity Test Framework: \`[Test]\` for sync, \`[UnityTest] IEnumerator\` for play-mode async.
+- EditMode tests live under \`Assets/Tests/Editor\` (asmdef references \`UnityEngine.TestRunner\` + \`UnityEditor.TestRunner\`); PlayMode tests under \`Assets/Tests/PlayMode\`.
+`;

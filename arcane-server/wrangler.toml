@@ -1,0 +1,23 @@
+name = "arcane-server"
+main = "index.ts"
+compatibility_date = "2025-12-01"
+compatibility_flags = ["nodejs_compat"]
+
+[[d1_databases]]
+binding = "arcane_db"
+database_name = "arcane-db"
+database_id = "fdc0556c-e622-44db-a189-1be9a55acb80"
+
+# Cloudflare Workers AI — all LLM calls route through this binding.
+[ai]
+binding = "AI"
+
+[vars]
+ENVIRONMENT = "production"
+# AI Gateway id — when set, all Workers AI calls route through it for
+# caching/logging/rate-limits. Left EMPTY for now: the existing "arcane-gateway"
+# is an *authenticated* gateway, which the Workers AI binding cannot pass
+# cf-aig-authorization to. To enable it: in the dashboard open the gateway's
+# Settings and turn OFF "Authenticated Gateway", then set this back to
+# "arcane-gateway" and redeploy. Empty = no gateway (models still work).
+CF_AI_GATEWAY_ID = ""

@@ -1,0 +1,166 @@
+---
+const API_URL = import.meta.env.PUBLIC_API_URL || 'https://api.arcaneai.org';
+---
+
+<section id="feedback" class="relative py-20">
+  <div class="container relative z-10 mx-auto px-4">
+    <div class="mx-auto max-w-2xl rounded-2xl glass p-6 sm:p-10 scroll-reveal">
+      <div class="text-center mb-8">
+        <h3 class="mb-3 font-display text-2xl font-bold tracking-tight sm:text-3xl">
+          Help Shape <span class="text-gradient-orange">Arcane</span>
+        </h3>
+        <p class="text-muted-foreground text-base">
+          This is our first release and your feedback matters. Tell us what works, what doesn't, and what you want next.
+        </p>
+      </div>
+
+      <form id="feedback-form" class="space-y-5">
+        <!-- Rating -->
+        <div>
+          <label class="block text-sm font-medium text-foreground mb-2">How would you rate your experience?</label>
+          <div id="star-rating" class="flex gap-2">
+            {[1, 2, 3, 4, 5].map((n) => (
+              <button type="button" data-rating={n}
+                class="star-btn h-10 w-10 rounded-lg border border-border/60 bg-background text-muted-foreground transition-all hover:border-primary/40 hover:text-primary flex items-center justify-center text-lg"
+                aria-label={`Rate ${n} star${n > 1 ? 's' : ''}`}>
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+              </button>
+            ))}
+          </div>
+          <input type="hidden" name="rating" id="rating-value" value="" required />
+        </div>
+
+        <!-- Category -->
+        <div>
+          <label for="category" class="block text-sm font-medium text-foreground mb-2">Category</label>
+          <select name="category" id="category"
+            class="w-full rounded-lg border border-border/60 bg-background px-3 py-2.5 text-sm text-foreground transition-colors focus:border-primary/40 focus:outline-none">
+            <option value="general">General Feedback</option>
+            <option value="bug">Bug Report</option>
+            <option value="feature">Feature Request</option>
+            <option value="ux">UI / UX</option>
+          </select>
+        </div>
+
+        <!-- Message -->
+        <div>
+          <label for="message" class="block text-sm font-medium text-foreground mb-2">Your feedback</label>
+          <textarea name="message" id="message" rows="4" required
+            placeholder="What's working well? What could be better?"
+            class="w-full rounded-lg border border-border/60 bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/50 transition-colors focus:border-primary/40 focus:outline-none resize-none"></textarea>
+        </div>
+
+        <!-- Email (optional) -->
+        <div>
+          <label for="email" class="block text-sm font-medium text-foreground mb-2">
+            Email <span class="text-muted-foreground font-normal">(optional, for follow-up)</span>
+          </label>
+          <input type="email" name="email" id="email"
+            placeholder="you@example.com"
+            class="w-full rounded-lg border border-border/60 bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/50 transition-colors focus:border-primary/40 focus:outline-none" />
+        </div>
+
+        <!-- Submit -->
+        <div class="flex items-center gap-4">
+          <button type="submit" id="submit-btn"
+            class="inline-flex items-center justify-center gap-2 rounded-md font-semibold bg-primary text-primary-foreground hover:bg-primary/90 glow-orange-sm h-11 px-6 transition-colors">
+            Submit Feedback
+          </button>
+          <span class="text-sm text-muted-foreground">
+            Help Shape Arcane
+          </span>
+        </div>
+
+        <!-- Status messages -->
+        <div id="form-status" class="hidden text-sm"></div>
+      </form>
+    </div>
+  </div>
+</section>
+
+<script define:vars={{ API_URL }}>
+  const form = document.getElementById('feedback-form');
+  const starBtns = document.querySelectorAll('.star-btn');
+  const ratingInput = document.getElementById('rating-value');
+  const statusEl = document.getElementById('form-status');
+  const submitBtn = document.getElementById('submit-btn');
+
+  let selectedRating = 0;
+
+  // Star rating interaction
+  starBtns.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      selectedRating = parseInt(btn.dataset.rating);
+      ratingInput.value = String(selectedRating);
+      starBtns.forEach((b) => {
+        const r = parseInt(b.dataset.rating);
+        if (r <= selectedRating) {
+          b.classList.add('border-primary', 'text-primary', 'bg-primary/10');
+          b.querySelector('svg').setAttribute('fill', 'currentColor');
+        } else {
+          b.classList.remove('border-primary', 'text-primary', 'bg-primary/10');
+          b.querySelector('svg').setAttribute('fill', 'none');
+        }
+      });
+    });
+  });
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    if (!selectedRating) {
+      statusEl.textContent = 'Please select a rating.';
+      statusEl.className = 'text-sm text-red-400';
+      statusEl.classList.remove('hidden');
+      return;
+    }
+
+    const message = form.message.value.trim();
+    if (!message) {
+      statusEl.textContent = 'Please enter your feedback.';
+      statusEl.className = 'text-sm text-red-400';
+      statusEl.classList.remove('hidden');
+      return;
+    }
+
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Submitting...';
+
+    try {
+      const res = await fetch(`${API_URL}/v1/feedback`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          rating: selectedRating,
+          message,
+          email: form.email.value.trim() || undefined,
+          category: form.category.value,
+        }),
+      });
+
+      if (res.ok) {
+        statusEl.textContent = 'Thank you for your feedback!';
+        statusEl.className = 'text-sm text-green-400';
+        statusEl.classList.remove('hidden');
+        form.reset();
+        selectedRating = 0;
+        starBtns.forEach((b) => {
+          b.classList.remove('border-primary', 'text-primary', 'bg-primary/10');
+          b.querySelector('svg').setAttribute('fill', 'none');
+        });
+      } else {
+        const data = await res.json();
+        statusEl.textContent = data.error || 'Something went wrong. Please try again.';
+        statusEl.className = 'text-sm text-red-400';
+        statusEl.classList.remove('hidden');
+      }
+    } catch {
+      statusEl.textContent = 'Network error. Please try again.';
+      statusEl.className = 'text-sm text-red-400';
+      statusEl.classList.remove('hidden');
+    } finally {
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Submit Feedback';
+    }
+  });
+</script>

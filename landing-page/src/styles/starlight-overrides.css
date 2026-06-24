@@ -1,0 +1,57 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+/* ----------------------------------------------------------------
+   Core dark palette — applied in both light and dark data-theme
+   because we force defaultTheme: 'dark' and want consistency.
+---------------------------------------------------------------- */
+:root,
+:root[data-theme="light"],
+:root[data-theme="dark"] {
+  --sl-color-accent-low: hsl(35 95% 15%);
+  --sl-color-accent: hsl(35 95% 55%);
+  --sl-color-accent-high: hsl(35 95% 80%);
+  --sl-color-white: hsl(40 10% 92%);
+  --sl-color-gray-1: hsl(220 10% 80%);
+  --sl-color-gray-2: hsl(220 10% 55%);
+  --sl-color-gray-3: hsl(220 15% 35%);
+  --sl-color-gray-4: hsl(220 15% 25%);
+  --sl-color-gray-5: hsl(220 22% 20%);
+  --sl-color-gray-6: hsl(220 26% 14%);
+  --sl-color-black: hsl(220 30% 10%);
+  --sl-font: 'Inter', sans-serif;
+  --sl-font-mono: 'JetBrains Mono', monospace;
+}
+
+/* Force the header/navbar to always use the dark navy background */
+header.header,
+.header {
+  background-color: hsl(220 26% 14%) !important;
+  border-bottom-color: hsl(220 15% 25%) !important;
+}
+
+/* Sidebar background */
+.sidebar-pane {
+  background-color: hsl(220 30% 10%) !important;
+}
+
+/* Page background */
+:root,
+:root[data-theme="light"],
+:root[data-theme="dark"] {
+  --sl-color-bg: hsl(220 26% 14%);
+  --sl-color-bg-sidebar: hsl(220 30% 10%);
+  --sl-color-bg-nav: hsl(220 26% 14%);
+  --sl-color-hairline: hsl(220 15% 25%);
+  --sl-color-text: hsl(40 10% 92%);
+  --sl-color-text-accent: hsl(35 95% 55%);
+}
+
+/* Hide the light/dark mode toggle — site is dark-only */
+starlight-theme-select {
+  display: none !important;
+}
+
+/* Use Space Grotesk for headings in docs */
+h1, h2, h3, h4 {
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+}

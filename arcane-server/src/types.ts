@@ -1,0 +1,69 @@
+import type { AuthPayload } from './middleware/auth.ts';
+
+// Hono environment type — declares context bindings and variables
+export type AppEnv = {
+    Bindings: {
+        arcane_db: D1Database;
+        AI: Ai;                      // Cloudflare Workers AI binding
+        CF_AI_GATEWAY_ID: string;    // AI Gateway id (caching/logging/rate-limits)
+        JWT_SECRET: string;
+        ENVIRONMENT: string;
+    };
+    Variables: {
+        user: AuthPayload;
+    };
+};
+
+// Request types (what the editor sends)
+export interface ChatCompletionRequest {
+    model: string;
+    messages: ChatMessage[];
+    tools?: ToolDefinition[];
+    stream?: boolean;
+    max_tokens?: number;
+    temperature?: number;
+    metadata?: {
+        taskType?: 'chat' | 'edit' | 'plan' | 'explain';
+        mode?: 'agent' | 'ask' | 'plan';
+        reasoningLevel?: 'low' | 'mid' | 'high' | 'super';
+        planPhase?: 'planning' | 'executing';
+        sessionId?: string;
+    };
+}
+
+export interface ChatMessage {
+    role: 'system' | 'user' | 'assistant' | 'tool';
+    content: string | ContentPart[];
+    tool_calls?: ToolCall[];
+    tool_call_id?: string;
+    name?: string;
+}
+
+export interface ContentPart {
+    type: 'text' | 'image_url';
+    text?: string;
+    image_url?: { url: string };
+}
+
+export interface ToolDefinition {
+    type: 'function';
+    function: {
+        name: string;
+        description: string;
+        parameters: Record<string, unknown>;
+    };
+}
+
+export interface ToolCall {
+    id: string;
+    type: 'function';
+    function: { name: string; arguments: string };
+}
+
+// Stream events (what the server sends back via SSE)
+export type StreamEvent =
+    | { type: 'text'; content: string }
+    | { type: 'tool_call'; id: string; name: string; arguments: string; finished: boolean }
+    | { type: 'usage'; input_tokens: number; output_tokens: number }
+    | { type: 'thinking'; thought: string; signature: string }
+    | { type: 'error'; message: string };

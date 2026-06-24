@@ -1,0 +1,8 @@
+# Dev-only files — excluded from npm pack / UPM tarball
+install-dev.sh
+deploy-prod.sh
+.gitignore
+.npmignore
+.DS_Store
+.arcane-dev-path
+*.tgz

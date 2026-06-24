@@ -1,0 +1,8 @@
+name = "arcane-release-worker"
+main = "src/index.ts"
+compatibility_date = "2025-12-01"
+compatibility_flags = ["nodejs_compat"]
+
+[[r2_buckets]]
+binding = "RELEASES_BUCKET"
+bucket_name = "arcane-releases"

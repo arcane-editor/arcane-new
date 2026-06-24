@@ -1,0 +1,109 @@
+---
+const osCards = [
+  {
+    id: "macos-arm",
+    name: "macOS",
+    version: "v0.10.2",
+    ext: ".dmg",
+    subtitle: "Apple Silicon (M1+)",
+    href: "https://releases.arcaneai.org/v0.10.2/Arcane-arm64.dmg",
+    icon: `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/></svg>`,
+  },
+  {
+    id: "windows",
+    name: "Windows",
+    version: "v0.10.2",
+    ext: ".exe",
+    subtitle: "Windows 10+ (64-bit)",
+    href: "https://releases.arcaneai.org/v0.10.2/ArcaneSetup.exe",
+    icon: `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></svg>`,
+  },
+  {
+    id: "linux",
+    name: "Linux",
+    version: "Coming Soon",
+    ext: ".AppImage",
+    subtitle: "Ubuntu 20.04+, Fedora 36+",
+    href: null,
+    icon: `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/></svg>`,
+  },
+];
+---
+
+<section id="download" class="relative py-16 sm:py-28">
+  <div class="absolute inset-0 gradient-mesh"></div>
+  <div class="container relative z-10 mx-auto px-4">
+    <div class="mb-16 text-center scroll-reveal">
+      <h2 class="mb-4 font-display text-4xl font-bold tracking-tight sm:text-5xl">
+        Download <span class="text-gradient-orange">ArcaneIDE</span>
+      </h2>
+      <p class="mx-auto max-w-xl text-muted-foreground text-lg">
+        Get started in minutes. Choose your platform below.
+      </p>
+    </div>
+
+    <!-- OS Cards -->
+    <div class="mx-auto max-w-5xl grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+      {osCards.map((os, i) => (
+        <div
+          class="scroll-reveal group relative rounded-2xl glass p-6 text-center transition-all duration-300 hover:glow-orange hover:border-primary/40 hover:-translate-y-1"
+          style={`transition-delay: ${i * 100}ms;`}
+        >
+          <div class="absolute inset-0 rounded-2xl bg-gradient-to-b from-primary/5 to-transparent opacity-0 transition-opacity group-hover:opacity-100"></div>
+          <div class="relative z-10">
+            <div class="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-primary transition-all group-hover:bg-primary/20 group-hover:scale-110">
+              <Fragment set:html={os.icon} />
+            </div>
+            <h3 class="mb-1 font-display text-xl font-semibold">{os.name}</h3>
+            <p class="mb-1 font-mono text-xs text-primary/70">{os.version}</p>
+            <p class="mb-5 text-xs text-muted-foreground">{os.subtitle}</p>
+            {os.href ? (
+              <a href={os.href} class="inline-flex items-center justify-center gap-2 w-full whitespace-nowrap rounded-md font-semibold text-base bg-primary text-primary-foreground hover:bg-primary/90 glow-orange-sm h-9 px-3 transition-colors text-sm">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-1 h-4 w-4"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+                Download {os.ext}
+              </a>
+            ) : (
+              <span class="inline-flex items-center justify-center gap-2 w-full whitespace-nowrap rounded-md font-semibold text-base bg-muted text-muted-foreground h-9 px-3 text-sm cursor-not-allowed">
+                Coming Soon
+              </span>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+
+    <!-- Unity Extension -->
+    <div class="mx-auto mt-16 max-w-4xl scroll-reveal" style="transition-delay: 400ms;">
+      <h3 class="mb-6 text-center font-display text-2xl font-semibold tracking-tight">
+        Unity <span class="text-gradient-orange">Plugin</span>
+      </h3>
+      <div class="mx-auto max-w-sm group relative rounded-2xl glass p-6 text-center transition-all duration-300 hover:glow-orange hover:border-primary/40 hover:-translate-y-1">
+        <div class="absolute inset-0 rounded-2xl bg-gradient-to-b from-primary/5 to-transparent opacity-0 transition-opacity group-hover:opacity-100"></div>
+        <div class="relative z-10">
+          <div class="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-primary transition-all group-hover:bg-primary/20 group-hover:scale-110">
+            <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" x2="12" y1="22.08" y2="12"/></svg>
+          </div>
+          <h3 class="mb-1 font-display text-xl font-semibold">Unity Extension</h3>
+          <p class="mb-1 font-mono text-xs text-primary/70">v0.0.1</p>
+          <p class="mb-5 text-xs text-muted-foreground">Unity 2021.3+ (UPM Package)</p>
+          <a href="https://releases.arcaneai.org/unity-extension-releases/com.arcane.editor-0.0.1.tgz" class="inline-flex items-center justify-center gap-2 w-full whitespace-nowrap rounded-md font-semibold text-base bg-primary text-primary-foreground hover:bg-primary/90 glow-orange-sm h-9 px-3 transition-colors text-sm">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-1 h-4 w-4"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+            Download .tgz
+          </a>
+          <p class="mt-3 text-xs text-muted-foreground">
+            Import via Unity Package Manager &middot;
+            <a href="/docs/getting-started/unity-extension/" class="text-primary/70 hover:text-primary transition-colors">Setup guide &rarr;</a>
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- All releases link -->
+    <div class="mx-auto mt-12 max-w-2xl scroll-reveal text-center" style="transition-delay: 500ms;">
+      <!-- <a href="https://github.com/arcane-editor/arcane/releases" target="_blank" rel="noopener"
+         class="text-sm text-muted-foreground hover:text-primary transition-colors">
+        View all releases on GitHub &rarr;
+      </a> -->
+    </div>
+  </div>
+</section>

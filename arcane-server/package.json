@@ -1,0 +1,25 @@
+{
+  "name": "arcane-server",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:migrate:local": "wrangler d1 execute arcane-db --local --file=migrations/0001_init.sql",
+    "db:migrate:remote": "wrangler d1 execute arcane-db --remote --file=migrations/0001_init.sql",
+    "db:seed:local": "wrangler d1 execute arcane-db --local --file=migrations/0002_seed.sql",
+    "db:seed:remote": "wrangler d1 execute arcane-db --remote --file=migrations/0002_seed.sql"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4",
+    "wrangler": "^4.69.0"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "ai": "^6.0.90",
+    "hono": "^4.11.9",
+    "jose": "^6.1.3",
+    "workers-ai-provider": "^3.2.0"
+  }
+}

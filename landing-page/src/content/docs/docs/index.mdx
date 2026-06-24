@@ -1,0 +1,37 @@
+---
+title: ArcaneIDE Documentation
+description: Everything you need to get started with ArcaneIDE — the AI-powered Unity code editor.
+template: splash
+hero:
+  tagline: Build Unity games faster with an AI that understands your whole project.
+  actions:
+    - text: Get Started
+      link: /docs/getting-started/installation/
+      icon: right-arrow
+    - text: Back to Home
+      link: /
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+<CardGrid>
+  <Card title="Installation" icon="rocket">
+    Download ArcaneIDE and get past macOS Gatekeeper — including instructions for unsigned builds.
+  </Card>
+  <Card title="Opening a Unity Project" icon="open-book">
+    Open your Unity project folder and let Arcane automatically index your scripts, scenes, and assets.
+  </Card>
+  <Card title="Unity Integration" icon="setting">
+    Play/pause the Unity Editor, stream console logs, and navigate your scene hierarchy — all from Arcane.
+  </Card>
+  <Card title="AI Chat & Modes" icon="star">
+    Use Agent, Ask, or Plan mode with configurable reasoning levels to get exactly the help you need.
+  </Card>
+  <Card title="Project Knowledge Graph" icon="puzzle">
+    Arcane indexes every C# class, Unity scene, prefab, and animator so the AI always has full context.
+  </Card>
+  <Card title="Troubleshooting" icon="warning">
+    Common issues: indexing, Unity connection, API keys, and Gatekeeper errors.
+  </Card>
+</CardGrid>

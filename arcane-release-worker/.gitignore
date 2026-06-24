@@ -1,0 +1,29 @@
+# Dependencies
+node_modules
+
+# Build output
+dist
+out
+*.tgz
+
+# Secrets / environment (set prod values via `wrangler secret put`)
+.env
+.env.local
+.env.*.local
+.env.vars
+.dev.vars
+
+# Cloudflare Wrangler
+.wrangler
+
+# Caches
+.cache
+*.tsbuildinfo
+
+# Logs
+logs
+*.log
+
+# IDE / OS
+.idea
+.DS_Store

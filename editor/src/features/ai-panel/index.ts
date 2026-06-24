@@ -1,0 +1,31 @@
+export { default as AiChatPanel } from './components/AiChatPanel';
+export { default as MaximizedAiOverlay } from './components/MaximizedAiOverlay';
+export {
+  saveSession,
+  generateSessionId,
+  loadSession,
+  loadLatestSession,
+  listSessions,
+  deleteSession,
+  renameSession,
+} from './services/session-persistence';
+export type { SessionData, SessionSummary } from './services/session-persistence';
+export { fixConsoleError } from './services/fix-console-error';
+export type {
+  AgentKind,
+  Attachment,
+  ChatMode,
+  ClaudeEffort,
+  ClaudeModel,
+  ClaudePermissionMode,
+  Effort,
+} from './services/types';
+export type {
+  AgentEvent,
+  AssistantMessage,
+  TextContent,
+  ThinkingContent,
+  ToolCall,
+  AgentTool,
+  AgentToolResult,
+} from './services/vendor/types';

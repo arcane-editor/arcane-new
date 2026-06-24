@@ -1,0 +1,49 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "editor",
+  "version": "0.1.0",
+  "identifier": "com.inno.editor",
+  "build": {
+    "beforeDevCommand": "bun run sync:bridge && bun run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "bun run sync:bridge && bun run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "welcome",
+        "title": "Arcane",
+        "url": "index.html?view=welcome",
+        "width": 720,
+        "height": 480,
+        "minWidth": 600,
+        "minHeight": 360,
+        "resizable": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "backgroundColor": "#13121A"
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "externalBin": ["binaries/arcane-graph", "binaries/typescript-language-server"],
+    "resources": { "../unity-bridge": "unity-bridge" },
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "macOS": {
+      "signingIdentity": "-",
+      "entitlements": "entitlements.plist"
+    }
+  }
+}

@@ -1,0 +1,43 @@
+.bc-line {
+  font-style: italic;
+}
+
+.bc-important {
+  color: #ff5577 !important;
+  font-weight: 600;
+}
+
+.bc-question {
+  color: #4aa3ff !important;
+}
+
+.bc-highlight {
+  color: #4ec07a !important;
+}
+
+.bc-strikethrough {
+  color: #6a6a6a !important;
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+  opacity: 0.7;
+}
+
+.bc-todo {
+  color: #f59e0b !important;
+  font-weight: 600;
+}
+
+.bc-fixme {
+  color: #ef4444 !important;
+  font-weight: 600;
+}
+
+.bc-hack {
+  color: #eab308 !important;
+  font-weight: 600;
+}
+
+.bc-note {
+  color: #06b6d4 !important;
+  font-weight: 600;
+}
