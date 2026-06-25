@@ -14,4 +14,5 @@ export type {
 } from './services/bridge-rpc';
 export { isBridgeInstalled, installBridge, BRIDGE_DOCS_URL } from './services/bridge-installer';
 export { maybeRefreshUnityAfterSave } from './services/refresh-on-save';
+export { triggerRecompileAndWait } from './services/compile-wait';
 export { BridgeInstallBanner } from './components/BridgeInstallBanner';

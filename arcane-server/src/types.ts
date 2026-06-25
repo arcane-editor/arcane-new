@@ -5,6 +5,7 @@ export type AppEnv = {
     Bindings: {
         arcane_db: D1Database;
         AI: Ai;                      // Cloudflare Workers AI binding
+        VECTORIZE: Vectorize;        // Unity docs/API vector index (384-dim, bge-small)
         CF_AI_GATEWAY_ID: string;    // AI Gateway id (caching/logging/rate-limits)
         JWT_SECRET: string;
         ENVIRONMENT: string;

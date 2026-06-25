@@ -6,7 +6,11 @@
 
 import { Type, type Static } from '@sinclair/typebox';
 import type { AgentTool, AgentToolResult } from '../types';
-import { resolveToCwd } from './path-utils';
+import {
+  resolveWithinRoot,
+  PathOutsideRootError,
+  pathOutsideRootMessage,
+} from './path-utils';
 import { applyEdits, generateDiff, type Edit } from './edit-diff';
 
 const editSchema = Type.Object({
@@ -32,6 +36,8 @@ export interface EditToolOptions {
   operations: EditOperations;
   /** Called after a successful edit with the absolute path */
   onFileEdited?: (absolutePath: string) => void;
+  /** When set, file operations are confined to this root (the Assets/ sandbox). */
+  allowedRoot?: string | null;
 }
 
 export function createEditTool(cwd: string, options: EditToolOptions): AgentTool {
@@ -49,7 +55,15 @@ export function createEditTool(cwd: string, options: EditToolOptions): AgentTool
       signal?: AbortSignal,
     ): Promise<AgentToolResult> {
       const { path, edits: editInputs } = params as EditToolInput;
-      const absolutePath = resolveToCwd(path, cwd);
+      let absolutePath: string;
+      try {
+        absolutePath = resolveWithinRoot(path, cwd, options.allowedRoot ?? null);
+      } catch (err) {
+        if (err instanceof PathOutsideRootError) {
+          return { content: [{ type: 'text', text: pathOutsideRootMessage(err) }] };
+        }
+        throw err;
+      }
 
       try {
         await ops.access(absolutePath);

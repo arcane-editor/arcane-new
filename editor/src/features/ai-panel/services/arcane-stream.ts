@@ -83,10 +83,15 @@ async function doStream(
   // 'explain'). Model choice is fully backend-driven off `reasoningLevel`; this
   // is metadata for logging only.
   const taskType = currentMode === 'ask' ? 'chat' : currentMode === 'plan' ? 'plan' : 'edit';
+  // Per-task output ceiling so the server clamp has a sane per-mode cap (the
+  // server still clamps to the model's published max). Q&A rarely needs 8k;
+  // agentic edits / plans can. Caps the output cost driver alongside compaction.
+  const maxTokensByTask = { chat: 4096, plan: 8192, edit: 8192 } as const;
   const body = {
     messages,
     tools: tools.length > 0 ? tools : undefined,
     stream: true,
+    max_tokens: maxTokensByTask[taskType],
     metadata: {
       taskType,
       mode: currentMode,

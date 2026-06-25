@@ -5,7 +5,11 @@
 
 import { Type, type Static } from '@sinclair/typebox';
 import type { AgentTool, AgentToolResult } from '../types';
-import { resolveToCwd } from './path-utils';
+import {
+  resolveWithinRoot,
+  PathOutsideRootError,
+  pathOutsideRootMessage,
+} from './path-utils';
 
 const writeSchema = Type.Object({
   path: Type.String({ description: 'Absolute or relative file path to write' }),
@@ -23,6 +27,8 @@ export interface WriteToolOptions {
   operations: WriteOperations;
   /** Called after a successful write with the absolute path */
   onFileWritten?: (absolutePath: string) => void;
+  /** When set, file operations are confined to this root (the Assets/ sandbox). */
+  allowedRoot?: string | null;
 }
 
 export function createWriteTool(cwd: string, options: WriteToolOptions): AgentTool {
@@ -40,7 +46,15 @@ export function createWriteTool(cwd: string, options: WriteToolOptions): AgentTo
       signal?: AbortSignal,
     ): Promise<AgentToolResult> {
       const { path, content } = params as WriteToolInput;
-      const absolutePath = resolveToCwd(path, cwd);
+      let absolutePath: string;
+      try {
+        absolutePath = resolveWithinRoot(path, cwd, options.allowedRoot ?? null);
+      } catch (err) {
+        if (err instanceof PathOutsideRootError) {
+          return { content: [{ type: 'text', text: pathOutsideRootMessage(err) }] };
+        }
+        throw err;
+      }
 
       if (signal?.aborted) {
         return { content: [{ type: 'text', text: 'Operation aborted' }] };

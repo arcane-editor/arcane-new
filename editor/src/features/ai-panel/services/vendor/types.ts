@@ -190,6 +190,8 @@ export interface AgentLoopConfig {
   getApiKey?: () => Promise<string | undefined> | string | undefined;
   signal?: AbortSignal;
   reasoning?: string;
+  /** Token budget used to trigger no-LLM context compaction. */
+  contextWindow?: number;
 }
 
 // =========================================================================

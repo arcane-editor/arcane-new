@@ -161,6 +161,34 @@ export function getUnityFactsBlock(): string | null {
   return lines.join('\n');
 }
 
+/**
+ * Grounding context for the version-accurate API tools (unity_api_search /
+ * lookup) and the compile-gate de-hallucinator: the detected Unity version plus
+ * the render pipeline + input system used as Vectorize metadata filters. Reads
+ * the warmed facts cache; kicks off a prime if cold (pipeline/input come back
+ * undefined that turn, which is fine — the server treats them as optional).
+ */
+export function getUnityGroundingContext(): {
+  unityVersion: string | null;
+  renderPipeline?: RenderPipeline;
+  inputSystem?: 'New' | 'Legacy' | 'Both';
+} {
+  const ctx = useProjectContextStore.getState();
+  const workspacePath = useWorkspaceStore.getState().workspacePath;
+  const facts = cache?.workspacePath === workspacePath ? cache : null;
+  if (!facts && workspacePath) void primeUnityFacts(workspacePath);
+
+  let inputSystem: 'New' | 'Legacy' | 'Both' | undefined;
+  if (facts) {
+    inputSystem = facts.inputSystem.includes('New')
+      ? 'New'
+      : facts.inputSystem.includes('Both')
+        ? 'Both'
+        : 'Legacy';
+  }
+  return { unityVersion: ctx.unityVersion ?? null, renderPipeline: facts?.renderPipeline, inputSystem };
+}
+
 // Keep the cache warm: prime whenever a Unity project becomes active. Deferred
 // by a microtask so the subscription is set up only AFTER all modules finish
 // evaluating — this makes it safe even if this module is ever pulled into an

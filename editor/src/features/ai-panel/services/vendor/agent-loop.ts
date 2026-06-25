@@ -18,6 +18,10 @@ import type {
   AgentToolResult,
 } from './types';
 import { EventStream } from './event-stream';
+import { compactMessages } from './compaction';
+
+/** Conservative default — the smallest model tier's window (qwen low). */
+const DEFAULT_CONTEXT_WINDOW = 32768;
 
 type AgentLoopEventStream = EventStream<AgentEvent, AgentMessage[]>;
 
@@ -68,10 +72,15 @@ async function runLoop(
 
     stream.push({ type: 'turn_start' });
 
-    // 1. Stream assistant response from LLM
+    // 1. Stream assistant response from LLM.
+    // `allMessages` stays the full record (saved/displayed); the LLM only sees a
+    // compacted view so weak-model context never grows unbounded.
+    const visible = compactMessages(allMessages, {
+      contextWindow: config.contextWindow ?? DEFAULT_CONTEXT_WINDOW,
+    });
     const assistantMessage = await streamAssistantResponse(
       config,
-      { systemPrompt: state.systemPrompt, messages: allMessages, tools: state.tools },
+      { systemPrompt: state.systemPrompt, messages: visible, tools: state.tools },
       stream,
     );
 

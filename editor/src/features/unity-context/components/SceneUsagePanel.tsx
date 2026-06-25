@@ -2,6 +2,7 @@ import { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { ChevronRight, ChevronDown, Search, LoaderCircle, Layers } from 'lucide-react';
 import { useWorkspaceStore } from '../../../stores/workspace';
 import { useProjectContextStore } from '../../../stores/project-context';
+import { useUnityStore } from '../../../stores/unity';
 import { classifyFile, FilePriority } from '../../csharp';
 import { useSceneUsageStore } from '../stores/scene-usage';
 import type { AssetKind, AssetUsageEntry } from '../services/scene-usage-finder';
@@ -10,6 +11,7 @@ function SceneUsagePanel() {
   const activeFilePath = useWorkspaceStore((s) => s.activeFilePath);
   const workspacePath = useWorkspaceStore((s) => s.workspacePath);
   const isUnityProject = useProjectContextStore((s) => s.isUnityProject);
+  const unityConnected = useUnityStore((s) => s.connected);
   const openFile = useWorkspaceStore((s) => s.openFile);
 
   const entries = useSceneUsageStore((s) => s.entriesForActiveScript);
@@ -134,6 +136,8 @@ function SceneUsagePanel() {
         <div className="scene-usage-subtitle">
           {isLoading
             ? 'Scanning scenes, prefabs, and assets…'
+            : filtered.length === 0 && !unityConnected
+            ? 'Unity not connected — usage may be incomplete.'
             : `Found in ${sceneCount} ${sceneCount === 1 ? 'scene' : 'scenes'}, ${prefabCount} ${prefabCount === 1 ? 'prefab' : 'prefabs'}, ${soCount} ${soCount === 1 ? 'scriptable object' : 'scriptable objects'} (${totalGameObjects} GameObjects)`}
         </div>
       )}
@@ -164,7 +168,9 @@ function SceneUsagePanel() {
           {entries === null
             ? 'Loading…'
             : list.length === 0
-            ? 'Not used in any scenes, prefabs, or scriptable objects.'
+            ? unityConnected
+              ? 'Not used in any scenes, prefabs, or scriptable objects.'
+              : 'No references found in saved scenes, prefabs, or assets. Connect the Unity Editor for complete, live usage data.'
             : 'No matches.'}
         </div>
       )}

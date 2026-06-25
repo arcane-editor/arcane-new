@@ -12,6 +12,19 @@ database_id = "fdc0556c-e622-44db-a189-1be9a55acb80"
 [ai]
 binding = "AI"
 
+# Vectorize — version-accurate Unity documentation index (ScriptReference +
+# Manual + API signatures), embedded with @cf/baai/bge-small-en-v1.5 (384-dim).
+# Create the index out-of-band before deploying:
+#   wrangler vectorize create unity-docs-v1 --dimensions=384 --metric=cosine
+#   wrangler vectorize create-metadata-index unity-docs-v1 --property-name unityVersion  --type string
+#   wrangler vectorize create-metadata-index unity-docs-v1 --property-name docType        --type string
+#   wrangler vectorize create-metadata-index unity-docs-v1 --property-name renderPipeline --type string
+#   wrangler vectorize create-metadata-index unity-docs-v1 --property-name inputSystem    --type string
+#   wrangler vectorize create-metadata-index unity-docs-v1 --property-name deprecated     --type string
+[[vectorize]]
+binding = "VECTORIZE"
+index_name = "unity-docs-v1"
+
 [vars]
 ENVIRONMENT = "production"
 # AI Gateway id — when set, all Workers AI calls route through it for

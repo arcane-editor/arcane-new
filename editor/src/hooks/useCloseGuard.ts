@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { ask } from '@tauri-apps/plugin-dialog';
 import { useWorkspaceStore } from '../stores/workspace';
+import { useAiStore } from '../stores/ai';
 import { safeUnlisten } from '../utils/tauri-listener';
 
 export function useCloseGuard() {
@@ -12,6 +13,9 @@ export function useCloseGuard() {
     (async () => {
       const win = getCurrentWindow();
       const fn = await win.onCloseRequested(async (event) => {
+        // Persist any pending chat-session changes before the window goes away.
+        await useAiStore.getState().flushSessionNow();
+
         const dirty = useWorkspaceStore.getState().openFiles.filter(
           (f) => f.isDirty && !f.path.startsWith('diff://') && !f.path.startsWith('auth://'),
         );

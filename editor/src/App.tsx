@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Allotment } from 'allotment';
+import { Allotment, LayoutPriority } from 'allotment';
 import { open } from '@tauri-apps/plugin-dialog';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import 'allotment/dist/style.css';
@@ -21,7 +21,8 @@ import {
   openFolderInNewWindow,
   setProjectWindowTitle,
 } from './features/project';
-import { AiChatPanel, MaximizedAiOverlay } from './features/ai-panel';
+import { AiChatPanel, MaximizedAiOverlay, restoreLatestSessionForWorkspace } from './features/ai-panel';
+import { useAiStore } from './stores/ai';
 import { GraphifyIntroModal, computeBuildOpts, startGraphifyAutoRebuild } from './features/graphify';
 import { initAsmdefFeature } from './features/asmdef';
 import { initUnityPackagesFeature } from './features/unity-packages';
@@ -80,6 +81,26 @@ function App() {
   const [unityPicker, setUnityPicker] = useState<UnityPickerMode | null>(null);
   const [newScriptDir, setNewScriptDir] = useState<string | null>(null);
   const persistedLayout = useMemo(() => loadLayoutSizes(), []);
+  // Initial horizontal split: each side pane defaults to 30% of the window on
+  // first open (editor takes the rest); persisted drags win. defaultSizes are
+  // absolute px scaled to fit, and must have one entry per always-mounted pane.
+  const initialLayout = useMemo(() => {
+    const w = typeof window !== 'undefined' ? window.innerWidth : 1280;
+    // Use a persisted width only when it's plausible for a side pane; discard
+    // unset/invalid or implausibly large values (e.g. left over from a bad layout)
+    // and fall back to the default fraction so panes never open absurdly wide.
+    const sideWidth = (v: number | undefined, fallbackFrac: number) => {
+      const fallback = Math.round(w * fallbackFrac);
+      if (typeof v !== 'number' || !Number.isFinite(v) || v <= 0 || v > w * 0.45) {
+        return fallback;
+      }
+      return Math.round(v);
+    };
+    const left = sideWidth(persistedLayout.sidebar, 0.3);
+    const right = sideWidth(persistedLayout.rightPanel, 0.3);
+    const editor = Math.max(w - left - right, 320);
+    return { left, right, sizes: [left, editor, right] };
+  }, [persistedLayout]);
 
   // Restore persisted state on mount
   useEffect(() => {
@@ -162,6 +183,33 @@ function App() {
 
   // Unsaved-changes prompt on window close
   useCloseGuard();
+
+  // Restore the latest chat session for the active workspace, and re-restore on
+  // workspace switch. Driven from App level (not the toggle-able AI panel) so
+  // opening/closing the right sidebar never re-triggers a restore.
+  useEffect(() => {
+    let prevPath = useWorkspaceStore.getState().workspacePath;
+    if (prevPath) void restoreLatestSessionForWorkspace(prevPath);
+
+    const unsub = useWorkspaceStore.subscribe((state) => {
+      const next = state.workspacePath;
+      if (next === prevPath) return;
+      prevPath = next;
+      // Drop the previous workspace's transcript, then load the new one's.
+      useAiStore.getState().resetConversation();
+      if (next) void restoreLatestSessionForWorkspace(next);
+    });
+    return unsub;
+  }, []);
+
+  // Best-effort flush of the chat session on reload/navigation (can't await).
+  useEffect(() => {
+    const onBeforeUnload = () => {
+      void useAiStore.getState().flushSessionNow();
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, []);
 
   // Native menu (macOS): bridge menu-action events to the command registry
   useEffect(() => {
@@ -846,21 +894,38 @@ function App() {
             <ActivityBar />
             <div className="main-content">
               <Allotment
-                onChange={(sizes) =>
-                  saveLayoutSizes(
-                    rightSidebarVisible && sizes.length > 0
-                      ? { main: sizes, rightPanel: sizes[sizes.length - 1] }
-                      : { main: sizes },
-                  )
-                }
-                defaultSizes={persistedLayout.main}
+                proportionalLayout={false}
+                defaultSizes={initialLayout.sizes}
+                onChange={(sizes) => {
+                  // Panes are always mounted (toggled via `visible`), so the
+                  // sizes array is stable: [sidebar, editor, rightPanel]. Persist
+                  // each side's width only while it's actually shown (>0) so a
+                  // hidden pane keeps its last width instead of saving 0.
+                  const next: { sidebar?: number; rightPanel?: number } = {};
+                  if (sidebarVisible && sizes[0] > 0) next.sidebar = sizes[0];
+                  const last = sizes[sizes.length - 1];
+                  if (rightSidebarVisible && sizes.length >= 3 && last > 0) {
+                    next.rightPanel = last;
+                  }
+                  if (next.sidebar !== undefined || next.rightPanel !== undefined) {
+                    saveLayoutSizes(next);
+                  }
+                }}
               >
-                {sidebarVisible && (
-                  <Allotment.Pane preferredSize={persistedLayout.main?.[0] ?? 250} minSize={150} maxSize={500}>
-                    <SidebarPanel />
-                  </Allotment.Pane>
-                )}
-                <Allotment.Pane>
+                {/* All three panes are always rendered and toggled via `visible`
+                    so opening the right panel never re-distributes (and snaps
+                    wide) the left sidebar. The editor holds layout priority so it
+                    alone absorbs show/hide/resize deltas, keeping the side panes
+                    fixed at their width (25% each on first open). */}
+                <Allotment.Pane
+                  key="sidebar"
+                  visible={sidebarVisible}
+                  preferredSize={initialLayout.left}
+                  minSize={150}
+                >
+                  <SidebarPanel />
+                </Allotment.Pane>
+                <Allotment.Pane key="editor" priority={LayoutPriority.High}>
                   <div className="editor-area">
                     <Allotment vertical onChange={(sizes) => saveLayoutSizes({ vertical: sizes })}>
                       <Allotment.Pane>
@@ -892,11 +957,14 @@ function App() {
                     </Allotment>
                   </div>
                 </Allotment.Pane>
-                {rightSidebarVisible && (
-                  <Allotment.Pane preferredSize={persistedLayout.rightPanel ?? 300} minSize={200}>
-                    <RightSidebarPanel />
-                  </Allotment.Pane>
-                )}
+                <Allotment.Pane
+                  key="right"
+                  visible={rightSidebarVisible}
+                  preferredSize={initialLayout.right}
+                  minSize={200}
+                >
+                  <RightSidebarPanel />
+                </Allotment.Pane>
               </Allotment>
             </div>
             <RightActivityBar />

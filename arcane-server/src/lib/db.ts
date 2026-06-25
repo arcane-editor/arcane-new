@@ -196,6 +196,122 @@ export async function findAllFeedback(db: D1Database, limit = 100): Promise<Feed
     return result.results;
 }
 
+// --- Unity API signature queries ---
+
+export interface UnityApiSignatureRow {
+    id: number;
+    unity_version: string;
+    namespace: string;
+    type: string;
+    member: string;
+    kind: string;
+    signature: string;
+    overloads_json: string | null;
+    assembly: string | null;
+    deprecated: number;
+    obsolete_message: string | null;
+    doc_url: string | null;
+}
+
+/** One signature record as supplied by the ingest job. */
+export interface UnityApiRecord {
+    unityVersion: string;
+    namespace?: string;
+    type: string;
+    member: string;
+    kind: string;
+    signature: string;
+    overloads?: string[];
+    assembly?: string;
+    deprecated?: boolean;
+    obsoleteMessage?: string;
+    docUrl?: string;
+}
+
+/** Exact signature lookup. With `member`, returns that member's row(s); without, all members of the type. */
+export async function lookupUnitySignatures(
+    db: D1Database,
+    unityVersion: string,
+    type: string,
+    member?: string,
+    limit = 200,
+): Promise<UnityApiSignatureRow[]> {
+    if (member) {
+        const result = await db.prepare(
+            `SELECT * FROM unity_api_signatures
+             WHERE unity_version = ? AND type = ? AND member = ? COLLATE NOCASE
+             ORDER BY kind LIMIT ?`,
+        ).bind(unityVersion, type, member, limit).all<UnityApiSignatureRow>();
+        return result.results;
+    }
+    const result = await db.prepare(
+        `SELECT * FROM unity_api_signatures
+         WHERE unity_version = ? AND type = ? COLLATE NOCASE
+         ORDER BY member LIMIT ?`,
+    ).bind(unityVersion, type, limit).all<UnityApiSignatureRow>();
+    return result.results;
+}
+
+/** Deterministic name search (LIKE) — the fallback when Vectorize is cold/empty. */
+export async function searchUnitySignaturesByName(
+    db: D1Database,
+    unityVersion: string,
+    query: string,
+    limit = 12,
+): Promise<UnityApiSignatureRow[]> {
+    const like = `%${query.replace(/[%_]/g, '')}%`;
+    const result = await db.prepare(
+        `SELECT * FROM unity_api_signatures
+         WHERE unity_version = ? AND (type LIKE ? OR member LIKE ? OR signature LIKE ?)
+         ORDER BY (type = ? COLLATE NOCASE) DESC, length(member) ASC LIMIT ?`,
+    ).bind(unityVersion, like, like, like, query, limit).all<UnityApiSignatureRow>();
+    return result.results;
+}
+
+/** List deprecated APIs for a version — powers migrations / version upgrades. */
+export async function listDeprecatedUnityApis(
+    db: D1Database,
+    unityVersion: string,
+    limit = 1000,
+): Promise<UnityApiSignatureRow[]> {
+    const result = await db.prepare(
+        `SELECT * FROM unity_api_signatures
+         WHERE unity_version = ? AND deprecated = 1 ORDER BY type, member LIMIT ?`,
+    ).bind(unityVersion, limit).all<UnityApiSignatureRow>();
+    return result.results;
+}
+
+/** Idempotent batch upsert (UNIQUE(unity_version,type,member,kind) → INSERT OR REPLACE). */
+export async function upsertUnitySignatures(db: D1Database, records: UnityApiRecord[]): Promise<number> {
+    if (records.length === 0) return 0;
+    const stmt = db.prepare(
+        `INSERT OR REPLACE INTO unity_api_signatures
+         (unity_version, namespace, type, member, kind, signature, overloads_json, assembly, deprecated, obsolete_message, doc_url)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    const batch = records.map((r) => stmt.bind(
+        r.unityVersion,
+        r.namespace ?? '',
+        r.type,
+        r.member,
+        r.kind,
+        r.signature,
+        r.overloads && r.overloads.length ? JSON.stringify(r.overloads) : null,
+        r.assembly ?? null,
+        r.deprecated ? 1 : 0,
+        r.obsoleteMessage ?? null,
+        r.docUrl ?? null,
+    ));
+    await db.batch(batch);
+    return records.length;
+}
+
+/** Clear all signatures for a version (used by ingest `reset`). */
+export async function deleteUnitySignaturesForVersion(db: D1Database, unityVersion: string): Promise<number> {
+    const result = await db.prepare('DELETE FROM unity_api_signatures WHERE unity_version = ?').bind(unityVersion).run();
+    return result.meta.changes;
+}
+
 // --- Device code queries ---
 
 export async function createDeviceCode(

@@ -16,12 +16,14 @@ import {
   type ClaudeModel,
   type ClaudePermissionMode,
   type Effort,
+  type SaveSessionInput,
   type SessionData,
   type TextContent,
   type ThinkingContent,
   type ToolCall,
 } from '../features/ai-panel';
 import { useWorkspaceStore } from './workspace';
+import { notify } from './notifications';
 
 // ---- UI-friendly message types ----
 
@@ -141,6 +143,8 @@ interface AiState {
   resetConversation: () => void;
   /** Load a saved session's messages + config into the store for viewing/resume. */
   loadSessionIntoStore: (session: SessionData) => void;
+  /** Cancel any pending debounced save and persist the session immediately. */
+  flushSessionNow: () => Promise<void>;
   setMode: (mode: ChatMode) => void;
   setEffort: (effort: Effort) => void;
   setSelectedAgent: (agent: AgentKind) => void;
@@ -172,6 +176,55 @@ interface AiState {
 let messageCounter = 0;
 function nextId(): string {
   return `msg_${++messageCounter}_${Date.now()}`;
+}
+
+// ---- Incremental session persistence ----
+// Saves are debounced so streaming/turn boundaries don't each hit disk, but the
+// user's prompt and every completed turn are persisted — so an interrupted turn
+// (crash/quit mid-stream) isn't lost. `flushSessionNow` forces an immediate
+// write (used on app close).
+
+const SAVE_DEBOUNCE_MS = 600;
+let saveTimer: ReturnType<typeof setTimeout> | null = null;
+
+function buildSaveInput(): SaveSessionInput | null {
+  const state = useAiStore.getState();
+  if (!state.sessionId || state.messages.length === 0) return null;
+  return {
+    id: state.sessionId,
+    mode: state.mode,
+    effort: state.effort,
+    messages: state.messages,
+    agentKind: state.selectedAgent,
+    workspacePath: useWorkspaceStore.getState().workspacePath,
+    acpSessionId: state.claudeAcpSessionId,
+    claudeModel: state.claudeModel,
+    claudeEffort: state.claudeEffort,
+    claudePermissionMode: state.claudePermissionMode,
+  };
+}
+
+async function persistSessionNow(): Promise<void> {
+  const input = buildSaveInput();
+  if (!input) return;
+  const ok = await saveSession(input);
+  if (!ok) notify.warning('Failed to save chat history.');
+}
+
+function scheduleSave(): void {
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    saveTimer = null;
+    void persistSessionNow();
+  }, SAVE_DEBOUNCE_MS);
+}
+
+function flushSave(): Promise<void> {
+  if (saveTimer) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+  }
+  return persistSessionNow();
 }
 
 export const useAiStore = create<AiState>((set, get) => ({
@@ -212,21 +265,8 @@ export const useAiStore = create<AiState>((set, get) => ({
 
       case 'agent_end': {
         set({ isAgentRunning: false, streamingMessageId: null });
-        const state = get();
-        if (state.sessionId && state.messages.length > 0) {
-          saveSession({
-            id: state.sessionId,
-            mode: state.mode,
-            effort: state.effort,
-            messages: state.messages,
-            agentKind: state.selectedAgent,
-            workspacePath: useWorkspaceStore.getState().workspacePath,
-            acpSessionId: state.claudeAcpSessionId,
-            claudeModel: state.claudeModel,
-            claudeEffort: state.claudeEffort,
-            claudePermissionMode: state.claudePermissionMode,
-          }).catch(() => {});
-        }
+        // Persist the finished turn immediately (cancels any pending debounce).
+        void flushSave();
         break;
       }
 
@@ -298,6 +338,8 @@ export const useAiStore = create<AiState>((set, get) => ({
               streamingMessageId: null,
             }));
           }
+          // Persist at each completed assistant turn so a later crash can't lose it.
+          scheduleSave();
         }
         break;
       }
@@ -369,12 +411,20 @@ export const useAiStore = create<AiState>((set, get) => ({
       attachments: attachments && attachments.length > 0 ? attachments : undefined,
       timestamp: Date.now(),
     };
-    set((s) => ({ messages: [...s.messages, msg] }));
+    // Ensure a sessionId exists before the agent starts so the prompt is saved
+    // even if the turn is interrupted before agent_start.
+    set((s) => ({
+      messages: [...s.messages, msg],
+      sessionId: s.sessionId ?? generateSessionId(),
+    }));
+    scheduleSave();
   },
 
   setAgentRunning: (running: boolean) => set({ isAgentRunning: running }),
 
   setError: (error: string | null) => set({ errorMessage: error }),
+
+  flushSessionNow: () => flushSave(),
 
   resetConversation: () =>
     set({

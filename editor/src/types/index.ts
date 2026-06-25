@@ -102,6 +102,7 @@ export interface SettingsSchema {
   'graphify.rebuildOnCommit': boolean;
   'graphify.suppressFirstOpenToast': boolean;
   'unity.analyzers.enabled': boolean;
+  'unity.compileGate.enabled': boolean;
   'unity.nearMissDiagnostics.enabled': boolean;
   'unity.rename.formerlySerializedAs': boolean;
   'unity.serializationDiagnostics.enabled': boolean;

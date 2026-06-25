@@ -36,6 +36,8 @@ export interface AgentOptions {
   convertToLlm?: (messages: AgentMessage[]) => Message[];
   getApiKey?: () => Promise<string | undefined> | string | undefined;
   reasoning?: string;
+  /** Token budget for no-LLM context compaction (defaults to the smallest tier). */
+  contextWindow?: number;
 }
 
 export class Agent {
@@ -47,6 +49,7 @@ export class Agent {
   private convertToLlmFn: (messages: AgentMessage[]) => Message[];
   private getApiKey?: () => Promise<string | undefined> | string | undefined;
   private reasoning?: string;
+  private contextWindow?: number;
 
   constructor(options: AgentOptions) {
     this._state = {
@@ -61,6 +64,7 @@ export class Agent {
     this.convertToLlmFn = options.convertToLlm ?? defaultConvertToLlm;
     this.getApiKey = options.getApiKey;
     this.reasoning = options.reasoning;
+    this.contextWindow = options.contextWindow;
   }
 
   get state(): AgentState {
@@ -178,6 +182,7 @@ export class Agent {
       getApiKey: this.getApiKey,
       signal: this.abortController.signal,
       reasoning: this.reasoning,
+      contextWindow: this.contextWindow,
     };
 
     const eventStream = agentLoop(

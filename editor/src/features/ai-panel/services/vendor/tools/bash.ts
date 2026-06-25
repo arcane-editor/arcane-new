@@ -6,6 +6,11 @@
 import { Type, type Static } from '@sinclair/typebox';
 import type { AgentTool, AgentToolResult } from '../types';
 import { truncateTail } from './truncate';
+import {
+  resolveWithinRoot,
+  PathOutsideRootError,
+  pathOutsideRootMessage,
+} from './path-utils';
 
 const bashSchema = Type.Object({
   command: Type.String({ description: 'The shell command to execute' }),
@@ -29,6 +34,13 @@ export interface BashOperations {
 
 export interface BashToolOptions {
   operations: BashOperations;
+  /**
+   * When set, the command's working directory is confined to this root (the
+   * Assets/ sandbox) and defaults to it. Note: this pins the cwd but cannot stop
+   * a command string from `cd`-ing elsewhere — true containment needs a backend
+   * guard in execute_command (see plan).
+   */
+  allowedRoot?: string | null;
 }
 
 export function createBashTool(cwd: string, options: BashToolOptions): AgentTool {
@@ -50,7 +62,18 @@ export function createBashTool(cwd: string, options: BashToolOptions): AgentTool
         return { content: [{ type: 'text', text: 'Operation aborted' }] };
       }
 
-      const workDir = paramCwd ?? cwd;
+      const allowedRoot = options.allowedRoot ?? null;
+      let workDir: string;
+      try {
+        // Default cwd to the sandbox root (Assets/) when set; validate any
+        // caller-supplied cwd stays inside it.
+        workDir = resolveWithinRoot(paramCwd ?? allowedRoot ?? cwd, cwd, allowedRoot);
+      } catch (err) {
+        if (err instanceof PathOutsideRootError) {
+          return { content: [{ type: 'text', text: pathOutsideRootMessage(err) }] };
+        }
+        throw err;
+      }
       const timeout = paramTimeout ?? 30000;
 
       try {

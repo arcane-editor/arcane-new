@@ -18,13 +18,16 @@ export interface PersistedState {
 }
 
 export interface LayoutSizes {
+  /** @deprecated superseded by per-pane `sidebar`/`rightPanel` widths. */
   main?: number[];
   vertical?: number[];
   /**
-   * Persisted width of the right AI panel (px). Stored independently of `main`
-   * because Allotment pane indices shift when the left sidebar / right panel
-   * are toggled, which would otherwise misalign a saved `main` array on restore.
+   * Persisted width of the left file-explorer sidebar (px). Stored per-pane (not
+   * as a positional array) so it's stable as panes are shown/hidden — the panes
+   * are always mounted and toggled via Allotment's `visible` prop.
    */
+  sidebar?: number;
+  /** Persisted width of the right AI panel (px). Stored per-pane (see `sidebar`). */
   rightPanel?: number;
 }
 

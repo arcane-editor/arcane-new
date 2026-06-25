@@ -21,6 +21,7 @@ const DEFAULT_SETTINGS: SettingsSchema = {
   'graphify.rebuildOnCommit': false,
   'graphify.suppressFirstOpenToast': false,
   'unity.analyzers.enabled': true,
+  'unity.compileGate.enabled': true,
   'unity.nearMissDiagnostics.enabled': true,
   'unity.rename.formerlySerializedAs': true,
   'unity.serializationDiagnostics.enabled': true,

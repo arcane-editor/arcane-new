@@ -10,7 +10,11 @@
 
 import { Type, type Static } from '@sinclair/typebox';
 import type { AgentTool, AgentToolResult } from '../types';
-import { resolveToCwd } from './path-utils';
+import {
+  resolveWithinRoot,
+  PathOutsideRootError,
+  pathOutsideRootMessage,
+} from './path-utils';
 
 const MAX_RESULTS = 2000;
 
@@ -48,6 +52,8 @@ export interface ListOperations {
 
 export interface ListToolOptions {
   operations: ListOperations;
+  /** When set, listing is confined to this root (the Assets/ sandbox). */
+  allowedRoot?: string | null;
 }
 
 export function createListTool(cwd: string, options: ListToolOptions): AgentTool {
@@ -65,7 +71,19 @@ export function createListTool(cwd: string, options: ListToolOptions): AgentTool
       signal?: AbortSignal,
     ): Promise<AgentToolResult> {
       const { path, recursive = true, extensions } = params as ListToolInput;
-      const targetPath = path ? resolveToCwd(path, cwd) : cwd;
+      const allowedRoot = options.allowedRoot ?? null;
+      let targetPath: string;
+      try {
+        // Default to the sandbox root (Assets/) when set, else the workspace root.
+        targetPath = path
+          ? resolveWithinRoot(path, cwd, allowedRoot)
+          : (allowedRoot ?? cwd);
+      } catch (err) {
+        if (err instanceof PathOutsideRootError) {
+          return { content: [{ type: 'text', text: pathOutsideRootMessage(err) }] };
+        }
+        throw err;
+      }
 
       try {
         let entries: string[];

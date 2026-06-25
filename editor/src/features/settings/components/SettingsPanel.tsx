@@ -35,6 +35,7 @@ const SETTING_DEFINITIONS: SettingDefinition[] = [
     ], category: 'Terminal', label: 'Font Family', description: 'Controls the font family of the terminal. System fonts only — web fonts cause cell-measurement issues in xterm.' },
   { key: 'terminal.cursorBlink', type: 'boolean', category: 'Terminal', label: 'Cursor Blink', description: 'Controls whether the terminal cursor blinks.' },
   { key: 'unity.analyzers.enabled', type: 'boolean', category: 'Unity', label: 'Analyzers', description: 'Enable Unity-aware static analyzers (incorrect API usage, lifecycle ordering, etc.).' },
+  { key: 'unity.compileGate.enabled', type: 'boolean', category: 'Unity', label: 'AI Compile Verification', description: 'After the AI writes C#, recompile via the Unity bridge and feed real compiler errors back so it self-corrects (requires a connected Unity Editor).' },
   { key: 'unity.nearMissDiagnostics.enabled', type: 'boolean', category: 'Unity', label: 'Near-Miss Diagnostics', description: 'Warn when a method looks like a Unity message but has a wrong signature.' },
   { key: 'unity.rename.formerlySerializedAs', type: 'boolean', category: 'Unity', label: 'FormerlySerializedAs on Rename', description: 'Automatically insert [FormerlySerializedAs] when a serialized field is renamed.' },
   { key: 'unity.serializationDiagnostics.enabled', type: 'boolean', category: 'Unity', label: 'Serialization Diagnostics', description: 'Highlight fields with unsupported serialization types or conflicting attributes.' },

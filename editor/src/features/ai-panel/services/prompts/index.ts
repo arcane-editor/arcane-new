@@ -18,24 +18,25 @@ import { buildGraphSnapshot } from '../../../graphify';
 import { useWorkspaceStore } from '../../../../stores/workspace';
 import { getUnityFactsBlock } from './unity-facts';
 
-/** Append the codebase graph snapshot to a base system prompt, when one exists. */
-function withGraphSnapshot(base: string): string {
+/**
+ * Common decorators applied to every mode's base prompt, structured as a
+ * STABLE prefix + VOLATILE tail so an eventual prompt cache (AI Gateway) keeps
+ * the cacheable prefix byte-identical across turns:
+ *   [STABLE: base prompt incl. static Unity context crib]
+ *   [VOLATILE: Unity project facts (incl. active-file assembly) + graph snapshot]
+ * The volatile parts (which depend on the active file / detected facts) go LAST.
+ */
+function decorate(base: string): string {
+  const parts: string[] = [base];
+
+  const facts = getUnityFactsBlock();
+  if (facts) parts.push(facts);
+
   const activeFilePath = useWorkspaceStore.getState().activeFilePath;
   const snapshot = buildGraphSnapshot(activeFilePath);
-  if (!snapshot) return base;
-  return `${base}\n\n${snapshot}`;
-}
+  if (snapshot) parts.push(snapshot);
 
-/** Prepend the Unity project-facts block (Unity projects only). */
-function withUnityFacts(base: string): string {
-  const facts = getUnityFactsBlock();
-  if (!facts) return base;
-  return `${facts}\n\n${base}`;
-}
-
-/** Common decorators applied to every mode's base prompt. */
-function decorate(base: string): string {
-  return withUnityFacts(withGraphSnapshot(base));
+  return parts.join('\n\n');
 }
 
 /**

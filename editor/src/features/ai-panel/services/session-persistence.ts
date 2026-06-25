@@ -111,7 +111,8 @@ function sanitizeMessagesForPersistence(messages: AiMessage[]): AiMessage[] {
   });
 }
 
-export async function saveSession(input: SaveSessionInput): Promise<void> {
+/** Saves the session JSON. Returns true on success, false if the write failed. */
+export async function saveSession(input: SaveSessionInput): Promise<boolean> {
   const dir = await getSessionsDir();
   const filePath = `${dir}/${input.id}.json`;
 
@@ -133,6 +134,7 @@ export async function saveSession(input: SaveSessionInput): Promise<void> {
 
   try {
     await invoke('write_file', { path: filePath, contents: JSON.stringify(data, null, 2) });
+    return true;
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error ?? '');
     const missingDir = /No such file|os error 2|ENOENT/i.test(msg);
@@ -140,13 +142,14 @@ export async function saveSession(input: SaveSessionInput): Promise<void> {
       try {
         await ensureSessionsDirExists(dir);
         await invoke('write_file', { path: filePath, contents: JSON.stringify(data, null, 2) });
-        return;
+        return true;
       } catch (retryError) {
         console.error('Failed to save session (retry):', retryError);
-        return;
+        return false;
       }
     }
     console.error('Failed to save session:', error);
+    return false;
   }
 }
 

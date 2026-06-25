@@ -32,7 +32,13 @@ import {
   onFileWritten,
   onFileEdited,
 } from './tool-operations';
-import { createUnityReadTools, createUnityMutateTools, withUnityAnalyzerGate } from './unity-tools';
+import {
+  createUnityReadTools,
+  createUnityMutateTools,
+  withUnityAnalyzerGate,
+  withUnityCompileGate,
+  resetCompileGate,
+} from './unity-tools';
 import { useAiStore, type AiMessage } from '../../../stores/ai';
 import { useAuthStore } from '../../../stores/auth';
 import { useWorkspaceStore } from '../../../stores/workspace';
@@ -80,12 +86,22 @@ function getCurrentWorkspacePath(): string {
  * when a graph has been built for the workspace.
  */
 function createToolsForPromptMode(mode: PromptMode, workspacePath: string): AgentTool[] {
+  const isUnity = useProjectContextStore.getState().isUnityProject;
+  // In a Unity project, confine ALL of the agent's file operations to the
+  // Assets/ folder. `assetsRootPath` is `${workspacePath}/Assets` for Unity
+  // projects, null otherwise (which disables the sandbox for non-Unity work).
+  const allowedRoot = isUnity
+    ? (useWorkspaceStore.getState().assetsRootPath ?? null)
+    : null;
+
   const readOnly: AgentTool[] = [
     createReadTool(workspacePath, {
       operations: tauriReadOperations,
+      allowedRoot,
     }),
     createListTool(workspacePath, {
       operations: tauriListOperations,
+      allowedRoot,
     }),
   ];
 
@@ -102,9 +118,13 @@ function createToolsForPromptMode(mode: PromptMode, workspacePath: string): Agen
   // Unity tools join only for Unity projects. Read tools are auto-approved and
   // available in every mode; engine-mutate tools (per-action approved) only join
   // the mutating modes. The analyzer-gate wraps write/edit on .cs output.
-  const isUnity = useProjectContextStore.getState().isUnityProject;
+  const settings = useSettingsStore.getState();
   const analyzersOn =
-    isUnity && useSettingsStore.getState().getSetting('unity.analyzers.enabled') !== false;
+    isUnity && settings.getSetting('unity.analyzers.enabled') !== false;
+  // Live-bridge compile gate: real Unity compiler errors fed back to the agent.
+  // Default-on for Unity projects; the gate itself no-ops when no bridge is connected.
+  const compileGateOn =
+    isUnity && settings.getSetting('unity.compileGate.enabled') !== false;
   const unityRead: AgentTool[] = isUnity ? createUnityReadTools() : [];
 
   if (mode === 'ask' || mode === 'plan-planning') {
@@ -114,21 +134,32 @@ function createToolsForPromptMode(mode: PromptMode, workspacePath: string): Agen
   const writeTool = createWriteTool(workspacePath, {
     operations: tauriWriteOperations,
     onFileWritten,
+    allowedRoot,
   });
   const editTool = createEditTool(workspacePath, {
     operations: tauriEditOperations,
     onFileEdited,
+    allowedRoot,
   });
+
+  // Wrap .cs write/edit with the analyzer gate (instant, offline, regex) first,
+  // then the compile gate (authoritative, online) on the OUTSIDE so it runs last.
+  const wrapCs = (t: AgentTool): AgentTool => {
+    let g = analyzersOn ? withUnityAnalyzerGate(t, workspacePath) : t;
+    if (compileGateOn) g = withUnityCompileGate(g, workspacePath);
+    return g;
+  };
 
   return [
     ...readOnly,
     ...graphTools,
     ...unityRead,
     ...(isUnity ? createUnityMutateTools() : []),
-    analyzersOn ? withUnityAnalyzerGate(writeTool, workspacePath) : writeTool,
-    analyzersOn ? withUnityAnalyzerGate(editTool, workspacePath) : editTool,
+    wrapCs(writeTool),
+    wrapCs(editTool),
     createBashTool(workspacePath, {
       operations: tauriBashOperations,
+      allowedRoot,
     }),
   ];
 }
@@ -165,6 +196,9 @@ export class AgentService {
       streamFn: arcaneStream,
       convertToLlm,
       reasoning: 'mid',
+      // Server picks the model per reasoningLevel; default to the smallest tier's
+      // window so no-LLM compaction triggers early enough for the weakest model.
+      contextWindow: 32768,
     });
 
     this.unsubscribe = this.agent.subscribe((event) => {
@@ -212,6 +246,8 @@ export class AgentService {
     const promptMode: PromptMode = opts.promptMode ?? defaultPromptModeFor(opts.mode);
     this.syncForPromptMode(promptMode, opts.planExecution);
     this.agent.setReasoning(opts.effort);
+    // Fresh compile-gate repair budget per user turn.
+    resetCompileGate();
 
     // Resolve attachments. File + Unity-doc become a text prefix; image
     // attachments become content blocks routed through promptStructured().

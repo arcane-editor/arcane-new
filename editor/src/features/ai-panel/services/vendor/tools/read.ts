@@ -5,7 +5,12 @@
 
 import { Type, type Static } from '@sinclair/typebox';
 import type { AgentTool, AgentToolResult } from '../types';
-import { resolveToCwd, addLineNumbers } from './path-utils';
+import {
+  resolveWithinRoot,
+  PathOutsideRootError,
+  pathOutsideRootMessage,
+  addLineNumbers,
+} from './path-utils';
 import { truncateHead } from './truncate';
 
 const readSchema = Type.Object({
@@ -27,6 +32,8 @@ export interface ReadOperations {
 
 export interface ReadToolOptions {
   operations: ReadOperations;
+  /** When set, file operations are confined to this root (the Assets/ sandbox). */
+  allowedRoot?: string | null;
 }
 
 export function createReadTool(cwd: string, options: ReadToolOptions): AgentTool {
@@ -44,7 +51,15 @@ export function createReadTool(cwd: string, options: ReadToolOptions): AgentTool
       signal?: AbortSignal,
     ): Promise<AgentToolResult> {
       const { path, offset, limit } = params as ReadToolInput;
-      const absolutePath = resolveToCwd(path, cwd);
+      let absolutePath: string;
+      try {
+        absolutePath = resolveWithinRoot(path, cwd, options.allowedRoot ?? null);
+      } catch (err) {
+        if (err instanceof PathOutsideRootError) {
+          return { content: [{ type: 'text', text: pathOutsideRootMessage(err) }] };
+        }
+        throw err;
+      }
 
       try {
         await ops.access(absolutePath);

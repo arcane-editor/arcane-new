@@ -22,6 +22,7 @@ Unity scripts unless their location or contents make clear they're not
 - \`LateUpdate\` runs after all \`Update\`s — use it for camera follow / cleanup that must observe final positions.
 
 ### Conventions
+- **All file operations are confined to the \`Assets/\` folder.** Reads, writes, edits, listing, and shell commands outside \`Assets/\` are blocked and will return an error — keep every path inside \`Assets/\`.
 - PascalCase for public members and methods; \`_camelCase\` for private fields.
 - Prefer \`[SerializeField] private\` over \`public\` fields. Public fields create coupling and pollute the inspector with no enforcement of accessor semantics.
 - Match \`namespace\` to the assembly definition (asmdef) the script lives in. If no asmdef is present, follow the folder structure under \`Assets/Scripts\`.
