@@ -379,6 +379,7 @@ pub fn run() {
             asmdef::asmdef_build_graph,
             asmdef::asmdef_graph_get,
             asmdef::asmdef_owning_assembly,
+            asmdef::unity_classify_scripts,
             unity_yaml::unity_parse_asset,
             unity_index::unity_index_build,
             unity_index::unity_index_guid_map,

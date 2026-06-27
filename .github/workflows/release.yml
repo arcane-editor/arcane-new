@@ -1,0 +1,108 @@
+name: Release
+
+# Builds the Arcane editor for macOS (Apple Silicon + Intel) and Windows x64,
+# then uploads the installers to the `arcane-releases` R2 bucket.
+#
+# Triggered by pushing a version tag (e.g. `git tag v0.1.0 && git push --tags`)
+# or manually via the "Run workflow" button (workflow_dispatch).
+#
+# Signing: macOS is ad-hoc signed (tauri.conf.json signingIdentity "-") and
+# Windows is unsigned. No signing secrets are required. Only two repo secrets
+# are needed for the upload step:
+#   - CLOUDFLARE_API_TOKEN  (token with R2 edit permission)
+#   - CLOUDFLARE_ACCOUNT_ID
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14          # Apple Silicon
+            triple: aarch64-apple-darwin
+            bundles: dmg
+            asset: Arcane-arm64.dmg
+            glob: editor/src-tauri/target/release/bundle/dmg/*.dmg
+          - os: macos-13          # Intel
+            triple: x86_64-apple-darwin
+            bundles: dmg
+            asset: Arcane-x64.dmg
+            glob: editor/src-tauri/target/release/bundle/dmg/*.dmg
+          - os: windows-latest    # Windows x64
+            triple: x86_64-pc-windows-msvc
+            bundles: nsis
+            asset: ArcaneSetup.exe
+            glob: editor/src-tauri/target/release/bundle/nsis/*-setup.exe
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash   # bash on Windows too, so the `CI=` env-prefix works everywhere
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.triple }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # arcane-graph sidecar (PyInstaller — native per runner). Mirrors the proven
+      # steps from editor/.github/workflows/build-graph-sidecar.yml.
+      - name: Build arcane-graph sidecar
+        run: |
+          cd editor/tooling/arcane-graph-sidecar
+          python -m venv .venv
+          source .venv/bin/activate || source .venv/Scripts/activate
+          pip install --upgrade pip
+          pip install graphifyy pyinstaller
+          python -m PyInstaller pyinstaller.spec
+          mkdir -p ../../src-tauri/binaries
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            cp dist/arcane-graph.exe "../../src-tauri/binaries/arcane-graph-${{ matrix.triple }}.exe"
+          else
+            cp dist/arcane-graph "../../src-tauri/binaries/arcane-graph-${{ matrix.triple }}"
+          fi
+
+      - name: Install JS deps
+        run: cd editor && bun install
+
+      # GOTCHA: build-lsp-sidecars.ts treats CI=true as "--all-targets" and would
+      # cross-build all 4 platforms. Clear CI for this one step to stay host-only.
+      - name: Build typescript-language-server sidecar (host only)
+        run: cd editor && CI= bun run build:lsp-sidecars
+
+      # Use the tauri BINARY (`bunx tauri`), NOT `bun run tauri` — the npm script
+      # re-runs build-lsp-sidecars under CI=true (all targets). The frontend build
+      # is handled by tauri's beforeBuildCommand. ad-hoc mac / unsigned Windows
+      # are the defaults, so no signing config is needed here.
+      - name: Build Tauri app
+        run: cd editor && bunx tauri build --bundles ${{ matrix.bundles }}
+
+      - name: Stage installer under its public name
+        run: |
+          mkdir -p dist-release
+          cp "$(ls ${{ matrix.glob }} | head -n1)" "dist-release/${{ matrix.asset }}"
+
+      # Keep a copy as a workflow artifact too (handy for manual download / debugging).
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: dist-release/${{ matrix.asset }}
+
+      - name: Upload to R2
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          V="${GITHUB_REF_NAME:-dev}"
+          bunx wrangler r2 object put "arcane-releases/$V/${{ matrix.asset }}"     --file "dist-release/${{ matrix.asset }}" --remote
+          bunx wrangler r2 object put "arcane-releases/latest/${{ matrix.asset }}" --file "dist-release/${{ matrix.asset }}" --remote

@@ -359,6 +359,151 @@ pub fn asmdef_owning_assembly(
     ))
 }
 
+// ── Script classification (editor vs runtime, by assembly) ───────────────────
+
+/// A per-assembly classification bucket for the script summary.
+#[derive(Debug, Serialize, Clone)]
+pub struct AssemblyScriptCount {
+    /// Assembly name (e.g. `Game.Core`, `Assembly-CSharp`, `Assembly-CSharp-Editor`).
+    pub name: String,
+    /// True when this assembly compiles for the Editor platform only.
+    pub is_editor_only: bool,
+    /// `"asmdef"` when governed by an `.asmdef`/`.asmref`, else `"predefined"`.
+    pub source: String,
+    /// Number of `.cs` files compiled into this assembly.
+    pub count: usize,
+    /// A few example script paths (capped) for context.
+    pub sample_paths: Vec<String>,
+}
+
+/// Deterministic classification of every `.cs` script under `Assets/`.
+#[derive(Debug, Serialize, Clone)]
+pub struct UnityScriptSummary {
+    /// Total `.cs` scripts found under `Assets/`.
+    pub total: usize,
+    /// Scripts whose owning assembly is Editor-only.
+    pub editor_count: usize,
+    /// Scripts whose owning assembly compiles for runtime/players.
+    pub runtime_count: usize,
+    /// Per-assembly breakdown, Editor-only first then by descending count.
+    pub by_assembly: Vec<AssemblyScriptCount>,
+}
+
+const SAMPLE_CAP: usize = 5;
+
+/// Collect every `.cs` file under `root`, skipping `SKIP_DIRS`.
+fn collect_cs_files(root: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    if !root.is_dir() {
+        return out;
+    }
+    for entry in WalkDir::new(root)
+        .into_iter()
+        .filter_entry(|e| {
+            if e.file_type().is_dir() {
+                let name = e.file_name().to_string_lossy();
+                if SKIP_DIRS.contains(&name.as_ref()) {
+                    return false;
+                }
+            }
+            true
+        })
+        .filter_map(|e| e.ok())
+    {
+        if entry.file_type().is_file()
+            && entry.path().extension().map_or(false, |e| e == "cs")
+        {
+            out.push(entry.path().to_path_buf());
+        }
+    }
+    out
+}
+
+/// Classify every C# script under `<workspace>/Assets/` by its owning Unity
+/// assembly and whether that assembly is Editor-only. This is ground truth —
+/// it reuses the asmdef graph + Unity's predefined-assembly rules rather than
+/// guessing from folder names (an `Editor/` folder under a runtime asmdef is
+/// runtime; an Editor-only asmdef outside any `Editor/` folder is editor).
+pub fn classify_scripts(workspace: &Path) -> UnityScriptSummary {
+    // Build the asmdef graph once so we can look up `is_editor_only` by name.
+    let nodes = build_graph(workspace);
+    let mut editor_only_by_name: HashMap<String, bool> = HashMap::new();
+    for n in &nodes {
+        editor_only_by_name.insert(n.name.clone(), n.is_editor_only);
+    }
+
+    let files = collect_cs_files(&workspace.join("Assets"));
+
+    struct Bucket {
+        is_editor_only: bool,
+        source: String,
+        count: usize,
+        samples: Vec<String>,
+    }
+    let mut buckets: HashMap<String, Bucket> = HashMap::new();
+
+    for file in &files {
+        let asm = resolve_owning_assembly(workspace, file);
+        // Predefined assemblies are the only ones named `Assembly-CSharp*`; for
+        // those the `-Editor` prefix is authoritative. Everything else is an
+        // asmdef whose Editor-only flag comes from its `includePlatforms`.
+        let predefined = asm.starts_with("Assembly-CSharp");
+        let is_editor_only = if asm.starts_with("Assembly-CSharp-Editor") {
+            true
+        } else {
+            *editor_only_by_name.get(&asm).unwrap_or(&false)
+        };
+        let source = if predefined { "predefined" } else { "asmdef" };
+
+        let b = buckets.entry(asm).or_insert_with(|| Bucket {
+            is_editor_only,
+            source: source.to_string(),
+            count: 0,
+            samples: Vec::new(),
+        });
+        b.count += 1;
+        if b.samples.len() < SAMPLE_CAP {
+            b.samples.push(file.to_string_lossy().to_string());
+        }
+    }
+
+    let mut by_assembly: Vec<AssemblyScriptCount> = buckets
+        .into_iter()
+        .map(|(name, b)| AssemblyScriptCount {
+            name,
+            is_editor_only: b.is_editor_only,
+            source: b.source,
+            count: b.count,
+            sample_paths: b.samples,
+        })
+        .collect();
+    // Editor-only assemblies first, then by descending count, then name.
+    by_assembly.sort_by(|a, b| {
+        b.is_editor_only
+            .cmp(&a.is_editor_only)
+            .then_with(|| b.count.cmp(&a.count))
+            .then_with(|| a.name.cmp(&b.name))
+    });
+
+    let editor_count: usize = by_assembly
+        .iter()
+        .filter(|a| a.is_editor_only)
+        .map(|a| a.count)
+        .sum();
+    let total = files.len();
+    UnityScriptSummary {
+        total,
+        editor_count,
+        runtime_count: total - editor_count,
+        by_assembly,
+    }
+}
+
+#[tauri::command]
+pub fn unity_classify_scripts(workspace_path: String) -> Result<UnityScriptSummary, String> {
+    Ok(classify_scripts(Path::new(&workspace_path)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -493,6 +638,74 @@ mod tests {
         let graph = build_graph(&ws);
         let node = graph.iter().find(|n| n.name == "Tools").unwrap();
         assert!(node.is_editor_only);
+        fs::remove_dir_all(&ws).ok();
+    }
+
+    #[test]
+    fn classify_scripts_editor_vs_runtime() {
+        let ws = temp_dir("classify_mix");
+
+        // 1. Runtime asmdef that CONTAINS an `Editor/` folder. The script inside
+        //    it must be RUNTIME — the asmdef governs, folder name is not
+        //    decisive. This is the exact case naive heuristics get wrong.
+        write(&ws.join("Assets/Game/Game.asmdef"), r#"{"name":"Game.Runtime"}"#);
+        write(&ws.join("Assets/Game/Player.cs"), "class Player {}");
+        write(
+            &ws.join("Assets/Game/Editor/PlayerGizmos.cs"),
+            "class PlayerGizmos {}",
+        );
+
+        // 2. Editor-only asmdef OUTSIDE any `Editor/` folder → its script is EDITOR.
+        write(
+            &ws.join("Assets/Tools/Tools.asmdef"),
+            r#"{"name":"Game.Tools","includePlatforms":["Editor"]}"#,
+        );
+        write(&ws.join("Assets/Tools/Wizard.cs"), "class Wizard {}");
+
+        // 3. No-asmdef script under an `Editor/` folder → Assembly-CSharp-Editor.
+        write(
+            &ws.join("Assets/Loose/Editor/MyInspector.cs"),
+            "class MyInspector {}",
+        );
+
+        // 4. Plain no-asmdef runtime script.
+        write(&ws.join("Assets/Loose/Enemy.cs"), "class Enemy {}");
+
+        let s = classify_scripts(&ws);
+        assert_eq!(s.total, 5);
+        assert_eq!(s.editor_count, 2, "Wizard + MyInspector");
+        assert_eq!(s.runtime_count, 3, "Player + PlayerGizmos + Enemy");
+
+        // PlayerGizmos.cs lives under Game/Editor/ but its runtime asmdef wins.
+        let game = s
+            .by_assembly
+            .iter()
+            .find(|a| a.name == "Game.Runtime")
+            .expect("Game.Runtime bucket");
+        assert!(!game.is_editor_only);
+        assert_eq!(game.count, 2);
+
+        let tools = s
+            .by_assembly
+            .iter()
+            .find(|a| a.name == "Game.Tools")
+            .expect("Game.Tools bucket");
+        assert!(tools.is_editor_only);
+        assert_eq!(tools.source, "asmdef");
+        assert_eq!(tools.count, 1);
+
+        let editor_predef = s
+            .by_assembly
+            .iter()
+            .find(|a| a.name == "Assembly-CSharp-Editor")
+            .expect("predefined editor bucket");
+        assert!(editor_predef.is_editor_only);
+        assert_eq!(editor_predef.source, "predefined");
+        assert_eq!(editor_predef.count, 1);
+
+        // Editor-only buckets must sort ahead of runtime ones.
+        assert!(s.by_assembly[0].is_editor_only);
+
         fs::remove_dir_all(&ws).ok();
     }
 }

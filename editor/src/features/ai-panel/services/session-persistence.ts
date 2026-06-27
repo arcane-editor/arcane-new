@@ -9,7 +9,6 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { homeDir, join } from '@tauri-apps/api/path';
-import { readDir } from '@tauri-apps/plugin-fs';
 import type { AiMessage } from '../../../stores/ai';
 import type {
   AgentKind,
@@ -192,14 +191,16 @@ export async function renameSession(sessionId: string, title: string): Promise<v
 
 /**
  * List saved sessions as summaries, newest first. Optionally scoped to a
- * workspace. Reads `~/.arcane/sessions` via plugin-fs (the Rust `read_directory`
- * skips hidden dirs, so it can't enumerate `~/.arcane`).
+ * workspace. Enumerates `~/.arcane/sessions` via the custom `read_directory`
+ * Rust command (scope-exempt, unlike plugin-fs `readDir` which is blocked by the
+ * empty fs scope). Session files are named `session_*.json` — not hidden — so the
+ * command's hidden-name skip doesn't drop them.
  */
 export async function listSessions(workspacePath?: string | null): Promise<SessionSummary[]> {
   const dir = await getSessionsDir();
-  let entries: { name: string; isFile?: boolean }[];
+  let entries: { name: string; is_dir: boolean }[];
   try {
-    entries = await readDir(dir);
+    entries = await invoke<{ name: string; is_dir: boolean }[]>('read_directory', { path: dir });
   } catch {
     return [];
   }

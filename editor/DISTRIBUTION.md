@@ -1,8 +1,12 @@
-# Distributing the macOS Build
+# Distributing Arcane
 
-Builds produced by `bun run tauri build` are **ad-hoc signed**. That's enough to run them on the Mac that built them, but recipients on other Macs will see:
+Arcane ships for **macOS (Apple Silicon + Intel)** and **Windows x64**. Release builds are produced by the `Release` GitHub Actions workflow (`.github/workflows/release.yml`) and uploaded to the Cloudflare R2 bucket `arcane-releases` — see [Releasing (CI → Cloudflare R2)](#releasing-ci--cloudflare-r2) below. This doc covers what recipients see on each platform with the current **ad-hoc macOS / unsigned Windows** setup.
 
-> **"editor" is damaged and can't be opened. You should move it to the Trash.**
+## macOS
+
+Builds are **ad-hoc signed** (`signingIdentity: "-"`). That's enough to run them on the Mac that built them, but recipients on other Macs will see:
+
+> **"Arcane" is damaged and can't be opened. You should move it to the Trash.**
 
 This is expected and the app is not actually damaged. Read on for what to do.
 
@@ -15,12 +19,12 @@ The signature itself is fine. The rejection is about **trust**, not validity. Th
 ## For recipients
 
 1. Download the `.dmg` and double-click to mount it.
-2. Drag `editor.app` into `/Applications` (or wherever you want to keep it).
+2. Drag `Arcane.app` into `/Applications` (or wherever you want to keep it).
 3. Open **Terminal** (⌘+Space → "Terminal").
 4. Paste this and hit Enter:
 
    ```bash
-   xattr -dr com.apple.quarantine /Applications/editor.app
+   xattr -dr com.apple.quarantine /Applications/Arcane.app
    ```
 
    If you put the app somewhere other than `/Applications`, change the path accordingly.
@@ -47,6 +51,20 @@ A few things worth knowing:
 - **csharp-ls is not bundled**. If the recipient wants C# language features they need the .NET SDK + `dotnet tool install -g csharp-ls`. For Unity projects the editor surfaces a modal when dotnet is missing; non-Unity workspaces get a quieter toast hint.
 - **pyright is not bundled (yet)**. Python LSP still requires `npm install -g pyright` on the recipient's machine. Bundling is a known follow-up — see [LSP sidecar bundling](#lsp-sidecar-bundling) below.
 
+## Windows
+
+Windows builds are **unsigned** for now (no code-signing certificate). Recipients running `ArcaneSetup.exe` (the NSIS installer) will hit Microsoft **SmartScreen**:
+
+> **Windows protected your PC** — Microsoft Defender SmartScreen prevented an unrecognized app from starting.
+
+This is the "unknown publisher" warning, not a malware detection. To proceed:
+
+1. Click **More info**.
+2. Click **Run anyway**.
+3. Continue through the installer normally.
+
+It goes away once the installer is signed — see [Upgrade path](#upgrade-path). The bundled `arcane-graph` and `typescript-language-server` sidecars are installed alongside the app automatically; recipients don't need to do anything for them.
+
 ## LSP sidecar bundling
 
 Bundled LSP binaries are produced by `bun run build:lsp-sidecars` (called automatically from `bun run tauri ...`). The script uses `@yao-pkg/pkg` to snapshot the npm package into a single native executable, written to `src-tauri/binaries/<name>-<target-triple>[.exe]`. Tauri's `bundle.externalBin` config picks them up and copies them next to the main executable in the final bundle.
@@ -68,6 +86,33 @@ Recommended CI matrix for release builds:
 
 **Pyright follow-up**. Pyright's distribution uses webpack-style chunked code with dynamic `require()` calls that pkg's static analysis can't fully follow; the bundled binary exits silently on `--stdio` inside pkg's snapshot filesystem. Options for a future PR: (a) ship the pyright source as Tauri resources + a bundled Node binary, (b) wait for pkg to resolve the chunked require issue, or (c) switch the Python LSP to one without this packaging pattern.
 
+## Releasing (CI → Cloudflare R2)
+
+All three installers are built by **`.github/workflows/release.yml`** (repo root). Push a version tag to trigger it:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+(Or run it manually from the **Actions** tab via **Run workflow**.) The workflow runs one job per target — `macos-14` (Apple Silicon), `macos-13` (Intel), `windows-latest` — building the native `arcane-graph` + `typescript-language-server` sidecars on each runner, then `tauri build`, then uploading each installer to the `arcane-releases` R2 bucket under both the version path `` `<tag>/` `` (archived) and `` `latest/` `` (the stable links the landing page points at):
+
+- `Arcane-arm64.dmg` — macOS Apple Silicon
+- `Arcane-x64.dmg` — macOS Intel
+- `ArcaneSetup.exe` — Windows x64
+
+**Required GitHub secrets** (Settings → Secrets and variables → Actions): `CLOUDFLARE_API_TOKEN` (a token with **R2 edit** permission) and `CLOUDFLARE_ACCOUNT_ID`. No signing secrets are needed while we're ad-hoc / unsigned.
+
+**Manual upload.** To publish a locally-built installer (e.g. the Apple Silicon `.dmg` from `cd editor && bun run tauri build`), put the renamed files into `dist-release/` and run from the repo root:
+
+```bash
+scripts/upload-release.sh v0.1.0
+```
+
+It uploads to the same `<tag>/` + `latest/` paths. Auth via `wrangler login` or the `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID` env vars.
+
+> **Note:** the previous `arcane-release-worker` (resumable multipart upload Worker) has been removed — current builds are small enough for `wrangler r2 object put`. The `releases.arcaneai.org` domain and the `arcane-releases` bucket stay as-is.
+
 ## Upgrade path
 
 If you want recipients to open the app with a single double-click — no Terminal, no warnings — the path is:
@@ -85,11 +130,15 @@ If you want recipients to open the app with a single double-click — no Termina
 4. After `bun run tauri build`, notarize and staple:
    ```bash
    xcrun notarytool submit \
-     src-tauri/target/release/bundle/dmg/editor_0.1.0_aarch64.dmg \
+     src-tauri/target/release/bundle/dmg/Arcane_0.1.0_aarch64.dmg \
      --apple-id "you@example.com" --team-id TEAMID --password APP_SPECIFIC_PASSWORD \
      --wait
    xcrun stapler staple \
-     src-tauri/target/release/bundle/dmg/editor_0.1.0_aarch64.dmg
+     src-tauri/target/release/bundle/dmg/Arcane_0.1.0_aarch64.dmg
    ```
 
-After that, recipients can mount and open the app with no warnings and no Terminal step.
+After that, recipients can mount and open the app with no warnings and no Terminal step. This is also a prerequisite if you ever add the in-app auto-updater (Gatekeeper blocks silent updates of ad-hoc-signed apps).
+
+### Windows signing (later)
+
+To remove the SmartScreen warning, sign `ArcaneSetup.exe` with a code-signing certificate or **Azure Trusted Signing**. Tauri wires this through `bundle.windows` config + a CI signing step — no restructuring of `release.yml` needed, just an added secret and config.

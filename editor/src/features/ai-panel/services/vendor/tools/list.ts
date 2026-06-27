@@ -63,7 +63,7 @@ export function createListTool(cwd: string, options: ListToolOptions): AgentTool
     name: 'list',
     label: 'list',
     description:
-      'List files in a directory. Defaults to recursive scan from the workspace root. Use the `extensions` parameter to narrow results (e.g. ["cs"] for Unity scripts).',
+      'List files in a directory. Defaults to recursive scan from the workspace root. Use the `extensions` parameter to narrow results (e.g. ["cs"], ["shader"]). Note: a raw .cs listing does not tell you which Unity assembly a script compiles into — for editor-vs-runtime or per-assembly script questions use get_unity_script_map.',
     parameters: listSchema,
     async execute(
       _toolCallId: string,

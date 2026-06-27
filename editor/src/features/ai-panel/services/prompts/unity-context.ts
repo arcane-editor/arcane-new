@@ -11,7 +11,20 @@ export const UNITY_CONTEXT = `## Unity project context
 
 You are working inside a Unity project. Treat .cs files in this workspace as
 Unity scripts unless their location or contents make clear they're not
-(e.g. csproj files, Editor-only utilities, plain .NET libraries under Packages/).
+(e.g. .csproj files or plain .NET libraries under Packages/).
+
+### Script classification is by assembly, not by folder name
+Unity compiles each script into an assembly defined by the nearest ancestor
+\`.asmdef\` (or, with no asmdef, a predefined assembly). An **editor script** is one
+whose owning assembly compiles for the **Editor platform only** — i.e. an \`.asmdef\`
+with \`includePlatforms: ["Editor"]\`, or (no asmdef) a script under an \`Editor/\`
+folder → \`Assembly-CSharp-Editor\`. So a folder literally named \`Editor\` under a
+runtime asmdef is **not** editor code, and an Editor-only asmdef outside any
+\`Editor/\` folder **is**. Never infer this from filenames or folder names alone.
+For any question about how many scripts / editor scripts / runtime scripts exist,
+which assembly some scripts belong to, or how the project splits into assemblies,
+**call the \`get_unity_script_map\` tool** — it returns the ground-truth counts and
+per-assembly breakdown. Do not count \`.cs\` files from a \`list\` to answer these.
 
 ### Component lifecycle (most-common methods)
 \`Awake\` → \`OnEnable\` → \`Start\` → repeated \`Update\` / \`FixedUpdate\` / \`LateUpdate\` → \`OnDisable\` → \`OnDestroy\`.
