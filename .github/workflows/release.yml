@@ -60,10 +60,17 @@ jobs:
         run: |
           cd editor/tooling/arcane-graph-sidecar
           python -m venv .venv
-          source .venv/bin/activate || source .venv/Scripts/activate
-          pip install --upgrade pip
-          pip install graphifyy pyinstaller
-          python -m PyInstaller pyinstaller.spec
+          # Call the venv's python directly instead of `activate` — works the same
+          # on every OS, and `python -m pip` upgrades pip on Windows (the bare
+          # `pip install --upgrade pip` can't replace its own running pip.exe).
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            PY=".venv/Scripts/python.exe"
+          else
+            PY=".venv/bin/python"
+          fi
+          "$PY" -m pip install --upgrade pip
+          "$PY" -m pip install graphifyy pyinstaller
+          "$PY" -m PyInstaller pyinstaller.spec
           mkdir -p ../../src-tauri/binaries
           if [[ "$RUNNER_OS" == "Windows" ]]; then
             cp dist/arcane-graph.exe "../../src-tauri/binaries/arcane-graph-${{ matrix.triple }}.exe"
