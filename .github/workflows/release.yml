@@ -46,6 +46,13 @@ jobs:
 
       - uses: oven-sh/setup-bun@v2
 
+      # Pin OFFICIAL Node (static libuv). Without this the macOS runners use
+      # homebrew's node@22 (shared libuv), which crashes native build addons
+      # (esbuild/Rollup/Tailwind oxide) during `vite build` — Abort trap: 6 / exit 134.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.triple }}
@@ -91,6 +98,11 @@ jobs:
       # is handled by tauri's beforeBuildCommand. ad-hoc mac / unsigned Windows
       # are the defaults, so no signing config is needed here.
       - name: Build Tauri app
+        env:
+          # Monaco makes vite's build memory-heavy; give V8 headroom so it doesn't
+          # abort on the smaller (~7 GB) Apple-Silicon runner. Propagates into the
+          # `vite build` that tauri runs via beforeBuildCommand.
+          NODE_OPTIONS: --max-old-space-size=4096
         run: cd editor && bunx tauri build --bundles ${{ matrix.bundles }}
 
       - name: Stage installer under its public name
