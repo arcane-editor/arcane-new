@@ -7,7 +7,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::UnixListener;
 use tokio::sync::{mpsc, oneshot, Mutex};
 
 // ── Constants ───────────────────────────────────────────────────────────────
@@ -70,19 +69,30 @@ impl UnityIpcState {
 
 // ── Pipe Path ───────────────────────────────────────────────────────────────
 
-fn compute_pipe_path(workspace_path: &str) -> String {
+fn hash_workspace(workspace_path: &str) -> String {
     let normalized = std::fs::canonicalize(workspace_path)
         .unwrap_or_else(|_| Path::new(workspace_path).to_path_buf());
     let normalized_str = normalized.to_string_lossy().to_string();
 
     let mut hasher = Sha1::new();
     hasher.update(normalized_str.as_bytes());
-    let hash = format!("{:x}", hasher.finalize());
+    format!("{:x}", hasher.finalize())
+}
 
-    format!("/tmp/{}{}.sock", IPC_PIPE_PREFIX, hash)
+/// Unix: a domain socket under /tmp keyed by the workspace path hash.
+#[cfg(unix)]
+fn compute_pipe_path(workspace_path: &str) -> String {
+    format!("/tmp/{}{}.sock", IPC_PIPE_PREFIX, hash_workspace(workspace_path))
+}
+
+/// Windows: a named pipe (`\\.\pipe\…`) keyed by the same workspace hash.
+#[cfg(windows)]
+fn compute_pipe_path(workspace_path: &str) -> String {
+    format!(r"\\.\pipe\{}{}", IPC_PIPE_PREFIX, hash_workspace(workspace_path))
 }
 
 /// Clean up stale socket file if nothing is listening on it.
+#[cfg(unix)]
 async fn cleanup_stale_socket(socket_path: &str) -> Result<(), String> {
     if !Path::new(socket_path).exists() {
         return Ok(());
@@ -123,8 +133,9 @@ pub fn write_bridge_discovery(workspace_path: &str) -> Result<Option<String>, St
     let dir = root.join("Library").join("ArcaneIDE");
     std::fs::create_dir_all(&dir).map_err(|e| format!("Failed to create {}: {}", dir.display(), e))?;
     let file = dir.join("bridge.json");
+    let transport = if cfg!(windows) { "pipe" } else { "unix" };
     let content = serde_json::json!({
-        "transport": "unix",
+        "transport": transport,
         "socketPath": compute_pipe_path(workspace_path),
         "protocolVersion": PROTOCOL_VERSION,
         "ideVersion": env!("CARGO_PKG_VERSION"),
@@ -167,10 +178,24 @@ pub async fn unity_ipc_start(
     *inner.client_tx.lock().await = None;
 
     let socket_path = compute_pipe_path(&workspace_path);
+
+    #[cfg(unix)]
     cleanup_stale_socket(&socket_path).await?;
 
-    let listener = UnixListener::bind(&socket_path)
+    // Bind/create the transport up front so failures surface to the caller
+    // rather than dying silently inside the spawned accept loop.
+    #[cfg(unix)]
+    let listener = tokio::net::UnixListener::bind(&socket_path)
         .map_err(|e| format!("Failed to bind socket {}: {}", socket_path, e))?;
+
+    #[cfg(windows)]
+    let server = {
+        use tokio::net::windows::named_pipe::ServerOptions;
+        ServerOptions::new()
+            .first_pipe_instance(true)
+            .create(&socket_path)
+            .map_err(|e| format!("Failed to create pipe {}: {}", socket_path, e))?
+    };
 
     // Publish the discovery file so the Unity package can connect without
     // recomputing the socket path itself. Best-effort — not fatal if it fails.
@@ -183,41 +208,85 @@ pub async fn unity_ipc_start(
 
     let app_handle = app.clone();
     let ipc_state = inner.clone();
-    let sock_path = socket_path.clone();
 
-    // Spawn the accept loop
-    tokio::spawn(async move {
-        loop {
-            tokio::select! {
-                _ = shutdown_rx.recv() => {
-                    let _ = std::fs::remove_file(&sock_path);
-                    break;
-                }
-                accept_result = listener.accept() => {
-                    match accept_result {
-                        Ok((stream, _)) => {
-                            handle_client(stream, app_handle.clone(), ipc_state.clone()).await;
-                        }
-                        Err(e) => {
-                            eprintln!("[UnityIPC] Accept error: {}", e);
+    // Unix: accept connections on the listening socket; remove the socket file
+    // on shutdown.
+    #[cfg(unix)]
+    {
+        let sock_path = socket_path.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    _ = shutdown_rx.recv() => {
+                        let _ = std::fs::remove_file(&sock_path);
+                        break;
+                    }
+                    accept_result = listener.accept() => {
+                        match accept_result {
+                            Ok((stream, _)) => {
+                                handle_client(stream, app_handle.clone(), ipc_state.clone()).await;
+                            }
+                            Err(e) => {
+                                eprintln!("[UnityIPC] Accept error: {}", e);
+                            }
                         }
                     }
                 }
             }
-        }
-    });
+        });
+    }
+
+    // Windows: a named-pipe server instance serves a single client, so we hand
+    // off each connected instance and immediately create the next one to keep
+    // listening. Pipes leave no filesystem entry to clean up.
+    #[cfg(windows)]
+    {
+        use tokio::net::windows::named_pipe::ServerOptions;
+        let pipe_name = socket_path.clone();
+        let mut server = server;
+        tokio::spawn(async move {
+            loop {
+                // Wait for a client to connect (or for shutdown). Resolve the
+                // select! to a value first so the `connect()` borrow on `server`
+                // ends before we move it below.
+                let connected = tokio::select! {
+                    _ = shutdown_rx.recv() => break,
+                    res = server.connect() => res,
+                };
+                if let Err(e) = connected {
+                    eprintln!("[UnityIPC] Pipe connect error: {}", e);
+                    continue;
+                }
+
+                // Hand the connected instance to the client handler and create
+                // the next server instance so the pipe keeps accepting.
+                let connected_pipe = server;
+                match ServerOptions::new().create(&pipe_name) {
+                    Ok(next) => {
+                        server = next;
+                        handle_client(connected_pipe, app_handle.clone(), ipc_state.clone()).await;
+                    }
+                    Err(e) => {
+                        eprintln!("[UnityIPC] Failed to create next pipe instance: {}", e);
+                        handle_client(connected_pipe, app_handle.clone(), ipc_state.clone()).await;
+                        break;
+                    }
+                }
+            }
+        });
+    }
 
     Ok(())
 }
 
-async fn handle_client(
-    stream: tokio::net::UnixStream,
-    app: AppHandle,
-    state: Arc<UnityIpcInner>,
-) {
-    let (reader, writer) = stream.into_split();
-    let mut reader = reader;
-    let writer: Arc<Mutex<tokio::net::unix::OwnedWriteHalf>> = Arc::new(Mutex::new(writer));
+async fn handle_client<S>(stream: S, app: AppHandle, state: Arc<UnityIpcInner>)
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Send + 'static,
+{
+    // `tokio::io::split` works for any duplex byte stream, so the length-prefixed
+    // framing below is identical for Unix sockets and Windows named pipes.
+    let (mut reader, writer) = tokio::io::split(stream);
+    let writer = Arc::new(Mutex::new(writer));
 
     // Channel for sending messages to the client
     let (client_tx, mut client_rx) = mpsc::channel::<String>(64);
@@ -536,6 +605,7 @@ mod tests {
         assert_eq!(with_id.id.as_deref(), Some("rpc-7"));
     }
 
+    #[cfg(unix)]
     #[test]
     fn pipe_path_is_deterministic() {
         let a = compute_pipe_path("/tmp/some/workspace");

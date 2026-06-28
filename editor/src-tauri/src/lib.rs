@@ -479,28 +479,37 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app_handle, event| {
-            if let tauri::RunEvent::Reopen { has_visible_windows, .. } = &event {
-                if !has_visible_windows {
-                    use tauri::Manager;
-                    if let Some(w) = app_handle.webview_windows().get("welcome") {
-                        let _ = w.show();
-                        let _ = w.set_focus();
-                    } else {
-                        let app = app_handle.clone();
-                        tauri::async_runtime::spawn(async move {
-                            let _ = tauri::WebviewWindowBuilder::new(
-                                &app,
-                                "welcome",
-                                tauri::WebviewUrl::App("index.html?view=welcome".into()),
-                            )
-                            .title("Arcane")
-                            .inner_size(720.0, 480.0)
-                            .min_inner_size(600.0, 360.0)
-                            .resizable(true)
-                            .build();
-                        });
+            // `RunEvent::Reopen` (dock-icon click with no visible windows) is a
+            // macOS-only variant — it isn't part of the enum on Windows/Linux.
+            #[cfg(target_os = "macos")]
+            {
+                if let tauri::RunEvent::Reopen { has_visible_windows, .. } = &event {
+                    if !has_visible_windows {
+                        use tauri::Manager;
+                        if let Some(w) = app_handle.webview_windows().get("welcome") {
+                            let _ = w.show();
+                            let _ = w.set_focus();
+                        } else {
+                            let app = app_handle.clone();
+                            tauri::async_runtime::spawn(async move {
+                                let _ = tauri::WebviewWindowBuilder::new(
+                                    &app,
+                                    "welcome",
+                                    tauri::WebviewUrl::App("index.html?view=welcome".into()),
+                                )
+                                .title("Arcane")
+                                .inner_size(720.0, 480.0)
+                                .min_inner_size(600.0, 360.0)
+                                .resizable(true)
+                                .build();
+                            });
+                        }
                     }
                 }
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                let _ = (&app_handle, &event);
             }
         });
 }

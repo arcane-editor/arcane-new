@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 
@@ -42,11 +43,16 @@ pub fn auth_write_token(token: String, email: String) -> Result<(), String> {
 
     fs::write(&path, &content).map_err(|e| e.to_string())?;
 
-    // Set file permissions to 0600 (owner read/write only)
-    let metadata = fs::metadata(&path).map_err(|e| e.to_string())?;
-    let mut perms = metadata.permissions();
-    perms.set_mode(0o600);
-    fs::set_permissions(&path, perms).map_err(|e| e.to_string())?;
+    // Restrict the token file to the owner. On Unix that's an explicit 0600
+    // chmod; on Windows it lives under the user profile (%USERPROFILE%\.arcane)
+    // and inherits the user's ACLs, so no extra step is needed.
+    #[cfg(unix)]
+    {
+        let metadata = fs::metadata(&path).map_err(|e| e.to_string())?;
+        let mut perms = metadata.permissions();
+        perms.set_mode(0o600);
+        fs::set_permissions(&path, perms).map_err(|e| e.to_string())?;
+    }
 
     Ok(())
 }
