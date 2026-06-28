@@ -125,3 +125,38 @@ jobs:
           V="${GITHUB_REF_NAME:-dev}"
           bunx wrangler r2 object put "arcane-releases/$V/${{ matrix.asset }}"     --file "dist-release/${{ matrix.asset }}" --remote
           bunx wrangler r2 object put "arcane-releases/latest/${{ matrix.asset }}" --file "dist-release/${{ matrix.asset }}" --remote
+
+  # Publishes the Unity UPM package (arcane-extension) to the same arcane-releases
+  # bucket under unity-extension-releases/. Versioned by the extension's OWN
+  # package.json version (independent of the app tag), plus a stable latest/ copy
+  # the landing page points at — mirroring the editor's <version> + latest scheme.
+  # Cheap (no native build), runs alongside the app build on every tag / dispatch.
+  unity-extension:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: oven-sh/setup-bun@v2
+
+      # deploy-prod.sh validates package structure + .meta files, then `npm pack`s
+      # the tarball (com.arcane.editor-<version>.tgz).
+      - name: Build UPM tarball
+        run: cd arcane-extension && bash deploy-prod.sh
+
+      - name: Upload Unity extension to R2
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          cd arcane-extension
+          V=$(node -p "require('./package.json').version")
+          TGZ="com.arcane.editor-${V}.tgz"
+          bunx wrangler r2 object put "arcane-releases/unity-extension-releases/${TGZ}"                       --file "$TGZ" --remote
+          bunx wrangler r2 object put "arcane-releases/unity-extension-releases/latest/com.arcane.editor.tgz" --file "$TGZ" --remote

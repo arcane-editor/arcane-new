@@ -9,7 +9,7 @@ The Arcane Unity Extension connects your Unity Editor to ArcaneIDE over IPC, ena
 
 ### Option 1 — Download & Import (Recommended)
 
-1. Download the package: [com.arcane.editor-0.0.1.tgz](https://releases.arcaneai.org/unity-extension-releases/com.arcane.editor-0.0.1.tgz)
+1. Download the package: [com.arcane.editor.tgz](https://releases.arcaneai.org/unity-extension-releases/latest/com.arcane.editor.tgz)
 2. In Unity, go to **Window > Package Manager**
 3. Click **+** > **Add package from tarball...**
 4. Browse to the downloaded `.tgz` file and click **Open**
@@ -19,7 +19,7 @@ The Arcane Unity Extension connects your Unity Editor to ArcaneIDE over IPC, ena
 Open your Unity project's `Packages/manifest.json` and add this line to the `"dependencies"` block:
 
 ```json
-"com.arcane.editor": "https://releases.arcaneai.org/unity-extension-releases/com.arcane.editor-0.0.1.tgz"
+"com.arcane.editor": "https://releases.arcaneai.org/unity-extension-releases/latest/com.arcane.editor.tgz"
 ```
 
 Save the file. Unity will download and install the package automatically.
@@ -31,7 +31,7 @@ Save the file. Unity will download and install the package automatically.
 3. Click the **+** button (top-left) > **Add package by name...**
 4. Paste the URL:
    ```
-   https://releases.arcaneai.org/unity-extension-releases/com.arcane.editor-0.0.1.tgz
+   https://releases.arcaneai.org/unity-extension-releases/latest/com.arcane.editor.tgz
    ```
 5. Click **Add**
 
