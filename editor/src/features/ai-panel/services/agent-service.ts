@@ -186,6 +186,7 @@ export interface SendMessageOptions {
 export class AgentService {
   private agent: Agent;
   private unsubscribe: (() => void) | null = null;
+  private unsubscribeTelemetry: (() => void) | null = null;
 
   constructor() {
     const workspacePath = getCurrentWorkspacePath();
@@ -205,7 +206,7 @@ export class AgentService {
     this.unsubscribe = this.agent.subscribe((event) => {
       useAiStore.getState().handleAgentEvent(event);
     });
-    this.agent.subscribe((event) => recordTelemetryEvent(event));
+    this.unsubscribeTelemetry = this.agent.subscribe((event) => recordTelemetryEvent(event));
   }
 
   /**
@@ -237,6 +238,15 @@ export class AgentService {
   }
 
   async sendMessage(text: string, opts: SendMessageOptions): Promise<void> {
+    // Guard against concurrent entry: callers like fixConsoleError() invoke
+    // sendMessage() without the composer's in-flight guard. Bail out before
+    // any reset/mutation below (compile-gate budget, turn telemetry) so a
+    // concurrent call can't zero out the in-flight turn's state.
+    if (this.agent.isRunning) {
+      useAiStore.getState().setError('Agent is already processing a message.');
+      return;
+    }
+
     const auth = useAuthStore.getState();
     if (!auth.loggedIn || !auth.token) {
       if (auth.loggedIn && !auth.token) {
@@ -314,6 +324,7 @@ export class AgentService {
 
   dispose(): void {
     this.unsubscribe?.();
+    this.unsubscribeTelemetry?.();
     this.agent.abort();
   }
 }
