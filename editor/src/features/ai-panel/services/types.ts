@@ -71,3 +71,20 @@ export type Attachment =
       name: string;
       instanceId?: number;
     };
+
+/**
+ * Context window per tier — the real window of the model the server maps each
+ * tier to (must track arcane-server config/plans.ts + lib/costs.ts):
+ *   low   → @cf/qwen/qwen2.5-coder-32b-instruct (32k)
+ *   mid   → @cf/moonshotai/kimi-k2.7-code       (256k)
+ *   high  → @cf/zai-org/glm-5.2                 (200k)
+ *   super → @cf/zai-org/glm-5.2                 (200k)
+ * Compaction previously assumed 32k for every tier, eliding context the big
+ * models actually have room for.
+ */
+export const TIER_CONTEXT_WINDOWS: Record<Effort, number> = {
+  low: 32768,
+  mid: 256000,
+  high: 200000,
+  super: 200000,
+};

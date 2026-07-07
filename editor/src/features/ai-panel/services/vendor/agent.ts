@@ -147,6 +147,11 @@ export class Agent {
     this.reasoning = reasoning;
   }
 
+  /** LOCAL: adjust the compaction token budget per send (server-tier aware). */
+  setContextWindow(contextWindow: number): void {
+    this.contextWindow = contextWindow;
+  }
+
   /**
    * LOCAL: seed the conversation history (for resuming a saved session). The
    * next prompt() continues the conversation — runPrompt reads _state.messages

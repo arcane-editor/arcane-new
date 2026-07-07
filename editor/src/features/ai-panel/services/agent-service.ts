@@ -47,7 +47,7 @@ import { useSettingsStore } from '../../../stores/settings';
 import { buildSystemPrompt, defaultPromptModeFor, type PromptMode } from './prompts';
 import { resolveAttachments } from './attachments';
 import type { Model, AgentTool, AgentMessage } from './vendor/types';
-import type { Attachment, ChatMode, Effort } from './types';
+import { TIER_CONTEXT_WINDOWS, type Attachment, type ChatMode, type Effort } from './types';
 
 /** Convert saved UI messages back into vendor AgentMessages for resume. */
 function restoreAgentMessages(messages: AiMessage[]): AgentMessage[] {
@@ -246,6 +246,9 @@ export class AgentService {
     const promptMode: PromptMode = opts.promptMode ?? defaultPromptModeFor(opts.mode);
     this.syncForPromptMode(promptMode, opts.planExecution);
     this.agent.setReasoning(opts.effort);
+    // Compaction budget: the real window of the model this tier maps to
+    // (server model lineup is fixed; see TIER_CONTEXT_WINDOWS).
+    this.agent.setContextWindow(TIER_CONTEXT_WINDOWS[opts.effort]);
     // Fresh compile-gate repair budget per user turn.
     resetCompileGate();
 

@@ -10,7 +10,8 @@
     "sync:bridge": "node scripts/sync-unity-bridge.mjs",
     "preview": "vite preview",
     "build:lsp-sidecars": "bun run scripts/build-lsp-sidecars.ts",
-    "tauri": "bun run build:lsp-sidecars && tauri"
+    "tauri": "bun run build:lsp-sidecars && tauri",
+    "test": "bun test src"
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.2.8",
@@ -45,6 +46,7 @@
   "devDependencies": {
     "@tailwindcss/vite": "^4.2.2",
     "@tauri-apps/cli": "^2",
+    "@types/bun": "^1.3.14",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^4.6.0",
