@@ -2,311 +2,33 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Ship Phase 0 (config/prompt/model-routing quick wins) and Phase 1 (headless Unity eval harness) of `docs/superpowers/specs/2026-07-07-unity-ai-differentiation-design.md`.
+**Goal:** Ship Phase 0 (client-side harness/config quick wins — **no model changes**) and Phase 1 (headless Unity eval harness) of `docs/superpowers/specs/2026-07-07-unity-ai-differentiation-design.md`.
 
-**Architecture:** Two workstreams. (A) Quick wins: the server (`arcane-server/`, Cloudflare Worker) gains per-tier external OpenAI-compatible upstreams with CF Workers-AI failover, a `model_info` stream event, and telemetry columns; the editor (`editor/`) gains per-tier compaction windows, higher output ceilings, rewritten ask/agent prompts, tiered graph-snapshot budget, and turn telemetry. (B) Eval: a Bun-run harness in `editor/tooling/unity-eval/` drives the *real* vendor agent loop headlessly (tools take injected operations; a non-streaming OpenAI-compatible StreamFn) against fixture Unity projects, scoring tasks with the existing unity-analyzers plus file/answer checks.
+> **Scope decision (user, 2026-07-07):** keep the existing Cloudflare Workers AI model lineup untouched. No external providers, no routing changes. Improve the harness and client-side context handling; measure with the eval.
 
-**Tech Stack:** TypeScript, Bun (`bun test` — no test infra exists yet in either package; this plan bootstraps it), Hono + `ai` SDK v6 + `@ai-sdk/openai-compatible` (new dep) on Cloudflare Workers, D1 migrations via wrangler, Zustand, Typebox.
+**Architecture:** Two workstreams. (A) Quick wins: the editor (`editor/`) gains per-tier compaction windows matched to the real CF models, higher output ceilings, rewritten ask/agent prompts, tiered graph-snapshot budget, and turn telemetry; the server (`arcane-server/`) gains only telemetry columns (model routing untouched). (B) Eval: a Bun-run harness in `editor/tooling/unity-eval/` drives the *real* vendor agent loop headlessly (tools take injected operations; a non-streaming OpenAI-compatible StreamFn) against fixture Unity projects, scoring tasks with the existing unity-analyzers plus file/answer checks. Baselines run against the SAME CF models via Cloudflare's OpenAI-compatible REST endpoint.
+
+**Tech Stack:** TypeScript, Bun (`bun test` — no test infra exists yet in either package; this plan bootstraps it), Hono + `ai` SDK v6 on Cloudflare Workers (unchanged), D1 migrations via wrangler, Zustand, Typebox.
 
 ## Global Constraints
 
-- Default effort tier: `high` (was `mid`) — `editor/src/stores/ai.ts`.
+- **Model lineup is frozen**: `low` = `@cf/qwen/qwen2.5-coder-32b-instruct`, `mid` = `@cf/moonshotai/kimi-k2.7-code`, `high`/`super` = `@cf/zai-org/glm-5.2`. No task may edit `arcane-server/src/config/plans.ts` model ids or `llm-router.ts` routing.
+- Default effort tier: `high` (was `mid`) — `editor/src/stores/ai.ts`. (Tier selection among the EXISTING models; not a lineup change.)
 - Output ceilings: `chat: 16384, plan: 24576, edit: 24576` (was 4096/8192/8192).
-- Tier context windows (conservative min across each tier's possible models): `low: 32768, mid: 131072, high: 200000, super: 200000`.
+- Tier context windows (the real windows of the frozen lineup, from `arcane-server/src/lib/costs.ts` MODEL_CATALOG): `low: 32768, mid: 256000, high: 200000, super: 200000`.
 - Graph snapshot budget: 4096 chars on `high`/`super`, 1024 on `low`/`mid`.
-- CF Workers AI binding stays the universal failover; the $1/hr user cap stays untouched.
+- The $1/hr user cap stays untouched.
 - Editor deep-modules rule: import features only via their `index.ts` barrel (`editor/CLAUDE.md`). Exception: `editor/tooling/` scripts are not features and may import `src/` modules, but still prefer barrels.
 - Editor package manager is **bun**; arcane-server uses npm + wrangler. Tests in both run with `bun test`.
 - All prompts/limits changed here must keep the stable-prefix → volatile-tail ordering in `prompts/index.ts` `decorate()` (prompt-cache friendliness).
-- Upstream model ids/prices in Task 1 are best-guess defaults — Task 1 Step 1 verifies them against the live provider APIs before they're committed.
 
 ---
 
 ## Part A — Phase 0 quick wins
 
-### Task 1: Server — external upstream routing with CF failover
+### Task 1: REMOVED — external upstream routing
 
-**Files:**
-- Modify: `arcane-server/src/config/plans.ts`
-- Modify: `arcane-server/src/services/llm-router.ts`
-- Modify: `arcane-server/src/routes/chat.ts:14-28,84-88`
-- Modify: `arcane-server/src/lib/costs.ts`
-- Modify: `arcane-server/src/types.ts` (env bindings)
-- Modify: `arcane-server/package.json` (add `@ai-sdk/openai-compatible`, `test` script)
-- Test: `arcane-server/src/config/plans.test.ts`
-
-**Interfaces:**
-- Consumes: existing `INTENSITY_CONFIG`, `workersAiProvider(env)`, `streamCompletion(req, env)`, `MODEL_CATALOG`.
-- Produces: `chooseModelSpec(level: string | undefined, secrets: Record<string, string | undefined>): ModelSpec` where `ModelSpec = { route: 'upstream' | 'cf'; modelId: string; baseUrl?: string; apiKey?: string }` (exported from `plans.ts`); `getContextWindow(model: string): number` (exported from `costs.ts`); `streamCompletion(req, env)` now resolves the model itself from `req.metadata.reasoningLevel` and mutates `req.model` to the resolved id (chat.ts relies on this for logging). Task 2 relies on `streamCompletion` emitting a `model_info` event first.
-
-- [ ] **Step 1: Verify upstream model ids and pricing**
-
-Run (requires the two API keys — ask the user for them; if a key isn't available yet, keep that tier CF-only by deleting its `upstream` block in Step 4 and note it in the commit message):
-
-```bash
-curl -s https://api.deepseek.com/v1/models -H "Authorization: Bearer $DEEPSEEK_API_KEY" | head -c 2000
-curl -s https://api.moonshot.ai/v1/models -H "Authorization: Bearer $MOONSHOT_API_KEY" | head -c 2000
-```
-
-Expected: JSON model lists. Confirm the exact ids for DeepSeek's current chat/coder model (default assumption `deepseek-chat`) and Moonshot's current Kimi K2.5-class model (default assumption `kimi-k2.5`). Also confirm context window + per-Mtok pricing from the providers' pricing pages. If ids differ from the defaults, use the real ids everywhere the plan says `deepseek-chat` / `kimi-k2.5`.
-
-- [ ] **Step 2: Add dependency + test script**
-
-```bash
-cd arcane-server && npm install @ai-sdk/openai-compatible@^2
-```
-
-In `arcane-server/package.json` scripts add: `"test": "bun test src"`.
-
-- [ ] **Step 3: Write the failing test**
-
-Create `arcane-server/src/config/plans.test.ts`:
-
-```ts
-import { describe, it, expect } from 'bun:test';
-import { chooseModelSpec, INTENSITY_CONFIG } from './plans.ts';
-
-describe('chooseModelSpec', () => {
-    it('routes to upstream when the tier has one and its key is set', () => {
-        const spec = chooseModelSpec('mid', { DEEPSEEK_API_KEY: 'sk-test' });
-        expect(spec.route).toBe('upstream');
-        expect(spec.modelId).toBe(INTENSITY_CONFIG.mid.upstream!.model);
-        expect(spec.baseUrl).toBe(INTENSITY_CONFIG.mid.upstream!.baseUrl);
-        expect(spec.apiKey).toBe('sk-test');
-    });
-
-    it('falls back to CF when the upstream key is missing or empty', () => {
-        expect(chooseModelSpec('mid', {}).route).toBe('cf');
-        expect(chooseModelSpec('mid', { DEEPSEEK_API_KEY: '' }).route).toBe('cf');
-        expect(chooseModelSpec('mid', {}).modelId).toBe(INTENSITY_CONFIG.mid.model);
-    });
-
-    it('routes CF for tiers without an upstream', () => {
-        const spec = chooseModelSpec('low', { DEEPSEEK_API_KEY: 'sk-test' });
-        expect(spec.route).toBe('cf');
-        expect(spec.modelId).toBe('@cf/qwen/qwen2.5-coder-32b-instruct');
-    });
-
-    it('defaults unknown/missing levels to mid', () => {
-        expect(chooseModelSpec(undefined, {}).modelId).toBe(INTENSITY_CONFIG.mid.model);
-        expect(chooseModelSpec('garbage', {}).modelId).toBe(INTENSITY_CONFIG.mid.model);
-    });
-});
-```
-
-- [ ] **Step 4: Run test to verify it fails**
-
-Run: `cd arcane-server && bun test src/config`
-Expected: FAIL — `chooseModelSpec` is not exported.
-
-- [ ] **Step 5: Implement the config**
-
-In `arcane-server/src/config/plans.ts`, extend (keep the existing `model` field name so `getIntensityConfig` callers keep working):
-
-```ts
-export interface UpstreamConfig {
-    /** OpenAI-compatible base URL, no trailing slash. */
-    baseUrl: string;
-    /** Worker secret name holding the API key. Missing/empty → CF fallback. */
-    apiKeyVar: string;
-    /** Upstream model id (also the MODEL_CATALOG key for costs). */
-    model: string;
-}
-
-export interface IntensityConfig {
-    model: string; // Workers AI catalog id — always present; the failover path.
-    label: string;
-    upstream?: UpstreamConfig;
-}
-
-export const INTENSITY_CONFIG: Record<Intensity, IntensityConfig> = {
-    low:   { model: '@cf/qwen/qwen2.5-coder-32b-instruct', label: 'Low' },
-    mid:   {
-        model: '@cf/moonshotai/kimi-k2.7-code', label: 'Mid',
-        upstream: { baseUrl: 'https://api.deepseek.com/v1', apiKeyVar: 'DEEPSEEK_API_KEY', model: 'deepseek-chat' },
-    },
-    high:  {
-        model: '@cf/zai-org/glm-5.2', label: 'High',
-        upstream: { baseUrl: 'https://api.moonshot.ai/v1', apiKeyVar: 'MOONSHOT_API_KEY', model: 'kimi-k2.5' },
-    },
-    super: { model: '@cf/zai-org/glm-5.2', label: 'Extra High' }, // placeholder — own implementation later
-};
-
-export interface ModelSpec {
-    route: 'upstream' | 'cf';
-    modelId: string;
-    baseUrl?: string;
-    apiKey?: string;
-}
-
-export function chooseModelSpec(
-    level: string | undefined,
-    secrets: Record<string, string | undefined>,
-): ModelSpec {
-    const config = getIntensityConfig(level ?? '') ?? INTENSITY_CONFIG.mid;
-    const key = config.upstream ? secrets[config.upstream.apiKeyVar] : undefined;
-    if (config.upstream && key) {
-        return {
-            route: 'upstream',
-            modelId: config.upstream.model,
-            baseUrl: config.upstream.baseUrl,
-            apiKey: key,
-        };
-    }
-    return { route: 'cf', modelId: config.model };
-}
-```
-
-- [ ] **Step 6: Run test to verify it passes**
-
-Run: `cd arcane-server && bun test src/config`
-Expected: PASS (4 tests).
-
-- [ ] **Step 7: Add upstream models to the cost catalog**
-
-In `arcane-server/src/lib/costs.ts`: change `provider: 'workers-ai'` in `ModelInfo` to `provider: 'workers-ai' | 'external'`, append entries (use Step-1-verified numbers):
-
-```ts
-    // mid upstream — DeepSeek (OpenAI-compatible, automatic prefix caching)
-    'deepseek-chat': { provider: 'external', inputCostPer1M: 0.27, outputCostPer1M: 1.10, contextWindow: 131072, maxOutput: 8192, tier: 'standard' },
-    // high upstream — Moonshot Kimi K2.5 (full-size, not the CF-hosted code variant)
-    'kimi-k2.5':     { provider: 'external', inputCostPer1M: 0.60, outputCostPer1M: 2.50, contextWindow: 262144, maxOutput: 32000, tier: 'premium' },
-```
-
-And export:
-
-```ts
-const DEFAULT_CONTEXT_WINDOW = 32768;
-export function getContextWindow(model: string): number {
-    return MODEL_CATALOG[model]?.contextWindow ?? DEFAULT_CONTEXT_WINDOW;
-}
-```
-
-- [ ] **Step 8: Route in llm-router with failover**
-
-In `arcane-server/src/services/llm-router.ts`:
-
-```ts
-import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
-import { chooseModelSpec, type ModelSpec } from '../config/plans.ts';
-import { getMaxOutput, getContextWindow } from '../lib/costs.ts';
-```
-
-Extend the env interface:
-
-```ts
-export interface WorkersAiEnv {
-    AI: Ai;
-    CF_AI_GATEWAY_ID?: string;
-    DEEPSEEK_API_KEY?: string;
-    MOONSHOT_API_KEY?: string;
-}
-```
-
-Add a spec→model resolver (keep the existing `workersAiProvider` and `resolveModel` for the embeddings/graph routes):
-
-```ts
-function specToModel(spec: ModelSpec, env: WorkersAiEnv) {
-    if (spec.route === 'upstream') {
-        const provider = createOpenAICompatible({
-            name: 'upstream',
-            baseURL: spec.baseUrl!,
-            apiKey: spec.apiKey!,
-        });
-        return provider(spec.modelId);
-    }
-    return workersAiProvider(env)(spec.modelId);
-}
-```
-
-Rename the current `streamCompletion` body to a private generator parameterized by spec, and wrap it with resolution + first-error failover:
-
-```ts
-async function* streamWithSpec(spec: ModelSpec, req: ChatCompletionRequest, env: WorkersAiEnv): AsyncGenerator<StreamEvent> {
-    const model = specToModel(spec, env);
-    const messages = convertMessages(req.messages);
-    const tools = convertTools(req.tools);
-    const cap = getMaxOutput(spec.modelId);
-    const maxOutputTokens = Math.min(req.max_tokens ?? 8192, cap);
-
-    yield { type: 'model_info', model: spec.modelId, context_window: getContextWindow(spec.modelId) };
-
-    const result = streamText({ model, messages, ...(tools ? { tools } : {}), maxOutputTokens, temperature: req.temperature });
-    for await (const part of result.fullStream) {
-        switch (part.type) {
-            case 'text-delta': yield { type: 'text', content: part.text }; break;
-            case 'tool-call': yield { type: 'tool_call', id: part.toolCallId, name: part.toolName, arguments: JSON.stringify(part.input), finished: true }; break;
-            case 'finish': yield { type: 'usage', input_tokens: part.totalUsage.inputTokens ?? 0, output_tokens: part.totalUsage.outputTokens ?? 0, cached_input_tokens: (part.totalUsage as { cachedInputTokens?: number }).cachedInputTokens ?? 0 }; break;
-            case 'reasoning-delta': yield { type: 'thinking', thought: part.text, signature: '' }; break;
-            case 'error': yield { type: 'error', message: String(part.error) }; break;
-        }
-    }
-}
-
-export async function* streamCompletion(req: ChatCompletionRequest, env: WorkersAiEnv): AsyncGenerator<StreamEvent> {
-    const level = req.metadata?.reasoningLevel;
-    const spec = chooseModelSpec(level, env as unknown as Record<string, string | undefined>);
-    req.model = spec.modelId; // chat.ts reads this back for usage logging
-
-    // Failover: if an upstream fails before producing ANY user-visible output,
-    // silently retry on the CF model. After output has flowed, surface the error.
-    let emittedOutput = false;
-    try {
-        for await (const ev of streamWithSpec(spec, req, env)) {
-            if (ev.type === 'error' && !emittedOutput && spec.route === 'upstream') {
-                throw new Error(ev.message);
-            }
-            if (ev.type === 'text' || ev.type === 'tool_call' || ev.type === 'thinking') emittedOutput = true;
-            yield ev;
-        }
-        return;
-    } catch (err) {
-        if (emittedOutput || spec.route !== 'upstream') {
-            yield { type: 'error', message: err instanceof Error ? err.message : String(err) };
-            return;
-        }
-        console.error(`[llm-router] upstream ${spec.modelId} failed, falling back to CF:`, err);
-    }
-    const fallback = chooseModelSpec(level, {}); // no secrets → always CF
-    req.model = fallback.modelId;
-    yield* streamWithSpec(fallback, req, env);
-}
-```
-
-Note: on fallback a second `model_info` event is emitted — clients take the latest.
-
-- [ ] **Step 9: Add the new StreamEvent variant and env bindings**
-
-In `arcane-server/src/types.ts`: find the `StreamEvent` union and add `{ type: 'model_info'; model: string; context_window: number }`; extend the existing `usage` variant with `cached_input_tokens?: number`; add `DEEPSEEK_API_KEY?: string; MOONSHOT_API_KEY?: string;` to the Worker bindings type (the same type that declares `AI` / `arcane_db` — follow the file's existing pattern).
-
-- [ ] **Step 10: Simplify chat.ts**
-
-In `arcane-server/src/routes/chat.ts`: delete `resolveModelFromRequest` (lines 14-28) and the `body.model = model` block (lines 83-88) — `streamCompletion` now resolves and mutates `body.model` itself. Keep the dev log but move it after the stream completes or drop it. `logUsage(env.arcane_db, user, body.model, ...)` calls stay — `body.model` now holds the resolved id in both branches (verify the non-streaming branch logs after the loop, which it does).
-
-- [ ] **Step 11: Typecheck + tests + local smoke**
-
-```bash
-cd arcane-server && npx tsc --noEmit && bun test src
-```
-
-Expected: clean typecheck, tests PASS. Then smoke locally (put `DEEPSEEK_API_KEY=...` in `.dev.vars` if available):
-
-```bash
-npx wrangler dev &   # then, once ready:
-curl -sN localhost:8787/health
-```
-
-Expected: `{"status":"ok"}` (or the file's existing health shape). Full chat-path smoke happens in Task 12's baseline run (needs a JWT); kill wrangler afterwards.
-
-- [ ] **Step 12: Set production secrets + deploy note**
-
-Do NOT deploy in this task. Document in the commit message: prod rollout requires `wrangler secret put DEEPSEEK_API_KEY` and `wrangler secret put MOONSHOT_API_KEY`, then `npm run deploy`.
-
-- [ ] **Step 13: Commit**
-
-```bash
-git add arcane-server && git commit -m "feat(server): per-tier external upstreams with CF failover + model_info event"
-```
+**Dropped by user decision (2026-07-07): the CF Workers AI model lineup stays as-is.** No external providers, no `model_info` event, no failover changes. Task numbering below is preserved to avoid churn. Server-side work in this plan is limited to Task 2 (telemetry columns).
 
 ---
 
@@ -320,8 +42,8 @@ git add arcane-server && git commit -m "feat(server): per-tier external upstream
 - Test: manual D1 verification (schema change; no pure logic to unit-test)
 
 **Interfaces:**
-- Consumes: `usage` StreamEvent with `cached_input_tokens` (Task 1).
-- Produces: `request_logs` columns `task_type TEXT, turn_index INTEGER, tool_error_count INTEGER, repair_count INTEGER, cached_input_tokens INTEGER`; request `metadata.telemetry?: { turnIndex?: number; toolErrorCount?: number; repairCount?: number }` (Task 6 sends it).
+- Consumes: existing `usage` StreamEvent (input/output tokens only — Workers AI reports no cached-token figure today).
+- Produces: `request_logs` columns `task_type TEXT, turn_index INTEGER, tool_error_count INTEGER, repair_count INTEGER, cached_input_tokens INTEGER` (cached column is future-proofing; logged NULL for now); request `metadata.telemetry?: { turnIndex?: number; toolErrorCount?: number; repairCount?: number }` (Task 6 sends it).
 
 - [ ] **Step 1: Write the migration**
 
@@ -401,7 +123,7 @@ async function logUsage(
 }
 ```
 
-In both branches: track `let cachedInputTokens = 0` next to the existing token counters, set it from `event.type === 'usage'` (`event.cached_input_tokens ?? 0`), and call:
+In both branches, call (cachedInputTokens is intentionally omitted — Workers AI doesn't report it; the column stays NULL until a provider does):
 
 ```ts
 await logUsage(env.arcane_db, user, body.model, inputTokens, outputTokens, durationMs, {
@@ -409,7 +131,6 @@ await logUsage(env.arcane_db, user, body.model, inputTokens, outputTokens, durat
     turnIndex: body.metadata?.telemetry?.turnIndex,
     toolErrorCount: body.metadata?.telemetry?.toolErrorCount,
     repairCount: body.metadata?.telemetry?.repairCount,
-    cachedInputTokens,
 });
 ```
 
@@ -423,20 +144,19 @@ git add arcane-server && git commit -m "feat(server): request_logs telemetry col
 
 ---
 
-### Task 3: Editor — per-tier context windows, default effort high, model_info feedback
+### Task 3: Editor — per-tier compaction windows + default effort high
 
 **Files:**
 - Modify: `editor/src/features/ai-panel/services/types.ts`
 - Modify: `editor/src/features/ai-panel/services/vendor/agent.ts` (add setter)
 - Modify: `editor/src/features/ai-panel/services/agent-service.ts:236-250`
-- Modify: `editor/src/features/ai-panel/services/arcane-stream.ts` (model_info handling)
-- Modify: `editor/src/stores/ai.ts` (default effort + modelInfoByTier)
+- Modify: `editor/src/stores/ai.ts` (default effort)
 - Modify: `editor/package.json` (bootstrap `bun test`)
 - Test: `editor/src/features/ai-panel/services/types.test.ts`, `editor/src/features/ai-panel/services/vendor/agent.test.ts`
 
 **Interfaces:**
-- Consumes: `model_info` SSE event `{ type: 'model_info', model, context_window }` (Task 1).
-- Produces: `TIER_CONTEXT_WINDOWS: Record<Effort, number>` (types.ts); `Agent.setContextWindow(n: number): void`; ai store fields `modelInfoByTier: Partial<Record<Effort, { model: string; contextWindow: number }>>` + `setModelInfoForTier(tier: Effort, info: { model: string; contextWindow: number }): void`. Task 4/6 build on this wiring.
+- Consumes: nothing new server-side (model lineup frozen; windows are static facts about the frozen lineup).
+- Produces: `TIER_CONTEXT_WINDOWS: Record<Effort, number>` (types.ts); `Agent.setContextWindow(n: number): void`. Task 4 builds on the same files.
 
 - [ ] **Step 1: Bootstrap bun test in the editor**
 
@@ -455,16 +175,16 @@ import { describe, it, expect } from 'bun:test';
 import { TIER_CONTEXT_WINDOWS } from './types';
 
 describe('TIER_CONTEXT_WINDOWS', () => {
-  it('covers every effort tier with sane values', () => {
-    expect(TIER_CONTEXT_WINDOWS.low).toBe(32768);
-    expect(TIER_CONTEXT_WINDOWS.mid).toBe(131072);
-    expect(TIER_CONTEXT_WINDOWS.high).toBe(200000);
-    expect(TIER_CONTEXT_WINDOWS.super).toBe(200000);
+  it('matches the real windows of the frozen CF model lineup', () => {
+    expect(TIER_CONTEXT_WINDOWS.low).toBe(32768);    // @cf/qwen/qwen2.5-coder-32b-instruct
+    expect(TIER_CONTEXT_WINDOWS.mid).toBe(256000);   // @cf/moonshotai/kimi-k2.7-code
+    expect(TIER_CONTEXT_WINDOWS.high).toBe(200000);  // @cf/zai-org/glm-5.2
+    expect(TIER_CONTEXT_WINDOWS.super).toBe(200000); // @cf/zai-org/glm-5.2
   });
 });
 ```
 
-Create `editor/src/features/ai-panel/services/vendor/agent.test.ts` (proves the setter affects the *next* run's compaction config; uses a stub streamFn):
+Create `editor/src/features/ai-panel/services/vendor/agent.test.ts` (proves the setter exists and a prompt still completes; uses a stub streamFn):
 
 ```ts
 import { describe, it, expect } from 'bun:test';
@@ -510,13 +230,18 @@ If `tsc`/module-resolution friction appears (e.g. `bun:test` types), fix by addi
 
 ```ts
 /**
- * Conservative context-window floor per tier — the MIN across the models the
- * server may pick for that tier (must track arcane-server config/plans.ts +
- * lib/costs.ts). The server's model_info stream event refines this per send.
+ * Context window per tier — the real window of the model the server maps each
+ * tier to (must track arcane-server config/plans.ts + lib/costs.ts):
+ *   low   → @cf/qwen/qwen2.5-coder-32b-instruct (32k)
+ *   mid   → @cf/moonshotai/kimi-k2.7-code       (256k)
+ *   high  → @cf/zai-org/glm-5.2                 (200k)
+ *   super → @cf/zai-org/glm-5.2                 (200k)
+ * Compaction previously assumed 32k for every tier, eliding context the big
+ * models actually have room for.
  */
 export const TIER_CONTEXT_WINDOWS: Record<Effort, number> = {
   low: 32768,
-  mid: 131072,
+  mid: 256000,
   high: 200000,
   super: 200000,
 };
@@ -531,60 +256,17 @@ export const TIER_CONTEXT_WINDOWS: Record<Effort, number> = {
   }
 ```
 
-`editor/src/stores/ai.ts` — add to state interface + implementation:
-
-```ts
-  // near the other composer state fields
-  modelInfoByTier: Partial<Record<Effort, { model: string; contextWindow: number }>>;
-  setModelInfoForTier: (tier: Effort, info: { model: string; contextWindow: number }) => void;
-```
-
-```ts
-  // in the store creator, near mode/effort defaults (line ~236)
-  modelInfoByTier: {},
-  setModelInfoForTier: (tier, info) =>
-    set((s) => ({ modelInfoByTier: { ...s.modelInfoByTier, [tier]: info } })),
-```
-
-Change line 237 `effort: 'mid',` → `effort: 'high',`. Leave the session-restore fallback at line 457 (`?? 'mid'`) as `?? 'high'` too.
+`editor/src/stores/ai.ts` — change line 237 `effort: 'mid',` → `effort: 'high',` and the session-restore fallback at line ~457 `?? 'mid'` → `?? 'high'`.
 
 `editor/src/features/ai-panel/services/agent-service.ts` — in `sendMessage` right after `this.agent.setReasoning(opts.effort);` (line 248):
 
 ```ts
-    // Compaction budget: what the server actually served for this tier last
-    // time, else the conservative static floor for the tier.
-    const serverInfo = useAiStore.getState().modelInfoByTier[opts.effort];
-    this.agent.setContextWindow(
-      serverInfo?.contextWindow ?? TIER_CONTEXT_WINDOWS[opts.effort],
-    );
+    // Compaction budget: the real window of the model this tier maps to
+    // (server model lineup is fixed; see TIER_CONTEXT_WINDOWS).
+    this.agent.setContextWindow(TIER_CONTEXT_WINDOWS[opts.effort]);
 ```
 
 Add `TIER_CONTEXT_WINDOWS` to the existing `./types` import.
-
-`editor/src/features/ai-panel/services/arcane-stream.ts` — extend `ArcaneStreamEvent`:
-
-```ts
-  type: 'text' | 'tool_call' | 'thinking' | 'usage' | 'error' | 'model_info';
-  model?: string;
-  context_window?: number;
-```
-
-In the switch, add before the `error` case:
-
-```ts
-          case 'model_info': {
-            const tier = (options.reasoning ?? 'mid') as Effort;
-            if (event.model && event.context_window) {
-              useAiStore.getState().setModelInfoForTier(tier, {
-                model: event.model,
-                contextWindow: event.context_window,
-              });
-            }
-            break;
-          }
-```
-
-Import `type { Effort }` from `./types`.
 
 - [ ] **Step 5: Run tests + typecheck**
 
@@ -594,7 +276,7 @@ Expected: PASS + clean typecheck. (If `tsc --noEmit` isn't wired, `bun run build
 - [ ] **Step 6: Commit**
 
 ```bash
-git add editor && git commit -m "feat(editor): per-tier compaction windows, model_info feedback, default effort high"
+git add editor && git commit -m "feat(editor): per-tier compaction windows, default effort high"
 ```
 
 ---
@@ -1467,7 +1149,7 @@ import type {
 } from '../../src/features/ai-panel/services/vendor/types';
 
 export interface EvalModelConfig {
-  baseUrl: string; // e.g. https://api.deepseek.com/v1
+  baseUrl: string; // e.g. https://api.cloudflare.com/client/v4/accounts/<ACCOUNT_ID>/ai/v1
   apiKey: string;
   model: string;
   label: string;
@@ -1983,8 +1665,9 @@ export function renderReport(results: TaskResult[], label: string): string {
  * CLI: run the eval task set against one model config.
  *
  *   bun tooling/unity-eval/run-eval.ts \
- *     --base-url https://api.deepseek.com/v1 --api-key-env DEEPSEEK_API_KEY \
- *     --model deepseek-chat --label deepseek-chat [--filter grounding]
+ *     --base-url https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/ai/v1 \
+ *     --api-key-env CF_API_TOKEN --model @cf/moonshotai/kimi-k2.7-code \
+ *     --label cf-mid [--filter grounding]
  */
 
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -2203,23 +1886,23 @@ cd editor && bun test tooling/unity-eval && bun test src
 
 Expected: all PASS.
 
-- [ ] **Step 3: Baseline run #1 — current production path (Arcane server, CF mid tier)**
+- [ ] **Step 3: Baseline run #1 — the mid tier (default until this plan ships)**
 
-The server exposes an OpenAI-compatible endpoint but with JWT auth and tier-based routing, so run baselines directly against providers instead (same models the tiers map to). Run the CF-hosted models via any account you have, or skip to the upstream baseline if none. Minimum viable baseline: one run against the mid-tier upstream candidate:
-
-```bash
-cd editor && DEEPSEEK_API_KEY=<key> bun run eval -- --base-url https://api.deepseek.com/v1 --api-key-env DEEPSEEK_API_KEY --model deepseek-chat --label deepseek-chat
-```
-
-Expected: a results JSON + markdown table; some tasks will fail — that's the point (it's a baseline, record it, don't fix tasks to pass).
-
-- [ ] **Step 4: Baseline run #2 — high-tier candidate**
+Baselines run against the SAME models the server serves, via Cloudflare's OpenAI-compatible REST endpoint (`https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1/chat/completions`). You need the Cloudflare account id (visible in `wrangler whoami` or the dashboard) and an API token with Workers AI read permission (`wrangler` login token works, or create one scoped to Workers AI). Ask the user for both; export as `CF_ACCOUNT_ID` and `CF_API_TOKEN`.
 
 ```bash
-cd editor && MOONSHOT_API_KEY=<key> bun run eval -- --base-url https://api.moonshot.ai/v1 --api-key-env MOONSHOT_API_KEY --model kimi-k2.5 --label kimi-k2.5
+cd editor && CF_API_TOKEN=<token> bun run eval -- --base-url https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/ai/v1 --api-key-env CF_API_TOKEN --model @cf/moonshotai/kimi-k2.7-code --label cf-mid-kimi-k2.7
 ```
 
-Copy both result JSONs into `editor/tooling/unity-eval/results/baselines/` (this subdir IS committed) and note the pass rates in the README.
+Expected: a results JSON + markdown table; some tasks will fail — that's the point (it's a baseline, record it, don't fix tasks to pass). If the OpenAI-compat endpoint rejects a model id or tool calls, note it in the README and fall back to running that model through a temporary `/v1/chat/completions` call against a locally-run `wrangler dev` arcane-server with a dev JWT.
+
+- [ ] **Step 4: Baseline run #2 — the high tier (the new default effort)**
+
+```bash
+cd editor && CF_API_TOKEN=<token> bun run eval -- --base-url https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/ai/v1 --api-key-env CF_API_TOKEN --model @cf/zai-org/glm-5.2 --label cf-high-glm-5.2
+```
+
+Copy both result JSONs into `editor/tooling/unity-eval/results/baselines/` (this subdir IS committed) and note the pass rates in the README. This pair also directly answers "is defaulting to high worth it" with numbers.
 
 - [ ] **Step 5: Write README.md**
 
@@ -2258,6 +1941,6 @@ git add editor/tooling/unity-eval editor/AI-SPEC.md && git commit -m "feat(eval)
 
 ## Self-review notes
 
-- **Spec coverage:** Phase 0 — prompt rewrite (T5), output ceilings (T4), per-tier compaction + model_info (T1/T3), default effort (T3), graph budget (T4), upstream routing + failover (T1), prompt caching (DeepSeek prefix caching is automatic once the upstream routes there — T1; cached-token *observability* in T2; the client prompt already orders stable→volatile, unchanged), telemetry (T2/T6). Phase 1 — eval types/fixtures (T8), runner on the real loop (T9/T11), three check families incl. analyzers (T10), seed tasks + baselines + README (T12). Unity `-batchmode` compile checks are deferred to a follow-up task once a Unity install is available on the eval machine — the spec lists batchmode as part of the codegen pass criteria; analyzer_clean stands in until then (recorded in the eval README).
+- **Spec coverage:** Phase 0 — prompt rewrite (T5), output ceilings (T4), per-tier compaction windows (T3), default effort (T3), graph budget (T4), telemetry (T2/T6). External model routing + prompt-caching breakpoints were dropped by user decision (models frozen); the client prompt keeps stable→volatile ordering so caching can be added later without rework. Phase 1 — eval types/fixtures (T8), runner on the real loop (T9/T11), three check families incl. analyzers (T10), seed tasks + baselines + README (T12). Unity `-batchmode` compile checks are deferred to a follow-up task once a Unity install is available on the eval machine — the spec lists batchmode as part of the codegen pass criteria; analyzer_clean stands in until then (recorded in the eval README).
 - **Type consistency:** `chooseModelSpec`/`ModelSpec` (T1) used in T1 only; `TIER_CONTEXT_WINDOWS` + `setContextWindow` (T3) consumed in T3's agent-service edit; `EvalTask`/`TaskResult`/`CheckSpec` (T8) consumed by T10/T11/T12; `UsageTotals`/`createEvalStreamFn` (T9) consumed by T11; `convertToOpenAI` (T7) consumed by T9. `buildSystemPrompt` reshape (T4) touches agent-service + any plan-controller call sites — flagged in T4 Step 3.
-- **Known judgment calls:** upstream model ids are Step-1-verified, not assumed; `Finding` field names in T10 flagged for verification; eval runs without the Assets/ sandbox (fixture root = workspace root) by design.
+- **Known judgment calls:** baselines use Cloudflare's OpenAI-compatible REST endpoint so the eval measures the exact frozen lineup; `Finding` field names in T10 flagged for verification; eval runs without the Assets/ sandbox (fixture root = workspace root) by design.
