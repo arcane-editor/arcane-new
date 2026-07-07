@@ -16,6 +16,12 @@ export interface EvalModelConfig {
   apiKey: string;
   model: string;
   label: string;
+  // Threaded into the request body as `metadata: { reasoningLevel }` so runs
+  // against the arcane-server route pick the same model tier the server
+  // would select for that effort level. Omitted (no `metadata` key at all)
+  // when unset, since baselines against the raw CF OpenAI-compat endpoint
+  // don't need or understand it.
+  reasoningLevel?: string;
 }
 
 export interface UsageTotals {
@@ -54,6 +60,7 @@ export function createEvalStreamFn(cfg: EvalModelConfig, usage: UsageTotals): St
           tools: tools.length > 0 ? tools : undefined,
           stream: false,
           max_tokens: 8192,
+          ...(cfg.reasoningLevel ? { metadata: { reasoningLevel: cfg.reasoningLevel } } : {}),
         }),
         signal: options.signal,
       });

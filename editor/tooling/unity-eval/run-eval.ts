@@ -4,7 +4,7 @@
  *   bun tooling/unity-eval/run-eval.ts \
  *     --base-url https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/ai/v1 \
  *     --api-key-env CF_API_TOKEN --model @cf/moonshotai/kimi-k2.7-code \
- *     --label cf-mid [--filter grounding]
+ *     --label cf-mid [--filter grounding] [--reasoning-level high]
  */
 
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -23,6 +23,7 @@ const { values } = parseArgs({
     model: { type: 'string' },
     label: { type: 'string' },
     filter: { type: 'string' },
+    'reasoning-level': { type: 'string' },
   },
 });
 
@@ -30,6 +31,7 @@ const baseUrl = values['base-url'];
 const apiKeyEnv = values['api-key-env'];
 const model = values.model;
 const label = values.label ?? model ?? 'run';
+const reasoningLevel = values['reasoning-level'];
 if (!baseUrl || !apiKeyEnv || !model) {
   console.error('Required: --base-url --api-key-env --model. See file header.');
   process.exit(1);
@@ -42,7 +44,7 @@ if (!apiKey) {
 
 const tasks = TASKS.filter((t) => !values.filter || t.id.includes(values.filter) || t.family.includes(values.filter));
 const usage = { input: 0, output: 0, requests: 0 };
-const streamFn = createEvalStreamFn({ baseUrl, apiKey, model, label }, usage);
+const streamFn = createEvalStreamFn({ baseUrl, apiKey, model, label, reasoningLevel }, usage);
 
 const results: TaskResult[] = [];
 for (const task of tasks) {

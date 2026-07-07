@@ -12,6 +12,45 @@ function mockResponse(message: unknown, usage = { prompt_tokens: 10, completion_
 const ctx = { systemPrompt: 'SYS', messages: [], tools: [] };
 
 describe('createEvalStreamFn', () => {
+  it('sends metadata.reasoningLevel in the request body when configured', async () => {
+    let capturedBody: string | undefined;
+    globalThis.fetch = (async (_url, init) => {
+      capturedBody = init?.body as string;
+      return new Response(
+        JSON.stringify({ choices: [{ message: { role: 'assistant', content: 'hi' } }], usage: {} }),
+        { status: 200 },
+      );
+    }) as typeof fetch;
+    const usage = { input: 0, output: 0, requests: 0 };
+    const fn = createEvalStreamFn(
+      { baseUrl: 'http://x/v1', apiKey: 'k', model: 'm', label: 'test', reasoningLevel: 'high' },
+      usage,
+    );
+    for await (const _ev of fn(ctx as never, { model: { id: 'm', name: 'm', provider: 'eval' } } as never)) {
+      // drain
+    }
+    const body = JSON.parse(capturedBody ?? '{}');
+    expect(body.metadata).toEqual({ reasoningLevel: 'high' });
+  });
+
+  it('omits metadata entirely when reasoningLevel is not configured', async () => {
+    let capturedBody: string | undefined;
+    globalThis.fetch = (async (_url, init) => {
+      capturedBody = init?.body as string;
+      return new Response(
+        JSON.stringify({ choices: [{ message: { role: 'assistant', content: 'hi' } }], usage: {} }),
+        { status: 200 },
+      );
+    }) as typeof fetch;
+    const usage = { input: 0, output: 0, requests: 0 };
+    const fn = createEvalStreamFn({ baseUrl: 'http://x/v1', apiKey: 'k', model: 'm', label: 'test' }, usage);
+    for await (const _ev of fn(ctx as never, { model: { id: 'm', name: 'm', provider: 'eval' } } as never)) {
+      // drain
+    }
+    const body = JSON.parse(capturedBody ?? '{}');
+    expect('metadata' in body).toBe(false);
+  });
+
   it('converts a text answer into a done event', async () => {
     mockResponse({ role: 'assistant', content: 'hello' });
     const usage = { input: 0, output: 0, requests: 0 };

@@ -55,8 +55,13 @@ Working lean (to be confirmed): privacy 1a/1b, deployment 2a, capability 3a, inf
 
 ## Recommended Approach
 
-_TBD — populated after the four constraints are confirmed. Will be a phased roadmap (P0 restore compaction + verification loop → P1 Unity grounding via off-the-shelf MCP + version detection → P2 cost structuring + tool hardening → P3 routing tiers + internal eval), with the model shortlist resolved against the privacy answer._
+Superseded by the approved design + plan (2026-07-07):
+- Design: `../docs/superpowers/specs/2026-07-07-unity-ai-differentiation-design.md`
+- Plan (Phases 0-1): `../docs/superpowers/plans/2026-07-07-ai-quick-wins-and-eval.md`
+
+Constraint answers (2026-07-06): privacy = open to any provider; deployment = hosted, Arcane pays (CF failover retained); priority = verified agentic edits, then grounded Q&A, then completion; retrieval = graphify + unity_api_search (no new embeddings infra).
+Note: several "Gaps" above are now closed in code — compaction exists (`vendor/compaction.ts`), the verification loop exists (analyzer + compile gates feed diagnostics back), and `unity_api_search` provides version-accurate grounding. See the design doc §2 for the verified current state.
 
 ## Verification
 
-_TBD — will describe the internal Unity eval (analyzers + batchmode compile), a before/after quality+cost comparison on a sample of Unity tasks, and per-phase acceptance checks._
+The internal Unity eval lives at `tooling/unity-eval/` (12 seed tasks across codegen / grounding / agentic families, scored by unity-analyzers + file/answer checks against fixture projects). Run: `bun run eval -- --base-url <url> --api-key-env <VAR> --model <id> --label <name>`. Baselines are committed under `tooling/unity-eval/results/baselines/`. Every prompt/model/routing change ships with a before/after run.
