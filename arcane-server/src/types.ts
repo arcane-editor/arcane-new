@@ -29,6 +29,7 @@ export interface ChatCompletionRequest {
         reasoningLevel?: 'low' | 'mid' | 'high' | 'super';
         planPhase?: 'planning' | 'executing';
         sessionId?: string;
+        telemetry?: { turnIndex?: number; toolErrorCount?: number; repairCount?: number };
     };
 }
 

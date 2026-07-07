@@ -29,6 +29,11 @@ export interface RequestLogRow {
     cost_usd: number;
     duration_ms: number;
     created_at: string;
+    task_type?: string;
+    turn_index?: number;
+    tool_error_count?: number;
+    repair_count?: number;
+    cached_input_tokens?: number;
 }
 
 export interface UserWithUsageRow extends UserRow {
@@ -154,11 +159,23 @@ export async function getHourlyCost(db: D1Database, userId: number): Promise<{ t
 
 export async function createRequestLog(
     db: D1Database,
-    data: { userId: number; model: string; inputTokens: number; outputTokens: number; costUsd: number; durationMs: number },
+    data: {
+        userId: number; model: string; inputTokens: number; outputTokens: number;
+        costUsd: number; durationMs: number;
+        taskType?: string; turnIndex?: number; toolErrorCount?: number;
+        repairCount?: number; cachedInputTokens?: number;
+    },
 ): Promise<void> {
     await db.prepare(
-        'INSERT INTO request_logs (user_id, model, input_tokens, output_tokens, cost_usd, duration_ms) VALUES (?, ?, ?, ?, ?, ?)'
-    ).bind(data.userId, data.model, data.inputTokens, data.outputTokens, data.costUsd, data.durationMs).run();
+        `INSERT INTO request_logs
+         (user_id, model, input_tokens, output_tokens, cost_usd, duration_ms,
+          task_type, turn_index, tool_error_count, repair_count, cached_input_tokens)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(
+        data.userId, data.model, data.inputTokens, data.outputTokens, data.costUsd, data.durationMs,
+        data.taskType ?? null, data.turnIndex ?? null, data.toolErrorCount ?? null,
+        data.repairCount ?? null, data.cachedInputTokens ?? null,
+    ).run();
 }
 
 export async function findRecentRequestLogs(db: D1Database, userId: number, limit = 50): Promise<RequestLogRow[]> {

@@ -50,20 +50,19 @@ async function checkHourlyLimit(db: D1Database, userId: number): Promise<{ allow
     return { allowed: false, costUsd: totalCost, resetsAt, resetsInSeconds };
 }
 
-async function logUsage(db: D1Database, user: AuthPayload, model: string, inputTokens: number, outputTokens: number, durationMs: number): Promise<void> {
+async function logUsage(
+    db: D1Database, user: AuthPayload, model: string,
+    inputTokens: number, outputTokens: number, durationMs: number,
+    extras: { taskType?: string; turnIndex?: number; toolErrorCount?: number; repairCount?: number; cachedInputTokens?: number },
+): Promise<void> {
     const cost = estimateCost(model, inputTokens, outputTokens);
     const periodStart = getCurrentPeriodStart();
-
     await Promise.all([
         upsertUsagePeriod(db, parseInt(user.sub), periodStart, getNextPeriodStart(), inputTokens, outputTokens, cost)
             .catch(err => console.error('Failed to log usage period:', err)),
         createRequestLog(db, {
-            userId: parseInt(user.sub),
-            model,
-            inputTokens,
-            outputTokens,
-            costUsd: cost,
-            durationMs,
+            userId: parseInt(user.sub), model, inputTokens, outputTokens,
+            costUsd: cost, durationMs, ...extras,
         }).catch(err => console.error('Failed to log request:', err)),
     ]);
 }
@@ -109,7 +108,12 @@ chatRouter.post('/v1/chat/completions', async (c) => {
             }
 
             const durationMs = Date.now() - startTime;
-            await logUsage(env.arcane_db, user, body.model, inputTokens, outputTokens, durationMs);
+            await logUsage(env.arcane_db, user, body.model, inputTokens, outputTokens, durationMs, {
+                taskType: body.metadata?.taskType,
+                turnIndex: body.metadata?.telemetry?.turnIndex,
+                toolErrorCount: body.metadata?.telemetry?.toolErrorCount,
+                repairCount: body.metadata?.telemetry?.repairCount,
+            });
 
             return c.json({
                 id: `chatcmpl-${crypto.randomUUID()}`,
@@ -163,7 +167,12 @@ chatRouter.post('/v1/chat/completions', async (c) => {
             });
         } finally {
             const durationMs = Date.now() - startTime;
-            await logUsage(env.arcane_db, user, body.model, inputTokens, outputTokens, durationMs);
+            await logUsage(env.arcane_db, user, body.model, inputTokens, outputTokens, durationMs, {
+                taskType: body.metadata?.taskType,
+                turnIndex: body.metadata?.telemetry?.turnIndex,
+                toolErrorCount: body.metadata?.telemetry?.toolErrorCount,
+                repairCount: body.metadata?.telemetry?.repairCount,
+            });
         }
     });
 });
