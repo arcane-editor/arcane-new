@@ -64,12 +64,48 @@ describe('runChecks', () => {
     const dir = await mkdtemp(join(tmpdir(), 'eval-checks-'));
     try {
       await mkdir(join(dir, 'Assets'), { recursive: true });
-      // GetComponent-in-Update is a real, reachable rule that only ever
-      // reports at `warning` severity — confirms analyzer_clean only fails
-      // on `error`-severity findings, not on warnings/info.
+      // Black-box contract test: analyzer_clean only ever gates on
+      // `error`-severity findings. GetComponent-in-Update would trigger a
+      // `warning`-severity finding under the full analyzer engine, but
+      // checks.ts only runs the ported `editor-api-in-runtime` (`error`)
+      // logic — so warnings can never fail this check, and this file (which
+      // has no UnityEditor usage at all) must pass.
       await writeFile(
         join(dir, 'Assets/Warn.cs'),
         'using UnityEngine;\nclass A : MonoBehaviour { void Update() { GetComponent<Rigidbody>(); } }',
+      );
+      const results = await runChecks([{ type: 'analyzer_clean', glob: 'Assets/*.cs' }], {
+        workDir: dir,
+        finalAnswer: '',
+      });
+      expect(results[0].pass).toBe(true);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  // Regression test: the ported error-rule logic must match its source
+  // (`rules/editor-api-in-runtime.ts`) by scanning the comment/string-blanked
+  // `scan.code` view, NOT the raw file text. A `UnityEditor` mention that
+  // only appears inside a `//` comment or a string literal is not a real
+  // runtime leak and must not produce an error finding.
+  it('passes analyzer_clean when UnityEditor is only mentioned in a comment and a string literal', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'eval-checks-'));
+    try {
+      await mkdir(join(dir, 'Assets'), { recursive: true });
+      await writeFile(
+        join(dir, 'Assets/Commented.cs'),
+        [
+          'using UnityEngine;',
+          'public class Commented : MonoBehaviour {',
+          '  // Historical note: this used to call UnityEditor.EditorUtility.DisplayDialog here.',
+          '  void Start() {',
+          '    string exampleUsing = @"',
+          'using UnityEditor;',
+          '";',
+          '  }',
+          '}',
+        ].join('\n'),
       );
       const results = await runChecks([{ type: 'analyzer_clean', glob: 'Assets/*.cs' }], {
         workDir: dir,

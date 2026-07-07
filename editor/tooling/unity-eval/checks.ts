@@ -24,57 +24,47 @@
  * This is the same "barrel drags in Monaco" hazard as the graphify barrel,
  * just one level deeper than a single smoke-check anticipates.
  *
- * Fix: import the individual RULE modules directly, bypassing the engine's
- * registry, and replicate the same trivial "scan text, run each rule, collect
- * findings" loop `runAnalyzersOnText` uses (that loop itself has zero
- * Monaco/store dependency — only the module that also hosts it does). Of the
- * 13 rules `register-rules.ts` registers, 10 import cleanly under Bun:
- * `getcomponent-in-update`, `camera-main`, `string-apis`, `alloc-in-update`,
- * `deltatime-in-fixedupdate`, `null-propagation-unity-object`, `destroy-this`,
- * `transform-position-per-axis`, `waitforseconds-in-loop`,
- * `non-serializable-types`. Three do not:
- *   - `near-miss-messages` / `empty-messages` import `LIFECYCLE_METHOD_NAMES`
- *     from the `../../csharp` barrel, which re-exports React components
- *     (`NewScriptModal`, `class-rename-sync`) that import `useWorkspaceStore`
- *     directly — same Monaco wall as above.
- *   - `editor-api-in-runtime` imports `refreshAll` *by value* from
- *     `analyzer-engine` (to trigger a re-scan after its assembly-resolution
- *     promise settles) — same wall again.
- *
- * `editor-api-in-runtime` also happens to be the *only* rule whose
- * `defaultSeverity` is `'error'` (the rest are `warning`/`info` — see
+ * ── What `analyzer_clean` actually gates on ─────────────────────────────────
+ * `analyzer_clean` only ever fails a task on `error`-severity findings (see
+ * the `analyzer_clean` case in `runOne` below — it filters
+ * `f.severity === 'error'`). Of the 13 rules `register-rules.ts` registers,
+ * `editor-api-in-runtime` is the *only* one whose `defaultSeverity` is
+ * `'error'` — every other rule defaults to `warning`/`info` (see
  * `fixtures/analyzers/CorrectnessRules.cs`, which documents it as the sole
- * "EXPECTED: ERROR" case). Since it can't be loaded in Bun, and the eval
- * harness needs at least one real `error`-severity signal for `analyzer_clean`
- * to ever fail on, its core detection (two regexes + an `#if UNITY_EDITOR` /
- * `Editor/`-folder guard, all pure text scanning with no Monaco/store
- * dependency) is ported verbatim below. The only behavioural difference from
- * the original is that the asmdef-backed "this file belongs to an
- * editor-only assembly" exemption is dropped — the eval harness has no real
- * asmdef graph to resolve against, so every non-`Editor/`-folder, unguarded
- * usage is treated as a runtime leak. If `rules/editor-api-in-runtime.ts`'s
- * detection patterns change, this port must be updated to match.
+ * "EXPECTED: ERROR" case). That means no warning/info rule can ever change
+ * this check's outcome, however it's implemented — so this file does not
+ * import or run any of them. (An earlier version of this file directly
+ * imported 10 Bun-safe warning/info rule modules and ran them for parity
+ * with the real engine; they were removed as dead weight — they could never
+ * flip `analyzer_clean`'s result, and importing rule modules by path also
+ * bypassed the `unity-analyzers` feature's barrel.)
+ *
+ * `editor-api-in-runtime` itself can't be imported under Bun either — it
+ * imports `refreshAll` *by value* from `analyzer-engine` (to trigger a
+ * re-scan after its assembly-resolution promise settles), hitting the same
+ * Monaco wall as above. Its core detection (two regexes + an
+ * `#if UNITY_EDITOR` / `Editor/`-folder guard, all pure text/scan-based with
+ * no Monaco/store dependency) is ported verbatim below. The only behavioural
+ * difference from the original is that the asmdef-backed "this file belongs
+ * to an editor-only assembly" exemption is dropped — the eval harness has no
+ * real asmdef graph to resolve against, so every non-`Editor/`-folder,
+ * unguarded usage is treated as a runtime leak.
+ *
+ * If `rules/editor-api-in-runtime.ts`'s detection patterns change, this port
+ * must be updated to match — INCLUDING which view each part reads. The
+ * source rule runs both regexes against `scan.code` (the comment/string-
+ * blanked view `scanCSharp` produces, so a `UnityEditor` mention inside a
+ * `//` comment or a string literal can't false-trigger it — see lines ~52
+ * and ~70 of that file), while its `#if UNITY_EDITOR` guard-range parsing
+ * reads the raw `scan.text` (line-based scanning needs the real source).
+ * This port mirrors that split exactly.
  */
 
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Glob } from 'bun';
-import type {
-  AnalyzerRule,
-  Finding,
-  RuleContext,
-} from '../../src/features/unity-analyzers/services/analyzer-engine';
-import { scanCSharp } from '../../src/features/unity-analyzers/services/csharp-scan';
-import { getComponentInUpdateRule } from '../../src/features/unity-analyzers/rules/getcomponent-in-update';
-import { cameraMainRule } from '../../src/features/unity-analyzers/rules/camera-main';
-import { stringApisRule } from '../../src/features/unity-analyzers/rules/string-apis';
-import { allocInUpdateRule } from '../../src/features/unity-analyzers/rules/alloc-in-update';
-import { deltaTimeInFixedUpdateRule } from '../../src/features/unity-analyzers/rules/deltatime-in-fixedupdate';
-import { nullPropagationUnityObjectRule } from '../../src/features/unity-analyzers/rules/null-propagation-unity-object';
-import { destroyThisRule } from '../../src/features/unity-analyzers/rules/destroy-this';
-import { transformPositionPerAxisRule } from '../../src/features/unity-analyzers/rules/transform-position-per-axis';
-import { waitForSecondsInLoopRule } from '../../src/features/unity-analyzers/rules/waitforseconds-in-loop';
-import { nonSerializableTypesRule } from '../../src/features/unity-analyzers/rules/non-serializable-types';
+import type { Finding } from '../../src/features/unity-analyzers/services/analyzer-engine';
+import { scanCSharp, type CSharpScan } from '../../src/features/unity-analyzers/services/csharp-scan';
 import type { CheckSpec } from './eval-types';
 
 export interface CheckOutcome {
@@ -82,20 +72,6 @@ export interface CheckOutcome {
   pass: boolean;
   detail: string;
 }
-
-// Bun-safe subset of the registered analyzer rules — see module doc above.
-const SAFE_RULES: AnalyzerRule[] = [
-  getComponentInUpdateRule,
-  cameraMainRule,
-  stringApisRule,
-  allocInUpdateRule,
-  deltaTimeInFixedUpdateRule,
-  nullPropagationUnityObjectRule,
-  destroyThisRule,
-  transformPositionPerAxisRule,
-  waitForSecondsInLoopRule,
-  nonSerializableTypesRule,
-];
 
 // ── Ported from rules/editor-api-in-runtime.ts (see module doc above) ──────
 
@@ -126,15 +102,18 @@ function unityEditorGuardRanges(text: string): Array<[number, number]> {
   return ranges;
 }
 
-function editorApiInRuntimeFindings(text: string, filePath: string): Finding[] {
+function editorApiInRuntimeFindings(scan: CSharpScan, filePath: string): Finding[] {
   if (isInEditorFolder(filePath)) return [];
-  const guardedRanges = unityEditorGuardRanges(text);
+  // Guard-range parsing reads the raw source (line-based scan for `#if`
+  // directives); the regex matches below read the comment/string-blanked
+  // `scan.code` view — matching the source rule's split exactly.
+  const guardedRanges = unityEditorGuardRanges(scan.text);
   const guarded = (offset: number) => guardedRanges.some(([s, e]) => offset >= s && offset < e);
   const findings: Finding[] = [];
 
   USING_UNITYEDITOR_RE.lastIndex = 0;
   let m: RegExpExecArray | null;
-  while ((m = USING_UNITYEDITOR_RE.exec(text)) !== null) {
+  while ((m = USING_UNITYEDITOR_RE.exec(scan.code)) !== null) {
     const lead = m[1] ? m[1].length : 0;
     const start = m.index + lead;
     if (guarded(start)) continue;
@@ -150,7 +129,7 @@ function editorApiInRuntimeFindings(text: string, filePath: string): Finding[] {
   }
 
   UNITYEDITOR_MEMBER_RE.lastIndex = 0;
-  while ((m = UNITYEDITOR_MEMBER_RE.exec(text)) !== null) {
+  while ((m = UNITYEDITOR_MEMBER_RE.exec(scan.code)) !== null) {
     if (guarded(m.index)) continue;
     findings.push({
       ruleId: 'unity/editor-api-in-runtime',
@@ -164,20 +143,10 @@ function editorApiInRuntimeFindings(text: string, filePath: string): Finding[] {
   return findings;
 }
 
-/** Bun-safe stand-in for `runAnalyzersOnText` (see module doc for why). */
-function runSafeAnalyzers(text: string, filePath: string): Finding[] {
+/** Runs the sole error-severity check `analyzer_clean` needs (see module doc). */
+function runErrorRule(text: string, filePath: string): Finding[] {
   const scan = scanCSharp(text);
-  const ctx: RuleContext = { model: null, filePath, unityVersion: null, monaco: null };
-  const findings: Finding[] = [];
-  for (const rule of SAFE_RULES) {
-    try {
-      findings.push(...rule.run(scan, ctx));
-    } catch {
-      // Rules must never throw; skip defensively, mirroring the real engine.
-    }
-  }
-  findings.push(...editorApiInRuntimeFindings(text, filePath));
-  return findings;
+  return editorApiInRuntimeFindings(scan, filePath);
 }
 
 async function tryRead(workDir: string, rel: string): Promise<string | null> {
@@ -213,7 +182,7 @@ async function runOne(
       const errors: string[] = [];
       for await (const rel of new Glob(spec.glob).scan({ cwd: ctx.workDir })) {
         const text = await readFile(join(ctx.workDir, rel), 'utf8');
-        const findings = runSafeAnalyzers(text, rel);
+        const findings = runErrorRule(text, rel);
         for (const f of findings) {
           if (f.severity === 'error') errors.push(`${rel}: ${f.message}`);
         }
