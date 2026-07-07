@@ -190,7 +190,7 @@ export class AgentService {
     const workspacePath = getCurrentWorkspacePath();
 
     this.agent = new Agent({
-      systemPrompt: buildSystemPrompt('agent', workspacePath),
+      systemPrompt: buildSystemPrompt('agent', workspacePath, { effort: 'mid' }),
       model: PLACEHOLDER_MODEL,
       tools: createToolsForPromptMode('agent', workspacePath),
       streamFn: arcaneStream,
@@ -215,20 +215,21 @@ export class AgentService {
    */
   private syncForPromptMode(
     promptMode: PromptMode,
+    effort: Effort,
     planExecutionArgs?: { planPath: string; planContent: string },
   ): void {
     const workspacePath = getCurrentWorkspacePath();
 
-    if (promptMode === 'plan-execution') {
-      if (!planExecutionArgs) {
-        throw new Error('plan-execution requires planPath and planContent');
-      }
-      this.agent.setSystemPrompt(
-        buildSystemPrompt('plan-execution', workspacePath, planExecutionArgs),
-      );
-    } else {
-      this.agent.setSystemPrompt(buildSystemPrompt(promptMode, workspacePath));
+    if (promptMode === 'plan-execution' && !planExecutionArgs) {
+      throw new Error('plan-execution requires planPath and planContent');
     }
+
+    this.agent.setSystemPrompt(
+      buildSystemPrompt(promptMode, workspacePath, {
+        effort,
+        planExecution: planExecutionArgs,
+      }),
+    );
 
     this.agent.setTools(createToolsForPromptMode(promptMode, workspacePath));
   }
@@ -244,7 +245,7 @@ export class AgentService {
     }
 
     const promptMode: PromptMode = opts.promptMode ?? defaultPromptModeFor(opts.mode);
-    this.syncForPromptMode(promptMode, opts.planExecution);
+    this.syncForPromptMode(promptMode, opts.effort, opts.planExecution);
     this.agent.setReasoning(opts.effort);
     // Compaction budget: the real window of the model this tier maps to
     // (server model lineup is fixed; see TIER_CONTEXT_WINDOWS).

@@ -13,8 +13,8 @@ import {
   buildPlanExecutionPrompt,
   type PlanExecutionPromptArgs,
 } from './plan-execution';
-import type { ChatMode } from '../types';
-import { buildGraphSnapshot } from '../../../graphify';
+import type { ChatMode, Effort } from '../types';
+import { buildGraphSnapshot, graphSnapshotBudget } from '../../../graphify';
 import { useWorkspaceStore } from '../../../../stores/workspace';
 import { getUnityFactsBlock } from './unity-facts';
 
@@ -25,15 +25,18 @@ import { getUnityFactsBlock } from './unity-facts';
  *   [STABLE: base prompt incl. static Unity context crib]
  *   [VOLATILE: Unity project facts (incl. active-file assembly) + graph snapshot]
  * The volatile parts (which depend on the active file / detected facts) go LAST.
+ *
+ * The graph snapshot's char budget scales with `effort`: higher tiers can
+ * afford a bigger slice of the prompt (see graphSnapshotBudget).
  */
-function decorate(base: string): string {
+function decorate(base: string, effort: Effort): string {
   const parts: string[] = [base];
 
   const facts = getUnityFactsBlock();
   if (facts) parts.push(facts);
 
   const activeFilePath = useWorkspaceStore.getState().activeFilePath;
-  const snapshot = buildGraphSnapshot(activeFilePath);
+  const snapshot = buildGraphSnapshot(activeFilePath, { maxChars: graphSnapshotBudget(effort) });
   if (snapshot) parts.push(snapshot);
 
   return parts.join('\n\n');
@@ -47,32 +50,34 @@ function decorate(base: string): string {
  */
 export type PromptMode = 'ask' | 'agent' | 'plan-planning' | 'plan-execution';
 
-export function buildSystemPrompt(
-  mode: 'ask' | 'agent' | 'plan-planning',
-  workspacePath: string,
-): string;
-export function buildSystemPrompt(
-  mode: 'plan-execution',
-  workspacePath: string,
-  args: Omit<PlanExecutionPromptArgs, 'workspacePath'>,
-): string;
+export interface BuildSystemPromptOpts {
+  /** Drives the graph-snapshot char budget. Defaults to 'mid'. */
+  effort?: Effort;
+  /** Required when mode === 'plan-execution'. */
+  planExecution?: Omit<PlanExecutionPromptArgs, 'workspacePath'>;
+}
+
 export function buildSystemPrompt(
   mode: PromptMode,
   workspacePath: string,
-  args?: Omit<PlanExecutionPromptArgs, 'workspacePath'>,
+  opts?: BuildSystemPromptOpts,
 ): string {
+  const effort = opts?.effort ?? 'mid';
   switch (mode) {
     case 'ask':
-      return decorate(buildAskPrompt(workspacePath));
+      return decorate(buildAskPrompt(workspacePath), effort);
     case 'agent':
-      return decorate(buildAgentPrompt(workspacePath));
+      return decorate(buildAgentPrompt(workspacePath), effort);
     case 'plan-planning':
-      return decorate(buildPlanPlanningPrompt(workspacePath));
+      return decorate(buildPlanPlanningPrompt(workspacePath), effort);
     case 'plan-execution':
-      if (!args) {
+      if (!opts?.planExecution) {
         throw new Error('plan-execution prompt requires planPath and planContent');
       }
-      return decorate(buildPlanExecutionPrompt({ workspacePath, ...args }));
+      return decorate(
+        buildPlanExecutionPrompt({ workspacePath, ...opts.planExecution }),
+        effort,
+      );
   }
 }
 

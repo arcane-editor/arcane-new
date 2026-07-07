@@ -86,7 +86,7 @@ async function doStream(
   // Per-task output ceiling so the server clamp has a sane per-mode cap (the
   // server still clamps to the model's published max). Q&A rarely needs 8k;
   // agentic edits / plans can. Caps the output cost driver alongside compaction.
-  const maxTokensByTask = { chat: 4096, plan: 8192, edit: 8192 } as const;
+  const maxTokensByTask = { chat: 16384, plan: 24576, edit: 24576 } as const;
   const body = {
     messages,
     tools: tools.length > 0 ? tools : undefined,

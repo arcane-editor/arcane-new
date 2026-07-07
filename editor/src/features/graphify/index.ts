@@ -5,7 +5,7 @@ export {
   createGraphifyExplainTool,
   createGraphifyPathTool,
 } from './services/graphify-tools';
-export { buildGraphSnapshot } from './services/graph-context';
+export { buildGraphSnapshot, graphSnapshotBudget } from './services/graph-context';
 export { enrichGraph, type GraphEnrichment } from './services/graphify-enrich';
 export { computeBuildOpts } from './services/build-opts';
 export { startGraphifyAutoRebuild } from './services/auto-rebuild';
