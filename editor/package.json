@@ -11,7 +11,8 @@
     "preview": "vite preview",
     "build:lsp-sidecars": "bun run scripts/build-lsp-sidecars.ts",
     "tauri": "bun run build:lsp-sidecars && tauri",
-    "test": "bun test src"
+    "test": "bun test src",
+    "eval": "bun tooling/unity-eval/run-eval.ts"
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.2.8",
