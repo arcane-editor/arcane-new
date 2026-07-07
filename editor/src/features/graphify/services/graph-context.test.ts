@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { graphSnapshotBudget, capSnapshot } from './graph-context';
+import { graphSnapshotBudget, capSnapshot } from './graph-snapshot-budget';
 
 describe('graph snapshot budget', () => {
   it('gives high tiers 4096 chars and low tiers 1024', () => {
