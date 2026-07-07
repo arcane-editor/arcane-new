@@ -14,6 +14,7 @@ import type {
   ToolCall,
 } from './vendor/types';
 import { AssistantMessageEventStream } from './vendor/event-stream';
+import { nextTurnTelemetry } from './turn-telemetry';
 
 const ARCANE_SERVER_URL = 'https://api.arcaneai.org';
 
@@ -96,6 +97,7 @@ async function doStream(
       taskType,
       mode: currentMode,
       reasoningLevel: options.reasoning ?? 'mid',
+      telemetry: nextTurnTelemetry(),
     },
   };
 

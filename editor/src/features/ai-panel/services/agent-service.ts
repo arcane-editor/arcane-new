@@ -39,6 +39,7 @@ import {
   withUnityCompileGate,
   resetCompileGate,
 } from './unity-tools';
+import { resetTurnTelemetry, recordTelemetryEvent } from './turn-telemetry';
 import { useAiStore, type AiMessage } from '../../../stores/ai';
 import { useAuthStore } from '../../../stores/auth';
 import { useWorkspaceStore } from '../../../stores/workspace';
@@ -204,6 +205,7 @@ export class AgentService {
     this.unsubscribe = this.agent.subscribe((event) => {
       useAiStore.getState().handleAgentEvent(event);
     });
+    this.agent.subscribe((event) => recordTelemetryEvent(event));
   }
 
   /**
@@ -252,6 +254,7 @@ export class AgentService {
     this.agent.setContextWindow(TIER_CONTEXT_WINDOWS[opts.effort]);
     // Fresh compile-gate repair budget per user turn.
     resetCompileGate();
+    resetTurnTelemetry();
 
     // Resolve attachments. File + Unity-doc become a text prefix; image
     // attachments become content blocks routed through promptStructured().
