@@ -69,6 +69,10 @@ export async function runTask(
 
   const maxTurns = task.maxTurns ?? DEFAULT_MAX_TURNS;
   let turns = 0;
+  // Soft cap: turn_start fires and the next LLM call dispatches in the same
+  // tick, while this abort lands asynchronously via the event listener — so
+  // the loop may execute one extra turn before it actually stops. The
+  // `turns > maxTurns` check below the run is what makes the overrun fail.
   agent.subscribe((event) => {
     if (event.type === 'turn_start') {
       turns++;
@@ -93,6 +97,10 @@ export async function runTask(
     error = err instanceof Error ? err.message : String(err);
   }
   const wallMs = Date.now() - started;
+
+  if (!error && turns > maxTurns) {
+    error = `max turns exceeded (${turns} > ${maxTurns})`;
+  }
 
   const checks = await runChecks(task.checks, { workDir, finalAnswer });
   if (!opts?.keepWorkDir) await rm(workDir, { recursive: true, force: true });

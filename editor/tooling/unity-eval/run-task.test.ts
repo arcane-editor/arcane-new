@@ -24,6 +24,32 @@ function scriptedStreamFn(script: AssistantMessage['content'][]): StreamFn {
   };
 }
 
+/**
+ * A model that never stops on its own: every call issues another tool call
+ * (re-reading a fixture file that always exists), so the loop only ends via
+ * the maxTurns abort — never naturally.
+ */
+function runawayStreamFn(): StreamFn {
+  let call = 0;
+  return () => {
+    const stream = new AssistantMessageEventStream();
+    const id = `runaway-${call++}`;
+    stream.push({ type: 'start' });
+    stream.push({
+      type: 'done',
+      message: {
+        role: 'assistant',
+        content: [
+          { type: 'toolCall', id, name: 'read', arguments: { path: 'Packages/manifest.json' } },
+        ],
+        stopReason: 'toolUse',
+        timestamp: Date.now(),
+      },
+    });
+    return stream;
+  };
+}
+
 const task: EvalTask = {
   id: 'mock-001',
   family: 'codegen',
@@ -57,5 +83,14 @@ describe('runTask', () => {
     expect(result.pass).toBe(true);
     expect(result.turns).toBe(2);
     expect(result.checks.every((c) => c.pass)).toBe(true);
+  });
+
+  it('fails a runaway agent that never stops on its own, once maxTurns is exceeded', async () => {
+    const runawayTask: EvalTask = { ...task, maxTurns: 3 };
+    const usage = { input: 0, output: 0, requests: 0 };
+    const result = await runTask(runawayTask, runawayStreamFn(), usage);
+    expect(result.pass).toBe(false);
+    expect(result.error).toContain('max turns exceeded');
+    expect(result.turns).toBeLessThanOrEqual(runawayTask.maxTurns! + 1);
   });
 });
