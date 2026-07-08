@@ -98,6 +98,11 @@ export function createEvalStreamFn(cfg: EvalModelConfig, usage: UsageTotals): St
             signal,
           });
         } catch (err) {
+          // The caller aborted us (e.g. the agent hit maxTurns) — this isn't a
+          // transient network failure, so don't burn a backoff sleep or a
+          // retry attempt on it; propagate immediately so the real abort
+          // reason isn't clobbered by a later "exhausted retries" error.
+          if (options.signal?.aborted) throw err instanceof Error ? err : new Error(String(err));
           const reason = err instanceof Error ? err.message : String(err);
           if (attempt >= maxAttempts) throw err instanceof Error ? err : new Error(reason);
           const delay = retryBaseDelayMs * attempt;

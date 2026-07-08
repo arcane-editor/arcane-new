@@ -124,6 +124,59 @@ describe('createEvalStreamFn', () => {
     expect(usage.requests).toBe(3);
   });
 
+  it('retries after generic fetch-throw errors and succeeds on the third attempt', async () => {
+    let calls = 0;
+    globalThis.fetch = (async () => {
+      calls++;
+      if (calls < 3) throw new Error('network error');
+      return new Response(
+        JSON.stringify({
+          choices: [{ message: { role: 'assistant', content: 'hello' } }],
+          usage: { prompt_tokens: 10, completion_tokens: 5 },
+        }),
+        { status: 200 },
+      );
+    }) as typeof fetch;
+    const usage = { input: 0, output: 0, requests: 0 };
+    const fn = createEvalStreamFn(
+      { baseUrl: 'http://x/v1', apiKey: 'k', model: 'm', label: 'test', retryBaseDelayMs: 1, maxAttempts: 3 },
+      usage,
+    );
+    const events: unknown[] = [];
+    for await (const ev of fn(ctx as never, { model: { id: 'm', name: 'm', provider: 'eval' } } as never)) events.push(ev);
+    const done = events.find((e) => (e as { type: string }).type === 'done') as { message: { content: { type: string; text?: string }[] } };
+    expect(done.message.content[0]).toEqual({ type: 'text', text: 'hello' });
+    expect(calls).toBe(3);
+    expect(usage.requests).toBe(3);
+  });
+
+  it('does not retry when the caller signal is already aborted, and does not clobber the AbortError', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    let calls = 0;
+    globalThis.fetch = (async () => {
+      calls++;
+      throw new DOMException('The operation was aborted.', 'AbortError');
+    }) as typeof fetch;
+    const usage = { input: 0, output: 0, requests: 0 };
+    const fn = createEvalStreamFn(
+      { baseUrl: 'http://x/v1', apiKey: 'k', model: 'm', label: 'test', retryBaseDelayMs: 1 },
+      usage,
+    );
+    const events: unknown[] = [];
+    for await (const ev of fn(
+      ctx as never,
+      { model: { id: 'm', name: 'm', provider: 'eval' }, signal: controller.signal } as never,
+    )) {
+      events.push(ev);
+    }
+    expect(events.some((e) => (e as { type: string }).type === 'done')).toBe(false);
+    const errorEvent = events.find((e) => (e as { type: string }).type === 'error') as { error: Error };
+    expect(errorEvent.error.name).toBe('AbortError');
+    expect(calls).toBe(1);
+    expect(usage.requests).toBe(1);
+  });
+
   it('does not retry a non-retryable 4xx response', async () => {
     let calls = 0;
     globalThis.fetch = (async () => {
