@@ -76,9 +76,10 @@ pub struct ObjectDiff {
     pub new_name: Option<String>,
     pub old_parent_name: Option<String>,
     pub new_parent_name: Option<String>,
-    /// GameObject-level field changes (m_Name / m_TagString / m_Layer /
-    /// m_IsActive, …) — excludes `m_Component` (see `component_diffs`) and is
-    /// empty for pure add/remove (see `subtree_summary` instead).
+    /// GameObject-level field changes (m_TagString / m_Layer / m_IsActive,
+    /// …) — excludes `m_Name` (surfaced via `old_name`/`new_name` instead,
+    /// see `status: "renamed"`) and `m_Component` (see `component_diffs`),
+    /// and is empty for pure add/remove (see `subtree_summary` instead).
     pub property_diffs: Vec<PropertyDiff>,
     pub component_diffs: Vec<ComponentDiff>,
     /// Present only for whole-subtree "added"/"removed" statuses.
@@ -87,6 +88,15 @@ pub struct ObjectDiff {
 
 /// A single prefab-instance property override (`m_Modifications` entry) that
 /// differs between old and new.
+///
+/// Unity serializes a scalar override (int/float/string/enum, …) with the
+/// payload in `value:` and an empty `objectReference: {fileID: 0}`. A
+/// reference-type override (Material/Sprite/prefab reassignment, …) is the
+/// mirror image: `value:` is empty and the payload lives in `objectReference:
+/// {fileID: …, guid: …, type: …}`. A row is "modified" if EITHER `value` OR
+/// `objectReference` differs between sides — see `old_value`/`new_value` for
+/// the former and `old_object_reference`/`new_object_reference` for the
+/// latter.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct PrefabOverrideDiff {
@@ -99,6 +109,21 @@ pub struct PrefabOverrideDiff {
     pub property_path: String,
     pub old_value: Option<String>,
     pub new_value: Option<String>,
+    /// Raw `objectReference: {fileID: …, guid: …, type: …}` payload (trimmed)
+    /// for whichever side has one. `None` when this entry has no reference
+    /// payload on that side (the common scalar-`value` case) — mirrors
+    /// `old_value`/`new_value`'s per-side-presence convention.
+    pub old_object_reference: Option<String>,
+    pub new_object_reference: Option<String>,
+    /// Asset name resolved from whichever side's `object_reference` guid is
+    /// present (new-side preferred, same precedence `prefab_asset_name` uses
+    /// for `m_SourcePrefab`), via `guid_to_path`. `None` when neither side has
+    /// a reference payload or the guid isn't in the index.
+    pub object_reference_asset_name: Option<String>,
+    /// Raw guid backing `object_reference_asset_name`, kept alongside the
+    /// resolved name the same way `prefab_asset_guid` accompanies
+    /// `prefab_asset_name`.
+    pub object_reference_guid: Option<String>,
     /// "added" | "removed" | "modified".
     pub status: String,
 }
@@ -480,8 +505,11 @@ fn build_common_object_diff(
     let old_body = old_side.bodies.get(go_id).map(String::as_str).unwrap_or("");
     let new_body = new_side.bodies.get(go_id).map(String::as_str).unwrap_or("");
     let mut property_diffs = diff_properties(old_body, new_body);
-    // m_Component is handled structurally via component_diffs above.
-    property_diffs.retain(|d| d.key != "m_Component");
+    // m_Component is handled structurally via component_diffs above; m_Name
+    // is handled structurally via old_name/new_name (status "renamed") — a
+    // raw m_Name row here would just duplicate that and inflate
+    // summary.property_changes.
+    property_diffs.retain(|d| d.key != "m_Component" && d.key != "m_Name");
 
     if !renamed && !moved && component_diffs.is_empty() && property_diffs.is_empty() {
         return None;
@@ -581,6 +609,10 @@ struct ModEntry {
     target_guid: String,
     property_path: String,
     value: String,
+    /// Raw `objectReference: {...}` payload (trimmed), empty string when the
+    /// line is absent or its value is empty — same absent-vs-empty
+    /// convention as `value`.
+    object_reference: String,
 }
 
 /// Parse a `m_Modification` raw block's `m_Modifications:` list. Unity aligns
@@ -626,6 +658,7 @@ fn parse_modifications(block: &str) -> Vec<ModEntry> {
                     target_guid: first_guid(target_rest).unwrap_or_default(),
                     property_path: String::new(),
                     value: String::new(),
+                    object_reference: String::new(),
                 });
                 i += 1;
                 continue;
@@ -638,6 +671,8 @@ fn parse_modifications(block: &str) -> Vec<ModEntry> {
         if let Some(entry) = current.as_mut() {
             if let Some(rest) = trimmed.strip_prefix("propertyPath:") {
                 entry.property_path = rest.trim().to_string();
+            } else if let Some(rest) = trimmed.strip_prefix("objectReference:") {
+                entry.object_reference = rest.trim().to_string();
             } else if let Some(rest) = trimmed.strip_prefix("value:") {
                 entry.value = rest.trim().to_string();
             }
@@ -651,6 +686,24 @@ fn parse_modifications(block: &str) -> Vec<ModEntry> {
 }
 
 type ModKey = (String, String, String); // (target_guid, target_file_id, property_path)
+
+/// The two payload shapes a `ModEntry` can carry, compared as a unit: an
+/// entry differs between sides if `value` OR `object_reference` differs.
+#[derive(Clone, Default, PartialEq)]
+struct ModValue {
+    value: String,
+    object_reference: String,
+}
+
+/// `None` for an empty string — the "no payload of this kind on this side"
+/// case — else `Some(cloned string)`.
+fn non_empty(s: &str) -> Option<String> {
+    if s.is_empty() {
+        None
+    } else {
+        Some(s.to_string())
+    }
+}
 
 fn diff_prefab_instances(
     old_side: &Side,
@@ -685,18 +738,18 @@ fn diff_prefab_instances(
         let asset_name =
             source_guid.as_ref().and_then(|g| guid_to_path.get(g)).and_then(|p| filename_stem(p));
 
-        let mut old_map: HashMap<ModKey, String> = HashMap::new();
+        let mut old_map: HashMap<ModKey, ModValue> = HashMap::new();
         for e in &old_entries {
             old_map.insert(
                 (e.target_guid.clone(), e.target_file_id.clone(), e.property_path.clone()),
-                e.value.clone(),
+                ModValue { value: e.value.clone(), object_reference: e.object_reference.clone() },
             );
         }
-        let mut new_map: HashMap<ModKey, String> = HashMap::new();
+        let mut new_map: HashMap<ModKey, ModValue> = HashMap::new();
         for e in &new_entries {
             new_map.insert(
                 (e.target_guid.clone(), e.target_file_id.clone(), e.property_path.clone()),
-                e.value.clone(),
+                ModValue { value: e.value.clone(), object_reference: e.object_reference.clone() },
             );
         }
 
@@ -719,6 +772,16 @@ fn diff_prefab_instances(
                 _ => continue,
             };
             let (guid, fid, path) = key;
+            let old_object_reference = old_v.as_ref().and_then(|v| non_empty(&v.object_reference));
+            let new_object_reference = new_v.as_ref().and_then(|v| non_empty(&v.object_reference));
+            let object_reference_guid = new_object_reference
+                .as_deref()
+                .and_then(first_guid)
+                .or_else(|| old_object_reference.as_deref().and_then(first_guid));
+            let object_reference_asset_name = object_reference_guid
+                .as_ref()
+                .and_then(|g| guid_to_path.get(g))
+                .and_then(|p| filename_stem(p));
             out.push(PrefabOverrideDiff {
                 prefab_instance_file_id: pf_id.clone(),
                 prefab_asset_name: asset_name.clone(),
@@ -726,8 +789,12 @@ fn diff_prefab_instances(
                 target_file_id: fid,
                 target_guid: guid,
                 property_path: path,
-                old_value: old_v,
-                new_value: new_v,
+                old_value: old_v.map(|v| v.value),
+                new_value: new_v.map(|v| v.value),
+                old_object_reference,
+                new_object_reference,
+                object_reference_asset_name,
+                object_reference_guid,
                 status: status.to_string(),
             });
         }
@@ -1035,6 +1102,28 @@ mod tests {
     }
 
     #[test]
+    fn rename_does_not_duplicate_m_name_in_property_diffs() {
+        // m_Name is already surfaced structurally via old_name/new_name
+        // (status "renamed"); it must not also show up as a raw PropertyDiff
+        // row, which would duplicate it and inflate property_changes.
+        let before = "--- !u!1 &100\nGameObject:\n  m_Name: Player\n  m_TagString: Untagged\n  m_Layer: 0\n  m_IsActive: 1\n  m_Component:\n  - component: {fileID: 400}\n--- !u!4 &400\nTransform:\n  m_GameObject: {fileID: 100}\n  m_Father: {fileID: 0}\n";
+        let after = "--- !u!1 &100\nGameObject:\n  m_Name: Hero\n  m_TagString: Untagged\n  m_Layer: 0\n  m_IsActive: 1\n  m_Component:\n  - component: {fileID: 400}\n--- !u!4 &400\nTransform:\n  m_GameObject: {fileID: 100}\n  m_Father: {fileID: 0}\n";
+
+        let diff = diff_unity_assets(before, after, &empty_guids());
+        assert_eq!(diff.object_diffs.len(), 1);
+        let od = &diff.object_diffs[0];
+        assert_eq!(od.status, "renamed");
+        assert!(
+            od.property_diffs.iter().all(|d| d.key != "m_Name"),
+            "m_Name must not appear as a raw property_diffs row"
+        );
+        assert!(od.property_diffs.is_empty(), "no other GO-level fields changed besides the rename");
+        // Before this fix this was 1 (the redundant m_Name row); with m_Name
+        // filtered, a pure rename contributes zero property_changes.
+        assert_eq!(diff.summary.property_changes, 0);
+    }
+
+    #[test]
     fn reparent_moved_status_and_parent_names() {
         // Two potential parents ("Left", "Right") and a "Mover" that starts
         // under "Left" and ends up under "Right".
@@ -1062,6 +1151,33 @@ mod tests {
     }
 
     #[test]
+    fn rename_and_reparent_together_reports_renamed_status_with_parent_names() {
+        // Combined scenario the P6.1 report's design-decision #1 previously
+        // mischaracterized as "parent change not separately surfaced": moved
+        // is computed independently of the renamed-wins status string, so
+        // old/new parent names ARE populated even though status == "renamed".
+        let scene = |father: &str, name: &str| -> String {
+            format!(
+                "--- !u!1 &1\nGameObject:\n  m_Name: Left\n  m_Component:\n  - component: {{fileID: 2}}\n--- !u!4 &2\nTransform:\n  m_GameObject: {{fileID: 1}}\n  m_Father: {{fileID: 0}}\n--- !u!1 &3\nGameObject:\n  m_Name: Right\n  m_Component:\n  - component: {{fileID: 4}}\n--- !u!4 &4\nTransform:\n  m_GameObject: {{fileID: 3}}\n  m_Father: {{fileID: 0}}\n--- !u!1 &5\nGameObject:\n  m_Name: {name}\n  m_Component:\n  - component: {{fileID: 6}}\n--- !u!4 &6\nTransform:\n  m_GameObject: {{fileID: 5}}\n  m_Father: {{fileID: {father}}}\n"
+            )
+        };
+        let before = scene("2", "Mover"); // under Left
+        let after = scene("4", "SuperMover"); // under Right, renamed
+
+        let diff = diff_unity_assets(&before, &after, &empty_guids());
+        let mover = diff
+            .object_diffs
+            .iter()
+            .find(|d| d.file_id == "5")
+            .expect("Mover diff present");
+        assert_eq!(mover.status, "renamed");
+        assert_eq!(mover.old_name.as_deref(), Some("Mover"));
+        assert_eq!(mover.new_name.as_deref(), Some("SuperMover"));
+        assert_eq!(mover.old_parent_name.as_deref(), Some("Left"));
+        assert_eq!(mover.new_parent_name.as_deref(), Some("Right"));
+    }
+
+    #[test]
     fn prefab_override_value_change() {
         let prefab_guid = "abcdef0123456789abcdef0123456789";
         let target_guid = "11111111111111111111111111111111";
@@ -1086,6 +1202,61 @@ mod tests {
         assert_eq!(row.target_file_id, "400000");
         assert_eq!(row.prefab_asset_guid.as_deref(), Some(prefab_guid));
         assert_eq!(row.prefab_asset_name.as_deref(), Some("Enemy"));
+    }
+
+    #[test]
+    fn prefab_override_object_reference_change_is_not_dropped() {
+        // Reference-type overrides (Material/Sprite/prefab reassignment, …)
+        // serialize an EMPTY `value:` with the payload in `objectReference:
+        // {fileID: …, guid: …}`. Before this fix both sides compared as
+        // value=="" == "" and the row was silently dropped.
+        let prefab_guid = "abcdef0123456789abcdef0123456789";
+        let target_guid = "11111111111111111111111111111111";
+        let old_asset_guid = "22222222222222222222222222222222";
+        let new_asset_guid = "33333333333333333333333333333333";
+        let before = format!(
+            "--- !u!1001 &100100000\nPrefabInstance:\n  m_ObjectHideFlags: 0\n  serializedVersion: 2\n  m_Modification:\n    m_TransformParent: {{fileID: 0}}\n    m_Modifications:\n    - target: {{fileID: 400000, guid: {target_guid}, type: 3}}\n      propertyPath: m_Sprite\n      value: \n      objectReference: {{fileID: 21300000, guid: {old_asset_guid}, type: 3}}\n    m_RemovedComponents: []\n  m_SourcePrefab: {{fileID: 100100000, guid: {prefab_guid}, type: 3}}\n"
+        );
+        let after = format!(
+            "--- !u!1001 &100100000\nPrefabInstance:\n  m_ObjectHideFlags: 0\n  serializedVersion: 2\n  m_Modification:\n    m_TransformParent: {{fileID: 0}}\n    m_Modifications:\n    - target: {{fileID: 400000, guid: {target_guid}, type: 3}}\n      propertyPath: m_Sprite\n      value: \n      objectReference: {{fileID: 21300000, guid: {new_asset_guid}, type: 3}}\n    m_RemovedComponents: []\n  m_SourcePrefab: {{fileID: 100100000, guid: {prefab_guid}, type: 3}}\n"
+        );
+
+        let mut guids = HashMap::new();
+        guids.insert(prefab_guid.to_string(), "Assets/Prefabs/Enemy.prefab".to_string());
+        guids.insert(new_asset_guid.to_string(), "Assets/Sprites/NewSprite.png".to_string());
+
+        let diff = diff_unity_assets(&before, &after, &guids);
+        assert_eq!(diff.prefab_override_diffs.len(), 1, "the reference change must not be dropped");
+        let row = &diff.prefab_override_diffs[0];
+        assert_eq!(row.status, "modified");
+        assert_eq!(row.property_path, "m_Sprite");
+        // value stayed empty on both sides.
+        assert_eq!(row.old_value.as_deref(), Some(""));
+        assert_eq!(row.new_value.as_deref(), Some(""));
+        assert!(row.old_object_reference.as_deref().unwrap_or("").contains(old_asset_guid));
+        assert!(row.new_object_reference.as_deref().unwrap_or("").contains(new_asset_guid));
+        assert_eq!(row.object_reference_guid.as_deref(), Some(new_asset_guid));
+        assert_eq!(row.object_reference_asset_name.as_deref(), Some("NewSprite"));
+    }
+
+    #[test]
+    fn prefab_override_no_change_reference_entry_emits_nothing() {
+        let prefab_guid = "abcdef0123456789abcdef0123456789";
+        let target_guid = "11111111111111111111111111111111";
+        let asset_guid = "22222222222222222222222222222222";
+        let scene = || {
+            format!(
+                "--- !u!1001 &100100000\nPrefabInstance:\n  m_ObjectHideFlags: 0\n  serializedVersion: 2\n  m_Modification:\n    m_TransformParent: {{fileID: 0}}\n    m_Modifications:\n    - target: {{fileID: 400000, guid: {target_guid}, type: 3}}\n      propertyPath: m_Sprite\n      value: \n      objectReference: {{fileID: 21300000, guid: {asset_guid}, type: 3}}\n    m_RemovedComponents: []\n  m_SourcePrefab: {{fileID: 100100000, guid: {prefab_guid}, type: 3}}\n"
+            )
+        };
+        let before = scene();
+        let after = scene();
+
+        let mut guids = HashMap::new();
+        guids.insert(prefab_guid.to_string(), "Assets/Prefabs/Enemy.prefab".to_string());
+
+        let diff = diff_unity_assets(&before, &after, &guids);
+        assert!(diff.prefab_override_diffs.is_empty(), "identical reference entry emits no diff row");
     }
 
     #[test]
