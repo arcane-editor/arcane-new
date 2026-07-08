@@ -5,6 +5,8 @@ import {
   recordTelemetryEvent,
   recordGroundingLintHit,
   recordLoopGuardHit,
+  getRepairCount,
+  recordEscalation,
 } from './turn-telemetry';
 import type { AgentEvent } from './vendor/types';
 
@@ -58,5 +60,20 @@ describe('turn telemetry', () => {
     expect(nextTurnTelemetry().loopGuardHits).toBe(2);
     resetTurnTelemetry();
     expect(nextTurnTelemetry().loopGuardHits).toBe(0);
+  });
+
+  it('exposes the repair count via getRepairCount without incrementing turnIndex (P3.6)', () => {
+    recordTelemetryEvent(repairResult('[Unity compile] 2 compiler error(s) after writing X'));
+    expect(getRepairCount()).toBe(1);
+    expect(getRepairCount()).toBe(1); // peek-only, no side effects
+    expect(nextTurnTelemetry().turnIndex).toBe(1); // untouched by the peeks above
+  });
+
+  it('escalated defaults to false, can be recorded, and resets to false per send (P3.6)', () => {
+    expect(nextTurnTelemetry().escalated).toBe(false);
+    recordEscalation();
+    expect(nextTurnTelemetry().escalated).toBe(true);
+    resetTurnTelemetry();
+    expect(nextTurnTelemetry().escalated).toBe(false);
   });
 });

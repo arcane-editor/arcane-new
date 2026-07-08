@@ -55,11 +55,16 @@ export async function buildFixPrompt(entry: UnityLogEntry): Promise<string> {
   ].join('\n');
 }
 
-/** Drive the agent to fix a console error/exception. Reveals the AI panel. */
+/**
+ * Drive the agent to fix a console error/exception. Sends at the user's
+ * current effort (never hardcoded — mirrors `summarizeSceneDiff`, P6.4).
+ * Reveals the AI panel.
+ */
 export async function fixConsoleError(entry: UnityLogEntry): Promise<void> {
   const prompt = await buildFixPrompt(entry);
+  const effort = useAiStore.getState().effort;
   useAiStore.getState().setMode('agent');
   useUiStore.getState().setActiveRightSidebarView('ai-panel');
   useUiStore.getState().setRightSidebarVisible(true);
-  await getAgentService().sendMessage(prompt, { mode: 'agent', effort: 'mid' });
+  await getAgentService().sendMessage(prompt, { mode: 'agent', effort });
 }

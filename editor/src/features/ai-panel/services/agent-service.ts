@@ -43,6 +43,7 @@ import {
 } from './unity-tools';
 import { withCheckpoint } from './checkpoints/checkpoint-gate';
 import { withTurnGovernor, resetTurnGovernor, grantExtraCalls } from './turn-governor';
+import { withTurnEscalation, resetTurnEscalation } from './turn-escalation';
 import { withRepeatCallGuard, resetRepeatCallGuard } from './tool-guards';
 import { resetTurnTelemetry, recordTelemetryEvent, recordGroundingLintHit } from './turn-telemetry';
 import {
@@ -235,7 +236,11 @@ export class AgentService {
       systemPrompt: buildSystemPrompt('agent', workspacePath, { effort: 'mid' }),
       model: PLACEHOLDER_MODEL,
       tools: createToolsForPromptMode('agent', workspacePath),
-      streamFn: withTurnGovernor(arcaneStream),
+      // Escalation (P3.6) sits INSIDE the governor: the governor's own
+      // per-effort call-cap lookup must keep reading the send's ORIGINAL
+      // effort (unaffected by escalation), while only the request actually
+      // reaching `arcaneStream` should carry the bumped tier.
+      streamFn: withTurnGovernor(withTurnEscalation(arcaneStream)),
       convertToLlm,
       reasoning: 'mid',
       // Server picks the model per reasoningLevel; default to the smallest tier's
@@ -327,6 +332,9 @@ export class AgentService {
     // createToolsForPromptMode), so their per-send state needs an explicit
     // reset here, same as the compile gate above.
     resetTurnGovernor();
+    // Fresh escalation latch per send (P3.6) — same "wraps streamFn ONCE,
+    // needs an explicit per-send reset" reasoning as the governor above.
+    resetTurnEscalation();
     resetRepeatCallGuard();
     // Fresh touched-file registry for the verified-pass closing check (P3.4).
     beginVerifiedPass();

@@ -14,6 +14,11 @@ interface TurnTelemetry {
   groundingLintHits: number;
   /** Repeat-call guard suppressions this send (P3.2) — client-side only; server column is P4. */
   loopGuardHits: number;
+  /**
+   * Whether repair-triggered tier escalation (P3.6, `turn-escalation.ts`) has
+   * fired this send — client-side only; server column is P4.
+   */
+  escalated: boolean;
 }
 
 const EMPTY_TELEMETRY: TurnTelemetry = {
@@ -22,6 +27,7 @@ const EMPTY_TELEMETRY: TurnTelemetry = {
   repairCount: 0,
   groundingLintHits: 0,
   loopGuardHits: 0,
+  escalated: false,
 };
 
 let current: TurnTelemetry = { ...EMPTY_TELEMETRY };
@@ -38,6 +44,26 @@ export function recordGroundingLintHit(): void {
 /** Called once per repeat-call-guard suppression this send (P3.2, `tool-guards.ts`). */
 export function recordLoopGuardHit(): void {
   current.loopGuardHits++;
+}
+
+/**
+ * Read-only peek at the current repair count — consulted by
+ * `turn-escalation.ts` at request-build time. Unlike `nextTurnTelemetry`,
+ * this does NOT increment `turnIndex`, since checking whether to escalate
+ * isn't itself a new outgoing request.
+ */
+export function getRepairCount(): number {
+  return current.repairCount;
+}
+
+/**
+ * Marks this send as escalated (P3.6, `turn-escalation.ts`) once the tier
+ * has been bumped, so every subsequent request's telemetry snapshot (and the
+ * request metadata sent to the server) carries it. Idempotent — safe to call
+ * on every request once escalated, not just the triggering one.
+ */
+export function recordEscalation(): void {
+  current.escalated = true;
 }
 
 /** Called once per outgoing LLM request; returns the snapshot to send. */
