@@ -1,0 +1,15 @@
+{
+  "recordedAt": "2026-07-08T16:41:23.420Z",
+  "request": {
+    "endpoint": "lookup",
+    "type": "Graphics",
+    "member": "Blit",
+    "unityVersion": "2022.3.45f1",
+    "renderPipeline": "Built-in",
+    "inputSystem": "Legacy"
+  },
+  "response": {
+    "ok": true,
+    "data": []
+  }
+}

@@ -1,0 +1,103 @@
+{
+  "recordedAt": "2026-07-08T17:05:15.490Z",
+  "request": {
+    "endpoint": "search",
+    "query": "unityevent generic int event",
+    "unityVersion": "6000.3.5f2",
+    "renderPipeline": "URP",
+    "inputSystem": "New"
+  },
+  "response": {
+    "ok": true,
+    "data": [
+      {
+        "score": 0.68287295,
+        "docType": "api",
+        "type": "UnityEvent",
+        "member": "UnityEvent",
+        "namespace": "UnityEngine.Events",
+        "breadcrumb": "UnityEngine.Events.UnityEvent.UnityEvent",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/UnityEvent.html",
+        "deprecated": false,
+        "text": "UnityEngine.Events.UnityEvent.UnityEvent — public class UnityEvent"
+      },
+      {
+        "score": 0.6800196,
+        "docType": "api",
+        "type": "UnityEvent`3",
+        "member": "Invoke",
+        "namespace": "UnityEngine.Events",
+        "breadcrumb": "UnityEngine.Events.UnityEvent`3.Invoke",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/UnityEvent`3.Invoke.html",
+        "deprecated": false,
+        "text": "UnityEngine.Events.UnityEvent`3.Invoke — void Invoke(T0 arg0, T1 arg1, T2 arg2)"
+      },
+      {
+        "score": 0.6782507,
+        "docType": "api",
+        "type": "EventType",
+        "member": "value__",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.EventType.value__",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/EventType-value__.html",
+        "deprecated": false,
+        "text": "UnityEngine.EventType.value__ — int value__"
+      },
+      {
+        "score": 0.6762282,
+        "docType": "api",
+        "type": "UnityEvent`4",
+        "member": "Invoke",
+        "namespace": "UnityEngine.Events",
+        "breadcrumb": "UnityEngine.Events.UnityEvent`4.Invoke",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/UnityEvent`4.Invoke.html",
+        "deprecated": false,
+        "text": "UnityEngine.Events.UnityEvent`4.Invoke — void Invoke(T0 arg0, T1 arg1, T2 arg2, T3 arg3)"
+      },
+      {
+        "score": 0.6736366,
+        "docType": "api",
+        "type": "UnityEvent`1",
+        "member": "AddListener",
+        "namespace": "UnityEngine.Events",
+        "breadcrumb": "UnityEngine.Events.UnityEvent`1.AddListener",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/UnityEvent`1.AddListener.html",
+        "deprecated": false,
+        "text": "UnityEngine.Events.UnityEvent`1.AddListener — void AddListener(UnityAction<T0> call)"
+      },
+      {
+        "score": 0.6699777,
+        "docType": "api",
+        "type": "GenericEventType",
+        "member": "Error",
+        "namespace": "UnityEditor.Search",
+        "breadcrumb": "UnityEditor.Search.GenericEventType.Error",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/GenericEventType-Error.html",
+        "deprecated": false,
+        "text": "UnityEditor.Search.GenericEventType.Error — GenericEventType Error"
+      },
+      {
+        "score": 0.6679614,
+        "docType": "api",
+        "type": "GenericEventType",
+        "member": "Warning",
+        "namespace": "UnityEditor.Search",
+        "breadcrumb": "UnityEditor.Search.GenericEventType.Warning",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/GenericEventType-Warning.html",
+        "deprecated": false,
+        "text": "UnityEditor.Search.GenericEventType.Warning — GenericEventType Warning"
+      },
+      {
+        "score": 0.666988,
+        "docType": "api",
+        "type": "GenericEventType",
+        "member": "GenericEventType",
+        "namespace": "UnityEditor.Search",
+        "breadcrumb": "UnityEditor.Search.GenericEventType.GenericEventType",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/GenericEventType.html",
+        "deprecated": false,
+        "text": "UnityEditor.Search.GenericEventType.GenericEventType — public enum GenericEventType"
+      }
+    ]
+  }
+}

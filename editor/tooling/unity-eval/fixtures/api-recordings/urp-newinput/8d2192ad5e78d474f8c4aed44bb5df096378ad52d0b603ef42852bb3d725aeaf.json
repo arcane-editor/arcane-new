@@ -1,0 +1,103 @@
+{
+  "recordedAt": "2026-07-08T17:25:40.225Z",
+  "request": {
+    "endpoint": "search",
+    "query": "input system move action wasd vector2 composite",
+    "unityVersion": "6000.3.5f2",
+    "renderPipeline": "URP",
+    "inputSystem": "New"
+  },
+  "response": {
+    "ok": true,
+    "data": [
+      {
+        "score": 0.5878003,
+        "docType": "api",
+        "type": "Matrix2D",
+        "member": "Translate",
+        "namespace": "Unity.VectorGraphics",
+        "breadcrumb": "Unity.VectorGraphics.Matrix2D.Translate",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Matrix2D.Translate.html",
+        "deprecated": false,
+        "text": "Unity.VectorGraphics.Matrix2D.Translate — Matrix2D Translate(Vector2 vector)"
+      },
+      {
+        "score": 0.570591,
+        "docType": "api",
+        "type": "Painter2D",
+        "member": "MoveTo",
+        "namespace": "UnityEngine.UIElements",
+        "breadcrumb": "UnityEngine.UIElements.Painter2D.MoveTo",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Painter2D.MoveTo.html",
+        "deprecated": false,
+        "text": "UnityEngine.UIElements.Painter2D.MoveTo — void MoveTo(Vector2 pos)"
+      },
+      {
+        "score": 0.5687697,
+        "docType": "api",
+        "type": "GraphViewChange",
+        "member": "moveDelta",
+        "namespace": "UnityEditor.Experimental.GraphView",
+        "breadcrumb": "UnityEditor.Experimental.GraphView.GraphViewChange.moveDelta",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/GraphViewChange-moveDelta.html",
+        "deprecated": false,
+        "text": "UnityEditor.Experimental.GraphView.GraphViewChange.moveDelta — Vector2 moveDelta"
+      },
+      {
+        "score": 0.56495184,
+        "docType": "api",
+        "type": "SceneNodeWorldTransform",
+        "member": "WorldTransform",
+        "namespace": "Unity.VectorGraphics",
+        "breadcrumb": "Unity.VectorGraphics.SceneNodeWorldTransform.WorldTransform",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/SceneNodeWorldTransform-WorldTransform.html",
+        "deprecated": false,
+        "text": "Unity.VectorGraphics.SceneNodeWorldTransform.WorldTransform — Matrix2D WorldTransform"
+      },
+      {
+        "score": 0.56367224,
+        "docType": "api",
+        "type": "MovementVector",
+        "member": "MovementVector",
+        "namespace": "UnityEditor",
+        "breadcrumb": "UnityEditor.MovementVector.MovementVector",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/MovementVector.html",
+        "deprecated": false,
+        "text": "UnityEditor.MovementVector.MovementVector — public class MovementVector"
+      },
+      {
+        "score": 0.5607323,
+        "docType": "api",
+        "type": "Geometry",
+        "member": "WorldTransform",
+        "namespace": "Unity.VectorGraphics",
+        "breadcrumb": "Unity.VectorGraphics.Geometry.WorldTransform",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Geometry-WorldTransform.html",
+        "deprecated": false,
+        "text": "Unity.VectorGraphics.Geometry.WorldTransform — Matrix2D WorldTransform"
+      },
+      {
+        "score": 0.56000865,
+        "docType": "api",
+        "type": "CharacterController",
+        "member": "Move",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.CharacterController.Move",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/CharacterController.Move.html",
+        "deprecated": false,
+        "text": "UnityEngine.CharacterController.Move — CollisionFlags Move(Vector3 motion)"
+      },
+      {
+        "score": 0.55809146,
+        "docType": "api",
+        "type": "PhysicsTransform",
+        "member": "TransformPoint",
+        "namespace": "UnityEngine.LowLevelPhysics2D",
+        "breadcrumb": "UnityEngine.LowLevelPhysics2D.PhysicsTransform.TransformPoint",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/PhysicsTransform.TransformPoint.html",
+        "deprecated": false,
+        "text": "UnityEngine.LowLevelPhysics2D.PhysicsTransform.TransformPoint — Vector2 TransformPoint(Vector2 point)"
+      }
+    ]
+  }
+}

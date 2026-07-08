@@ -1,0 +1,34 @@
+{
+  "recordedAt": "2026-07-08T17:48:47.252Z",
+  "request": {
+    "endpoint": "lookup",
+    "type": "SceneManager",
+    "member": "LoadSceneAsync",
+    "unityVersion": "6000.3.5f2",
+    "renderPipeline": "URP",
+    "inputSystem": "New"
+  },
+  "response": {
+    "ok": true,
+    "data": [
+      {
+        "namespace": "UnityEngine.SceneManagement",
+        "type": "SceneManager",
+        "member": "LoadSceneAsync",
+        "kind": "method",
+        "signature": "AsyncOperation LoadSceneAsync(int sceneBuildIndex, LoadSceneMode mode)",
+        "overloads": [
+          "AsyncOperation LoadSceneAsync(int sceneBuildIndex, LoadSceneMode mode)",
+          "AsyncOperation LoadSceneAsync(int sceneBuildIndex)",
+          "AsyncOperation LoadSceneAsync(int sceneBuildIndex, LoadSceneParameters parameters)",
+          "AsyncOperation LoadSceneAsync(string sceneName, LoadSceneMode mode)",
+          "AsyncOperation LoadSceneAsync(string sceneName)",
+          "AsyncOperation LoadSceneAsync(string sceneName, LoadSceneParameters parameters)"
+        ],
+        "assembly": "UnityEngine.CoreModule",
+        "deprecated": false,
+        "docUrl": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/SceneManager.LoadSceneAsync.html"
+      }
+    ]
+  }
+}

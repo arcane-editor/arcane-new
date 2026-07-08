@@ -1,0 +1,103 @@
+{
+  "recordedAt": "2026-07-08T17:49:05.344Z",
+  "request": {
+    "endpoint": "search",
+    "query": "load scene by name",
+    "unityVersion": "6000.3.5f2",
+    "renderPipeline": "URP",
+    "inputSystem": "New"
+  },
+  "response": {
+    "ok": true,
+    "data": [
+      {
+        "score": 0.6415099,
+        "docType": "api",
+        "type": "SceneManager",
+        "member": "LoadScene",
+        "namespace": "UnityEngine.SceneManagement",
+        "breadcrumb": "UnityEngine.SceneManagement.SceneManager.LoadScene",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/SceneManager.LoadScene.html",
+        "deprecated": false,
+        "text": "UnityEngine.SceneManagement.SceneManager.LoadScene — void LoadScene(string sceneName, LoadSceneMode mode)"
+      },
+      {
+        "score": 0.61914873,
+        "docType": "api",
+        "type": "Scene",
+        "member": "name",
+        "namespace": "UnityEngine.SceneManagement",
+        "breadcrumb": "UnityEngine.SceneManagement.Scene.name",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Scene-name.html",
+        "deprecated": false,
+        "text": "UnityEngine.SceneManagement.Scene.name — public string name { get; set; }"
+      },
+      {
+        "score": 0.61468995,
+        "docType": "api",
+        "type": "SceneManager",
+        "member": "GetSceneByName",
+        "namespace": "UnityEngine.SceneManagement",
+        "breadcrumb": "UnityEngine.SceneManagement.SceneManager.GetSceneByName",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/SceneManager.GetSceneByName.html",
+        "deprecated": false,
+        "text": "UnityEngine.SceneManagement.SceneManager.GetSceneByName — Scene GetSceneByName(string name)"
+      },
+      {
+        "score": 0.5946607,
+        "docType": "api",
+        "type": "Application",
+        "member": "loadedLevelName",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.Application.loadedLevelName",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Application-loadedLevelName.html",
+        "deprecated": true,
+        "text": "UnityEngine.Application.loadedLevelName — public string loadedLevelName { get; } (DEPRECATED: Use SceneManager to determine what scenes have been loaded)"
+      },
+      {
+        "score": 0.58906156,
+        "docType": "api",
+        "type": "EditorSceneManager",
+        "member": "LoadSceneInPlayMode",
+        "namespace": "UnityEditor.SceneManagement",
+        "breadcrumb": "UnityEditor.SceneManagement.EditorSceneManager.LoadSceneInPlayMode",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/EditorSceneManager.LoadSceneInPlayMode.html",
+        "deprecated": false,
+        "text": "UnityEditor.SceneManagement.EditorSceneManager.LoadSceneInPlayMode — Scene LoadSceneInPlayMode(string path, LoadSceneParameters parameters)"
+      },
+      {
+        "score": 0.585351,
+        "docType": "api",
+        "type": "AssetBundle",
+        "member": "LoadAssetAsync",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.AssetBundle.LoadAssetAsync",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/AssetBundle.LoadAssetAsync.html",
+        "deprecated": false,
+        "text": "UnityEngine.AssetBundle.LoadAssetAsync — AssetBundleRequest LoadAssetAsync(string name)"
+      },
+      {
+        "score": 0.5840058,
+        "docType": "api",
+        "type": "AssetBundle",
+        "member": "LoadAsset",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.AssetBundle.LoadAsset",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/AssetBundle.LoadAsset.html",
+        "deprecated": false,
+        "text": "UnityEngine.AssetBundle.LoadAsset — object LoadAsset(string name)"
+      },
+      {
+        "score": 0.5744827,
+        "docType": "api",
+        "type": "SceneBundleInfo",
+        "member": "bundleName",
+        "namespace": "UnityEditor.Build.Content",
+        "breadcrumb": "UnityEditor.Build.Content.SceneBundleInfo.bundleName",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/SceneBundleInfo-bundleName.html",
+        "deprecated": false,
+        "text": "UnityEditor.Build.Content.SceneBundleInfo.bundleName — public string bundleName { get; set; }"
+      }
+    ]
+  }
+}

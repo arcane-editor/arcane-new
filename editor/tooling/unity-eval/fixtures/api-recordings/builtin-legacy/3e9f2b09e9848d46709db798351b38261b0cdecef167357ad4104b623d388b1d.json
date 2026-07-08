@@ -1,0 +1,14 @@
+{
+  "recordedAt": "2026-07-08T17:03:38.272Z",
+  "request": {
+    "endpoint": "search",
+    "query": "rigidbody.addforce forcemode.impulse",
+    "unityVersion": "2022.3.45f1",
+    "renderPipeline": "Built-in",
+    "inputSystem": "Legacy"
+  },
+  "response": {
+    "ok": true,
+    "data": []
+  }
+}

@@ -1,0 +1,103 @@
+{
+  "recordedAt": "2026-07-08T16:38:46.342Z",
+  "request": {
+    "endpoint": "search",
+    "query": "fullscreenpassrendererfeature urp",
+    "unityVersion": "6000.3.5f2",
+    "renderPipeline": "URP",
+    "inputSystem": "New"
+  },
+  "response": {
+    "ok": true,
+    "data": [
+      {
+        "score": 0.56764245,
+        "docType": "api",
+        "type": "XRRenderPass",
+        "member": "foveatedRenderingInfo",
+        "namespace": "UnityEngine.XR",
+        "breadcrumb": "UnityEngine.XR.XRRenderPass.foveatedRenderingInfo",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/XRRenderPass-foveatedRenderingInfo.html",
+        "deprecated": false,
+        "text": "UnityEngine.XR.XRRenderPass.foveatedRenderingInfo — IntPtr foveatedRenderingInfo"
+      },
+      {
+        "score": 0.5607942,
+        "docType": "api",
+        "type": "RayTracingInstanceCullingMaterialTest",
+        "member": "deniedShaderPasses",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.RayTracingInstanceCullingMaterialTest.deniedShaderPasses",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/RayTracingInstanceCullingMaterialTest-deniedShaderPasses.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.RayTracingInstanceCullingMaterialTest.deniedShaderPasses — string[] deniedShaderPasses"
+      },
+      {
+        "score": 0.55564433,
+        "docType": "api",
+        "type": "FullScreenMode",
+        "member": "FullScreenMode",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.FullScreenMode.FullScreenMode",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/FullScreenMode.html",
+        "deprecated": false,
+        "text": "UnityEngine.FullScreenMode.FullScreenMode — public enum FullScreenMode"
+      },
+      {
+        "score": 0.55148697,
+        "docType": "api",
+        "type": "FullScreenMode",
+        "member": "ExclusiveFullScreen",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.FullScreenMode.ExclusiveFullScreen",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/FullScreenMode-ExclusiveFullScreen.html",
+        "deprecated": false,
+        "text": "UnityEngine.FullScreenMode.ExclusiveFullScreen — FullScreenMode ExclusiveFullScreen"
+      },
+      {
+        "score": 0.54716396,
+        "docType": "api",
+        "type": "FullScreenMovieControlMode",
+        "member": "Full",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.FullScreenMovieControlMode.Full",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/FullScreenMovieControlMode-Full.html",
+        "deprecated": false,
+        "text": "UnityEngine.FullScreenMovieControlMode.Full — FullScreenMovieControlMode Full"
+      },
+      {
+        "score": 0.5470412,
+        "docType": "api",
+        "type": "RayTracingShader",
+        "member": "SetShaderPass",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.RayTracingShader.SetShaderPass",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/RayTracingShader.SetShaderPass.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.RayTracingShader.SetShaderPass — void SetShaderPass(string passName)"
+      },
+      {
+        "score": 0.5464924,
+        "docType": "api",
+        "type": "D3D9FullscreenMode",
+        "member": "FullscreenWindow",
+        "namespace": "UnityEditor",
+        "breadcrumb": "UnityEditor.D3D9FullscreenMode.FullscreenWindow",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/D3D9FullscreenMode-FullscreenWindow.html",
+        "deprecated": true,
+        "text": "UnityEditor.D3D9FullscreenMode.FullscreenWindow — D3D9FullscreenMode FullscreenWindow (DEPRECATED: D3D9 support has been removed)"
+      },
+      {
+        "score": 0.53729355,
+        "docType": "api",
+        "type": "DrawingSettings",
+        "member": "GetShaderPassName",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.DrawingSettings.GetShaderPassName",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/DrawingSettings.GetShaderPassName.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.DrawingSettings.GetShaderPassName — ShaderTagId GetShaderPassName(int index)"
+      }
+    ]
+  }
+}

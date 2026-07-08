@@ -1,0 +1,15 @@
+{
+  "recordedAt": "2026-07-08T16:34:08.212Z",
+  "request": {
+    "endpoint": "lookup",
+    "type": "Input",
+    "member": "GetAxis",
+    "unityVersion": "2022.3.45f1",
+    "renderPipeline": "Built-in",
+    "inputSystem": "Legacy"
+  },
+  "response": {
+    "ok": true,
+    "data": []
+  }
+}

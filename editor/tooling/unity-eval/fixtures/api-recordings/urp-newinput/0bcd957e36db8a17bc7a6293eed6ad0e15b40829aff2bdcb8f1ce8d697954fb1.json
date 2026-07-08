@@ -1,0 +1,103 @@
+{
+  "recordedAt": "2026-07-08T17:25:45.609Z",
+  "request": {
+    "endpoint": "search",
+    "query": "inputsystem dpadcomposite wasd composite binding 2dvector",
+    "unityVersion": "6000.3.5f2",
+    "renderPipeline": "URP",
+    "inputSystem": "New"
+  },
+  "response": {
+    "ok": true,
+    "data": [
+      {
+        "score": 0.5844363,
+        "docType": "api",
+        "type": "CommonUsages",
+        "member": "dPad",
+        "namespace": "UnityEngine.XR",
+        "breadcrumb": "UnityEngine.XR.CommonUsages.dPad",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/CommonUsages-dPad.html",
+        "deprecated": true,
+        "text": "UnityEngine.XR.CommonUsages.dPad — InputFeatureUsage<Vector2> dPad (DEPRECATED: CommonUsages.dPad is not used by any XR platform and will be removed.)"
+      },
+      {
+        "score": 0.57357633,
+        "docType": "api",
+        "type": "InputDeviceCharacteristics",
+        "member": "Controller",
+        "namespace": "UnityEngine.XR",
+        "breadcrumb": "UnityEngine.XR.InputDeviceCharacteristics.Controller",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/InputDeviceCharacteristics-Controller.html",
+        "deprecated": false,
+        "text": "UnityEngine.XR.InputDeviceCharacteristics.Controller — InputDeviceCharacteristics Controller"
+      },
+      {
+        "score": 0.57319754,
+        "docType": "api",
+        "type": "IDataModeHandlerAndDispatcher",
+        "member": "IDataModeHandlerAndDispatcher",
+        "namespace": "UnityEditor",
+        "breadcrumb": "UnityEditor.IDataModeHandlerAndDispatcher.IDataModeHandlerAndDispatcher",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/IDataModeHandlerAndDispatcher.html",
+        "deprecated": true,
+        "text": "UnityEditor.IDataModeHandlerAndDispatcher.IDataModeHandlerAndDispatcher — public interface IDataModeHandlerAndDispatcher (DEPRECATED: IDataModeHandlerAndDispatcher has been deprecated, please use EditorWindow.dataModeController instead.)"
+      },
+      {
+        "score": 0.5728275,
+        "docType": "api",
+        "type": "InputDeviceCharacteristics",
+        "member": "HeldInHand",
+        "namespace": "UnityEngine.XR",
+        "breadcrumb": "UnityEngine.XR.InputDeviceCharacteristics.HeldInHand",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/InputDeviceCharacteristics-HeldInHand.html",
+        "deprecated": false,
+        "text": "UnityEngine.XR.InputDeviceCharacteristics.HeldInHand — InputDeviceCharacteristics HeldInHand"
+      },
+      {
+        "score": 0.5585141,
+        "docType": "api",
+        "type": "WSACapability",
+        "member": "InputInjectionBrokered",
+        "namespace": "UnityEditor",
+        "breadcrumb": "UnityEditor.WSACapability.InputInjectionBrokered",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/WSACapability-InputInjectionBrokered.html",
+        "deprecated": false,
+        "text": "UnityEditor.WSACapability.InputInjectionBrokered — WSACapability InputInjectionBrokered"
+      },
+      {
+        "score": 0.55485886,
+        "docType": "api",
+        "type": "MaterialEditor",
+        "member": "GetVector",
+        "namespace": "UnityEditor",
+        "breadcrumb": "UnityEditor.MaterialEditor.GetVector",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/MaterialEditor.GetVector.html",
+        "deprecated": true,
+        "text": "UnityEditor.MaterialEditor.GetVector — Vector4 GetVector(string propertyName, ref bool hasMixedValue) (DEPRECATED: Use GetMaterialProperty instead.)"
+      },
+      {
+        "score": 0.5528208,
+        "docType": "api",
+        "type": "InputDeviceRole",
+        "member": "GameController",
+        "namespace": "UnityEngine.XR",
+        "breadcrumb": "UnityEngine.XR.InputDeviceRole.GameController",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/InputDeviceRole-GameController.html",
+        "deprecated": false,
+        "text": "UnityEngine.XR.InputDeviceRole.GameController — InputDeviceRole GameController"
+      },
+      {
+        "score": 0.54635763,
+        "docType": "api",
+        "type": "ProceduralMaterial",
+        "member": "GetProceduralVector",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.ProceduralMaterial.GetProceduralVector",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/ProceduralMaterial.GetProceduralVector.html",
+        "deprecated": false,
+        "text": "UnityEngine.ProceduralMaterial.GetProceduralVector — Vector4 GetProceduralVector(string inputName)"
+      }
+    ]
+  }
+}

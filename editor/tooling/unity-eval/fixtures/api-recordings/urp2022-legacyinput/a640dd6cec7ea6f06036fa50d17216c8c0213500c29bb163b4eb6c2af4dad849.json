@@ -1,0 +1,14 @@
+{
+  "recordedAt": "2026-07-08T16:19:45.147Z",
+  "request": {
+    "endpoint": "search",
+    "query": "materialpropertyblock setcolor setcolor _basecolor shader.propertytoid",
+    "unityVersion": "2022.3.45f1",
+    "renderPipeline": "URP",
+    "inputSystem": "Legacy"
+  },
+  "response": {
+    "ok": true,
+    "data": []
+  }
+}

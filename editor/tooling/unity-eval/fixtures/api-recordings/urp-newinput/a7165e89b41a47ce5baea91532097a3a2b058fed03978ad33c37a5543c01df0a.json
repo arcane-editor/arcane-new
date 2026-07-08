@@ -1,0 +1,32 @@
+{
+  "recordedAt": "2026-07-08T17:31:56.726Z",
+  "request": {
+    "endpoint": "lookup",
+    "type": "Material",
+    "member": "SetTexture",
+    "unityVersion": "6000.3.5f2",
+    "renderPipeline": "URP",
+    "inputSystem": "New"
+  },
+  "response": {
+    "ok": true,
+    "data": [
+      {
+        "namespace": "UnityEngine",
+        "type": "Material",
+        "member": "SetTexture",
+        "kind": "method",
+        "signature": "void SetTexture(string name, Texture value)",
+        "overloads": [
+          "void SetTexture(string name, Texture value)",
+          "void SetTexture(int nameID, Texture value)",
+          "void SetTexture(string name, RenderTexture value, RenderTextureSubElement element)",
+          "void SetTexture(int nameID, RenderTexture value, RenderTextureSubElement element)"
+        ],
+        "assembly": "UnityEngine.CoreModule",
+        "deprecated": false,
+        "docUrl": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Material.SetTexture.html"
+      }
+    ]
+  }
+}

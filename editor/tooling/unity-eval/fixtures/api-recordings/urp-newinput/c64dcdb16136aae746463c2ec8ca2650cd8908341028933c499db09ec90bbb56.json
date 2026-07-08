@@ -1,0 +1,34 @@
+{
+  "recordedAt": "2026-07-08T17:48:05.539Z",
+  "request": {
+    "endpoint": "lookup",
+    "type": "SceneManager",
+    "member": "LoadScene",
+    "unityVersion": "6000.3.5f2",
+    "renderPipeline": "URP",
+    "inputSystem": "New"
+  },
+  "response": {
+    "ok": true,
+    "data": [
+      {
+        "namespace": "UnityEngine.SceneManagement",
+        "type": "SceneManager",
+        "member": "LoadScene",
+        "kind": "method",
+        "signature": "void LoadScene(string sceneName, LoadSceneMode mode)",
+        "overloads": [
+          "void LoadScene(string sceneName, LoadSceneMode mode)",
+          "void LoadScene(string sceneName)",
+          "Scene LoadScene(string sceneName, LoadSceneParameters parameters)",
+          "void LoadScene(int sceneBuildIndex, LoadSceneMode mode)",
+          "void LoadScene(int sceneBuildIndex)",
+          "Scene LoadScene(int sceneBuildIndex, LoadSceneParameters parameters)"
+        ],
+        "assembly": "UnityEngine.CoreModule",
+        "deprecated": false,
+        "docUrl": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/SceneManager.LoadScene.html"
+      }
+    ]
+  }
+}

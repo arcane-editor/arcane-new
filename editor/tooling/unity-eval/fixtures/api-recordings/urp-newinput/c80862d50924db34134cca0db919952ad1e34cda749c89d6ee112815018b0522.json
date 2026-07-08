@@ -1,0 +1,15 @@
+{
+  "recordedAt": "2026-07-08T16:38:45.433Z",
+  "request": {
+    "endpoint": "lookup",
+    "type": "Universal",
+    "member": "FullScreenPassRendererFeature",
+    "unityVersion": "6000.3.5f2",
+    "renderPipeline": "URP",
+    "inputSystem": "New"
+  },
+  "response": {
+    "ok": true,
+    "data": []
+  }
+}

@@ -1,0 +1,103 @@
+{
+  "recordedAt": "2026-07-08T17:34:19.508Z",
+  "request": {
+    "endpoint": "search",
+    "query": "urp blit pass material fullscreen texture",
+    "unityVersion": "6000.3.5f2",
+    "renderPipeline": "URP",
+    "inputSystem": "New"
+  },
+  "response": {
+    "ok": true,
+    "data": [
+      {
+        "score": 0.572623,
+        "docType": "api",
+        "type": "TextureImporterAlphaSource",
+        "member": "FromGrayScale",
+        "namespace": "UnityEditor",
+        "breadcrumb": "UnityEditor.TextureImporterAlphaSource.FromGrayScale",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/TextureImporterAlphaSource-FromGrayScale.html",
+        "deprecated": false,
+        "text": "UnityEditor.TextureImporterAlphaSource.FromGrayScale — TextureImporterAlphaSource FromGrayScale"
+      },
+      {
+        "score": 0.5667821,
+        "docType": "api",
+        "type": "Graphics",
+        "member": "BlitMultiTap",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.Graphics.BlitMultiTap",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Graphics.BlitMultiTap.html",
+        "deprecated": false,
+        "text": "UnityEngine.Graphics.BlitMultiTap — void BlitMultiTap(Texture source, RenderTexture dest, Material mat, Vector2[] offsets)"
+      },
+      {
+        "score": 0.5596766,
+        "docType": "api",
+        "type": "Graphics",
+        "member": "Blit",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.Graphics.Blit",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Graphics.Blit.html",
+        "deprecated": false,
+        "text": "UnityEngine.Graphics.Blit — void Blit(Texture source, RenderTexture dest)"
+      },
+      {
+        "score": 0.55931884,
+        "docType": "api",
+        "type": "UnityWebRequestMultimedia",
+        "member": "GetMovieTexture",
+        "namespace": "UnityEngine.Networking",
+        "breadcrumb": "UnityEngine.Networking.UnityWebRequestMultimedia.GetMovieTexture",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/UnityWebRequestMultimedia.GetMovieTexture.html",
+        "deprecated": true,
+        "text": "UnityEngine.Networking.UnityWebRequestMultimedia.GetMovieTexture — UnityWebRequest GetMovieTexture(string uri) (DEPRECATED: MovieTexture is deprecated. Use VideoPlayer instead.)"
+      },
+      {
+        "score": 0.5552195,
+        "docType": "api",
+        "type": "TextureImporter",
+        "member": "DoesSourceTextureHaveAlpha",
+        "namespace": "UnityEditor",
+        "breadcrumb": "UnityEditor.TextureImporter.DoesSourceTextureHaveAlpha",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/TextureImporter.DoesSourceTextureHaveAlpha.html",
+        "deprecated": false,
+        "text": "UnityEditor.TextureImporter.DoesSourceTextureHaveAlpha — bool DoesSourceTextureHaveAlpha()"
+      },
+      {
+        "score": 0.55219376,
+        "docType": "api",
+        "type": "VideoClipImporter",
+        "member": "GetPreviewTexture",
+        "namespace": "UnityEditor",
+        "breadcrumb": "UnityEditor.VideoClipImporter.GetPreviewTexture",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/VideoClipImporter.GetPreviewTexture.html",
+        "deprecated": false,
+        "text": "UnityEditor.VideoClipImporter.GetPreviewTexture — Texture GetPreviewTexture()"
+      },
+      {
+        "score": 0.5490149,
+        "docType": "api",
+        "type": "UnityWebRequestTexture",
+        "member": "GetTexture",
+        "namespace": "UnityEngine.Networking",
+        "breadcrumb": "UnityEngine.Networking.UnityWebRequestTexture.GetTexture",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/UnityWebRequestTexture.GetTexture.html",
+        "deprecated": false,
+        "text": "UnityEngine.Networking.UnityWebRequestTexture.GetTexture — UnityWebRequest GetTexture(string uri)"
+      },
+      {
+        "score": 0.5445589,
+        "docType": "api",
+        "type": "TextureImporter",
+        "member": "GetAllowsAlphaSplitting",
+        "namespace": "UnityEditor",
+        "breadcrumb": "UnityEditor.TextureImporter.GetAllowsAlphaSplitting",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/TextureImporter.GetAllowsAlphaSplitting.html",
+        "deprecated": true,
+        "text": "UnityEditor.TextureImporter.GetAllowsAlphaSplitting — bool GetAllowsAlphaSplitting() (DEPRECATED: Use UnityEditor.TextureImporter.GetPlatformTextureSettings() instead.)"
+      }
+    ]
+  }
+}

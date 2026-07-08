@@ -1,0 +1,103 @@
+{
+  "recordedAt": "2026-07-08T17:31:03.480Z",
+  "request": {
+    "endpoint": "search",
+    "query": "material.settexture main texture",
+    "unityVersion": "6000.3.5f2",
+    "renderPipeline": "URP",
+    "inputSystem": "New"
+  },
+  "response": {
+    "ok": true,
+    "data": [
+      {
+        "score": 0.73953056,
+        "docType": "api",
+        "type": "Material",
+        "member": "mainTexture",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.Material.mainTexture",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Material-mainTexture.html",
+        "deprecated": false,
+        "text": "UnityEngine.Material.mainTexture — public Texture mainTexture { get; set; }"
+      },
+      {
+        "score": 0.717928,
+        "docType": "api",
+        "type": "Material",
+        "member": "SetTexture",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.Material.SetTexture",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Material.SetTexture.html",
+        "deprecated": false,
+        "text": "UnityEngine.Material.SetTexture — void SetTexture(string name, Texture value)"
+      },
+      {
+        "score": 0.71103495,
+        "docType": "api",
+        "type": "MaterialDefinition",
+        "member": "SetTexture",
+        "namespace": "UnityEngine.UIElements",
+        "breadcrumb": "UnityEngine.UIElements.MaterialDefinition.SetTexture",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/MaterialDefinition.SetTexture.html",
+        "deprecated": false,
+        "text": "UnityEngine.UIElements.MaterialDefinition.SetTexture — void SetTexture(string name, Texture value)"
+      },
+      {
+        "score": 0.6890484,
+        "docType": "api",
+        "type": "MaterialEditor",
+        "member": "SetTexture",
+        "namespace": "UnityEditor",
+        "breadcrumb": "UnityEditor.MaterialEditor.SetTexture",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/MaterialEditor.SetTexture.html",
+        "deprecated": true,
+        "text": "UnityEditor.MaterialEditor.SetTexture — void SetTexture(string propertyName, Texture value) (DEPRECATED: Use MaterialProperty instead.)"
+      },
+      {
+        "score": 0.6876549,
+        "docType": "api",
+        "type": "MaterialPropertyBlock",
+        "member": "SetTexture",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.MaterialPropertyBlock.SetTexture",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/MaterialPropertyBlock.SetTexture.html",
+        "deprecated": false,
+        "text": "UnityEngine.MaterialPropertyBlock.SetTexture — void SetTexture(string name, Texture value)"
+      },
+      {
+        "score": 0.6866858,
+        "docType": "api",
+        "type": "CanvasRenderer",
+        "member": "SetTexture",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.CanvasRenderer.SetTexture",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/CanvasRenderer.SetTexture.html",
+        "deprecated": false,
+        "text": "UnityEngine.CanvasRenderer.SetTexture — void SetTexture(Texture texture)"
+      },
+      {
+        "score": 0.67935675,
+        "docType": "api",
+        "type": "ComputeShader",
+        "member": "SetTexture",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.ComputeShader.SetTexture",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/ComputeShader.SetTexture.html",
+        "deprecated": false,
+        "text": "UnityEngine.ComputeShader.SetTexture — void SetTexture(int kernelIndex, int nameID, Texture texture, int mipLevel)"
+      },
+      {
+        "score": 0.6768646,
+        "docType": "api",
+        "type": "Material",
+        "member": "mainTextureScale",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.Material.mainTextureScale",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Material-mainTextureScale.html",
+        "deprecated": false,
+        "text": "UnityEngine.Material.mainTextureScale — public Vector2 mainTextureScale { get; set; }"
+      }
+    ]
+  }
+}

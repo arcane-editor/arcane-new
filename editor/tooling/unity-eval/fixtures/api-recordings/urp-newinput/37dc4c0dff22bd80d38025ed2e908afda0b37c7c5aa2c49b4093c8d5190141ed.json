@@ -1,0 +1,103 @@
+{
+  "recordedAt": "2026-07-08T17:36:07.100Z",
+  "request": {
+    "endpoint": "search",
+    "query": "blit urp full screen blit pass command buffer",
+    "unityVersion": "6000.3.5f2",
+    "renderPipeline": "URP",
+    "inputSystem": "New"
+  },
+  "response": {
+    "ok": true,
+    "data": [
+      {
+        "score": 0.53534245,
+        "docType": "api",
+        "type": "MacFullscreenMode",
+        "member": "CaptureDisplay",
+        "namespace": "UnityEditor",
+        "breadcrumb": "UnityEditor.MacFullscreenMode.CaptureDisplay",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/MacFullscreenMode-CaptureDisplay.html",
+        "deprecated": true,
+        "text": "UnityEditor.MacFullscreenMode.CaptureDisplay — MacFullscreenMode CaptureDisplay (DEPRECATED: Capture Display mode is deprecated, Use FullscreenWindow instead)"
+      },
+      {
+        "score": 0.5275481,
+        "docType": "api",
+        "type": "MacFullscreenMode",
+        "member": "FullscreenWindow",
+        "namespace": "UnityEditor",
+        "breadcrumb": "UnityEditor.MacFullscreenMode.FullscreenWindow",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/MacFullscreenMode-FullscreenWindow.html",
+        "deprecated": false,
+        "text": "UnityEditor.MacFullscreenMode.FullscreenWindow — MacFullscreenMode FullscreenWindow"
+      },
+      {
+        "score": 0.52106357,
+        "docType": "api",
+        "type": "CapturePixelFormat",
+        "member": "BGRA32",
+        "namespace": "UnityEngine.Windows.WebCam",
+        "breadcrumb": "UnityEngine.Windows.WebCam.CapturePixelFormat.BGRA32",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/CapturePixelFormat-BGRA32.html",
+        "deprecated": false,
+        "text": "UnityEngine.Windows.WebCam.CapturePixelFormat.BGRA32 — CapturePixelFormat BGRA32"
+      },
+      {
+        "score": 0.5170434,
+        "docType": "api",
+        "type": "CommandBuffer",
+        "member": "NextSubPass",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.CommandBuffer.NextSubPass",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/CommandBuffer.NextSubPass.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.CommandBuffer.NextSubPass — void NextSubPass()"
+      },
+      {
+        "score": 0.5134693,
+        "docType": "api",
+        "type": "CommandBuffer",
+        "member": "Blit",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.CommandBuffer.Blit",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/CommandBuffer.Blit.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.CommandBuffer.Blit — void Blit(Texture source, RenderTargetIdentifier dest)"
+      },
+      {
+        "score": 0.5094862,
+        "docType": "api",
+        "type": "UnityWebRequestTexture",
+        "member": "GetTexture",
+        "namespace": "UnityEngine.Networking",
+        "breadcrumb": "UnityEngine.Networking.UnityWebRequestTexture.GetTexture",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/UnityWebRequestTexture.GetTexture.html",
+        "deprecated": false,
+        "text": "UnityEngine.Networking.UnityWebRequestTexture.GetTexture — UnityWebRequest GetTexture(string uri)"
+      },
+      {
+        "score": 0.5062221,
+        "docType": "api",
+        "type": "CommandBuffer",
+        "member": "BeginRenderPass",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.CommandBuffer.BeginRenderPass",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/CommandBuffer.BeginRenderPass.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.CommandBuffer.BeginRenderPass — void BeginRenderPass(int width, int height, int volumeDepth, int samples, NativeArray<AttachmentDescriptor> attachments, int depthAttachmentIndex, NativeArray<SubPassDescriptor> subPasses, ReadOnlySpan<Byte> debugNameUtf8)"
+      },
+      {
+        "score": 0.5055781,
+        "docType": "api",
+        "type": "XRMirrorViewBlitDesc",
+        "member": "GetBlitParameter",
+        "namespace": "UnityEngine.XR",
+        "breadcrumb": "UnityEngine.XR.XRMirrorViewBlitDesc.GetBlitParameter",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/XRMirrorViewBlitDesc.GetBlitParameter.html",
+        "deprecated": false,
+        "text": "UnityEngine.XR.XRMirrorViewBlitDesc.GetBlitParameter — void GetBlitParameter(int blitParameterIndex, ref XRBlitParams blitParameter)"
+      }
+    ]
+  }
+}

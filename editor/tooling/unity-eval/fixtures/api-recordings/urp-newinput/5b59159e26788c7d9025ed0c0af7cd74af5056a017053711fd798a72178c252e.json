@@ -1,0 +1,103 @@
+{
+  "recordedAt": "2026-07-08T16:24:32.825Z",
+  "request": {
+    "endpoint": "search",
+    "query": "material color",
+    "unityVersion": "6000.3.5f2",
+    "renderPipeline": "URP",
+    "inputSystem": "New"
+  },
+  "response": {
+    "ok": true,
+    "data": [
+      {
+        "score": 0.623453,
+        "docType": "api",
+        "type": "MaterialEditor",
+        "member": "GetColor",
+        "namespace": "UnityEditor",
+        "breadcrumb": "UnityEditor.MaterialEditor.GetColor",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/MaterialEditor.GetColor.html",
+        "deprecated": true,
+        "text": "UnityEditor.MaterialEditor.GetColor — Color GetColor(string propertyName, ref bool hasMixedValue) (DEPRECATED: Use GetMaterialProperty instead.)"
+      },
+      {
+        "score": 0.6203689,
+        "docType": "api",
+        "type": "MaterialEditor",
+        "member": "ColorProperty",
+        "namespace": "UnityEditor",
+        "breadcrumb": "UnityEditor.MaterialEditor.ColorProperty",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/MaterialEditor.ColorProperty.html",
+        "deprecated": false,
+        "text": "UnityEditor.MaterialEditor.ColorProperty — Color ColorProperty(MaterialProperty prop, string label)"
+      },
+      {
+        "score": 0.6140078,
+        "docType": "api",
+        "type": "MaterialEditor",
+        "member": "SetColor",
+        "namespace": "UnityEditor",
+        "breadcrumb": "UnityEditor.MaterialEditor.SetColor",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/MaterialEditor.SetColor.html",
+        "deprecated": true,
+        "text": "UnityEditor.MaterialEditor.SetColor — void SetColor(string propertyName, Color value) (DEPRECATED: Use MaterialProperty instead.)"
+      },
+      {
+        "score": 0.61057353,
+        "docType": "api",
+        "type": "MaterialProperty",
+        "member": "colorValue",
+        "namespace": "UnityEditor",
+        "breadcrumb": "UnityEditor.MaterialProperty.colorValue",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/MaterialProperty-colorValue.html",
+        "deprecated": false,
+        "text": "UnityEditor.MaterialProperty.colorValue — public Color colorValue { get; set; }"
+      },
+      {
+        "score": 0.6096473,
+        "docType": "api",
+        "type": "Material",
+        "member": "GetColor",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.Material.GetColor",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Material.GetColor.html",
+        "deprecated": false,
+        "text": "UnityEngine.Material.GetColor — Color GetColor(string name)"
+      },
+      {
+        "score": 0.596966,
+        "docType": "api",
+        "type": "Material",
+        "member": "SetColor",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.Material.SetColor",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Material.SetColor.html",
+        "deprecated": false,
+        "text": "UnityEngine.Material.SetColor — void SetColor(string name, Color value)"
+      },
+      {
+        "score": 0.58550805,
+        "docType": "api",
+        "type": "Geometry",
+        "member": "Color",
+        "namespace": "Unity.VectorGraphics",
+        "breadcrumb": "Unity.VectorGraphics.Geometry.Color",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Geometry-Color.html",
+        "deprecated": false,
+        "text": "Unity.VectorGraphics.Geometry.Color — Color Color"
+      },
+      {
+        "score": 0.5846168,
+        "docType": "api",
+        "type": "Color",
+        "member": "mediumAquamarine",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.Color.mediumAquamarine",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Color-mediumAquamarine.html",
+        "deprecated": false,
+        "text": "UnityEngine.Color.mediumAquamarine — public Color mediumAquamarine { get; }"
+      }
+    ]
+  }
+}

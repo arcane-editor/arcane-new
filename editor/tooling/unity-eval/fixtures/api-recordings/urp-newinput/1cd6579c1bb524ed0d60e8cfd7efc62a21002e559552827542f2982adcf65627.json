@@ -1,0 +1,103 @@
+{
+  "recordedAt": "2026-07-08T16:38:50.387Z",
+  "request": {
+    "endpoint": "search",
+    "query": "scriptablerendererfeature full screen pass shader",
+    "unityVersion": "6000.3.5f2",
+    "renderPipeline": "URP",
+    "inputSystem": "New"
+  },
+  "response": {
+    "ok": true,
+    "data": [
+      {
+        "score": 0.5990735,
+        "docType": "api",
+        "type": "ShaderSnippetData",
+        "member": "pass",
+        "namespace": "UnityEditor.Rendering",
+        "breadcrumb": "UnityEditor.Rendering.ShaderSnippetData.pass",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/ShaderSnippetData-pass.html",
+        "deprecated": false,
+        "text": "UnityEditor.Rendering.ShaderSnippetData.pass — public PassIdentifier pass { get; }"
+      },
+      {
+        "score": 0.5936422,
+        "docType": "api",
+        "type": "D3D9FullscreenMode",
+        "member": "FullscreenWindow",
+        "namespace": "UnityEditor",
+        "breadcrumb": "UnityEditor.D3D9FullscreenMode.FullscreenWindow",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/D3D9FullscreenMode-FullscreenWindow.html",
+        "deprecated": true,
+        "text": "UnityEditor.D3D9FullscreenMode.FullscreenWindow — D3D9FullscreenMode FullscreenWindow (DEPRECATED: D3D9 support has been removed)"
+      },
+      {
+        "score": 0.5902073,
+        "docType": "api",
+        "type": "ShaderUtil",
+        "member": "hardwareSupportsRectRenderTexture",
+        "namespace": "UnityEditor",
+        "breadcrumb": "UnityEditor.ShaderUtil.hardwareSupportsRectRenderTexture",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/ShaderUtil-hardwareSupportsRectRenderTexture.html",
+        "deprecated": false,
+        "text": "UnityEditor.ShaderUtil.hardwareSupportsRectRenderTexture — public bool hardwareSupportsRectRenderTexture { get; }"
+      },
+      {
+        "score": 0.58915573,
+        "docType": "api",
+        "type": "BuiltinShaderDefine",
+        "member": "UNITY_NO_FULL_STANDARD_SHADER",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.BuiltinShaderDefine.UNITY_NO_FULL_STANDARD_SHADER",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/BuiltinShaderDefine-UNITY_NO_FULL_STANDARD_SHADER.html",
+        "deprecated": true,
+        "text": "UnityEngine.Rendering.BuiltinShaderDefine.UNITY_NO_FULL_STANDARD_SHADER — BuiltinShaderDefine UNITY_NO_FULL_STANDARD_SHADER (DEPRECATED: UNITY_NO_FULL_STANDARD_SHADER is never defined since OpenGL ES 2.0 was removed.)"
+      },
+      {
+        "score": 0.5864114,
+        "docType": "api",
+        "type": "CustomRenderTexture",
+        "member": "GetDoubleBufferRenderTexture",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.CustomRenderTexture.GetDoubleBufferRenderTexture",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/CustomRenderTexture.GetDoubleBufferRenderTexture.html",
+        "deprecated": false,
+        "text": "UnityEngine.CustomRenderTexture.GetDoubleBufferRenderTexture — RenderTexture GetDoubleBufferRenderTexture()"
+      },
+      {
+        "score": 0.58597153,
+        "docType": "api",
+        "type": "ScriptableRenderContext",
+        "member": "CreateShadowRendererList",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.ScriptableRenderContext.CreateShadowRendererList",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/ScriptableRenderContext.CreateShadowRendererList.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.ScriptableRenderContext.CreateShadowRendererList — RendererList CreateShadowRendererList(ref ShadowDrawingSettings settings)"
+      },
+      {
+        "score": 0.5853478,
+        "docType": "api",
+        "type": "SupportedRenderingFeatures",
+        "member": "overridesShadowmask",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.SupportedRenderingFeatures.overridesShadowmask",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/SupportedRenderingFeatures-overridesShadowmask.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.SupportedRenderingFeatures.overridesShadowmask — public bool overridesShadowmask { get; set; }"
+      },
+      {
+        "score": 0.5834858,
+        "docType": "api",
+        "type": "BuiltinShaderDefine",
+        "member": "UNITY_LIGHTMAP_FULL_HDR",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.BuiltinShaderDefine.UNITY_LIGHTMAP_FULL_HDR",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/BuiltinShaderDefine-UNITY_LIGHTMAP_FULL_HDR.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.BuiltinShaderDefine.UNITY_LIGHTMAP_FULL_HDR — BuiltinShaderDefine UNITY_LIGHTMAP_FULL_HDR"
+      }
+    ]
+  }
+}

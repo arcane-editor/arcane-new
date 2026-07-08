@@ -1,0 +1,103 @@
+{
+  "recordedAt": "2026-07-08T17:18:50.298Z",
+  "request": {
+    "endpoint": "search",
+    "query": "material color setcolor _basecolor",
+    "unityVersion": "6000.3.5f2",
+    "renderPipeline": "URP",
+    "inputSystem": "New"
+  },
+  "response": {
+    "ok": true,
+    "data": [
+      {
+        "score": 0.6837142,
+        "docType": "api",
+        "type": "Material",
+        "member": "SetColor",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.Material.SetColor",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Material.SetColor.html",
+        "deprecated": false,
+        "text": "UnityEngine.Material.SetColor — void SetColor(string name, Color value)"
+      },
+      {
+        "score": 0.67102325,
+        "docType": "api",
+        "type": "MaterialEditor",
+        "member": "SetColor",
+        "namespace": "UnityEditor",
+        "breadcrumb": "UnityEditor.MaterialEditor.SetColor",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/MaterialEditor.SetColor.html",
+        "deprecated": true,
+        "text": "UnityEditor.MaterialEditor.SetColor — void SetColor(string propertyName, Color value) (DEPRECATED: Use MaterialProperty instead.)"
+      },
+      {
+        "score": 0.66349214,
+        "docType": "api",
+        "type": "MaterialPropertyBlock",
+        "member": "SetColor",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.MaterialPropertyBlock.SetColor",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/MaterialPropertyBlock.SetColor.html",
+        "deprecated": false,
+        "text": "UnityEngine.MaterialPropertyBlock.SetColor — void SetColor(string name, Color value)"
+      },
+      {
+        "score": 0.6579777,
+        "docType": "api",
+        "type": "MaterialDefinition",
+        "member": "SetColor",
+        "namespace": "UnityEngine.UIElements",
+        "breadcrumb": "UnityEngine.UIElements.MaterialDefinition.SetColor",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/MaterialDefinition.SetColor.html",
+        "deprecated": false,
+        "text": "UnityEngine.UIElements.MaterialDefinition.SetColor — void SetColor(string name, Color value)"
+      },
+      {
+        "score": 0.6398365,
+        "docType": "api",
+        "type": "MaterialProperty",
+        "member": "colorValue",
+        "namespace": "UnityEditor",
+        "breadcrumb": "UnityEditor.MaterialProperty.colorValue",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/MaterialProperty-colorValue.html",
+        "deprecated": false,
+        "text": "UnityEditor.MaterialProperty.colorValue — public Color colorValue { get; set; }"
+      },
+      {
+        "score": 0.63484734,
+        "docType": "api",
+        "type": "Material",
+        "member": "color",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.Material.color",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Material-color.html",
+        "deprecated": false,
+        "text": "UnityEngine.Material.color — public Color color { get; set; }"
+      },
+      {
+        "score": 0.63387704,
+        "docType": "api",
+        "type": "Material",
+        "member": "SetColorArray",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.Material.SetColorArray",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Material.SetColorArray.html",
+        "deprecated": false,
+        "text": "UnityEngine.Material.SetColorArray — void SetColorArray(string name, List<Color> values)"
+      },
+      {
+        "score": 0.6322316,
+        "docType": "api",
+        "type": "MaterialPropertyBlock",
+        "member": "AddColor",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.MaterialPropertyBlock.AddColor",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/MaterialPropertyBlock.AddColor.html",
+        "deprecated": true,
+        "text": "UnityEngine.MaterialPropertyBlock.AddColor — void AddColor(string name, Color value) (DEPRECATED: Use SetColor instead (UnityUpgradable) -> SetColor(*))"
+      }
+    ]
+  }
+}

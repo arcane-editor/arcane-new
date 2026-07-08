@@ -1,0 +1,14 @@
+{
+  "recordedAt": "2026-07-08T16:26:31.735Z",
+  "request": {
+    "endpoint": "search",
+    "query": "material color",
+    "unityVersion": "2022.3.45f1",
+    "renderPipeline": "Built-in",
+    "inputSystem": "Legacy"
+  },
+  "response": {
+    "ok": true,
+    "data": []
+  }
+}

@@ -1,0 +1,103 @@
+{
+  "recordedAt": "2026-07-08T17:37:48.783Z",
+  "request": {
+    "endpoint": "search",
+    "query": "scriptablerendererfeature full screen blit post processing",
+    "unityVersion": "6000.3.5f2",
+    "renderPipeline": "URP",
+    "inputSystem": "New"
+  },
+  "response": {
+    "ok": true,
+    "data": [
+      {
+        "score": 0.5676773,
+        "docType": "api",
+        "type": "ScriptableRenderContext",
+        "member": "Submit",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.ScriptableRenderContext.Submit",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/ScriptableRenderContext.Submit.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.ScriptableRenderContext.Submit — void Submit()"
+      },
+      {
+        "score": 0.5623965,
+        "docType": "api",
+        "type": "ScriptableBakedReflectionSystem",
+        "member": "ScriptableBakedReflectionSystem",
+        "namespace": "UnityEditor.Experimental.Rendering",
+        "breadcrumb": "UnityEditor.Experimental.Rendering.ScriptableBakedReflectionSystem.ScriptableBakedReflectionSystem",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/ScriptableBakedReflectionSystem.html",
+        "deprecated": false,
+        "text": "UnityEditor.Experimental.Rendering.ScriptableBakedReflectionSystem.ScriptableBakedReflectionSystem — public class ScriptableBakedReflectionSystem"
+      },
+      {
+        "score": 0.5577462,
+        "docType": "api",
+        "type": "ScriptableBakedReflectionSystem",
+        "member": "SynchronizeReflectionProbes",
+        "namespace": "UnityEditor.Experimental.Rendering",
+        "breadcrumb": "UnityEditor.Experimental.Rendering.ScriptableBakedReflectionSystem.SynchronizeReflectionProbes",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/ScriptableBakedReflectionSystem.SynchronizeReflectionProbes.html",
+        "deprecated": false,
+        "text": "UnityEditor.Experimental.Rendering.ScriptableBakedReflectionSystem.SynchronizeReflectionProbes — void SynchronizeReflectionProbes()"
+      },
+      {
+        "score": 0.55738705,
+        "docType": "api",
+        "type": "ScriptableBakedReflectionSystem",
+        "member": "Clear",
+        "namespace": "UnityEditor.Experimental.Rendering",
+        "breadcrumb": "UnityEditor.Experimental.Rendering.ScriptableBakedReflectionSystem.Clear",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/ScriptableBakedReflectionSystem.Clear.html",
+        "deprecated": false,
+        "text": "UnityEditor.Experimental.Rendering.ScriptableBakedReflectionSystem.Clear — void Clear()"
+      },
+      {
+        "score": 0.55423146,
+        "docType": "api",
+        "type": "CustomRenderTexture",
+        "member": "GetDoubleBufferRenderTexture",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.CustomRenderTexture.GetDoubleBufferRenderTexture",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/CustomRenderTexture.GetDoubleBufferRenderTexture.html",
+        "deprecated": false,
+        "text": "UnityEngine.CustomRenderTexture.GetDoubleBufferRenderTexture — RenderTexture GetDoubleBufferRenderTexture()"
+      },
+      {
+        "score": 0.5540666,
+        "docType": "api",
+        "type": "ScriptableBakedReflectionSystem",
+        "member": "BakeAllReflectionProbes",
+        "namespace": "UnityEditor.Experimental.Rendering",
+        "breadcrumb": "UnityEditor.Experimental.Rendering.ScriptableBakedReflectionSystem.BakeAllReflectionProbes",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/ScriptableBakedReflectionSystem.BakeAllReflectionProbes.html",
+        "deprecated": false,
+        "text": "UnityEditor.Experimental.Rendering.ScriptableBakedReflectionSystem.BakeAllReflectionProbes — bool BakeAllReflectionProbes()"
+      },
+      {
+        "score": 0.55355,
+        "docType": "api",
+        "type": "ScriptableBakedReflectionSystemSettings",
+        "member": "system",
+        "namespace": "UnityEditor.Experimental.Rendering",
+        "breadcrumb": "UnityEditor.Experimental.Rendering.ScriptableBakedReflectionSystemSettings.system",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/ScriptableBakedReflectionSystemSettings-system.html",
+        "deprecated": false,
+        "text": "UnityEditor.Experimental.Rendering.ScriptableBakedReflectionSystemSettings.system — public IScriptableBakedReflectionSystem system { get; set; }"
+      },
+      {
+        "score": 0.5428726,
+        "docType": "api",
+        "type": "ScriptableBakedReflectionSystemSettings",
+        "member": "ScriptableBakedReflectionSystemSettings",
+        "namespace": "UnityEditor.Experimental.Rendering",
+        "breadcrumb": "UnityEditor.Experimental.Rendering.ScriptableBakedReflectionSystemSettings.ScriptableBakedReflectionSystemSettings",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/ScriptableBakedReflectionSystemSettings.html",
+        "deprecated": false,
+        "text": "UnityEditor.Experimental.Rendering.ScriptableBakedReflectionSystemSettings.ScriptableBakedReflectionSystemSettings — public class ScriptableBakedReflectionSystemSettings"
+      }
+    ]
+  }
+}

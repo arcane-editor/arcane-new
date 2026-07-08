@@ -1,0 +1,26 @@
+{
+  "recordedAt": "2026-07-08T16:36:05.609Z",
+  "request": {
+    "endpoint": "lookup",
+    "type": "Material",
+    "member": "mainTexture",
+    "unityVersion": "6000.3.5f2",
+    "renderPipeline": "URP",
+    "inputSystem": "New"
+  },
+  "response": {
+    "ok": true,
+    "data": [
+      {
+        "namespace": "UnityEngine",
+        "type": "Material",
+        "member": "mainTexture",
+        "kind": "property",
+        "signature": "public Texture mainTexture { get; set; }",
+        "assembly": "UnityEngine.CoreModule",
+        "deprecated": false,
+        "docUrl": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Material-mainTexture.html"
+      }
+    ]
+  }
+}

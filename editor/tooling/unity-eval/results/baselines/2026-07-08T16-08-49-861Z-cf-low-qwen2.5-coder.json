@@ -1,0 +1,2943 @@
+{
+  "label": "cf-low-qwen2.5-coder",
+  "model": "server-routed",
+  "baseUrl": "http://localhost:8787/v1",
+  "usage": {
+    "input": 212009,
+    "output": 38119,
+    "requests": 72
+  },
+  "repeats": 3,
+  "groundingCacheMisses": 0,
+  "recordFailures": 0,
+  "results": [
+    {
+      "taskId": "codegen-dash-cooldown",
+      "family": "codegen",
+      "pass": false,
+      "passCount": 0,
+      "repeats": 3,
+      "flaky": false,
+      "attempts": [
+        {
+          "taskId": "codegen-dash-cooldown",
+          "family": "codegen",
+          "pass": false,
+          "checks": [
+            {
+              "spec": {
+                "type": "file_exists",
+                "path": "Assets/Scripts/PlayerDash.cs"
+              },
+              "pass": false,
+              "detail": "missing: Assets/Scripts/PlayerDash.cs"
+            },
+            {
+              "spec": {
+                "type": "file_contains",
+                "path": "Assets/Scripts/PlayerDash.cs",
+                "pattern": "cooldown",
+                "flags": "i"
+              },
+              "pass": false,
+              "detail": "missing: Assets/Scripts/PlayerDash.cs"
+            },
+            {
+              "spec": {
+                "type": "file_not_contains",
+                "path": "Assets/Scripts/PlayerDash.cs",
+                "pattern": "UnityEngine\\.InputSystem"
+              },
+              "pass": false,
+              "detail": "missing: Assets/Scripts/PlayerDash.cs"
+            },
+            {
+              "spec": {
+                "type": "analyzer_clean",
+                "glob": "Assets/Scripts/PlayerDash.cs"
+              },
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "turns": 1,
+          "wallMs": 36412,
+          "inputTokens": 3273,
+          "outputTokens": 680,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        },
+        {
+          "taskId": "codegen-dash-cooldown",
+          "family": "codegen",
+          "pass": false,
+          "checks": [
+            {
+              "spec": {
+                "type": "file_exists",
+                "path": "Assets/Scripts/PlayerDash.cs"
+              },
+              "pass": false,
+              "detail": "missing: Assets/Scripts/PlayerDash.cs"
+            },
+            {
+              "spec": {
+                "type": "file_contains",
+                "path": "Assets/Scripts/PlayerDash.cs",
+                "pattern": "cooldown",
+                "flags": "i"
+              },
+              "pass": false,
+              "detail": "missing: Assets/Scripts/PlayerDash.cs"
+            },
+            {
+              "spec": {
+                "type": "file_not_contains",
+                "path": "Assets/Scripts/PlayerDash.cs",
+                "pattern": "UnityEngine\\.InputSystem"
+              },
+              "pass": false,
+              "detail": "missing: Assets/Scripts/PlayerDash.cs"
+            },
+            {
+              "spec": {
+                "type": "analyzer_clean",
+                "glob": "Assets/Scripts/PlayerDash.cs"
+              },
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "turns": 1,
+          "wallMs": 20410,
+          "inputTokens": 3273,
+          "outputTokens": 602,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        },
+        {
+          "taskId": "codegen-dash-cooldown",
+          "family": "codegen",
+          "pass": false,
+          "checks": [
+            {
+              "spec": {
+                "type": "file_exists",
+                "path": "Assets/Scripts/PlayerDash.cs"
+              },
+              "pass": false,
+              "detail": "missing: Assets/Scripts/PlayerDash.cs"
+            },
+            {
+              "spec": {
+                "type": "file_contains",
+                "path": "Assets/Scripts/PlayerDash.cs",
+                "pattern": "cooldown",
+                "flags": "i"
+              },
+              "pass": false,
+              "detail": "missing: Assets/Scripts/PlayerDash.cs"
+            },
+            {
+              "spec": {
+                "type": "file_not_contains",
+                "path": "Assets/Scripts/PlayerDash.cs",
+                "pattern": "UnityEngine\\.InputSystem"
+              },
+              "pass": false,
+              "detail": "missing: Assets/Scripts/PlayerDash.cs"
+            },
+            {
+              "spec": {
+                "type": "analyzer_clean",
+                "glob": "Assets/Scripts/PlayerDash.cs"
+              },
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "turns": 1,
+          "wallMs": 9932,
+          "inputTokens": 3272,
+          "outputTokens": 253,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "taskId": "codegen-damage-event",
+      "family": "codegen",
+      "pass": false,
+      "passCount": 0,
+      "repeats": 3,
+      "flaky": false,
+      "attempts": [
+        {
+          "taskId": "codegen-damage-event",
+          "family": "codegen",
+          "pass": false,
+          "checks": [
+            {
+              "spec": {
+                "type": "file_contains",
+                "path": "Assets/Scripts/Health.cs",
+                "pattern": "TakeDamage"
+              },
+              "pass": false,
+              "detail": "pattern not found in Assets/Scripts/Health.cs"
+            },
+            {
+              "spec": {
+                "type": "file_contains",
+                "path": "Assets/Scripts/Health.cs",
+                "pattern": "UnityEvent"
+              },
+              "pass": false,
+              "detail": "pattern not found in Assets/Scripts/Health.cs"
+            },
+            {
+              "spec": {
+                "type": "analyzer_clean",
+                "glob": "Assets/Scripts/Health.cs"
+              },
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "turns": 1,
+          "wallMs": 76775,
+          "inputTokens": 3264,
+          "outputTokens": 2002,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        },
+        {
+          "taskId": "codegen-damage-event",
+          "family": "codegen",
+          "pass": false,
+          "checks": [
+            {
+              "spec": {
+                "type": "file_contains",
+                "path": "Assets/Scripts/Health.cs",
+                "pattern": "TakeDamage"
+              },
+              "pass": false,
+              "detail": "pattern not found in Assets/Scripts/Health.cs"
+            },
+            {
+              "spec": {
+                "type": "file_contains",
+                "path": "Assets/Scripts/Health.cs",
+                "pattern": "UnityEvent"
+              },
+              "pass": false,
+              "detail": "pattern not found in Assets/Scripts/Health.cs"
+            },
+            {
+              "spec": {
+                "type": "analyzer_clean",
+                "glob": "Assets/Scripts/Health.cs"
+              },
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "turns": 1,
+          "wallMs": 8446,
+          "inputTokens": 3266,
+          "outputTokens": 206,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        },
+        {
+          "taskId": "codegen-damage-event",
+          "family": "codegen",
+          "pass": false,
+          "checks": [
+            {
+              "spec": {
+                "type": "file_contains",
+                "path": "Assets/Scripts/Health.cs",
+                "pattern": "TakeDamage"
+              },
+              "pass": false,
+              "detail": "pattern not found in Assets/Scripts/Health.cs"
+            },
+            {
+              "spec": {
+                "type": "file_contains",
+                "path": "Assets/Scripts/Health.cs",
+                "pattern": "UnityEvent"
+              },
+              "pass": false,
+              "detail": "pattern not found in Assets/Scripts/Health.cs"
+            },
+            {
+              "spec": {
+                "type": "analyzer_clean",
+                "glob": "Assets/Scripts/Health.cs"
+              },
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "turns": 1,
+          "wallMs": 33204,
+          "inputTokens": 3264,
+          "outputTokens": 916,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "taskId": "codegen-canvas-fade",
+      "family": "codegen",
+      "pass": false,
+      "passCount": 0,
+      "repeats": 3,
+      "flaky": false,
+      "attempts": [
+        {
+          "taskId": "codegen-canvas-fade",
+          "family": "codegen",
+          "pass": false,
+          "checks": [
+            {
+              "spec": {
+                "type": "file_exists",
+                "path": "Assets/Scripts/UIFader.cs"
+              },
+              "pass": false,
+              "detail": "missing: Assets/Scripts/UIFader.cs"
+            },
+            {
+              "spec": {
+                "type": "file_contains",
+                "path": "Assets/Scripts/UIFader.cs",
+                "pattern": "IEnumerator"
+              },
+              "pass": false,
+              "detail": "missing: Assets/Scripts/UIFader.cs"
+            },
+            {
+              "spec": {
+                "type": "file_not_contains",
+                "path": "Assets/Scripts/UIFader.cs",
+                "pattern": "async\\s+void"
+              },
+              "pass": false,
+              "detail": "missing: Assets/Scripts/UIFader.cs"
+            },
+            {
+              "spec": {
+                "type": "analyzer_clean",
+                "glob": "Assets/Scripts/UIFader.cs"
+              },
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "turns": 1,
+          "wallMs": 18169,
+          "inputTokens": 3273,
+          "outputTokens": 514,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        },
+        {
+          "taskId": "codegen-canvas-fade",
+          "family": "codegen",
+          "pass": false,
+          "checks": [
+            {
+              "spec": {
+                "type": "file_exists",
+                "path": "Assets/Scripts/UIFader.cs"
+              },
+              "pass": false,
+              "detail": "missing: Assets/Scripts/UIFader.cs"
+            },
+            {
+              "spec": {
+                "type": "file_contains",
+                "path": "Assets/Scripts/UIFader.cs",
+                "pattern": "IEnumerator"
+              },
+              "pass": false,
+              "detail": "missing: Assets/Scripts/UIFader.cs"
+            },
+            {
+              "spec": {
+                "type": "file_not_contains",
+                "path": "Assets/Scripts/UIFader.cs",
+                "pattern": "async\\s+void"
+              },
+              "pass": false,
+              "detail": "missing: Assets/Scripts/UIFader.cs"
+            },
+            {
+              "spec": {
+                "type": "analyzer_clean",
+                "glob": "Assets/Scripts/UIFader.cs"
+              },
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "turns": 1,
+          "wallMs": 14885,
+          "inputTokens": 3272,
+          "outputTokens": 430,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        },
+        {
+          "taskId": "codegen-canvas-fade",
+          "family": "codegen",
+          "pass": false,
+          "checks": [
+            {
+              "spec": {
+                "type": "file_exists",
+                "path": "Assets/Scripts/UIFader.cs"
+              },
+              "pass": false,
+              "detail": "missing: Assets/Scripts/UIFader.cs"
+            },
+            {
+              "spec": {
+                "type": "file_contains",
+                "path": "Assets/Scripts/UIFader.cs",
+                "pattern": "IEnumerator"
+              },
+              "pass": false,
+              "detail": "missing: Assets/Scripts/UIFader.cs"
+            },
+            {
+              "spec": {
+                "type": "file_not_contains",
+                "path": "Assets/Scripts/UIFader.cs",
+                "pattern": "async\\s+void"
+              },
+              "pass": false,
+              "detail": "missing: Assets/Scripts/UIFader.cs"
+            },
+            {
+              "spec": {
+                "type": "analyzer_clean",
+                "glob": "Assets/Scripts/UIFader.cs"
+              },
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "turns": 1,
+          "wallMs": 40636,
+          "inputTokens": 3273,
+          "outputTokens": 1268,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "taskId": "codegen-so-config",
+      "family": "codegen",
+      "pass": false,
+      "passCount": 0,
+      "repeats": 3,
+      "flaky": false,
+      "attempts": [
+        {
+          "taskId": "codegen-so-config",
+          "family": "codegen",
+          "pass": false,
+          "checks": [
+            {
+              "spec": {
+                "type": "file_exists",
+                "path": "Assets/Scripts/EnemyConfig.cs"
+              },
+              "pass": false,
+              "detail": "missing: Assets/Scripts/EnemyConfig.cs"
+            },
+            {
+              "spec": {
+                "type": "file_contains",
+                "path": "Assets/Scripts/EnemyConfig.cs",
+                "pattern": "ScriptableObject"
+              },
+              "pass": false,
+              "detail": "missing: Assets/Scripts/EnemyConfig.cs"
+            },
+            {
+              "spec": {
+                "type": "file_contains",
+                "path": "Assets/Scripts/EnemyConfig.cs",
+                "pattern": "CreateAssetMenu"
+              },
+              "pass": false,
+              "detail": "missing: Assets/Scripts/EnemyConfig.cs"
+            },
+            {
+              "spec": {
+                "type": "analyzer_clean",
+                "glob": "Assets/Scripts/EnemyConfig.cs"
+              },
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "turns": 1,
+          "wallMs": 11161,
+          "inputTokens": 3262,
+          "outputTokens": 232,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        },
+        {
+          "taskId": "codegen-so-config",
+          "family": "codegen",
+          "pass": false,
+          "checks": [
+            {
+              "spec": {
+                "type": "file_exists",
+                "path": "Assets/Scripts/EnemyConfig.cs"
+              },
+              "pass": false,
+              "detail": "missing: Assets/Scripts/EnemyConfig.cs"
+            },
+            {
+              "spec": {
+                "type": "file_contains",
+                "path": "Assets/Scripts/EnemyConfig.cs",
+                "pattern": "ScriptableObject"
+              },
+              "pass": false,
+              "detail": "missing: Assets/Scripts/EnemyConfig.cs"
+            },
+            {
+              "spec": {
+                "type": "file_contains",
+                "path": "Assets/Scripts/EnemyConfig.cs",
+                "pattern": "CreateAssetMenu"
+              },
+              "pass": false,
+              "detail": "missing: Assets/Scripts/EnemyConfig.cs"
+            },
+            {
+              "spec": {
+                "type": "analyzer_clean",
+                "glob": "Assets/Scripts/EnemyConfig.cs"
+              },
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "turns": 1,
+          "wallMs": 24269,
+          "inputTokens": 3262,
+          "outputTokens": 502,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        },
+        {
+          "taskId": "codegen-so-config",
+          "family": "codegen",
+          "pass": false,
+          "checks": [
+            {
+              "spec": {
+                "type": "file_exists",
+                "path": "Assets/Scripts/EnemyConfig.cs"
+              },
+              "pass": false,
+              "detail": "missing: Assets/Scripts/EnemyConfig.cs"
+            },
+            {
+              "spec": {
+                "type": "file_contains",
+                "path": "Assets/Scripts/EnemyConfig.cs",
+                "pattern": "ScriptableObject"
+              },
+              "pass": false,
+              "detail": "missing: Assets/Scripts/EnemyConfig.cs"
+            },
+            {
+              "spec": {
+                "type": "file_contains",
+                "path": "Assets/Scripts/EnemyConfig.cs",
+                "pattern": "CreateAssetMenu"
+              },
+              "pass": false,
+              "detail": "missing: Assets/Scripts/EnemyConfig.cs"
+            },
+            {
+              "spec": {
+                "type": "analyzer_clean",
+                "glob": "Assets/Scripts/EnemyConfig.cs"
+              },
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "turns": 1,
+          "wallMs": 11409,
+          "inputTokens": 3261,
+          "outputTokens": 241,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "taskId": "codegen-trap-mover",
+      "family": "codegen",
+      "pass": false,
+      "passCount": 0,
+      "repeats": 3,
+      "flaky": false,
+      "attempts": [
+        {
+          "taskId": "codegen-trap-mover",
+          "family": "codegen",
+          "pass": false,
+          "checks": [
+            {
+              "spec": {
+                "type": "file_exists",
+                "path": "Assets/Scripts/CharacterMover.cs"
+              },
+              "pass": false,
+              "detail": "missing: Assets/Scripts/CharacterMover.cs"
+            },
+            {
+              "spec": {
+                "type": "file_contains",
+                "path": "Assets/Scripts/CharacterMover.cs",
+                "pattern": "Input\\.GetAxis|Input\\.GetKey"
+              },
+              "pass": false,
+              "detail": "missing: Assets/Scripts/CharacterMover.cs"
+            },
+            {
+              "spec": {
+                "type": "file_not_contains",
+                "path": "Assets/Scripts/CharacterMover.cs",
+                "pattern": "UnityEngine\\.InputSystem"
+              },
+              "pass": false,
+              "detail": "missing: Assets/Scripts/CharacterMover.cs"
+            },
+            {
+              "spec": {
+                "type": "analyzer_clean",
+                "glob": "Assets/Scripts/CharacterMover.cs"
+              },
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "turns": 1,
+          "wallMs": 14725,
+          "inputTokens": 3271,
+          "outputTokens": 392,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        },
+        {
+          "taskId": "codegen-trap-mover",
+          "family": "codegen",
+          "pass": false,
+          "checks": [
+            {
+              "spec": {
+                "type": "file_exists",
+                "path": "Assets/Scripts/CharacterMover.cs"
+              },
+              "pass": false,
+              "detail": "missing: Assets/Scripts/CharacterMover.cs"
+            },
+            {
+              "spec": {
+                "type": "file_contains",
+                "path": "Assets/Scripts/CharacterMover.cs",
+                "pattern": "Input\\.GetAxis|Input\\.GetKey"
+              },
+              "pass": false,
+              "detail": "missing: Assets/Scripts/CharacterMover.cs"
+            },
+            {
+              "spec": {
+                "type": "file_not_contains",
+                "path": "Assets/Scripts/CharacterMover.cs",
+                "pattern": "UnityEngine\\.InputSystem"
+              },
+              "pass": false,
+              "detail": "missing: Assets/Scripts/CharacterMover.cs"
+            },
+            {
+              "spec": {
+                "type": "analyzer_clean",
+                "glob": "Assets/Scripts/CharacterMover.cs"
+              },
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "turns": 1,
+          "wallMs": 7396,
+          "inputTokens": 3271,
+          "outputTokens": 178,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        },
+        {
+          "taskId": "codegen-trap-mover",
+          "family": "codegen",
+          "pass": false,
+          "checks": [
+            {
+              "spec": {
+                "type": "file_exists",
+                "path": "Assets/Scripts/CharacterMover.cs"
+              },
+              "pass": false,
+              "detail": "missing: Assets/Scripts/CharacterMover.cs"
+            },
+            {
+              "spec": {
+                "type": "file_contains",
+                "path": "Assets/Scripts/CharacterMover.cs",
+                "pattern": "Input\\.GetAxis|Input\\.GetKey"
+              },
+              "pass": false,
+              "detail": "missing: Assets/Scripts/CharacterMover.cs"
+            },
+            {
+              "spec": {
+                "type": "file_not_contains",
+                "path": "Assets/Scripts/CharacterMover.cs",
+                "pattern": "UnityEngine\\.InputSystem"
+              },
+              "pass": false,
+              "detail": "missing: Assets/Scripts/CharacterMover.cs"
+            },
+            {
+              "spec": {
+                "type": "analyzer_clean",
+                "glob": "Assets/Scripts/CharacterMover.cs"
+              },
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "turns": 1,
+          "wallMs": 6364,
+          "inputTokens": 3271,
+          "outputTokens": 131,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "taskId": "codegen-trap-material",
+      "family": "codegen",
+      "pass": false,
+      "passCount": 0,
+      "repeats": 3,
+      "flaky": false,
+      "attempts": [
+        {
+          "taskId": "codegen-trap-material",
+          "family": "codegen",
+          "pass": false,
+          "checks": [
+            {
+              "spec": {
+                "type": "file_exists",
+                "path": "Assets/Scripts/TintOnHit.cs"
+              },
+              "pass": false,
+              "detail": "missing: Assets/Scripts/TintOnHit.cs"
+            },
+            {
+              "spec": {
+                "type": "file_contains",
+                "path": "Assets/Scripts/TintOnHit.cs",
+                "pattern": "material\\.color\\s*=|_BaseColor"
+              },
+              "pass": false,
+              "detail": "missing: Assets/Scripts/TintOnHit.cs"
+            },
+            {
+              "spec": {
+                "type": "file_not_contains",
+                "path": "Assets/Scripts/TintOnHit.cs",
+                "pattern": "\"_Color\""
+              },
+              "pass": false,
+              "detail": "missing: Assets/Scripts/TintOnHit.cs"
+            },
+            {
+              "spec": {
+                "type": "analyzer_clean",
+                "glob": "Assets/Scripts/TintOnHit.cs"
+              },
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "turns": 1,
+          "wallMs": 9694,
+          "inputTokens": 3273,
+          "outputTokens": 208,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        },
+        {
+          "taskId": "codegen-trap-material",
+          "family": "codegen",
+          "pass": false,
+          "checks": [
+            {
+              "spec": {
+                "type": "file_exists",
+                "path": "Assets/Scripts/TintOnHit.cs"
+              },
+              "pass": false,
+              "detail": "missing: Assets/Scripts/TintOnHit.cs"
+            },
+            {
+              "spec": {
+                "type": "file_contains",
+                "path": "Assets/Scripts/TintOnHit.cs",
+                "pattern": "material\\.color\\s*=|_BaseColor"
+              },
+              "pass": false,
+              "detail": "missing: Assets/Scripts/TintOnHit.cs"
+            },
+            {
+              "spec": {
+                "type": "file_not_contains",
+                "path": "Assets/Scripts/TintOnHit.cs",
+                "pattern": "\"_Color\""
+              },
+              "pass": false,
+              "detail": "missing: Assets/Scripts/TintOnHit.cs"
+            },
+            {
+              "spec": {
+                "type": "analyzer_clean",
+                "glob": "Assets/Scripts/TintOnHit.cs"
+              },
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "turns": 1,
+          "wallMs": 34336,
+          "inputTokens": 3272,
+          "outputTokens": 919,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        },
+        {
+          "taskId": "codegen-trap-material",
+          "family": "codegen",
+          "pass": false,
+          "checks": [
+            {
+              "spec": {
+                "type": "file_exists",
+                "path": "Assets/Scripts/TintOnHit.cs"
+              },
+              "pass": false,
+              "detail": "missing: Assets/Scripts/TintOnHit.cs"
+            },
+            {
+              "spec": {
+                "type": "file_contains",
+                "path": "Assets/Scripts/TintOnHit.cs",
+                "pattern": "material\\.color\\s*=|_BaseColor"
+              },
+              "pass": false,
+              "detail": "missing: Assets/Scripts/TintOnHit.cs"
+            },
+            {
+              "spec": {
+                "type": "file_not_contains",
+                "path": "Assets/Scripts/TintOnHit.cs",
+                "pattern": "\"_Color\""
+              },
+              "pass": false,
+              "detail": "missing: Assets/Scripts/TintOnHit.cs"
+            },
+            {
+              "spec": {
+                "type": "analyzer_clean",
+                "glob": "Assets/Scripts/TintOnHit.cs"
+              },
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "turns": 1,
+          "wallMs": 8351,
+          "inputTokens": 3274,
+          "outputTokens": 190,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "taskId": "codegen-trap-jump",
+      "family": "codegen",
+      "pass": false,
+      "passCount": 0,
+      "repeats": 3,
+      "flaky": false,
+      "attempts": [
+        {
+          "taskId": "codegen-trap-jump",
+          "family": "codegen",
+          "pass": false,
+          "checks": [
+            {
+              "spec": {
+                "type": "file_exists",
+                "path": "Assets/Scripts/PlayerJump.cs"
+              },
+              "pass": false,
+              "detail": "missing: Assets/Scripts/PlayerJump.cs"
+            },
+            {
+              "spec": {
+                "type": "file_contains",
+                "path": "Assets/Scripts/PlayerJump.cs",
+                "pattern": "GetKeyDown|GetButtonDown"
+              },
+              "pass": false,
+              "detail": "missing: Assets/Scripts/PlayerJump.cs"
+            },
+            {
+              "spec": {
+                "type": "file_not_contains",
+                "path": "Assets/Scripts/PlayerJump.cs",
+                "pattern": "UnityEngine\\.InputSystem"
+              },
+              "pass": false,
+              "detail": "missing: Assets/Scripts/PlayerJump.cs"
+            },
+            {
+              "spec": {
+                "type": "analyzer_clean",
+                "glob": "Assets/Scripts/PlayerJump.cs"
+              },
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "turns": 1,
+          "wallMs": 17095,
+          "inputTokens": 3268,
+          "outputTokens": 496,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        },
+        {
+          "taskId": "codegen-trap-jump",
+          "family": "codegen",
+          "pass": false,
+          "checks": [
+            {
+              "spec": {
+                "type": "file_exists",
+                "path": "Assets/Scripts/PlayerJump.cs"
+              },
+              "pass": false,
+              "detail": "missing: Assets/Scripts/PlayerJump.cs"
+            },
+            {
+              "spec": {
+                "type": "file_contains",
+                "path": "Assets/Scripts/PlayerJump.cs",
+                "pattern": "GetKeyDown|GetButtonDown"
+              },
+              "pass": false,
+              "detail": "missing: Assets/Scripts/PlayerJump.cs"
+            },
+            {
+              "spec": {
+                "type": "file_not_contains",
+                "path": "Assets/Scripts/PlayerJump.cs",
+                "pattern": "UnityEngine\\.InputSystem"
+              },
+              "pass": false,
+              "detail": "missing: Assets/Scripts/PlayerJump.cs"
+            },
+            {
+              "spec": {
+                "type": "analyzer_clean",
+                "glob": "Assets/Scripts/PlayerJump.cs"
+              },
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "turns": 1,
+          "wallMs": 8862,
+          "inputTokens": 3268,
+          "outputTokens": 195,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        },
+        {
+          "taskId": "codegen-trap-jump",
+          "family": "codegen",
+          "pass": false,
+          "checks": [
+            {
+              "spec": {
+                "type": "file_exists",
+                "path": "Assets/Scripts/PlayerJump.cs"
+              },
+              "pass": false,
+              "detail": "missing: Assets/Scripts/PlayerJump.cs"
+            },
+            {
+              "spec": {
+                "type": "file_contains",
+                "path": "Assets/Scripts/PlayerJump.cs",
+                "pattern": "GetKeyDown|GetButtonDown"
+              },
+              "pass": false,
+              "detail": "missing: Assets/Scripts/PlayerJump.cs"
+            },
+            {
+              "spec": {
+                "type": "file_not_contains",
+                "path": "Assets/Scripts/PlayerJump.cs",
+                "pattern": "UnityEngine\\.InputSystem"
+              },
+              "pass": false,
+              "detail": "missing: Assets/Scripts/PlayerJump.cs"
+            },
+            {
+              "spec": {
+                "type": "analyzer_clean",
+                "glob": "Assets/Scripts/PlayerJump.cs"
+              },
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "turns": 1,
+          "wallMs": 34600,
+          "inputTokens": 3268,
+          "outputTokens": 1066,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "taskId": "codegen-trap-fade",
+      "family": "codegen",
+      "pass": false,
+      "passCount": 0,
+      "repeats": 3,
+      "flaky": false,
+      "attempts": [
+        {
+          "taskId": "codegen-trap-fade",
+          "family": "codegen",
+          "pass": false,
+          "checks": [
+            {
+              "spec": {
+                "type": "file_exists",
+                "path": "Assets/Scripts/UIFader.cs"
+              },
+              "pass": false,
+              "detail": "missing: Assets/Scripts/UIFader.cs"
+            },
+            {
+              "spec": {
+                "type": "file_contains",
+                "path": "Assets/Scripts/UIFader.cs",
+                "pattern": "IEnumerator"
+              },
+              "pass": false,
+              "detail": "missing: Assets/Scripts/UIFader.cs"
+            },
+            {
+              "spec": {
+                "type": "file_not_contains",
+                "path": "Assets/Scripts/UIFader.cs",
+                "pattern": "async\\s+void"
+              },
+              "pass": false,
+              "detail": "missing: Assets/Scripts/UIFader.cs"
+            },
+            {
+              "spec": {
+                "type": "analyzer_clean",
+                "glob": "Assets/Scripts/UIFader.cs"
+              },
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "turns": 1,
+          "wallMs": 10423,
+          "inputTokens": 3273,
+          "outputTokens": 290,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        },
+        {
+          "taskId": "codegen-trap-fade",
+          "family": "codegen",
+          "pass": false,
+          "checks": [
+            {
+              "spec": {
+                "type": "file_exists",
+                "path": "Assets/Scripts/UIFader.cs"
+              },
+              "pass": false,
+              "detail": "missing: Assets/Scripts/UIFader.cs"
+            },
+            {
+              "spec": {
+                "type": "file_contains",
+                "path": "Assets/Scripts/UIFader.cs",
+                "pattern": "IEnumerator"
+              },
+              "pass": false,
+              "detail": "missing: Assets/Scripts/UIFader.cs"
+            },
+            {
+              "spec": {
+                "type": "file_not_contains",
+                "path": "Assets/Scripts/UIFader.cs",
+                "pattern": "async\\s+void"
+              },
+              "pass": false,
+              "detail": "missing: Assets/Scripts/UIFader.cs"
+            },
+            {
+              "spec": {
+                "type": "analyzer_clean",
+                "glob": "Assets/Scripts/UIFader.cs"
+              },
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "turns": 1,
+          "wallMs": 22648,
+          "inputTokens": 3273,
+          "outputTokens": 681,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        },
+        {
+          "taskId": "codegen-trap-fade",
+          "family": "codegen",
+          "pass": false,
+          "checks": [
+            {
+              "spec": {
+                "type": "file_exists",
+                "path": "Assets/Scripts/UIFader.cs"
+              },
+              "pass": false,
+              "detail": "missing: Assets/Scripts/UIFader.cs"
+            },
+            {
+              "spec": {
+                "type": "file_contains",
+                "path": "Assets/Scripts/UIFader.cs",
+                "pattern": "IEnumerator"
+              },
+              "pass": false,
+              "detail": "missing: Assets/Scripts/UIFader.cs"
+            },
+            {
+              "spec": {
+                "type": "file_not_contains",
+                "path": "Assets/Scripts/UIFader.cs",
+                "pattern": "async\\s+void"
+              },
+              "pass": false,
+              "detail": "missing: Assets/Scripts/UIFader.cs"
+            },
+            {
+              "spec": {
+                "type": "analyzer_clean",
+                "glob": "Assets/Scripts/UIFader.cs"
+              },
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "turns": 1,
+          "wallMs": 119750,
+          "inputTokens": 3273,
+          "outputTokens": 3845,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "taskId": "grounding-urp-color",
+      "family": "grounding",
+      "pass": false,
+      "passCount": 0,
+      "repeats": 3,
+      "flaky": false,
+      "attempts": [
+        {
+          "taskId": "grounding-urp-color",
+          "family": "grounding",
+          "pass": false,
+          "checks": [
+            {
+              "spec": {
+                "type": "answer_matches",
+                "pattern": "_BaseColor"
+              },
+              "pass": false,
+              "detail": "answer pattern did not match"
+            },
+            {
+              "spec": {
+                "type": "answer_not_matches",
+                "pattern": "\"_Color\""
+              },
+              "pass": true,
+              "detail": "answer pattern did not match"
+            }
+          ],
+          "turns": 1,
+          "wallMs": 21520,
+          "inputTokens": 2626,
+          "outputTokens": 650,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        },
+        {
+          "taskId": "grounding-urp-color",
+          "family": "grounding",
+          "pass": false,
+          "checks": [
+            {
+              "spec": {
+                "type": "answer_matches",
+                "pattern": "_BaseColor"
+              },
+              "pass": false,
+              "detail": "answer pattern did not match"
+            },
+            {
+              "spec": {
+                "type": "answer_not_matches",
+                "pattern": "\"_Color\""
+              },
+              "pass": true,
+              "detail": "answer pattern did not match"
+            }
+          ],
+          "turns": 1,
+          "wallMs": 34445,
+          "inputTokens": 2626,
+          "outputTokens": 715,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        },
+        {
+          "taskId": "grounding-urp-color",
+          "family": "grounding",
+          "pass": false,
+          "checks": [
+            {
+              "spec": {
+                "type": "answer_matches",
+                "pattern": "_BaseColor"
+              },
+              "pass": false,
+              "detail": "answer pattern did not match"
+            },
+            {
+              "spec": {
+                "type": "answer_not_matches",
+                "pattern": "\"_Color\""
+              },
+              "pass": true,
+              "detail": "answer pattern did not match"
+            }
+          ],
+          "turns": 1,
+          "wallMs": 18993,
+          "inputTokens": 2626,
+          "outputTokens": 591,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "taskId": "grounding-builtin-color",
+      "family": "grounding",
+      "pass": true,
+      "passCount": 3,
+      "repeats": 3,
+      "flaky": false,
+      "attempts": [
+        {
+          "taskId": "grounding-builtin-color",
+          "family": "grounding",
+          "pass": true,
+          "checks": [
+            {
+              "spec": {
+                "type": "answer_matches",
+                "pattern": "\\.color\\s*=|\"_Color\""
+              },
+              "pass": true,
+              "detail": "answer pattern matched"
+            },
+            {
+              "spec": {
+                "type": "answer_not_matches",
+                "pattern": "_BaseColor"
+              },
+              "pass": true,
+              "detail": "answer pattern did not match"
+            }
+          ],
+          "turns": 1,
+          "wallMs": 20003,
+          "inputTokens": 2627,
+          "outputTokens": 607,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        },
+        {
+          "taskId": "grounding-builtin-color",
+          "family": "grounding",
+          "pass": true,
+          "checks": [
+            {
+              "spec": {
+                "type": "answer_matches",
+                "pattern": "\\.color\\s*=|\"_Color\""
+              },
+              "pass": true,
+              "detail": "answer pattern matched"
+            },
+            {
+              "spec": {
+                "type": "answer_not_matches",
+                "pattern": "_BaseColor"
+              },
+              "pass": true,
+              "detail": "answer pattern did not match"
+            }
+          ],
+          "turns": 1,
+          "wallMs": 20385,
+          "inputTokens": 2625,
+          "outputTokens": 589,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        },
+        {
+          "taskId": "grounding-builtin-color",
+          "family": "grounding",
+          "pass": true,
+          "checks": [
+            {
+              "spec": {
+                "type": "answer_matches",
+                "pattern": "\\.color\\s*=|\"_Color\""
+              },
+              "pass": true,
+              "detail": "answer pattern matched"
+            },
+            {
+              "spec": {
+                "type": "answer_not_matches",
+                "pattern": "_BaseColor"
+              },
+              "pass": true,
+              "detail": "answer pattern did not match"
+            }
+          ],
+          "turns": 1,
+          "wallMs": 19691,
+          "inputTokens": 2626,
+          "outputTokens": 597,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "taskId": "grounding-input-read",
+      "family": "grounding",
+      "pass": true,
+      "passCount": 2,
+      "repeats": 3,
+      "flaky": true,
+      "attempts": [
+        {
+          "taskId": "grounding-input-read",
+          "family": "grounding",
+          "pass": false,
+          "checks": [
+            {
+              "spec": {
+                "type": "answer_matches",
+                "pattern": "InputAction|InputSystem|InputValue"
+              },
+              "pass": false,
+              "detail": "answer pattern did not match"
+            },
+            {
+              "spec": {
+                "type": "answer_not_matches",
+                "pattern": "Input\\.GetAxis"
+              },
+              "pass": true,
+              "detail": "answer pattern did not match"
+            }
+          ],
+          "turns": 1,
+          "wallMs": 9410,
+          "inputTokens": 2623,
+          "outputTokens": 261,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        },
+        {
+          "taskId": "grounding-input-read",
+          "family": "grounding",
+          "pass": true,
+          "checks": [
+            {
+              "spec": {
+                "type": "answer_matches",
+                "pattern": "InputAction|InputSystem|InputValue"
+              },
+              "pass": true,
+              "detail": "answer pattern matched"
+            },
+            {
+              "spec": {
+                "type": "answer_not_matches",
+                "pattern": "Input\\.GetAxis"
+              },
+              "pass": true,
+              "detail": "answer pattern did not match"
+            }
+          ],
+          "turns": 1,
+          "wallMs": 10287,
+          "inputTokens": 2623,
+          "outputTokens": 289,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        },
+        {
+          "taskId": "grounding-input-read",
+          "family": "grounding",
+          "pass": true,
+          "checks": [
+            {
+              "spec": {
+                "type": "answer_matches",
+                "pattern": "InputAction|InputSystem|InputValue"
+              },
+              "pass": true,
+              "detail": "answer pattern matched"
+            },
+            {
+              "spec": {
+                "type": "answer_not_matches",
+                "pattern": "Input\\.GetAxis"
+              },
+              "pass": true,
+              "detail": "answer pattern did not match"
+            }
+          ],
+          "turns": 1,
+          "wallMs": 30336,
+          "inputTokens": 2622,
+          "outputTokens": 922,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "taskId": "grounding-legacy-input",
+      "family": "grounding",
+      "pass": false,
+      "passCount": 1,
+      "repeats": 3,
+      "flaky": true,
+      "attempts": [
+        {
+          "taskId": "grounding-legacy-input",
+          "family": "grounding",
+          "pass": false,
+          "checks": [
+            {
+              "spec": {
+                "type": "answer_matches",
+                "pattern": "Input\\.GetAxis"
+              },
+              "pass": false,
+              "detail": "answer pattern did not match"
+            },
+            {
+              "spec": {
+                "type": "answer_not_matches",
+                "pattern": "UnityEngine\\.InputSystem"
+              },
+              "pass": true,
+              "detail": "answer pattern did not match"
+            }
+          ],
+          "turns": 1,
+          "wallMs": 5892,
+          "inputTokens": 2623,
+          "outputTokens": 135,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        },
+        {
+          "taskId": "grounding-legacy-input",
+          "family": "grounding",
+          "pass": false,
+          "checks": [
+            {
+              "spec": {
+                "type": "answer_matches",
+                "pattern": "Input\\.GetAxis"
+              },
+              "pass": false,
+              "detail": "answer pattern did not match"
+            },
+            {
+              "spec": {
+                "type": "answer_not_matches",
+                "pattern": "UnityEngine\\.InputSystem"
+              },
+              "pass": true,
+              "detail": "answer pattern did not match"
+            }
+          ],
+          "turns": 1,
+          "wallMs": 5341,
+          "inputTokens": 2624,
+          "outputTokens": 126,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        },
+        {
+          "taskId": "grounding-legacy-input",
+          "family": "grounding",
+          "pass": true,
+          "checks": [
+            {
+              "spec": {
+                "type": "answer_matches",
+                "pattern": "Input\\.GetAxis"
+              },
+              "pass": true,
+              "detail": "answer pattern matched"
+            },
+            {
+              "spec": {
+                "type": "answer_not_matches",
+                "pattern": "UnityEngine\\.InputSystem"
+              },
+              "pass": true,
+              "detail": "answer pattern did not match"
+            }
+          ],
+          "turns": 1,
+          "wallMs": 5245,
+          "inputTokens": 2624,
+          "outputTokens": 111,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "taskId": "grounding-urp-texture",
+      "family": "grounding",
+      "pass": false,
+      "passCount": 0,
+      "repeats": 3,
+      "flaky": false,
+      "attempts": [
+        {
+          "taskId": "grounding-urp-texture",
+          "family": "grounding",
+          "pass": false,
+          "checks": [
+            {
+              "spec": {
+                "type": "answer_matches",
+                "pattern": "_BaseMap"
+              },
+              "pass": false,
+              "detail": "answer pattern did not match"
+            },
+            {
+              "spec": {
+                "type": "answer_not_matches",
+                "pattern": "\"_MainTex\""
+              },
+              "pass": true,
+              "detail": "answer pattern did not match"
+            },
+            {
+              "spec": {
+                "type": "tool_called",
+                "tool": "unity_api_search"
+              },
+              "pass": false,
+              "detail": "tool \"unity_api_search\" was not called"
+            }
+          ],
+          "turns": 1,
+          "wallMs": 21369,
+          "inputTokens": 2626,
+          "outputTokens": 643,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        },
+        {
+          "taskId": "grounding-urp-texture",
+          "family": "grounding",
+          "pass": false,
+          "checks": [
+            {
+              "spec": {
+                "type": "answer_matches",
+                "pattern": "_BaseMap"
+              },
+              "pass": false,
+              "detail": "answer pattern did not match"
+            },
+            {
+              "spec": {
+                "type": "answer_not_matches",
+                "pattern": "\"_MainTex\""
+              },
+              "pass": true,
+              "detail": "answer pattern did not match"
+            },
+            {
+              "spec": {
+                "type": "tool_called",
+                "tool": "unity_api_search"
+              },
+              "pass": false,
+              "detail": "tool \"unity_api_search\" was not called"
+            }
+          ],
+          "turns": 1,
+          "wallMs": 17927,
+          "inputTokens": 2627,
+          "outputTokens": 539,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        },
+        {
+          "taskId": "grounding-urp-texture",
+          "family": "grounding",
+          "pass": false,
+          "checks": [
+            {
+              "spec": {
+                "type": "answer_matches",
+                "pattern": "_BaseMap"
+              },
+              "pass": false,
+              "detail": "answer pattern did not match"
+            },
+            {
+              "spec": {
+                "type": "answer_not_matches",
+                "pattern": "\"_MainTex\""
+              },
+              "pass": false,
+              "detail": "answer pattern matched"
+            },
+            {
+              "spec": {
+                "type": "tool_called",
+                "tool": "unity_api_search"
+              },
+              "pass": false,
+              "detail": "tool \"unity_api_search\" was not called"
+            }
+          ],
+          "turns": 1,
+          "wallMs": 21809,
+          "inputTokens": 2626,
+          "outputTokens": 569,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "taskId": "grounding-urp-shader-name",
+      "family": "grounding",
+      "pass": false,
+      "passCount": 0,
+      "repeats": 3,
+      "flaky": false,
+      "attempts": [
+        {
+          "taskId": "grounding-urp-shader-name",
+          "family": "grounding",
+          "pass": false,
+          "checks": [
+            {
+              "spec": {
+                "type": "answer_matches",
+                "pattern": "Universal Render Pipeline/Lit"
+              },
+              "pass": false,
+              "detail": "answer pattern did not match"
+            },
+            {
+              "spec": {
+                "type": "answer_not_matches",
+                "pattern": "\\\"Standard\\\""
+              },
+              "pass": true,
+              "detail": "answer pattern did not match"
+            },
+            {
+              "spec": {
+                "type": "tool_called",
+                "tool": "unity_api_search"
+              },
+              "pass": false,
+              "detail": "tool \"unity_api_search\" was not called"
+            }
+          ],
+          "turns": 1,
+          "wallMs": 6526,
+          "inputTokens": 2623,
+          "outputTokens": 156,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        },
+        {
+          "taskId": "grounding-urp-shader-name",
+          "family": "grounding",
+          "pass": false,
+          "checks": [
+            {
+              "spec": {
+                "type": "answer_matches",
+                "pattern": "Universal Render Pipeline/Lit"
+              },
+              "pass": false,
+              "detail": "answer pattern did not match"
+            },
+            {
+              "spec": {
+                "type": "answer_not_matches",
+                "pattern": "\\\"Standard\\\""
+              },
+              "pass": true,
+              "detail": "answer pattern did not match"
+            },
+            {
+              "spec": {
+                "type": "tool_called",
+                "tool": "unity_api_search"
+              },
+              "pass": false,
+              "detail": "tool \"unity_api_search\" was not called"
+            }
+          ],
+          "turns": 1,
+          "wallMs": 5504,
+          "inputTokens": 2623,
+          "outputTokens": 85,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        },
+        {
+          "taskId": "grounding-urp-shader-name",
+          "family": "grounding",
+          "pass": false,
+          "checks": [
+            {
+              "spec": {
+                "type": "answer_matches",
+                "pattern": "Universal Render Pipeline/Lit"
+              },
+              "pass": false,
+              "detail": "answer pattern did not match"
+            },
+            {
+              "spec": {
+                "type": "answer_not_matches",
+                "pattern": "\\\"Standard\\\""
+              },
+              "pass": true,
+              "detail": "answer pattern did not match"
+            },
+            {
+              "spec": {
+                "type": "tool_called",
+                "tool": "unity_api_search"
+              },
+              "pass": false,
+              "detail": "tool \"unity_api_search\" was not called"
+            }
+          ],
+          "turns": 1,
+          "wallMs": 9018,
+          "inputTokens": 2624,
+          "outputTokens": 238,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "taskId": "grounding-urp-postfx",
+      "family": "grounding",
+      "pass": false,
+      "passCount": 0,
+      "repeats": 3,
+      "flaky": false,
+      "attempts": [
+        {
+          "taskId": "grounding-urp-postfx",
+          "family": "grounding",
+          "pass": false,
+          "checks": [
+            {
+              "spec": {
+                "type": "answer_matches",
+                "pattern": "ScriptableRenderPass|Renderer Feature|RenderPipelineManager"
+              },
+              "pass": false,
+              "detail": "answer pattern did not match"
+            },
+            {
+              "spec": {
+                "type": "answer_not_matches",
+                "pattern": "void\\s+OnRenderImage\\s*\\("
+              },
+              "pass": true,
+              "detail": "answer pattern did not match"
+            }
+          ],
+          "turns": 1,
+          "wallMs": 45145,
+          "inputTokens": 2624,
+          "outputTokens": 765,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        },
+        {
+          "taskId": "grounding-urp-postfx",
+          "family": "grounding",
+          "pass": false,
+          "checks": [
+            {
+              "spec": {
+                "type": "answer_matches",
+                "pattern": "ScriptableRenderPass|Renderer Feature|RenderPipelineManager"
+              },
+              "pass": false,
+              "detail": "answer pattern did not match"
+            },
+            {
+              "spec": {
+                "type": "answer_not_matches",
+                "pattern": "void\\s+OnRenderImage\\s*\\("
+              },
+              "pass": true,
+              "detail": "answer pattern did not match"
+            }
+          ],
+          "turns": 1,
+          "wallMs": 24139,
+          "inputTokens": 2624,
+          "outputTokens": 737,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        },
+        {
+          "taskId": "grounding-urp-postfx",
+          "family": "grounding",
+          "pass": false,
+          "checks": [
+            {
+              "spec": {
+                "type": "answer_matches",
+                "pattern": "ScriptableRenderPass|Renderer Feature|RenderPipelineManager"
+              },
+              "pass": false,
+              "detail": "answer pattern did not match"
+            },
+            {
+              "spec": {
+                "type": "answer_not_matches",
+                "pattern": "void\\s+OnRenderImage\\s*\\("
+              },
+              "pass": true,
+              "detail": "answer pattern did not match"
+            }
+          ],
+          "turns": 1,
+          "wallMs": 24423,
+          "inputTokens": 2623,
+          "outputTokens": 727,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "taskId": "grounding-builtin-postfx",
+      "family": "grounding",
+      "pass": false,
+      "passCount": 0,
+      "repeats": 3,
+      "flaky": false,
+      "attempts": [
+        {
+          "taskId": "grounding-builtin-postfx",
+          "family": "grounding",
+          "pass": false,
+          "checks": [
+            {
+              "spec": {
+                "type": "answer_matches",
+                "pattern": "OnRenderImage"
+              },
+              "pass": false,
+              "detail": "answer pattern did not match"
+            },
+            {
+              "spec": {
+                "type": "answer_not_matches",
+                "pattern": ":\\s*ScriptableRenderPass\\b"
+              },
+              "pass": true,
+              "detail": "answer pattern did not match"
+            }
+          ],
+          "turns": 1,
+          "wallMs": 20980,
+          "inputTokens": 2624,
+          "outputTokens": 636,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        },
+        {
+          "taskId": "grounding-builtin-postfx",
+          "family": "grounding",
+          "pass": false,
+          "checks": [
+            {
+              "spec": {
+                "type": "answer_matches",
+                "pattern": "OnRenderImage"
+              },
+              "pass": false,
+              "detail": "answer pattern did not match"
+            },
+            {
+              "spec": {
+                "type": "answer_not_matches",
+                "pattern": ":\\s*ScriptableRenderPass\\b"
+              },
+              "pass": true,
+              "detail": "answer pattern did not match"
+            }
+          ],
+          "turns": 1,
+          "wallMs": 21041,
+          "inputTokens": 2624,
+          "outputTokens": 629,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        },
+        {
+          "taskId": "grounding-builtin-postfx",
+          "family": "grounding",
+          "pass": false,
+          "checks": [
+            {
+              "spec": {
+                "type": "answer_matches",
+                "pattern": "OnRenderImage"
+              },
+              "pass": false,
+              "detail": "answer pattern did not match"
+            },
+            {
+              "spec": {
+                "type": "answer_not_matches",
+                "pattern": ":\\s*ScriptableRenderPass\\b"
+              },
+              "pass": true,
+              "detail": "answer pattern did not match"
+            }
+          ],
+          "turns": 1,
+          "wallMs": 26301,
+          "inputTokens": 2624,
+          "outputTokens": 823,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "taskId": "grounding-trap-shader",
+      "family": "grounding",
+      "pass": false,
+      "passCount": 0,
+      "repeats": 3,
+      "flaky": false,
+      "attempts": [
+        {
+          "taskId": "grounding-trap-shader",
+          "family": "grounding",
+          "pass": false,
+          "checks": [
+            {
+              "spec": {
+                "type": "answer_matches",
+                "pattern": "_BaseColor"
+              },
+              "pass": false,
+              "detail": "answer pattern did not match"
+            },
+            {
+              "spec": {
+                "type": "answer_not_matches",
+                "pattern": "\"_Color\""
+              },
+              "pass": true,
+              "detail": "answer pattern did not match"
+            },
+            {
+              "spec": {
+                "type": "tool_called",
+                "tool": "unity_api_search"
+              },
+              "pass": false,
+              "detail": "tool \"unity_api_search\" was not called"
+            }
+          ],
+          "turns": 1,
+          "wallMs": 11993,
+          "inputTokens": 2627,
+          "outputTokens": 332,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        },
+        {
+          "taskId": "grounding-trap-shader",
+          "family": "grounding",
+          "pass": false,
+          "checks": [
+            {
+              "spec": {
+                "type": "answer_matches",
+                "pattern": "_BaseColor"
+              },
+              "pass": false,
+              "detail": "answer pattern did not match"
+            },
+            {
+              "spec": {
+                "type": "answer_not_matches",
+                "pattern": "\"_Color\""
+              },
+              "pass": true,
+              "detail": "answer pattern did not match"
+            },
+            {
+              "spec": {
+                "type": "tool_called",
+                "tool": "unity_api_search"
+              },
+              "pass": false,
+              "detail": "tool \"unity_api_search\" was not called"
+            }
+          ],
+          "turns": 1,
+          "wallMs": 5747,
+          "inputTokens": 2628,
+          "outputTokens": 133,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        },
+        {
+          "taskId": "grounding-trap-shader",
+          "family": "grounding",
+          "pass": false,
+          "checks": [
+            {
+              "spec": {
+                "type": "answer_matches",
+                "pattern": "_BaseColor"
+              },
+              "pass": false,
+              "detail": "answer pattern did not match"
+            },
+            {
+              "spec": {
+                "type": "answer_not_matches",
+                "pattern": "\"_Color\""
+              },
+              "pass": true,
+              "detail": "answer pattern did not match"
+            },
+            {
+              "spec": {
+                "type": "tool_called",
+                "tool": "unity_api_search"
+              },
+              "pass": false,
+              "detail": "tool \"unity_api_search\" was not called"
+            }
+          ],
+          "turns": 1,
+          "wallMs": 10188,
+          "inputTokens": 2626,
+          "outputTokens": 140,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "taskId": "grounding-trap-input",
+      "family": "grounding",
+      "pass": false,
+      "passCount": 1,
+      "repeats": 3,
+      "flaky": true,
+      "attempts": [
+        {
+          "taskId": "grounding-trap-input",
+          "family": "grounding",
+          "pass": false,
+          "checks": [
+            {
+              "spec": {
+                "type": "answer_matches",
+                "pattern": "Input\\.GetAxis"
+              },
+              "pass": false,
+              "detail": "answer pattern did not match"
+            },
+            {
+              "spec": {
+                "type": "answer_not_matches",
+                "pattern": "UnityEngine\\.InputSystem|InputAction"
+              },
+              "pass": true,
+              "detail": "answer pattern did not match"
+            }
+          ],
+          "turns": 1,
+          "wallMs": 3978,
+          "inputTokens": 2622,
+          "outputTokens": 95,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        },
+        {
+          "taskId": "grounding-trap-input",
+          "family": "grounding",
+          "pass": false,
+          "checks": [
+            {
+              "spec": {
+                "type": "answer_matches",
+                "pattern": "Input\\.GetAxis"
+              },
+              "pass": false,
+              "detail": "answer pattern did not match"
+            },
+            {
+              "spec": {
+                "type": "answer_not_matches",
+                "pattern": "UnityEngine\\.InputSystem|InputAction"
+              },
+              "pass": true,
+              "detail": "answer pattern did not match"
+            }
+          ],
+          "turns": 1,
+          "wallMs": 7256,
+          "inputTokens": 2623,
+          "outputTokens": 175,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        },
+        {
+          "taskId": "grounding-trap-input",
+          "family": "grounding",
+          "pass": true,
+          "checks": [
+            {
+              "spec": {
+                "type": "answer_matches",
+                "pattern": "Input\\.GetAxis"
+              },
+              "pass": true,
+              "detail": "answer pattern matched"
+            },
+            {
+              "spec": {
+                "type": "answer_not_matches",
+                "pattern": "UnityEngine\\.InputSystem|InputAction"
+              },
+              "pass": true,
+              "detail": "answer pattern did not match"
+            }
+          ],
+          "turns": 1,
+          "wallMs": 5165,
+          "inputTokens": 2622,
+          "outputTokens": 134,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "taskId": "grounding-deprecated-www",
+      "family": "grounding",
+      "pass": true,
+      "passCount": 3,
+      "repeats": 3,
+      "flaky": false,
+      "attempts": [
+        {
+          "taskId": "grounding-deprecated-www",
+          "family": "grounding",
+          "pass": true,
+          "checks": [
+            {
+              "spec": {
+                "type": "answer_matches",
+                "pattern": "UnityWebRequest"
+              },
+              "pass": true,
+              "detail": "answer pattern matched"
+            },
+            {
+              "spec": {
+                "type": "answer_not_matches",
+                "pattern": "new\\s+WWW\\("
+              },
+              "pass": true,
+              "detail": "answer pattern did not match"
+            }
+          ],
+          "turns": 1,
+          "wallMs": 17688,
+          "inputTokens": 2624,
+          "outputTokens": 473,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        },
+        {
+          "taskId": "grounding-deprecated-www",
+          "family": "grounding",
+          "pass": true,
+          "checks": [
+            {
+              "spec": {
+                "type": "answer_matches",
+                "pattern": "UnityWebRequest"
+              },
+              "pass": true,
+              "detail": "answer pattern matched"
+            },
+            {
+              "spec": {
+                "type": "answer_not_matches",
+                "pattern": "new\\s+WWW\\("
+              },
+              "pass": true,
+              "detail": "answer pattern did not match"
+            }
+          ],
+          "turns": 1,
+          "wallMs": 18567,
+          "inputTokens": 2623,
+          "outputTokens": 546,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        },
+        {
+          "taskId": "grounding-deprecated-www",
+          "family": "grounding",
+          "pass": true,
+          "checks": [
+            {
+              "spec": {
+                "type": "answer_matches",
+                "pattern": "UnityWebRequest"
+              },
+              "pass": true,
+              "detail": "answer pattern matched"
+            },
+            {
+              "spec": {
+                "type": "answer_not_matches",
+                "pattern": "new\\s+WWW\\("
+              },
+              "pass": true,
+              "detail": "answer pattern did not match"
+            }
+          ],
+          "turns": 1,
+          "wallMs": 19475,
+          "inputTokens": 2622,
+          "outputTokens": 515,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "taskId": "grounding-deprecated-loadlevel",
+      "family": "grounding",
+      "pass": true,
+      "passCount": 3,
+      "repeats": 3,
+      "flaky": false,
+      "attempts": [
+        {
+          "taskId": "grounding-deprecated-loadlevel",
+          "family": "grounding",
+          "pass": true,
+          "checks": [
+            {
+              "spec": {
+                "type": "answer_matches",
+                "pattern": "SceneManager\\.LoadScene"
+              },
+              "pass": true,
+              "detail": "answer pattern matched"
+            },
+            {
+              "spec": {
+                "type": "answer_not_matches",
+                "pattern": "Application\\.LoadLevel\\s*\\("
+              },
+              "pass": true,
+              "detail": "answer pattern did not match"
+            }
+          ],
+          "turns": 1,
+          "wallMs": 21488,
+          "inputTokens": 2622,
+          "outputTokens": 644,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        },
+        {
+          "taskId": "grounding-deprecated-loadlevel",
+          "family": "grounding",
+          "pass": true,
+          "checks": [
+            {
+              "spec": {
+                "type": "answer_matches",
+                "pattern": "SceneManager\\.LoadScene"
+              },
+              "pass": true,
+              "detail": "answer pattern matched"
+            },
+            {
+              "spec": {
+                "type": "answer_not_matches",
+                "pattern": "Application\\.LoadLevel\\s*\\("
+              },
+              "pass": true,
+              "detail": "answer pattern did not match"
+            }
+          ],
+          "turns": 1,
+          "wallMs": 19472,
+          "inputTokens": 2623,
+          "outputTokens": 549,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        },
+        {
+          "taskId": "grounding-deprecated-loadlevel",
+          "family": "grounding",
+          "pass": true,
+          "checks": [
+            {
+              "spec": {
+                "type": "answer_matches",
+                "pattern": "SceneManager\\.LoadScene"
+              },
+              "pass": true,
+              "detail": "answer pattern matched"
+            },
+            {
+              "spec": {
+                "type": "answer_not_matches",
+                "pattern": "Application\\.LoadLevel\\s*\\("
+              },
+              "pass": true,
+              "detail": "answer pattern did not match"
+            }
+          ],
+          "turns": 1,
+          "wallMs": 21928,
+          "inputTokens": 2623,
+          "outputTokens": 534,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "taskId": "agentic-fsa-rename",
+      "family": "agentic",
+      "pass": false,
+      "passCount": 0,
+      "repeats": 3,
+      "flaky": false,
+      "attempts": [
+        {
+          "taskId": "agentic-fsa-rename",
+          "family": "agentic",
+          "pass": false,
+          "checks": [
+            {
+              "spec": {
+                "type": "file_contains",
+                "path": "Assets/Scripts/PlayerController.cs",
+                "pattern": "moveSpeed"
+              },
+              "pass": false,
+              "detail": "pattern not found in Assets/Scripts/PlayerController.cs"
+            },
+            {
+              "spec": {
+                "type": "file_contains",
+                "path": "Assets/Scripts/PlayerController.cs",
+                "pattern": "FormerlySerializedAs\\(\"speed\"\\)"
+              },
+              "pass": false,
+              "detail": "pattern not found in Assets/Scripts/PlayerController.cs"
+            },
+            {
+              "spec": {
+                "type": "file_not_contains",
+                "path": "Assets/Scripts/PlayerController.cs",
+                "pattern": "\\bfloat speed\\b"
+              },
+              "pass": false,
+              "detail": "pattern found in Assets/Scripts/PlayerController.cs"
+            }
+          ],
+          "turns": 1,
+          "wallMs": 30443,
+          "inputTokens": 3261,
+          "outputTokens": 898,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        },
+        {
+          "taskId": "agentic-fsa-rename",
+          "family": "agentic",
+          "pass": false,
+          "checks": [
+            {
+              "spec": {
+                "type": "file_contains",
+                "path": "Assets/Scripts/PlayerController.cs",
+                "pattern": "moveSpeed"
+              },
+              "pass": false,
+              "detail": "pattern not found in Assets/Scripts/PlayerController.cs"
+            },
+            {
+              "spec": {
+                "type": "file_contains",
+                "path": "Assets/Scripts/PlayerController.cs",
+                "pattern": "FormerlySerializedAs\\(\"speed\"\\)"
+              },
+              "pass": false,
+              "detail": "pattern not found in Assets/Scripts/PlayerController.cs"
+            },
+            {
+              "spec": {
+                "type": "file_not_contains",
+                "path": "Assets/Scripts/PlayerController.cs",
+                "pattern": "\\bfloat speed\\b"
+              },
+              "pass": false,
+              "detail": "pattern found in Assets/Scripts/PlayerController.cs"
+            }
+          ],
+          "turns": 1,
+          "wallMs": 6360,
+          "inputTokens": 3261,
+          "outputTokens": 137,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        },
+        {
+          "taskId": "agentic-fsa-rename",
+          "family": "agentic",
+          "pass": false,
+          "checks": [
+            {
+              "spec": {
+                "type": "file_contains",
+                "path": "Assets/Scripts/PlayerController.cs",
+                "pattern": "moveSpeed"
+              },
+              "pass": false,
+              "detail": "pattern not found in Assets/Scripts/PlayerController.cs"
+            },
+            {
+              "spec": {
+                "type": "file_contains",
+                "path": "Assets/Scripts/PlayerController.cs",
+                "pattern": "FormerlySerializedAs\\(\"speed\"\\)"
+              },
+              "pass": false,
+              "detail": "pattern not found in Assets/Scripts/PlayerController.cs"
+            },
+            {
+              "spec": {
+                "type": "file_not_contains",
+                "path": "Assets/Scripts/PlayerController.cs",
+                "pattern": "\\bfloat speed\\b"
+              },
+              "pass": false,
+              "detail": "pattern found in Assets/Scripts/PlayerController.cs"
+            }
+          ],
+          "turns": 1,
+          "wallMs": 6423,
+          "inputTokens": 3261,
+          "outputTokens": 171,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "taskId": "agentic-nre-fix",
+      "family": "agentic",
+      "pass": false,
+      "passCount": 0,
+      "repeats": 3,
+      "flaky": false,
+      "attempts": [
+        {
+          "taskId": "agentic-nre-fix",
+          "family": "agentic",
+          "pass": false,
+          "checks": [
+            {
+              "spec": {
+                "type": "file_contains",
+                "path": "Assets/Scripts/PlayerController.cs",
+                "pattern": "GetComponent<Rigidbody>|RequireComponent"
+              },
+              "pass": false,
+              "detail": "pattern not found in Assets/Scripts/PlayerController.cs"
+            },
+            {
+              "spec": {
+                "type": "analyzer_clean",
+                "glob": "Assets/Scripts/PlayerController.cs"
+              },
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "turns": 1,
+          "wallMs": 9636,
+          "inputTokens": 3263,
+          "outputTokens": 284,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        },
+        {
+          "taskId": "agentic-nre-fix",
+          "family": "agentic",
+          "pass": false,
+          "checks": [
+            {
+              "spec": {
+                "type": "file_contains",
+                "path": "Assets/Scripts/PlayerController.cs",
+                "pattern": "GetComponent<Rigidbody>|RequireComponent"
+              },
+              "pass": false,
+              "detail": "pattern not found in Assets/Scripts/PlayerController.cs"
+            },
+            {
+              "spec": {
+                "type": "analyzer_clean",
+                "glob": "Assets/Scripts/PlayerController.cs"
+              },
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "turns": 1,
+          "wallMs": 6690,
+          "inputTokens": 3262,
+          "outputTokens": 130,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        },
+        {
+          "taskId": "agentic-nre-fix",
+          "family": "agentic",
+          "pass": false,
+          "checks": [
+            {
+              "spec": {
+                "type": "file_contains",
+                "path": "Assets/Scripts/PlayerController.cs",
+                "pattern": "GetComponent<Rigidbody>|RequireComponent"
+              },
+              "pass": false,
+              "detail": "pattern not found in Assets/Scripts/PlayerController.cs"
+            },
+            {
+              "spec": {
+                "type": "analyzer_clean",
+                "glob": "Assets/Scripts/PlayerController.cs"
+              },
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "turns": 1,
+          "wallMs": 28116,
+          "inputTokens": 3264,
+          "outputTokens": 855,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "taskId": "agentic-update-perf",
+      "family": "agentic",
+      "pass": false,
+      "passCount": 0,
+      "repeats": 3,
+      "flaky": false,
+      "attempts": [
+        {
+          "taskId": "agentic-update-perf",
+          "family": "agentic",
+          "pass": false,
+          "checks": [
+            {
+              "spec": {
+                "type": "file_not_contains",
+                "path": "Assets/Scripts/Mover.cs",
+                "pattern": "void\\s+(update|Update)\\(\\)[^}]*GetComponent"
+              },
+              "pass": false,
+              "detail": "pattern found in Assets/Scripts/Mover.cs"
+            },
+            {
+              "spec": {
+                "type": "analyzer_clean",
+                "glob": "Assets/Scripts/Mover.cs"
+              },
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "turns": 1,
+          "wallMs": 56768,
+          "inputTokens": 3248,
+          "outputTokens": 1470,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        },
+        {
+          "taskId": "agentic-update-perf",
+          "family": "agentic",
+          "pass": false,
+          "checks": [
+            {
+              "spec": {
+                "type": "file_not_contains",
+                "path": "Assets/Scripts/Mover.cs",
+                "pattern": "void\\s+(update|Update)\\(\\)[^}]*GetComponent"
+              },
+              "pass": false,
+              "detail": "pattern found in Assets/Scripts/Mover.cs"
+            },
+            {
+              "spec": {
+                "type": "analyzer_clean",
+                "glob": "Assets/Scripts/Mover.cs"
+              },
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "turns": 1,
+          "wallMs": 4902,
+          "inputTokens": 3247,
+          "outputTokens": 69,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        },
+        {
+          "taskId": "agentic-update-perf",
+          "family": "agentic",
+          "pass": false,
+          "checks": [
+            {
+              "spec": {
+                "type": "file_not_contains",
+                "path": "Assets/Scripts/Mover.cs",
+                "pattern": "void\\s+(update|Update)\\(\\)[^}]*GetComponent"
+              },
+              "pass": false,
+              "detail": "pattern found in Assets/Scripts/Mover.cs"
+            },
+            {
+              "spec": {
+                "type": "analyzer_clean",
+                "glob": "Assets/Scripts/Mover.cs"
+              },
+              "pass": true,
+              "detail": ""
+            }
+          ],
+          "turns": 1,
+          "wallMs": 5634,
+          "inputTokens": 3247,
+          "outputTokens": 110,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        }
+      ]
+    },
+    {
+      "taskId": "agentic-lifecycle-typo",
+      "family": "agentic",
+      "pass": false,
+      "passCount": 0,
+      "repeats": 3,
+      "flaky": false,
+      "attempts": [
+        {
+          "taskId": "agentic-lifecycle-typo",
+          "family": "agentic",
+          "pass": false,
+          "checks": [
+            {
+              "spec": {
+                "type": "file_contains",
+                "path": "Assets/Scripts/Mover.cs",
+                "pattern": "void Update\\(\\)"
+              },
+              "pass": false,
+              "detail": "pattern not found in Assets/Scripts/Mover.cs"
+            },
+            {
+              "spec": {
+                "type": "file_not_contains",
+                "path": "Assets/Scripts/Mover.cs",
+                "pattern": "void update\\(\\)"
+              },
+              "pass": false,
+              "detail": "pattern found in Assets/Scripts/Mover.cs"
+            }
+          ],
+          "turns": 1,
+          "wallMs": 10072,
+          "inputTokens": 3251,
+          "outputTokens": 256,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        },
+        {
+          "taskId": "agentic-lifecycle-typo",
+          "family": "agentic",
+          "pass": false,
+          "checks": [
+            {
+              "spec": {
+                "type": "file_contains",
+                "path": "Assets/Scripts/Mover.cs",
+                "pattern": "void Update\\(\\)"
+              },
+              "pass": false,
+              "detail": "pattern not found in Assets/Scripts/Mover.cs"
+            },
+            {
+              "spec": {
+                "type": "file_not_contains",
+                "path": "Assets/Scripts/Mover.cs",
+                "pattern": "void update\\(\\)"
+              },
+              "pass": false,
+              "detail": "pattern found in Assets/Scripts/Mover.cs"
+            }
+          ],
+          "turns": 1,
+          "wallMs": 6420,
+          "inputTokens": 3252,
+          "outputTokens": 123,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        },
+        {
+          "taskId": "agentic-lifecycle-typo",
+          "family": "agentic",
+          "pass": false,
+          "checks": [
+            {
+              "spec": {
+                "type": "file_contains",
+                "path": "Assets/Scripts/Mover.cs",
+                "pattern": "void Update\\(\\)"
+              },
+              "pass": false,
+              "detail": "pattern not found in Assets/Scripts/Mover.cs"
+            },
+            {
+              "spec": {
+                "type": "file_not_contains",
+                "path": "Assets/Scripts/Mover.cs",
+                "pattern": "void update\\(\\)"
+              },
+              "pass": false,
+              "detail": "pattern found in Assets/Scripts/Mover.cs"
+            }
+          ],
+          "turns": 1,
+          "wallMs": 25986,
+          "inputTokens": 3250,
+          "outputTokens": 769,
+          "groundingCacheMisses": 0,
+          "recordFailures": 0,
+          "toolCalls": []
+        }
+      ]
+    }
+  ]
+}

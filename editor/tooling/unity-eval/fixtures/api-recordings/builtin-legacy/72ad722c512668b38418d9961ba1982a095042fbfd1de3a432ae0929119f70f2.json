@@ -1,0 +1,14 @@
+{
+  "recordedAt": "2026-07-08T17:45:04.284Z",
+  "request": {
+    "endpoint": "search",
+    "query": "download text from url unitywebrequest",
+    "unityVersion": "2022.3.45f1",
+    "renderPipeline": "Built-in",
+    "inputSystem": "Legacy"
+  },
+  "response": {
+    "ok": true,
+    "data": []
+  }
+}

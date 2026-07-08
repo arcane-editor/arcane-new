@@ -1,0 +1,14 @@
+{
+  "recordedAt": "2026-07-08T17:00:26.279Z",
+  "request": {
+    "endpoint": "search",
+    "query": "input.getkey keycode legacy input",
+    "unityVersion": "2022.3.45f1",
+    "renderPipeline": "Built-in",
+    "inputSystem": "Legacy"
+  },
+  "response": {
+    "ok": true,
+    "data": []
+  }
+}

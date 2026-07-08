@@ -329,30 +329,60 @@ but wrong ones.
 
 ## Baseline results
 
-**Captured 2026-07-08** via Variant B (local `wrangler dev` arcane-server,
-tier selected with `--reasoning-level`, remote Workers AI binding — i.e. the
-real production routing path and the real frozen models). Result JSONs live
-in `results/baselines/`.
+**Current baselines — captured 2026-07-08 (evening), 24 tasks × `--repeats 3`,
+majority scoring.** Chat via Variant B (local `wrangler dev` arcane-server,
+tier via `--reasoning-level`, remote Workers AI binding = real production
+routing + the real frozen models); grounding recorded live from the
+**production** server (`--record --server-url https://api.arcaneai.org
+--record-api-key-env PROD_JWT`) so `unity_api_search` served real
+Vectorize/D1 corpus data (zero record failures, zero cache misses). Result
+JSONs live in `results/baselines/` (the `2026-07-08T16*/17*` trio).
 
-| Label | Model | codegen | grounding | agentic | Total | Tokens in/out |
-|---|---|---|---|---|---|---|
-| cf-mid-kimi-k2.7 | @cf/moonshotai/kimi-k2.7-code | 4/4 | 3/4 | 4/4 | **11/12** | 174k/12.6k |
-| cf-high-glm-5.2 | @cf/zai-org/glm-5.2 | 4/4 | 2/4 | 4/4 | **10/12** | 154k/11.2k |
+| Label | Model | codegen | grounding | agentic | Total |
+|---|---|---|---|---|---|
+| cf-low-qwen2.5-coder | @cf/qwen/qwen2.5-coder-32b-instruct | 0/8 | 4/12 | 0/4 | **4/24** |
+| cf-mid-kimi-k2.7 | @cf/moonshotai/kimi-k2.7-code | 8/8 | 8/12 | 4/4 | **20/24** |
+| cf-high-glm-5.2 | @cf/zai-org/glm-5.2 | 8/8 | 8/12 | 4/4 | **20/24** |
 
-**These predate the 12→24 task grow (P1.6)** — they were captured against
-the original 4/4/4 suite and the counts/percentages above don't reflect the
-current 8 codegen / 12 grounding / 4 agentic split. Re-capture via
-`--preset cf-mid`/`--preset cf-high` (or `cf-low`, not yet baselined) to get
-numbers comparable to the current suite before drawing conclusions from a
-diff against the table below.
+What failed, concretely:
 
-What failed, concretely — every failure across both runs is **pipeline/input
-grounding**, exactly the gap the design doc targets:
+- **cf-low fails every write-task** (0/8 codegen, 0/4 agentic, zero transport
+  errors) — a systematic tool/edit-format failure on qwen2.5-coder in this
+  harness, not a knowledge gap. This is the biggest known headroom for
+  harness work (loop robustness / edit-format tuning), tracked for Phase 3.
+- mid: `grounding-urp-texture`, `grounding-urp-shader-name`,
+  `grounding-trap-shader` (+ flaky `grounding-input-read`).
+- high: `grounding-urp-shader-name`, `grounding-trap-shader`
+  (+ flaky `grounding-urp-color`, `grounding-trap-input`).
+- The persistent misses are the **exact-name grounding trio** (the three
+  tasks whose correct answer is a literal property/shader name the injected
+  facts don't state) — the precise target of the Phase-2 contrastive-facts +
+  answer-linter work.
 
-- mid: `grounding-urp-color` — mentioned `"_Color"` in a URP-project answer.
-- high: `grounding-urp-color` (same `"_Color"` leak) and
-  `grounding-input-read` — mentioned `Input.GetAxis` in a new-Input-System
-  project.
+**Corpus coverage caveat:** the grounding corpus (D1 + Vectorize) currently
+contains **only Unity 6000.3**. `urp-newinput` was aligned to 6000.3.5f2 so
+its grounding is real; `urp2022-legacyinput` (2022.3) is deliberately
+uncovered — its tasks measure facts-only behavior under explicit
+`grounding UNAVAILABLE`/no-matches conditions. Ingesting 2022.3/6000.0
+corpora is an ops follow-up (see `arcane-server/scripts/README.md`).
+
+An earlier same-day 3-tier run (kept only in local `results/`, not
+baselines) was captured while every grounding call 500'd (local D1 missing
+`unity_api_signatures`): low 4/24, mid 18/24, high 16/24. The +2/+4
+mid/high delta against those runs is the measured value of working
+version-matched grounding.
+
+### Historical (12-task suite, 2026-07-08 morning)
+
+| Label | codegen | grounding | agentic | Total |
+|---|---|---|---|---|
+| cf-mid-kimi-k2.7 | 4/4 | 3/4 | 4/4 | **11/12** |
+| cf-high-glm-5.2 | 4/4 | 2/4 | 4/4 | **10/12** |
+
+Captured against the original 4/4/4 suite with only the 5 fs tools wired, no
+gates, `max_tokens: 8192`, before the fixture/version alignment — not
+comparable to the current suite. Failures were the `_Color`-in-URP and
+`Input.GetAxis`-under-new-Input-System leaks.
 
 Caveats to keep honest:
 
