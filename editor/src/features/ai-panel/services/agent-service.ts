@@ -39,15 +39,18 @@ import {
   withUnityCompileGate,
   resetCompileGate,
 } from './unity-tools';
-import { resetTurnTelemetry, recordTelemetryEvent } from './turn-telemetry';
+import { resetTurnTelemetry, recordTelemetryEvent, recordGroundingLintHit } from './turn-telemetry';
 import { useAiStore, type AiMessage } from '../../../stores/ai';
 import { useAuthStore } from '../../../stores/auth';
 import { useWorkspaceStore } from '../../../stores/workspace';
 import { useProjectContextStore } from '../../../stores/project-context';
 import { useSettingsStore } from '../../../stores/settings';
 import { buildSystemPrompt, defaultPromptModeFor, type PromptMode } from './prompts';
+import { getUnityGroundingContext } from './prompts/unity-facts';
+import type { ContrastFacts } from './prompts/unity-contrast';
+import { lintAnswer, buildReviseMessage } from './grounding-lint';
 import { resolveAttachments } from './attachments';
-import type { Model, AgentTool, AgentMessage } from './vendor/types';
+import type { Model, AgentTool, AgentMessage, TextContent } from './vendor/types';
 import { TIER_CONTEXT_WINDOWS, type Attachment, type ChatMode, type Effort } from './types';
 
 /** Convert saved UI messages back into vendor AgentMessages for resume. */
@@ -298,6 +301,14 @@ export class AgentService {
       } else {
         await this.agent.prompt(promptText);
       }
+
+      // Ask-mode grounding linter (P2.2): one forced revise turn, hooked
+      // OUTSIDE the vendor loop (architecturally the answer-level sibling of
+      // the compile/analyzer gates, which operate at the tool-call level).
+      // Agent mode has the compile gate instead — do not wire this there.
+      if (opts.mode === 'ask') {
+        await this.runGroundingLint();
+      }
     } catch (error) {
       if (error instanceof Error && error.message === 'Agent is already running') {
         useAiStore.getState().setError('Agent is already processing a message.');
@@ -307,6 +318,52 @@ export class AgentService {
         error instanceof Error ? error.message : 'An unexpected error occurred.',
       );
     }
+  }
+
+  /**
+   * Ask-mode grounding linter (P2.2). Reverse-scans the just-finished turn's
+   * final assistant message (same approach as `tooling/unity-eval/
+   * run-task.ts`'s finalAnswer extraction) and, if it uses an API this
+   * project's detected facts say is wrong, pushes exactly ONE forced revise
+   * turn — never more, even if the revised answer still has issues.
+   *
+   * No-ops for non-Unity workspaces (same `isUnityProject` gate
+   * `getUnityFactsBlock()` uses — the contrast table's rows are Unity-
+   * specific, so there's nothing to lint outside a Unity project).
+   *
+   * Skips a message whose `stopReason` is `'aborted'` (the user cancelled
+   * mid-stream — nothing to lint, and prompting again would just restart a
+   * cancelled turn). Errors from the revise prompt itself propagate to the
+   * caller's existing catch block, same as the initial prompt.
+   */
+  private async runGroundingLint(): Promise<void> {
+    if (!useProjectContextStore.getState().isUnityProject) return;
+
+    const lastAssistant = [...this.agent.getMessages()]
+      .reverse()
+      .find((m) => m.role === 'assistant');
+    if (!lastAssistant || lastAssistant.role !== 'assistant') return;
+    if (lastAssistant.stopReason === 'aborted') return;
+
+    const finalText = lastAssistant.content
+      .filter((c): c is TextContent => c.type === 'text')
+      .map((c) => c.text)
+      .join('\n');
+    if (!finalText) return;
+
+    const ctx = getUnityGroundingContext();
+    const facts: ContrastFacts = {
+      renderPipeline: ctx.renderPipeline ?? null,
+      inputSystem: ctx.inputSystem ?? null,
+    };
+    const violations = lintAnswer(finalText, facts);
+    if (violations.length === 0) return;
+
+    recordGroundingLintHit();
+    useAiStore
+      .getState()
+      .addSystemMessage(`Grounding check — revising: ${violations.length} project-mismatch issue(s)`);
+    await this.agent.prompt(buildReviseMessage(violations));
   }
 
   abort(): void {

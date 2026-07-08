@@ -152,6 +152,71 @@ describe('runTask', () => {
   });
 });
 
+describe('runTask — grounding linter parity (P2.2)', () => {
+  const groundingAskTask: EvalTask = {
+    id: 'mock-ground-001',
+    family: 'grounding',
+    fixture: 'urp-newinput', // URP + New Input System
+    mode: 'ask',
+    prompt: 'How do I tint this material red?',
+    checks: [],
+  };
+
+  /** Wraps a scripted StreamFn with a call counter so tests can assert exact LLM-call counts. */
+  function countingStreamFn(script: AssistantMessage['content'][]): { streamFn: StreamFn; calls: () => number } {
+    const inner = scriptedStreamFn(script);
+    let calls = 0;
+    const streamFn: StreamFn = (ctx, opts) => {
+      calls++;
+      return inner(ctx, opts);
+    };
+    return { streamFn, calls: () => calls };
+  }
+
+  it('a violating first answer triggers exactly one revise cycle and grades the revised (clean) answer', async () => {
+    const { streamFn, calls } = countingStreamFn([
+      [
+        {
+          type: 'text',
+          text: ['Here you go:', '', '```csharp', 'material.SetColor("_Color", Color.red);', '```'].join('\n'),
+        },
+      ],
+      [{ type: 'text', text: ['```csharp', 'material.SetColor("_BaseColor", Color.red);', '```'].join('\n') }],
+    ]);
+    const usage = { input: 0, output: 0, requests: 0 };
+    const result = await runTask(
+      {
+        ...groundingAskTask,
+        checks: [
+          { type: 'answer_matches', pattern: '_BaseColor' },
+          { type: 'answer_not_matches', pattern: '"_Color"' },
+        ],
+      },
+      streamFn,
+      usage,
+    );
+    expect(result.groundingLintHits).toBe(1);
+    expect(calls()).toBe(2);
+    expect(result.checks.every((c) => c.pass)).toBe(true);
+    expect(result.pass).toBe(true);
+  });
+
+  it('a clean first answer never triggers a revise cycle (single LLM call)', async () => {
+    const { streamFn, calls } = countingStreamFn([
+      [{ type: 'text', text: ['```csharp', 'material.SetColor("_BaseColor", Color.red);', '```'].join('\n') }],
+    ]);
+    const usage = { input: 0, output: 0, requests: 0 };
+    const result = await runTask(
+      { ...groundingAskTask, checks: [{ type: 'answer_matches', pattern: '_BaseColor' }] },
+      streamFn,
+      usage,
+    );
+    expect(result.groundingLintHits).toBe(0);
+    expect(calls()).toBe(1);
+    expect(result.pass).toBe(true);
+  });
+});
+
 describe('maxTokensForMode', () => {
   it('maps ask mode to the prod chat cap and agent mode to the prod agentic cap', () => {
     expect(maxTokensForMode('ask')).toBe(ASK_MAX_TOKENS);

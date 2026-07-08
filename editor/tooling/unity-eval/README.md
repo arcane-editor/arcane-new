@@ -136,13 +136,14 @@ Output: a markdown report on stdout, and a JSON file written to
   "repeats": 1,                 // the --repeats value this run used
   "groundingCacheMisses": 0,
   "recordFailures": 0,
+  "groundingLintHits": 0,        // ask-mode grounding-linter revise cycles fired, summed across all tasks/attempts
   "results": [
     {
       "taskId": "...", "family": "...",
       "pass": true,              // aggregated verdict, see aggregate.ts
       "passCount": 1, "repeats": 1,
       "flaky": false,            // true when attempts disagreed
-      "attempts": [ /* 1..N TaskResult objects: pass, checks, turns, wallMs, inputTokens, outputTokens, error?, groundingCacheMisses, recordFailures */ ]
+      "attempts": [ /* 1..N TaskResult objects: pass, checks, turns, wallMs, inputTokens, outputTokens, error?, groundingCacheMisses, recordFailures, groundingLintHits */ ]
     },
     // ...
   ]
@@ -182,6 +183,37 @@ agent tasks never saw the findings that drive real self-correction turns —
 `analyzer_clean` would only catch the *final* state, not exercise the repair
 loop itself. `ask` mode has no write/edit tools, so the gate never applies
 there.
+
+## Grounding linter (ask-mode answer check + one revise turn)
+
+`ask`-mode tasks' final text answer is run through
+`src/features/ai-panel/services/grounding-lint.ts`'s `lintAnswer()` — the
+answer-level sibling of the analyzer gate above, hooked OUTSIDE the vendor
+loop instead of inside a tool call. It's the enforcement half of P2.1's
+contrastive anti-default facts (`prompts/unity-contrast.ts`): the facts block
+can state "`_BaseColor` is correct here, `_Color` is WRONG" and the model can
+still revert to its training default in the actual answer, so this is a
+deterministic, regex-based check for that specific failure mode, not a second
+opinion from another LLM call.
+
+Scoping is deliberately narrow to avoid flagging correct answers that
+*explain* a wrong default in prose ("don't use `_Color` here"): only fenced
+code blocks (comments stripped first) and inline code spans that already look
+like usage (contain a call paren or a `using` directive) are matched against
+`unity-contrast.ts`'s `wrongTokens` patterns — see `grounding-lint.ts`'s
+header comment for the exact rule and `grounding-lint.test.ts` for the
+false-positive corpus this scoping is tested against.
+
+If `lintAnswer()` finds any violations, `run-task.ts` fires exactly **one**
+forced revise turn — `agent.prompt(buildReviseMessage(violations))` — and
+grades the task on the *revised* answer, mirroring production's
+`agent-service.ts` hook (same functions, same one-revise cap, same facts
+source: `buildFixtureGroundingContext`/`getUnityGroundingContext`
+respectively). There is no second revise even if the revised answer still has
+issues. Each task's `TaskResult.groundingLintHits` is 0 or 1 (1 means graded
+on the post-revise answer), summed into the run's results JSON the same way
+as `groundingCacheMisses`/`recordFailures`. `agent` mode is untouched — it has
+the compile gate instead.
 
 ## Grounding tools (`unity_api_search` / `get_unity_docs`)
 

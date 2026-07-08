@@ -3,6 +3,7 @@ import {
   resetTurnTelemetry,
   nextTurnTelemetry,
   recordTelemetryEvent,
+  recordGroundingLintHit,
 } from './turn-telemetry';
 import type { AgentEvent } from './vendor/types';
 
@@ -34,5 +35,13 @@ describe('turn telemetry', () => {
     recordTelemetryEvent(repairResult('[Unity analyzers] 1 error-severity issue(s)'));
     recordTelemetryEvent(repairResult('[Unity compile] Clean'));
     expect(nextTurnTelemetry().repairCount).toBe(2);
+  });
+
+  it('counts grounding-lint revise hits and resets to 0 per send', () => {
+    expect(nextTurnTelemetry().groundingLintHits).toBe(0);
+    recordGroundingLintHit();
+    expect(nextTurnTelemetry().groundingLintHits).toBe(1);
+    resetTurnTelemetry();
+    expect(nextTurnTelemetry().groundingLintHits).toBe(0);
   });
 });

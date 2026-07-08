@@ -43,4 +43,9 @@ export interface TaskResult {
   // `groundingCacheMisses` to signal recording quality issues (bad token,
   // server down, etc.) — see `api-recordings.ts` for warning logs.
   recordFailures: number;
+  // Ask-mode grounding-linter (P2.2) revise cycles fired this task — 0 or 1
+  // (exactly one forced revise turn max, same as production's agent-service
+  // hook). When 1, `pass`/`checks` were graded against the SECOND (post-
+  // revise) answer, not the model's first response — see `run-task.ts`.
+  groundingLintHits: number;
 }

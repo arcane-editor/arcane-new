@@ -10,12 +10,19 @@ interface TurnTelemetry {
   turnIndex: number;
   toolErrorCount: number;
   repairCount: number;
+  /** Ask-mode grounding-linter revise cycles fired this send (P2.2) — 0 or 1. */
+  groundingLintHits: number;
 }
 
-let current: TurnTelemetry = { turnIndex: 0, toolErrorCount: 0, repairCount: 0 };
+let current: TurnTelemetry = { turnIndex: 0, toolErrorCount: 0, repairCount: 0, groundingLintHits: 0 };
 
 export function resetTurnTelemetry(): void {
-  current = { turnIndex: 0, toolErrorCount: 0, repairCount: 0 };
+  current = { turnIndex: 0, toolErrorCount: 0, repairCount: 0, groundingLintHits: 0 };
+}
+
+/** Called once when the grounding linter fires a revise turn for this send (P2.2). */
+export function recordGroundingLintHit(): void {
+  current.groundingLintHits++;
 }
 
 /** Called once per outgoing LLM request; returns the snapshot to send. */

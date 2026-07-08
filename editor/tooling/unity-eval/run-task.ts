@@ -26,6 +26,7 @@ import {
   localBashOperations,
   localListOperations,
 } from './local-operations';
+import { lintAnswer, buildReviseMessage } from '../../src/features/ai-panel/services/grounding-lint';
 import { buildFixtureFacts, buildFixtureGroundingContext } from './fixture-facts';
 import { createRecordingApiClient, createReplayApiClient } from './api-recordings';
 import { runChecks } from './checks';
@@ -166,6 +167,7 @@ export async function runTask(
   const started = Date.now();
   let error: string | undefined;
   let finalAnswer = '';
+  let groundingLintHits = 0;
   try {
     const messages = await agent.prompt(task.prompt);
     const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
@@ -175,6 +177,35 @@ export async function runTask(
         .map((c) => c.text)
         .join('\n');
       if (lastAssistant.stopReason === 'error') error = lastAssistant.errorMessage ?? 'model error';
+    }
+
+    // Eval parity for production's ask-mode grounding linter (P2.2's
+    // agent-service.ts `runGroundingLint` hook): same `lintAnswer` /
+    // `buildReviseMessage`, same facts source (`buildFixtureGroundingContext`,
+    // already computed above as `groundingCtx` — the eval's analog of
+    // production's `getUnityGroundingContext()`), same "exactly one forced
+    // revise turn" cap. Skips a run that already errored or was aborted
+    // (maxTurns) — nothing sound to lint, and prompting again would just
+    // extend an already-failed run.
+    if (!error && task.mode === 'ask' && lastAssistant?.stopReason !== 'aborted') {
+      const violations = lintAnswer(finalAnswer, {
+        renderPipeline: groundingCtx.renderPipeline,
+        inputSystem: groundingCtx.inputSystem,
+      });
+      if (violations.length > 0) {
+        groundingLintHits = 1;
+        const reviseMessages = await agent.prompt(buildReviseMessage(violations));
+        const revisedAssistant = [...reviseMessages].reverse().find((m) => m.role === 'assistant');
+        if (revisedAssistant && revisedAssistant.role === 'assistant') {
+          finalAnswer = revisedAssistant.content
+            .filter((c): c is { type: 'text'; text: string } => c.type === 'text')
+            .map((c) => c.text)
+            .join('\n');
+          if (revisedAssistant.stopReason === 'error') {
+            error = revisedAssistant.errorMessage ?? 'model error';
+          }
+        }
+      }
     }
   } catch (err) {
     error = err instanceof Error ? err.message : String(err);
@@ -200,6 +231,7 @@ export async function runTask(
     error,
     groundingCacheMisses: 'misses' in apiClient ? apiClient.misses : 0,
     recordFailures: 'recordFailures' in apiClient ? apiClient.recordFailures : 0,
+    groundingLintHits,
     toolCalls,
   };
 }

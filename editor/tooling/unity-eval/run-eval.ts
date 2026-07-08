@@ -162,6 +162,10 @@ const recordFailures = aggregated.reduce(
   (sum, r) => sum + r.attempts.reduce((s, a) => s + a.recordFailures, 0),
   0,
 );
+const groundingLintHits = aggregated.reduce(
+  (sum, r) => sum + r.attempts.reduce((s, a) => s + a.groundingLintHits, 0),
+  0,
+);
 
 const resultsDir = new URL('./results/', import.meta.url).pathname;
 await mkdir(resultsDir, { recursive: true });
@@ -170,7 +174,17 @@ const outPath = join(resultsDir, `${stamp}-${label}.json`);
 await writeFile(
   outPath,
   JSON.stringify(
-    { label, model, baseUrl, usage, repeats, groundingCacheMisses, recordFailures, results: aggregated },
+    {
+      label,
+      model,
+      baseUrl,
+      usage,
+      repeats,
+      groundingCacheMisses,
+      recordFailures,
+      groundingLintHits,
+      results: aggregated,
+    },
     null,
     2,
   ),
@@ -188,5 +202,11 @@ if (recordFailures > 0) {
   console.error(
     `[unity-eval] ${recordFailures} grounding record failure/failures — see warnings above. ` +
       `Check token/server status and re-record with --record.`,
+  );
+}
+if (groundingLintHits > 0) {
+  console.error(
+    `[unity-eval] ${groundingLintHits} ask-mode grounding-linter revise cycle(s) fired — ` +
+      `the affected task(s) were graded on their post-revise answer (see groundingLintHits per task).`,
   );
 }

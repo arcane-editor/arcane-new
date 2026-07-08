@@ -15,6 +15,7 @@ function mkResult(taskId: string, family: string, pass: boolean, overrides: Part
     outputTokens: 50,
     groundingCacheMisses: 0,
     recordFailures: 0,
+    groundingLintHits: 0,
     toolCalls: [],
     ...overrides,
   };
