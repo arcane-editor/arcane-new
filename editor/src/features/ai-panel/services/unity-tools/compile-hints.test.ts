@@ -291,4 +291,74 @@ describe('buildCompileHints — CS1501 wrong overload arity', () => {
       .split(' | ');
     expect(listed).toHaveLength(8);
   });
+
+  it('cross-file type inference forbidden: CS1061(TypeX, FileA) + CS1501(M, FileB) → NO overload hint', async () => {
+    const errors = [
+      err("error CS1061: 'Rigidbody' does not contain a definition for 'Fly'", 'Assets/FileA.cs'),
+      err("error CS1501: No overload for method 'AddForce' takes 3 arguments", 'Assets/FileB.cs'),
+    ];
+    let overloadLookupCalled = false;
+    const client = fakeClient({
+      lookup: async (_type, member) => {
+        if (member === 'AddForce') overloadLookupCalled = true;
+        return { ok: true, data: [] };
+      },
+    });
+    await buildCompileHints(errors, client);
+    expect(overloadLookupCalled).toBe(false);
+  });
+
+  it('same-file type inference: CS1061(TypeX, FileA) + CS1501(M, FileA) → hint for TypeX.M', async () => {
+    const errors = [
+      err("error CS1061: 'Rigidbody' does not contain a definition for 'Fly'", 'Assets/File.cs'),
+      err("error CS1501: No overload for method 'AddForce' takes 3 arguments", 'Assets/File.cs'),
+    ];
+    const overloadSigs: ApiSignature[] = [
+      { type: 'Rigidbody', member: 'AddForce', kind: 'method', signature: 'void AddForce(Vector3 force)' },
+    ];
+    const client = fakeClient({
+      lookup: async (type, member) => {
+        if (member === 'AddForce') {
+          expect(type).toBe('Rigidbody');
+          return { ok: true, data: overloadSigs };
+        }
+        return { ok: true, data: [] };
+      },
+    });
+    const text = await buildCompileHints(errors, client);
+    expect(text).toContain('Rigidbody.AddForce overloads: void AddForce(Vector3 force)');
+  });
+});
+
+describe('buildCompileHints — CS0246 missing type (edge cases)', () => {
+  it('lookup returns signature without namespace → search called → did-you-mean hint emitted', async () => {
+    const errors = [
+      err("error CS0246: The type or namespace name 'Rigidbody2D' could not be found (are you missing a using directive or an assembly reference?)"),
+    ];
+    const sigsWithoutNamespace: ApiSignature[] = [
+      {
+        type: 'Rigidbody2D',
+        member: 'AddForce',
+        kind: 'method',
+        signature: 'void AddForce(Vector2 force)',
+        // namespace is undefined — should trigger search fallback
+      },
+    ];
+    let searchCalled = false;
+    const hits: ApiSearchHit[] = [{ breadcrumb: 'Rigidbody2D from UnityEngine', score: 0.85 }];
+    const client = fakeClient({
+      lookup: async () => ({
+        ok: true,
+        data: sigsWithoutNamespace,
+      }),
+      search: async (query) => {
+        searchCalled = true;
+        expect(query).toBe('Rigidbody2D');
+        return { ok: true, data: hits };
+      },
+    });
+    const text = await buildCompileHints(errors, client);
+    expect(searchCalled).toBe(true);
+    expect(text).toContain('did you mean "Rigidbody2D from UnityEngine"?');
+  });
 });

@@ -76,17 +76,6 @@ function splitQualified(qualified: string): { type: string; member: string } | n
   return { type, member };
 }
 
-/** All distinct types identifiable from CS1061/CS0117/CS0246 errors anywhere in the batch. */
-function identifiedTypesInBatch(errors: CompilerMessage[]): Set<string> {
-  const types = new Set<string>();
-  for (const e of errors) {
-    const mm = extractMissingMember(e.message);
-    if (mm) types.add(mm.type);
-    const mt = extractMissingType(e.message);
-    if (mt) types.add(mt);
-  }
-  return types;
-}
 
 async function memberHints(errors: CompilerMessage[], client: HintLookup): Promise<string[]> {
   const types: string[] = [];
@@ -134,15 +123,17 @@ async function missingTypeHints(errors: CompilerMessage[], client: HintLookup): 
     try {
       const result = await client.lookup(type);
       if (result.ok && result.data.length > 0) {
-        const ns = result.data.find((s) => s.namespace)?.namespace;
-        if (ns) {
-          const docUrl = result.data.find((s) => s.docUrl)?.docUrl;
+        const first = result.data.find((s) => s.namespace);
+        if (first) {
+          const ns = first.namespace;
+          const docUrl = first.docUrl;
           blocks.push(`${type} found in namespace ${ns} — add \`using ${ns};\`${docUrl ? ` (${docUrl})` : ''}`);
+          continue;
         }
-        continue;
+        // No actionable namespace found — fall through to search fallback below.
       }
 
-      // Empty or failed lookup — try ONE fuzzy search before giving up.
+      // Empty or failed lookup, or found-but-no-namespace — try ONE fuzzy search.
       const searchResult = await client.search(type);
       if (!searchResult.ok || searchResult.data.length === 0) continue;
       const top = searchResult.data[0];
@@ -158,7 +149,6 @@ async function missingTypeHints(errors: CompilerMessage[], client: HintLookup): 
 }
 
 async function overloadHints(errors: CompilerMessage[], client: HintLookup): Promise<string[]> {
-  const batchTypes = identifiedTypesInBatch(errors);
   const targets: { type: string; method: string }[] = [];
   const seen = new Set<string>();
 
@@ -168,10 +158,26 @@ async function overloadHints(errors: CompilerMessage[], client: HintLookup): Pro
 
     // (b) the method name itself is qualified — highest-confidence receiver.
     const qualified = splitQualified(bad.method);
-    // (a) otherwise, only a SINGLE unambiguous type elsewhere in the batch counts —
+
+    // (a) otherwise, only a SINGLE unambiguous type from the SAME FILE counts —
     // more than one candidate (or none) means the receiver isn't identifiable, and
-    // we never guess.
-    const type = qualified?.type ?? (batchTypes.size === 1 ? [...batchTypes][0] : null);
+    // we never guess. Cross-file type inference is forbidden.
+    let type = qualified?.type ?? null;
+    if (!type) {
+      const sameFileTypes = new Set<string>();
+      for (const err of errors) {
+        if (err.file !== e.file) continue;
+        const mm = extractMissingMember(err.message);
+        if (mm) sameFileTypes.add(mm.type);
+        const mt = extractMissingType(err.message);
+        if (mt) sameFileTypes.add(mt);
+      }
+      // Only use if exactly one type identified in the same file.
+      if (sameFileTypes.size === 1) {
+        type = [...sameFileTypes][0];
+      }
+    }
+
     const method = qualified?.member ?? bad.method;
     if (!type) continue;
 
