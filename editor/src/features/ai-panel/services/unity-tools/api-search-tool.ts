@@ -1,19 +1,23 @@
 import { Type, type Static } from '@sinclair/typebox';
 import type { AgentTool } from '../vendor/types';
 import { txt } from './text-result';
-import type { ApiSignature, ApiSearchHit } from './api-client';
+import type { ApiSignature, ApiSearchHit, GroundingResult } from './api-client';
 
 // Injected dependency — mirrors `unityApiSearch`/`unityApiLookup` from
 // `./api-client` exactly, but as an interface so this module never imports
 // those (store-backed) value bindings itself. Production wiring lives in
 // `unity-tools/index.ts` (the only place in this feature that touches
 // stores); everything below is store-free and Bun-safe to import directly.
+//
+// Both calls return `GroundingResult` so unavailability (signed out, no
+// Unity version, offline, HTTP error) is explicit — the eval replay client
+// (next task) implements this same interface.
 export interface UnityApiClient {
   search(
     query: string,
     opts?: { docType?: 'scriptref' | 'manual' | 'api' | 'all'; topK?: number },
-  ): Promise<ApiSearchHit[]>;
-  lookup(type: string, member?: string): Promise<ApiSignature[]>;
+  ): Promise<GroundingResult<ApiSearchHit[]>>;
+  lookup(type: string, member?: string): Promise<GroundingResult<ApiSignature[]>>;
 }
 
 // Deliberately tiny schema (weak-model friendly): just a free-text query and an
@@ -55,6 +59,14 @@ function formatSignatures(sigs: ApiSignature[]): string {
     .join('\n');
 }
 
+/** Explicit grounding-unavailable message — never let the model guess in silence. */
+function unavailableText(reason: string): string {
+  return (
+    `[Unity grounding UNAVAILABLE: ${reason}] Do NOT guess API signatures. ` +
+    `State uncertainty, or use get_unity_docs for the documentation URL.`
+  );
+}
+
 function formatHits(hits: ApiSearchHit[]): string {
   return hits
     .map((h) => {
@@ -90,13 +102,20 @@ export function createUnityApiSearchTool(client: UnityApiClient): AgentTool {
       const exactTarget = member?.includes('.') ? member : query.includes('.') && !query.includes(' ') ? query : null;
       if (exactTarget) {
         const { type, member: mem } = splitTypeMember(exactTarget);
-        const sigs = await client.lookup(type, mem);
-        if (sigs.length > 0) {
-          return txt(`Exact Unity API signatures:\n${formatSignatures(sigs)}`);
+        const lookupResult = await client.lookup(type, mem);
+        if (!lookupResult.ok) {
+          return txt(unavailableText(lookupResult.reason));
+        }
+        if (lookupResult.data.length > 0) {
+          return txt(`Exact Unity API signatures:\n${formatSignatures(lookupResult.data)}`);
         }
       }
 
-      const hits = await client.search(query, { topK: 8 });
+      const searchResult = await client.search(query, { topK: 8 });
+      if (!searchResult.ok) {
+        return txt(unavailableText(searchResult.reason));
+      }
+      const hits = searchResult.data;
       if (hits.length === 0) {
         return txt(
           `No Unity API matches for "${query}". Either you're signed out, this Unity version's API index ` +

@@ -84,9 +84,12 @@ async function buildSignatureHints(errors: CompilerMessage[]): Promise<string> {
   const blocks: string[] = [];
   for (const type of types) {
     try {
-      const sigs = await unityApiLookup(type);
-      if (sigs.length === 0) continue;
-      const members = [...new Set(sigs.map((s) => s.member))].slice(0, 24);
+      const result = await unityApiLookup(type);
+      // Grounding unavailable (signed out / no version / offline / HTTP error) —
+      // hints here are best-effort, so skip silently rather than surface the reason.
+      if (!result.ok) continue;
+      if (result.data.length === 0) continue;
+      const members = [...new Set(result.data.map((s) => s.member))].slice(0, 24);
       if (members.length) blocks.push(`Real members of ${type}: ${members.join(', ')}`);
     } catch {
       /* best-effort */

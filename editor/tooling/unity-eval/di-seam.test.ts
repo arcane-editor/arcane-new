@@ -18,7 +18,11 @@ import {
   type UnityApiClient,
 } from '../../src/features/ai-panel/services/unity-tools/api-search-tool';
 import { createGetUnityDocsTool } from '../../src/features/ai-panel/services/unity-tools/docs-tool';
-import type { ApiSearchHit, ApiSignature } from '../../src/features/ai-panel/services/unity-tools/api-client';
+import type {
+  ApiSearchHit,
+  ApiSignature,
+  GroundingResult,
+} from '../../src/features/ai-panel/services/unity-tools/api-client';
 
 function textOf(result: { content: { type: string; text?: string }[] }): string {
   return result.content.map((c) => c.text ?? '').join('\n');
@@ -37,9 +41,9 @@ describe('DI seam — unity_api_search', () => {
     const fakeClient: UnityApiClient = {
       search: async (query) => {
         expect(query).toBe('apply force at a point');
-        return hits;
+        return { ok: true, data: hits };
       },
-      lookup: async () => [],
+      lookup: async () => ({ ok: true, data: [] }),
     };
 
     const tool = createUnityApiSearchTool(fakeClient);
@@ -62,13 +66,61 @@ describe('DI seam — unity_api_search', () => {
       lookup: async (type, member) => {
         expect(type).toBe('Rigidbody');
         expect(member).toBe('AddForce');
-        return sigs;
+        return { ok: true, data: sigs };
       },
     };
 
     const tool = createUnityApiSearchTool(fakeClient);
     const result = await tool.execute('call-2', { query: 'Rigidbody.AddForce', member: 'Rigidbody.AddForce' });
     expect(textOf(result)).toContain('Exact Unity API signatures');
+  });
+
+  it('returns the existing "no matches" wording when search succeeds with no hits', async () => {
+    const fakeClient: UnityApiClient = {
+      search: async () => ({ ok: true, data: [] }),
+      lookup: async () => ({ ok: true, data: [] }),
+    };
+
+    const tool = createUnityApiSearchTool(fakeClient);
+    const result = await tool.execute('call-no-hits', { query: 'a totally made up thing' });
+    const text = textOf(result);
+    expect(text).toContain('No Unity API matches for "a totally made up thing"');
+    expect(text).not.toContain('UNAVAILABLE');
+  });
+
+  type UnavailableReason = Extract<GroundingResult<never>, { ok: false }>['reason'];
+  const reasons: UnavailableReason[] = ['signed-out', 'no-unity-version', 'offline', 'http-500'];
+
+  for (const reason of reasons) {
+    it(`surfaces the UNAVAILABLE message when search reports "${reason}"`, async () => {
+      const fakeClient: UnityApiClient = {
+        search: async () => ({ ok: false, reason }),
+        lookup: async () => ({ ok: false, reason }),
+      };
+
+      const tool = createUnityApiSearchTool(fakeClient);
+      const result = await tool.execute('call-unavailable', { query: 'apply force at a point' });
+      expect(textOf(result)).toBe(
+        `[Unity grounding UNAVAILABLE: ${reason}] Do NOT guess API signatures. ` +
+          `State uncertainty, or use get_unity_docs for the documentation URL.`,
+      );
+    });
+  }
+
+  it('exact-lookup path surfaces UNAVAILABLE without falling back to search', async () => {
+    const fakeClient: UnityApiClient = {
+      search: async () => {
+        throw new Error('should not fall back to search when grounding is unavailable');
+      },
+      lookup: async () => ({ ok: false, reason: 'signed-out' }),
+    };
+
+    const tool = createUnityApiSearchTool(fakeClient);
+    const result = await tool.execute('call-3', { query: 'Rigidbody.AddForce', member: 'Rigidbody.AddForce' });
+    expect(textOf(result)).toBe(
+      '[Unity grounding UNAVAILABLE: signed-out] Do NOT guess API signatures. ' +
+        'State uncertainty, or use get_unity_docs for the documentation URL.',
+    );
   });
 });
 

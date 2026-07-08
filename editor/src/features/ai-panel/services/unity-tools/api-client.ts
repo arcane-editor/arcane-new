@@ -6,8 +6,10 @@
 //                      the de-hallucinator and the compile-gate's CS-code repair.
 //
 // Unity version + render pipeline + input system are derived automatically from
-// the detected project facts — callers never pass them. Best-effort: any failure
-// (offline, signed out, version not ingested) returns [] so callers degrade.
+// the detected project facts — callers never pass them. `unityApiSearch` and
+// `unityApiLookup` surface WHY grounding is unavailable (signed out, version
+// not ingested, offline, HTTP error) via `GroundingResult` instead of silently
+// returning [] — a successful call that simply finds nothing is still `ok: true`.
 
 import { useAuthStore } from '../../../../stores/auth';
 import { unityMajorMinor } from '../../../../data/unity-docs-index';
@@ -15,6 +17,18 @@ import { getUnityGroundingContext } from '../prompts/unity-facts';
 
 // Same host as the AI chat path (see arcane-stream.ts / graphify-enrich.ts).
 const ARCANE_SERVER_URL = 'https://api.arcaneai.org';
+
+/**
+ * Discriminated result for the two version-accurate grounding calls
+ * (`unityApiSearch`, `unityApiLookup`). Unavailability is explicit so callers
+ * (the tool layer) can tell "grounding is down" apart from "found nothing" —
+ * the latter is `{ ok: true, data: [] }`, never a failure.
+ *
+ * This is the contract the eval replay client (next task) implements too.
+ */
+export type GroundingResult<T> =
+  | { ok: true; data: T }
+  | { ok: false; reason: 'signed-out' | 'no-unity-version' | 'offline' | `http-${number}` };
 
 export interface ApiSignature {
   namespace?: string;
@@ -49,30 +63,30 @@ function resolvedVersion(): string | null {
   return unityMajorMinor(unityVersion) ?? unityVersion;
 }
 
-async function postJson<T>(path: string, body: unknown): Promise<T | null> {
+async function postJson<T>(path: string, body: unknown): Promise<GroundingResult<T>> {
   const token = useAuthStore.getState().token;
-  if (!token) return null;
+  if (!token) return { ok: false, reason: 'signed-out' };
   try {
     const res = await fetch(`${ARCANE_SERVER_URL}${path}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify(body),
     });
-    if (!res.ok) return null;
-    return (await res.json()) as T;
+    if (!res.ok) return { ok: false, reason: `http-${res.status}` };
+    return { ok: true, data: (await res.json()) as T };
   } catch {
-    return null;
+    return { ok: false, reason: 'offline' };
   }
 }
 
 export async function unityApiSearch(
   query: string,
   opts?: { docType?: 'scriptref' | 'manual' | 'api' | 'all'; topK?: number },
-): Promise<ApiSearchHit[]> {
+): Promise<GroundingResult<ApiSearchHit[]>> {
   const version = resolvedVersion();
-  if (!version) return [];
+  if (!version) return { ok: false, reason: 'no-unity-version' };
   const { renderPipeline, inputSystem } = getUnityGroundingContext();
-  const data = await postJson<{ results?: ApiSearchHit[] }>('/v1/unity/api/search', {
+  const result = await postJson<{ results?: ApiSearchHit[] }>('/v1/unity/api/search', {
     query,
     unityVersion: version,
     renderPipeline,
@@ -80,27 +94,36 @@ export async function unityApiSearch(
     docType: opts?.docType,
     topK: opts?.topK,
   });
-  return data?.results ?? [];
+  if (!result.ok) return result;
+  return { ok: true, data: result.data.results ?? [] };
 }
 
-export async function unityApiLookup(type: string, member?: string): Promise<ApiSignature[]> {
+export async function unityApiLookup(type: string, member?: string): Promise<GroundingResult<ApiSignature[]>> {
   const version = resolvedVersion();
-  if (!version) return [];
-  const data = await postJson<{ signatures?: ApiSignature[] }>('/v1/unity/api/lookup', {
+  if (!version) return { ok: false, reason: 'no-unity-version' };
+  const result = await postJson<{ signatures?: ApiSignature[] }>('/v1/unity/api/lookup', {
     unityVersion: version,
     type,
     member,
   });
-  return data?.signatures ?? [];
+  if (!result.ok) return result;
+  return { ok: true, data: result.data.signatures ?? [] };
 }
 
-/** Deprecated APIs (with obsolete/replacement hints) for the project's version. */
+/**
+ * Deprecated APIs (with obsolete/replacement hints) for the project's version.
+ * Only consumed by `migration-tool.ts`'s "version-upgrade" plan, which already
+ * degrades gracefully on an empty list — kept as a plain array (not part of
+ * the `GroundingResult` contract) since that call site has no reason-specific
+ * handling to do.
+ */
 export async function unityDeprecatedApis(limit = 500): Promise<ApiSignature[]> {
   const version = resolvedVersion();
   if (!version) return [];
-  const data = await postJson<{ deprecated?: ApiSignature[] }>('/v1/unity/api/deprecated', {
+  const result = await postJson<{ deprecated?: ApiSignature[] }>('/v1/unity/api/deprecated', {
     unityVersion: version,
     limit,
   });
-  return data?.deprecated ?? [];
+  if (!result.ok) return [];
+  return result.data.deprecated ?? [];
 }
