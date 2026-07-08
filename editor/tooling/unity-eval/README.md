@@ -4,8 +4,10 @@ Regression gate for Arcane's Unity agent: prompt, model, and routing changes
 must not silently make the agent worse at Unity work. Per the approved
 2026-07-07 design (`../../AI-SPEC.md` § Recommended Approach), this harness
 drives the **real** vendor agent loop (`src/features/ai-panel/services/vendor`)
-— same tools, same system prompts, same message conversion — against small
+— same agent loop, message conversion, and system prompts — against small
 fixture Unity projects, headlessly (no Tauri, no Unity Editor, no browser).
+The tool set is reduced, though: see "Fidelity gaps" below before reading
+too much into a single number.
 
 ## What it is
 
@@ -156,6 +158,13 @@ grounding**, exactly the gap the design doc targets:
 
 Caveats to keep honest:
 
+- **Fidelity gaps.** The harness wires up only the 5 basic fs tools
+  (read/list/write/edit/bash) — no `unity_api_search`, no analyzer/compile
+  gates — even though the system prompts advertise those tools. So the
+  grounding scores above measure the bare model's Unity knowledge *without*
+  the product's grounding tools; production, which does have them, may do
+  better. The harness also pins `max_tokens: 8192` vs production's 16384
+  (chat) / 24576 (plan, edit).
 - **Run-to-run variance is real.** Grounding tasks flipped pass/fail between
   runs of the same model. Treat single-run deltas of ±1 task as noise; the
   12-task suite is a smoke gate, not a benchmark. Grow the task set before

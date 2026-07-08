@@ -30,7 +30,7 @@ const { values } = parseArgs({
 const baseUrl = values['base-url'];
 const apiKeyEnv = values['api-key-env'];
 const model = values.model;
-const label = values.label ?? model ?? 'run';
+const label = (values.label ?? model ?? 'run').replace(/[^\w.@-]/g, '-');
 const reasoningLevel = values['reasoning-level'];
 if (!baseUrl || !apiKeyEnv || !model) {
   console.error('Required: --base-url --api-key-env --model. See file header.');

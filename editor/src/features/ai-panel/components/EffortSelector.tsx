@@ -15,8 +15,8 @@ import type { Effort } from '../services/types';
 
 const LEVELS: { value: Effort; label: string; title: string; bars: number }[] = [
   { value: 'low', label: 'Low', title: 'Fast, cheap. Best for simple Q&A or quick edits.', bars: 1 },
-  { value: 'mid', label: 'Mid', title: 'Balanced. Good default for most tasks.', bars: 2 },
-  { value: 'high', label: 'High', title: 'Slower, deeper reasoning. Best for plans and complex changes.', bars: 3 },
+  { value: 'mid', label: 'Mid', title: 'Balanced speed and quality.', bars: 2 },
+  { value: 'high', label: 'High', title: 'Slower, deeper reasoning. Best for plans and complex changes. Default.', bars: 3 },
   { value: 'super', label: 'Extra High', title: 'Maximum reasoning depth. Best for the hardest changes.', bars: 4 },
 ];
 

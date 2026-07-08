@@ -29,11 +29,11 @@ export interface RequestLogRow {
     cost_usd: number;
     duration_ms: number;
     created_at: string;
-    task_type?: string;
-    turn_index?: number;
-    tool_error_count?: number;
-    repair_count?: number;
-    cached_input_tokens?: number;
+    task_type: string | null;
+    turn_index: number | null;
+    tool_error_count: number | null;
+    repair_count: number | null;
+    cached_input_tokens: number | null;
 }
 
 export interface UserWithUsageRow extends UserRow {
