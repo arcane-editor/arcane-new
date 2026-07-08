@@ -19,7 +19,7 @@ describe('buildFixtureFacts', () => {
 
   it('detects URP + new Input System', async () => {
     const facts = await buildFixtureFacts(FIXTURES + 'urp-newinput');
-    expect(facts).toContain('Unity version: 6000.0.23f1');
+    expect(facts).toContain('Unity version: 6000.3.5f2');
     expect(facts).toContain('Render pipeline: URP');
     expect(facts).toContain('Input system: Input System (new)');
   });
@@ -50,7 +50,7 @@ describe('buildFixtureGroundingContext', () => {
   it('derives structured grounding context for URP + new Input System', async () => {
     const ctx = await buildFixtureGroundingContext(FIXTURES + 'urp-newinput');
     expect(ctx).toEqual({
-      unityVersion: '6000.0.23f1',
+      unityVersion: '6000.3.5f2',
       renderPipeline: 'URP',
       inputSystem: 'New',
     });
