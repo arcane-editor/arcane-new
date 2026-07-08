@@ -59,7 +59,7 @@ describe('withCheckpoint', () => {
         return { content: [{ type: 'text', text: 'Successfully wrote 1 bytes (1 lines) to /proj/Foo.cs' }] };
       },
     };
-    const gate = withCheckpoint(inner, CWD, deps);
+    const gate = withCheckpoint(inner, CWD, { deps });
 
     await gate.execute('call-1', { path: 'Foo.cs', content: 'x' });
 
@@ -75,7 +75,7 @@ describe('withCheckpoint', () => {
         recordedWith = before;
       },
     };
-    const gate = withCheckpoint(fakeTool('Successfully wrote 1 bytes (1 lines) to /proj/New.cs'), CWD, deps);
+    const gate = withCheckpoint(fakeTool('Successfully wrote 1 bytes (1 lines) to /proj/New.cs'), CWD, { deps });
 
     await gate.execute('call-1', { path: 'New.cs', content: 'x' });
 
@@ -92,7 +92,7 @@ describe('withCheckpoint', () => {
       },
       recordPreWrite: () => {},
     };
-    const gate = withCheckpoint(fakeTool('Successfully wrote 1 bytes (1 lines) to /proj/Foo.cs'), CWD, deps);
+    const gate = withCheckpoint(fakeTool('Successfully wrote 1 bytes (1 lines) to /proj/Foo.cs'), CWD, { deps });
 
     await gate.execute('call-1', { path: 'Foo.cs', content: 'x' });
 
@@ -104,7 +104,7 @@ describe('withCheckpoint', () => {
     const gate = withCheckpoint(
       fakeTool('Successfully wrote 1 bytes (1 lines) to /proj/Foo.cs'),
       CWD,
-      { isEnabled: () => true, ...deps },
+      { deps: { isEnabled: () => true, ...deps } },
     );
 
     await gate.execute('call-1', { path: 'Foo.cs', content: 'v1' });
@@ -132,7 +132,7 @@ describe('withCheckpoint', () => {
       },
     };
     const inner = fakeTool('Successfully wrote 1 bytes (1 lines) to /proj/Foo.cs');
-    const gate = withCheckpoint(inner, CWD, deps);
+    const gate = withCheckpoint(inner, CWD, { deps });
 
     const res = await gate.execute('call-1', { path: 'Foo.cs', content: 'x' });
     const innerRes = await inner.execute('call-1', { path: 'Foo.cs', content: 'x' });
@@ -152,7 +152,7 @@ describe('withCheckpoint', () => {
       },
     };
     const inner = fakeTool('Error writing file: disk full');
-    const gate = withCheckpoint(inner, CWD, deps);
+    const gate = withCheckpoint(inner, CWD, { deps });
 
     const res = await gate.execute('call-1', { path: 'Foo.cs', content: 'x' });
 
@@ -170,10 +170,56 @@ describe('withCheckpoint', () => {
       },
     };
     const inner = fakeTool('some result');
-    const gate = withCheckpoint(inner, CWD, deps);
+    const gate = withCheckpoint(inner, CWD, { deps });
 
     await gate.execute('call-1', {});
 
     expect(called).toBe(false);
+  });
+
+  it('skips the snapshot (but still delegates) for a path outside allowedRoot — the inner tool rejects those writes itself', async () => {
+    let readCalled = false;
+    let recordCalled = false;
+    const deps: CheckpointGateDeps = {
+      isEnabled: () => true,
+      readBeforeContent: async () => {
+        readCalled = true;
+        return 'should not be read';
+      },
+      recordPreWrite: () => {
+        recordCalled = true;
+      },
+    };
+    // Mirrors the real vendor-tool result for an out-of-root path.
+    const inner = fakeTool("Error: '/proj/Secrets.cs' is outside the allowed project area.");
+    const gate = withCheckpoint(inner, CWD, { allowedRoot: '/proj/Assets', deps });
+
+    const res = await gate.execute('call-1', { path: 'Secrets.cs', content: 'x' });
+
+    expect(readCalled).toBe(false);
+    expect(recordCalled).toBe(false);
+    expect(res).toEqual({
+      content: [{ type: 'text', text: "Error: '/proj/Secrets.cs' is outside the allowed project area." }],
+    });
+  });
+
+  it('still records normally for a path INSIDE allowedRoot', async () => {
+    let recordedPath: string | undefined;
+    const deps: CheckpointGateDeps = {
+      isEnabled: () => true,
+      readBeforeContent: async () => 'before',
+      recordPreWrite: (absPath) => {
+        recordedPath = absPath;
+      },
+    };
+    const gate = withCheckpoint(
+      fakeTool('Successfully wrote 1 bytes (1 lines) to /proj/Assets/Foo.cs'),
+      CWD,
+      { allowedRoot: '/proj/Assets', deps },
+    );
+
+    await gate.execute('call-1', { path: 'Assets/Foo.cs', content: 'x' });
+
+    expect(recordedPath).toBe('/proj/Assets/Foo.cs');
   });
 });

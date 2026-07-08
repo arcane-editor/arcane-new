@@ -9,10 +9,15 @@
 // — checkpoint is the INNERMOST wrapper (closest to the raw write/edit tool),
 // with the analyzer/lsp/compile gates layered outside it. None of those gates
 // can prevent the underlying write from being attempted (they only annotate
-// the result afterward), so every call that reaches this gate proceeds to a
-// real write — this gate never needs to guess whether the write "will happen".
-// P5.3 will later insert an approval gate OUTSIDE the checkpoint; today's
-// order is just gates(checkpoint(tool)).
+// the result afterward). The one pre-write rejection the inner tools DO make
+// themselves is the Assets/ sandbox: vendor/tools/write.ts and edit.ts call
+// `resolveWithinRoot` internally and silently return an error-text result
+// (no write, no onFileWritten) for out-of-root paths. This gate applies the
+// SAME `allowedRoot` check up front and skips the snapshot when the path is
+// out of root — otherwise it would record phantom entries for writes that
+// never happen (wrong "Checkpoint · N files" counts, and false state for
+// P5.3's approval gate). P5.3 will later insert that approval gate OUTSIDE
+// the checkpoint; today's order is just gates(checkpoint(tool)).
 //
 // Settings-gated on `ai.checkpoints.enabled` (default on). Known limitation
 // (documented in the P5.2 report too): bash-tool mutations are not
@@ -29,7 +34,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import type { AgentTool } from '../vendor/types';
-import { resolveToCwd } from '../vendor/tools/path-utils';
+import { resolveWithinRoot, PathOutsideRootError } from '../vendor/tools/path-utils';
 import { useSettingsStore } from '../../../../stores/settings';
 import { useCheckpointsStore } from '../../../../stores/checkpoints';
 
@@ -38,6 +43,16 @@ export interface CheckpointGateDeps {
   /** Reads the file's current content; resolves `null` if it doesn't exist (or is unreadable). */
   readBeforeContent: (absPath: string) => Promise<string | null>;
   recordPreWrite: (absPath: string, beforeContent: string | null) => void;
+}
+
+export interface CheckpointGateOptions {
+  /**
+   * The same Assets/ sandbox root the wrapped write/edit tool was created
+   * with (null = no sandbox). Must match, or this gate snapshots paths the
+   * inner tool will refuse to write.
+   */
+  allowedRoot?: string | null;
+  deps?: CheckpointGateDeps;
 }
 
 function defaultIsEnabled(): boolean {
@@ -61,8 +76,10 @@ const DEFAULT_DEPS: CheckpointGateDeps = {
 export function withCheckpoint(
   tool: AgentTool,
   cwd: string,
-  deps: CheckpointGateDeps = DEFAULT_DEPS,
+  options: CheckpointGateOptions = {},
 ): AgentTool {
+  const deps = options.deps ?? DEFAULT_DEPS;
+  const allowedRoot = options.allowedRoot ?? null;
   return {
     ...tool,
     async execute(id, params, signal, onUpdate) {
@@ -72,9 +89,22 @@ export function withCheckpoint(
 
       const p = (params as { path?: string }).path;
       if (p) {
-        const absPath = resolveToCwd(p, cwd);
-        const before = await deps.readBeforeContent(absPath);
-        deps.recordPreWrite(absPath, before);
+        let absPath: string | null;
+        try {
+          absPath = resolveWithinRoot(p, cwd, allowedRoot);
+        } catch (err) {
+          // Out-of-root: the inner tool will reject this write itself (its
+          // own resolveWithinRoot call) — don't record a phantom snapshot.
+          if (err instanceof PathOutsideRootError) {
+            absPath = null;
+          } else {
+            throw err;
+          }
+        }
+        if (absPath !== null) {
+          const before = await deps.readBeforeContent(absPath);
+          deps.recordPreWrite(absPath, before);
+        }
       }
 
       // Delegate unconditionally, and return the inner result untouched —

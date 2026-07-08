@@ -201,7 +201,11 @@ export const useCheckpointsStore = create<CheckpointsState>((set, get) => ({
   loadForSession: async (sessionId) => {
     const { loadCheckpoints } = await import('../features/ai-panel');
     const turns = await loadCheckpoints(sessionId).catch(() => []);
-    set({ turns, sessionId });
+    // Apply the same FIFO cap `beginTurn` enforces, in case a persisted file
+    // (e.g. hand-edited or from an older build) exceeds it.
+    const capped =
+      turns.length > MAX_TURNS_PER_SESSION ? turns.slice(turns.length - MAX_TURNS_PER_SESSION) : turns;
+    set({ turns: capped, sessionId });
   },
 
   reset: () => {

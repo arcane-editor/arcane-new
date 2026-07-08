@@ -182,14 +182,16 @@ function createToolsForPromptMode(mode: PromptMode, workspacePath: string): Agen
   // cs-gates (wrapCs wraps the checkpoint-wrapped tool, not the other way
   // around) so snapshots happen right next to the actual write — P5.3 will
   // later insert an approval gate OUTSIDE the checkpoint; today's order is
-  // just gates(checkpoint(tool)).
+  // just gates(checkpoint(tool)). `allowedRoot` must match the tools' own
+  // sandbox so out-of-root writes (which the tools reject internally) don't
+  // record phantom snapshots.
   return [
     ...readOnly,
     ...graphTools,
     ...unityRead,
     ...(isUnity ? createUnityMutateTools() : []),
-    wrapCs(withCheckpoint(writeTool, workspacePath)),
-    wrapCs(withCheckpoint(editTool, workspacePath)),
+    wrapCs(withCheckpoint(writeTool, workspacePath, { allowedRoot })),
+    wrapCs(withCheckpoint(editTool, workspacePath, { allowedRoot })),
     createBashTool(workspacePath, {
       operations: tauriBashOperations,
       allowedRoot,
