@@ -10,6 +10,7 @@ import AssistantMessage from './AssistantMessage';
 import PlanActions from './PlanActions';
 import ClaudePlanList from './ClaudePlanList';
 import PermissionRequestBlock from './PermissionRequestBlock';
+import VerifiedCard from './VerifiedCard';
 
 function MessageList() {
   const messages = useAiStore((s) => s.messages);
@@ -51,6 +52,8 @@ function MessageList() {
               );
             case 'permissionRequest':
               return <PermissionRequestBlock key={msg.id} message={msg} />;
+            case 'verifiedPass':
+              return <VerifiedCard key={msg.id} message={msg} />;
             case 'system':
               return (
                 <div key={msg.id} className="ai-panel-system-message">

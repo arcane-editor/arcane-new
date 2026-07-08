@@ -21,6 +21,7 @@ import {
   type TextContent,
   type ThinkingContent,
   type ToolCall,
+  type VerifiedCardData,
 } from '../features/ai-panel';
 import { useWorkspaceStore } from './workspace';
 import { notify } from './notifications';
@@ -35,7 +36,7 @@ export interface PermissionOption {
 
 export interface AiMessage {
   id: string;
-  role: 'user' | 'assistant' | 'toolResult' | 'system' | 'permissionRequest';
+  role: 'user' | 'assistant' | 'toolResult' | 'system' | 'permissionRequest' | 'verifiedPass';
   /** User message text */
   text?: string;
   /** Assistant message content blocks (text, thinking, tool calls) */
@@ -57,6 +58,17 @@ export interface AiMessage {
   };
   /** Attachments shown above this message (user role only) */
   attachments?: Attachment[];
+  /**
+   * Verified-pass closing check (P3.4, `verifiedPass` role only) — the
+   * post-send analyzer/compile/GUID sweep, rendered as a compact card. Like
+   * `permissionRequest`/`system` messages, this is UI-only and not part of
+   * the LLM history (see `restoreAgentMessages`'s skip comment in
+   * agent-service.ts). It happens to round-trip through session save/load
+   * today (messages are persisted generically as JSON, unfiltered), but that
+   * isn't specially maintained — if a future format change drops it, the
+   * card simply doesn't reappear after a reload. Acceptable for v1.
+   */
+  verifiedPass?: VerifiedCardData;
   /** Metadata */
   timestamp: number;
   isStreaming?: boolean;
@@ -158,6 +170,7 @@ interface AiState {
   setClaudeAcpSessionId: (id: string | null) => void;
   addAssistantTextMessage: (text: string) => string;
   addSystemMessage: (text: string) => string;
+  addVerifiedPassMessage: (data: VerifiedCardData) => string;
   addPermissionRequest: (
     toolCallId: string,
     toolName: string | undefined,
@@ -504,6 +517,18 @@ export const useAiStore = create<AiState>((set, get) => ({
       id,
       role: 'system',
       text,
+      timestamp: Date.now(),
+    };
+    set((s) => ({ messages: [...s.messages, msg] }));
+    return id;
+  },
+
+  addVerifiedPassMessage: (data: VerifiedCardData) => {
+    const id = nextId();
+    const msg: AiMessage = {
+      id,
+      role: 'verifiedPass',
+      verifiedPass: data,
       timestamp: Date.now(),
     };
     set((s) => ({ messages: [...s.messages, msg] }));

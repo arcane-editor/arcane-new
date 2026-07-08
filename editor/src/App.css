@@ -3659,6 +3659,114 @@ html, body, #root {
   color: var(--text-secondary);
 }
 
+/* ---- AI Panel: Verified-pass card (P3.4) ---- */
+.ai-verified-card {
+  margin: 8px 12px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+}
+.ai-verified-card.is-ok {
+  border-color: color-mix(in srgb, var(--success) 30%, var(--border));
+}
+.ai-verified-card.is-bad {
+  border-color: color-mix(in srgb, var(--error-text) 30%, var(--border));
+}
+.ai-verified-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 7px 10px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  user-select: none;
+  transition: background 120ms ease;
+}
+.ai-verified-header:hover:not(:disabled) {
+  background: var(--hover);
+}
+.ai-verified-header:disabled {
+  cursor: default;
+}
+.ai-verified-chevron-spacer {
+  display: inline-block;
+  width: 12px;
+}
+.ai-verified-title {
+  font-weight: 600;
+  color: var(--text-primary);
+  flex-shrink: 0;
+}
+.ai-verified-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+.ai-verified-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+.ai-verified-sep {
+  opacity: 0.4;
+}
+.ai-verified-files {
+  color: var(--text-secondary);
+}
+.ai-verified-icon-ok {
+  color: var(--success);
+  flex-shrink: 0;
+}
+.ai-verified-icon-bad {
+  color: var(--error-text);
+  flex-shrink: 0;
+}
+.ai-verified-icon-skip {
+  color: var(--text-secondary);
+  opacity: 0.6;
+  flex-shrink: 0;
+}
+.ai-verified-body {
+  padding: 8px 12px 10px 30px;
+  background: var(--bg-primary);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  border-top: 1px solid var(--border);
+}
+.ai-verified-body-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+  margin-top: 8px;
+}
+.ai-verified-body-label:first-child {
+  margin-top: 0;
+}
+.ai-verified-error-label {
+  color: var(--error-text);
+}
+.ai-verified-file-list {
+  margin: 0;
+  padding-left: 16px;
+  font-family: var(--font-mono, 'Fira Code', monospace);
+  font-size: 11px;
+}
+.ai-verified-file-list li {
+  word-break: break-word;
+}
+
 /* ---- AI Panel: Error banner ---- */
 .ai-panel-error {
   display: flex;

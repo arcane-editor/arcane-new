@@ -41,6 +41,12 @@ import {
   resetCompileGate,
 } from './unity-tools';
 import { resetTurnTelemetry, recordTelemetryEvent, recordGroundingLintHit } from './turn-telemetry';
+import {
+  beginVerifiedPass,
+  recordTouchedFile,
+  touchedFileCount,
+  runVerifiedPass,
+} from './verified-pass';
 import { useAiStore, type AiMessage } from '../../../stores/ai';
 import { useAuthStore } from '../../../stores/auth';
 import { useWorkspaceStore } from '../../../stores/workspace';
@@ -72,7 +78,7 @@ function restoreAgentMessages(messages: AiMessage[]): AgentMessage[] {
         timestamp: m.timestamp,
       });
     }
-    // system / permissionRequest are not part of LLM history — skip.
+    // system / permissionRequest / verifiedPass are not part of LLM history — skip.
   }
   return out;
 }
@@ -139,14 +145,23 @@ function createToolsForPromptMode(mode: PromptMode, workspacePath: string): Agen
     return [...readOnly, ...graphTools, ...unityRead];
   }
 
+  // Verified-pass (P3.4) registers every file the send touches by composing
+  // onto the existing onFileWritten/onFileEdited hooks — the vendor write/edit
+  // tools themselves are untouched.
   const writeTool = createWriteTool(workspacePath, {
     operations: tauriWriteOperations,
-    onFileWritten,
+    onFileWritten: (path) => {
+      recordTouchedFile(path);
+      onFileWritten(path);
+    },
     allowedRoot,
   });
   const editTool = createEditTool(workspacePath, {
     operations: tauriEditOperations,
-    onFileEdited,
+    onFileEdited: (path) => {
+      recordTouchedFile(path);
+      onFileEdited(path);
+    },
     allowedRoot,
   });
 
@@ -274,6 +289,8 @@ export class AgentService {
     // Fresh compile-gate repair budget per user turn.
     resetCompileGate();
     resetTurnTelemetry();
+    // Fresh touched-file registry for the verified-pass closing check (P3.4).
+    beginVerifiedPass();
 
     // Resolve attachments. File + Unity-doc become a text prefix; image
     // attachments become content blocks routed through promptStructured().
@@ -314,6 +331,11 @@ export class AgentService {
       // Agent mode has the compile gate instead — do not wire this there.
       if (opts.mode === 'ask') {
         await this.runGroundingLint();
+      } else {
+        // Verified-pass closing check (P3.4): the agent/plan-execution sibling
+        // of the grounding linter above — runs once the whole send is done,
+        // over everything it touched.
+        await this.runVerifiedPassIfNeeded(promptMode);
       }
     } catch (error) {
       if (error instanceof Error && error.message === 'Agent is already running') {
@@ -370,6 +392,42 @@ export class AgentService {
       .getState()
       .addSystemMessage(`Grounding check — revising: ${violations.length} project-mismatch issue(s)`);
     await this.agent.prompt(buildReviseMessage(violations));
+  }
+
+  /**
+   * Verified-pass closing check (P3.4). The agent/plan-execution sibling of
+   * `runGroundingLint` above: instead of linting the answer text, it re-checks
+   * everything the send actually touched (analyzers, a live compile, GUID
+   * integrity) and attaches the result as a compact "Verified" card. v1 renders
+   * results only — no loop re-entry (in-loop repair already happens via the
+   * per-write gates: analyzer-gate.ts, compile-gate.ts, lsp-gate.ts).
+   *
+   * No-ops for non-Unity workspaces and when the setting is off (same gating
+   * shape as the compile/lsp gates in `createToolsForPromptMode`), when
+   * nothing was written/edited this send, and when the turn was aborted
+   * (same `stopReason` check `runGroundingLint` uses — nothing was "finished"
+   * to verify).
+   */
+  private async runVerifiedPassIfNeeded(promptMode: PromptMode): Promise<void> {
+    if (promptMode !== 'agent' && promptMode !== 'plan-execution') return;
+    if (touchedFileCount() === 0) return;
+    if (!useProjectContextStore.getState().isUnityProject) return;
+    if (useSettingsStore.getState().getSetting('unity.verifiedPass.enabled') === false) return;
+
+    const lastAssistant = [...this.agent.getMessages()]
+      .reverse()
+      .find((m) => m.role === 'assistant');
+    if (lastAssistant && lastAssistant.role === 'assistant' && lastAssistant.stopReason === 'aborted') {
+      return;
+    }
+
+    try {
+      const data = await runVerifiedPass(getCurrentWorkspacePath());
+      useAiStore.getState().addVerifiedPassMessage(data);
+    } catch {
+      // runVerifiedPass is already defensive per-step; this is just an extra
+      // safety net so a verified-pass failure never surfaces as a send error.
+    }
   }
 
   abort(): void {

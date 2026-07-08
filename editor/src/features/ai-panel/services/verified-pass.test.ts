@@ -1,0 +1,258 @@
+import { describe, it, expect, beforeEach } from 'bun:test';
+import {
+  beginVerifiedPass,
+  recordTouchedFile,
+  touchedFileCount,
+  runVerifiedPass,
+  type VerifiedPassDeps,
+} from './verified-pass';
+import type { Finding } from '../../unity-analyzers';
+import type { CompilationPayload } from '../../../types/unity';
+
+const WORKSPACE = '/proj';
+
+function finding(overrides: Partial<Finding> = {}): Finding {
+  return {
+    ruleId: 'unity.getComponentInUpdate',
+    message: 'GetComponent called in Update',
+    severity: 'error',
+    start: 0,
+    end: 1,
+    ...overrides,
+  };
+}
+
+function fakeDeps(overrides: Partial<VerifiedPassDeps> = {}): VerifiedPassDeps {
+  return {
+    readFile: async () => 'class Foo {}',
+    runAnalyzers: () => [],
+    bridgeConnected: () => false,
+    triggerRecompile: async () => null,
+    readGuid: async () => 'abc123',
+    ...overrides,
+  };
+}
+
+describe('verified-pass registry', () => {
+  beforeEach(() => {
+    beginVerifiedPass();
+  });
+
+  it('starts empty and grows as files are recorded', () => {
+    expect(touchedFileCount()).toBe(0);
+    recordTouchedFile('/proj/Assets/Scripts/Foo.cs');
+    expect(touchedFileCount()).toBe(1);
+    recordTouchedFile('/proj/Assets/Scripts/Bar.cs');
+    expect(touchedFileCount()).toBe(2);
+  });
+
+  it('dedupes the same file touched more than once', () => {
+    recordTouchedFile('/proj/Assets/Scripts/Foo.cs');
+    recordTouchedFile('/proj/Assets/Scripts/Foo.cs');
+    expect(touchedFileCount()).toBe(1);
+  });
+
+  it('resets per send', () => {
+    recordTouchedFile('/proj/Assets/Scripts/Foo.cs');
+    expect(touchedFileCount()).toBe(1);
+    beginVerifiedPass();
+    expect(touchedFileCount()).toBe(0);
+  });
+});
+
+describe('runVerifiedPass', () => {
+  beforeEach(() => {
+    beginVerifiedPass();
+  });
+
+  it('reports an all-clean card when nothing is wrong and the bridge is connected', async () => {
+    recordTouchedFile('/proj/Assets/Scripts/Foo.cs');
+    recordTouchedFile('/proj/Assets/Scripts/Foo.cs.meta');
+
+    const report: CompilationPayload = { started: false, success: true, errors: 0, messages: [] };
+    const deps = fakeDeps({
+      bridgeConnected: () => true,
+      triggerRecompile: async () => report,
+    });
+
+    const data = await runVerifiedPass(WORKSPACE, deps);
+
+    expect(data.files).toBe(2);
+    expect(data.touchedFiles.sort()).toEqual(
+      ['Assets/Scripts/Foo.cs', 'Assets/Scripts/Foo.cs.meta'].sort(),
+    );
+    expect(data.analyzers).toEqual({ errors: 0 });
+    expect(data.compile).toBe('clean');
+    expect(data.guids).toBe('intact');
+  });
+
+  it('counts error-severity analyzer findings across touched .cs files', async () => {
+    recordTouchedFile('/proj/Assets/Scripts/Foo.cs');
+    recordTouchedFile('/proj/Assets/Scripts/Bar.cs');
+
+    const deps = fakeDeps({
+      runAnalyzers: (_text, filePath) =>
+        filePath.endsWith('Foo.cs')
+          ? [finding({ severity: 'error' }), finding({ severity: 'warning' })]
+          : [finding({ severity: 'error' })],
+    });
+
+    const data = await runVerifiedPass(WORKSPACE, deps);
+
+    expect(data.analyzers).toEqual({ errors: 2 });
+  });
+
+  it('reports compile as skipped when the bridge is not connected', async () => {
+    recordTouchedFile('/proj/Assets/Scripts/Foo.cs');
+
+    let triggerCalled = false;
+    const deps = fakeDeps({
+      bridgeConnected: () => false,
+      triggerRecompile: async () => {
+        triggerCalled = true;
+        return null;
+      },
+    });
+
+    const data = await runVerifiedPass(WORKSPACE, deps);
+
+    expect(data.compile).toBe('skipped');
+    expect(triggerCalled).toBe(false);
+  });
+
+  it('reports compile errors when the bridge returns compiler errors', async () => {
+    recordTouchedFile('/proj/Assets/Scripts/Foo.cs');
+
+    const report: CompilationPayload = {
+      started: false,
+      success: false,
+      errors: 2,
+      messages: [
+        { file: 'Assets/Scripts/Foo.cs', line: 3, column: 1, message: 'boom', type: 'Error' },
+        { file: 'Assets/Scripts/Foo.cs', line: 8, column: 1, message: 'bang', type: 'Error' },
+        { file: 'Assets/Scripts/Foo.cs', line: 1, column: 1, message: 'meh', type: 'Warning' },
+      ],
+    };
+    const deps = fakeDeps({
+      bridgeConnected: () => true,
+      triggerRecompile: async () => report,
+    });
+
+    const data = await runVerifiedPass(WORKSPACE, deps);
+
+    expect(data.compile).toEqual({ errors: 2 });
+  });
+
+  it('reports guid integrity as missing for a touched .cs under Assets/ with no readable meta', async () => {
+    recordTouchedFile('/proj/Assets/Scripts/Foo.cs');
+    recordTouchedFile('/proj/Assets/Scripts/Bar.cs');
+
+    const deps = fakeDeps({
+      readGuid: async (absPath) => (absPath.endsWith('Bar.cs') ? null : 'guid-1'),
+    });
+
+    const data = await runVerifiedPass(WORKSPACE, deps);
+
+    expect(data.guids).toEqual({ missing: ['Assets/Scripts/Bar.cs'] });
+  });
+
+  it('skips the guid check for touched .cs files outside Assets/', async () => {
+    recordTouchedFile('/proj/Tools/Editor/Helper.cs');
+
+    let guidCalled = false;
+    const deps = fakeDeps({
+      readGuid: async () => {
+        guidCalled = true;
+        return null;
+      },
+    });
+
+    const data = await runVerifiedPass(WORKSPACE, deps);
+
+    expect(data.guids).toBe('intact');
+    expect(guidCalled).toBe(false);
+  });
+
+  it('degrades a throwing step to skipped without breaking the other steps', async () => {
+    recordTouchedFile('/proj/Assets/Scripts/Foo.cs');
+
+    const deps = fakeDeps({
+      runAnalyzers: () => {
+        throw new Error('analyzer engine exploded');
+      },
+      bridgeConnected: () => true,
+      triggerRecompile: async () => ({ started: false, success: true, errors: 0, messages: [] }),
+      readGuid: async () => 'guid-1',
+    });
+
+    const data = await runVerifiedPass(WORKSPACE, deps);
+
+    expect(data.analyzers).toBe('skipped');
+    expect(data.compile).toBe('clean');
+    expect(data.guids).toBe('intact');
+  });
+
+  it('degrades the compile step to skipped when triggerRecompile throws', async () => {
+    recordTouchedFile('/proj/Assets/Scripts/Foo.cs');
+
+    const deps = fakeDeps({
+      bridgeConnected: () => true,
+      triggerRecompile: async () => {
+        throw new Error('bridge dropped');
+      },
+    });
+
+    const data = await runVerifiedPass(WORKSPACE, deps);
+
+    expect(data.compile).toBe('skipped');
+    expect(data.analyzers).toEqual({ errors: 0 });
+  });
+
+  it('degrades the guid step to skipped when readGuid throws', async () => {
+    recordTouchedFile('/proj/Assets/Scripts/Foo.cs');
+
+    const deps = fakeDeps({
+      readGuid: async () => {
+        throw new Error('meta read exploded');
+      },
+    });
+
+    const data = await runVerifiedPass(WORKSPACE, deps);
+
+    expect(data.guids).toBe('skipped');
+  });
+
+  it('only counts .cs files touched for the analyzer step, ignoring other extensions', async () => {
+    recordTouchedFile('/proj/Assets/Scripts/Foo.cs');
+    recordTouchedFile('/proj/Assets/Scenes/Level1.unity');
+
+    const seen: string[] = [];
+    const deps = fakeDeps({
+      runAnalyzers: (_text, filePath) => {
+        seen.push(filePath);
+        return [];
+      },
+    });
+
+    const data = await runVerifiedPass(WORKSPACE, deps);
+
+    expect(seen).toEqual(['/proj/Assets/Scripts/Foo.cs']);
+    expect(data.files).toBe(2);
+  });
+
+  it('reflects the registry reset between two consecutive sends', async () => {
+    recordTouchedFile('/proj/Assets/Scripts/Foo.cs');
+    const deps = fakeDeps();
+    const first = await runVerifiedPass(WORKSPACE, deps);
+    expect(first.files).toBe(1);
+
+    beginVerifiedPass();
+    recordTouchedFile('/proj/Assets/Scripts/Bar.cs');
+    recordTouchedFile('/proj/Assets/Scripts/Baz.cs');
+    const second = await runVerifiedPass(WORKSPACE, deps);
+    expect(second.files).toBe(2);
+    expect(second.touchedFiles.sort()).toEqual(
+      ['Assets/Scripts/Bar.cs', 'Assets/Scripts/Baz.cs'].sort(),
+    );
+  });
+});
