@@ -3,7 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AssistantMessageEventStream } from '../../src/features/ai-panel/services/vendor/event-stream';
-import type { StreamFn, AssistantMessage } from '../../src/features/ai-panel/services/vendor/types';
+import type { Context, StreamFn, AssistantMessage } from '../../src/features/ai-panel/services/vendor/types';
 import type { UnityApiClient } from '../../src/features/ai-panel/services/unity-tools/api-search-tool';
 import { runTask, buildTools, maxTokensForMode, ASK_MAX_TOKENS, AGENT_MAX_TOKENS } from './run-task';
 import type { EvalTask } from './eval-types';
@@ -35,29 +35,49 @@ function scriptedStreamFn(script: AssistantMessage['content'][]): StreamFn {
 }
 
 /**
- * A model that never stops on its own: every call issues another tool call
- * (re-reading a fixture file that always exists), so the loop only ends via
- * the maxTurns abort — never naturally.
+ * A model that never stops VOLUNTARILY — as long as tools are offered, it
+ * always issues another tool call (re-reading a fixture file that always
+ * exists) instead of answering. Once the turn governor (P3.2) strips
+ * `tools` from the request at the cap, a real model literally can't emit a
+ * function call anymore — this fake mirrors that by checking
+ * `context.tools.length`, so it exercises the actual "stops because tools
+ * are gone" mechanism instead of a canned response that ignores the
+ * request it was given.
  */
-function runawayStreamFn(): StreamFn {
+function runawayStreamFn(): { streamFn: StreamFn; lastContext: () => Context | undefined } {
   let call = 0;
-  return () => {
+  let lastContext: Context | undefined;
+  const streamFn: StreamFn = (context) => {
+    lastContext = context;
     const stream = new AssistantMessageEventStream();
-    const id = `runaway-${call++}`;
     stream.push({ type: 'start' });
-    stream.push({
-      type: 'done',
-      message: {
-        role: 'assistant',
-        content: [
-          { type: 'toolCall', id, name: 'read', arguments: { path: 'Packages/manifest.json' } },
-        ],
-        stopReason: 'toolUse',
-        timestamp: Date.now(),
-      },
-    });
+    if (context.tools.length === 0) {
+      stream.push({
+        type: 'done',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'Wrapping up as asked.' }],
+          stopReason: 'stop',
+          timestamp: Date.now(),
+        },
+      });
+    } else {
+      const id = `runaway-${call++}`;
+      stream.push({
+        type: 'done',
+        message: {
+          role: 'assistant',
+          content: [
+            { type: 'toolCall', id, name: 'read', arguments: { path: 'Packages/manifest.json' } },
+          ],
+          stopReason: 'toolUse',
+          timestamp: Date.now(),
+        },
+      });
+    }
     return stream;
   };
+  return { streamFn, lastContext: () => lastContext };
 }
 
 const task: EvalTask = {
@@ -95,13 +115,27 @@ describe('runTask', () => {
     expect(result.checks.every((c) => c.pass)).toBe(true);
   });
 
-  it('fails a runaway agent that never stops on its own, once maxTurns is exceeded', async () => {
+  it('ends gracefully at the turn-governor cap for an agent that never stops on its own — fails on CHECKS, not a max-turns error', async () => {
     const runawayTask: EvalTask = { ...task, maxTurns: 3 };
     const usage = { input: 0, output: 0, requests: 0 };
-    const result = await runTask(runawayTask, runawayStreamFn(), usage);
-    expect(result.pass).toBe(false);
-    expect(result.error).toContain('max turns exceeded');
-    expect(result.turns).toBeLessThanOrEqual(runawayTask.maxTurns! + 1);
+    const { streamFn, lastContext } = runawayStreamFn();
+    const result = await runTask(runawayTask, streamFn, usage);
+
+    expect(result.error).toBeUndefined();
+    expect(result.turns).toBe(3);
+    expect(result.pass).toBe(false); // no file was ever written — fails on checks
+    expect(result.checks.some((c) => !c.pass)).toBe(true);
+
+    // The final request had tools stripped and carried the one-shot wrap-up
+    // message (P3.2's `withTurnGovernor`), which is what let the loop end
+    // naturally instead of needing an abort.
+    const finalRequest = lastContext();
+    expect(finalRequest?.tools).toEqual([]);
+    expect(
+      finalRequest?.messages.some(
+        (m) => m.role === 'user' && typeof m.content === 'string' && m.content.includes('one response left'),
+      ),
+    ).toBe(true);
   });
 
   it('surfaces groundingCacheMisses on the result (0 when the grounding tool is never called)', async () => {

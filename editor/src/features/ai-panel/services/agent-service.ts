@@ -41,6 +41,8 @@ import {
   resetCompileGate,
 } from './unity-tools';
 import { withCheckpoint } from './checkpoints/checkpoint-gate';
+import { withTurnGovernor, resetTurnGovernor } from './turn-governor';
+import { withRepeatCallGuard, resetRepeatCallGuard } from './tool-guards';
 import { resetTurnTelemetry, recordTelemetryEvent, recordGroundingLintHit } from './turn-telemetry';
 import {
   beginVerifiedPass,
@@ -144,7 +146,7 @@ function createToolsForPromptMode(mode: PromptMode, workspacePath: string): Agen
   const unityRead: AgentTool[] = isUnity ? createUnityReadTools() : [];
 
   if (mode === 'ask' || mode === 'plan-planning') {
-    return [...readOnly, ...graphTools, ...unityRead];
+    return [...readOnly, ...graphTools, ...unityRead].map(withRepeatCallGuard);
   }
 
   // Verified-pass (P3.4) registers every file the send touches by composing
@@ -196,7 +198,7 @@ function createToolsForPromptMode(mode: PromptMode, workspacePath: string): Agen
       operations: tauriBashOperations,
       allowedRoot,
     }),
-  ];
+  ].map(withRepeatCallGuard);
 }
 
 let agentInstance: AgentService | null = null;
@@ -229,7 +231,7 @@ export class AgentService {
       systemPrompt: buildSystemPrompt('agent', workspacePath, { effort: 'mid' }),
       model: PLACEHOLDER_MODEL,
       tools: createToolsForPromptMode('agent', workspacePath),
-      streamFn: arcaneStream,
+      streamFn: withTurnGovernor(arcaneStream),
       convertToLlm,
       reasoning: 'mid',
       // Server picks the model per reasoningLevel; default to the smallest tier's
@@ -316,6 +318,12 @@ export class AgentService {
     // Fresh compile-gate repair budget per user turn.
     resetCompileGate();
     resetTurnTelemetry();
+    // Fresh turn-governor call budget + repeat-call guard registries per
+    // send (P3.2) — both wrap streamFn/tools ONCE (constructor /
+    // createToolsForPromptMode), so their per-send state needs an explicit
+    // reset here, same as the compile gate above.
+    resetTurnGovernor();
+    resetRepeatCallGuard();
     // Fresh touched-file registry for the verified-pass closing check (P3.4).
     beginVerifiedPass();
 

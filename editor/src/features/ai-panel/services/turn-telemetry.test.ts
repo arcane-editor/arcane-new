@@ -4,6 +4,7 @@ import {
   nextTurnTelemetry,
   recordTelemetryEvent,
   recordGroundingLintHit,
+  recordLoopGuardHit,
 } from './turn-telemetry';
 import type { AgentEvent } from './vendor/types';
 
@@ -48,5 +49,14 @@ describe('turn telemetry', () => {
     expect(nextTurnTelemetry().groundingLintHits).toBe(1);
     resetTurnTelemetry();
     expect(nextTurnTelemetry().groundingLintHits).toBe(0);
+  });
+
+  it('counts repeat-call-guard suppressions and resets to 0 per send (P3.2)', () => {
+    expect(nextTurnTelemetry().loopGuardHits).toBe(0);
+    recordLoopGuardHit();
+    recordLoopGuardHit();
+    expect(nextTurnTelemetry().loopGuardHits).toBe(2);
+    resetTurnTelemetry();
+    expect(nextTurnTelemetry().loopGuardHits).toBe(0);
   });
 });

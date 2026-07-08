@@ -12,17 +12,32 @@ interface TurnTelemetry {
   repairCount: number;
   /** Ask-mode grounding-linter revise cycles fired this send (P2.2) — 0 or 1. */
   groundingLintHits: number;
+  /** Repeat-call guard suppressions this send (P3.2) — client-side only; server column is P4. */
+  loopGuardHits: number;
 }
 
-let current: TurnTelemetry = { turnIndex: 0, toolErrorCount: 0, repairCount: 0, groundingLintHits: 0 };
+const EMPTY_TELEMETRY: TurnTelemetry = {
+  turnIndex: 0,
+  toolErrorCount: 0,
+  repairCount: 0,
+  groundingLintHits: 0,
+  loopGuardHits: 0,
+};
+
+let current: TurnTelemetry = { ...EMPTY_TELEMETRY };
 
 export function resetTurnTelemetry(): void {
-  current = { turnIndex: 0, toolErrorCount: 0, repairCount: 0, groundingLintHits: 0 };
+  current = { ...EMPTY_TELEMETRY };
 }
 
 /** Called once when the grounding linter fires a revise turn for this send (P2.2). */
 export function recordGroundingLintHit(): void {
   current.groundingLintHits++;
+}
+
+/** Called once per repeat-call-guard suppression this send (P3.2, `tool-guards.ts`). */
+export function recordLoopGuardHit(): void {
+  current.loopGuardHits++;
 }
 
 /** Called once per outgoing LLM request; returns the snapshot to send. */

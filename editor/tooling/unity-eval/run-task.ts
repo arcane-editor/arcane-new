@@ -27,6 +27,8 @@ import {
   localListOperations,
 } from './local-operations';
 import { lintAnswer, buildReviseMessage } from '../../src/features/ai-panel/services/grounding-lint';
+import { withTurnGovernor, resetTurnGovernor } from '../../src/features/ai-panel/services/turn-governor';
+import { withRepeatCallGuard, resetRepeatCallGuard } from '../../src/features/ai-panel/services/tool-guards';
 import { buildFixtureFacts, buildFixtureGroundingContext } from './fixture-facts';
 import { createRecordingApiClient, createReplayApiClient } from './api-recordings';
 import { runChecks } from './checks';
@@ -80,7 +82,7 @@ export function buildTools(
     createUnityApiSearchTool(groundingClient),
     createGetUnityDocsTool(() => unityVersion),
   ];
-  if (task.mode === 'ask') return [read, list, ...unityTools];
+  if (task.mode === 'ask') return [read, list, ...unityTools].map(withRepeatCallGuard);
   // Analyzer gate (eval analog of prod's F-5.3 `withUnityAnalyzerGate` /
   // `wrapCs` in `agent-service.ts`) wraps write/edit only — same tools prod
   // wraps, in the same order (gate applied first, closest to the raw tool).
@@ -99,7 +101,7 @@ export function buildTools(
     write,
     edit,
     createBashTool(workDir, { operations: localBashOperations }),
-  ];
+  ].map(withRepeatCallGuard);
 }
 
 export async function runTask(
@@ -133,16 +135,34 @@ export async function runTask(
     : createReplayApiClient(recordingsDir, fixtureCtx);
 
   const usageBefore = { ...usage };
+  const maxTurns = task.maxTurns ?? DEFAULT_MAX_TURNS;
+
+  // Turn governor (P3.2): the SAME prod mechanism (`withTurnGovernor`),
+  // configured so the cap equals this task's `maxTurns` — the eval measures
+  // real prod wrap-up behavior instead of a soft-abort standing in for it.
+  // `caps` overrides every effort key since the eval's `Agent` never calls
+  // `setReasoning` (no `reasoning` option passed above), so `options.
+  // reasoning` is always undefined and the governor normalizes that to
+  // 'mid' — overriding all four keeps this robust even if that changes.
+  // `onCapReached` is a no-op: there's no ai-store to notify in the eval
+  // harness (mirrors the Bun-safe DI seam `lsp-gate.ts`/`compile-gate.ts` use
+  // for their own store-backed defaults).
+  resetTurnGovernor();
+  resetRepeatCallGuard();
+  const governedStreamFn = withTurnGovernor(streamFn, () => ({
+    caps: { low: maxTurns, mid: maxTurns, high: maxTurns, super: maxTurns },
+    onCapReached: () => {},
+  }));
+
   const agent = new Agent({
     systemPrompt,
     model: { id: 'eval', name: 'eval', provider: 'eval' },
     tools: buildTools(task, workDir, apiClient, groundingCtx.unityVersion),
-    streamFn,
+    streamFn: governedStreamFn,
     convertToLlm,
     contextWindow: 131072,
   });
 
-  const maxTurns = task.maxTurns ?? DEFAULT_MAX_TURNS;
   let turns = 0;
   // Chronological tool names for the whole run, backing the
   // `tool_called`/`tool_not_called` checks (`checks.ts`). Recorded on
@@ -151,14 +171,14 @@ export async function runTask(
   // e.g. a schema-invalid call, would never reach execution) — so this list
   // reflects tools that genuinely ran.
   const toolCalls: string[] = [];
-  // Soft cap: turn_start fires and the next LLM call dispatches in the same
-  // tick, while this abort lands asynchronously via the event listener — so
-  // the loop may execute one extra turn before it actually stops. The
-  // `turns > maxTurns` check below the run is what makes the overrun fail.
+  // The turn governor above bounds the loop now (graceful wrap-up at
+  // `maxTurns` calls, tools stripped so the model can't keep tool-calling
+  // past it) — `turns` is just a counter here. `turns > maxTurns` below is
+  // kept as a failsafe for the case the governor doesn't stop the loop
+  // (shouldn't trigger once stripping takes effect).
   agent.subscribe((event) => {
     if (event.type === 'turn_start') {
       turns++;
-      if (turns > maxTurns) agent.abort();
     } else if (event.type === 'tool_execution_start') {
       toolCalls.push(event.toolName);
     }
