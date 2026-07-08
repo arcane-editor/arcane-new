@@ -37,17 +37,26 @@ export function withEvalAnalyzerGate(tool: AgentTool, workDir: string): AgentToo
   return {
     ...tool,
     async execute(id, params, signal, onUpdate) {
-      const res = await tool.execute(id, params, signal, onUpdate);
       const p = (params as { path?: string }).path;
-      if (!p || !p.toLowerCase().endsWith('.cs')) return res;
+      if (!p || !p.toLowerCase().endsWith('.cs')) {
+        return await tool.execute(id, params, signal, onUpdate);
+      }
 
-      // Always re-read from disk (rather than trusting a write's params.content)
-      // so a failed write/edit — where the file was never actually mutated —
-      // passes through untouched; see module doc above.
-      const content = await readFile(resolveToCwd(p, workDir), 'utf8').catch(() => null);
-      if (content == null) return res;
+      // Read content BEFORE delegating to the wrapped tool so we can detect
+      // whether the call actually changed the file.
+      const preContent = await readFile(resolveToCwd(p, workDir), 'utf8').catch(() => null);
 
-      const findings = runErrorRule(content, p).filter((f) => f.severity === 'error');
+      // Execute the wrapped tool (which may fail without mutating the file).
+      const res = await tool.execute(id, params, signal, onUpdate);
+
+      // Read content AFTER the call to check if it was actually mutated.
+      const postContent = await readFile(resolveToCwd(p, workDir), 'utf8').catch(() => null);
+
+      // Only analyze and gate if the file now exists AND the content changed.
+      // If the call failed or was a no-op, pass the result through untouched.
+      if (postContent == null || postContent === preContent) return res;
+
+      const findings = runErrorRule(postContent, p).filter((f) => f.severity === 'error');
       if (findings.length === 0) return res;
 
       // Exact string construction copied from `analyzer-gate.ts`'s

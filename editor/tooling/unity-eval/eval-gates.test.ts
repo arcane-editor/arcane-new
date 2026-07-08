@@ -79,4 +79,46 @@ describe('withEvalAnalyzerGate', () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  it('does not append message when edit fails (bad oldText) on existing violating file', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'eval-gate-'));
+    try {
+      // Pre-create the file with violating content
+      const edit = createEditTool(dir, { operations: localEditOperations });
+      await edit.execute('setup', { path: 'Assets/Bad.cs', edits: [{ oldText: '', newText: VIOLATION_CS }] });
+
+      // Now try to edit with bad oldText (will fail, file unchanged)
+      const gated = withEvalAnalyzerGate(edit, dir);
+      const badParams = { path: 'Assets/Bad.cs', edits: [{ oldText: 'nonexistent', newText: 'x' }] };
+      const result = await gated.execute('c5', badParams);
+      expect(textOf(result)).not.toContain('[Unity analyzers]');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('does not append message when write fails on existing violating file', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'eval-gate-'));
+    try {
+      // Pre-create the file with violating content
+      const write = createWriteTool(dir, { operations: localWriteOperations });
+      await write.execute('setup', { path: 'Assets/Bad.cs', content: VIOLATION_CS });
+
+      // Stub writeFile to throw
+      const failingOperations = {
+        ...localWriteOperations,
+        writeFile: async () => {
+          throw new Error('Write failed');
+        },
+      };
+      const failingWrite = createWriteTool(dir, { operations: failingOperations });
+      const gated = withEvalAnalyzerGate(failingWrite, dir);
+
+      // Try to write new content (will fail, file unchanged)
+      const result = await gated.execute('c6', { path: 'Assets/Bad.cs', content: 'using UnityEngine;\npublic class NewClass : MonoBehaviour { }' });
+      expect(textOf(result)).not.toContain('[Unity analyzers]');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });
