@@ -67,11 +67,11 @@ export const TASKS: EvalTask[] = [
       { type: 'file_exists', path: 'Assets/Scripts/TintOnHit.cs' },
       // Accept either spelling: `material.color = c` and
       // `SetColor("_BaseColor", c)` are both correct on URP/Lit in
-      // 2022.3 — Unity's native `Material.color` accessor resolves against
-      // whichever main-color property the shader actually declares
-      // (`_Color` on the legacy Standard shader, `_BaseColor` on URP/HDRP
-      // Lit shaders), so `material.color` is not a legacy-only API here.
-      // `"_Color"` is the one that's wrong for this project's shader.
+      // 2022.3 — URP/Lit declares `[MainColor] _BaseColor`, and Unity's
+      // `Material.color` accessor maps to the property tagged `[MainColor]`
+      // (since ~2019.3), so `material.color` deterministically writes
+      // `_BaseColor` on URP/Lit. Accept-either remains correct because
+      // models may write either form.
       { type: 'file_contains', path: 'Assets/Scripts/TintOnHit.cs', pattern: 'material\\.color\\s*=|_BaseColor' },
       { type: 'file_not_contains', path: 'Assets/Scripts/TintOnHit.cs', pattern: '"_Color"' },
       { type: 'analyzer_clean', glob: 'Assets/Scripts/TintOnHit.cs' },
@@ -165,10 +165,9 @@ export const TASKS: EvalTask[] = [
     prompt: 'What shader should a new standard opaque material use in this project?',
     checks: [
       { type: 'answer_matches', pattern: 'Universal Render Pipeline/Lit' },
-      // Word-boundary, case-sensitive: catches "Standard" the shader name
-      // (capitalized, as Unity's shader menu/dropdown shows it) without
-      // tripping on incidental lowercase uses like "standard practice".
-      { type: 'answer_not_matches', pattern: '\\bStandard\\b' },
+      // Only fail on quoted-shader-spec form (e.g. Shader.Find("Standard")),
+      // not prose contrast like "the old Standard shader".
+      { type: 'answer_not_matches', pattern: '\\"Standard\\"' },
       { type: 'tool_called', tool: 'unity_api_search' },
     ],
   },
@@ -180,8 +179,9 @@ export const TASKS: EvalTask[] = [
       // `MonoBehaviour.OnRenderImage` is a Built-in render pipeline camera
       // callback; it is documented as not invoked at all when a Scriptable
       // Render Pipeline (URP/HDRP) is active, so recommending it here is
-      // simply wrong, not just outdated style.
-      { type: 'answer_not_matches', pattern: 'OnRenderImage' },
+      // simply wrong, not just outdated style. Only fail on code-recommendation
+      // form (method definition), not prose negation.
+      { type: 'answer_not_matches', pattern: 'void\\s+OnRenderImage\\s*\\(' },
     ],
   },
   {
@@ -191,7 +191,8 @@ export const TASKS: EvalTask[] = [
       // Inverse of `grounding-urp-postfx`: `OnRenderImage` is the correct,
       // classic Built-in-pipeline answer here.
       { type: 'answer_matches', pattern: 'OnRenderImage' },
-      { type: 'answer_not_matches', pattern: 'ScriptableRenderPass' },
+      // Only fail on subclassing form, not prose mention of URP as an alternative.
+      { type: 'answer_not_matches', pattern: ':\\s*ScriptableRenderPass\\b' },
     ],
   },
   {
@@ -222,6 +223,7 @@ export const TASKS: EvalTask[] = [
     prompt: 'What\'s the modern way to download text from a URL in a script?',
     checks: [
       { type: 'answer_matches', pattern: 'UnityWebRequest' },
+      // WWW → UnityWebRequest since 2018.
       { type: 'answer_not_matches', pattern: 'new\\s+WWW\\(' },
     ],
   },
@@ -230,7 +232,8 @@ export const TASKS: EvalTask[] = [
     prompt: 'What\'s the modern way to load a scene by name from a script?',
     checks: [
       { type: 'answer_matches', pattern: 'SceneManager\\.LoadScene' },
-      { type: 'answer_not_matches', pattern: 'Application\\.LoadLevel' },
+      // Application.LoadLevel → SceneManager.LoadScene since 5.3.
+      { type: 'answer_not_matches', pattern: 'Application\\.LoadLevel\\s*\\(' },
     ],
   },
 
