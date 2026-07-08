@@ -31,6 +31,7 @@ const DEFAULT_SETTINGS: SettingsSchema = {
   'unity.telemetry.enabled': false,
   'unity.hierarchyPanel.enabled': true,
   'unity.assetViewer.structuredDefault': true,
+  'unity.sceneDiff.enabled': true,
   'unity.codeLens.assetUsages': true,
   'unity.templates.enabled': true,
   'unity.docs.versionMatchedHover': true,

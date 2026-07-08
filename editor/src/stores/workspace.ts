@@ -27,6 +27,7 @@ import { useSettingsStore } from './settings';
 import { notify } from './notifications';
 import { coDeleteMeta, coRenameMeta } from '../features/explorer';
 import { maybeRefreshUnityAfterSave } from '../features/unity-bridge';
+import { isUnityAssetFile } from '../features/unity-asset-viewer';
 import { ExcludeMatcher } from '../utils/exclude-matcher';
 import { addRecentProject } from '../utils/persistence';
 import { classifyFile, offerClassRenameSync } from '../features/csharp';
@@ -1087,6 +1088,12 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       // File deleted — modifiedContent stays empty
     }
 
+    // Unity scene/prefab/asset files get a semantic tree diff instead of the
+    // flat Monaco text diff below, gated on the user setting (checked at
+    // open time — see `DiffInfo.semanticCandidate`'s doc comment).
+    const semanticCandidate =
+      isUnityAssetFile(fileName) && useSettingsStore.getState().settings['unity.sceneDiff.enabled'];
+
     const file: OpenFile = {
       path: diffPath,
       name: `${fileName} (${staged ? 'Staged' : 'Working Tree'})`,
@@ -1097,6 +1104,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         modifiedContent,
         filePath,
         staged,
+        semanticCandidate,
       },
     };
 

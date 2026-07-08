@@ -4,3 +4,25 @@
 export { AssetViewer } from './components/AssetViewer';
 export { InputActionsViewer, isInputActionsFile } from './components/InputActionsViewer';
 export { isUnityAssetFile } from './services/asset-model';
+
+// Semantic scene/prefab git-diff viewer (P6.2), driven by the Rust
+// `unity_scene_diff` diff engine (P6.1). `EditorPanel`/`workspace` import
+// ONLY through this barrel per the deep-modules rule.
+export { SceneDiffViewer } from './components/SceneDiffViewer';
+export {
+  formatSceneDiffForPrompt,
+  formatDiffSummaryLine,
+  summarizeDiffCounts,
+} from './services/scene-diff-model';
+export type {
+  SceneDiff,
+  ObjectDiff,
+  ObjectDiffStatus,
+  ComponentDiff,
+  ComponentDiffStatus,
+  PropertyDiff,
+  SubtreeSummary,
+  PrefabOverrideDiff,
+  PrefabOverrideStatus,
+  DiffSummary,
+} from './services/scene-diff-model';

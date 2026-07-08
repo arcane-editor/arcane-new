@@ -3,7 +3,7 @@ import MonacoEditor, { DiffEditor } from '@monaco-editor/react';
 import type { editor as MonacoEditorNs } from 'monaco-editor';
 import { ask } from '@tauri-apps/plugin-dialog';
 import { useWorkspaceStore } from '../../../stores/workspace';
-import { useUiStore, type AssetViewerMode } from '../../../stores/ui';
+import { useUiStore, type AssetViewerMode, type DiffViewMode } from '../../../stores/ui';
 import { useThemeStore } from '../../../stores/theme';
 import { useSettingsStore } from '../../../stores/settings';
 import { useProjectContextStore } from '../../../stores/project-context';
@@ -22,7 +22,13 @@ import { PackageCacheBanner, isPackageCachePath } from '../../unity-packages';
 import { initUsageCodeLens } from '../../unity-context';
 import { initUnityAnalyzers } from '../../unity-analyzers';
 import { initUnityCompilerDiagnostics } from '../../unity-compiler';
-import { AssetViewer, isUnityAssetFile, InputActionsViewer, isInputActionsFile } from '../../unity-asset-viewer';
+import {
+  AssetViewer,
+  isUnityAssetFile,
+  InputActionsViewer,
+  isInputActionsFile,
+  SceneDiffViewer,
+} from '../../unity-asset-viewer';
 import { initTestCodeLens } from '../../unity-test-runner';
 import { attachBreakpointGutter } from '../../debugger';
 
@@ -46,6 +52,7 @@ function EditorPanel() {
   const isUnityProject = useProjectContextStore((s) => s.isUnityProject);
   const structuredDefault = useSettingsStore((s) => s.settings['unity.assetViewer.structuredDefault']);
   const assetViewerModeMap = useUiStore((s) => s.assetViewerMode);
+  const diffViewModeMap = useUiStore((s) => s.diffViewMode);
 
   const editorRef = useRef<MonacoEditorNs.IStandaloneCodeEditor | null>(null);
 
@@ -159,31 +166,75 @@ function EditorPanel() {
   }
 
   if (activeFile.diff) {
-    return (
-      <div className="editor-container">
-        <DiffEditor
-          height="100%"
-          language={detectLanguage(activeFile.diff.filePath)}
-          theme={monacoThemeId}
-          original={activeFile.diff.originalContent}
-          modified={activeFile.diff.modifiedContent}
-          beforeMount={(_monaco) => {
-            // Pre-register theme so editor.create() doesn't fall back to vs (light).
-            ensureMonacoTheme(useThemeStore.getState().getActiveTheme());
-          }}
-          onMount={(_editor, _monaco) => {
-            ensureMonacoTheme(useThemeStore.getState().getActiveTheme());
-          }}
-          options={{
-            readOnly: true,
-            renderSideBySide: true,
-            automaticLayout: true,
-            minimap: { enabled: false },
-            fontSize: editorFontSize,
-            fontFamily: "'Geist Mono Variable', 'Geist Mono', 'JetBrains Mono', 'SF Mono', Menlo, Monaco, 'Courier New', monospace",
-            fontLigatures: true,
-          }}
+    const diffPath = activeFile.path;
+    const diffInfo = activeFile.diff;
+    // Unity asset diffs render as a semantic tree by default (tagged at
+    // `openDiffTab` time, gated on the `unity.sceneDiff.enabled` setting);
+    // per-tab overrides — manual toggle or an automatic SceneDiffViewer
+    // fallback — live in the ui store, same pattern as `assetViewerMode`.
+    const semanticCandidate = diffInfo.semanticCandidate === true;
+    const diffMode: DiffViewMode = diffViewModeMap[diffPath] ?? (semanticCandidate ? 'semantic' : 'text');
+    const setDiffMode = (mode: DiffViewMode) => useUiStore.getState().setDiffViewMode(diffPath, mode);
+
+    if (semanticCandidate && diffMode === 'semantic') {
+      return (
+        <SceneDiffViewer
+          filePath={diffInfo.filePath}
+          name={activeFile.name}
+          staged={diffInfo.staged}
+          onViewText={() => setDiffMode('text')}
+          onFallback={() => setDiffMode('text')}
         />
+      );
+    }
+
+    return (
+      <div className="editor-container" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+        {semanticCandidate && (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 10,
+              padding: '4px 10px',
+              fontSize: 12,
+              background: 'var(--bg-sidebar)',
+              borderBottom: '1px solid var(--border)',
+              color: 'var(--text-secondary)',
+              flexShrink: 0,
+            }}
+          >
+            <span>Raw YAML text diff.</span>
+            <button className="asset-viewer-btn" style={{ marginLeft: 'auto' }} onClick={() => setDiffMode('semantic')}>
+              Semantic View
+            </button>
+          </div>
+        )}
+        <div style={{ flex: 1, minHeight: 0 }}>
+          <DiffEditor
+            height="100%"
+            language={detectLanguage(diffInfo.filePath)}
+            theme={monacoThemeId}
+            original={diffInfo.originalContent}
+            modified={diffInfo.modifiedContent}
+            beforeMount={(_monaco) => {
+              // Pre-register theme so editor.create() doesn't fall back to vs (light).
+              ensureMonacoTheme(useThemeStore.getState().getActiveTheme());
+            }}
+            onMount={(_editor, _monaco) => {
+              ensureMonacoTheme(useThemeStore.getState().getActiveTheme());
+            }}
+            options={{
+              readOnly: true,
+              renderSideBySide: true,
+              automaticLayout: true,
+              minimap: { enabled: false },
+              fontSize: editorFontSize,
+              fontFamily: "'Geist Mono Variable', 'Geist Mono', 'JetBrains Mono', 'SF Mono', Menlo, Monaco, 'Courier New', monospace",
+              fontLigatures: true,
+            }}
+          />
+        </div>
       </div>
     );
   }

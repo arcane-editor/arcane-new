@@ -31,8 +31,12 @@ function openByPath(path: string) {
   void useWorkspaceStore.getState().openFile(abs, fileName);
 }
 
-/** A clickable guid reference — resolves to an asset path via the GUID index. */
-function GuidRef({ guid, label }: { guid: string; label?: string }) {
+/**
+ * A clickable guid reference — resolves to an asset path via the GUID index.
+ * Exported for reuse by `SceneDiffViewer` (same feature folder), which needs
+ * the identical guid→link rendering for scene-diff property/reference rows.
+ */
+export function GuidRef({ guid, label }: { guid: string; label?: string }) {
   const [resolved, setResolved] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;

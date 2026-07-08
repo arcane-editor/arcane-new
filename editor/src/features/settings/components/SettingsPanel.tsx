@@ -45,6 +45,7 @@ const SETTING_DEFINITIONS: SettingDefinition[] = [
   { key: 'unity.telemetry.enabled', type: 'boolean', category: 'Unity', label: 'Play-Mode Telemetry', description: 'Show a live FPS / memory / GC strip in the status bar while the Unity Editor is in Play Mode.' },
   { key: 'unity.hierarchyPanel.enabled', type: 'boolean', category: 'Unity', label: 'Hierarchy Panel', description: 'Show a live scene hierarchy panel mirroring the Unity Editor hierarchy.' },
   { key: 'unity.assetViewer.structuredDefault', type: 'boolean', category: 'Unity', label: 'Asset Viewer: Structured Default', description: 'Open Unity asset files in the structured viewer by default instead of raw text.' },
+  { key: 'unity.sceneDiff.enabled', type: 'boolean', category: 'Unity', label: 'Semantic Scene Diff', description: 'Semantic scene/prefab diffs — show Unity file changes as objects and properties instead of raw YAML.' },
   { key: 'unity.codeLens.assetUsages', type: 'boolean', category: 'Unity', label: 'CodeLens: Asset Usages', description: 'Show an inline CodeLens count of scene/prefab references above each MonoBehaviour.' },
   { key: 'unity.templates.enabled', type: 'boolean', category: 'Unity', label: 'Script Templates', description: 'Enable Unity-specific new-file templates (MonoBehaviour, ScriptableObject, etc.).' },
   { key: 'unity.docs.versionMatchedHover', type: 'boolean', category: 'Unity', label: 'Version-Matched Docs Hover', description: 'Show hover documentation matched to the Unity version used by the open project.' },

@@ -17,6 +17,13 @@ export interface DiffInfo {
   modifiedContent: string;
   filePath: string;
   staged: boolean;
+  /**
+   * True when this is a Unity asset file (`.unity`/`.prefab`/`.asset`/…) AND
+   * `unity.sceneDiff.enabled` was on when the tab was opened — i.e. eligible
+   * for the semantic `SceneDiffViewer` instead of the raw Monaco text diff.
+   * Computed once at `openDiffTab` time (see `stores/workspace.ts`).
+   */
+  semanticCandidate?: boolean;
 }
 
 export interface OpenFile {
@@ -112,6 +119,7 @@ export interface SettingsSchema {
   'unity.telemetry.enabled': boolean;
   'unity.hierarchyPanel.enabled': boolean;
   'unity.assetViewer.structuredDefault': boolean;
+  'unity.sceneDiff.enabled': boolean;
   'unity.codeLens.assetUsages': boolean;
   'unity.templates.enabled': boolean;
   'unity.docs.versionMatchedHover': boolean;

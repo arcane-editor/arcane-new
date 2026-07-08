@@ -4,6 +4,8 @@ import type { DiagnosticItem, DiagnosticSource } from '../types';
 export type SidebarView = 'explorer' | 'source-control' | 'search' | 'scene-context' | 'hierarchy' | 'test' | 'debug';
 /** Per-file view mode for Unity YAML assets: structured tree vs raw Monaco. */
 export type AssetViewerMode = 'structured' | 'raw-view' | 'raw-edit';
+/** Per-tab view mode for a Unity-asset git diff tab: semantic tree vs raw Monaco text diff. */
+export type DiffViewMode = 'semantic' | 'text';
 export type RightSidebarView = 'ai-panel' | 'unity-inspector';
 export type BottomPanelTab = 'terminal' | 'problems' | 'output' | 'unity-console';
 export type LspStatus = 'idle' | 'starting' | 'indexing' | 'ready' | 'error';
@@ -116,6 +118,14 @@ interface UiState {
   assetViewerMode: Record<string, AssetViewerMode>;
   setAssetViewerMode: (path: string, mode: AssetViewerMode) => void;
 
+  /**
+   * diff-tab path → semantic/text view mode override (absent ⇒ 'semantic'
+   * when the tab is a semantic candidate, else 'text'). Also flipped to
+   * 'text' automatically when `SceneDiffViewer` fails to render a diff.
+   */
+  diffViewMode: Record<string, DiffViewMode>;
+  setDiffViewMode: (path: string, mode: DiffViewMode) => void;
+
   /** uri → source → items */
   diagnostics: DiagnosticsMap;
   /**
@@ -190,6 +200,10 @@ export const useUiStore = create<UiState>((set, get) => ({
   assetViewerMode: {},
   setAssetViewerMode: (path, mode) =>
     set((s) => ({ assetViewerMode: { ...s.assetViewerMode, [path]: mode } })),
+
+  diffViewMode: {},
+  setDiffViewMode: (path, mode) =>
+    set((s) => ({ diffViewMode: { ...s.diffViewMode, [path]: mode } })),
 
   diagnostics: new Map(),
   setFileDiagnostics: (fileUri, source, items) => {
