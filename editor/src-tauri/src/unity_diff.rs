@@ -697,14 +697,25 @@ struct ModValue {
 
 /// `None` when `s` carries no *reference* payload on this side: either the
 /// field is wholly absent (empty string) or it's Unity's null-reference
-/// sentinel `{fileID: 0}` — real saved scenes serialize THIS literal
+/// Helper: returns true when a reference is the Unity null-reference sentinel
+/// `{fileID: 0}` (whitespace-robust via regex). Unity serializes this sentinel
+/// alongside `value:` for every scalar-typed modification, so we must
+/// distinguish it from a real reference payload.
+fn is_null_reference_sentinel(s: &str) -> bool {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    let re = RE.get_or_init(|| Regex::new(r"^\{\s*fileID:\s*0\s*\}$").expect("null sentinel regex"));
+    re.is_match(s.trim())
+}
+
+/// Check if a reference string is non-empty (not the null sentinel). Returns
+/// the string (cloned) if non-empty, else `None`. The sentinel `{fileID: 0}`
+/// (with any whitespace) is treated as empty — real saved scenes serialize THIS
 /// placeholder alongside `value:` for every scalar-typed modification (not
-/// an omitted line), so a plain emptiness check alone would misclassify
-/// every scalar override as also carrying a "reference payload". Else
-/// `Some(cloned string)`.
+/// an omitted line), so we must exclude it to avoid misclassifying scalar
+/// overrides as also carrying a "reference payload". Else `Some(cloned string)`.
 fn non_empty_reference(s: &str) -> Option<String> {
     let trimmed = s.trim();
-    if trimmed.is_empty() || trimmed == "{fileID: 0}" {
+    if trimmed.is_empty() || is_null_reference_sentinel(trimmed) {
         None
     } else {
         Some(s.to_string())
@@ -1273,6 +1284,53 @@ mod tests {
 
         let diff = diff_unity_assets(&before, &after, &guids);
         assert!(diff.prefab_override_diffs.is_empty(), "identical reference entry emits no diff row");
+    }
+
+    #[test]
+    fn prefab_override_reference_nulled_to_fileid_zero() {
+        // Regression test: when old side has a real reference and new side is
+        // nulled to {fileID: 0}, must emit a PrefabOverrideDiff with
+        // oldObjectReference populated and count as a reference change (status="modified").
+        // The null sentinel `{fileID: 0}` must be filtered out and not appear in
+        // new_object_reference.
+        let prefab_guid = "abcdef0123456789abcdef0123456789";
+        let target_guid = "11111111111111111111111111111111";
+        let old_asset_guid = "22222222222222222222222222222222";
+        let before = format!(
+            "--- !u!1001 &100100000\nPrefabInstance:\n  m_ObjectHideFlags: 0\n  serializedVersion: 2\n  m_Modification:\n    m_TransformParent: {{fileID: 0}}\n    m_Modifications:\n    - target: {{fileID: 400000, guid: {target_guid}, type: 3}}\n      propertyPath: m_Sprite\n      value: \n      objectReference: {{fileID: 21300000, guid: {old_asset_guid}, type: 3}}\n    m_RemovedComponents: []\n  m_SourcePrefab: {{fileID: 100100000, guid: {prefab_guid}, type: 3}}\n"
+        );
+        let after = format!(
+            "--- !u!1001 &100100000\nPrefabInstance:\n  m_ObjectHideFlags: 0\n  serializedVersion: 2\n  m_Modification:\n    m_TransformParent: {{fileID: 0}}\n    m_Modifications:\n    - target: {{fileID: 400000, guid: {target_guid}, type: 3}}\n      propertyPath: m_Sprite\n      value: \n      objectReference: {{fileID: 0}}\n    m_RemovedComponents: []\n  m_SourcePrefab: {{fileID: 100100000, guid: {prefab_guid}, type: 3}}\n"
+        );
+
+        let mut guids = HashMap::new();
+        guids.insert(prefab_guid.to_string(), "Assets/Prefabs/Enemy.prefab".to_string());
+
+        let diff = diff_unity_assets(&before, &after, &guids);
+        assert_eq!(diff.prefab_override_diffs.len(), 1, "nulled reference must emit a diff row");
+        let row = &diff.prefab_override_diffs[0];
+        assert_eq!(row.status, "modified", "reference change is a modification");
+        assert_eq!(row.property_path, "m_Sprite");
+        assert!(row.old_object_reference.as_deref().unwrap_or("").contains(old_asset_guid));
+        assert_eq!(row.new_object_reference, None, "nulled sentinel must not appear as a reference");
+    }
+
+    #[test]
+    fn null_reference_sentinel_whitespace_robust() {
+        // Unit tests for the `is_null_reference_sentinel` helper to ensure it
+        // correctly handles various whitespace patterns around `{fileID: 0}`.
+        assert!(is_null_reference_sentinel("{fileID: 0}"));
+        assert!(is_null_reference_sentinel("{fileID:0}"));
+        assert!(is_null_reference_sentinel("{ fileID: 0 }"));
+        assert!(is_null_reference_sentinel("{  fileID:  0  }"));
+        assert!(is_null_reference_sentinel("  {fileID: 0}  ")); // surrounding trim happens in non_empty_reference
+
+        // Non-sentinel references should not match.
+        assert!(!is_null_reference_sentinel("{fileID: 1}"));
+        assert!(!is_null_reference_sentinel("{fileID: 123}"));
+        assert!(!is_null_reference_sentinel("{fileID: 0, guid: abc}"));
+        assert!(!is_null_reference_sentinel(""));
+        assert!(!is_null_reference_sentinel("{}"));
     }
 
     #[test]

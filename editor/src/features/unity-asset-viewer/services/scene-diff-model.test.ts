@@ -163,6 +163,7 @@ describe('formatSceneDiffForPrompt — prefab override reference change', () => 
       objectDiffs: [],
       prefabOverrideDiffs: [
         basePrefabOverrideDiff({
+          prefabInstanceFileId: '100100000',
           prefabAssetName: 'Enemy',
           prefabAssetGuid: 'abcdef0123456789abcdef0123456789',
           propertyPath: 'm_Sprite',
@@ -180,7 +181,7 @@ describe('formatSceneDiffForPrompt — prefab override reference change', () => 
     };
 
     expect(formatSceneDiffForPrompt(diff)).toBe(
-      "1 prefab override\nOverrides on 'Enemy.prefab' instance\n  m_Sprite: reference → NewSprite",
+      "1 prefab override\nOverrides on 'Enemy.prefab' instance (fileID: 100100000)\n  m_Sprite: reference → NewSprite",
     );
   });
 
@@ -189,6 +190,7 @@ describe('formatSceneDiffForPrompt — prefab override reference change', () => 
       objectDiffs: [],
       prefabOverrideDiffs: [
         basePrefabOverrideDiff({
+          prefabInstanceFileId: '100100000',
           prefabAssetName: 'Enemy',
           propertyPath: 'speed',
           oldValue: '5',
@@ -200,7 +202,7 @@ describe('formatSceneDiffForPrompt — prefab override reference change', () => 
     };
 
     expect(formatSceneDiffForPrompt(diff)).toBe(
-      "1 prefab override\nOverrides on 'Enemy.prefab' instance\n  speed: 5 → 9",
+      "1 prefab override\nOverrides on 'Enemy.prefab' instance (fileID: 100100000)\n  speed: 5 → 9",
     );
   });
 
@@ -209,6 +211,7 @@ describe('formatSceneDiffForPrompt — prefab override reference change', () => 
       objectDiffs: [],
       prefabOverrideDiffs: [
         basePrefabOverrideDiff({
+          prefabInstanceFileId: '100100000',
           prefabAssetName: 'Enemy',
           propertyPath: 'm_LocalPosition',
           oldValue: '{x: 0, y: 0, z: 0}',
@@ -220,25 +223,28 @@ describe('formatSceneDiffForPrompt — prefab override reference change', () => 
     };
 
     expect(formatSceneDiffForPrompt(diff)).toBe(
-      "1 prefab override\nOverrides on 'Enemy.prefab' instance\n  m_LocalPosition: (0, 0, 0) → (1, 2.5, 0)",
+      "1 prefab override\nOverrides on 'Enemy.prefab' instance (fileID: 100100000)\n  m_LocalPosition: (0, 0, 0) → (1, 2.5, 0)",
     );
   });
 });
 
 describe('groupPrefabOverrides', () => {
-  it('groups multiple rows on the same source prefab into one section, in first-seen order', () => {
+  it('groups multiple rows on the same prefab instance together, by prefabInstanceFileId', () => {
     const rows: PrefabOverrideDiff[] = [
       basePrefabOverrideDiff({
+        prefabInstanceFileId: '100100000',
         prefabAssetName: 'Enemy',
         prefabAssetGuid: 'abcdef0123456789abcdef0123456789',
         propertyPath: 'health',
       }),
       basePrefabOverrideDiff({
+        prefabInstanceFileId: '100100001',
         prefabAssetName: 'Turret',
         prefabAssetGuid: '99999999999999999999999999999999',
         propertyPath: 'range',
       }),
       basePrefabOverrideDiff({
+        prefabInstanceFileId: '100100000',
         prefabAssetName: 'Enemy',
         prefabAssetGuid: 'abcdef0123456789abcdef0123456789',
         propertyPath: 'speed',
@@ -247,8 +253,10 @@ describe('groupPrefabOverrides', () => {
 
     const groups = groupPrefabOverrides(rows);
     expect(groups.length).toBe(2);
+    expect(groups[0].prefabInstanceFileId).toBe('100100000');
     expect(groups[0].prefabAssetName).toBe('Enemy');
     expect(groups[0].rows.map((r) => r.propertyPath)).toEqual(['health', 'speed']);
+    expect(groups[1].prefabInstanceFileId).toBe('100100001');
     expect(groups[1].prefabAssetName).toBe('Turret');
     expect(groups[1].rows.map((r) => r.propertyPath)).toEqual(['range']);
   });
@@ -263,14 +271,52 @@ describe('groupPrefabOverrides', () => {
     ];
     const groups = groupPrefabOverrides(rows);
     expect(groups.length).toBe(1);
-    expect(formatPrefabOverrideGroupHeader(groups[0])).toBe('Overrides on prefab instance 777000');
+    expect(formatPrefabOverrideGroupHeader(groups[0])).toBe('Overrides on prefab instance (fileID: 777000)');
   });
 
-  it('formats the header with the .prefab extension appended', () => {
+  it('formats the header with the .prefab extension appended and includes the fileID', () => {
     const groups = groupPrefabOverrides([
-      basePrefabOverrideDiff({ prefabAssetName: 'Enemy', prefabAssetGuid: 'abcdef0123456789abcdef0123456789' }),
+      basePrefabOverrideDiff({
+        prefabInstanceFileId: '100100000',
+        prefabAssetName: 'Enemy',
+        prefabAssetGuid: 'abcdef0123456789abcdef0123456789',
+      }),
     ]);
-    expect(formatPrefabOverrideGroupHeader(groups[0])).toBe("Overrides on 'Enemy.prefab' instance");
+    expect(formatPrefabOverrideGroupHeader(groups[0])).toBe(
+      "Overrides on 'Enemy.prefab' instance (fileID: 100100000)"
+    );
+  });
+
+  it('groups two instances of the same asset separately by prefabInstanceFileId', () => {
+    const rows: PrefabOverrideDiff[] = [
+      basePrefabOverrideDiff({
+        prefabInstanceFileId: '100100000',
+        prefabAssetName: 'Enemy',
+        prefabAssetGuid: 'abcdef0123456789abcdef0123456789',
+        propertyPath: 'health',
+      }),
+      basePrefabOverrideDiff({
+        prefabInstanceFileId: '100100001',
+        prefabAssetName: 'Enemy',
+        prefabAssetGuid: 'abcdef0123456789abcdef0123456789',
+        propertyPath: 'health',
+      }),
+    ];
+
+    const groups = groupPrefabOverrides(rows);
+    // Two instances of the same asset should be separate groups.
+    expect(groups.length).toBe(2);
+    expect(groups[0].prefabInstanceFileId).toBe('100100000');
+    expect(groups[0].rows.map((r) => r.propertyPath)).toEqual(['health']);
+    expect(groups[1].prefabInstanceFileId).toBe('100100001');
+    expect(groups[1].rows.map((r) => r.propertyPath)).toEqual(['health']);
+    // Both should have distinguishable headers
+    expect(formatPrefabOverrideGroupHeader(groups[0])).toBe(
+      "Overrides on 'Enemy.prefab' instance (fileID: 100100000)"
+    );
+    expect(formatPrefabOverrideGroupHeader(groups[1])).toBe(
+      "Overrides on 'Enemy.prefab' instance (fileID: 100100001)"
+    );
   });
 });
 

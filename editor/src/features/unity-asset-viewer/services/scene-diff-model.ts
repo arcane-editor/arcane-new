@@ -264,8 +264,11 @@ export interface PrefabOverrideGroup {
 export function groupPrefabOverrides(diffs: PrefabOverrideDiff[]): PrefabOverrideGroup[] {
   const groups: PrefabOverrideGroup[] = [];
   const byKey = new Map<string, PrefabOverrideGroup>();
+
   for (const p of diffs) {
-    const key = p.prefabAssetGuid ?? p.prefabAssetName ?? `instance:${p.prefabInstanceFileId}`;
+    // Primary grouping key is the per-placement `prefabInstanceFileId` to keep
+    // distinct placed instances separate (even if they share the same prefab asset).
+    const key = p.prefabInstanceFileId;
     let group = byKey.get(key);
     if (!group) {
       group = {
@@ -283,11 +286,16 @@ export function groupPrefabOverrides(diffs: PrefabOverrideDiff[]): PrefabOverrid
   return groups;
 }
 
-/** Plain-text section header for one `PrefabOverrideGroup`, e.g. `"Overrides on 'Enemy.prefab' instance"`. */
+/**
+ * Plain-text section header for one `PrefabOverrideGroup`, e.g.
+ * `"Overrides on 'Enemy.prefab' instance (fileID: 100100000)"`. When the asset
+ * name is known, the header includes the fileID for unambiguous reference; when
+ * only the fileID is available, it stands alone.
+ */
 export function formatPrefabOverrideGroupHeader(g: PrefabOverrideGroup): string {
   return g.prefabAssetName
-    ? `Overrides on '${g.prefabAssetName}.prefab' instance`
-    : `Overrides on prefab instance ${g.prefabInstanceFileId}`;
+    ? `Overrides on '${g.prefabAssetName}.prefab' instance (fileID: ${g.prefabInstanceFileId})`
+    : `Overrides on prefab instance (fileID: ${g.prefabInstanceFileId})`;
 }
 
 /** One override row, without the owning-prefab context (that's the group header). */
