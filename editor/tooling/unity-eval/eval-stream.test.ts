@@ -78,4 +78,67 @@ describe('createEvalStreamFn', () => {
     expect(done.message.stopReason).toBe('toolUse');
     expect(done.message.content[0]).toEqual({ type: 'toolCall', id: 'c1', name: 'read', arguments: { path: 'a.cs' } });
   });
+
+  it('retries once after a transient 500 and succeeds on the second attempt', async () => {
+    let calls = 0;
+    globalThis.fetch = (async () => {
+      calls++;
+      if (calls === 1) return new Response('3021: rate limiting: inference request per min rate reached', { status: 500 });
+      return new Response(
+        JSON.stringify({
+          choices: [{ message: { role: 'assistant', content: 'hello' } }],
+          usage: { prompt_tokens: 10, completion_tokens: 5 },
+        }),
+        { status: 200 },
+      );
+    }) as typeof fetch;
+    const usage = { input: 0, output: 0, requests: 0 };
+    const fn = createEvalStreamFn(
+      { baseUrl: 'http://x/v1', apiKey: 'k', model: 'm', label: 'test', retryBaseDelayMs: 1 },
+      usage,
+    );
+    const events: unknown[] = [];
+    for await (const ev of fn(ctx as never, { model: { id: 'm', name: 'm', provider: 'eval' } } as never)) events.push(ev);
+    const done = events.find((e) => (e as { type: string }).type === 'done') as { message: { content: { type: string; text?: string }[] } };
+    expect(done.message.content[0]).toEqual({ type: 'text', text: 'hello' });
+    expect(calls).toBe(2);
+    expect(usage).toEqual({ input: 10, output: 5, requests: 2 });
+  });
+
+  it('gives up after maxAttempts consecutive 500s and emits only an error event', async () => {
+    let calls = 0;
+    globalThis.fetch = (async () => {
+      calls++;
+      return new Response('error code: 502', { status: 502 });
+    }) as typeof fetch;
+    const usage = { input: 0, output: 0, requests: 0 };
+    const fn = createEvalStreamFn(
+      { baseUrl: 'http://x/v1', apiKey: 'k', model: 'm', label: 'test', retryBaseDelayMs: 1, maxAttempts: 3 },
+      usage,
+    );
+    const events: unknown[] = [];
+    for await (const ev of fn(ctx as never, { model: { id: 'm', name: 'm', provider: 'eval' } } as never)) events.push(ev);
+    expect(events.some((e) => (e as { type: string }).type === 'done')).toBe(false);
+    expect(events.some((e) => (e as { type: string }).type === 'error')).toBe(true);
+    expect(calls).toBe(3);
+    expect(usage.requests).toBe(3);
+  });
+
+  it('does not retry a non-retryable 4xx response', async () => {
+    let calls = 0;
+    globalThis.fetch = (async () => {
+      calls++;
+      return new Response('bad request: invalid schema', { status: 400 });
+    }) as typeof fetch;
+    const usage = { input: 0, output: 0, requests: 0 };
+    const fn = createEvalStreamFn(
+      { baseUrl: 'http://x/v1', apiKey: 'k', model: 'm', label: 'test', retryBaseDelayMs: 1 },
+      usage,
+    );
+    const events: unknown[] = [];
+    for await (const ev of fn(ctx as never, { model: { id: 'm', name: 'm', provider: 'eval' } } as never)) events.push(ev);
+    expect(events.some((e) => (e as { type: string }).type === 'error')).toBe(true);
+    expect(calls).toBe(1);
+    expect(usage.requests).toBe(1);
+  });
 });
