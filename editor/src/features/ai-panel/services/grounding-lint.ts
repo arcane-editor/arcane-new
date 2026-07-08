@@ -17,27 +17,25 @@
  * prose MENTION of the wrong token, not a USE of it. So this linter never
  * scans raw prose. It only ever looks inside two regions of the answer:
  *
- *  1. Fenced code blocks (``` … ```). These are real code, so the block-
- *     level scoping IS the false-positive control: every `wrongTokens`
- *     pattern is matched against the block's full text. The one wrinkle
- *     (found by P2.1's reviewer) is that a negation comment INSIDE a fenced
- *     block — e.g. `// don't use _Color, use _BaseColor` — would otherwise
- *     false-positive, so `//…` (to end of line) and `/*…*\/` spans are
- *     stripped from each fenced block before matching.
+ *  1. Fenced code blocks (``` … ``` or ~~~ … ~~~). These are real code, so the
+ *     block-level scoping IS the false-positive control: every `wrongTokens`
+ *     pattern is matched against the block's full text. Fences may be paired or
+ *     unclosed (if the answer is truncated or incomplete, the rest of the text
+ *     is treated as the block body). The one wrinkle (found by P2.1's reviewer)
+ *     is that a negation comment INSIDE a fenced block — e.g.
+ *     `// don't use _Color, use _BaseColor` — would otherwise false-positive,
+ *     so `//…` (to end of line) and `/*…*\/` spans are stripped from each
+ *     fenced block before matching.
  *
  *  2. Inline code spans (`…`). These are much shorter and far more likely to
- *     be a bare mention ("don't use `_Color`") than real usage, so a single
- *     extra gate applies BEFORE any pattern is tested against a span: the
- *     span's own text must look like a usage form — it contains a call/
- *     grouping paren `(` (e.g. `` `Input.GetAxis("Horizontal")` ``,
- *     `` `SetColor("_Color", ...)` ``) or a `using` directive (e.g.
- *     `` `using UnityEngine.InputSystem;` ``). A bare identifier or bare
- *     quoted string span (`` `_Color` ``, `` `InputAction` ``) never passes
- *     this gate, so it can never match regardless of which row's pattern it
- *     might otherwise resemble — that's what keeps "don't use `_Color`"
- *     clean. Spans that DO pass the gate are matched the same way fenced
- *     blocks are (full `wrongTokens` set, no comment-stripping needed since
- *     inline spans are single-line).
+ *     be a bare mention ("don't use `_Color`") than real usage. To reduce
+ *     false positives, inline spans are only matched against `wrongTokens`
+ *     patterns that themselves encode usage syntax — patterns containing
+ *     `\(` or `using\s` (e.g., call-forms like `SetColor\(\s*"_Color"`,
+ *     `Input\.(GetAxis|…)`, `using\s+UnityEngine\.InputSystem`). Bare
+ *     quoted-string and bare-identifier patterns (`` `_Color` ``,
+ *     `` `InputAction` ``) apply only inside fenced blocks, not inline.
+ *     This ensures that "don't use `_Color`" in prose stays clean.
  *
  * Anything outside a fence or inline span — plain prose — is never matched,
  * even if it happens to contain a wrong token verbatim.
@@ -51,10 +49,6 @@ export interface Violation {
   correction: string;
 }
 
-// Fenced block: opening ``` (optional language tag) + newline, non-greedy
-// body, closing ```. `s` flag lets `.` inside `[\s\S]` alternatives, but we
-// stick to `[\s\S]*?` for portability.
-const FENCE_RE = /```[^\n`]*\n([\s\S]*?)```/g;
 // Inline span: single backtick pair, no newline inside (matches CommonMark's
 // short-span convention closely enough for this scope).
 const INLINE_SPAN_RE = /`([^`\n]+)`/g;
@@ -68,18 +62,28 @@ function stripComments(code: string): string {
 }
 
 /**
- * The inline-span usage-form gate: does this span's own text look like real
- * code being invoked/imported, rather than a bare identifier or quoted
- * property name mentioned in passing? See the module header for why this is
- * the false-positive control for inline spans specifically.
+ * Does this pattern string encode usage syntax (call, method reference, or import)?
+ * Returns false only for "bare mention" patterns — those that match ONLY a quoted
+ * string or ONLY a bare identifier with word boundaries. All other patterns
+ * (containing structure like `\.`, `\(`, `using`, `\s`, `:`, etc.) are usage patterns.
  */
-function isUsageForm(span: string): boolean {
-  return span.includes('(') || /\busing\s+/.test(span);
+function isUsagePattern(pattern: string): boolean {
+  // Bare quoted string: "_Color", "_BaseColor", "_MainTex", "_BaseMap"
+  if (/^"[^"]*"$/.test(pattern)) {
+    return false;
+  }
+  // Bare word with boundaries: \bInputAction\b, \bPlayerInput\b
+  // (the pattern string contains literal backslash-b sequences)
+  if (/^\\b\w+\\b$/.test(pattern)) {
+    return false;
+  }
+  // Everything else (containing method references, calls, imports, etc.) is a usage pattern
+  return true;
 }
 
-/** First substring in `text` matched by any of the row's `wrongTokens`, or null. */
-function firstMatch(row: ContrastRow, text: string): string | null {
-  for (const token of row.wrongTokens) {
+/** First substring in `text` matched by any of the given tokens, or null. */
+function firstMatch(tokens: readonly typeof ContrastRow.prototype.wrongTokens[number][], text: string): string | null {
+  for (const token of tokens) {
     const re = new RegExp(token.pattern, token.flags ?? '');
     const m = re.exec(text);
     if (m) return m[0];
@@ -87,21 +91,58 @@ function firstMatch(row: ContrastRow, text: string): string | null {
   return null;
 }
 
-/** Fenced-code-block bodies (comments stripped), in document order. */
+/**
+ * Fenced-code-block bodies (comments stripped), in document order.
+ * Supports both ``` and ~~~ fence types. Handles both paired and unclosed fences
+ * (unclosed fences treat the rest of the text as the block body).
+ */
 function extractCodeBlocks(text: string): { blocks: string[]; spans: Array<[number, number]> } {
   const blocks: string[] = [];
   const spans: Array<[number, number]> = [];
-  FENCE_RE.lastIndex = 0;
-  let m: RegExpExecArray | null;
-  while ((m = FENCE_RE.exec(text))) {
-    blocks.push(stripComments(m[1] ?? ''));
-    spans.push([m.index, m.index + m[0].length]);
+
+  let pos = 0;
+  const openFencePattern = /^(```|~~~)[^\n]*\n/m;
+
+  while (pos < text.length) {
+    const openMatch = openFencePattern.exec(text.slice(pos));
+    if (!openMatch) break;
+
+    const fenceType = openMatch[1]!;
+    const spanStart = pos + openMatch.index;
+    const contentStart = pos + openMatch.index + openMatch[0].length;
+
+    // Look for closing fence of the same type at the start of a line
+    const closePattern = new RegExp(`^${fenceType.replace(/`/g, '\\`')}`, 'm');
+    const closeMatch = closePattern.exec(text.slice(contentStart));
+
+    let spanEnd: number;
+    let contentEnd: number;
+
+    if (closeMatch) {
+      // Found closing fence
+      contentEnd = contentStart + closeMatch.index;
+      // Skip to end of closing fence line
+      const afterClose = contentStart + closeMatch.index + fenceType.length;
+      const nextNewline = text.indexOf('\n', afterClose);
+      spanEnd = nextNewline === -1 ? text.length : nextNewline + 1;
+    } else {
+      // Unclosed fence: rest of text is content
+      contentEnd = text.length;
+      spanEnd = text.length;
+    }
+
+    const body = text.substring(contentStart, contentEnd);
+    blocks.push(stripComments(body));
+    spans.push([spanStart, spanEnd]);
+
+    pos = spanEnd;
   }
+
   return { blocks, spans };
 }
 
-/** Inline-span bodies that pass the usage-form gate, searched OUTSIDE the given fenced ranges. */
-function extractUsageFormSpans(text: string, fencedSpans: Array<[number, number]>): string[] {
+/** All inline-span bodies (no gate), searched OUTSIDE the given fenced ranges. */
+function extractAllInlineSpans(text: string, fencedSpans: Array<[number, number]>): string[] {
   let withoutFences = text;
   if (fencedSpans.length > 0) {
     let out = '';
@@ -118,15 +159,14 @@ function extractUsageFormSpans(text: string, fencedSpans: Array<[number, number]
   INLINE_SPAN_RE.lastIndex = 0;
   let m: RegExpExecArray | null;
   while ((m = INLINE_SPAN_RE.exec(withoutFences))) {
-    const span = m[1] ?? '';
-    if (isUsageForm(span)) spans.push(span);
+    spans.push(m[1] ?? '');
   }
   return spans;
 }
 
 /**
  * Lint an assistant answer for wrong-for-this-project API usage, scoped to
- * fenced code blocks and usage-form inline spans only (see module header).
+ * fenced code blocks and inline spans only (see module header).
  * Returns one `Violation` per applicable contrast row that matched (deduped
  * by `rowId` — a row can only ever contribute a single violation, no matter
  * how many times or where its pattern matches).
@@ -136,21 +176,27 @@ export function lintAnswer(text: string, facts: ContrastFacts): Violation[] {
   if (rows.length === 0) return [];
 
   const { blocks: codeBlocks, spans: fencedSpans } = extractCodeBlocks(text);
-  const usageSpans = extractUsageFormSpans(text, fencedSpans);
+  const allInlineSpans = extractAllInlineSpans(text, fencedSpans);
 
   const violations: Violation[] = [];
   for (const row of rows) {
     let matched: string | null = null;
+
+    // Check fenced blocks with all patterns
     for (const block of codeBlocks) {
-      matched = firstMatch(row, block);
+      matched = firstMatch(row.wrongTokens, block);
       if (matched) break;
     }
+
+    // Check inline spans, but only with patterns that encode usage syntax
     if (!matched) {
-      for (const span of usageSpans) {
-        matched = firstMatch(row, span);
+      const usagePatterns = row.wrongTokens.filter((t) => isUsagePattern(t.pattern));
+      for (const span of allInlineSpans) {
+        matched = firstMatch(usagePatterns, span);
         if (matched) break;
       }
     }
+
     if (matched) {
       violations.push({ rowId: row.id, matchedText: matched, correction: row.correction });
     }

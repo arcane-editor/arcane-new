@@ -59,10 +59,46 @@ describe('lintAnswer — fenced code blocks', () => {
     const violations = lintAnswer(text, URP_NEW);
     expect(violations.filter((v) => v.rowId === 'urp-color')).toHaveLength(1);
   });
+
+  it('supports ~~~ fence delimiters the same way as ```', () => {
+    const text = [
+      'Here is how to tint in URP:',
+      '',
+      '~~~csharp',
+      'material.SetColor("_Color", Color.red);',
+      '~~~',
+    ].join('\n');
+    const violations = lintAnswer(text, URP_NEW);
+    expect(violations).toHaveLength(1);
+    expect(violations[0]!.rowId).toBe('urp-color');
+  });
+
+  it('treats unclosed fence (no closing ```) as content to end-of-text and detects violations', () => {
+    const text = [
+      'In this case:',
+      '',
+      '```csharp',
+      'material.SetColor("_Color", Color.red);',
+    ].join('\n');
+    const violations = lintAnswer(text, URP_NEW);
+    expect(violations).toHaveLength(1);
+    expect(violations[0]!.rowId).toBe('urp-color');
+  });
+
+  it('fenced block containing bare `"_Color"` (assignment, not call) is still a violation', () => {
+    const text = [
+      '```csharp',
+      'var prop = "_Color";',
+      '```',
+    ].join('\n');
+    const violations = lintAnswer(text, URP_NEW);
+    expect(violations).toHaveLength(1);
+    expect(violations[0]!.rowId).toBe('urp-color');
+  });
 });
 
 describe('lintAnswer — inline code spans (prose scoping)', () => {
-  it('a prose negation with a bare inline `_Color` span stays clean (no call/usage syntax in the span)', () => {
+  it('a prose negation with a bare inline `_Color` span stays clean (no call/usage syntax in the pattern)', () => {
     const text = "Don't use `_Color` in this project — it's a Built-in-only shader property.";
     expect(lintAnswer(text, URP_NEW)).toHaveLength(0);
   });
@@ -77,6 +113,18 @@ describe('lintAnswer — inline code spans (prose scoping)', () => {
   it('a bare inline `InputAction` mention (no call syntax) stays clean under Legacy facts', () => {
     const text = 'This project does not use `InputAction` — it is on the legacy Input Manager.';
     expect(lintAnswer(text, { renderPipeline: null, inputSystem: 'Legacy' })).toHaveLength(0);
+  });
+
+  it('an inline span like `Debug.Log("_Color")` stays clean (pattern "_Color" lacks usage syntax, only matches in fenced blocks)', () => {
+    const text = 'You might write `Debug.Log("_Color")` for debugging, but the real code should use `_BaseColor`.';
+    expect(lintAnswer(text, URP_NEW)).toHaveLength(0);
+  });
+
+  it('an inline span with SetColor call syntax (`SetColor("_Color", ...)`) is flagged because the pattern includes \\(', () => {
+    const text = 'Replace `SetColor("_Color", ...)` with the URP equivalent.';
+    const violations = lintAnswer(text, URP_NEW);
+    expect(violations).toHaveLength(1);
+    expect(violations[0]!.rowId).toBe('urp-color');
   });
 
   it('prose outside any fence/span is never matched, even if it contains a wrong token verbatim', () => {
