@@ -12,6 +12,7 @@ export {
 export type { SessionData, SessionSummary, SaveSessionInput } from './services/session-persistence';
 export { restoreLatestSessionForWorkspace } from './services/session-restore';
 export { fixConsoleError } from './services/fix-console-error';
+export { summarizeSceneDiff } from './services/summarize-scene-diff';
 export type {
   AgentKind,
   Attachment,

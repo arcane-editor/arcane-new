@@ -1,10 +1,16 @@
 import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { ChevronRight, ChevronDown, GitCompare, Code2, FilePlus, FileMinus, Move, Pencil } from 'lucide-react';
+import { ChevronRight, ChevronDown, GitCompare, Code2, FilePlus, FileMinus, Move, Pencil, Sparkles } from 'lucide-react';
 import { useWorkspaceStore } from '../../../stores/workspace';
 import { GuidRef } from './AssetViewer';
 import { extractGuid } from '../services/asset-model';
-import { formatDiffSummaryLine, humanizeInlineMap, groupPrefabOverrides } from '../services/scene-diff-model';
+import {
+  formatDiffSummaryLine,
+  formatSceneDiffForPrompt,
+  humanizeInlineMap,
+  groupPrefabOverrides,
+} from '../services/scene-diff-model';
+import { summarizeSceneDiff } from '../../ai-panel';
 import type {
   SceneDiff,
   ObjectDiff,
@@ -372,6 +378,16 @@ export function SceneDiffViewer({ filePath, name, staged, onViewText, onFallback
         <span style={{ opacity: 0.7 }}>semantic diff</span>
         {diff && <span style={{ opacity: 0.7 }}>· {formatDiffSummaryLine(diff)}</span>}
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+          <button
+            className="asset-viewer-btn"
+            disabled={!diff}
+            onClick={() =>
+              diff && void summarizeSceneDiff({ filePath, promptText: formatSceneDiffForPrompt(diff) })
+            }
+            title="Summarize this change with AI"
+          >
+            <Sparkles size={13} /> Summarize
+          </button>
           <button className="asset-viewer-btn" onClick={onViewText} title="Show the raw YAML text diff">
             <Code2 size={13} /> View Text Diff
           </button>
