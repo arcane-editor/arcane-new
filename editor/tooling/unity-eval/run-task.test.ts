@@ -111,6 +111,34 @@ describe('runTask', () => {
     expect(result.groundingCacheMisses).toBe(0);
   });
 
+  it('records executed tool names on toolCalls, in order, and scores tool_called/tool_not_called against them', async () => {
+    const streamFn = scriptedStreamFn([
+      [
+        { type: 'text', text: 'Reading the manifest first.' },
+        { type: 'toolCall', id: 'c1', name: 'read', arguments: { path: 'Packages/manifest.json' } },
+      ],
+      [
+        {
+          type: 'toolCall', id: 'c2', name: 'write',
+          arguments: { path: 'Assets/Scripts/Pickup.cs', content: 'public class Pickup {}' },
+        },
+      ],
+      [{ type: 'text', text: 'Done.' }],
+    ]);
+    const usage = { input: 0, output: 0, requests: 0 };
+    const toolCallTask = {
+      ...task,
+      checks: [
+        { type: 'tool_called' as const, tool: 'read' },
+        { type: 'tool_called' as const, tool: 'write' },
+        { type: 'tool_not_called' as const, tool: 'unity_api_search' },
+      ],
+    };
+    const result = await runTask(toolCallTask, streamFn, usage);
+    expect(result.toolCalls).toEqual(['read', 'write']);
+    expect(result.checks.every((c) => c.pass)).toBe(true);
+  });
+
   it('threads the prod-aligned max_tokens value for the task mode into a shared requestState', async () => {
     const streamFn = scriptedStreamFn([[{ type: 'text', text: 'no tools needed' }]]);
     const usage = { input: 0, output: 0, requests: 0 };

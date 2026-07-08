@@ -84,6 +84,51 @@ describe('runChecks', () => {
     }
   });
 
+  it('evaluates tool_called / tool_not_called against the passed-in toolCalls list', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'eval-checks-'));
+    try {
+      const results = await runChecks(
+        [
+          { type: 'tool_called', tool: 'unity_api_search' },
+          { type: 'tool_not_called', tool: 'get_unity_docs' },
+        ],
+        { workDir: dir, finalAnswer: '', toolCalls: ['read', 'unity_api_search', 'write'] },
+      );
+      expect(results.map((r) => r.pass)).toEqual([true, true]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('fails tool_called when the tool never ran, and fails tool_not_called when it did', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'eval-checks-'));
+    try {
+      const results = await runChecks(
+        [
+          { type: 'tool_called', tool: 'unity_api_search' },
+          { type: 'tool_not_called', tool: 'write' },
+        ],
+        { workDir: dir, finalAnswer: '', toolCalls: ['read', 'write'] },
+      );
+      expect(results.map((r) => r.pass)).toEqual([false, false]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('treats an absent toolCalls list as "no tools were called" rather than throwing', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'eval-checks-'));
+    try {
+      const results = await runChecks([{ type: 'tool_not_called', tool: 'unity_api_search' }], {
+        workDir: dir,
+        finalAnswer: '',
+      });
+      expect(results[0].pass).toBe(true);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   // Regression test: the ported error-rule logic must match its source
   // (`rules/editor-api-in-runtime.ts`) by scanning the comment/string-blanked
   // `scan.code` view, NOT the raw file text. A `UnityEditor` mention that
