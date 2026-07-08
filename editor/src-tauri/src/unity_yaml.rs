@@ -442,6 +442,21 @@ pub fn parse_asset(content: &str) -> UnityAssetModel {
     }
 }
 
+/// Parse a Unity asset into structured documents *plus* each document's raw
+/// body slice (the text from just after its header line to the next header,
+/// verbatim). `parse_asset` throws the body away once `properties` is
+/// extracted; the diff engine (`unity_diff.rs`) needs the raw text too, so it
+/// can pull richer values (inline maps, multi-line blocks) that
+/// `collect_simple_properties` intentionally skips. Reuses the same
+/// `split_documents`/`parse_document` internals as `parse_asset` — same
+/// document set, same leniency, never panics.
+pub fn parse_asset_with_bodies(content: &str) -> Vec<(UnityYamlDocument, String)> {
+    split_documents(content)
+        .iter()
+        .map(|raw| (parse_document(raw), raw.content.to_string()))
+        .collect()
+}
+
 /// Return every distinct 32-hex `guid:` reference found anywhere in `content`.
 /// Used to populate the reverse-reference index. Order is first-seen.
 pub fn extract_guid_refs(content: &str) -> Vec<String> {
@@ -628,6 +643,22 @@ Material:
         assert_eq!(model.documents.len(), 1);
         assert_eq!(model.documents[0].file_id, "500");
         assert_eq!(model.documents[0].class_id, "1");
+    }
+
+    #[test]
+    fn parse_asset_with_bodies_matches_parse_asset_and_keeps_raw_bodies() {
+        let pairs = parse_asset_with_bodies(TWO_GO_SCENE);
+        let model = parse_asset(TWO_GO_SCENE);
+        assert_eq!(pairs.len(), model.documents.len());
+        for (i, (doc, _body)) in pairs.iter().enumerate() {
+            assert_eq!(doc, &model.documents[i]);
+        }
+        // The Transform body slice should contain its raw, un-simplified line.
+        let (_, transform_body) = pairs
+            .iter()
+            .find(|(d, _)| d.file_id == "400")
+            .expect("transform doc present");
+        assert!(transform_body.contains("m_Father: {fileID: 0}"));
     }
 
     #[test]

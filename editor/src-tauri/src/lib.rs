@@ -8,6 +8,7 @@ mod unity;
 mod asmdef;
 mod unity_yaml;
 mod unity_index;
+mod unity_diff;
 mod unity_tests;
 mod unity_ipc;
 mod dap;
@@ -381,6 +382,8 @@ pub fn run() {
             asmdef::asmdef_owning_assembly,
             asmdef::unity_classify_scripts,
             unity_yaml::unity_parse_asset,
+            unity_diff::unity_scene_diff,
+            unity_diff::unity_scene_diff_revs,
             unity_index::unity_index_build,
             unity_index::unity_index_guid_map,
             unity_index::unity_index_find_references,

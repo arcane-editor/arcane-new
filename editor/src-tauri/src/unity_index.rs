@@ -452,7 +452,10 @@ fn ensure_index(
 /// Used by the read-only query commands. Returns `Err` only if a build can't
 /// determine the unity version — which it never can here, so we build with the
 /// cached version or empty string.
-fn get_or_build(workspace_path: &str) -> IndexState {
+///
+/// `pub(crate)` so `unity_diff.rs` can resolve guid → asset path without a
+/// second, competing index implementation.
+pub(crate) fn get_or_build(workspace_path: &str) -> IndexState {
     let workspace = Path::new(workspace_path);
     let ws_str = workspace.to_string_lossy().to_string();
 
