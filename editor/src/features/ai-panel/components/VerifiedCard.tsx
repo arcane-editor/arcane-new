@@ -56,7 +56,7 @@ function VerifiedCard({ message }: Props) {
     guids === 'skipped'
       ? 'GUIDs skipped'
       : guids === 'intact'
-        ? 'GUIDs intact'
+        ? 'GUIDs ok'
         : plural(guids.missing.length, 'GUID missing');
 
   const allOk = compileMarker !== 'bad' && analyzersMarker !== 'bad' && guidsMarker !== 'bad';

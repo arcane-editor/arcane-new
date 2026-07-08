@@ -10,6 +10,8 @@
 // paths a send wrote/edited (wired into the write/edit tool's `onFileWritten`/
 // `onFileEdited` hooks from agent-service.ts — see `createToolsForPromptMode`).
 // `runVerifiedPass()` then sweeps the registry once, after `prompt()` resolves.
+// Known v1 limitation: bash-tool file mutations are not registered — same scope
+// as the per-write gates.
 //
 // DI note (mirrors lsp-gate.ts's `DiagnosticsFetcher` seam): `runAnalyzersOnText`,
 // `bridgeConnected`, and `triggerRecompileAndWait` each sit behind an import
@@ -23,7 +25,9 @@
 // Budget: the whole pass is capped at ~10s total (not per-step) — each step is
 // raced against whatever's left of the budget and degrades to 'skipped' on
 // timeout, the same as it does on a thrown error, so a slow/dropped Unity
-// bridge can't hang the "done" moment the user is waiting on.
+// bridge can't hang the "done" moment the user is waiting on. The compile step
+// creates its own AbortController timed to the remaining budget, so the
+// underlying triggerRecompileAndWait stops waiting when the budget expires.
 
 import { invoke } from '@tauri-apps/api/core';
 import { readScriptGuidFromMeta } from './unity-tools/script-guid';
@@ -173,13 +177,30 @@ async function computeAnalyzers(
   return { errors };
 }
 
-async function computeCompile(deps: VerifiedPassDeps): Promise<VerifiedCardData['compile']> {
+async function computeCompile(
+  deps: VerifiedPassDeps,
+  budgetMs: number,
+): Promise<VerifiedCardData['compile']> {
   const connected = await deps.bridgeConnected();
   if (!connected) return 'skipped';
-  const report = await deps.triggerRecompile({});
-  if (!report) return 'skipped'; // timed out / bridge dropped mid-wait
-  const errors = (report.messages ?? []).filter((m) => m.type === 'Error').length;
-  return errors === 0 ? 'clean' : { errors };
+
+  const controller = new AbortController();
+  let abortTimer: ReturnType<typeof setTimeout> | null = null;
+
+  try {
+    if (budgetMs > 0) {
+      abortTimer = setTimeout(() => {
+        controller.abort();
+      }, budgetMs);
+    }
+
+    const report = await deps.triggerRecompile({ signal: controller.signal });
+    if (!report) return 'skipped'; // timed out / bridge dropped mid-wait / aborted
+    const errors = (report.messages ?? []).filter((m) => m.type === 'Error').length;
+    return errors === 0 ? 'clean' : { errors };
+  } finally {
+    if (abortTimer) clearTimeout(abortTimer);
+  }
 }
 
 async function computeGuids(
@@ -218,7 +239,7 @@ export async function runVerifiedPass(
     'skipped',
   );
   const compile = await withBudget<VerifiedCardData['compile']>(
-    () => computeCompile(deps),
+    () => computeCompile(deps, remaining()),
     remaining(),
     'skipped',
   );
