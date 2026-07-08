@@ -275,6 +275,7 @@ function PrefabOverrideGroupSection({ group }: { group: PrefabOverrideGroup }) {
           <span>{`prefab instance ${group.prefabInstanceFileId}`}</span>
         )}
         <span>instance</span>
+        <span style={{ fontSize: 11.5 }}>{`(fileID: ${group.prefabInstanceFileId})`}</span>
       </div>
       {group.rows.map((p, i) => (
         <PrefabOverrideRow key={i} p={p} />
