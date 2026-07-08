@@ -428,7 +428,7 @@ export class AgentService {
       .addSystemMessage(`Grounding check — revising: ${violations.length} project-mismatch issue(s)`);
     // Reserve a turn for the revise prompt: the shared governor counter already
     // tracks the main ask-mode send; this grant ensures the revise request can run
-    // even if the main send exhausted its cap (tools stay stripped but we get the message through).
+    // even if the main send exhausted its cap (a granted call passes through untouched).
     grantExtraCalls(1);
     await this.agent.prompt(buildReviseMessage(violations));
   }
