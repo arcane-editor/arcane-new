@@ -1,8 +1,10 @@
 import { describe, it, expect } from 'bun:test';
 import {
   formatSceneDiffForPrompt,
-  formatDiffSummaryLine,
   summarizeDiffCounts,
+  humanizeInlineMap,
+  groupPrefabOverrides,
+  formatPrefabOverrideGroupHeader,
   type SceneDiff,
   type ObjectDiff,
   type PrefabOverrideDiff,
@@ -148,12 +150,15 @@ describe('formatSceneDiffForPrompt — truncated flag', () => {
       truncated: true,
     };
 
-    expect(formatDiffSummaryLine(diff)).toBe('600 modified (truncated — showing first 500 objects)');
+    // With no object/prefab-override diffs, formatSceneDiffForPrompt's
+    // output is exactly the summary line — asserting through the function
+    // this describe block names, per the P6.2 minor fix.
+    expect(formatSceneDiffForPrompt(diff)).toBe('600 modified (truncated — showing first 500 objects)');
   });
 });
 
 describe('formatSceneDiffForPrompt — prefab override reference change', () => {
-  it('describes a reference-type override change (not the scalar value)', () => {
+  it('describes a reference-type override change (not the scalar value), grouped under the source prefab', () => {
     const diff: SceneDiff = {
       objectDiffs: [],
       prefabOverrideDiffs: [
@@ -175,7 +180,7 @@ describe('formatSceneDiffForPrompt — prefab override reference change', () => 
     };
 
     expect(formatSceneDiffForPrompt(diff)).toBe(
-      "1 prefab override\nPrefab override on 'Enemy': m_Sprite reference → NewSprite",
+      "1 prefab override\nOverrides on 'Enemy.prefab' instance\n  m_Sprite: reference → NewSprite",
     );
   });
 
@@ -195,8 +200,114 @@ describe('formatSceneDiffForPrompt — prefab override reference change', () => 
     };
 
     expect(formatSceneDiffForPrompt(diff)).toBe(
-      "1 prefab override\nPrefab override on 'Enemy': speed 5 → 9",
+      "1 prefab override\nOverrides on 'Enemy.prefab' instance\n  speed: 5 → 9",
     );
+  });
+
+  it('pretty-prints a vector/color value inside a prefab override row', () => {
+    const diff: SceneDiff = {
+      objectDiffs: [],
+      prefabOverrideDiffs: [
+        basePrefabOverrideDiff({
+          prefabAssetName: 'Enemy',
+          propertyPath: 'm_LocalPosition',
+          oldValue: '{x: 0, y: 0, z: 0}',
+          newValue: '{x: 1, y: 2.5, z: 0}',
+        }),
+      ],
+      summary: EMPTY_SUMMARY,
+      truncated: false,
+    };
+
+    expect(formatSceneDiffForPrompt(diff)).toBe(
+      "1 prefab override\nOverrides on 'Enemy.prefab' instance\n  m_LocalPosition: (0, 0, 0) → (1, 2.5, 0)",
+    );
+  });
+});
+
+describe('groupPrefabOverrides', () => {
+  it('groups multiple rows on the same source prefab into one section, in first-seen order', () => {
+    const rows: PrefabOverrideDiff[] = [
+      basePrefabOverrideDiff({
+        prefabAssetName: 'Enemy',
+        prefabAssetGuid: 'abcdef0123456789abcdef0123456789',
+        propertyPath: 'health',
+      }),
+      basePrefabOverrideDiff({
+        prefabAssetName: 'Turret',
+        prefabAssetGuid: '99999999999999999999999999999999',
+        propertyPath: 'range',
+      }),
+      basePrefabOverrideDiff({
+        prefabAssetName: 'Enemy',
+        prefabAssetGuid: 'abcdef0123456789abcdef0123456789',
+        propertyPath: 'speed',
+      }),
+    ];
+
+    const groups = groupPrefabOverrides(rows);
+    expect(groups.length).toBe(2);
+    expect(groups[0].prefabAssetName).toBe('Enemy');
+    expect(groups[0].rows.map((r) => r.propertyPath)).toEqual(['health', 'speed']);
+    expect(groups[1].prefabAssetName).toBe('Turret');
+    expect(groups[1].rows.map((r) => r.propertyPath)).toEqual(['range']);
+  });
+
+  it('falls back to the prefab instance fileID when the source prefab name is unresolved', () => {
+    const rows: PrefabOverrideDiff[] = [
+      basePrefabOverrideDiff({
+        prefabInstanceFileId: '777000',
+        prefabAssetName: null,
+        prefabAssetGuid: null,
+      }),
+    ];
+    const groups = groupPrefabOverrides(rows);
+    expect(groups.length).toBe(1);
+    expect(formatPrefabOverrideGroupHeader(groups[0])).toBe('Overrides on prefab instance 777000');
+  });
+
+  it('formats the header with the .prefab extension appended', () => {
+    const groups = groupPrefabOverrides([
+      basePrefabOverrideDiff({ prefabAssetName: 'Enemy', prefabAssetGuid: 'abcdef0123456789abcdef0123456789' }),
+    ]);
+    expect(formatPrefabOverrideGroupHeader(groups[0])).toBe("Overrides on 'Enemy.prefab' instance");
+  });
+});
+
+describe('humanizeInlineMap', () => {
+  it('formats a Vector3-shaped map as (x, y, z)', () => {
+    expect(humanizeInlineMap('{x: 0, y: 1.5, z: 0}')).toBe('(0, 1.5, 0)');
+  });
+
+  it('formats a Vector2-shaped map as (x, y)', () => {
+    expect(humanizeInlineMap('{x: 3, y: -2}')).toBe('(3, -2)');
+  });
+
+  it('formats a Quaternion-shaped map (x, y, z, w) as (x, y, z, w)', () => {
+    expect(humanizeInlineMap('{x: 0, y: 0, z: 0, w: 1}')).toBe('(0, 0, 0, 1)');
+  });
+
+  it('formats a Color-shaped map as rgba(r, g, b, a)', () => {
+    expect(humanizeInlineMap('{r: 1, g: 0.5, b: 0, a: 1}')).toBe('rgba(1, 0.5, 0, 1)');
+  });
+
+  it('leaves a malformed map (missing coordinate) raw', () => {
+    expect(humanizeInlineMap('{x: 0, y: 1}').length).toBeGreaterThan(0);
+    // {x, y} alone IS a valid Vector2 — use a genuinely malformed shape instead.
+    expect(humanizeInlineMap('{x: 0, y:}')).toBe('{x: 0, y:}');
+  });
+
+  it('leaves a map with unrecognized keys raw', () => {
+    expect(humanizeInlineMap('{fileID: 0}')).toBe('{fileID: 0}');
+    expect(humanizeInlineMap('{fileID: 123, guid: abcdef0123456789abcdef0123456789, type: 3}')).toBe(
+      '{fileID: 123, guid: abcdef0123456789abcdef0123456789, type: 3}',
+    );
+  });
+
+  it('leaves plain scalars untouched', () => {
+    expect(humanizeInlineMap('5')).toBe('5');
+    expect(humanizeInlineMap('Untagged')).toBe('Untagged');
+    expect(humanizeInlineMap('')).toBe('');
   });
 });
 

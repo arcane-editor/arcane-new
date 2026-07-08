@@ -4,7 +4,7 @@ import { ChevronRight, ChevronDown, GitCompare, Code2, FilePlus, FileMinus, Move
 import { useWorkspaceStore } from '../../../stores/workspace';
 import { GuidRef } from './AssetViewer';
 import { extractGuid } from '../services/asset-model';
-import { formatDiffSummaryLine } from '../services/scene-diff-model';
+import { formatDiffSummaryLine, humanizeInlineMap, groupPrefabOverrides } from '../services/scene-diff-model';
 import type {
   SceneDiff,
   ObjectDiff,
@@ -12,6 +12,7 @@ import type {
   ComponentDiff,
   PropertyDiff,
   PrefabOverrideDiff,
+  PrefabOverrideGroup,
 } from '../services/scene-diff-model';
 
 interface Props {
@@ -66,7 +67,8 @@ function DiffValue({ value }: { value: string | null }) {
   }
   const guid = extractGuid(value);
   if (guid) return <GuidRef guid={guid} />;
-  const v = value.length > 200 ? value.slice(0, 200) + '…' : value;
+  const humanized = humanizeInlineMap(value);
+  const v = humanized.length > 200 ? humanized.slice(0, 200) + '…' : humanized;
   return <span style={{ color: 'var(--text-primary)' }}>{v}</span>;
 }
 
@@ -206,6 +208,7 @@ function ObjectDiffRow({
   );
 }
 
+/** One override row beneath its group's header — just `propertyPath: old → new` (the owning prefab is the header). */
 function PrefabOverrideRow({ p }: { p: PrefabOverrideDiff }) {
   const isReferenceChange = p.oldObjectReference !== null || p.newObjectReference !== null;
   const color = p.status === 'added' ? 'var(--git-added)' : p.status === 'removed' ? 'var(--git-deleted)' : 'var(--git-modified)';
@@ -217,7 +220,7 @@ function PrefabOverrideRow({ p }: { p: PrefabOverrideDiff }) {
         alignItems: 'center',
         gap: 6,
         padding: '2px 10px',
-        paddingLeft: 26,
+        paddingLeft: 40,
         fontSize: 12.5,
         color: 'var(--text-secondary)',
         minHeight: 22,
@@ -225,17 +228,6 @@ function PrefabOverrideRow({ p }: { p: PrefabOverrideDiff }) {
       }}
     >
       <span style={{ color }}>{sign}</span>
-      <span>
-        {p.prefabAssetName ? (
-          p.prefabAssetGuid ? (
-            <GuidRef guid={p.prefabAssetGuid} label={p.prefabAssetName} />
-          ) : (
-            p.prefabAssetName
-          )
-        ) : (
-          `prefab instance ${p.prefabInstanceFileId}`
-        )}
-      </span>
       <span>{p.propertyPath}:</span>
       {isReferenceChange ? (
         p.status === 'removed' ? (
@@ -252,6 +244,41 @@ function PrefabOverrideRow({ p }: { p: PrefabOverrideDiff }) {
           <DiffValue value={p.newValue} />
         </>
       )}
+    </div>
+  );
+}
+
+/** Section for one source prefab's overrides: a header naming the instance, then its rows. */
+function PrefabOverrideGroupSection({ group }: { group: PrefabOverrideGroup }) {
+  return (
+    <div>
+      <div
+        style={{
+          padding: '2px 10px',
+          paddingLeft: 26,
+          fontSize: 12.5,
+          fontWeight: 600,
+          color: 'var(--text-secondary)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+        }}
+      >
+        <span>Overrides on</span>
+        {group.prefabAssetName ? (
+          group.prefabAssetGuid ? (
+            <GuidRef guid={group.prefabAssetGuid} label={`${group.prefabAssetName}.prefab`} />
+          ) : (
+            <span>{`'${group.prefabAssetName}.prefab'`}</span>
+          )
+        ) : (
+          <span>{`prefab instance ${group.prefabInstanceFileId}`}</span>
+        )}
+        <span>instance</span>
+      </div>
+      {group.rows.map((p, i) => (
+        <PrefabOverrideRow key={i} p={p} />
+      ))}
     </div>
   );
 }
@@ -295,8 +322,11 @@ export function SceneDiffViewer({ filePath, name, staged, onViewText, onFallback
           setDiff(d);
         }
       })
-      .catch(() => {
-        if (!cancelled) setFailed(true);
+      .catch((e) => {
+        if (!cancelled) {
+          console.error('[scene-diff] failed to compute scene diff', e);
+          setFailed(true);
+        }
       });
 
     return () => {
@@ -371,8 +401,8 @@ export function SceneDiffViewer({ filePath, name, staged, onViewText, onFallback
                 >
                   Prefab overrides
                 </div>
-                {diff.prefabOverrideDiffs.map((p, i) => (
-                  <PrefabOverrideRow key={i} p={p} />
+                {groupPrefabOverrides(diff.prefabOverrideDiffs).map((group) => (
+                  <PrefabOverrideGroupSection key={group.key} group={group} />
                 ))}
               </div>
             )}

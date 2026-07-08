@@ -18,10 +18,11 @@ export interface DiffInfo {
   filePath: string;
   staged: boolean;
   /**
-   * True when this is a Unity asset file (`.unity`/`.prefab`/`.asset`/…) AND
-   * `unity.sceneDiff.enabled` was on when the tab was opened — i.e. eligible
-   * for the semantic `SceneDiffViewer` instead of the raw Monaco text diff.
-   * Computed once at `openDiffTab` time (see `stores/workspace.ts`).
+   * True when the workspace is a Unity project, this is a Unity asset file
+   * (`.unity`/`.prefab`/`.asset`/…), AND `unity.sceneDiff.enabled` was on
+   * when the tab was opened — i.e. eligible for the semantic
+   * `SceneDiffViewer` instead of the raw Monaco text diff. Computed once at
+   * `openDiffTab` time (see `stores/workspace.ts`).
    */
   semanticCandidate?: boolean;
 }

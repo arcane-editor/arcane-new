@@ -695,10 +695,16 @@ struct ModValue {
     object_reference: String,
 }
 
-/// `None` for an empty string — the "no payload of this kind on this side"
-/// case — else `Some(cloned string)`.
-fn non_empty(s: &str) -> Option<String> {
-    if s.is_empty() {
+/// `None` when `s` carries no *reference* payload on this side: either the
+/// field is wholly absent (empty string) or it's Unity's null-reference
+/// sentinel `{fileID: 0}` — real saved scenes serialize THIS literal
+/// placeholder alongside `value:` for every scalar-typed modification (not
+/// an omitted line), so a plain emptiness check alone would misclassify
+/// every scalar override as also carrying a "reference payload". Else
+/// `Some(cloned string)`.
+fn non_empty_reference(s: &str) -> Option<String> {
+    let trimmed = s.trim();
+    if trimmed.is_empty() || trimmed == "{fileID: 0}" {
         None
     } else {
         Some(s.to_string())
@@ -772,8 +778,10 @@ fn diff_prefab_instances(
                 _ => continue,
             };
             let (guid, fid, path) = key;
-            let old_object_reference = old_v.as_ref().and_then(|v| non_empty(&v.object_reference));
-            let new_object_reference = new_v.as_ref().and_then(|v| non_empty(&v.object_reference));
+            let old_object_reference =
+                old_v.as_ref().and_then(|v| non_empty_reference(&v.object_reference));
+            let new_object_reference =
+                new_v.as_ref().and_then(|v| non_empty_reference(&v.object_reference));
             let object_reference_guid = new_object_reference
                 .as_deref()
                 .and_then(first_guid)
@@ -1202,6 +1210,14 @@ mod tests {
         assert_eq!(row.target_file_id, "400000");
         assert_eq!(row.prefab_asset_guid.as_deref(), Some(prefab_guid));
         assert_eq!(row.prefab_asset_name.as_deref(), Some("Enemy"));
+        // Bug fix (P6.3): both sides literally serialize `objectReference:
+        // {fileID: 0}` (Unity's null-reference sentinel, present alongside
+        // `value:` for every scalar modification — never omitted). Before
+        // the fix, `non_empty` treated this non-empty TEXT as a real
+        // reference payload, so every scalar override was misclassified as
+        // also carrying a reference change.
+        assert_eq!(row.old_object_reference, None, "null-sentinel reference must not count as a payload");
+        assert_eq!(row.new_object_reference, None, "null-sentinel reference must not count as a payload");
     }
 
     #[test]
@@ -1302,5 +1318,93 @@ mod tests {
         assert_eq!(diff.summary.modified_objects, 600, "exact count regardless of cap");
         assert!(diff.truncated);
         assert_eq!(diff.object_diffs.len(), MAX_OBJECT_DIFFS);
+    }
+
+    /// Realistic saved-scene pair (`fixtures/unity-diff/SampleScene.{before,after}.unity`):
+    /// a Main Camera, a Directional Light, a scripted Player, an empty
+    /// "Enemies" container, a "Pickup", and an `Enemy.prefab` instance under
+    /// it — all in real Unity save-file shape (serializedVersion,
+    /// m_ObjectHideFlags, a `stripped` placeholder pair for the prefab
+    /// instance's scene-side root). The `.after` version differs from
+    /// `.before` in exactly four ways: one scalar property change (Player's
+    /// `speed`), one added component (Pickup gains a BoxCollider), one
+    /// reparent (Pickup moves from the scene root under "Enemies"), and one
+    /// prefab-override change (the Enemy instance's `health` override).
+    /// Camera/Light/Enemies/the stripped pair are byte-identical across both
+    /// files and must contribute nothing.
+    #[test]
+    fn real_scene_fixture_pair_produces_exactly_the_four_intended_changes() {
+        let base = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/unity-diff");
+        let before = std::fs::read_to_string(base.join("SampleScene.before.unity"))
+            .expect("read SampleScene.before.unity fixture");
+        let after = std::fs::read_to_string(base.join("SampleScene.after.unity"))
+            .expect("read SampleScene.after.unity fixture");
+
+        let mut guids = HashMap::new();
+        guids.insert(
+            "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4".to_string(),
+            "Assets/Scripts/PlayerController.cs".to_string(),
+        );
+        guids.insert(
+            "0123456789abcdef0123456789abcdef".to_string(),
+            "Assets/Prefabs/Enemy.prefab".to_string(),
+        );
+
+        let diff = diff_unity_assets(&before, &after, &guids);
+
+        // Exactly two changed GameObjects: Camera/Light/Enemies/the stripped
+        // placeholder pair are unchanged and must not appear at all.
+        assert_eq!(
+            diff.object_diffs.len(),
+            2,
+            "only Player and Pickup changed: {:#?}",
+            diff.object_diffs
+        );
+
+        let player = diff.object_diffs.iter().find(|d| d.file_id == "300000").expect("Player diff");
+        assert_eq!(player.status, "modified");
+        assert!(player.property_diffs.is_empty(), "no GameObject-level field changed on Player");
+        assert_eq!(player.component_diffs.len(), 1);
+        let player_mono = &player.component_diffs[0];
+        assert_eq!(player_mono.type_name, "PlayerController", "resolved via the script guid index");
+        assert_eq!(player_mono.status, "modified");
+        assert_eq!(
+            player_mono.property_diffs,
+            vec![PropertyDiff { key: "speed".into(), old: Some("5".into()), new: Some("8".into()) }]
+        );
+
+        let pickup = diff.object_diffs.iter().find(|d| d.file_id == "500000").expect("Pickup diff");
+        assert_eq!(pickup.status, "moved");
+        assert_eq!(pickup.old_parent_name, None, "was a scene root before");
+        assert_eq!(pickup.new_parent_name.as_deref(), Some("Enemies"));
+        assert_eq!(pickup.component_diffs.len(), 1, "only the added BoxCollider, m_Father is filtered");
+        assert_eq!(pickup.component_diffs[0].status, "added");
+        assert_eq!(pickup.component_diffs[0].type_name, "BoxCollider");
+
+        assert_eq!(diff.prefab_override_diffs.len(), 1);
+        let over = &diff.prefab_override_diffs[0];
+        assert_eq!(over.prefab_asset_name.as_deref(), Some("Enemy"));
+        assert_eq!(over.property_path, "health");
+        assert_eq!(over.old_value.as_deref(), Some("50"));
+        assert_eq!(over.new_value.as_deref(), Some("75"));
+        assert_eq!(over.status, "modified");
+        // The scalar override's `objectReference: {fileID: 0}` null sentinel
+        // must not be surfaced as a reference payload (see the `non_empty_reference`
+        // bugfix exercised above by `prefab_override_value_change`).
+        assert_eq!(over.old_object_reference, None);
+        assert_eq!(over.new_object_reference, None);
+
+        assert_eq!(
+            diff.summary,
+            DiffSummary {
+                added_objects: 0,
+                removed_objects: 0,
+                modified_objects: 1,
+                moved_objects: 1,
+                component_changes: 2,
+                property_changes: 1,
+            }
+        );
+        assert!(!diff.truncated);
     }
 }

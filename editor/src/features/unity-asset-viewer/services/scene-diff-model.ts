@@ -98,8 +98,43 @@ export interface SceneDiff {
 
 // ── Formatting ───────────────────────────────────────────────────────────---
 
+/**
+ * Humanize a raw Unity inline-map value — `{x: 0, y: 1.5, z: 0}` →
+ * `(0, 1.5, 0)`, `{r: 1, g: 0.5, b: 0, a: 1}` → `rgba(1, 0.5, 0, 1)` — for
+ * display in both the viewer and the prompt formatter. Recognizes exactly:
+ * Vector2 (`x, y`), Vector3 (`x, y, z`), Quaternion/Vector4 (`x, y, z, w`),
+ * and Color (`r, g, b, a`). Anything else — a plain scalar, a `{fileID: …}`
+ * reference, a map with extra/missing/empty-valued keys — is returned
+ * unchanged (raw). Pure; never throws.
+ */
+export function humanizeInlineMap(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) return raw;
+
+  const inner = trimmed.slice(1, -1);
+  const entries = inner.length === 0 ? [] : inner.split(',').map((s) => s.trim());
+  const map: Record<string, string> = {};
+  for (const entry of entries) {
+    const idx = entry.indexOf(':');
+    if (idx === -1) return raw;
+    const key = entry.slice(0, idx).trim();
+    const value = entry.slice(idx + 1).trim();
+    if (!key || !value) return raw;
+    map[key] = value;
+  }
+
+  const keys = Object.keys(map);
+  const isExactly = (want: string[]) => keys.length === want.length && want.every((k) => k in map);
+
+  if (isExactly(['x', 'y'])) return `(${map.x}, ${map.y})`;
+  if (isExactly(['x', 'y', 'z'])) return `(${map.x}, ${map.y}, ${map.z})`;
+  if (isExactly(['x', 'y', 'z', 'w'])) return `(${map.x}, ${map.y}, ${map.z}, ${map.w})`;
+  if (isExactly(['r', 'g', 'b', 'a'])) return `rgba(${map.r}, ${map.g}, ${map.b}, ${map.a})`;
+  return raw;
+}
+
 function fmtVal(v: string | null): string {
-  return v === null ? '∅' : v;
+  return v === null ? '∅' : humanizeInlineMap(v);
 }
 
 function plural(n: number, singular: string, pluralForm: string): string {
@@ -207,8 +242,56 @@ function formatObjectDiffLines(od: ObjectDiff): string[] {
   }
 }
 
-function formatPrefabOverrideLines(p: PrefabOverrideDiff): string[] {
-  const owner = p.prefabAssetName ? `'${p.prefabAssetName}'` : `prefab instance ${p.prefabInstanceFileId}`;
+/**
+ * One section of `PrefabOverrideDiff` rows that share a source prefab —
+ * grouped the way a Unity dev thinks about it ("what changed on this prefab
+ * instance"), rather than as one flat list. Grouping key is the source
+ * prefab's guid (falls back to its resolved name, then to the owning
+ * `PrefabInstance`'s fileID when neither is known), and groups are emitted
+ * in first-seen order for determinism. Shared by `formatSceneDiffForPrompt`
+ * and `SceneDiffViewer` so the grouping itself never drifts between the two
+ * surfaces — each surface renders the group header/rows its own way (plain
+ * text here, clickable `GuidRef`s in the viewer).
+ */
+export interface PrefabOverrideGroup {
+  key: string;
+  prefabAssetName: string | null;
+  prefabAssetGuid: string | null;
+  prefabInstanceFileId: string;
+  rows: PrefabOverrideDiff[];
+}
+
+export function groupPrefabOverrides(diffs: PrefabOverrideDiff[]): PrefabOverrideGroup[] {
+  const groups: PrefabOverrideGroup[] = [];
+  const byKey = new Map<string, PrefabOverrideGroup>();
+  for (const p of diffs) {
+    const key = p.prefabAssetGuid ?? p.prefabAssetName ?? `instance:${p.prefabInstanceFileId}`;
+    let group = byKey.get(key);
+    if (!group) {
+      group = {
+        key,
+        prefabAssetName: p.prefabAssetName,
+        prefabAssetGuid: p.prefabAssetGuid,
+        prefabInstanceFileId: p.prefabInstanceFileId,
+        rows: [],
+      };
+      byKey.set(key, group);
+      groups.push(group);
+    }
+    group.rows.push(p);
+  }
+  return groups;
+}
+
+/** Plain-text section header for one `PrefabOverrideGroup`, e.g. `"Overrides on 'Enemy.prefab' instance"`. */
+export function formatPrefabOverrideGroupHeader(g: PrefabOverrideGroup): string {
+  return g.prefabAssetName
+    ? `Overrides on '${g.prefabAssetName}.prefab' instance`
+    : `Overrides on prefab instance ${g.prefabInstanceFileId}`;
+}
+
+/** One override row, without the owning-prefab context (that's the group header). */
+function formatPrefabOverrideRowLine(p: PrefabOverrideDiff): string {
   const isReferenceChange = p.oldObjectReference !== null || p.newObjectReference !== null;
   let change: string;
   if (isReferenceChange) {
@@ -221,18 +304,22 @@ function formatPrefabOverrideLines(p: PrefabOverrideDiff): string[] {
   } else {
     change = `${fmtVal(p.oldValue)} → ${fmtVal(p.newValue)}`;
   }
-  return [`Prefab override on ${owner}: ${p.propertyPath} ${change}`];
+  return `${p.propertyPath}: ${change}`;
 }
 
 /**
  * Compact human/LLM-readable rendering of a `SceneDiff`: a summary line,
- * then one entry per object diff, then one entry per prefab override diff.
- * Deterministic (mirrors the Rust engine's already-deterministic array
- * order) — safe to use as an LLM prompt fragment or a test fixture.
+ * then one entry per object diff, then one section per source prefab with
+ * an override change (see `groupPrefabOverrides`). Deterministic (mirrors
+ * the Rust engine's already-deterministic array order) — safe to use as an
+ * LLM prompt fragment or a test fixture.
  */
 export function formatSceneDiffForPrompt(diff: SceneDiff): string {
   const lines: string[] = [formatDiffSummaryLine(diff)];
   for (const od of diff.objectDiffs) lines.push(...formatObjectDiffLines(od));
-  for (const pod of diff.prefabOverrideDiffs) lines.push(...formatPrefabOverrideLines(pod));
+  for (const group of groupPrefabOverrides(diff.prefabOverrideDiffs)) {
+    lines.push(formatPrefabOverrideGroupHeader(group));
+    for (const row of group.rows) lines.push(`  ${formatPrefabOverrideRowLine(row)}`);
+  }
   return lines.join('\n');
 }
