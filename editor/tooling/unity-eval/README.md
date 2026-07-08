@@ -22,11 +22,14 @@ too much into a single number.
   dependent correct answer (URP vs Built-in color/texture property, new Input
   System vs legacy `Input.GetAxis`, deprecated-API awareness). Scored by
   `answer_matches` / `answer_not_matches` against the model's final text
-  answer, and — for the three tasks where the correct answer is an exact
-  property/shader-name string the injected facts block doesn't itself state
-  (`grounding-urp-texture`, `grounding-urp-shader-name`,
-  `grounding-trap-shader`) — a `tool_called: unity_api_search` check that the
-  model actually grounded itself instead of guessing.
+  answer, and — for `grounding-urp-shader-name`, the one task where the
+  correct answer is an exact shader-PATH string the injected facts block
+  doesn't itself state — a `tool_called: unity_api_search` check that the
+  model actually grounded itself instead of guessing. (Since P2.1's
+  contrastive anti-default facts, the injected block *does* state the exact
+  shader-property strings, so `grounding-urp-texture` and
+  `grounding-trap-shader` no longer need this check — see the per-task
+  comments in `tasks.ts`.)
 - **agentic** (4) — agent mode, multi-step tasks requiring investigation
   (find a bug, not just apply a patch) and Unity-safe editing (e.g. rename a
   serialized field without losing Inspector-set values). Scored by file

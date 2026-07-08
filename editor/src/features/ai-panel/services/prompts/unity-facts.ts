@@ -15,6 +15,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { useProjectContextStore } from '../../../../stores/project-context';
 import { useWorkspaceStore } from '../../../../stores/workspace';
 import { useAsmdefStore } from '../../../../stores/asmdef';
+import { contrastFactLines, type ContrastInputSystem } from './unity-contrast';
 
 type RenderPipeline = 'URP' | 'HDRP' | 'Built-in';
 
@@ -59,6 +60,16 @@ function detectInputSystem(projectSettings: string | null, hasInputSystemPkg: bo
     }
   }
   return hasInputSystemPkg ? 'New (Input System) available' : 'Legacy';
+}
+
+/**
+ * Collapse the wordy `inputSystem` label above (`"New (Input System)"`,
+ * `"New (Input System) available"`, `"Both"`, `"Legacy"`) to the tri-state
+ * `ContrastInputSystem` the contrast table and `getUnityGroundingContext()`
+ * key their detection off of — same substring-matching rule both already used.
+ */
+function deriveContrastInputSystem(inputSystemLabel: string): ContrastInputSystem {
+  return inputSystemLabel.includes('New') ? 'New' : inputSystemLabel.includes('Both') ? 'Both' : 'Legacy';
 }
 
 /** Populate the facts cache for a workspace (idempotent, best-effort). */
@@ -154,6 +165,18 @@ export function getUnityFactsBlock(): string | null {
     '- Generate Unity-version-correct, pipeline-correct code. Do not suggest Built-in shaders for a URP/HDRP project, legacy Input for a New-Input-System project, or version-wrong APIs.',
   );
 
+  // Contrastive anti-default facts (P2.1, unity-contrast.ts): derived from
+  // the SAME renderPipeline/inputSystem values just computed above, so this
+  // stays in lockstep with the generic facts with no separate detection path.
+  if (facts) {
+    lines.push(
+      ...contrastFactLines({
+        renderPipeline: facts.renderPipeline,
+        inputSystem: deriveContrastInputSystem(facts.inputSystem),
+      }),
+    );
+  }
+
   if (facts?.unityRules) {
     lines.push('', '## Project conventions (.ai/unity-rules.md — follow these)', facts.unityRules.trim());
   }
@@ -178,14 +201,7 @@ export function getUnityGroundingContext(): {
   const facts = cache?.workspacePath === workspacePath ? cache : null;
   if (!facts && workspacePath) void primeUnityFacts(workspacePath);
 
-  let inputSystem: 'New' | 'Legacy' | 'Both' | undefined;
-  if (facts) {
-    inputSystem = facts.inputSystem.includes('New')
-      ? 'New'
-      : facts.inputSystem.includes('Both')
-        ? 'Both'
-        : 'Legacy';
-  }
+  const inputSystem = facts ? deriveContrastInputSystem(facts.inputSystem) : undefined;
   return { unityVersion: ctx.unityVersion ?? null, renderPipeline: facts?.renderPipeline, inputSystem };
 }
 

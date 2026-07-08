@@ -120,3 +120,63 @@ describe('activeInputHandler parsing (ProjectSettings.asset authoritative over p
     }
   });
 });
+
+// P2.1: contrastive anti-default facts (`unity-contrast.ts`) are appended as
+// ADDITIONS at the end of `buildFixtureFacts`'s output, derived from the same
+// pipeline/inputSystem values detected above. Full-string assertions here
+// double as a regression check that the pre-existing base lines (header,
+// version, render pipeline, input system) stay byte-identical — a wording
+// change to those four lines would fail these tests just as loudly as a
+// wrong/missing contrast line would.
+describe('contrast facts integration (P2.1)', () => {
+  it('builtin-legacy (Built-in + legacy): builtin-color, builtin-postfx, input-legacy, + both deprecations', async () => {
+    const facts = await buildFixtureFacts(FIXTURES + 'builtin-legacy');
+    expect(facts).toBe(
+      [
+        '## Unity project facts (authoritative — match these)',
+        '- Unity version: 2022.3.45f1',
+        '- Render pipeline: Built-in',
+        '- Input system: Input Manager (legacy)',
+        '- `_Color`/`_MainTex` are correct here; `_BaseColor`/`_BaseMap` are URP names and WRONG here.',
+        '- Full-screen effects: `OnRenderImage` is the classic approach here; `ScriptableRenderPass` is URP-only and does not apply to this project.',
+        '- Legacy Input Manager is active: do NOT use `UnityEngine.InputSystem`/InputAction (package not enabled) — `Input.GetAxis` etc. are correct here.',
+        '- `WWW` is deprecated — use `UnityWebRequest` for networking/file loads instead.',
+        '- `Application.LoadLevel` is deprecated — use `SceneManager.LoadScene` instead.',
+      ].join('\n'),
+    );
+  });
+
+  it('urp-newinput (URP + new): urp-color, urp-postfx, input-new, + both deprecations', async () => {
+    const facts = await buildFixtureFacts(FIXTURES + 'urp-newinput');
+    expect(facts).toBe(
+      [
+        '## Unity project facts (authoritative — match these)',
+        '- Unity version: 6000.3.5f2',
+        '- Render pipeline: URP',
+        '- Input system: Input System (new)',
+        '- Shader color property is `_BaseColor` (texture: `_BaseMap`). `_Color`/`_MainTex` are WRONG in this project (Built-in names).',
+        '- Full-screen effects: `OnRenderImage` does NOT run under URP — use a ScriptableRenderPass / Renderer Feature.',
+        '- New Input System is active: `Input.GetAxis/GetKey/GetButton/GetMouseButton` are WRONG here — use InputAction/PlayerInput.',
+        '- `WWW` is deprecated — use `UnityWebRequest` for networking/file loads instead.',
+        '- `Application.LoadLevel` is deprecated — use `SceneManager.LoadScene` instead.',
+      ].join('\n'),
+    );
+  });
+
+  it('urp2022-legacyinput (URP + legacy trap fixture): urp-color, urp-postfx, input-legacy, + both deprecations', async () => {
+    const facts = await buildFixtureFacts(FIXTURES + 'urp2022-legacyinput');
+    expect(facts).toBe(
+      [
+        '## Unity project facts (authoritative — match these)',
+        '- Unity version: 2022.3.45f1',
+        '- Render pipeline: URP',
+        '- Input system: Input Manager (legacy)',
+        '- Shader color property is `_BaseColor` (texture: `_BaseMap`). `_Color`/`_MainTex` are WRONG in this project (Built-in names).',
+        '- Full-screen effects: `OnRenderImage` does NOT run under URP — use a ScriptableRenderPass / Renderer Feature.',
+        '- Legacy Input Manager is active: do NOT use `UnityEngine.InputSystem`/InputAction (package not enabled) — `Input.GetAxis` etc. are correct here.',
+        '- `WWW` is deprecated — use `UnityWebRequest` for networking/file loads instead.',
+        '- `Application.LoadLevel` is deprecated — use `SceneManager.LoadScene` instead.',
+      ].join('\n'),
+    );
+  });
+});

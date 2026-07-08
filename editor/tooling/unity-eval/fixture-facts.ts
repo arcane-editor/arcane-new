@@ -5,6 +5,7 @@
 
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { contrastFactLines } from '../../src/features/ai-panel/services/prompts/unity-contrast';
 
 type RenderPipeline = 'URP' | 'HDRP' | 'Built-in';
 
@@ -104,6 +105,10 @@ export async function buildFixtureFacts(fixtureDir: string): Promise<string> {
     `- Unity version: ${version}`,
     `- Render pipeline: ${pipeline}`,
     `- Input system: ${INPUT_SYSTEM_WORDING[inputSystem]}`,
+    // Contrastive anti-default facts (P2.1, unity-contrast.ts) — ADDITIONS
+    // only, derived from the SAME pipeline/inputSystem values just detected
+    // above, so pre-existing fact strings above stay byte-identical.
+    ...contrastFactLines({ renderPipeline: pipeline, inputSystem }),
   ].join('\n');
 }
 

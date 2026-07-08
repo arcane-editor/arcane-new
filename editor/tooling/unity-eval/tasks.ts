@@ -137,15 +137,18 @@ export const TASKS: EvalTask[] = [
   },
 
   // ── grounding (exact property/shader-name — facts alone can't answer) ──
-  // `fixture-facts.ts`'s injected block only ever states version/pipeline/
-  // input-system wording (see `buildFixtureFacts`) — it never names a
-  // specific shader property or shader path string. So for the three tasks
-  // below, where the "correct" answer *is* an exact identifier, the model
-  // has to actually ground itself via `unity_api_search` rather than infer
-  // it from the facts block; hence `tool_called`. The other new grounding
-  // tasks turn on a directional/API-choice fact the model can reasonably
-  // know already (or that the facts block states almost verbatim, e.g.
-  // "Input Manager (legacy)"), so they don't get a `tool_called` check.
+  // `fixture-facts.ts`'s injected block states version/pipeline/input-system
+  // wording (see `buildFixtureFacts`) plus, since P2.1, contrastive
+  // anti-default facts (`unity-contrast.ts`) appended at the end — and those
+  // DO now name exact shader-property strings (`_BaseColor`/`_BaseMap` for
+  // URP, `_Color`/`_MainTex` for Built-in) directly in the prompt. It still
+  // never names an exact SHADER PATH string (e.g. "Universal Render
+  // Pipeline/Lit") — no row in the contrast table covers that. So of the
+  // three tasks that originally got a `tool_called: unity_api_search` check
+  // here (facts alone couldn't answer them), only `grounding-urp-shader-name`
+  // still needs it; see the per-task comments below for why the other two
+  // lost theirs (established rule: `tool_called` only where facts are
+  // insufficient).
   {
     id: 'grounding-urp-texture', family: 'grounding', fixture: 'urp-newinput', mode: 'ask',
     prompt: 'How do I set a material\'s main texture from a script at runtime in this project?',
@@ -157,7 +160,13 @@ export const TASKS: EvalTask[] = [
       // `_MainTex` as the property to set), not an incidental mention of
       // the legacy name.
       { type: 'answer_not_matches', pattern: '"_MainTex"' },
-      { type: 'tool_called', tool: 'unity_api_search' },
+      // P2.1 (deliberate removal): `unity-contrast.ts`'s `urp-color` row
+      // states `_BaseMap`/`_Color` explicitly for every URP fixture, so the
+      // injected fixture facts are now SUFFICIENT to answer this without a
+      // tool call — the `tool_called: unity_api_search` check this task
+      // previously had is removed. Contrast with `grounding-urp-shader-name`
+      // just below, whose exact shader-path answer is deliberately NOT in
+      // the contrast table and so keeps its `tool_called` check.
     ],
   },
   {
@@ -168,6 +177,12 @@ export const TASKS: EvalTask[] = [
       // Only fail on quoted-shader-spec form (e.g. Shader.Find("Standard")),
       // not prose contrast like "the old Standard shader".
       { type: 'answer_not_matches', pattern: '\\"Standard\\"' },
+      // KEPT (P2.1): the literal shader asset name "Universal Render
+      // Pipeline/Lit" is deliberately NOT in `unity-contrast.ts`'s table —
+      // that's an encyclopedia-shaped fact, not a high-frequency
+      // anti-default, so this is the one case left where the model has to
+      // actually ground itself via `unity_api_search` rather than read the
+      // answer off the facts block.
       { type: 'tool_called', tool: 'unity_api_search' },
     ],
   },
@@ -204,7 +219,11 @@ export const TASKS: EvalTask[] = [
       // shader's color property (`_BaseColor`) is still correct here.
       { type: 'answer_matches', pattern: '_BaseColor' },
       { type: 'answer_not_matches', pattern: '"_Color"' },
-      { type: 'tool_called', tool: 'unity_api_search' },
+      // P2.1 (deliberate removal, same rule as `grounding-urp-texture`
+      // above): this fixture is URP, so `unity-contrast.ts`'s `urp-color`
+      // row states `_BaseColor` explicitly in the injected facts block —
+      // the fixture facts alone are now SUFFICIENT, so the `tool_called:
+      // unity_api_search` check this task previously had is removed.
     ],
   },
   {
