@@ -23,7 +23,7 @@ import {
   type NodeKey,
 } from 'lexical';
 
-export type MentionKind = 'file' | 'unity-doc' | 'unity-context' | 'unity-object';
+export type MentionKind = 'file' | 'unity-doc' | 'unity-context' | 'unity-object' | 'unity-asset';
 
 export interface MentionPayload {
   kind: MentionKind;

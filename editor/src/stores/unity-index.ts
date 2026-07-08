@@ -71,6 +71,15 @@ function invalidateGuidMap(): void {
   guidMapInflight = null;
 }
 
+/**
+ * The cached guid → path map, thin-wrapped for direct (non-subscribing)
+ * consumers outside this store (e.g. the `@asset` mention category). Same
+ * module-level cache as `resolveGuid` — no new fetch, no new subscription.
+ */
+export function getGuidMap(): Promise<Record<string, string>> {
+  return loadGuidMap();
+}
+
 async function loadGuidMap(): Promise<Record<string, string>> {
   if (guidMapCache) return guidMapCache;
   if (guidMapInflight) return guidMapInflight;
@@ -174,8 +183,11 @@ let deltaDebounce: ReturnType<typeof setTimeout> | null = null;
 let pendingChanged = new Set<string>();
 let pendingRemoved = new Set<string>();
 
-// Extensions whose changes affect the GUID / reverse-reference index.
-const INDEX_RELEVANT = [
+// Extensions whose changes affect the GUID / reverse-reference index. Exported
+// for consumers (e.g. the `@asset` mention category) that need the same
+// index-relevant extension list to filter the guid map to actual assets
+// (`.meta` files are index-relevant but aren't themselves assets).
+export const INDEX_RELEVANT = [
   '.meta',
   '.unity',
   '.prefab',

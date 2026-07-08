@@ -4,13 +4,24 @@
  * Phase 4 supports file + unity-doc as text content prepended to the user's
  * message. Phase 5 will branch image attachments into multi-part content
  * blocks (text + image_url) via a vendor-patched Agent.promptStructured().
+ *
+ * Store/bridge imports below are deliberately dynamic (`await import(...)`
+ * inside the functions that need them) rather than static top-of-file
+ * imports. A static import of `stores/unity`, `stores/unity-scene`,
+ * `stores/unity-index`, or the `unity-bridge` barrel's runtime export
+ * transitively reaches `stores/workspace` → `stores/ai` → the `ai-panel`
+ * barrel → `stores/theme`, whose `create()` initializer touches `document`
+ * at module-eval time — a crash under `bun test`'s no-DOM environment
+ * (verified: even importing an unrelated existing export of this file was
+ * enough to crash before this change). Keeping this file's top level free of
+ * runtime store imports means the pure formatters below (e.g.
+ * `formatUnityAssetBlock`) can be unit-tested in isolation. Same pattern as
+ * `summarize-scene-diff.ts`.
  */
 
 import { invoke } from '@tauri-apps/api/core';
 import type { Attachment } from './types';
-import { bridgeRpc, type HierarchyNode } from '../../unity-bridge';
-import { useUnityStore } from '../../../stores/unity';
-import { useUnitySceneStore } from '../../../stores/unity-scene';
+import type { HierarchyNode } from '../../unity-bridge';
 
 const MAX_FILE_BYTES = 200 * 1024;
 const MAX_TOTAL_FILE_BYTES = 500 * 1024;
@@ -53,6 +64,11 @@ export async function resolveAttachments(
       const block = await resolveUnityObject(a.name, a.instanceId);
       if (block) blocks.push(block);
       else warnings.push(`@object(${a.name}): unavailable (Unity not connected?).`);
+      continue;
+    }
+
+    if (a.kind === 'unity-asset') {
+      blocks.push(await resolveUnityAsset(a.path, a.relPath, a.guid));
       continue;
     }
 
@@ -144,6 +160,8 @@ function formatNodeText(n: HierarchyNode, depth: number, maxDepth: number, out: 
 async function resolveUnityContext(
   verb: 'scene' | 'selection' | 'hierarchy' | 'console',
 ): Promise<string | null> {
+  const { useUnityStore } = await import('../../../stores/unity');
+
   // @console reads the local log ring — works offline.
   if (verb === 'console') {
     const errs = useUnityStore
@@ -159,6 +177,7 @@ async function resolveUnityContext(
   if (!useUnityStore.getState().connected) return null;
 
   if (verb === 'selection') {
+    const { bridgeRpc } = await import('../../unity-bridge');
     const sel = await bridgeRpc.getSelection().catch(() => ({ objects: [] }));
     const body = sel.objects.length
       ? sel.objects.map((o) => `${o.name} (${o.type}) — ${o.path}`).join('\n')
@@ -167,6 +186,7 @@ async function resolveUnityContext(
   }
 
   // scene / hierarchy
+  const { useUnitySceneStore } = await import('../../../stores/unity-scene');
   const h = await useUnitySceneStore.getState().ensureFresh().catch(() => null);
   if (!h) return null;
   const maxDepth = verb === 'hierarchy' ? 2 : 6;
@@ -179,12 +199,139 @@ async function resolveUnityContext(
 }
 
 async function resolveUnityObject(name: string, instanceId?: number): Promise<string | null> {
+  const { useUnityStore } = await import('../../../stores/unity');
   if (!useUnityStore.getState().connected) return null;
+  const { bridgeRpc } = await import('../../unity-bridge');
   const go = await bridgeRpc
     .getGameObject(instanceId != null ? { instanceId } : { path: name })
     .catch(() => null);
   if (!go) return null;
   return `<unity-object name="${escapeAttr(name)}">\n${capBlock(JSON.stringify(go, null, 1))}\n</unity-object>`;
+}
+
+// ── Unity asset attachment (P5.4) ────────────────────────────────────────────
+// Structured summary of a Unity YAML asset (scene/prefab/material/etc.) parsed
+// via the Rust `unity_parse_asset` command — GameObject→component tree for
+// scenes/prefabs, or a document/property list for materials/.asset/.anim/
+// .controller — plus a reverse-reference count from the GUID index. These
+// types mirror the camelCase shape `unity_parse_asset` returns (see
+// `unity_yaml.rs` / `unity-asset-viewer/services/asset-model.ts`); duplicated
+// locally rather than imported cross-feature since unity-asset-viewer only
+// exports React components, no pure text formatter to reuse.
+
+interface UnityAssetComponentRef {
+  typeName: string;
+}
+
+interface UnityAssetGameObject {
+  name: string;
+  isActive: boolean;
+  components: UnityAssetComponentRef[];
+  children: UnityAssetGameObject[];
+}
+
+interface UnityAssetDocument {
+  typeName: string;
+  properties: Array<[string, string]>;
+}
+
+export interface UnityAssetModel {
+  documents: UnityAssetDocument[];
+  gameObjects: UnityAssetGameObject[];
+}
+
+const UNITY_ASSET_BLOCK_CAP = 8 * 1024;
+const UNITY_ASSET_MAX_NODES = 40;
+const UNITY_ASSET_MAX_DOC_PROPS = 8;
+
+async function resolveUnityAsset(path: string, relPath: string, guid: string): Promise<string> {
+  let model: UnityAssetModel | null = null;
+  let parseError: string | null = null;
+  try {
+    model = await invoke<UnityAssetModel>('unity_parse_asset', { path });
+  } catch (err) {
+    parseError = formatErr(err);
+  }
+
+  const { useUnityIndexStore } = await import('../../../stores/unity-index');
+  const refs = await useUnityIndexStore.getState().findReferences(guid);
+
+  return formatUnityAssetBlock({ relPath, model, parseError, refCount: refs.length });
+}
+
+/** First-N-nodes GameObject→component tree, or a document/property summary
+ *  for asset types with no GameObject hierarchy (materials, .asset, etc.). */
+function formatAssetTree(model: UnityAssetModel): string {
+  if (model.gameObjects.length > 0) {
+    const lines: string[] = [];
+    let count = 0;
+    let truncated = false;
+    const walk = (go: UnityAssetGameObject, depth: number) => {
+      if (truncated) return;
+      if (count >= UNITY_ASSET_MAX_NODES) {
+        truncated = true;
+        return;
+      }
+      count++;
+      const indent = '  '.repeat(depth);
+      const comps = go.components.map((c) => c.typeName).join(', ');
+      lines.push(`${indent}${go.name}${go.isActive ? '' : ' (inactive)'}${comps ? ` [${comps}]` : ''}`);
+      for (const child of go.children) {
+        if (truncated) break;
+        walk(child, depth + 1);
+      }
+    };
+    for (const go of model.gameObjects) {
+      if (truncated) break;
+      walk(go, 0);
+    }
+    if (truncated) lines.push(`…(truncated at ${UNITY_ASSET_MAX_NODES} nodes)`);
+    return lines.join('\n');
+  }
+
+  if (model.documents.length > 0) {
+    const lines: string[] = [];
+    for (const doc of model.documents.slice(0, UNITY_ASSET_MAX_NODES)) {
+      lines.push(doc.typeName);
+      for (const [k, v] of doc.properties.slice(0, UNITY_ASSET_MAX_DOC_PROPS)) {
+        const val = v.length > 120 ? v.slice(0, 120) + '…' : v;
+        lines.push(`  ${k}: ${val}`);
+      }
+    }
+    return lines.join('\n');
+  }
+
+  return '(empty asset — no structured content)';
+}
+
+/**
+ * Format a parsed Unity asset (or a parse failure) into a `<unity-asset>`
+ * text block for the prompt prefix. Pure — no I/O, no store reads. Capped to
+ * ~8KB; the reference-count line is always preserved (reserved before the
+ * body is truncated) so a huge asset never silently drops it.
+ */
+export function formatUnityAssetBlock(params: {
+  relPath: string;
+  model: UnityAssetModel | null;
+  parseError?: string | null;
+  refCount: number;
+}): string {
+  const { relPath, model, parseError, refCount } = params;
+
+  if (!model || parseError) {
+    return `<unity-asset path="${escapeAttr(relPath)}">\ncould not parse asset — path only\n</unity-asset>`;
+  }
+
+  const refLine = `referenced by ${refCount} asset${refCount === 1 ? '' : 's'}`;
+  const reserve = byteLength(refLine) + 2; // blank line before the ref count
+  const bodyCap = Math.max(0, UNITY_ASSET_BLOCK_CAP - reserve);
+
+  let body = formatAssetTree(model);
+  if (byteLength(body) > bodyCap) {
+    body = truncateToBytes(body, bodyCap) + '\n…(truncated)';
+  }
+
+  return `<unity-asset path="${escapeAttr(relPath)}">\n${body}\n\n${refLine}\n</unity-asset>`;
 }
 
 function escapeAttr(s: string): string {

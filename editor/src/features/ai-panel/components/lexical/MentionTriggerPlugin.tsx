@@ -141,6 +141,16 @@ function MentionTriggerPlugin() {
           };
           label = pick.name;
           break;
+        case 'unity-asset':
+          attachment = {
+            kind: 'unity-asset',
+            id: attachmentId,
+            guid: pick.guid,
+            path: pick.path,
+            relPath: pick.relPath,
+          };
+          label = pick.relPath.split('/').pop() ?? pick.relPath;
+          break;
       }
 
       addAttachment(attachment);

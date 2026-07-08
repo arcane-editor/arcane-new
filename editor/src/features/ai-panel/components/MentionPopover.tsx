@@ -21,10 +21,21 @@ import { FileText, BookOpen, Boxes, Box, Terminal, ChevronLeft } from 'lucide-re
 import { useWorkspaceStore } from '../../../stores/workspace';
 import { useProjectContextStore } from '../../../stores/project-context';
 import { useUnitySceneStore } from '../../../stores/unity-scene';
+import { useUnityIndexStore, getGuidMap, INDEX_RELEVANT } from '../../../stores/unity-index';
 import type { HierarchyNode } from '../../unity-bridge';
 import { UNITY_API_LIST, UNITY_API_DEFAULTS } from '../../../data/unity-api-list';
 
-type CategoryId = 'files' | 'unity-docs' | 'unity-console' | 'scene-objects';
+type CategoryId = 'files' | 'unity-docs' | 'unity-console' | 'scene-objects' | 'assets';
+
+// Asset extensions surfaced in the `@assets` category — the index-relevant
+// list minus `.meta` (a `.meta` sidecar isn't itself a pickable asset).
+const ASSET_MENTION_EXTS = INDEX_RELEVANT.filter((e) => e !== '.meta');
+
+function isAssetMentionPath(p: string): boolean {
+  const lower = p.toLowerCase();
+  return ASSET_MENTION_EXTS.some((e) => lower.endsWith(e));
+}
+
 type SceneVerb = 'scene' | 'selection' | 'hierarchy';
 
 const SCENE_VERBS: { verb: SceneVerb; desc: string }[] = [
@@ -66,9 +77,18 @@ export type MentionPick =
   | { kind: 'file'; path: string; relPath: string; bytes?: number }
   | { kind: 'unity-doc'; name: string; url: string; category?: string }
   | { kind: 'unity-context'; verb: 'scene' | 'selection' | 'hierarchy' | 'console' }
-  | { kind: 'unity-object'; name: string; instanceId?: number };
+  | { kind: 'unity-object'; name: string; instanceId?: number }
+  | { kind: 'unity-asset'; guid: string; path: string; relPath: string };
 
 interface FileItem {
+  path: string;
+  relPath: string;
+  basename: string;
+  score: number;
+}
+
+interface AssetItem {
+  guid: string;
   path: string;
   relPath: string;
   basename: string;
@@ -96,6 +116,11 @@ function MentionPopover({ open, query, anchorRect, onPick, onClose }: Props) {
   const isUnityProject = useProjectContextStore((s) => s.isUnityProject);
   const [allFiles, setAllFiles] = useState<{ path: string; relPath: string; basename: string }[]>([]);
   const [loadingFiles, setLoadingFiles] = useState(false);
+  const [allAssets, setAllAssets] = useState<
+    { guid: string; path: string; relPath: string; basename: string }[]
+  >([]);
+  const [loadingAssets, setLoadingAssets] = useState(false);
+  const indexStatus = useUnityIndexStore((s) => s.status);
 
   // The category the user has drilled into (null = level-1 category menu).
   const [activeCategory, setActiveCategory] = useState<CategoryId | null>(null);
@@ -110,6 +135,7 @@ function MentionPopover({ open, query, anchorRect, onPick, onClose }: Props) {
       { id: 'unity-docs', label: 'Unity Docs', desc: 'Unity API reference', icon: BookOpen },
       { id: 'unity-console', label: 'Unity Console', desc: 'recent console errors', icon: Terminal },
       { id: 'scene-objects', label: 'Scene Objects', desc: 'scene, selection, GameObjects', icon: Boxes },
+      { id: 'assets', label: 'Assets', desc: 'scenes, prefabs, materials', icon: Box },
     ];
   }, [isUnityProject]);
 
@@ -151,6 +177,30 @@ function MentionPopover({ open, query, anchorRect, onPick, onClose }: Props) {
       })
       .finally(() => setLoadingFiles(false));
   }, [effectiveCategory, open, workspacePath, allFiles.length, loadingFiles, isUnityProject]);
+
+  // ─── Lazy-load the guid map when entering the Assets category ────
+  useEffect(() => {
+    if (effectiveCategory !== 'assets') return;
+    if (!open || !isUnityProject || allAssets.length > 0 || loadingAssets) return;
+    setLoadingAssets(true);
+    getGuidMap()
+      .then((map) => {
+        setAllAssets(
+          Object.entries(map)
+            .filter(([, p]) => isAssetMentionPath(p))
+            .map(([guid, p]) => ({
+              guid,
+              path: p,
+              relPath: relPathOf(p, workspacePath),
+              basename: p.split('/').pop() ?? p,
+            })),
+        );
+      })
+      .catch(() => {
+        /* fail silently */
+      })
+      .finally(() => setLoadingAssets(false));
+  }, [effectiveCategory, open, isUnityProject, allAssets.length, loadingAssets, workspacePath]);
 
   // ─── Item lists per category ──────────────────────────────────
   const fileItems = useMemo<FileItem[]>(() => {
@@ -195,6 +245,24 @@ function MentionPopover({ open, query, anchorRect, onPick, onClose }: Props) {
     scored.sort((a, b) => b.score - a.score);
     return scored.slice(0, MAX_PER_SECTION);
   }, [query, isUnityProject]);
+
+  const assetItems = useMemo<AssetItem[]>(() => {
+    if (!isUnityProject) return [];
+    if (!query) return allAssets.slice(0, MAX_PER_SECTION).map((a) => ({ ...a, score: 0 }));
+    const q = query.toLowerCase();
+    const scored: AssetItem[] = [];
+    for (const a of allAssets) {
+      const bn = a.basename.toLowerCase();
+      const rp = a.relPath.toLowerCase();
+      let score = -1;
+      if (bn.startsWith(q)) score = 100 - bn.length;
+      else if (bn.includes(q)) score = 50 - bn.length;
+      else if (rp.includes(q)) score = 25 - rp.length;
+      if (score >= 0) scored.push({ ...a, score });
+    }
+    scored.sort((a, b) => b.score - a.score);
+    return scored.slice(0, MAX_PER_SECTION);
+  }, [query, allAssets, isUnityProject]);
 
   const sceneHierarchy = useUnitySceneStore((s) => s.hierarchy);
   useEffect(() => {
@@ -245,10 +313,17 @@ function MentionPopover({ open, query, anchorRect, onPick, onClose }: Props) {
             instanceId: o.instanceId,
           })),
         ];
+      case 'assets':
+        return assetItems.map((a) => ({
+          kind: 'unity-asset',
+          guid: a.guid,
+          path: a.path,
+          relPath: a.relPath,
+        }));
       default:
         return [];
     }
-  }, [isCategoryLevel, effectiveCategory, fileItems, unityItems, sceneVerbs, objectItems]);
+  }, [isCategoryLevel, effectiveCategory, fileItems, unityItems, sceneVerbs, objectItems, assetItems]);
 
   const navCount = isCategoryLevel ? matchedCategories.length : entries.length;
 
@@ -380,7 +455,11 @@ function MentionPopover({ open, query, anchorRect, onPick, onClose }: Props) {
           </div>
           {navCount === 0 ? (
             <div className="ai-panel-mention-empty">
-              {loadingFiles && effectiveCategory === 'files' ? 'Loading…' : 'No matches'}
+              {loadingFiles && effectiveCategory === 'files'
+                ? 'Loading…'
+                : effectiveCategory === 'assets' && indexStatus !== 'ready'
+                  ? 'Index building…'
+                  : 'No matches'}
             </div>
           ) : (
             entries.map((entry, i) => (
@@ -435,6 +514,11 @@ function EntryRow({
       label = entry.name;
       meta = 'object';
       break;
+    case 'unity-asset':
+      icon = <Box size={14} className="ai-panel-mention-icon" />;
+      label = entry.relPath.split('/').pop() ?? entry.relPath;
+      meta = extOf(entry.relPath);
+      break;
   }
   return (
     <button
@@ -463,12 +547,19 @@ function entryKey(entry: MentionPick, i: number): string {
       return `ctx-${entry.verb}`;
     case 'unity-object':
       return `obj-${entry.instanceId ?? i}`;
+    case 'unity-asset':
+      return `asset-${entry.guid}`;
   }
 }
 
 function dirOf(relPath: string): string {
   const idx = relPath.lastIndexOf('/');
   return idx > 0 ? relPath.slice(0, idx) : '';
+}
+
+function extOf(relPath: string): string {
+  const idx = relPath.lastIndexOf('.');
+  return idx >= 0 ? relPath.slice(idx + 1) : '';
 }
 
 function relPathOf(absPath: string, workspacePath: string | null): string {

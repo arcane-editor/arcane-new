@@ -70,6 +70,14 @@ export type Attachment =
       id: string;
       name: string;
       instanceId?: number;
+    }
+  | {
+      /** A Unity asset (scene/prefab/material/etc.) from the GUID index, resolved at send time. */
+      kind: 'unity-asset';
+      id: string;
+      guid: string;
+      path: string;
+      relPath: string;
     };
 
 /**

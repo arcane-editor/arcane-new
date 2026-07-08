@@ -20,7 +20,7 @@ function AttachmentChip({ attachment: a, removable = true }: Props) {
   const openFile = useWorkspaceStore((s) => s.openFile);
 
   function handleOpen() {
-    if (a.kind === 'file') {
+    if (a.kind === 'file' || a.kind === 'unity-asset') {
       openFile(a.path, a.relPath.split('/').pop() ?? a.relPath);
     } else if (a.kind === 'unity-doc') {
       openUrl(a.url).catch(() => {});
@@ -62,6 +62,11 @@ function AttachmentChip({ attachment: a, removable = true }: Props) {
       icon = <Box size={12} />;
       label = a.name;
       title = `Live GameObject "${a.name}" (resolved when sent)`;
+      break;
+    case 'unity-asset':
+      icon = <Box size={12} />;
+      label = a.relPath.split('/').pop() ?? a.relPath;
+      title = a.relPath;
       break;
   }
 
