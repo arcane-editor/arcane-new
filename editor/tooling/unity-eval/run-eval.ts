@@ -62,6 +62,11 @@ const { values } = parseArgs({
     preset: { type: 'string' },
     record: { type: 'boolean', default: false },
     'server-url': { type: 'string', default: 'http://localhost:8787' },
+    // Bearer token env var for --record's grounding server when it differs from
+    // the chat endpoint's token (e.g. chat → local wrangler dev with a dev JWT,
+    // recording → production arcane-server with a prod JWT). Falls back to
+    // --api-key-env when omitted.
+    'record-api-key-env': { type: 'string' },
     'recordings-dir': { type: 'string' },
     repeats: { type: 'string', default: '1' },
   },
@@ -108,8 +113,14 @@ if (!Number.isInteger(repeats) || repeats < 1) {
   process.exit(1);
 }
 
+const recordKeyEnv = values['record-api-key-env'];
+const recordToken = recordKeyEnv ? process.env[recordKeyEnv] : apiKey;
+if (values.record && recordKeyEnv && !recordToken) {
+  console.error(`Env var ${recordKeyEnv} (--record-api-key-env) is not set.`);
+  process.exit(1);
+}
 const groundingConfig: GroundingConfig = values.record
-  ? { recordingsDir: values['recordings-dir'], record: { serverUrl: values['server-url'], token: apiKey } }
+  ? { recordingsDir: values['recordings-dir'], record: { serverUrl: values['server-url'], token: recordToken! } }
   : { recordingsDir: values['recordings-dir'] };
 if (values.record) {
   console.error(
