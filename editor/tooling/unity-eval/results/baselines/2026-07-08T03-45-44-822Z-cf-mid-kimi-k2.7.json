@@ -1,0 +1,416 @@
+{
+  "label": "cf-mid-kimi-k2.7",
+  "model": "@cf/moonshotai/kimi-k2.7-code",
+  "baseUrl": "http://localhost:8787/v1",
+  "usage": {
+    "input": 174039,
+    "output": 12598,
+    "requests": 57
+  },
+  "results": [
+    {
+      "taskId": "codegen-dash-cooldown",
+      "family": "codegen",
+      "pass": true,
+      "checks": [
+        {
+          "spec": {
+            "type": "file_exists",
+            "path": "Assets/Scripts/PlayerDash.cs"
+          },
+          "pass": true,
+          "detail": "exists"
+        },
+        {
+          "spec": {
+            "type": "file_contains",
+            "path": "Assets/Scripts/PlayerDash.cs",
+            "pattern": "cooldown",
+            "flags": "i"
+          },
+          "pass": true,
+          "detail": "pattern found in Assets/Scripts/PlayerDash.cs"
+        },
+        {
+          "spec": {
+            "type": "file_not_contains",
+            "path": "Assets/Scripts/PlayerDash.cs",
+            "pattern": "UnityEngine\\.InputSystem"
+          },
+          "pass": true,
+          "detail": "pattern not found in Assets/Scripts/PlayerDash.cs"
+        },
+        {
+          "spec": {
+            "type": "analyzer_clean",
+            "glob": "Assets/Scripts/PlayerDash.cs"
+          },
+          "pass": true,
+          "detail": ""
+        }
+      ],
+      "turns": 6,
+      "wallMs": 53712,
+      "inputTokens": 19010,
+      "outputTokens": 2198
+    },
+    {
+      "taskId": "codegen-damage-event",
+      "family": "codegen",
+      "pass": true,
+      "checks": [
+        {
+          "spec": {
+            "type": "file_contains",
+            "path": "Assets/Scripts/Health.cs",
+            "pattern": "TakeDamage"
+          },
+          "pass": true,
+          "detail": "pattern found in Assets/Scripts/Health.cs"
+        },
+        {
+          "spec": {
+            "type": "file_contains",
+            "path": "Assets/Scripts/Health.cs",
+            "pattern": "UnityEvent"
+          },
+          "pass": true,
+          "detail": "pattern found in Assets/Scripts/Health.cs"
+        },
+        {
+          "spec": {
+            "type": "analyzer_clean",
+            "glob": "Assets/Scripts/Health.cs"
+          },
+          "pass": true,
+          "detail": ""
+        }
+      ],
+      "turns": 3,
+      "wallMs": 12149,
+      "inputTokens": 8817,
+      "outputTokens": 486
+    },
+    {
+      "taskId": "codegen-canvas-fade",
+      "family": "codegen",
+      "pass": true,
+      "checks": [
+        {
+          "spec": {
+            "type": "file_exists",
+            "path": "Assets/Scripts/UIFader.cs"
+          },
+          "pass": true,
+          "detail": "exists"
+        },
+        {
+          "spec": {
+            "type": "file_contains",
+            "path": "Assets/Scripts/UIFader.cs",
+            "pattern": "IEnumerator"
+          },
+          "pass": true,
+          "detail": "pattern found in Assets/Scripts/UIFader.cs"
+        },
+        {
+          "spec": {
+            "type": "file_not_contains",
+            "path": "Assets/Scripts/UIFader.cs",
+            "pattern": "async\\s+void"
+          },
+          "pass": true,
+          "detail": "pattern not found in Assets/Scripts/UIFader.cs"
+        },
+        {
+          "spec": {
+            "type": "analyzer_clean",
+            "glob": "Assets/Scripts/UIFader.cs"
+          },
+          "pass": true,
+          "detail": ""
+        }
+      ],
+      "turns": 6,
+      "wallMs": 27682,
+      "inputTokens": 18201,
+      "outputTokens": 653
+    },
+    {
+      "taskId": "codegen-so-config",
+      "family": "codegen",
+      "pass": true,
+      "checks": [
+        {
+          "spec": {
+            "type": "file_exists",
+            "path": "Assets/Scripts/EnemyConfig.cs"
+          },
+          "pass": true,
+          "detail": "exists"
+        },
+        {
+          "spec": {
+            "type": "file_contains",
+            "path": "Assets/Scripts/EnemyConfig.cs",
+            "pattern": "ScriptableObject"
+          },
+          "pass": true,
+          "detail": "pattern found in Assets/Scripts/EnemyConfig.cs"
+        },
+        {
+          "spec": {
+            "type": "file_contains",
+            "path": "Assets/Scripts/EnemyConfig.cs",
+            "pattern": "CreateAssetMenu"
+          },
+          "pass": true,
+          "detail": "pattern found in Assets/Scripts/EnemyConfig.cs"
+        },
+        {
+          "spec": {
+            "type": "analyzer_clean",
+            "glob": "Assets/Scripts/EnemyConfig.cs"
+          },
+          "pass": true,
+          "detail": ""
+        }
+      ],
+      "turns": 2,
+      "wallMs": 23943,
+      "inputTokens": 5480,
+      "outputTokens": 1215
+    },
+    {
+      "taskId": "grounding-urp-color",
+      "family": "grounding",
+      "pass": false,
+      "checks": [
+        {
+          "spec": {
+            "type": "answer_matches",
+            "pattern": "_BaseColor"
+          },
+          "pass": true,
+          "detail": "answer pattern matched"
+        },
+        {
+          "spec": {
+            "type": "answer_not_matches",
+            "pattern": "\"_Color\""
+          },
+          "pass": false,
+          "detail": "answer pattern matched"
+        }
+      ],
+      "turns": 3,
+      "wallMs": 21769,
+      "inputTokens": 6827,
+      "outputTokens": 970
+    },
+    {
+      "taskId": "grounding-builtin-color",
+      "family": "grounding",
+      "pass": true,
+      "checks": [
+        {
+          "spec": {
+            "type": "answer_matches",
+            "pattern": "\\.color\\s*=|\"_Color\""
+          },
+          "pass": true,
+          "detail": "answer pattern matched"
+        },
+        {
+          "spec": {
+            "type": "answer_not_matches",
+            "pattern": "_BaseColor"
+          },
+          "pass": true,
+          "detail": "answer pattern did not match"
+        }
+      ],
+      "turns": 4,
+      "wallMs": 22057,
+      "inputTokens": 10142,
+      "outputTokens": 1114
+    },
+    {
+      "taskId": "grounding-input-read",
+      "family": "grounding",
+      "pass": true,
+      "checks": [
+        {
+          "spec": {
+            "type": "answer_matches",
+            "pattern": "InputAction|InputSystem|InputValue"
+          },
+          "pass": true,
+          "detail": "answer pattern matched"
+        },
+        {
+          "spec": {
+            "type": "answer_not_matches",
+            "pattern": "Input\\.GetAxis"
+          },
+          "pass": true,
+          "detail": "answer pattern did not match"
+        }
+      ],
+      "turns": 3,
+      "wallMs": 18149,
+      "inputTokens": 6960,
+      "outputTokens": 983
+    },
+    {
+      "taskId": "grounding-legacy-input",
+      "family": "grounding",
+      "pass": true,
+      "checks": [
+        {
+          "spec": {
+            "type": "answer_matches",
+            "pattern": "Input\\.GetAxis"
+          },
+          "pass": true,
+          "detail": "answer pattern matched"
+        },
+        {
+          "spec": {
+            "type": "answer_not_matches",
+            "pattern": "UnityEngine\\.InputSystem"
+          },
+          "pass": true,
+          "detail": "answer pattern did not match"
+        }
+      ],
+      "turns": 3,
+      "wallMs": 22574,
+      "inputTokens": 7107,
+      "outputTokens": 1304
+    },
+    {
+      "taskId": "agentic-fsa-rename",
+      "family": "agentic",
+      "pass": true,
+      "checks": [
+        {
+          "spec": {
+            "type": "file_contains",
+            "path": "Assets/Scripts/PlayerController.cs",
+            "pattern": "moveSpeed"
+          },
+          "pass": true,
+          "detail": "pattern found in Assets/Scripts/PlayerController.cs"
+        },
+        {
+          "spec": {
+            "type": "file_contains",
+            "path": "Assets/Scripts/PlayerController.cs",
+            "pattern": "FormerlySerializedAs\\(\"speed\"\\)"
+          },
+          "pass": true,
+          "detail": "pattern found in Assets/Scripts/PlayerController.cs"
+        },
+        {
+          "spec": {
+            "type": "file_not_contains",
+            "path": "Assets/Scripts/PlayerController.cs",
+            "pattern": "\\bfloat speed\\b"
+          },
+          "pass": true,
+          "detail": "pattern not found in Assets/Scripts/PlayerController.cs"
+        }
+      ],
+      "turns": 11,
+      "wallMs": 58767,
+      "inputTokens": 43029,
+      "outputTokens": 1438
+    },
+    {
+      "taskId": "agentic-nre-fix",
+      "family": "agentic",
+      "pass": true,
+      "checks": [
+        {
+          "spec": {
+            "type": "file_contains",
+            "path": "Assets/Scripts/PlayerController.cs",
+            "pattern": "GetComponent<Rigidbody>|RequireComponent"
+          },
+          "pass": true,
+          "detail": "pattern found in Assets/Scripts/PlayerController.cs"
+        },
+        {
+          "spec": {
+            "type": "analyzer_clean",
+            "glob": "Assets/Scripts/PlayerController.cs"
+          },
+          "pass": true,
+          "detail": ""
+        }
+      ],
+      "turns": 8,
+      "wallMs": 55434,
+      "inputTokens": 28098,
+      "outputTokens": 1349
+    },
+    {
+      "taskId": "agentic-update-perf",
+      "family": "agentic",
+      "pass": true,
+      "checks": [
+        {
+          "spec": {
+            "type": "file_not_contains",
+            "path": "Assets/Scripts/Mover.cs",
+            "pattern": "void\\s+(update|Update)\\(\\)[^}]*GetComponent"
+          },
+          "pass": true,
+          "detail": "pattern not found in Assets/Scripts/Mover.cs"
+        },
+        {
+          "spec": {
+            "type": "analyzer_clean",
+            "glob": "Assets/Scripts/Mover.cs"
+          },
+          "pass": true,
+          "detail": ""
+        }
+      ],
+      "turns": 3,
+      "wallMs": 14625,
+      "inputTokens": 8523,
+      "outputTokens": 487
+    },
+    {
+      "taskId": "agentic-lifecycle-typo",
+      "family": "agentic",
+      "pass": true,
+      "checks": [
+        {
+          "spec": {
+            "type": "file_contains",
+            "path": "Assets/Scripts/Mover.cs",
+            "pattern": "void Update\\(\\)"
+          },
+          "pass": true,
+          "detail": "pattern found in Assets/Scripts/Mover.cs"
+        },
+        {
+          "spec": {
+            "type": "file_not_contains",
+            "path": "Assets/Scripts/Mover.cs",
+            "pattern": "void update\\(\\)"
+          },
+          "pass": true,
+          "detail": "pattern not found in Assets/Scripts/Mover.cs"
+        }
+      ],
+      "turns": 4,
+      "wallMs": 13284,
+      "inputTokens": 11845,
+      "outputTokens": 401
+    }
+  ]
+}

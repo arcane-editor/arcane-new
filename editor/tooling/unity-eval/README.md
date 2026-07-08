@@ -136,11 +136,48 @@ but wrong ones.
 
 ## Baseline results
 
-**PENDING** — not yet run. Baselines must be captured against the same
-models arcane-server actually serves, via Cloudflare's OpenAI-compatible
-endpoint, so the eval measures the real frozen lineup. Two variants,
-depending on whether the OpenAI-compat endpoint accepts the model id/tool
-calls cleanly:
+**Captured 2026-07-08** via Variant B (local `wrangler dev` arcane-server,
+tier selected with `--reasoning-level`, remote Workers AI binding — i.e. the
+real production routing path and the real frozen models). Result JSONs live
+in `results/baselines/`.
+
+| Label | Model | codegen | grounding | agentic | Total | Tokens in/out |
+|---|---|---|---|---|---|---|
+| cf-mid-kimi-k2.7 | @cf/moonshotai/kimi-k2.7-code | 4/4 | 3/4 | 4/4 | **11/12** | 174k/12.6k |
+| cf-high-glm-5.2 | @cf/zai-org/glm-5.2 | 4/4 | 2/4 | 4/4 | **10/12** | 154k/11.2k |
+
+What failed, concretely — every failure across both runs is **pipeline/input
+grounding**, exactly the gap the design doc targets:
+
+- mid: `grounding-urp-color` — mentioned `"_Color"` in a URP-project answer.
+- high: `grounding-urp-color` (same `"_Color"` leak) and
+  `grounding-input-read` — mentioned `Input.GetAxis` in a new-Input-System
+  project.
+
+Caveats to keep honest:
+
+- **Run-to-run variance is real.** Grounding tasks flipped pass/fail between
+  runs of the same model. Treat single-run deltas of ±1 task as noise; the
+  12-task suite is a smoke gate, not a benchmark. Grow the task set before
+  drawing fine-grained conclusions.
+- **`answer_not_matches` is strict**: an answer that gives the right API but
+  *also* mentions the wrong-pipeline one ("in Built-in you'd use `_Color`")
+  scores as a fail. That strictness is intentional (hedged answers are what
+  ungrounded models do) but it inflates the miss rate vs. human judgment —
+  a candidate refinement when the suite grows.
+- **On "is defaulting to high worth it":** on this small suite the mid model
+  scored one task higher and ran ~30-50% faster. Within noise, but the
+  burden of proof is now on `high` — revisit the default once the suite is
+  bigger (see `docs/superpowers/specs/2026-07-07-unity-ai-differentiation-design.md`
+  Phase 1 acceptance).
+- A first, pre-retry attempt scored mid 8/12 / high 6/12 — **9 of 10 of
+  those failures were Workers AI transients** (per-minute rate limit 3021,
+  502/1031, dropped connections) plus multi-minute hangs, which motivated
+  the retry + per-request-timeout hardening in `eval-stream.ts`. Kept out of
+  `results/baselines/` deliberately; the transient-polluted JSONs remain in
+  local `results/` history only.
+
+The original run instructions (either variant works):
 
 **Variant A — direct against Cloudflare's OpenAI-compatible endpoint**
 (preferred; needs `CF_ACCOUNT_ID` and a `CF_API_TOKEN` with Workers AI read
@@ -188,15 +225,9 @@ cd editor && DEV_JWT=<token> bun run eval -- \
   --api-key-env DEV_JWT --model unused --reasoning-level high --label local-high
 ```
 
-Once run, copy both result JSONs into `results/baselines/` and fill in:
-
-| Label | Model | codegen | grounding | agentic | Total |
-|---|---|---|---|---|---|
-| cf-mid-kimi-k2.7 | @cf/moonshotai/kimi-k2.7-code | ?/4 | ?/4 | ?/4 | ?/12 |
-| cf-high-glm-5.2 | @cf/zai-org/glm-5.2 | ?/4 | ?/4 | ?/4 | ?/12 |
-
-This pair is also the direct answer to "is defaulting to high worth it,"
-in numbers instead of vibes.
+When re-running baselines, copy the new result JSONs into
+`results/baselines/` (`git add -f` — the parent `results/` dir is
+gitignored) and update the table above.
 
 ## The rule
 
