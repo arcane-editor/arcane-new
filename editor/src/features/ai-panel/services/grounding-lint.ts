@@ -82,7 +82,7 @@ function isUsagePattern(pattern: string): boolean {
 }
 
 /** First substring in `text` matched by any of the given tokens, or null. */
-function firstMatch(tokens: readonly typeof ContrastRow.prototype.wrongTokens[number][], text: string): string | null {
+function firstMatch(tokens: readonly ContrastRow['wrongTokens'][number][], text: string): string | null {
   for (const token of tokens) {
     const re = new RegExp(token.pattern, token.flags ?? '');
     const m = re.exec(text);
