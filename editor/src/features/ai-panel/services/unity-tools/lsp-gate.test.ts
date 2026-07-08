@@ -110,6 +110,39 @@ describe('withLspDiagnosticsGate', () => {
     expect(res).toEqual(innerRes);
   });
 
+  it('forwards the tool call abort signal into the fetcher', async () => {
+    const controller = new AbortController();
+    let receivedSignal: AbortSignal | undefined;
+    const fetcher: DiagnosticsFetcher = async (_absPath, _content, signal) => {
+      receivedSignal = signal;
+      return [];
+    };
+    const inner = fakeTool('Successfully wrote 10 bytes (1 lines) to /proj/Foo.cs');
+    const gate = withLspDiagnosticsGate(inner, CWD, fetcher);
+
+    await gate.execute('call-1', { path: 'Foo.cs', content: 'class Foo {}' }, controller.signal);
+
+    expect(receivedSignal).toBe(controller.signal);
+  });
+
+  it('leaves the result untouched when the tool call is aborted (fetcher observes the aborted signal, returns nothing new)', async () => {
+    const controller = new AbortController();
+    const fetcher: DiagnosticsFetcher = async (_absPath, _content, signal) => {
+      // Mirrors requestFileDiagnostics's real abort behavior: resolve to []
+      // once the signal is aborted, instead of throwing or hanging.
+      if (signal?.aborted) return [];
+      return [{ line: 1, severity: 'error', message: 'should not appear' }];
+    };
+    const inner = fakeTool('Successfully wrote 10 bytes (1 lines) to /proj/Foo.cs');
+    const gate = withLspDiagnosticsGate(inner, CWD, fetcher);
+
+    controller.abort();
+    const res = await gate.execute('call-1', { path: 'Foo.cs', content: 'class Foo {}' }, controller.signal);
+    const innerRes = await inner.execute('call-1', { path: 'Foo.cs', content: 'class Foo {}' });
+
+    expect(res).toEqual(innerRes);
+  });
+
   it('recognizes a successful edit result (not just write)', async () => {
     const diagnostics: FileDiag[] = [{ line: 5, severity: 'error', message: 'CS0246 missing type' }];
     const { fetcher } = countingFetcher(diagnostics);

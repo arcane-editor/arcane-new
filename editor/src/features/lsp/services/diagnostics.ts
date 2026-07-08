@@ -1,17 +1,24 @@
 // One-shot C# diagnostics fetch (P3.3) — best-effort bridge between csharp-ls's
 // PULL diagnostics (`textDocument/diagnostic`) and callers that need a
 // diagnostics snapshot for a file that may NOT be open in Monaco (e.g. the AI
-// agent just wrote/edited it on disk). Ephemerally opens the document if it
-// isn't already tracked, pulls once, and closes it again — unless the file was
-// already open (in which case we leave it open; closing a user's editor tab's
-// backing document out from under them would break their live diagnostics).
+// agent just wrote/edited it on disk). Always open/close-pairs its own
+// ephemeral interest via `document-sync.ts`'s ref-counted open tracking: if
+// the file is already open for another reason (a real editor tab, or another
+// concurrent ephemeral fetch), our own `syncDocumentOpen`/`syncDocumentClose`
+// only adjust the ref-count, so this call can never tear down someone else's
+// open document out from under them — safe by construction, no snapshot of
+// "was it already open" required (see the ref-count fix that replaced the
+// prior `alreadyOpen`-snapshot approach, which had exactly that race: an
+// ephemeral open that outlived a user opening the same file in a real tab
+// during its settle window would close the tab's backing document on exit).
 //
 // Consumed by the ai-panel's LSP diagnostics gate (`unity-tools/lsp-gate.ts`),
 // which runs inside the agent's tool loop — so this must never hang or throw.
-// A ~4s timeout and full try/catch coverage make every failure mode resolve to
-// `[]` instead of blocking the loop or surfacing an error to the model.
+// A ~4s timeout, an optional abort `signal`, and full try/catch coverage make
+// every failure mode resolve to `[]` instead of blocking the loop or
+// surfacing an error to the model.
 
-import { fileUri, syncDocumentOpen, syncDocumentClose, getOpenDocumentUris } from './document-sync';
+import { fileUri, syncDocumentOpen, syncDocumentClose } from './document-sync';
 import { lspManager } from './manager';
 
 /** Best-effort cap: never let a diagnostics fetch block the agent tool loop. */
@@ -77,17 +84,36 @@ function delay<T>(ms: number, value: T): Promise<T> {
 }
 
 /**
+ * Resolves to `null` the instant `signal` is (or becomes) aborted — whether
+ * it was already aborted before this call or fires mid-flight. Used as an
+ * extra `Promise.race` branch so an aborted tool call doesn't wait out the
+ * settle delay / timeout.
+ */
+function abortSignal(signal: AbortSignal): Promise<null> {
+  if (signal.aborted) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    signal.addEventListener('abort', () => resolve(null), { once: true });
+  });
+}
+
+/**
  * Fetch C# diagnostics for `absPath` with `content` as its current text,
  * whether or not the file is open in Monaco. Resolves to `[]` (never throws)
- * if csharp-ls isn't running, the request errors, or it doesn't answer within
- * `DIAGNOSTICS_TIMEOUT_MS`.
+ * if csharp-ls isn't running, the request errors, it doesn't answer within
+ * `DIAGNOSTICS_TIMEOUT_MS`, or `signal` is aborted. The ephemeral
+ * open/close always runs as a matched pair regardless of outcome (including
+ * abort) — see `finally` below — and is safe by construction because
+ * `document-sync.ts` ref-counts opens.
  */
-export async function requestFileDiagnostics(absPath: string, content: string): Promise<FileDiag[]> {
+export async function requestFileDiagnostics(
+  absPath: string,
+  content: string,
+  signal?: AbortSignal,
+): Promise<FileDiag[]> {
   const client = lspManager.client('csharp');
   if (!client.isRunning()) return [];
 
   const uri = fileUri(absPath);
-  const alreadyOpen = getOpenDocumentUris().has(uri);
 
   try {
     syncDocumentOpen(client, absPath, content, 'csharp');
@@ -100,15 +126,16 @@ export async function requestFileDiagnostics(absPath: string, content: string): 
         .catch(() => null),
     );
 
-    const result = await Promise.race([pull, delay(DIAGNOSTICS_TIMEOUT_MS, null)]);
+    const racers: Promise<RawDiagnosticReport | null>[] = [pull, delay(DIAGNOSTICS_TIMEOUT_MS, null)];
+    if (signal) racers.push(abortSignal(signal));
+
+    const result = await Promise.race(racers);
 
     if (!result || result.kind === 'unchanged') return [];
     return (result.items ?? []).map(toFileDiag);
   } catch {
     return [];
   } finally {
-    if (!alreadyOpen) {
-      syncDocumentClose(client, absPath);
-    }
+    syncDocumentClose(client, absPath);
   }
 }

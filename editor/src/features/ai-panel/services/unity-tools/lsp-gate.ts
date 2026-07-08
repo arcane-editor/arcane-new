@@ -12,6 +12,12 @@
 // gate adds nothing on top of that beyond formatting: on any fetch failure it
 // leaves the inner tool result untouched, exactly like a clean/no-error run.
 //
+// The tool call's abort `signal` is forwarded into the fetch (mirrors
+// `compile-gate.ts` forwarding it to `triggerRecompileAndWait`), so a
+// cancelled turn doesn't leave the diagnostics fetch running past its
+// caller's interest — the fetch resolves `[]` promptly on abort instead of
+// riding out the full settle delay/timeout.
+//
 // `fetchDiagnostics` is injectable (mirrors `compile-gate.ts`'s `HintLookup`
 // seam) so this file stays directly Bun-testable. Its default reaches the real
 // implementation via a DYNAMIC import of the `features/lsp` barrel rather than
@@ -27,11 +33,19 @@ import type { AgentTool, AgentToolResult } from '../vendor/types';
 import { resolveToCwd } from '../vendor/tools/path-utils';
 import type { FileDiag } from '../../../lsp';
 
-export type DiagnosticsFetcher = (absPath: string, content: string) => Promise<FileDiag[]>;
+export type DiagnosticsFetcher = (
+  absPath: string,
+  content: string,
+  signal?: AbortSignal,
+) => Promise<FileDiag[]>;
 
-async function defaultFetchDiagnostics(absPath: string, content: string): Promise<FileDiag[]> {
+async function defaultFetchDiagnostics(
+  absPath: string,
+  content: string,
+  signal?: AbortSignal,
+): Promise<FileDiag[]> {
   const { requestFileDiagnostics } = await import('../../../lsp');
-  return requestFileDiagnostics(absPath, content);
+  return requestFileDiagnostics(absPath, content, signal);
 }
 
 /**
@@ -89,7 +103,7 @@ export function withLspDiagnosticsGate(
 
       let diagnostics: FileDiag[];
       try {
-        diagnostics = await fetchDiagnostics(absPath, content);
+        diagnostics = await fetchDiagnostics(absPath, content, signal);
       } catch {
         return res;
       }
