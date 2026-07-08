@@ -42,6 +42,20 @@ export interface UsageTotals {
   requests: number;
 }
 
+/**
+ * Mutable per-request `max_tokens` override, read fresh on every HTTP
+ * request. A single `StreamFn` (built once per `run-eval.ts` invocation) is
+ * shared across every task in the run, including repeats — but production's
+ * `max_tokens` cap varies by task type (`arcane-stream.ts`'s
+ * `maxTokensByTask`), so `run-task.ts` mutates `.maxTokens` on this shared
+ * object (via `maxTokensForMode`) right before each `agent.prompt()` call,
+ * the same "shared mutable object read at call time" shape `usage` already
+ * uses above.
+ */
+export interface EvalRequestState {
+  maxTokens: number;
+}
+
 interface OpenAIChatResponse {
   choices?: Array<{
     message?: {
@@ -56,7 +70,17 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export function createEvalStreamFn(cfg: EvalModelConfig, usage: UsageTotals): StreamFn {
+// Pre-existing eval default, used only when no `requestState` is supplied —
+// preserves existing direct constructions/tests that don't thread one
+// through. Real eval runs (`run-eval.ts`) always pass a `requestState` so
+// `run-task.ts` can set the prod-aligned per-mode value (`maxTokensForMode`).
+const DEFAULT_MAX_TOKENS = 8192;
+
+export function createEvalStreamFn(
+  cfg: EvalModelConfig,
+  usage: UsageTotals,
+  requestState?: EvalRequestState,
+): StreamFn {
   return (context, options) => {
     const stream = new AssistantMessageEventStream();
 
@@ -92,7 +116,7 @@ export function createEvalStreamFn(cfg: EvalModelConfig, usage: UsageTotals): St
               messages,
               tools: tools.length > 0 ? tools : undefined,
               stream: false,
-              max_tokens: 8192,
+              max_tokens: requestState?.maxTokens ?? DEFAULT_MAX_TOKENS,
               ...(cfg.reasoningLevel ? { metadata: { reasoningLevel: cfg.reasoningLevel } } : {}),
             }),
             signal,

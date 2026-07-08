@@ -1,9 +1,13 @@
 import { describe, it, expect } from 'bun:test';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { AssistantMessageEventStream } from '../../src/features/ai-panel/services/vendor/event-stream';
 import type { StreamFn, AssistantMessage } from '../../src/features/ai-panel/services/vendor/types';
 import type { UnityApiClient } from '../../src/features/ai-panel/services/unity-tools/api-search-tool';
-import { runTask, buildTools } from './run-task';
+import { runTask, buildTools, maxTokensForMode, ASK_MAX_TOKENS, AGENT_MAX_TOKENS } from './run-task';
 import type { EvalTask } from './eval-types';
+import type { EvalRequestState } from './eval-stream';
 
 const fakeGroundingClient: UnityApiClient = {
   search: async () => ({ ok: true, data: [] }),
@@ -106,6 +110,27 @@ describe('runTask', () => {
     const result = await runTask({ ...task, mode: 'ask' }, streamFn, usage);
     expect(result.groundingCacheMisses).toBe(0);
   });
+
+  it('threads the prod-aligned max_tokens value for the task mode into a shared requestState', async () => {
+    const streamFn = scriptedStreamFn([[{ type: 'text', text: 'no tools needed' }]]);
+    const usage = { input: 0, output: 0, requests: 0 };
+    const requestState: EvalRequestState = { maxTokens: 1 };
+    await runTask({ ...task, mode: 'ask' }, streamFn, usage, { requestState });
+    expect(requestState.maxTokens).toBe(ASK_MAX_TOKENS);
+
+    const agentStreamFn = scriptedStreamFn([[{ type: 'text', text: 'no tools needed' }]]);
+    await runTask({ ...task, mode: 'agent', maxTurns: 1 }, agentStreamFn, usage, { requestState });
+    expect(requestState.maxTokens).toBe(AGENT_MAX_TOKENS);
+  });
+});
+
+describe('maxTokensForMode', () => {
+  it('maps ask mode to the prod chat cap and agent mode to the prod agentic cap', () => {
+    expect(maxTokensForMode('ask')).toBe(ASK_MAX_TOKENS);
+    expect(maxTokensForMode('agent')).toBe(AGENT_MAX_TOKENS);
+    expect(ASK_MAX_TOKENS).toBe(16384);
+    expect(AGENT_MAX_TOKENS).toBe(24576);
+  });
 });
 
 describe('buildTools', () => {
@@ -132,5 +157,22 @@ describe('buildTools', () => {
     expect(names).not.toContain('write');
     expect(names).not.toContain('edit');
     expect(names).not.toContain('bash');
+  });
+
+  it('wraps agent-mode write/edit with the analyzer gate (F-5.3 parity, wrapCs equivalent)', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'eval-buildtools-'));
+    try {
+      const tools = buildTools({ ...task, mode: 'agent' }, dir, fakeGroundingClient, '2022.3.45f1');
+      const write = tools.find((t) => t.name === 'write')!;
+      const result = await write.execute('c1', {
+        path: 'Assets/Bad.cs',
+        content: 'using UnityEngine;\nusing UnityEditor;\npublic class Bad : MonoBehaviour { }',
+      });
+      const text = result.content.map((c) => ('text' in c ? c.text : '')).join('\n');
+      expect(text).toContain('[Unity analyzers]');
+      expect(text).toContain('UNITY0305');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });

@@ -49,7 +49,7 @@ tier) is **deferred** until a Unity install exists on the eval machine.
 
 ```bash
 cd editor
-bun run eval -- --base-url <url> --api-key-env <ENV_VAR> --model <model-id> --label <run-name> [--filter <substring>] [--reasoning-level <low|mid|high|super>]
+bun run eval -- --base-url <url> --api-key-env <ENV_VAR> --model <model-id> --label <run-name> [--filter <substring>] [--reasoning-level <low|mid|high|super>] [--repeats <N>]
 ```
 
 - `--base-url` — an OpenAI-compatible base (no trailing `/chat/completions`;
@@ -66,14 +66,70 @@ bun run eval -- --base-url <url> --api-key-env <ENV_VAR> --model <model-id> --la
   route reads `metadata.reasoningLevel` to pick a model tier — see
   `resolveModelFromRequest()` in `arcane-server/src/routes/chat.ts`). It's a
   no-op against a raw Workers AI / vendor endpoint that doesn't look at it.
+- `--repeats` — optional, default `1`. Runs each task `N` times sequentially
+  and reduces the attempts to one majority verdict per task (pass iff
+  `passCount >= ceil(N/2)` — see `aggregate.ts`). Use this to separate a real
+  regression from run-to-run noise (see "Run-to-run variance is real" below)
+  at the cost of an `N`×increase in requests/cost/time.
+
+### Results JSON
 
 Output: a markdown report on stdout, and a JSON file written to
-`tooling/unity-eval/results/<timestamp>-<label>.json` (per-task pass/fail,
-turn count, wall time, token usage). The whole `results/` directory is
-gitignored (run output is an artifact, not source) — when you want to lock
-in a baseline for comparison, copy the JSON into `results/baselines/` and
-force-add it (`git add -f tooling/unity-eval/results/baselines/<file>.json`);
-that curated subdir is the one exception meant to be committed.
+`tooling/unity-eval/results/<timestamp>-<label>.json`. Top-level shape:
+
+```jsonc
+{
+  "label": "...", "model": "...", "baseUrl": "...",
+  "usage": { "input": 0, "output": 0, "requests": 0 },
+  "repeats": 1,                 // the --repeats value this run used
+  "groundingCacheMisses": 0,
+  "recordFailures": 0,
+  "results": [
+    {
+      "taskId": "...", "family": "...",
+      "pass": true,              // aggregated verdict, see aggregate.ts
+      "passCount": 1, "repeats": 1,
+      "flaky": false,            // true when attempts disagreed
+      "attempts": [ /* 1..N TaskResult objects: pass, checks, turns, wallMs, inputTokens, outputTokens, error?, groundingCacheMisses, recordFailures */ ]
+    },
+    // ...
+  ]
+}
+```
+
+**Shape note (post-`--repeats`):** each `results[]` entry used to *be* a flat
+`TaskResult` (with `turns`/`wallMs`/`checks`/etc. at the top level). It's now
+an aggregated wrapper around 1..N `TaskResult`s in `attempts[]`, even at the
+default `--repeats 1` — `taskId`, `family`, and `pass` still read the same at
+the top level (so a naive `results[i].pass` check for the baseline-comparison
+workflow still works unchanged), but per-attempt detail moved to
+`attempts[0]` instead of the entry itself. `report.ts`'s table adds a `Score`
+column (`passCount/repeats`) and marks a task `~` when its attempts disagreed
+(flaky); the totals row counts aggregated verdicts, not raw attempts.
+
+The whole `results/` directory is gitignored (run output is an artifact, not
+source) — when you want to lock in a baseline for comparison, copy the JSON
+into `results/baselines/` and force-add it
+(`git add -f tooling/unity-eval/results/baselines/<file>.json`); that curated
+subdir is the one exception meant to be committed.
+
+## Analyzer gate (agent-mode write/edit)
+
+Agent-mode `write`/`edit` on a `.cs` path are wrapped with `eval-gates.ts`'s
+`withEvalAnalyzerGate` — the eval's analog of production's F-5.3 analyzer gate
+(`src/features/ai-panel/services/unity-tools/analyzer-gate.ts`,
+`withUnityAnalyzerGate`, wired via `wrapCs` in `agent-service.ts`). After a
+`.cs` write/edit, it re-reads the resulting file and runs the same ported
+error-severity rule `analyzer_clean` uses (`analyzer-rule.ts` — only
+`editor-api-in-runtime` can ever produce an error-severity finding, see that
+file's header); if any error-severity findings were introduced, it appends
+them to the tool result using production's exact
+`[Unity analyzers] N error-severity issue(s)…` message so the eval agent gets
+the same in-loop repair stimulus production gives it. Without this gate, eval
+agent tasks never saw the findings that drive real self-correction turns —
+`analyzer_clean` would only catch the *final* state, not exercise the repair
+loop itself. `ask` mode has no write/edit tools, so the gate never applies
+there.
 
 ## Grounding tools (`unity_api_search` / `get_unity_docs`)
 
@@ -214,18 +270,22 @@ grounding**, exactly the gap the design doc targets:
 
 Caveats to keep honest:
 
-- **Fidelity gaps.** *(Recorded 2026-07-08, ahead of the grounding-tool
-  wiring below.)* The harness wired up only the 5 basic fs tools
-  (read/list/write/edit/bash) — no `unity_api_search`, no analyzer/compile
-  gates — even though the system prompts advertise those tools. So the
-  grounding scores above measure the bare model's Unity knowledge *without*
-  the product's grounding tools; production, which does have them, may do
-  better. The harness also pins `max_tokens: 8192` vs production's 16384
-  (chat) / 24576 (plan, edit). Since then, `unity_api_search` + `get_unity_docs`
-  have been wired into every mode via replay/record recordings (see
-  "Grounding tools" above) — these baselines predate that and should be
-  re-captured to measure its effect; analyzer/compile gates and the
-  `max_tokens` gap remain open.
+- **Fidelity gaps.** *(Recorded 2026-07-08, ahead of the fixes below.)* The
+  harness wired up only the 5 basic fs tools (read/list/write/edit/bash) — no
+  `unity_api_search`, no analyzer/compile gates — even though the system
+  prompts advertise those tools. So the grounding scores above measure the
+  bare model's Unity knowledge *without* the product's grounding tools;
+  production, which does have them, may do better. The harness also pinned
+  `max_tokens: 8192` vs production's 16384 (chat) / 24576 (plan, edit). Since
+  then: `unity_api_search` + `get_unity_docs` have been wired into every mode
+  via replay/record recordings (see "Grounding tools" above); the
+  error-severity analyzer gate is now wired into agent-mode write/edit (see
+  "Analyzer gate" above); and `max_tokens` now matches production per task
+  mode (`ask` → 16384, `agent` → 24576, see "How to run"). These baselines
+  predate all three and should be re-captured to measure their effect. The
+  **compile gate** (real Unity compiler errors fed back to the agent) remains
+  open — it needs a live Unity bridge connection the headless eval doesn't
+  have.
 - **Run-to-run variance is real.** Grounding tasks flipped pass/fail between
   runs of the same model. Treat single-run deltas of ±1 task as noise; the
   12-task suite is a smoke gate, not a benchmark. Grow the task set before

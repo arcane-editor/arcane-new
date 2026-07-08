@@ -29,8 +29,9 @@ import {
 import { buildFixtureFacts, buildFixtureGroundingContext } from './fixture-facts';
 import { createRecordingApiClient, createReplayApiClient } from './api-recordings';
 import { runChecks } from './checks';
+import { withEvalAnalyzerGate } from './eval-gates';
 import type { EvalTask, TaskResult } from './eval-types';
-import type { UsageTotals } from './eval-stream';
+import type { UsageTotals, EvalRequestState } from './eval-stream';
 
 const FIXTURES_DIR = new URL('./fixtures/', import.meta.url).pathname;
 const DEFAULT_MAX_TURNS = 12;
@@ -51,6 +52,19 @@ export interface GroundingConfig {
   record?: { serverUrl: string; token: string };
 }
 
+// Mirrors production's per-task-type output ceiling (`arcane-stream.ts`'s
+// `maxTokensByTask`: chat 16384 / plan 24576 / edit 24576). The eval only has
+// two task modes (`ask` | `agent` — see `eval-types.ts`), so this collapses
+// prod's three-way split to two: `ask` maps to prod's chat/Q&A cap, `agent`
+// (which covers both plan-shaped and edit-shaped agentic work here) maps to
+// prod's higher agentic cap.
+export const ASK_MAX_TOKENS = 16384;
+export const AGENT_MAX_TOKENS = 24576;
+
+export function maxTokensForMode(mode: EvalTask['mode']): number {
+  return mode === 'ask' ? ASK_MAX_TOKENS : AGENT_MAX_TOKENS;
+}
+
 export function buildTools(
   task: EvalTask,
   workDir: string,
@@ -66,12 +80,23 @@ export function buildTools(
     createGetUnityDocsTool(() => unityVersion),
   ];
   if (task.mode === 'ask') return [read, list, ...unityTools];
+  // Analyzer gate (eval analog of prod's F-5.3 `withUnityAnalyzerGate` /
+  // `wrapCs` in `agent-service.ts`) wraps write/edit only — same tools prod
+  // wraps, in the same order (gate applied first, closest to the raw tool).
+  const write = withEvalAnalyzerGate(
+    createWriteTool(workDir, { operations: localWriteOperations }),
+    workDir,
+  );
+  const edit = withEvalAnalyzerGate(
+    createEditTool(workDir, { operations: localEditOperations }),
+    workDir,
+  );
   return [
     read,
     list,
     ...unityTools,
-    createWriteTool(workDir, { operations: localWriteOperations }),
-    createEditTool(workDir, { operations: localEditOperations }),
+    write,
+    edit,
     createBashTool(workDir, { operations: localBashOperations }),
   ];
 }
@@ -80,8 +105,13 @@ export async function runTask(
   task: EvalTask,
   streamFn: StreamFn,
   usage: UsageTotals,
-  opts?: { keepWorkDir?: boolean; grounding?: GroundingConfig },
+  opts?: { keepWorkDir?: boolean; grounding?: GroundingConfig; requestState?: EvalRequestState },
 ): Promise<TaskResult> {
+  // Thread this task's prod-aligned max_tokens cap into the (possibly
+  // long-lived, shared-across-tasks) stream fn's mutable request state —
+  // see `EvalRequestState`'s doc comment in `eval-stream.ts`.
+  if (opts?.requestState) opts.requestState.maxTokens = maxTokensForMode(task.mode);
+
   const workDir = await mkdtemp(join(tmpdir(), `unity-eval-${task.id}-`));
   await cp(join(FIXTURES_DIR, task.fixture), workDir, { recursive: true });
 

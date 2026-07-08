@@ -177,6 +177,71 @@ describe('createEvalStreamFn', () => {
     expect(usage.requests).toBe(1);
   });
 
+  it('defaults to max_tokens: 8192 when no requestState is supplied (back-compat for direct constructions)', async () => {
+    let capturedBody: string | undefined;
+    globalThis.fetch = (async (_url, init) => {
+      capturedBody = init?.body as string;
+      return new Response(
+        JSON.stringify({ choices: [{ message: { role: 'assistant', content: 'hi' } }], usage: {} }),
+        { status: 200 },
+      );
+    }) as typeof fetch;
+    const usage = { input: 0, output: 0, requests: 0 };
+    const fn = createEvalStreamFn({ baseUrl: 'http://x/v1', apiKey: 'k', model: 'm', label: 'test' }, usage);
+    for await (const _ev of fn(ctx as never, { model: { id: 'm', name: 'm', provider: 'eval' } } as never)) {
+      // drain
+    }
+    const body = JSON.parse(capturedBody ?? '{}');
+    expect(body.max_tokens).toBe(8192);
+  });
+
+  it('sends max_tokens from requestState.maxTokens (ask-mode value) when supplied', async () => {
+    let capturedBody: string | undefined;
+    globalThis.fetch = (async (_url, init) => {
+      capturedBody = init?.body as string;
+      return new Response(
+        JSON.stringify({ choices: [{ message: { role: 'assistant', content: 'hi' } }], usage: {} }),
+        { status: 200 },
+      );
+    }) as typeof fetch;
+    const usage = { input: 0, output: 0, requests: 0 };
+    const requestState = { maxTokens: 16384 };
+    const fn = createEvalStreamFn(
+      { baseUrl: 'http://x/v1', apiKey: 'k', model: 'm', label: 'test' },
+      usage,
+      requestState,
+    );
+    for await (const _ev of fn(ctx as never, { model: { id: 'm', name: 'm', provider: 'eval' } } as never)) {
+      // drain
+    }
+    const body = JSON.parse(capturedBody ?? '{}');
+    expect(body.max_tokens).toBe(16384);
+  });
+
+  it('reads requestState.maxTokens fresh per request, reflecting an in-between mutation (agent-mode value)', async () => {
+    let capturedBody: string | undefined;
+    globalThis.fetch = (async (_url, init) => {
+      capturedBody = init?.body as string;
+      return new Response(
+        JSON.stringify({ choices: [{ message: { role: 'assistant', content: 'hi' } }], usage: {} }),
+        { status: 200 },
+      );
+    }) as typeof fetch;
+    const usage = { input: 0, output: 0, requests: 0 };
+    const requestState = { maxTokens: 16384 };
+    const fn = createEvalStreamFn(
+      { baseUrl: 'http://x/v1', apiKey: 'k', model: 'm', label: 'test' },
+      usage,
+      requestState,
+    );
+    requestState.maxTokens = 24576; // simulate run-task.ts switching to an agent-mode task
+    for await (const _ev of fn(ctx as never, { model: { id: 'm', name: 'm', provider: 'eval' } } as never)) {
+      // drain
+    }
+    const body = JSON.parse(capturedBody ?? '{}');
+    expect(body.max_tokens).toBe(24576);
+  });
+
   it('does not retry a non-retryable 4xx response', async () => {
     let calls = 0;
     globalThis.fetch = (async () => {

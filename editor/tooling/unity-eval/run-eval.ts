@@ -4,7 +4,13 @@
  *   bun tooling/unity-eval/run-eval.ts \
  *     --base-url https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/ai/v1 \
  *     --api-key-env CF_API_TOKEN --model @cf/moonshotai/kimi-k2.7-code \
- *     --label cf-mid [--filter grounding] [--reasoning-level high]
+ *     --label cf-mid [--filter grounding] [--reasoning-level high] [--repeats 3]
+ *
+ * `--repeats N` (default 1) runs each task N times sequentially and reduces
+ * the N per-attempt results to one majority verdict per task via
+ * `aggregate.ts`'s `aggregateAttempts` (pass iff `passCount >= ceil(N/2)`) —
+ * see that file and README.md's "Results JSON" section for the shape this
+ * adds to the output.
  *
  * Grounding (`unity_api_search` / `get_unity_docs`) replays committed
  * recordings by default — no network, deterministic, CI-safe (see
@@ -27,9 +33,10 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
-import { createEvalStreamFn } from './eval-stream';
+import { createEvalStreamFn, type EvalRequestState } from './eval-stream';
 import { runTask, type GroundingConfig } from './run-task';
 import { renderReport } from './report';
+import { aggregateAttempts, type AggregatedTaskResult } from './aggregate';
 import { TASKS } from './tasks';
 import type { TaskResult } from './eval-types';
 
@@ -44,6 +51,7 @@ const { values } = parseArgs({
     record: { type: 'boolean', default: false },
     'server-url': { type: 'string', default: 'http://localhost:8787' },
     'recordings-dir': { type: 'string' },
+    repeats: { type: 'string', default: '1' },
   },
 });
 
@@ -61,6 +69,11 @@ if (!apiKey) {
   console.error(`Env var ${apiKeyEnv} is not set.`);
   process.exit(1);
 }
+const repeats = Number.parseInt(values.repeats ?? '1', 10);
+if (!Number.isInteger(repeats) || repeats < 1) {
+  console.error(`--repeats must be a positive integer, got: ${values.repeats}`);
+  process.exit(1);
+}
 
 const groundingConfig: GroundingConfig = values.record
   ? { recordingsDir: values['recordings-dir'], record: { serverUrl: values['server-url'], token: apiKey } }
@@ -74,18 +87,37 @@ if (values.record) {
 
 const tasks = TASKS.filter((t) => !values.filter || t.id.includes(values.filter) || t.family.includes(values.filter));
 const usage = { input: 0, output: 0, requests: 0 };
-const streamFn = createEvalStreamFn({ baseUrl, apiKey, model, label, reasoningLevel }, usage);
+// Shared across every task/repeat in this run; `runTask` mutates
+// `.maxTokens` per task mode right before each `agent.prompt()` call (see
+// `eval-stream.ts`'s `EvalRequestState` doc comment).
+const requestState: EvalRequestState = { maxTokens: 8192 };
+const streamFn = createEvalStreamFn({ baseUrl, apiKey, model, label, reasoningLevel }, usage, requestState);
 
-const results: TaskResult[] = [];
+const aggregated: AggregatedTaskResult[] = [];
 for (const task of tasks) {
-  console.error(`▶ ${task.id} …`);
-  const r = await runTask(task, streamFn, usage, { grounding: groundingConfig });
-  console.error(`  ${r.pass ? '✅' : '❌'} (${r.turns} turns, ${(r.wallMs / 1000).toFixed(1)}s)`);
-  results.push(r);
+  const attempts: TaskResult[] = [];
+  for (let attempt = 1; attempt <= repeats; attempt++) {
+    const suffix = repeats > 1 ? ` (attempt ${attempt}/${repeats})` : '';
+    console.error(`▶ ${task.id}${suffix} …`);
+    const r = await runTask(task, streamFn, usage, { grounding: groundingConfig, requestState });
+    console.error(`  ${r.pass ? '✅' : '❌'} (${r.turns} turns, ${(r.wallMs / 1000).toFixed(1)}s)`);
+    attempts.push(r);
+  }
+  const agg = aggregateAttempts(attempts);
+  if (agg.flaky) {
+    console.error(`  ⚠ flaky: ${task.id} — ${agg.passCount}/${agg.repeats} attempts passed`);
+  }
+  aggregated.push(agg);
 }
 
-const groundingCacheMisses = results.reduce((sum, r) => sum + r.groundingCacheMisses, 0);
-const recordFailures = results.reduce((sum, r) => sum + r.recordFailures, 0);
+const groundingCacheMisses = aggregated.reduce(
+  (sum, r) => sum + r.attempts.reduce((s, a) => s + a.groundingCacheMisses, 0),
+  0,
+);
+const recordFailures = aggregated.reduce(
+  (sum, r) => sum + r.attempts.reduce((s, a) => s + a.recordFailures, 0),
+  0,
+);
 
 const resultsDir = new URL('./results/', import.meta.url).pathname;
 await mkdir(resultsDir, { recursive: true });
@@ -93,10 +125,14 @@ const stamp = new Date().toISOString().replace(/[:.]/g, '-');
 const outPath = join(resultsDir, `${stamp}-${label}.json`);
 await writeFile(
   outPath,
-  JSON.stringify({ label, model, baseUrl, usage, groundingCacheMisses, recordFailures, results }, null, 2),
+  JSON.stringify(
+    { label, model, baseUrl, usage, repeats, groundingCacheMisses, recordFailures, results: aggregated },
+    null,
+    2,
+  ),
 );
 
-console.log(renderReport(results, label));
+console.log(renderReport(aggregated, label));
 console.error(`\nSaved: ${outPath} — total tokens in/out: ${usage.input}/${usage.output} over ${usage.requests} requests`);
 if (groundingCacheMisses > 0) {
   console.error(
