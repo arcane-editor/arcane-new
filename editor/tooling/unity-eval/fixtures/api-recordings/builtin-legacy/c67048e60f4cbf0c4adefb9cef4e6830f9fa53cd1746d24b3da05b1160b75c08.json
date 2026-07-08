@@ -1,0 +1,14 @@
+{
+  "recordedAt": "2026-07-08T20:00:38.621Z",
+  "request": {
+    "endpoint": "search",
+    "query": "time.time",
+    "unityVersion": "2022.3.45f1",
+    "renderPipeline": "Built-in",
+    "inputSystem": "Legacy"
+  },
+  "response": {
+    "ok": true,
+    "data": []
+  }
+}

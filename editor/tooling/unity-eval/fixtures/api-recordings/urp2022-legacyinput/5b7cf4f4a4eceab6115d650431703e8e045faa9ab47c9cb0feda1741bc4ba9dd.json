@@ -1,0 +1,15 @@
+{
+  "recordedAt": "2026-07-08T20:13:21.778Z",
+  "request": {
+    "endpoint": "lookup",
+    "type": "Input",
+    "member": "GetButtonDown",
+    "unityVersion": "2022.3.45f1",
+    "renderPipeline": "URP",
+    "inputSystem": "Legacy"
+  },
+  "response": {
+    "ok": true,
+    "data": []
+  }
+}

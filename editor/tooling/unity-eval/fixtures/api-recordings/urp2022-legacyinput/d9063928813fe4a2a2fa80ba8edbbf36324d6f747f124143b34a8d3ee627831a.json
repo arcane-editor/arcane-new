@@ -1,0 +1,14 @@
+{
+  "recordedAt": "2026-07-08T19:30:03.115Z",
+  "request": {
+    "endpoint": "search",
+    "query": "material.setcolor",
+    "unityVersion": "2022.3.45f1",
+    "renderPipeline": "URP",
+    "inputSystem": "Legacy"
+  },
+  "response": {
+    "ok": true,
+    "data": []
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "recordedAt": "2026-07-08T19:25:46.531Z",
+  "request": {
+    "endpoint": "search",
+    "query": "createassetmenu",
+    "unityVersion": "2022.3.45f1",
+    "renderPipeline": "Built-in",
+    "inputSystem": "Legacy"
+  },
+  "response": {
+    "ok": true,
+    "data": []
+  }
+}

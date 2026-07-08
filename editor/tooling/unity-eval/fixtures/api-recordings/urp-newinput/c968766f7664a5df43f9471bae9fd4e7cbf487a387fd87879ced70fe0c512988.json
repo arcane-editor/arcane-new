@@ -1,0 +1,103 @@
+{
+  "recordedAt": "2026-07-08T19:42:10.057Z",
+  "request": {
+    "endpoint": "search",
+    "query": "createrendergraphtexture",
+    "unityVersion": "6000.3.5f2",
+    "renderPipeline": "URP",
+    "inputSystem": "New"
+  },
+  "response": {
+    "ok": true,
+    "data": [
+      {
+        "score": 0.64592594,
+        "docType": "api",
+        "type": "TexturePlayableOutput",
+        "member": "Create",
+        "namespace": "UnityEngine.Experimental.Playables",
+        "breadcrumb": "UnityEngine.Experimental.Playables.TexturePlayableOutput.Create",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/TexturePlayableOutput.Create.html",
+        "deprecated": false,
+        "text": "UnityEngine.Experimental.Playables.TexturePlayableOutput.Create — TexturePlayableOutput Create(PlayableGraph graph, string name, RenderTexture target)"
+      },
+      {
+        "score": 0.6176647,
+        "docType": "api",
+        "type": "TextureMixerPlayable",
+        "member": "Create",
+        "namespace": "UnityEngine.Experimental.Playables",
+        "breadcrumb": "UnityEngine.Experimental.Playables.TextureMixerPlayable.Create",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/TextureMixerPlayable.Create.html",
+        "deprecated": false,
+        "text": "UnityEngine.Experimental.Playables.TextureMixerPlayable.Create — TextureMixerPlayable Create(PlayableGraph graph)"
+      },
+      {
+        "score": 0.5945977,
+        "docType": "api",
+        "type": "CameraPlayable",
+        "member": "Create",
+        "namespace": "UnityEngine.Experimental.Playables",
+        "breadcrumb": "UnityEngine.Experimental.Playables.CameraPlayable.Create",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/CameraPlayable.Create.html",
+        "deprecated": false,
+        "text": "UnityEngine.Experimental.Playables.CameraPlayable.Create — CameraPlayable Create(PlayableGraph graph, Camera camera)"
+      },
+      {
+        "score": 0.5839289,
+        "docType": "api",
+        "type": "CustomRenderTexture",
+        "member": "GetDoubleBufferRenderTexture",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.CustomRenderTexture.GetDoubleBufferRenderTexture",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/CustomRenderTexture.GetDoubleBufferRenderTexture.html",
+        "deprecated": false,
+        "text": "UnityEngine.CustomRenderTexture.GetDoubleBufferRenderTexture — RenderTexture GetDoubleBufferRenderTexture()"
+      },
+      {
+        "score": 0.579406,
+        "docType": "api",
+        "type": "AnimationPlayableOutput",
+        "member": "Create",
+        "namespace": "UnityEngine.Animations",
+        "breadcrumb": "UnityEngine.Animations.AnimationPlayableOutput.Create",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/AnimationPlayableOutput.Create.html",
+        "deprecated": false,
+        "text": "UnityEngine.Animations.AnimationPlayableOutput.Create — AnimationPlayableOutput Create(PlayableGraph graph, string name, Animator target)"
+      },
+      {
+        "score": 0.57789546,
+        "docType": "api",
+        "type": "EditorGUI",
+        "member": "DrawPreviewTexture",
+        "namespace": "UnityEditor",
+        "breadcrumb": "UnityEditor.EditorGUI.DrawPreviewTexture",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/EditorGUI.DrawPreviewTexture.html",
+        "deprecated": false,
+        "text": "UnityEditor.EditorGUI.DrawPreviewTexture — void DrawPreviewTexture(Rect position, Texture image, Material mat, ScaleMode scaleMode, float imageAspect, float mipLevel, ColorWriteMask colorWriteMask, float exposure)"
+      },
+      {
+        "score": 0.5749508,
+        "docType": "api",
+        "type": "PaintContext",
+        "member": "sourceRenderTexture",
+        "namespace": "UnityEngine.TerrainTools",
+        "breadcrumb": "UnityEngine.TerrainTools.PaintContext.sourceRenderTexture",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/PaintContext-sourceRenderTexture.html",
+        "deprecated": false,
+        "text": "UnityEngine.TerrainTools.PaintContext.sourceRenderTexture — public RenderTexture sourceRenderTexture { get; set; }"
+      },
+      {
+        "score": 0.5734932,
+        "docType": "api",
+        "type": "AudioPlayableOutput",
+        "member": "Create",
+        "namespace": "UnityEngine.Audio",
+        "breadcrumb": "UnityEngine.Audio.AudioPlayableOutput.Create",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/AudioPlayableOutput.Create.html",
+        "deprecated": false,
+        "text": "UnityEngine.Audio.AudioPlayableOutput.Create — AudioPlayableOutput Create(PlayableGraph graph, string name, AudioSource target)"
+      }
+    ]
+  }
+}

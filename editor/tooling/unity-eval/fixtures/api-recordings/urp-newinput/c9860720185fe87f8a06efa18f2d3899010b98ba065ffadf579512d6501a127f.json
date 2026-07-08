@@ -1,0 +1,103 @@
+{
+  "recordedAt": "2026-07-08T19:24:49.197Z",
+  "request": {
+    "endpoint": "search",
+    "query": "canvasgroup alpha",
+    "unityVersion": "6000.3.5f2",
+    "renderPipeline": "URP",
+    "inputSystem": "New"
+  },
+  "response": {
+    "ok": true,
+    "data": [
+      {
+        "score": 0.69330263,
+        "docType": "api",
+        "type": "CanvasGroup",
+        "member": "alpha",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.CanvasGroup.alpha",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/CanvasGroup-alpha.html",
+        "deprecated": false,
+        "text": "UnityEngine.CanvasGroup.alpha — public float alpha { get; set; }"
+      },
+      {
+        "score": 0.63257825,
+        "docType": "api",
+        "type": "CanvasGroup",
+        "member": "CanvasGroup",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.CanvasGroup.CanvasGroup",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/CanvasGroup.html",
+        "deprecated": false,
+        "text": "UnityEngine.CanvasGroup.CanvasGroup — public class CanvasGroup"
+      },
+      {
+        "score": 0.5694297,
+        "docType": "api",
+        "type": "ColorWriteMask",
+        "member": "Alpha",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.ColorWriteMask.Alpha",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/ColorWriteMask-Alpha.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.ColorWriteMask.Alpha — ColorWriteMask Alpha"
+      },
+      {
+        "score": 0.5516641,
+        "docType": "api",
+        "type": "CanvasRenderer",
+        "member": "SetAlpha",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.CanvasRenderer.SetAlpha",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/CanvasRenderer.SetAlpha.html",
+        "deprecated": false,
+        "text": "UnityEngine.CanvasRenderer.SetAlpha — void SetAlpha(float alpha)"
+      },
+      {
+        "score": 0.55158323,
+        "docType": "api",
+        "type": "DrawCameraMode",
+        "member": "AlphaChannel",
+        "namespace": "UnityEditor",
+        "breadcrumb": "UnityEditor.DrawCameraMode.AlphaChannel",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/DrawCameraMode-AlphaChannel.html",
+        "deprecated": false,
+        "text": "UnityEditor.DrawCameraMode.AlphaChannel — DrawCameraMode AlphaChannel"
+      },
+      {
+        "score": 0.539457,
+        "docType": "api",
+        "type": "Capabilities",
+        "member": "Groupable",
+        "namespace": "UnityEditor.Experimental.GraphView",
+        "breadcrumb": "UnityEditor.Experimental.GraphView.Capabilities.Groupable",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Capabilities-Groupable.html",
+        "deprecated": false,
+        "text": "UnityEditor.Experimental.GraphView.Capabilities.Groupable — Capabilities Groupable"
+      },
+      {
+        "score": 0.53913075,
+        "docType": "api",
+        "type": "TextureImporterSingleChannelComponent",
+        "member": "Alpha",
+        "namespace": "UnityEditor",
+        "breadcrumb": "UnityEditor.TextureImporterSingleChannelComponent.Alpha",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/TextureImporterSingleChannelComponent-Alpha.html",
+        "deprecated": false,
+        "text": "UnityEditor.TextureImporterSingleChannelComponent.Alpha — TextureImporterSingleChannelComponent Alpha"
+      },
+      {
+        "score": 0.5341249,
+        "docType": "api",
+        "type": "GradientAlphaKey",
+        "member": "alpha",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.GradientAlphaKey.alpha",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/GradientAlphaKey-alpha.html",
+        "deprecated": false,
+        "text": "UnityEngine.GradientAlphaKey.alpha — float alpha"
+      }
+    ]
+  }
+}

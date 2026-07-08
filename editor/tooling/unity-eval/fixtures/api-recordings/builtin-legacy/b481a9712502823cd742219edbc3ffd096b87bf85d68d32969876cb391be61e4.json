@@ -1,0 +1,14 @@
+{
+  "recordedAt": "2026-07-08T19:35:23.709Z",
+  "request": {
+    "endpoint": "search",
+    "query": "material.color main color renderer.material",
+    "unityVersion": "2022.3.45f1",
+    "renderPipeline": "Built-in",
+    "inputSystem": "Legacy"
+  },
+  "response": {
+    "ok": true,
+    "data": []
+  }
+}

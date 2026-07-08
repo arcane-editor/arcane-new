@@ -1,0 +1,103 @@
+{
+  "recordedAt": "2026-07-08T20:34:30.624Z",
+  "request": {
+    "endpoint": "search",
+    "query": "blitter blitcameratexture command buffer",
+    "unityVersion": "6000.3.5f2",
+    "renderPipeline": "URP",
+    "inputSystem": "New"
+  },
+  "response": {
+    "ok": true,
+    "data": [
+      {
+        "score": 0.6108008,
+        "docType": "api",
+        "type": "CommandBuffer",
+        "member": "Blit",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.CommandBuffer.Blit",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/CommandBuffer.Blit.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.CommandBuffer.Blit — void Blit(Texture source, RenderTargetIdentifier dest)"
+      },
+      {
+        "score": 0.60838836,
+        "docType": "api",
+        "type": "Camera",
+        "member": "AddCommandBuffer",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.Camera.AddCommandBuffer",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Camera.AddCommandBuffer.html",
+        "deprecated": false,
+        "text": "UnityEngine.Camera.AddCommandBuffer — void AddCommandBuffer(CameraEvent evt, CommandBuffer buffer)"
+      },
+      {
+        "score": 0.5949375,
+        "docType": "api",
+        "type": "Camera",
+        "member": "GetCommandBuffers",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.Camera.GetCommandBuffers",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Camera.GetCommandBuffers.html",
+        "deprecated": false,
+        "text": "UnityEngine.Camera.GetCommandBuffers — CommandBuffer[] GetCommandBuffers(CameraEvent evt)"
+      },
+      {
+        "score": 0.5829554,
+        "docType": "api",
+        "type": "Camera",
+        "member": "commandBufferCount",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.Camera.commandBufferCount",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Camera-commandBufferCount.html",
+        "deprecated": false,
+        "text": "UnityEngine.Camera.commandBufferCount — public int commandBufferCount { get; }"
+      },
+      {
+        "score": 0.57454306,
+        "docType": "api",
+        "type": "Camera",
+        "member": "RemoveCommandBuffer",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.Camera.RemoveCommandBuffer",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Camera.RemoveCommandBuffer.html",
+        "deprecated": false,
+        "text": "UnityEngine.Camera.RemoveCommandBuffer — void RemoveCommandBuffer(CameraEvent evt, CommandBuffer buffer)"
+      },
+      {
+        "score": 0.5734101,
+        "docType": "api",
+        "type": "CommandBuffer",
+        "member": "SetupCameraProperties",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.CommandBuffer.SetupCameraProperties",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/CommandBuffer.SetupCameraProperties.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.CommandBuffer.SetupCameraProperties — void SetupCameraProperties(Camera camera)"
+      },
+      {
+        "score": 0.57107985,
+        "docType": "api",
+        "type": "BatchBufferTarget",
+        "member": "UnsupportedByUnderlyingGraphicsApi",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.BatchBufferTarget.UnsupportedByUnderlyingGraphicsApi",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/BatchBufferTarget-UnsupportedByUnderlyingGraphicsApi.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.BatchBufferTarget.UnsupportedByUnderlyingGraphicsApi — BatchBufferTarget UnsupportedByUnderlyingGraphicsApi"
+      },
+      {
+        "score": 0.56854457,
+        "docType": "api",
+        "type": "CustomRenderTexture",
+        "member": "GetDoubleBufferRenderTexture",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.CustomRenderTexture.GetDoubleBufferRenderTexture",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/CustomRenderTexture.GetDoubleBufferRenderTexture.html",
+        "deprecated": false,
+        "text": "UnityEngine.CustomRenderTexture.GetDoubleBufferRenderTexture — RenderTexture GetDoubleBufferRenderTexture()"
+      }
+    ]
+  }
+}

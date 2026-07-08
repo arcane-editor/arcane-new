@@ -1,0 +1,103 @@
+{
+  "recordedAt": "2026-07-08T19:41:47.747Z",
+  "request": {
+    "endpoint": "search",
+    "query": "scriptablerendererfeature",
+    "unityVersion": "6000.3.5f2",
+    "renderPipeline": "URP",
+    "inputSystem": "New"
+  },
+  "response": {
+    "ok": true,
+    "data": [
+      {
+        "score": 0.5923005,
+        "docType": "api",
+        "type": "CustomRenderTexture",
+        "member": "GetDoubleBufferRenderTexture",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.CustomRenderTexture.GetDoubleBufferRenderTexture",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/CustomRenderTexture.GetDoubleBufferRenderTexture.html",
+        "deprecated": false,
+        "text": "UnityEngine.CustomRenderTexture.GetDoubleBufferRenderTexture — RenderTexture GetDoubleBufferRenderTexture()"
+      },
+      {
+        "score": 0.58648247,
+        "docType": "api",
+        "type": "ScriptableRenderPipelineExtensionAttribute",
+        "member": "ScriptableRenderPipelineExtensionAttribute",
+        "namespace": "UnityEditor.Rendering",
+        "breadcrumb": "UnityEditor.Rendering.ScriptableRenderPipelineExtensionAttribute.ScriptableRenderPipelineExtensionAttribute",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/ScriptableRenderPipelineExtensionAttribute.html",
+        "deprecated": true,
+        "text": "UnityEditor.Rendering.ScriptableRenderPipelineExtensionAttribute.ScriptableRenderPipelineExtensionAttribute — public class ScriptableRenderPipelineExtensionAttribute (DEPRECATED: ScriptableRenderPipelineExtensionAttribute is deprecated. Use SupportedOnRenderPipelineAttribute instead. #from(23.1) (UnityUpgradable) -> UnityEngine.Rendering.SupportedOnRenderPipelineAttribute)"
+      },
+      {
+        "score": 0.5704546,
+        "docType": "api",
+        "type": "ScriptableSingleton`1",
+        "member": "instance",
+        "namespace": "UnityEditor",
+        "breadcrumb": "UnityEditor.ScriptableSingleton`1.instance",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/ScriptableSingleton`1-instance.html",
+        "deprecated": false,
+        "text": "UnityEditor.ScriptableSingleton`1.instance — public T instance { get; }"
+      },
+      {
+        "score": 0.5677755,
+        "docType": "api",
+        "type": "PassType",
+        "member": "ScriptableRenderPipeline",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.PassType.ScriptableRenderPipeline",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/PassType-ScriptableRenderPipeline.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.PassType.ScriptableRenderPipeline — PassType ScriptableRenderPipeline"
+      },
+      {
+        "score": 0.5625877,
+        "docType": "api",
+        "type": "ScriptableRenderContext",
+        "member": "Submit",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.ScriptableRenderContext.Submit",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/ScriptableRenderContext.Submit.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.ScriptableRenderContext.Submit — void Submit()"
+      },
+      {
+        "score": 0.5578034,
+        "docType": "api",
+        "type": "ScriptableBakedReflectionSystem",
+        "member": "ScriptableBakedReflectionSystem",
+        "namespace": "UnityEditor.Experimental.Rendering",
+        "breadcrumb": "UnityEditor.Experimental.Rendering.ScriptableBakedReflectionSystem.ScriptableBakedReflectionSystem",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/ScriptableBakedReflectionSystem.html",
+        "deprecated": false,
+        "text": "UnityEditor.Experimental.Rendering.ScriptableBakedReflectionSystem.ScriptableBakedReflectionSystem — public class ScriptableBakedReflectionSystem"
+      },
+      {
+        "score": 0.55677646,
+        "docType": "api",
+        "type": "SystemInfo",
+        "member": "SupportsRandomWriteOnRenderTextureFormat",
+        "namespace": "UnityEngine.Device",
+        "breadcrumb": "UnityEngine.Device.SystemInfo.SupportsRandomWriteOnRenderTextureFormat",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/SystemInfo.SupportsRandomWriteOnRenderTextureFormat.html",
+        "deprecated": false,
+        "text": "UnityEngine.Device.SystemInfo.SupportsRandomWriteOnRenderTextureFormat — bool SupportsRandomWriteOnRenderTextureFormat(RenderTextureFormat format)"
+      },
+      {
+        "score": 0.5549897,
+        "docType": "api",
+        "type": "SystemInfo",
+        "member": "SupportsBlendingOnRenderTextureFormat",
+        "namespace": "UnityEngine.Device",
+        "breadcrumb": "UnityEngine.Device.SystemInfo.SupportsBlendingOnRenderTextureFormat",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/SystemInfo.SupportsBlendingOnRenderTextureFormat.html",
+        "deprecated": false,
+        "text": "UnityEngine.Device.SystemInfo.SupportsBlendingOnRenderTextureFormat — bool SupportsBlendingOnRenderTextureFormat(RenderTextureFormat format)"
+      }
+    ]
+  }
+}

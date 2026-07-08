@@ -1,0 +1,103 @@
+{
+  "recordedAt": "2026-07-08T20:34:31.009Z",
+  "request": {
+    "endpoint": "search",
+    "query": "renderingutils reallocateifneeded rthandle",
+    "unityVersion": "6000.3.5f2",
+    "renderPipeline": "URP",
+    "inputSystem": "New"
+  },
+  "response": {
+    "ok": true,
+    "data": [
+      {
+        "score": 0.58513725,
+        "docType": "api",
+        "type": "CopyTextureSupport",
+        "member": "RTToTexture",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.CopyTextureSupport.RTToTexture",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/CopyTextureSupport-RTToTexture.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.CopyTextureSupport.RTToTexture — CopyTextureSupport RTToTexture"
+      },
+      {
+        "score": 0.5716181,
+        "docType": "api",
+        "type": "ShadingRateImage",
+        "member": "AllocFromPixelSize",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.ShadingRateImage.AllocFromPixelSize",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/ShadingRateImage.AllocFromPixelSize.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.ShadingRateImage.AllocFromPixelSize — RenderTexture AllocFromPixelSize(ref RenderTextureDescriptor rtDesc)"
+      },
+      {
+        "score": 0.57015467,
+        "docType": "api",
+        "type": "BuiltinRenderTextureType",
+        "member": "BindableTexture",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.BuiltinRenderTextureType.BindableTexture",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/BuiltinRenderTextureType-BindableTexture.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.BuiltinRenderTextureType.BindableTexture — BuiltinRenderTextureType BindableTexture"
+      },
+      {
+        "score": 0.55971897,
+        "docType": "api",
+        "type": "BlendMode",
+        "member": "SrcColor",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.BlendMode.SrcColor",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/BlendMode-SrcColor.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.BlendMode.SrcColor — BlendMode SrcColor"
+      },
+      {
+        "score": 0.55934715,
+        "docType": "api",
+        "type": "GraphicsStateCollection",
+        "member": "WarmUp",
+        "namespace": "UnityEngine.Experimental.Rendering",
+        "breadcrumb": "UnityEngine.Experimental.Rendering.GraphicsStateCollection.WarmUp",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/GraphicsStateCollection.WarmUp.html",
+        "deprecated": false,
+        "text": "UnityEngine.Experimental.Rendering.GraphicsStateCollection.WarmUp — JobHandle WarmUp(JobHandle dependency)"
+      },
+      {
+        "score": 0.5587271,
+        "docType": "api",
+        "type": "EditorCameraUtils",
+        "member": "EditorCameraUtils",
+        "namespace": "UnityEditor.Rendering",
+        "breadcrumb": "UnityEditor.Rendering.EditorCameraUtils.EditorCameraUtils",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/EditorCameraUtils.html",
+        "deprecated": false,
+        "text": "UnityEditor.Rendering.EditorCameraUtils.EditorCameraUtils — public class EditorCameraUtils"
+      },
+      {
+        "score": 0.5584118,
+        "docType": "api",
+        "type": "RenderTexture",
+        "member": "SupportsStencil",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.RenderTexture.SupportsStencil",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/RenderTexture.SupportsStencil.html",
+        "deprecated": false,
+        "text": "UnityEngine.RenderTexture.SupportsStencil — bool SupportsStencil(RenderTexture rt)"
+      },
+      {
+        "score": 0.55760676,
+        "docType": "api",
+        "type": "ScriptableBakedReflectionSystem",
+        "member": "SynchronizeReflectionProbes",
+        "namespace": "UnityEditor.Experimental.Rendering",
+        "breadcrumb": "UnityEditor.Experimental.Rendering.ScriptableBakedReflectionSystem.SynchronizeReflectionProbes",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/ScriptableBakedReflectionSystem.SynchronizeReflectionProbes.html",
+        "deprecated": false,
+        "text": "UnityEditor.Experimental.Rendering.ScriptableBakedReflectionSystem.SynchronizeReflectionProbes — void SynchronizeReflectionProbes()"
+      }
+    ]
+  }
+}

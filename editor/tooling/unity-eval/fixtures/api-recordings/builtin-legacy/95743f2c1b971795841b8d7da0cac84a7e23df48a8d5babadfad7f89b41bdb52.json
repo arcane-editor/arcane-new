@@ -1,0 +1,14 @@
+{
+  "recordedAt": "2026-07-08T19:47:23.191Z",
+  "request": {
+    "endpoint": "search",
+    "query": "onrenderimage full screen image effect post processing built-in render pipeline",
+    "unityVersion": "2022.3.45f1",
+    "renderPipeline": "Built-in",
+    "inputSystem": "Legacy"
+  },
+  "response": {
+    "ok": true,
+    "data": []
+  }
+}

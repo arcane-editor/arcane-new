@@ -1,0 +1,15 @@
+{
+  "recordedAt": "2026-07-08T20:33:05.028Z",
+  "request": {
+    "endpoint": "lookup",
+    "type": "RenderingUtils",
+    "member": "ReAllocateIfNeeded",
+    "unityVersion": "6000.3.5f2",
+    "renderPipeline": "URP",
+    "inputSystem": "New"
+  },
+  "response": {
+    "ok": true,
+    "data": []
+  }
+}

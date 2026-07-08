@@ -1,0 +1,103 @@
+{
+  "recordedAt": "2026-07-08T19:42:15.502Z",
+  "request": {
+    "endpoint": "search",
+    "query": "blitter",
+    "unityVersion": "6000.3.5f2",
+    "renderPipeline": "URP",
+    "inputSystem": "New"
+  },
+  "response": {
+    "ok": true,
+    "data": [
+      {
+        "score": 0.48647138,
+        "docType": "api",
+        "type": "XRMirrorViewBlitDesc",
+        "member": "GetBlitParameter",
+        "namespace": "UnityEngine.XR",
+        "breadcrumb": "UnityEngine.XR.XRMirrorViewBlitDesc.GetBlitParameter",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/XRMirrorViewBlitDesc.GetBlitParameter.html",
+        "deprecated": false,
+        "text": "UnityEngine.XR.XRMirrorViewBlitDesc.GetBlitParameter — void GetBlitParameter(int blitParameterIndex, ref XRBlitParams blitParameter)"
+      },
+      {
+        "score": 0.48567632,
+        "docType": "api",
+        "type": "Android",
+        "member": "blitType",
+        "namespace": "UnityEditor",
+        "breadcrumb": "UnityEditor.Android.blitType",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Android-blitType.html",
+        "deprecated": false,
+        "text": "UnityEditor.Android.blitType — public AndroidBlitType blitType { get; set; }"
+      },
+      {
+        "score": 0.4763055,
+        "docType": "api",
+        "type": "XRMirrorViewBlitModeDesc",
+        "member": "blitModeDesc",
+        "namespace": "UnityEngine.XR",
+        "breadcrumb": "UnityEngine.XR.XRMirrorViewBlitModeDesc.blitModeDesc",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/XRMirrorViewBlitModeDesc-blitModeDesc.html",
+        "deprecated": false,
+        "text": "UnityEngine.XR.XRMirrorViewBlitModeDesc.blitModeDesc — string blitModeDesc"
+      },
+      {
+        "score": 0.4604779,
+        "docType": "api",
+        "type": "XRMirrorViewBlitModeDesc",
+        "member": "blitMode",
+        "namespace": "UnityEngine.XR",
+        "breadcrumb": "UnityEngine.XR.XRMirrorViewBlitModeDesc.blitMode",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/XRMirrorViewBlitModeDesc-blitMode.html",
+        "deprecated": false,
+        "text": "UnityEngine.XR.XRMirrorViewBlitModeDesc.blitMode — int blitMode"
+      },
+      {
+        "score": 0.45549035,
+        "docType": "api",
+        "type": "Graphics",
+        "member": "BlitMultiTap",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.Graphics.BlitMultiTap",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Graphics.BlitMultiTap.html",
+        "deprecated": false,
+        "text": "UnityEngine.Graphics.BlitMultiTap — void BlitMultiTap(Texture source, RenderTexture dest, Material mat, Vector2[] offsets)"
+      },
+      {
+        "score": 0.45340732,
+        "docType": "api",
+        "type": "XRMirrorViewBlitDesc",
+        "member": "blitParamsCount",
+        "namespace": "UnityEngine.XR",
+        "breadcrumb": "UnityEngine.XR.XRMirrorViewBlitDesc.blitParamsCount",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/XRMirrorViewBlitDesc-blitParamsCount.html",
+        "deprecated": false,
+        "text": "UnityEngine.XR.XRMirrorViewBlitDesc.blitParamsCount — int blitParamsCount"
+      },
+      {
+        "score": 0.45274317,
+        "docType": "api",
+        "type": "CommandBuffer",
+        "member": "Blit",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.CommandBuffer.Blit",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/CommandBuffer.Blit.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.CommandBuffer.Blit — void Blit(Texture source, RenderTargetIdentifier dest)"
+      },
+      {
+        "score": 0.4515747,
+        "docType": "api",
+        "type": "Graphics",
+        "member": "Blit",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.Graphics.Blit",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Graphics.Blit.html",
+        "deprecated": false,
+        "text": "UnityEngine.Graphics.Blit — void Blit(Texture source, RenderTexture dest)"
+      }
+    ]
+  }
+}

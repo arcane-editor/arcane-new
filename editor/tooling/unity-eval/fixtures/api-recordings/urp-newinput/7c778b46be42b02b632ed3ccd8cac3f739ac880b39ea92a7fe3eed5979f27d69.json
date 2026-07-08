@@ -1,0 +1,103 @@
+{
+  "recordedAt": "2026-07-08T19:39:59.181Z",
+  "request": {
+    "endpoint": "search",
+    "query": "material.settexture _basemap urp",
+    "unityVersion": "6000.3.5f2",
+    "renderPipeline": "URP",
+    "inputSystem": "New"
+  },
+  "response": {
+    "ok": true,
+    "data": [
+      {
+        "score": 0.6559688,
+        "docType": "api",
+        "type": "MaterialEditor",
+        "member": "SetTextureScale",
+        "namespace": "UnityEditor",
+        "breadcrumb": "UnityEditor.MaterialEditor.SetTextureScale",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/MaterialEditor.SetTextureScale.html",
+        "deprecated": true,
+        "text": "UnityEditor.MaterialEditor.SetTextureScale — void SetTextureScale(string propertyName, Vector2 value, int coord) (DEPRECATED: Use MaterialProperty instead.)"
+      },
+      {
+        "score": 0.6434115,
+        "docType": "api",
+        "type": "MaterialEditor",
+        "member": "SetTexture",
+        "namespace": "UnityEditor",
+        "breadcrumb": "UnityEditor.MaterialEditor.SetTexture",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/MaterialEditor.SetTexture.html",
+        "deprecated": true,
+        "text": "UnityEditor.MaterialEditor.SetTexture — void SetTexture(string propertyName, Texture value) (DEPRECATED: Use MaterialProperty instead.)"
+      },
+      {
+        "score": 0.6359749,
+        "docType": "api",
+        "type": "VisualEffect",
+        "member": "SetTexture",
+        "namespace": "UnityEngine.VFX",
+        "breadcrumb": "UnityEngine.VFX.VisualEffect.SetTexture",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/VisualEffect.SetTexture.html",
+        "deprecated": false,
+        "text": "UnityEngine.VFX.VisualEffect.SetTexture — void SetTexture(int nameID, Texture t)"
+      },
+      {
+        "score": 0.63592005,
+        "docType": "api",
+        "type": "Material",
+        "member": "SetTexture",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.Material.SetTexture",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Material.SetTexture.html",
+        "deprecated": false,
+        "text": "UnityEngine.Material.SetTexture — void SetTexture(string name, Texture value)"
+      },
+      {
+        "score": 0.6350267,
+        "docType": "api",
+        "type": "MaterialDefinition",
+        "member": "SetTexture",
+        "namespace": "UnityEngine.UIElements",
+        "breadcrumb": "UnityEngine.UIElements.MaterialDefinition.SetTexture",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/MaterialDefinition.SetTexture.html",
+        "deprecated": false,
+        "text": "UnityEngine.UIElements.MaterialDefinition.SetTexture — void SetTexture(string name, Texture value)"
+      },
+      {
+        "score": 0.6316442,
+        "docType": "api",
+        "type": "RayTracingShader",
+        "member": "SetTexture",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.RayTracingShader.SetTexture",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/RayTracingShader.SetTexture.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.RayTracingShader.SetTexture — void SetTexture(int nameID, Texture texture)"
+      },
+      {
+        "score": 0.62881637,
+        "docType": "api",
+        "type": "MaterialPropertyBlock",
+        "member": "SetTexture",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.MaterialPropertyBlock.SetTexture",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/MaterialPropertyBlock.SetTexture.html",
+        "deprecated": false,
+        "text": "UnityEngine.MaterialPropertyBlock.SetTexture — void SetTexture(string name, Texture value)"
+      },
+      {
+        "score": 0.62441576,
+        "docType": "api",
+        "type": "PaintContext",
+        "member": "sourceRenderTexture",
+        "namespace": "UnityEngine.TerrainTools",
+        "breadcrumb": "UnityEngine.TerrainTools.PaintContext.sourceRenderTexture",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/PaintContext-sourceRenderTexture.html",
+        "deprecated": false,
+        "text": "UnityEngine.TerrainTools.PaintContext.sourceRenderTexture — public RenderTexture sourceRenderTexture { get; set; }"
+      }
+    ]
+  }
+}

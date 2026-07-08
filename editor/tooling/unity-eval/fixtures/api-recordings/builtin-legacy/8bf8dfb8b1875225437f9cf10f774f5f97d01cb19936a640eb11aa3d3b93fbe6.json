@@ -1,0 +1,15 @@
+{
+  "recordedAt": "2026-07-08T21:09:53.103Z",
+  "request": {
+    "endpoint": "lookup",
+    "type": "DownloadHandler",
+    "member": "text",
+    "unityVersion": "2022.3.45f1",
+    "renderPipeline": "Built-in",
+    "inputSystem": "Legacy"
+  },
+  "response": {
+    "ok": true,
+    "data": []
+  }
+}

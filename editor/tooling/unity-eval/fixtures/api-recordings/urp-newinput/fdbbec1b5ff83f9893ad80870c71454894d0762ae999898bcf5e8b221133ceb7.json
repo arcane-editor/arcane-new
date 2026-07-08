@@ -1,0 +1,103 @@
+{
+  "recordedAt": "2026-07-08T19:43:04.883Z",
+  "request": {
+    "endpoint": "search",
+    "query": "scriptablerenderpass blit commandbuffer",
+    "unityVersion": "6000.3.5f2",
+    "renderPipeline": "URP",
+    "inputSystem": "New"
+  },
+  "response": {
+    "ok": true,
+    "data": [
+      {
+        "score": 0.6150999,
+        "docType": "api",
+        "type": "CommandBuffer",
+        "member": "BeginRenderPass",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.CommandBuffer.BeginRenderPass",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/CommandBuffer.BeginRenderPass.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.CommandBuffer.BeginRenderPass — void BeginRenderPass(int width, int height, int volumeDepth, int samples, NativeArray<AttachmentDescriptor> attachments, int depthAttachmentIndex, NativeArray<SubPassDescriptor> subPasses, ReadOnlySpan<Byte> debugNameUtf8)"
+      },
+      {
+        "score": 0.60846406,
+        "docType": "api",
+        "type": "CustomRenderTexture",
+        "member": "GetDoubleBufferRenderTexture",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.CustomRenderTexture.GetDoubleBufferRenderTexture",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/CustomRenderTexture.GetDoubleBufferRenderTexture.html",
+        "deprecated": false,
+        "text": "UnityEngine.CustomRenderTexture.GetDoubleBufferRenderTexture — RenderTexture GetDoubleBufferRenderTexture()"
+      },
+      {
+        "score": 0.5970876,
+        "docType": "api",
+        "type": "CommandBuffer",
+        "member": "EndRenderPass",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.CommandBuffer.EndRenderPass",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/CommandBuffer.EndRenderPass.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.CommandBuffer.EndRenderPass — void EndRenderPass()"
+      },
+      {
+        "score": 0.5922838,
+        "docType": "api",
+        "type": "CommandBuffer",
+        "member": "NextSubPass",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.CommandBuffer.NextSubPass",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/CommandBuffer.NextSubPass.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.CommandBuffer.NextSubPass — void NextSubPass()"
+      },
+      {
+        "score": 0.5796899,
+        "docType": "api",
+        "type": "Camera",
+        "member": "commandBufferCount",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.Camera.commandBufferCount",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Camera-commandBufferCount.html",
+        "deprecated": false,
+        "text": "UnityEngine.Camera.commandBufferCount — public int commandBufferCount { get; }"
+      },
+      {
+        "score": 0.5781557,
+        "docType": "api",
+        "type": "ScriptableRenderContext",
+        "member": "BeginRenderPass",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.ScriptableRenderContext.BeginRenderPass",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/ScriptableRenderContext.BeginRenderPass.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.ScriptableRenderContext.BeginRenderPass — void BeginRenderPass(int width, int height, int volumeDepth, int samples, NativeArray<AttachmentDescriptor> attachments, int depthAttachmentIndex, int shadingRateImageAttachmentIndex)"
+      },
+      {
+        "score": 0.57562345,
+        "docType": "api",
+        "type": "ScriptableRenderContext",
+        "member": "ExecuteCommandBuffer",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.ScriptableRenderContext.ExecuteCommandBuffer",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/ScriptableRenderContext.ExecuteCommandBuffer.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.ScriptableRenderContext.ExecuteCommandBuffer — void ExecuteCommandBuffer(CommandBuffer commandBuffer)"
+      },
+      {
+        "score": 0.5745718,
+        "docType": "api",
+        "type": "ScriptableRenderContext",
+        "member": "EndSubPass",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.ScriptableRenderContext.EndSubPass",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/ScriptableRenderContext.EndSubPass.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.ScriptableRenderContext.EndSubPass — void EndSubPass()"
+      }
+    ]
+  }
+}

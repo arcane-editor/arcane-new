@@ -1,0 +1,103 @@
+{
+  "recordedAt": "2026-07-08T19:42:14.977Z",
+  "request": {
+    "endpoint": "search",
+    "query": "rendererfeatures",
+    "unityVersion": "6000.3.5f2",
+    "renderPipeline": "URP",
+    "inputSystem": "New"
+  },
+  "response": {
+    "ok": true,
+    "data": [
+      {
+        "score": 0.60914314,
+        "docType": "api",
+        "type": "SupportedRenderingFeatures",
+        "member": "rendererProbes",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.SupportedRenderingFeatures.rendererProbes",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/SupportedRenderingFeatures-rendererProbes.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.SupportedRenderingFeatures.rendererProbes — public bool rendererProbes { get; set; }"
+      },
+      {
+        "score": 0.58609766,
+        "docType": "api",
+        "type": "BuiltinRenderTextureType",
+        "member": "RenderTexture",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.BuiltinRenderTextureType.RenderTexture",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/BuiltinRenderTextureType-RenderTexture.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.BuiltinRenderTextureType.RenderTexture — BuiltinRenderTextureType RenderTexture"
+      },
+      {
+        "score": 0.5850351,
+        "docType": "api",
+        "type": "VideoRenderMode",
+        "member": "RenderTexture",
+        "namespace": "UnityEngine.Video",
+        "breadcrumb": "UnityEngine.Video.VideoRenderMode.RenderTexture",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/VideoRenderMode-RenderTexture.html",
+        "deprecated": false,
+        "text": "UnityEngine.Video.VideoRenderMode.RenderTexture — VideoRenderMode RenderTexture"
+      },
+      {
+        "score": 0.5813673,
+        "docType": "api",
+        "type": "LOD",
+        "member": "renderers",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.LOD.renderers",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/LOD-renderers.html",
+        "deprecated": false,
+        "text": "UnityEngine.LOD.renderers — Renderer[] renderers"
+      },
+      {
+        "score": 0.5796129,
+        "docType": "api",
+        "type": "RenderTextureDescriptor",
+        "member": "flags",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.RenderTextureDescriptor.flags",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/RenderTextureDescriptor-flags.html",
+        "deprecated": false,
+        "text": "UnityEngine.RenderTextureDescriptor.flags — public RenderTextureCreationFlags flags { get; }"
+      },
+      {
+        "score": 0.57854366,
+        "docType": "api",
+        "type": "RenderTextureCreationFlags",
+        "member": "ShadingRate",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.RenderTextureCreationFlags.ShadingRate",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/RenderTextureCreationFlags-ShadingRate.html",
+        "deprecated": false,
+        "text": "UnityEngine.RenderTextureCreationFlags.ShadingRate — RenderTextureCreationFlags ShadingRate"
+      },
+      {
+        "score": 0.576059,
+        "docType": "api",
+        "type": "Renderer",
+        "member": "Renderer",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.Renderer.Renderer",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Renderer.html",
+        "deprecated": false,
+        "text": "UnityEngine.Renderer.Renderer — public class Renderer"
+      },
+      {
+        "score": 0.5743913,
+        "docType": "api",
+        "type": "BatchDrawCommandType",
+        "member": "Procedural",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.BatchDrawCommandType.Procedural",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/BatchDrawCommandType-Procedural.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.BatchDrawCommandType.Procedural — BatchDrawCommandType Procedural"
+      }
+    ]
+  }
+}

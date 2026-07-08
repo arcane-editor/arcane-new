@@ -1,0 +1,103 @@
+{
+  "recordedAt": "2026-07-08T19:42:10.487Z",
+  "request": {
+    "endpoint": "search",
+    "query": "universalresourcedata",
+    "unityVersion": "6000.3.5f2",
+    "renderPipeline": "URP",
+    "inputSystem": "New"
+  },
+  "response": {
+    "ok": true,
+    "data": [
+      {
+        "score": 0.5385733,
+        "docType": "api",
+        "type": "CommonRoles",
+        "member": "streamingResourceFile",
+        "namespace": "UnityEditor.Build.Reporting",
+        "breadcrumb": "UnityEditor.Build.Reporting.CommonRoles.streamingResourceFile",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/CommonRoles-streamingResourceFile.html",
+        "deprecated": false,
+        "text": "UnityEditor.Build.Reporting.CommonRoles.streamingResourceFile — public string streamingResourceFile { get; }"
+      },
+      {
+        "score": 0.53441155,
+        "docType": "api",
+        "type": "AssetDatabase",
+        "member": "GlobalArtifactProcessedVersion",
+        "namespace": "UnityEditor",
+        "breadcrumb": "UnityEditor.AssetDatabase.GlobalArtifactProcessedVersion",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/AssetDatabase-GlobalArtifactProcessedVersion.html",
+        "deprecated": false,
+        "text": "UnityEditor.AssetDatabase.GlobalArtifactProcessedVersion — public UInt32 GlobalArtifactProcessedVersion { get; }"
+      },
+      {
+        "score": 0.53421235,
+        "docType": "api",
+        "type": "OnDemandResourcesRequest",
+        "member": "GetResourcePath",
+        "namespace": "UnityEngine.iOS",
+        "breadcrumb": "UnityEngine.iOS.OnDemandResourcesRequest.GetResourcePath",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/OnDemandResourcesRequest.GetResourcePath.html",
+        "deprecated": false,
+        "text": "UnityEngine.iOS.OnDemandResourcesRequest.GetResourcePath — string GetResourcePath(string resourceName)"
+      },
+      {
+        "score": 0.533793,
+        "docType": "api",
+        "type": "ProceduralMaterial",
+        "member": "GetProceduralPropertyDescriptions",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.ProceduralMaterial.GetProceduralPropertyDescriptions",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/ProceduralMaterial.GetProceduralPropertyDescriptions.html",
+        "deprecated": false,
+        "text": "UnityEngine.ProceduralMaterial.GetProceduralPropertyDescriptions — ProceduralPropertyDescription[] GetProceduralPropertyDescriptions()"
+      },
+      {
+        "score": 0.5324327,
+        "docType": "api",
+        "type": "AnalyticsResult",
+        "member": "AnalyticsDisabled",
+        "namespace": "UnityEngine.Analytics",
+        "breadcrumb": "UnityEngine.Analytics.AnalyticsResult.AnalyticsDisabled",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/AnalyticsResult-AnalyticsDisabled.html",
+        "deprecated": false,
+        "text": "UnityEngine.Analytics.AnalyticsResult.AnalyticsDisabled — AnalyticsResult AnalyticsDisabled"
+      },
+      {
+        "score": 0.5305341,
+        "docType": "api",
+        "type": "WriteResult",
+        "member": "resourceFiles",
+        "namespace": "UnityEditor.Build.Content",
+        "breadcrumb": "UnityEditor.Build.Content.WriteResult.resourceFiles",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/WriteResult-resourceFiles.html",
+        "deprecated": false,
+        "text": "UnityEditor.Build.Content.WriteResult.resourceFiles — public ReadOnlyCollection<ResourceFile> resourceFiles { get; }"
+      },
+      {
+        "score": 0.5304659,
+        "docType": "api",
+        "type": "CommonRoles",
+        "member": "builtInResources",
+        "namespace": "UnityEditor.Build.Reporting",
+        "breadcrumb": "UnityEditor.Build.Reporting.CommonRoles.builtInResources",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/CommonRoles-builtInResources.html",
+        "deprecated": false,
+        "text": "UnityEditor.Build.Reporting.CommonRoles.builtInResources — public string builtInResources { get; }"
+      },
+      {
+        "score": 0.5292215,
+        "docType": "api",
+        "type": "ResourceKind",
+        "member": "ResourceKind",
+        "namespace": "UnityEditor",
+        "breadcrumb": "UnityEditor.ResourceKind.ResourceKind",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/ResourceKind.html",
+        "deprecated": false,
+        "text": "UnityEditor.ResourceKind.ResourceKind — public enum ResourceKind"
+      }
+    ]
+  }
+}

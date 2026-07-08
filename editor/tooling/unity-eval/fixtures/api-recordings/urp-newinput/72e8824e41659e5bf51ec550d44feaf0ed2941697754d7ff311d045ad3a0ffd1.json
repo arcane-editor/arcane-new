@@ -1,0 +1,103 @@
+{
+  "recordedAt": "2026-07-08T21:25:00.561Z",
+  "request": {
+    "endpoint": "search",
+    "query": "scriptablerenderpass blit fullscreen texture",
+    "unityVersion": "6000.3.5f2",
+    "renderPipeline": "URP",
+    "inputSystem": "New"
+  },
+  "response": {
+    "ok": true,
+    "data": [
+      {
+        "score": 0.5725214,
+        "docType": "api",
+        "type": "XRDisplaySubsystem",
+        "member": "singlePassRenderingDisabled",
+        "namespace": "UnityEngine.XR",
+        "breadcrumb": "UnityEngine.XR.XRDisplaySubsystem.singlePassRenderingDisabled",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/XRDisplaySubsystem-singlePassRenderingDisabled.html",
+        "deprecated": true,
+        "text": "UnityEngine.XR.XRDisplaySubsystem.singlePassRenderingDisabled — public bool singlePassRenderingDisabled { get; set; } (DEPRECATED: singlePassRenderingDisabled{get;set;} is deprecated. Use textureLayout and supportedTextureLayouts instead.)"
+      },
+      {
+        "score": 0.56656075,
+        "docType": "api",
+        "type": "XRDisplaySubsystem",
+        "member": "GetRenderPass",
+        "namespace": "UnityEngine.XR",
+        "breadcrumb": "UnityEngine.XR.XRDisplaySubsystem.GetRenderPass",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/XRDisplaySubsystem.GetRenderPass.html",
+        "deprecated": false,
+        "text": "UnityEngine.XR.XRDisplaySubsystem.GetRenderPass — void GetRenderPass(int renderPassIndex, ref XRRenderPass renderPass)"
+      },
+      {
+        "score": 0.56629115,
+        "docType": "api",
+        "type": "Graphics",
+        "member": "Blit",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.Graphics.Blit",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Graphics.Blit.html",
+        "deprecated": false,
+        "text": "UnityEngine.Graphics.Blit — void Blit(Texture source, RenderTexture dest)"
+      },
+      {
+        "score": 0.56621456,
+        "docType": "api",
+        "type": "MacFullscreenMode",
+        "member": "FullscreenWindow",
+        "namespace": "UnityEditor",
+        "breadcrumb": "UnityEditor.MacFullscreenMode.FullscreenWindow",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/MacFullscreenMode-FullscreenWindow.html",
+        "deprecated": false,
+        "text": "UnityEditor.MacFullscreenMode.FullscreenWindow — MacFullscreenMode FullscreenWindow"
+      },
+      {
+        "score": 0.5658783,
+        "docType": "api",
+        "type": "TextureImporterRGBMMode",
+        "member": "Encoded",
+        "namespace": "UnityEditor",
+        "breadcrumb": "UnityEditor.TextureImporterRGBMMode.Encoded",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/TextureImporterRGBMMode-Encoded.html",
+        "deprecated": false,
+        "text": "UnityEditor.TextureImporterRGBMMode.Encoded — TextureImporterRGBMMode Encoded"
+      },
+      {
+        "score": 0.56578434,
+        "docType": "api",
+        "type": "Handheld",
+        "member": "PlayFullScreenMovie",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.Handheld.PlayFullScreenMovie",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Handheld.PlayFullScreenMovie.html",
+        "deprecated": false,
+        "text": "UnityEngine.Handheld.PlayFullScreenMovie — bool PlayFullScreenMovie(string path, Color bgColor, FullScreenMovieControlMode controlMode, FullScreenMovieScalingMode scalingMode)"
+      },
+      {
+        "score": 0.5654656,
+        "docType": "api",
+        "type": "TextureImporterSwizzle",
+        "member": "B",
+        "namespace": "UnityEditor",
+        "breadcrumb": "UnityEditor.TextureImporterSwizzle.B",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/TextureImporterSwizzle-B.html",
+        "deprecated": false,
+        "text": "UnityEditor.TextureImporterSwizzle.B — TextureImporterSwizzle B"
+      },
+      {
+        "score": 0.5639148,
+        "docType": "api",
+        "type": "XRRenderPass",
+        "member": "foveatedRenderingInfo",
+        "namespace": "UnityEngine.XR",
+        "breadcrumb": "UnityEngine.XR.XRRenderPass.foveatedRenderingInfo",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/XRRenderPass-foveatedRenderingInfo.html",
+        "deprecated": false,
+        "text": "UnityEngine.XR.XRRenderPass.foveatedRenderingInfo — IntPtr foveatedRenderingInfo"
+      }
+    ]
+  }
+}

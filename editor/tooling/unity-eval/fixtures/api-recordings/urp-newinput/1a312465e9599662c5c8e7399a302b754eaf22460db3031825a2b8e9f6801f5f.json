@@ -1,0 +1,15 @@
+{
+  "recordedAt": "2026-07-08T21:04:15.914Z",
+  "request": {
+    "endpoint": "lookup",
+    "type": "Blitter",
+    "member": "BlitCameraTexture",
+    "unityVersion": "6000.3.5f2",
+    "renderPipeline": "URP",
+    "inputSystem": "New"
+  },
+  "response": {
+    "ok": true,
+    "data": []
+  }
+}

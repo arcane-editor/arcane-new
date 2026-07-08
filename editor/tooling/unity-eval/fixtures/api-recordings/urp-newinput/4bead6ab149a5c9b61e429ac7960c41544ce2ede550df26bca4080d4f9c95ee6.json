@@ -1,0 +1,103 @@
+{
+  "recordedAt": "2026-07-08T20:58:23.779Z",
+  "request": {
+    "endpoint": "search",
+    "query": "inputaction readvalue<vector2> for wasd movement",
+    "unityVersion": "6000.3.5f2",
+    "renderPipeline": "URP",
+    "inputSystem": "New"
+  },
+  "response": {
+    "ok": true,
+    "data": [
+      {
+        "score": 0.594087,
+        "docType": "api",
+        "type": "EditorGUI",
+        "member": "Vector2Field",
+        "namespace": "UnityEditor",
+        "breadcrumb": "UnityEditor.EditorGUI.Vector2Field",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/EditorGUI.Vector2Field.html",
+        "deprecated": false,
+        "text": "UnityEditor.EditorGUI.Vector2Field — Vector2 Vector2Field(Rect position, string label, Vector2 value)"
+      },
+      {
+        "score": 0.592006,
+        "docType": "api",
+        "type": "ValueType",
+        "member": "Vector2",
+        "namespace": "UnityEditor.Search",
+        "breadcrumb": "UnityEditor.Search.ValueType.Vector2",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/ValueType-Vector2.html",
+        "deprecated": false,
+        "text": "UnityEditor.Search.ValueType.Vector2 — ValueType Vector2"
+      },
+      {
+        "score": 0.5886321,
+        "docType": "api",
+        "type": "Matrix2D",
+        "member": "Translate",
+        "namespace": "Unity.VectorGraphics",
+        "breadcrumb": "Unity.VectorGraphics.Matrix2D.Translate",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Matrix2D.Translate.html",
+        "deprecated": false,
+        "text": "Unity.VectorGraphics.Matrix2D.Translate — Matrix2D Translate(Vector2 vector)"
+      },
+      {
+        "score": 0.5798818,
+        "docType": "api",
+        "type": "NavigationMoveEvent",
+        "member": "move",
+        "namespace": "UnityEngine.UIElements",
+        "breadcrumb": "UnityEngine.UIElements.NavigationMoveEvent.move",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/NavigationMoveEvent-move.html",
+        "deprecated": false,
+        "text": "UnityEngine.UIElements.NavigationMoveEvent.move — public Vector2 move { get; set; }"
+      },
+      {
+        "score": 0.5763668,
+        "docType": "api",
+        "type": "Rigidbody2D",
+        "member": "Cast",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.Rigidbody2D.Cast",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Rigidbody2D.Cast.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rigidbody2D.Cast — int Cast(Vector2 direction, RaycastHit2D[] results)"
+      },
+      {
+        "score": 0.57522464,
+        "docType": "api",
+        "type": "ChildMotion",
+        "member": "position",
+        "namespace": "UnityEditor.Animations",
+        "breadcrumb": "UnityEditor.Animations.ChildMotion.position",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/ChildMotion-position.html",
+        "deprecated": false,
+        "text": "UnityEditor.Animations.ChildMotion.position — public Vector2 position { get; set; }"
+      },
+      {
+        "score": 0.57277954,
+        "docType": "api",
+        "type": "CharacterController",
+        "member": "Move",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.CharacterController.Move",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/CharacterController.Move.html",
+        "deprecated": false,
+        "text": "UnityEngine.CharacterController.Move — CollisionFlags Move(Vector3 motion)"
+      },
+      {
+        "score": 0.57269377,
+        "docType": "api",
+        "type": "Joint2D",
+        "member": "GetReactionForce",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.Joint2D.GetReactionForce",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Joint2D.GetReactionForce.html",
+        "deprecated": false,
+        "text": "UnityEngine.Joint2D.GetReactionForce — Vector2 GetReactionForce(float timeStep)"
+      }
+    ]
+  }
+}

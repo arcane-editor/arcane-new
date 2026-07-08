@@ -1,0 +1,103 @@
+{
+  "recordedAt": "2026-07-08T20:25:50.384Z",
+  "request": {
+    "endpoint": "search",
+    "query": "inputaction.readvalue vector2",
+    "unityVersion": "6000.3.5f2",
+    "renderPipeline": "URP",
+    "inputSystem": "New"
+  },
+  "response": {
+    "ok": true,
+    "data": [
+      {
+        "score": 0.6253228,
+        "docType": "api",
+        "type": "SerializedProperty",
+        "member": "vector2Value",
+        "namespace": "UnityEditor",
+        "breadcrumb": "UnityEditor.SerializedProperty.vector2Value",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/SerializedProperty-vector2Value.html",
+        "deprecated": false,
+        "text": "UnityEditor.SerializedProperty.vector2Value — public Vector2 vector2Value { get; set; }"
+      },
+      {
+        "score": 0.62180763,
+        "docType": "api",
+        "type": "ValueType",
+        "member": "Vector2",
+        "namespace": "UnityEditor.Search",
+        "breadcrumb": "UnityEditor.Search.ValueType.Vector2",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/ValueType-Vector2.html",
+        "deprecated": false,
+        "text": "UnityEditor.Search.ValueType.Vector2 — ValueType Vector2"
+      },
+      {
+        "score": 0.60572207,
+        "docType": "api",
+        "type": "SerializedProperty",
+        "member": "vector2IntValue",
+        "namespace": "UnityEditor",
+        "breadcrumb": "UnityEditor.SerializedProperty.vector2IntValue",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/SerializedProperty-vector2IntValue.html",
+        "deprecated": false,
+        "text": "UnityEditor.SerializedProperty.vector2IntValue — public Vector2Int vector2IntValue { get; set; }"
+      },
+      {
+        "score": 0.59970754,
+        "docType": "api",
+        "type": "EditorGUI",
+        "member": "Vector2Field",
+        "namespace": "UnityEditor",
+        "breadcrumb": "UnityEditor.EditorGUI.Vector2Field",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/EditorGUI.Vector2Field.html",
+        "deprecated": false,
+        "text": "UnityEditor.EditorGUI.Vector2Field — Vector2 Vector2Field(Rect position, string label, Vector2 value)"
+      },
+      {
+        "score": 0.5893769,
+        "docType": "api",
+        "type": "Vector2Field",
+        "member": "inputUssClassName",
+        "namespace": "UnityEngine.UIElements",
+        "breadcrumb": "UnityEngine.UIElements.Vector2Field.inputUssClassName",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Vector2Field-inputUssClassName.html",
+        "deprecated": false,
+        "text": "UnityEngine.UIElements.Vector2Field.inputUssClassName — string inputUssClassName"
+      },
+      {
+        "score": 0.58731383,
+        "docType": "api",
+        "type": "SerializedPropertyType",
+        "member": "Vector2",
+        "namespace": "UnityEditor",
+        "breadcrumb": "UnityEditor.SerializedPropertyType.Vector2",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/SerializedPropertyType-Vector2.html",
+        "deprecated": false,
+        "text": "UnityEditor.SerializedPropertyType.Vector2 — SerializedPropertyType Vector2"
+      },
+      {
+        "score": 0.5827425,
+        "docType": "api",
+        "type": "ClusterInput",
+        "member": "GetTrackerPosition",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.ClusterInput.GetTrackerPosition",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/ClusterInput.GetTrackerPosition.html",
+        "deprecated": false,
+        "text": "UnityEngine.ClusterInput.GetTrackerPosition — Vector3 GetTrackerPosition(string name)"
+      },
+      {
+        "score": 0.5803855,
+        "docType": "api",
+        "type": "TextInputBaseField`1",
+        "member": "cursorPosition",
+        "namespace": "UnityEngine.UIElements",
+        "breadcrumb": "UnityEngine.UIElements.TextInputBaseField`1.cursorPosition",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/TextInputBaseField`1-cursorPosition.html",
+        "deprecated": false,
+        "text": "UnityEngine.UIElements.TextInputBaseField`1.cursorPosition — public Vector2 cursorPosition { get; }"
+      }
+    ]
+  }
+}

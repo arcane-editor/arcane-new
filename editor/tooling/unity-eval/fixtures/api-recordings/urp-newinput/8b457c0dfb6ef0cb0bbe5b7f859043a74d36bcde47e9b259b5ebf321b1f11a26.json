@@ -1,0 +1,103 @@
+{
+  "recordedAt": "2026-07-08T20:23:56.457Z",
+  "request": {
+    "endpoint": "search",
+    "query": "playerinput component movement action",
+    "unityVersion": "6000.3.5f2",
+    "renderPipeline": "URP",
+    "inputSystem": "New"
+  },
+  "response": {
+    "ok": true,
+    "data": [
+      {
+        "score": 0.6019668,
+        "docType": "api",
+        "type": "SynchronizeInputs",
+        "member": "SynchronizeInputs",
+        "namespace": "UnityEngine.PlayerLoop",
+        "breadcrumb": "UnityEngine.PlayerLoop.SynchronizeInputs.SynchronizeInputs",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/SynchronizeInputs.html",
+        "deprecated": false,
+        "text": "UnityEngine.PlayerLoop.SynchronizeInputs.SynchronizeInputs — public struct SynchronizeInputs"
+      },
+      {
+        "score": 0.5972582,
+        "docType": "api",
+        "type": "ProcessRemoteInput",
+        "member": "ProcessRemoteInput",
+        "namespace": "UnityEngine.PlayerLoop",
+        "breadcrumb": "UnityEngine.PlayerLoop.ProcessRemoteInput.ProcessRemoteInput",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/ProcessRemoteInput.html",
+        "deprecated": false,
+        "text": "UnityEngine.PlayerLoop.ProcessRemoteInput.ProcessRemoteInput — public struct ProcessRemoteInput"
+      },
+      {
+        "score": 0.5879769,
+        "docType": "api",
+        "type": "PrefabUtility",
+        "member": "prefabInstanceApplying",
+        "namespace": "UnityEditor",
+        "breadcrumb": "UnityEditor.PrefabUtility.prefabInstanceApplying",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/PrefabUtility-prefabInstanceApplying.html",
+        "deprecated": false,
+        "text": "UnityEditor.PrefabUtility.prefabInstanceApplying — event Action<GameObject> prefabInstanceApplying"
+      },
+      {
+        "score": 0.5789514,
+        "docType": "api",
+        "type": "Type",
+        "member": "Move",
+        "namespace": "UnityEngine.InputForUI",
+        "breadcrumb": "UnityEngine.InputForUI.Type.Move",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Type-Move.html",
+        "deprecated": false,
+        "text": "UnityEngine.InputForUI.Type.Move — Type Move"
+      },
+      {
+        "score": 0.5789339,
+        "docType": "api",
+        "type": "DeviceSimulator",
+        "member": "touchScreenInput",
+        "namespace": "UnityEditor.DeviceSimulation",
+        "breadcrumb": "UnityEditor.DeviceSimulation.DeviceSimulator.touchScreenInput",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/DeviceSimulator-touchScreenInput.html",
+        "deprecated": false,
+        "text": "UnityEditor.DeviceSimulation.DeviceSimulator.touchScreenInput — event Action<TouchEvent> touchScreenInput"
+      },
+      {
+        "score": 0.57699025,
+        "docType": "api",
+        "type": "NewInputFixedUpdate",
+        "member": "NewInputFixedUpdate",
+        "namespace": "UnityEngine.PlayerLoop",
+        "breadcrumb": "UnityEngine.PlayerLoop.NewInputFixedUpdate.NewInputFixedUpdate",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/NewInputFixedUpdate.html",
+        "deprecated": false,
+        "text": "UnityEngine.PlayerLoop.NewInputFixedUpdate.NewInputFixedUpdate — public struct NewInputFixedUpdate"
+      },
+      {
+        "score": 0.5766518,
+        "docType": "api",
+        "type": "CharacterController",
+        "member": "Move",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.CharacterController.Move",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/CharacterController.Move.html",
+        "deprecated": false,
+        "text": "UnityEngine.CharacterController.Move — CollisionFlags Move(Vector3 motion)"
+      },
+      {
+        "score": 0.57558507,
+        "docType": "api",
+        "type": "InputTrackingState",
+        "member": "Acceleration",
+        "namespace": "UnityEngine.XR",
+        "breadcrumb": "UnityEngine.XR.InputTrackingState.Acceleration",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/InputTrackingState-Acceleration.html",
+        "deprecated": false,
+        "text": "UnityEngine.XR.InputTrackingState.Acceleration — InputTrackingState Acceleration"
+      }
+    ]
+  }
+}

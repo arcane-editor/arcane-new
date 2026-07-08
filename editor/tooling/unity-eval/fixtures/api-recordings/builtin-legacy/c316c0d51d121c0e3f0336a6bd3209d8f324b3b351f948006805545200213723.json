@@ -1,0 +1,14 @@
+{
+  "recordedAt": "2026-07-08T20:02:27.643Z",
+  "request": {
+    "endpoint": "search",
+    "query": "rigidbody.velocity",
+    "unityVersion": "2022.3.45f1",
+    "renderPipeline": "Built-in",
+    "inputSystem": "Legacy"
+  },
+  "response": {
+    "ok": true,
+    "data": []
+  }
+}

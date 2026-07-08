@@ -1,0 +1,14 @@
+{
+  "recordedAt": "2026-07-08T21:28:59.052Z",
+  "request": {
+    "endpoint": "search",
+    "query": "onrenderimage full-screen post-processing effect",
+    "unityVersion": "2022.3.45f1",
+    "renderPipeline": "Built-in",
+    "inputSystem": "Legacy"
+  },
+  "response": {
+    "ok": true,
+    "data": []
+  }
+}

@@ -1,0 +1,103 @@
+{
+  "recordedAt": "2026-07-08T21:15:46.506Z",
+  "request": {
+    "endpoint": "search",
+    "query": "inputaction readvalue",
+    "unityVersion": "6000.3.5f2",
+    "renderPipeline": "URP",
+    "inputSystem": "New"
+  },
+  "response": {
+    "ok": true,
+    "data": [
+      {
+        "score": 0.5671825,
+        "docType": "api",
+        "type": "DropdownMenu",
+        "member": "InsertAction",
+        "namespace": "UnityEngine.UIElements",
+        "breadcrumb": "UnityEngine.UIElements.DropdownMenu.InsertAction",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/DropdownMenu.InsertAction.html",
+        "deprecated": false,
+        "text": "UnityEngine.UIElements.DropdownMenu.InsertAction — void InsertAction(int atIndex, string actionName, Action<DropdownMenuAction> action, Func<DropdownMenuAction, Status> actionStatusCallback, object userData)"
+      },
+      {
+        "score": 0.5644683,
+        "docType": "api",
+        "type": "EditorAction",
+        "member": "EditorAction",
+        "namespace": "UnityEditor.Actions",
+        "breadcrumb": "UnityEditor.Actions.EditorAction.EditorAction",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/EditorAction.html",
+        "deprecated": false,
+        "text": "UnityEditor.Actions.EditorAction.EditorAction — public class EditorAction"
+      },
+      {
+        "score": 0.5582532,
+        "docType": "api",
+        "type": "EditorActionResult",
+        "member": "value__",
+        "namespace": "UnityEditor.Actions",
+        "breadcrumb": "UnityEditor.Actions.EditorActionResult.value__",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/EditorActionResult-value__.html",
+        "deprecated": false,
+        "text": "UnityEditor.Actions.EditorActionResult.value__ — int value__"
+      },
+      {
+        "score": 0.5534309,
+        "docType": "api",
+        "type": "InputMode",
+        "member": "value__",
+        "namespace": "UnityEditor",
+        "breadcrumb": "UnityEditor.InputMode.value__",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/InputMode-value__.html",
+        "deprecated": false,
+        "text": "UnityEditor.InputMode.value__ — int value__"
+      },
+      {
+        "score": 0.5519784,
+        "docType": "api",
+        "type": "InputData",
+        "member": "m_TypeName",
+        "namespace": "UnityEditor",
+        "breadcrumb": "UnityEditor.InputData.m_TypeName",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/InputData-m_TypeName.html",
+        "deprecated": false,
+        "text": "UnityEditor.InputData.m_TypeName — string m_TypeName"
+      },
+      {
+        "score": 0.5511927,
+        "docType": "api",
+        "type": "DrivenTransformProperties",
+        "member": "value__",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.DrivenTransformProperties.value__",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/DrivenTransformProperties-value__.html",
+        "deprecated": false,
+        "text": "UnityEngine.DrivenTransformProperties.value__ — int value__"
+      },
+      {
+        "score": 0.5498698,
+        "docType": "api",
+        "type": "SerializedProperty",
+        "member": "intValue",
+        "namespace": "UnityEditor",
+        "breadcrumb": "UnityEditor.SerializedProperty.intValue",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/SerializedProperty-intValue.html",
+        "deprecated": false,
+        "text": "UnityEditor.SerializedProperty.intValue — public int intValue { get; set; }"
+      },
+      {
+        "score": 0.54908603,
+        "docType": "api",
+        "type": "Configuration",
+        "member": "InputActionsPerSecond",
+        "namespace": "UnityEngine.InputForUI",
+        "breadcrumb": "UnityEngine.InputForUI.Configuration.InputActionsPerSecond",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Configuration-InputActionsPerSecond.html",
+        "deprecated": false,
+        "text": "UnityEngine.InputForUI.Configuration.InputActionsPerSecond — float InputActionsPerSecond"
+      }
+    ]
+  }
+}

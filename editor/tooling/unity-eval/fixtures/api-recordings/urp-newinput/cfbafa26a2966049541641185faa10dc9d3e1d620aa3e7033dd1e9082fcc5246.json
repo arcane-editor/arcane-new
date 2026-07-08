@@ -1,0 +1,103 @@
+{
+  "recordedAt": "2026-07-08T21:25:00.120Z",
+  "request": {
+    "endpoint": "search",
+    "query": "scriptablerendererfeature addrenderpasses",
+    "unityVersion": "6000.3.5f2",
+    "renderPipeline": "URP",
+    "inputSystem": "New"
+  },
+  "response": {
+    "ok": true,
+    "data": [
+      {
+        "score": 0.6147067,
+        "docType": "api",
+        "type": "ScriptableRenderContext",
+        "member": "EndRenderPass",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.ScriptableRenderContext.EndRenderPass",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/ScriptableRenderContext.EndRenderPass.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.ScriptableRenderContext.EndRenderPass — void EndRenderPass()"
+      },
+      {
+        "score": 0.602028,
+        "docType": "api",
+        "type": "ScriptableRenderContext",
+        "member": "BeginRenderPass",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.ScriptableRenderContext.BeginRenderPass",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/ScriptableRenderContext.BeginRenderPass.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.ScriptableRenderContext.BeginRenderPass — void BeginRenderPass(int width, int height, int volumeDepth, int samples, NativeArray<AttachmentDescriptor> attachments, int depthAttachmentIndex, int shadingRateImageAttachmentIndex)"
+      },
+      {
+        "score": 0.5952652,
+        "docType": "api",
+        "type": "ScriptableRenderContext",
+        "member": "SubmitForRenderPassValidation",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.ScriptableRenderContext.SubmitForRenderPassValidation",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/ScriptableRenderContext.SubmitForRenderPassValidation.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.ScriptableRenderContext.SubmitForRenderPassValidation — bool SubmitForRenderPassValidation()"
+      },
+      {
+        "score": 0.58284575,
+        "docType": "api",
+        "type": "XRRenderPass",
+        "member": "GetRenderParameter",
+        "namespace": "UnityEngine.XR",
+        "breadcrumb": "UnityEngine.XR.XRRenderPass.GetRenderParameter",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/XRRenderPass.GetRenderParameter.html",
+        "deprecated": false,
+        "text": "UnityEngine.XR.XRRenderPass.GetRenderParameter — void GetRenderParameter(Camera camera, int renderParameterIndex, ref XRRenderParameter renderParameter)"
+      },
+      {
+        "score": 0.5802131,
+        "docType": "api",
+        "type": "ScriptableRenderContext",
+        "member": "DrawRenderers",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.ScriptableRenderContext.DrawRenderers",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/ScriptableRenderContext.DrawRenderers.html",
+        "deprecated": true,
+        "text": "UnityEngine.Rendering.ScriptableRenderContext.DrawRenderers — void DrawRenderers(CullingResults cullingResults, ref DrawingSettings drawingSettings, ref FilteringSettings filteringSettings) (DEPRECATED: DrawRenderers is obsolete and replaced with the RendererList API: construct a RendererList using ScriptableRenderContext.CreateRendererList and execture it using CommandBuffer.DrawRendererList.)"
+      },
+      {
+        "score": 0.57969576,
+        "docType": "api",
+        "type": "PassType",
+        "member": "ScriptableRenderPipeline",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.PassType.ScriptableRenderPipeline",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/PassType-ScriptableRenderPipeline.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.PassType.ScriptableRenderPipeline — PassType ScriptableRenderPipeline"
+      },
+      {
+        "score": 0.574933,
+        "docType": "api",
+        "type": "CommandBuffer",
+        "member": "EndRenderPass",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.CommandBuffer.EndRenderPass",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/CommandBuffer.EndRenderPass.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.CommandBuffer.EndRenderPass — void EndRenderPass()"
+      },
+      {
+        "score": 0.56963456,
+        "docType": "api",
+        "type": "SystemInfo",
+        "member": "supportsDepthFetchInRenderPass",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.SystemInfo.supportsDepthFetchInRenderPass",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/SystemInfo-supportsDepthFetchInRenderPass.html",
+        "deprecated": false,
+        "text": "UnityEngine.SystemInfo.supportsDepthFetchInRenderPass — public bool supportsDepthFetchInRenderPass { get; }"
+      }
+    ]
+  }
+}

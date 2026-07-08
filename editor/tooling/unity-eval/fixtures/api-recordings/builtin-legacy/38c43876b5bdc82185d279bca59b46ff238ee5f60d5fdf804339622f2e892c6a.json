@@ -1,0 +1,14 @@
+{
+  "recordedAt": "2026-07-08T19:46:23.028Z",
+  "request": {
+    "endpoint": "search",
+    "query": "graphics.blit source destination material",
+    "unityVersion": "2022.3.45f1",
+    "renderPipeline": "Built-in",
+    "inputSystem": "Legacy"
+  },
+  "response": {
+    "ok": true,
+    "data": []
+  }
+}

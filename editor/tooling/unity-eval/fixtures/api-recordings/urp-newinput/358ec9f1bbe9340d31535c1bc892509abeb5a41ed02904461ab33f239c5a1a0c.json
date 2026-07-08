@@ -1,0 +1,103 @@
+{
+  "recordedAt": "2026-07-08T21:04:16.481Z",
+  "request": {
+    "endpoint": "search",
+    "query": "blitter.blitcameratexture",
+    "unityVersion": "6000.3.5f2",
+    "renderPipeline": "URP",
+    "inputSystem": "New"
+  },
+  "response": {
+    "ok": true,
+    "data": [
+      {
+        "score": 0.5574089,
+        "docType": "api",
+        "type": "CameraEvent",
+        "member": "AfterDepthNormalsTexture",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.CameraEvent.AfterDepthNormalsTexture",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/CameraEvent-AfterDepthNormalsTexture.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.CameraEvent.AfterDepthNormalsTexture — CameraEvent AfterDepthNormalsTexture"
+      },
+      {
+        "score": 0.5549069,
+        "docType": "api",
+        "type": "CameraRayEnumerator",
+        "member": "MoveNext",
+        "namespace": "UnityEngine.UIElements",
+        "breadcrumb": "UnityEngine.UIElements.CameraRayEnumerator.MoveNext",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/CameraRayEnumerator.MoveNext.html",
+        "deprecated": false,
+        "text": "UnityEngine.UIElements.CameraRayEnumerator.MoveNext — bool MoveNext()"
+      },
+      {
+        "score": 0.5543054,
+        "docType": "api",
+        "type": "CameraEvent",
+        "member": "BeforeDepthNormalsTexture",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.CameraEvent.BeforeDepthNormalsTexture",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/CameraEvent-BeforeDepthNormalsTexture.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.CameraEvent.BeforeDepthNormalsTexture — CameraEvent BeforeDepthNormalsTexture"
+      },
+      {
+        "score": 0.55101097,
+        "docType": "api",
+        "type": "DrawCameraMode",
+        "member": "Directionality",
+        "namespace": "UnityEditor",
+        "breadcrumb": "UnityEditor.DrawCameraMode.Directionality",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/DrawCameraMode-Directionality.html",
+        "deprecated": true,
+        "text": "UnityEditor.DrawCameraMode.Directionality — DrawCameraMode Directionality (DEPRECATED: Renamed to better distinguish this mode from new Progressive baked modes. Please use RealtimeDirectionality instead. (UnityUpgradable) -> RealtimeDirectionality)"
+      },
+      {
+        "score": 0.54051155,
+        "docType": "api",
+        "type": "Graphics",
+        "member": "BlitMultiTap",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.Graphics.BlitMultiTap",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Graphics.BlitMultiTap.html",
+        "deprecated": false,
+        "text": "UnityEngine.Graphics.BlitMultiTap — void BlitMultiTap(Texture source, RenderTexture dest, Material mat, Vector2[] offsets)"
+      },
+      {
+        "score": 0.5362504,
+        "docType": "api",
+        "type": "CommonUsages",
+        "member": "colorCameraRotation",
+        "namespace": "UnityEngine.XR",
+        "breadcrumb": "UnityEngine.XR.CommonUsages.colorCameraRotation",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/CommonUsages-colorCameraRotation.html",
+        "deprecated": false,
+        "text": "UnityEngine.XR.CommonUsages.colorCameraRotation — InputFeatureUsage<Quaternion> colorCameraRotation"
+      },
+      {
+        "score": 0.5267496,
+        "docType": "api",
+        "type": "Graphics",
+        "member": "Blit",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.Graphics.Blit",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Graphics.Blit.html",
+        "deprecated": false,
+        "text": "UnityEngine.Graphics.Blit — void Blit(Texture source, RenderTexture dest)"
+      },
+      {
+        "score": 0.51827866,
+        "docType": "api",
+        "type": "CommonUsages",
+        "member": "colorCameraAngularAcceleration",
+        "namespace": "UnityEngine.XR",
+        "breadcrumb": "UnityEngine.XR.CommonUsages.colorCameraAngularAcceleration",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/CommonUsages-colorCameraAngularAcceleration.html",
+        "deprecated": false,
+        "text": "UnityEngine.XR.CommonUsages.colorCameraAngularAcceleration — InputFeatureUsage<Vector3> colorCameraAngularAcceleration"
+      }
+    ]
+  }
+}

@@ -1,0 +1,103 @@
+{
+  "recordedAt": "2026-07-08T21:25:04.658Z",
+  "request": {
+    "endpoint": "search",
+    "query": "blitter.blitcameratexture urp",
+    "unityVersion": "6000.3.5f2",
+    "renderPipeline": "URP",
+    "inputSystem": "New"
+  },
+  "response": {
+    "ok": true,
+    "data": [
+      {
+        "score": 0.5389333,
+        "docType": "api",
+        "type": "WebCamDevice",
+        "member": "depthCameraName",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.WebCamDevice.depthCameraName",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/WebCamDevice-depthCameraName.html",
+        "deprecated": false,
+        "text": "UnityEngine.WebCamDevice.depthCameraName — public string depthCameraName { get; }"
+      },
+      {
+        "score": 0.53116703,
+        "docType": "api",
+        "type": "Graphics",
+        "member": "BlitMultiTap",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.Graphics.BlitMultiTap",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Graphics.BlitMultiTap.html",
+        "deprecated": false,
+        "text": "UnityEngine.Graphics.BlitMultiTap — void BlitMultiTap(Texture source, RenderTexture dest, Material mat, Vector2[] offsets)"
+      },
+      {
+        "score": 0.5273995,
+        "docType": "api",
+        "type": "CameraEvent",
+        "member": "BeforeDepthNormalsTexture",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.CameraEvent.BeforeDepthNormalsTexture",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/CameraEvent-BeforeDepthNormalsTexture.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.CameraEvent.BeforeDepthNormalsTexture — CameraEvent BeforeDepthNormalsTexture"
+      },
+      {
+        "score": 0.5252014,
+        "docType": "api",
+        "type": "CapturePixelFormat",
+        "member": "BGRA32",
+        "namespace": "UnityEngine.Windows.WebCam",
+        "breadcrumb": "UnityEngine.Windows.WebCam.CapturePixelFormat.BGRA32",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/CapturePixelFormat-BGRA32.html",
+        "deprecated": false,
+        "text": "UnityEngine.Windows.WebCam.CapturePixelFormat.BGRA32 — CapturePixelFormat BGRA32"
+      },
+      {
+        "score": 0.51962924,
+        "docType": "api",
+        "type": "XRMirrorViewBlitDesc",
+        "member": "GetBlitParameter",
+        "namespace": "UnityEngine.XR",
+        "breadcrumb": "UnityEngine.XR.XRMirrorViewBlitDesc.GetBlitParameter",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/XRMirrorViewBlitDesc.GetBlitParameter.html",
+        "deprecated": false,
+        "text": "UnityEngine.XR.XRMirrorViewBlitDesc.GetBlitParameter — void GetBlitParameter(int blitParameterIndex, ref XRBlitParams blitParameter)"
+      },
+      {
+        "score": 0.51961595,
+        "docType": "api",
+        "type": "UnityWebRequestMultimedia",
+        "member": "GetMovieTexture",
+        "namespace": "UnityEngine.Networking",
+        "breadcrumb": "UnityEngine.Networking.UnityWebRequestMultimedia.GetMovieTexture",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/UnityWebRequestMultimedia.GetMovieTexture.html",
+        "deprecated": true,
+        "text": "UnityEngine.Networking.UnityWebRequestMultimedia.GetMovieTexture — UnityWebRequest GetMovieTexture(string uri) (DEPRECATED: MovieTexture is deprecated. Use VideoPlayer instead.)"
+      },
+      {
+        "score": 0.5160772,
+        "docType": "api",
+        "type": "CameraEvent",
+        "member": "AfterDepthNormalsTexture",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.CameraEvent.AfterDepthNormalsTexture",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/CameraEvent-AfterDepthNormalsTexture.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.CameraEvent.AfterDepthNormalsTexture — CameraEvent AfterDepthNormalsTexture"
+      },
+      {
+        "score": 0.5159905,
+        "docType": "api",
+        "type": "WWW",
+        "member": "LoadImageIntoTexture",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.WWW.LoadImageIntoTexture",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/WWW.LoadImageIntoTexture.html",
+        "deprecated": false,
+        "text": "UnityEngine.WWW.LoadImageIntoTexture — void LoadImageIntoTexture(Texture2D texture)"
+      }
+    ]
+  }
+}

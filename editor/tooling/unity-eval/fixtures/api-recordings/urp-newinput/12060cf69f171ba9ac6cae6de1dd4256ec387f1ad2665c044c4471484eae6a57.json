@@ -1,0 +1,103 @@
+{
+  "recordedAt": "2026-07-08T21:15:44.365Z",
+  "request": {
+    "endpoint": "search",
+    "query": "inputaction readvalue vector2 movement",
+    "unityVersion": "6000.3.5f2",
+    "renderPipeline": "URP",
+    "inputSystem": "New"
+  },
+  "response": {
+    "ok": true,
+    "data": [
+      {
+        "score": 0.60496855,
+        "docType": "api",
+        "type": "CharacterController",
+        "member": "Move",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.CharacterController.Move",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/CharacterController.Move.html",
+        "deprecated": false,
+        "text": "UnityEngine.CharacterController.Move — CollisionFlags Move(Vector3 motion)"
+      },
+      {
+        "score": 0.6004668,
+        "docType": "api",
+        "type": "NavigationMoveEvent",
+        "member": "move",
+        "namespace": "UnityEngine.UIElements",
+        "breadcrumb": "UnityEngine.UIElements.NavigationMoveEvent.move",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/NavigationMoveEvent-move.html",
+        "deprecated": false,
+        "text": "UnityEngine.UIElements.NavigationMoveEvent.move — public Vector2 move { get; set; }"
+      },
+      {
+        "score": 0.5976424,
+        "docType": "api",
+        "type": "TextEditor",
+        "member": "MoveCursorToPosition",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.TextEditor.MoveCursorToPosition",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/TextEditor.MoveCursorToPosition.html",
+        "deprecated": false,
+        "text": "UnityEngine.TextEditor.MoveCursorToPosition — void MoveCursorToPosition(Vector2 cursorPosition)"
+      },
+      {
+        "score": 0.5923271,
+        "docType": "api",
+        "type": "Type",
+        "member": "Move",
+        "namespace": "UnityEngine.InputForUI",
+        "breadcrumb": "UnityEngine.InputForUI.Type.Move",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Type-Move.html",
+        "deprecated": false,
+        "text": "UnityEngine.InputForUI.Type.Move — Type Move"
+      },
+      {
+        "score": 0.5862327,
+        "docType": "api",
+        "type": "ChildMotion",
+        "member": "position",
+        "namespace": "UnityEditor.Animations",
+        "breadcrumb": "UnityEditor.Animations.ChildMotion.position",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/ChildMotion-position.html",
+        "deprecated": false,
+        "text": "UnityEditor.Animations.ChildMotion.position — public Vector2 position { get; set; }"
+      },
+      {
+        "score": 0.5856692,
+        "docType": "api",
+        "type": "EditorGUI",
+        "member": "Vector2Field",
+        "namespace": "UnityEditor",
+        "breadcrumb": "UnityEditor.EditorGUI.Vector2Field",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/EditorGUI.Vector2Field.html",
+        "deprecated": false,
+        "text": "UnityEditor.EditorGUI.Vector2Field — Vector2 Vector2Field(Rect position, string label, Vector2 value)"
+      },
+      {
+        "score": 0.5814578,
+        "docType": "api",
+        "type": "EditorSnapSettings",
+        "member": "move",
+        "namespace": "UnityEditor",
+        "breadcrumb": "UnityEditor.EditorSnapSettings.move",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/EditorSnapSettings-move.html",
+        "deprecated": false,
+        "text": "UnityEditor.EditorSnapSettings.move — public Vector3 move { get; set; }"
+      },
+      {
+        "score": 0.5792321,
+        "docType": "api",
+        "type": "GraphViewChange",
+        "member": "moveDelta",
+        "namespace": "UnityEditor.Experimental.GraphView",
+        "breadcrumb": "UnityEditor.Experimental.GraphView.GraphViewChange.moveDelta",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/GraphViewChange-moveDelta.html",
+        "deprecated": false,
+        "text": "UnityEditor.Experimental.GraphView.GraphViewChange.moveDelta — Vector2 moveDelta"
+      }
+    ]
+  }
+}

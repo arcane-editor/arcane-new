@@ -1,0 +1,103 @@
+{
+  "recordedAt": "2026-07-08T20:35:30.327Z",
+  "request": {
+    "endpoint": "search",
+    "query": "scriptablerenderpass blitter blitcameratexture urp",
+    "unityVersion": "6000.3.5f2",
+    "renderPipeline": "URP",
+    "inputSystem": "New"
+  },
+  "response": {
+    "ok": true,
+    "data": [
+      {
+        "score": 0.59750956,
+        "docType": "api",
+        "type": "XRRenderPass",
+        "member": "GetRenderParameter",
+        "namespace": "UnityEngine.XR",
+        "breadcrumb": "UnityEngine.XR.XRRenderPass.GetRenderParameter",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/XRRenderPass.GetRenderParameter.html",
+        "deprecated": false,
+        "text": "UnityEngine.XR.XRRenderPass.GetRenderParameter — void GetRenderParameter(Camera camera, int renderParameterIndex, ref XRRenderParameter renderParameter)"
+      },
+      {
+        "score": 0.5734228,
+        "docType": "api",
+        "type": "ScriptableRenderContext",
+        "member": "BeginRenderPass",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.ScriptableRenderContext.BeginRenderPass",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/ScriptableRenderContext.BeginRenderPass.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.ScriptableRenderContext.BeginRenderPass — void BeginRenderPass(int width, int height, int volumeDepth, int samples, NativeArray<AttachmentDescriptor> attachments, int depthAttachmentIndex, int shadingRateImageAttachmentIndex)"
+      },
+      {
+        "score": 0.55788964,
+        "docType": "api",
+        "type": "ScriptableRenderContext",
+        "member": "EndSubPass",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.ScriptableRenderContext.EndSubPass",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/ScriptableRenderContext.EndSubPass.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.ScriptableRenderContext.EndSubPass — void EndSubPass()"
+      },
+      {
+        "score": 0.5509584,
+        "docType": "api",
+        "type": "RenderPipelineManager",
+        "member": "endCameraRendering",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.RenderPipelineManager.endCameraRendering",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/RenderPipelineManager-endCameraRendering.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.RenderPipelineManager.endCameraRendering — event Action<ScriptableRenderContext, Camera> endCameraRendering"
+      },
+      {
+        "score": 0.55058473,
+        "docType": "api",
+        "type": "XRRenderPass",
+        "member": "foveatedRenderingInfo",
+        "namespace": "UnityEngine.XR",
+        "breadcrumb": "UnityEngine.XR.XRRenderPass.foveatedRenderingInfo",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/XRRenderPass-foveatedRenderingInfo.html",
+        "deprecated": false,
+        "text": "UnityEngine.XR.XRRenderPass.foveatedRenderingInfo — IntPtr foveatedRenderingInfo"
+      },
+      {
+        "score": 0.5448216,
+        "docType": "api",
+        "type": "ScriptableRenderContext",
+        "member": "EndRenderPass",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.ScriptableRenderContext.EndRenderPass",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/ScriptableRenderContext.EndRenderPass.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.ScriptableRenderContext.EndRenderPass — void EndRenderPass()"
+      },
+      {
+        "score": 0.5438689,
+        "docType": "api",
+        "type": "ScriptableRenderContext",
+        "member": "BeginSubPass",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.ScriptableRenderContext.BeginSubPass",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/ScriptableRenderContext.BeginSubPass.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.ScriptableRenderContext.BeginSubPass — void BeginSubPass(NativeArray<int> colors, NativeArray<int> inputs, bool isDepthReadOnly, bool isStencilReadOnly)"
+      },
+      {
+        "score": 0.5411579,
+        "docType": "api",
+        "type": "ScriptableRenderContext",
+        "member": "StopMultiEye",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.ScriptableRenderContext.StopMultiEye",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/ScriptableRenderContext.StopMultiEye.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.ScriptableRenderContext.StopMultiEye — void StopMultiEye(Camera camera)"
+      }
+    ]
+  }
+}

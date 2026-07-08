@@ -1,0 +1,15 @@
+{
+  "recordedAt": "2026-07-08T19:42:10.137Z",
+  "request": {
+    "endpoint": "lookup",
+    "type": "UniversalResourceData",
+    "member": "activeColorTexture",
+    "unityVersion": "6000.3.5f2",
+    "renderPipeline": "URP",
+    "inputSystem": "New"
+  },
+  "response": {
+    "ok": true,
+    "data": []
+  }
+}

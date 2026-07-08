@@ -1,0 +1,103 @@
+{
+  "recordedAt": "2026-07-08T21:25:05.097Z",
+  "request": {
+    "endpoint": "search",
+    "query": "rthandle allocatefullscreenrendertexture",
+    "unityVersion": "6000.3.5f2",
+    "renderPipeline": "URP",
+    "inputSystem": "New"
+  },
+  "response": {
+    "ok": true,
+    "data": [
+      {
+        "score": 0.58678937,
+        "docType": "api",
+        "type": "ShadingRateImage",
+        "member": "AllocFromPixelSize",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.ShadingRateImage.AllocFromPixelSize",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/ShadingRateImage.AllocFromPixelSize.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.ShadingRateImage.AllocFromPixelSize — RenderTexture AllocFromPixelSize(ref RenderTextureDescriptor rtDesc)"
+      },
+      {
+        "score": 0.577018,
+        "docType": "api",
+        "type": "D3D9FullscreenMode",
+        "member": "value__",
+        "namespace": "UnityEditor",
+        "breadcrumb": "UnityEditor.D3D9FullscreenMode.value__",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/D3D9FullscreenMode-value__.html",
+        "deprecated": false,
+        "text": "UnityEditor.D3D9FullscreenMode.value__ — int value__"
+      },
+      {
+        "score": 0.574301,
+        "docType": "api",
+        "type": "CustomRenderTexture",
+        "member": "EnsureDoubleBufferConsistency",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.CustomRenderTexture.EnsureDoubleBufferConsistency",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/CustomRenderTexture.EnsureDoubleBufferConsistency.html",
+        "deprecated": false,
+        "text": "UnityEngine.CustomRenderTexture.EnsureDoubleBufferConsistency — void EnsureDoubleBufferConsistency()"
+      },
+      {
+        "score": 0.57358164,
+        "docType": "api",
+        "type": "PlayerSettings",
+        "member": "macFullscreenMode",
+        "namespace": "UnityEditor",
+        "breadcrumb": "UnityEditor.PlayerSettings.macFullscreenMode",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/PlayerSettings-macFullscreenMode.html",
+        "deprecated": true,
+        "text": "UnityEditor.PlayerSettings.macFullscreenMode — public MacFullscreenMode macFullscreenMode { get; set; } (DEPRECATED: macFullscreenMode is deprecated, use fullScreenMode instead)"
+      },
+      {
+        "score": 0.57217646,
+        "docType": "api",
+        "type": "MacFullscreenMode",
+        "member": "FullscreenWindow",
+        "namespace": "UnityEditor",
+        "breadcrumb": "UnityEditor.MacFullscreenMode.FullscreenWindow",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/MacFullscreenMode-FullscreenWindow.html",
+        "deprecated": false,
+        "text": "UnityEditor.MacFullscreenMode.FullscreenWindow — MacFullscreenMode FullscreenWindow"
+      },
+      {
+        "score": 0.5687945,
+        "docType": "api",
+        "type": "FullScreenMode",
+        "member": "ExclusiveFullScreen",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.FullScreenMode.ExclusiveFullScreen",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/FullScreenMode-ExclusiveFullScreen.html",
+        "deprecated": false,
+        "text": "UnityEngine.FullScreenMode.ExclusiveFullScreen — FullScreenMode ExclusiveFullScreen"
+      },
+      {
+        "score": 0.56622785,
+        "docType": "api",
+        "type": "BuiltinRenderTextureType",
+        "member": "BindableTexture",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.BuiltinRenderTextureType.BindableTexture",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/BuiltinRenderTextureType-BindableTexture.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.BuiltinRenderTextureType.BindableTexture — BuiltinRenderTextureType BindableTexture"
+      },
+      {
+        "score": 0.5632616,
+        "docType": "api",
+        "type": "VideoRenderMode",
+        "member": "RenderTexture",
+        "namespace": "UnityEngine.Video",
+        "breadcrumb": "UnityEngine.Video.VideoRenderMode.RenderTexture",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/VideoRenderMode-RenderTexture.html",
+        "deprecated": false,
+        "text": "UnityEngine.Video.VideoRenderMode.RenderTexture — VideoRenderMode RenderTexture"
+      }
+    ]
+  }
+}

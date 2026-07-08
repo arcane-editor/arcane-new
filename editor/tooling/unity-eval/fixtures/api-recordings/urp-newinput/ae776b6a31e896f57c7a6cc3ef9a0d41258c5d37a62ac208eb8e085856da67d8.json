@@ -1,0 +1,103 @@
+{
+  "recordedAt": "2026-07-08T21:22:04.329Z",
+  "request": {
+    "endpoint": "search",
+    "query": "scriptablerendererfeature full screen render pass urp",
+    "unityVersion": "6000.3.5f2",
+    "renderPipeline": "URP",
+    "inputSystem": "New"
+  },
+  "response": {
+    "ok": true,
+    "data": [
+      {
+        "score": 0.6146164,
+        "docType": "api",
+        "type": "PassType",
+        "member": "ScriptableRenderPipeline",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.PassType.ScriptableRenderPipeline",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/PassType-ScriptableRenderPipeline.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.PassType.ScriptableRenderPipeline — PassType ScriptableRenderPipeline"
+      },
+      {
+        "score": 0.6116508,
+        "docType": "api",
+        "type": "CustomRenderTexture",
+        "member": "GetDoubleBufferRenderTexture",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.CustomRenderTexture.GetDoubleBufferRenderTexture",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/CustomRenderTexture.GetDoubleBufferRenderTexture.html",
+        "deprecated": false,
+        "text": "UnityEngine.CustomRenderTexture.GetDoubleBufferRenderTexture — RenderTexture GetDoubleBufferRenderTexture()"
+      },
+      {
+        "score": 0.60043305,
+        "docType": "api",
+        "type": "ScriptableRenderContext",
+        "member": "EndRenderPass",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.ScriptableRenderContext.EndRenderPass",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/ScriptableRenderContext.EndRenderPass.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.ScriptableRenderContext.EndRenderPass — void EndRenderPass()"
+      },
+      {
+        "score": 0.5907488,
+        "docType": "api",
+        "type": "PassType",
+        "member": "ScriptableRenderPipelineDefaultUnlit",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.PassType.ScriptableRenderPipelineDefaultUnlit",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/PassType-ScriptableRenderPipelineDefaultUnlit.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.PassType.ScriptableRenderPipelineDefaultUnlit — PassType ScriptableRenderPipelineDefaultUnlit"
+      },
+      {
+        "score": 0.58318925,
+        "docType": "api",
+        "type": "VideoRenderMode",
+        "member": "RenderTexture",
+        "namespace": "UnityEngine.Video",
+        "breadcrumb": "UnityEngine.Video.VideoRenderMode.RenderTexture",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/VideoRenderMode-RenderTexture.html",
+        "deprecated": false,
+        "text": "UnityEngine.Video.VideoRenderMode.RenderTexture — VideoRenderMode RenderTexture"
+      },
+      {
+        "score": 0.5733811,
+        "docType": "api",
+        "type": "FullScreenMode",
+        "member": "ExclusiveFullScreen",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.FullScreenMode.ExclusiveFullScreen",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/FullScreenMode-ExclusiveFullScreen.html",
+        "deprecated": false,
+        "text": "UnityEngine.FullScreenMode.ExclusiveFullScreen — FullScreenMode ExclusiveFullScreen"
+      },
+      {
+        "score": 0.57077646,
+        "docType": "api",
+        "type": "ScriptableRenderContext",
+        "member": "Submit",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.ScriptableRenderContext.Submit",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/ScriptableRenderContext.Submit.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.ScriptableRenderContext.Submit — void Submit()"
+      },
+      {
+        "score": 0.5679962,
+        "docType": "api",
+        "type": "D3D9FullscreenMode",
+        "member": "FullscreenWindow",
+        "namespace": "UnityEditor",
+        "breadcrumb": "UnityEditor.D3D9FullscreenMode.FullscreenWindow",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/D3D9FullscreenMode-FullscreenWindow.html",
+        "deprecated": true,
+        "text": "UnityEditor.D3D9FullscreenMode.FullscreenWindow — D3D9FullscreenMode FullscreenWindow (DEPRECATED: D3D9 support has been removed)"
+      }
+    ]
+  }
+}

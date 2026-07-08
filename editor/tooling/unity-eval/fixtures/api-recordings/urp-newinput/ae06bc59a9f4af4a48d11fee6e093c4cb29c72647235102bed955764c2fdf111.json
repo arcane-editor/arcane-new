@@ -1,0 +1,30 @@
+{
+  "recordedAt": "2026-07-08T20:56:33.541Z",
+  "request": {
+    "endpoint": "lookup",
+    "type": "Material",
+    "member": "SetColor",
+    "unityVersion": "6000.3.5f2",
+    "renderPipeline": "URP",
+    "inputSystem": "New"
+  },
+  "response": {
+    "ok": true,
+    "data": [
+      {
+        "namespace": "UnityEngine",
+        "type": "Material",
+        "member": "SetColor",
+        "kind": "method",
+        "signature": "void SetColor(string name, Color value)",
+        "overloads": [
+          "void SetColor(string name, Color value)",
+          "void SetColor(int nameID, Color value)"
+        ],
+        "assembly": "UnityEngine.CoreModule",
+        "deprecated": false,
+        "docUrl": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Material.SetColor.html"
+      }
+    ]
+  }
+}

@@ -1,0 +1,103 @@
+{
+  "recordedAt": "2026-07-08T21:10:52.625Z",
+  "request": {
+    "endpoint": "search",
+    "query": "scenemanager.loadscene by name",
+    "unityVersion": "6000.3.5f2",
+    "renderPipeline": "URP",
+    "inputSystem": "New"
+  },
+  "response": {
+    "ok": true,
+    "data": [
+      {
+        "score": 0.7661629,
+        "docType": "api",
+        "type": "SceneManager",
+        "member": "LoadScene",
+        "namespace": "UnityEngine.SceneManagement",
+        "breadcrumb": "UnityEngine.SceneManagement.SceneManager.LoadScene",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/SceneManager.LoadScene.html",
+        "deprecated": false,
+        "text": "UnityEngine.SceneManagement.SceneManager.LoadScene — void LoadScene(string sceneName, LoadSceneMode mode)"
+      },
+      {
+        "score": 0.70643675,
+        "docType": "api",
+        "type": "SceneManager",
+        "member": "GetSceneByName",
+        "namespace": "UnityEngine.SceneManagement",
+        "breadcrumb": "UnityEngine.SceneManagement.SceneManager.GetSceneByName",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/SceneManager.GetSceneByName.html",
+        "deprecated": false,
+        "text": "UnityEngine.SceneManagement.SceneManager.GetSceneByName — Scene GetSceneByName(string name)"
+      },
+      {
+        "score": 0.6821838,
+        "docType": "api",
+        "type": "LoadSceneParameters",
+        "member": "loadSceneMode",
+        "namespace": "UnityEngine.SceneManagement",
+        "breadcrumb": "UnityEngine.SceneManagement.LoadSceneParameters.loadSceneMode",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/LoadSceneParameters-loadSceneMode.html",
+        "deprecated": false,
+        "text": "UnityEngine.SceneManagement.LoadSceneParameters.loadSceneMode — public LoadSceneMode loadSceneMode { get; set; }"
+      },
+      {
+        "score": 0.67879033,
+        "docType": "api",
+        "type": "SceneManager",
+        "member": "LoadSceneAsync",
+        "namespace": "UnityEngine.SceneManagement",
+        "breadcrumb": "UnityEngine.SceneManagement.SceneManager.LoadSceneAsync",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/SceneManager.LoadSceneAsync.html",
+        "deprecated": false,
+        "text": "UnityEngine.SceneManagement.SceneManager.LoadSceneAsync — AsyncOperation LoadSceneAsync(int sceneBuildIndex, LoadSceneMode mode)"
+      },
+      {
+        "score": 0.67787856,
+        "docType": "api",
+        "type": "EditorSceneManager",
+        "member": "LoadSceneInPlayMode",
+        "namespace": "UnityEditor.SceneManagement",
+        "breadcrumb": "UnityEditor.SceneManagement.EditorSceneManager.LoadSceneInPlayMode",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/EditorSceneManager.LoadSceneInPlayMode.html",
+        "deprecated": false,
+        "text": "UnityEditor.SceneManagement.EditorSceneManager.LoadSceneInPlayMode — Scene LoadSceneInPlayMode(string path, LoadSceneParameters parameters)"
+      },
+      {
+        "score": 0.6758279,
+        "docType": "api",
+        "type": "EditorSceneManager",
+        "member": "LoadSceneAsyncInPlayMode",
+        "namespace": "UnityEditor.SceneManagement",
+        "breadcrumb": "UnityEditor.SceneManagement.EditorSceneManager.LoadSceneAsyncInPlayMode",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/EditorSceneManager.LoadSceneAsyncInPlayMode.html",
+        "deprecated": false,
+        "text": "UnityEditor.SceneManagement.EditorSceneManager.LoadSceneAsyncInPlayMode — AsyncOperation LoadSceneAsyncInPlayMode(string path, LoadSceneParameters parameters)"
+      },
+      {
+        "score": 0.67111653,
+        "docType": "api",
+        "type": "EditorApplication",
+        "member": "currentScene",
+        "namespace": "UnityEditor",
+        "breadcrumb": "UnityEditor.EditorApplication.currentScene",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/EditorApplication-currentScene.html",
+        "deprecated": true,
+        "text": "UnityEditor.EditorApplication.currentScene — public string currentScene { get; set; } (DEPRECATED: Use EditorSceneManager to see which scenes are currently loaded)"
+      },
+      {
+        "score": 0.66970086,
+        "docType": "api",
+        "type": "Application",
+        "member": "loadedLevelName",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.Application.loadedLevelName",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Application-loadedLevelName.html",
+        "deprecated": true,
+        "text": "UnityEngine.Application.loadedLevelName — public string loadedLevelName { get; } (DEPRECATED: Use SceneManager to determine what scenes have been loaded)"
+      }
+    ]
+  }
+}

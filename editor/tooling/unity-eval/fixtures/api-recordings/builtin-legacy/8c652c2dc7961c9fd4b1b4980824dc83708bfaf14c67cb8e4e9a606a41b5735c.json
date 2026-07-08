@@ -1,0 +1,15 @@
+{
+  "recordedAt": "2026-07-08T20:01:38.683Z",
+  "request": {
+    "endpoint": "lookup",
+    "type": "Input",
+    "member": "GetKeyDown",
+    "unityVersion": "2022.3.45f1",
+    "renderPipeline": "Built-in",
+    "inputSystem": "Legacy"
+  },
+  "response": {
+    "ok": true,
+    "data": []
+  }
+}

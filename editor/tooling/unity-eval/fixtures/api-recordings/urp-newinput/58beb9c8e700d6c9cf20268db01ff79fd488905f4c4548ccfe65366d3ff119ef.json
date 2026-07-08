@@ -1,0 +1,15 @@
+{
+  "recordedAt": "2026-07-08T19:41:42.498Z",
+  "request": {
+    "endpoint": "lookup",
+    "type": "ScriptableRenderPass",
+    "member": "Blit",
+    "unityVersion": "6000.3.5f2",
+    "renderPipeline": "URP",
+    "inputSystem": "New"
+  },
+  "response": {
+    "ok": true,
+    "data": []
+  }
+}

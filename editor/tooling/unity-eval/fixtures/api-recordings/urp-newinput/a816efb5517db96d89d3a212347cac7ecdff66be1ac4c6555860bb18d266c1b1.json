@@ -1,0 +1,103 @@
+{
+  "recordedAt": "2026-07-08T19:43:04.383Z",
+  "request": {
+    "endpoint": "search",
+    "query": "scriptablerendererfeature create rendertextures enqueuepass",
+    "unityVersion": "6000.3.5f2",
+    "renderPipeline": "URP",
+    "inputSystem": "New"
+  },
+  "response": {
+    "ok": true,
+    "data": [
+      {
+        "score": 0.6429026,
+        "docType": "api",
+        "type": "ScriptableRenderContext",
+        "member": "EndRenderPass",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.ScriptableRenderContext.EndRenderPass",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/ScriptableRenderContext.EndRenderPass.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.ScriptableRenderContext.EndRenderPass — void EndRenderPass()"
+      },
+      {
+        "score": 0.6405876,
+        "docType": "api",
+        "type": "CustomRenderTexture",
+        "member": "GetDoubleBufferRenderTexture",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.CustomRenderTexture.GetDoubleBufferRenderTexture",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/CustomRenderTexture.GetDoubleBufferRenderTexture.html",
+        "deprecated": false,
+        "text": "UnityEngine.CustomRenderTexture.GetDoubleBufferRenderTexture — RenderTexture GetDoubleBufferRenderTexture()"
+      },
+      {
+        "score": 0.6199499,
+        "docType": "api",
+        "type": "ScriptableRenderContext",
+        "member": "CreateRendererList",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.ScriptableRenderContext.CreateRendererList",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/ScriptableRenderContext.CreateRendererList.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.ScriptableRenderContext.CreateRendererList — RendererList CreateRendererList(RendererListDesc desc)"
+      },
+      {
+        "score": 0.61966884,
+        "docType": "api",
+        "type": "PassType",
+        "member": "ScriptableRenderPipeline",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.PassType.ScriptableRenderPipeline",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/PassType-ScriptableRenderPipeline.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.PassType.ScriptableRenderPipeline — PassType ScriptableRenderPipeline"
+      },
+      {
+        "score": 0.6087458,
+        "docType": "api",
+        "type": "ScriptableRenderContext",
+        "member": "DrawRenderers",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.ScriptableRenderContext.DrawRenderers",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/ScriptableRenderContext.DrawRenderers.html",
+        "deprecated": true,
+        "text": "UnityEngine.Rendering.ScriptableRenderContext.DrawRenderers — void DrawRenderers(CullingResults cullingResults, ref DrawingSettings drawingSettings, ref FilteringSettings filteringSettings) (DEPRECATED: DrawRenderers is obsolete and replaced with the RendererList API: construct a RendererList using ScriptableRenderContext.CreateRendererList and execture it using CommandBuffer.DrawRendererList.)"
+      },
+      {
+        "score": 0.6086366,
+        "docType": "api",
+        "type": "ScriptableRenderContext",
+        "member": "BeginSubPass",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.ScriptableRenderContext.BeginSubPass",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/ScriptableRenderContext.BeginSubPass.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.ScriptableRenderContext.BeginSubPass — void BeginSubPass(NativeArray<int> colors, NativeArray<int> inputs, bool isDepthReadOnly, bool isStencilReadOnly)"
+      },
+      {
+        "score": 0.6079479,
+        "docType": "api",
+        "type": "ScriptableRenderContext",
+        "member": "BeginRenderPass",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.ScriptableRenderContext.BeginRenderPass",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/ScriptableRenderContext.BeginRenderPass.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.ScriptableRenderContext.BeginRenderPass — void BeginRenderPass(int width, int height, int volumeDepth, int samples, NativeArray<AttachmentDescriptor> attachments, int depthAttachmentIndex, int shadingRateImageAttachmentIndex)"
+      },
+      {
+        "score": 0.6039594,
+        "docType": "api",
+        "type": "XRDisplaySubsystem",
+        "member": "GetSharedDepthTextureForRenderPass",
+        "namespace": "UnityEngine.XR",
+        "breadcrumb": "UnityEngine.XR.XRDisplaySubsystem.GetSharedDepthTextureForRenderPass",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/XRDisplaySubsystem.GetSharedDepthTextureForRenderPass.html",
+        "deprecated": false,
+        "text": "UnityEngine.XR.XRDisplaySubsystem.GetSharedDepthTextureForRenderPass — RenderTexture GetSharedDepthTextureForRenderPass(int renderPass)"
+      }
+    ]
+  }
+}

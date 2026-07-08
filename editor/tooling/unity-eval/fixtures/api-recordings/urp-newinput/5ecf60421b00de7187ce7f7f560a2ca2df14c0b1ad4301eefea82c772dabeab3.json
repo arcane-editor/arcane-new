@@ -1,0 +1,103 @@
+{
+  "recordedAt": "2026-07-08T19:41:05.295Z",
+  "request": {
+    "endpoint": "search",
+    "query": "urp default lit opaque shader name material shader universal render pipeline/lit",
+    "unityVersion": "6000.3.5f2",
+    "renderPipeline": "URP",
+    "inputSystem": "New"
+  },
+  "response": {
+    "ok": true,
+    "data": [
+      {
+        "score": 0.59606016,
+        "docType": "api",
+        "type": "RenderPipelineAsset",
+        "member": "defaultShader",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.RenderPipelineAsset.defaultShader",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/RenderPipelineAsset-defaultShader.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.RenderPipelineAsset.defaultShader — public Shader defaultShader { get; }"
+      },
+      {
+        "score": 0.58310694,
+        "docType": "api",
+        "type": "ShaderUtil",
+        "member": "GetAnyHitShaderName",
+        "namespace": "UnityEditor",
+        "breadcrumb": "UnityEditor.ShaderUtil.GetAnyHitShaderName",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/ShaderUtil.GetAnyHitShaderName.html",
+        "deprecated": false,
+        "text": "UnityEditor.ShaderUtil.GetAnyHitShaderName — string GetAnyHitShaderName(RayTracingShader s)"
+      },
+      {
+        "score": 0.57290804,
+        "docType": "api",
+        "type": "ShaderUtil",
+        "member": "GetMissShaderName",
+        "namespace": "UnityEditor",
+        "breadcrumb": "UnityEditor.ShaderUtil.GetMissShaderName",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/ShaderUtil.GetMissShaderName.html",
+        "deprecated": false,
+        "text": "UnityEditor.ShaderUtil.GetMissShaderName — string GetMissShaderName(RayTracingShader s, int shaderIndex)"
+      },
+      {
+        "score": 0.5727825,
+        "docType": "api",
+        "type": "RayTracingSubMeshFlagsConfig",
+        "member": "opaqueMaterials",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.RayTracingSubMeshFlagsConfig.opaqueMaterials",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/RayTracingSubMeshFlagsConfig-opaqueMaterials.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.RayTracingSubMeshFlagsConfig.opaqueMaterials — RayTracingSubMeshFlags opaqueMaterials"
+      },
+      {
+        "score": 0.57061017,
+        "docType": "api",
+        "type": "ShaderUtil",
+        "member": "GetCallableShaderName",
+        "namespace": "UnityEditor",
+        "breadcrumb": "UnityEditor.ShaderUtil.GetCallableShaderName",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/ShaderUtil.GetCallableShaderName.html",
+        "deprecated": false,
+        "text": "UnityEditor.ShaderUtil.GetCallableShaderName — string GetCallableShaderName(RayTracingShader s, int shaderIndex)"
+      },
+      {
+        "score": 0.5695912,
+        "docType": "api",
+        "type": "RenderPipelineAsset",
+        "member": "autodeskInteractiveMaskedShader",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.RenderPipelineAsset.autodeskInteractiveMaskedShader",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/RenderPipelineAsset-autodeskInteractiveMaskedShader.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.RenderPipelineAsset.autodeskInteractiveMaskedShader — public Shader autodeskInteractiveMaskedShader { get; }"
+      },
+      {
+        "score": 0.569337,
+        "docType": "api",
+        "type": "BuiltinRenderTextureType",
+        "member": "PrepassLightSpec",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.BuiltinRenderTextureType.PrepassLightSpec",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/BuiltinRenderTextureType-PrepassLightSpec.html",
+        "deprecated": true,
+        "text": "UnityEngine.Rendering.BuiltinRenderTextureType.PrepassLightSpec — BuiltinRenderTextureType PrepassLightSpec (DEPRECATED: Deferred Lighting has been removed, so PrepassLightSpec built-in render texture type is never used now.)"
+      },
+      {
+        "score": 0.56891733,
+        "docType": "api",
+        "type": "BuiltinRenderTextureType",
+        "member": "PrepassNormalsSpec",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.BuiltinRenderTextureType.PrepassNormalsSpec",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/BuiltinRenderTextureType-PrepassNormalsSpec.html",
+        "deprecated": true,
+        "text": "UnityEngine.Rendering.BuiltinRenderTextureType.PrepassNormalsSpec — BuiltinRenderTextureType PrepassNormalsSpec (DEPRECATED: Deferred Lighting has been removed, so PrepassNormalsSpec built-in render texture type is never used now.)"
+      }
+    ]
+  }
+}
