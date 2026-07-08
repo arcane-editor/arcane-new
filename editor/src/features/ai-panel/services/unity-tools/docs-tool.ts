@@ -1,8 +1,7 @@
 import { Type, type Static } from '@sinclair/typebox';
 import type { AgentTool } from '../vendor/types';
-import { useProjectContextStore } from '../../../../stores/project-context';
 import { lookupUnityDocs, unityMajorMinor } from '../../../../data/unity-docs-index';
-import { txt } from './shared';
+import { txt } from './text-result';
 
 const docsSchema = Type.Object({
   symbol: Type.String({ description: 'Unity API symbol, e.g. "Rigidbody.AddForce" or "Transform".' }),
@@ -12,8 +11,13 @@ const docsSchema = Type.Object({
  * get_unity_docs (F-5.2) — version-matched Unity Scripting Reference lookup.
  * Offline + deterministic: constructs the docs URL for the project's Unity
  * major.minor from a local index; no network call.
+ *
+ * `getVersion` is injected (rather than read from the project-context store
+ * directly) so this module has no store/Monaco dependency and can be
+ * imported directly under Bun (see `unity-tools/index.ts` for the production
+ * wiring, which passes the real store-backed getter).
  */
-export function createGetUnityDocsTool(): AgentTool {
+export function createGetUnityDocsTool(getVersion: () => string | null): AgentTool {
   return {
     name: 'get_unity_docs',
     label: 'get unity docs',
@@ -22,7 +26,7 @@ export function createGetUnityDocsTool(): AgentTool {
     parameters: docsSchema,
     async execute(_id, params) {
       const { symbol } = params as Static<typeof docsSchema>;
-      const version = useProjectContextStore.getState().unityVersion;
+      const version = getVersion();
       const mm = unityMajorMinor(version);
       const hits = lookupUnityDocs(symbol, version, 3);
       const header = `Docs matched to Unity ${mm ?? '(version unknown — using latest)'}:`;

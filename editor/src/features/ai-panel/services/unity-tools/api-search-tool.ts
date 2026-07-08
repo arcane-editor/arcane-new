@@ -1,7 +1,20 @@
 import { Type, type Static } from '@sinclair/typebox';
 import type { AgentTool } from '../vendor/types';
-import { txt } from './shared';
-import { unityApiSearch, unityApiLookup, type ApiSignature, type ApiSearchHit } from './api-client';
+import { txt } from './text-result';
+import type { ApiSignature, ApiSearchHit } from './api-client';
+
+// Injected dependency — mirrors `unityApiSearch`/`unityApiLookup` from
+// `./api-client` exactly, but as an interface so this module never imports
+// those (store-backed) value bindings itself. Production wiring lives in
+// `unity-tools/index.ts` (the only place in this feature that touches
+// stores); everything below is store-free and Bun-safe to import directly.
+export interface UnityApiClient {
+  search(
+    query: string,
+    opts?: { docType?: 'scriptref' | 'manual' | 'api' | 'all'; topK?: number },
+  ): Promise<ApiSearchHit[]>;
+  lookup(type: string, member?: string): Promise<ApiSignature[]>;
+}
 
 // Deliberately tiny schema (weak-model friendly): just a free-text query and an
 // optional exact "Type.Member". Version / pipeline / input are derived server-
@@ -61,7 +74,7 @@ function formatHits(hits: ApiSearchHit[]): string {
  * search over the whole ScriptReference + Manual (Vectorize) plus exact
  * signature lookup (D1). Read-only / auto-approved.
  */
-export function createUnityApiSearchTool(): AgentTool {
+export function createUnityApiSearchTool(client: UnityApiClient): AgentTool {
   return {
     name: 'unity_api_search',
     label: 'unity api search',
@@ -77,13 +90,13 @@ export function createUnityApiSearchTool(): AgentTool {
       const exactTarget = member?.includes('.') ? member : query.includes('.') && !query.includes(' ') ? query : null;
       if (exactTarget) {
         const { type, member: mem } = splitTypeMember(exactTarget);
-        const sigs = await unityApiLookup(type, mem);
+        const sigs = await client.lookup(type, mem);
         if (sigs.length > 0) {
           return txt(`Exact Unity API signatures:\n${formatSignatures(sigs)}`);
         }
       }
 
-      const hits = await unityApiSearch(query, { topK: 8 });
+      const hits = await client.search(query, { topK: 8 });
       if (hits.length === 0) {
         return txt(
           `No Unity API matches for "${query}". Either you're signed out, this Unity version's API index ` +
