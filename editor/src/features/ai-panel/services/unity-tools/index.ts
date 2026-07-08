@@ -6,11 +6,24 @@ import { createUnityApiSearchTool } from './api-search-tool';
 import { unityApiSearch, unityApiLookup } from './api-client';
 import { createUnityMigrationTool } from './migration-tool';
 import { createUnityScriptMapTool } from './script-map-tool';
+import { withUnityCompileGate as createCompileGate } from './compile-gate';
 
 export { createUnityMutateTools } from './mutate-tools';
 export { withUnityAnalyzerGate } from './analyzer-gate';
-export { withUnityCompileGate, resetCompileGate } from './compile-gate';
+export { resetCompileGate } from './compile-gate';
 export { unityApiSearch, unityApiLookup } from './api-client';
+
+/**
+ * Compile-gate decorator, with the real (store-backed) grounding client wired
+ * in here — the only place in `unity-tools/` that does — so callers keep the
+ * existing 2-arg call (`withUnityCompileGate(tool, cwd)`; see agent-service.ts).
+ * `compile-gate.ts` itself takes the client as an injected `HintLookup`
+ * (mirrors the `createUnityApiSearchTool(client)` DI seam above), so its
+ * `compile-hints.ts` de-hallucinator stays directly testable under Bun.
+ */
+export function withUnityCompileGate(tool: AgentTool, cwd: string): AgentTool {
+  return createCompileGate(tool, cwd, { search: unityApiSearch, lookup: unityApiLookup });
+}
 
 /**
  * Read-only Unity tools (auto-approved): bridge/index tools, deterministic

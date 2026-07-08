@@ -18,7 +18,7 @@ import { resolveToCwd } from '../vendor/tools/path-utils';
 import { triggerRecompileAndWait } from '../../../unity-bridge';
 import type { CompilerMessage } from '../../../../types/unity';
 import { bridgeConnected } from './shared';
-import { unityApiLookup } from './api-client';
+import { buildCompileHints, type HintLookup } from './compile-hints';
 
 const MAX_ATTEMPTS = 4;
 
@@ -50,59 +50,11 @@ function formatError(m: CompilerMessage): string {
   return `  • line ${m.line}: ${m.message}`;
 }
 
-/** Strip namespace + generics from a type reference → simple name. */
-function simpleTypeName(t: string): string {
-  let s = t.split('<')[0] ?? t;
-  const dot = s.lastIndexOf('.');
-  if (dot >= 0) s = s.slice(dot + 1);
-  return s.trim();
-}
-
-/** Extract (type, missing-member) from a CS1061 / CS0117 "no definition" error. */
-function extractMissingMember(message: string): { type: string; member: string } | null {
-  if (!/CS1061|CS0117/.test(message)) return null;
-  const m = message.match(/'([^']+)' does not contain a definition for '([^']+)'/);
-  if (!m || !m[1] || !m[2]) return null;
-  return { type: simpleTypeName(m[1]), member: m[2] };
-}
-
-/**
- * De-hallucinator: when the compiler reports a missing member (CS1061/CS0117),
- * fetch the type's REAL members from the version-accurate index and inline them,
- * so the weak model corrects to a real API without another tool round-trip.
- * Best-effort — never throws, capped to a couple of types.
- */
-async function buildSignatureHints(errors: CompilerMessage[]): Promise<string> {
-  const types = new Set<string>();
-  for (const e of errors) {
-    const hit = extractMissingMember(e.message);
-    if (hit) types.add(hit.type);
-    if (types.size >= 2) break;
-  }
-  if (types.size === 0) return '';
-
-  const blocks: string[] = [];
-  for (const type of types) {
-    try {
-      const result = await unityApiLookup(type);
-      // Grounding unavailable (signed out / no version / offline / HTTP error) —
-      // hints here are best-effort, so skip silently rather than surface the reason.
-      if (!result.ok) continue;
-      if (result.data.length === 0) continue;
-      const members = [...new Set(result.data.map((s) => s.member))].slice(0, 24);
-      if (members.length) blocks.push(`Real members of ${type}: ${members.join(', ')}`);
-    } catch {
-      /* best-effort */
-    }
-  }
-  return blocks.length ? `\n[Unity API] ${blocks.join('\n')}` : '';
-}
-
 function appendNote(res: AgentToolResult, text: string): AgentToolResult {
   return { ...res, content: [...res.content, { type: 'text', text }] };
 }
 
-export function withUnityCompileGate(tool: AgentTool, cwd: string): AgentTool {
+export function withUnityCompileGate(tool: AgentTool, cwd: string, client: HintLookup): AgentTool {
   return {
     ...tool,
     async execute(id, params, signal, onUpdate) {
@@ -146,7 +98,7 @@ export function withUnityCompileGate(tool: AgentTool, cwd: string): AgentTool {
       if (here.length && elsewhere > 0) {
         text += `\n(+${elsewhere} more compiler error(s) elsewhere in the project)`;
       }
-      text += await buildSignatureHints(shown);
+      text += await buildCompileHints(shown, client);
       text += `\nVerify exact signatures with unity_api_search (pass "Type.Member") before retrying.`;
       return appendNote(res, text);
     },
