@@ -114,6 +114,18 @@ export interface ArcanePlanEntry {
 /** Plan-mode lifecycle. */
 export type PlanPhase = 'idle' | 'planning' | 'awaiting-execute' | 'executing';
 
+/**
+ * Session-cumulative token usage (P4) — accumulated from the Arcane server's
+ * `usage` SSE events (`arcane-stream.ts`), which were previously skipped
+ * client-side entirely. Purely for later surfacing (e.g. a cost/usage
+ * indicator); nothing renders it yet.
+ */
+export interface SessionUsage {
+  input: number;
+  output: number;
+  requests: number;
+}
+
 interface AiState {
   // Conversation
   messages: AiMessage[];
@@ -167,6 +179,9 @@ interface AiState {
   /** Snapshot of the attachments the last plan was created with. */
   lastAttachments: Attachment[];
 
+  /** Session-cumulative token usage (P4) — see `SessionUsage`. */
+  sessionUsage: SessionUsage;
+
   // Actions
   handleAgentEvent: (event: AgentEvent) => void;
   addUserMessage: (text: string, attachments?: Attachment[]) => void;
@@ -205,6 +220,8 @@ interface AiState {
   setActivePlanPath: (path: string | null) => void;
   setPendingPrompt: (prompt: string | null) => void;
   setLastAttachments: (attachments: Attachment[]) => void;
+  /** Accumulates a completed request's token usage into `sessionUsage` (P4, `arcane-stream.ts`). */
+  recordSessionUsage: (inputTokens: number, outputTokens: number) => void;
 }
 
 let messageCounter = 0;
@@ -285,6 +302,7 @@ export const useAiStore = create<AiState>((set, get) => ({
   activePlanPath: null,
   pendingPrompt: null,
   lastAttachments: [],
+  sessionUsage: { input: 0, output: 0, requests: 0 },
 
   handleAgentEvent: (event: AgentEvent) => {
     switch (event.type) {
@@ -479,6 +497,7 @@ export const useAiStore = create<AiState>((set, get) => ({
       activePlanPath: null,
       pendingPrompt: null,
       lastAttachments: [],
+      sessionUsage: { input: 0, output: 0, requests: 0 },
     });
     useCheckpointsStore.getState().reset();
   },
@@ -507,6 +526,7 @@ export const useAiStore = create<AiState>((set, get) => ({
       activePlanPath: null,
       pendingPrompt: null,
       lastAttachments: [],
+      sessionUsage: { input: 0, output: 0, requests: 0 },
     }));
     void useCheckpointsStore.getState().loadForSession(session.id);
   },
@@ -607,4 +627,13 @@ export const useAiStore = create<AiState>((set, get) => ({
   setActivePlanPath: (path: string | null) => set({ activePlanPath: path }),
   setPendingPrompt: (prompt: string | null) => set({ pendingPrompt: prompt }),
   setLastAttachments: (attachments: Attachment[]) => set({ lastAttachments: attachments }),
+
+  recordSessionUsage: (inputTokens: number, outputTokens: number) =>
+    set((s) => ({
+      sessionUsage: {
+        input: s.sessionUsage.input + inputTokens,
+        output: s.sessionUsage.output + outputTokens,
+        requests: s.sessionUsage.requests + 1,
+      },
+    })),
 }));

@@ -2,6 +2,7 @@ import { Type, type Static } from '@sinclair/typebox';
 import type { AgentTool } from '../vendor/types';
 import { txt } from './text-result';
 import type { ApiSignature, ApiSearchHit, GroundingResult } from './api-client';
+import { recordGroundingUnavailable } from '../turn-telemetry';
 
 // Injected dependency — mirrors `unityApiSearch`/`unityApiLookup` from
 // `./api-client` exactly, but as an interface so this module never imports
@@ -104,6 +105,7 @@ export function createUnityApiSearchTool(client: UnityApiClient): AgentTool {
         const { type, member: mem } = splitTypeMember(exactTarget);
         const lookupResult = await client.lookup(type, mem);
         if (!lookupResult.ok) {
+          recordGroundingUnavailable();
           return txt(unavailableText(lookupResult.reason));
         }
         if (lookupResult.data.length > 0) {
@@ -113,6 +115,7 @@ export function createUnityApiSearchTool(client: UnityApiClient): AgentTool {
 
       const searchResult = await client.search(query, { topK: 8 });
       if (!searchResult.ok) {
+        recordGroundingUnavailable();
         return txt(unavailableText(searchResult.reason));
       }
       const hits = searchResult.data;

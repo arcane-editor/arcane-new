@@ -137,6 +137,13 @@ export async function* streamCompletion(req: ChatCompletionRequest, env: Workers
                     type: 'usage',
                     input_tokens: part.totalUsage.inputTokens ?? 0,
                     output_tokens: part.totalUsage.outputTokens ?? 0,
+                    // AI SDK v5: `totalUsage.cachedInputTokens` is deprecated in favor
+                    // of `inputTokenDetails.cacheReadTokens` (checked against the
+                    // installed `ai` package's types). 0/undefined for Workers AI
+                    // today — no prefix-caching provider is wired up yet (see
+                    // AI-SPEC.md "Prompt caching status") — plumbed through now so
+                    // request_logs.cached_input_tokens lights up the day one is.
+                    cached_input_tokens: part.totalUsage.inputTokenDetails.cacheReadTokens ?? 0,
                 };
                 break;
             case 'reasoning-delta':

@@ -12,13 +12,25 @@ interface TurnTelemetry {
   repairCount: number;
   /** Ask-mode grounding-linter revise cycles fired this send (P2.2) — 0 or 1. */
   groundingLintHits: number;
-  /** Repeat-call guard suppressions this send (P3.2) — client-side only; server column is P4. */
+  /** Repeat-call guard suppressions this send (P3.2) — now reported to the server (P4). */
   loopGuardHits: number;
   /**
    * Whether repair-triggered tier escalation (P3.6, `turn-escalation.ts`) has
-   * fired this send — client-side only; server column is P4.
+   * fired this send — now reported to the server (P4).
    */
   escalated: boolean;
+  /** `unity_api_search` tool executions observed this send (P4, `recordTelemetryEvent`). */
+  groundingToolCalls: number;
+  /** `unity_api_search` "ok:false" (grounding UNAVAILABLE) results this send (P4, `api-search-tool.ts`). */
+  groundingUnavailable: number;
+  /**
+   * Wall-clock latency (ms) of the most recently completed LLM request this
+   * send (P4, `arcane-stream.ts`'s `usage` event handling). `null` until the
+   * first request of the send completes — reported one request "behind" by
+   * construction, since the telemetry snapshot for request N is built before
+   * request N's own `usage` event arrives.
+   */
+  lastTurnLatencyMs: number | null;
 }
 
 const EMPTY_TELEMETRY: TurnTelemetry = {
@@ -28,6 +40,9 @@ const EMPTY_TELEMETRY: TurnTelemetry = {
   groundingLintHits: 0,
   loopGuardHits: 0,
   escalated: false,
+  groundingToolCalls: 0,
+  groundingUnavailable: 0,
+  lastTurnLatencyMs: null,
 };
 
 let current: TurnTelemetry = { ...EMPTY_TELEMETRY };
@@ -44,6 +59,24 @@ export function recordGroundingLintHit(): void {
 /** Called once per repeat-call-guard suppression this send (P3.2, `tool-guards.ts`). */
 export function recordLoopGuardHit(): void {
   current.loopGuardHits++;
+}
+
+/**
+ * Called once per `unity_api_search` "ok:false" (grounding UNAVAILABLE) result
+ * this send — imported directly by `api-search-tool.ts` since that's the only
+ * place both the lookup and search unavailable paths are visible (P4).
+ */
+export function recordGroundingUnavailable(): void {
+  current.groundingUnavailable++;
+}
+
+/**
+ * Records the most recently completed LLM request's wall-clock latency this
+ * send (P4, `arcane-stream.ts`'s `usage` event handling). Overwrites on every
+ * call — only the LATEST completed request's latency is kept.
+ */
+export function recordTurnLatency(latencyMs: number): void {
+  current.lastTurnLatencyMs = latencyMs;
 }
 
 /**
@@ -75,9 +108,18 @@ export function nextTurnTelemetry(): TurnTelemetry {
 const REPAIR_MARKERS = ['[Unity compile]', '[Unity analyzers]', '[C# language server]'];
 
 export function recordTelemetryEvent(event: AgentEvent): void {
-  if (event.type === 'tool_execution_end' && event.isError) {
-    current.toolErrorCount++;
-    return;
+  if (event.type === 'tool_execution_end') {
+    // Grounding-tool-call counter (P4): the agent loop emits this event for
+    // every tool execution (including ones the repeat-call guard suppresses
+    // internally), so this is the cleanest existing observation point for
+    // "how many times did the model reach for Unity API grounding this send."
+    if (event.toolName === 'unity_api_search') {
+      current.groundingToolCalls++;
+    }
+    if (event.isError) {
+      current.toolErrorCount++;
+      return;
+    }
   }
   if (event.type === 'message_end' && event.message.role === 'toolResult') {
     const c = event.message.content;

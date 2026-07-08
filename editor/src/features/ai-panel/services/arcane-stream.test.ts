@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, mock } from 'bun:test';
 import type { AssistantMessageEvent, Context, StreamOptions } from './vendor/types';
 import { sleep } from './stream-retry';
+import { resetTurnTelemetry, nextTurnTelemetry } from './turn-telemetry';
 
 // arcane-stream.ts pulls in `useAuthStore` / `useAiStore`, which (via the
 // ai-panel barrel / theme store) transitively touch `document` — fine in the
@@ -24,9 +25,15 @@ mock.module('../../../stores/auth', () => ({
 }));
 
 let aiState: { mode: 'ask' | 'agent' | 'plan' } = { mode: 'ask' };
+let sessionUsageCalls: Array<{ inputTokens: number; outputTokens: number }> = [];
 mock.module('../../../stores/ai', () => ({
   useAiStore: {
-    getState: () => aiState,
+    getState: () => ({
+      ...aiState,
+      recordSessionUsage: (inputTokens: number, outputTokens: number) => {
+        sessionUsageCalls.push({ inputTokens, outputTokens });
+      },
+    }),
   },
 }));
 
@@ -97,6 +104,8 @@ beforeEach(() => {
   authState = { token: 'test-token' };
   logoutCalls = 0;
   aiState = { mode: 'ask' };
+  sessionUsageCalls = [];
+  resetTurnTelemetry();
 });
 
 describe('createArcaneStreamFn', () => {
@@ -352,6 +361,42 @@ describe('createArcaneStreamFn', () => {
     const done = events.find((e) => e.type === 'done') as Extract<AssistantMessageEvent, { type: 'done' }>;
     expect(done).toBeDefined();
     expect(done.message.content[0]).toEqual({ type: 'text', text: 'hello' });
+  });
+
+  it('records a scripted usage event into turn-telemetry latency and the ai store session-usage counter (P4)', async () => {
+    const fetchImpl = (async () =>
+      sseResponse([
+        'data: {"type":"text","content":"hi"}\n\n',
+        'data: {"type":"usage","input_tokens":10,"output_tokens":5}\n\n',
+        'data: [DONE]\n\n',
+      ])) as unknown as typeof fetch;
+
+    const streamFn = createArcaneStreamFn({ fetchImpl });
+    const events = await drain(streamFn(ctx, opts()));
+
+    expect(events.some((e) => e.type === 'done')).toBe(true);
+    expect(sessionUsageCalls).toEqual([{ inputTokens: 10, outputTokens: 5 }]);
+
+    const snapshot = nextTurnTelemetry();
+    expect(snapshot.lastTurnLatencyMs).not.toBeNull();
+    expect(typeof snapshot.lastTurnLatencyMs).toBe('number');
+  });
+
+  it('accumulates session usage across multiple usage events within the same stream', async () => {
+    const fetchImpl = (async () =>
+      sseResponse([
+        'data: {"type":"usage","input_tokens":10,"output_tokens":5}\n\n',
+        'data: {"type":"usage","input_tokens":3,"output_tokens":2}\n\n',
+        'data: [DONE]\n\n',
+      ])) as unknown as typeof fetch;
+
+    const streamFn = createArcaneStreamFn({ fetchImpl });
+    await drain(streamFn(ctx, opts()));
+
+    expect(sessionUsageCalls).toEqual([
+      { inputTokens: 10, outputTokens: 5 },
+      { inputTokens: 3, outputTokens: 2 },
+    ]);
   });
 
   it('surfaces "not logged in" without ever calling fetch', async () => {

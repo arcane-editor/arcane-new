@@ -34,6 +34,12 @@ export interface RequestLogRow {
     tool_error_count: number | null;
     repair_count: number | null;
     cached_input_tokens: number | null;
+    grounding_lint_hits: number | null;
+    loop_guard_hits: number | null;
+    escalated: number | null;
+    grounding_tool_calls: number | null;
+    grounding_unavailable: number | null;
+    last_turn_latency_ms: number | null;
 }
 
 export interface UserWithUsageRow extends UserRow {
@@ -164,17 +170,27 @@ export async function createRequestLog(
         costUsd: number; durationMs: number;
         taskType?: string; turnIndex?: number; toolErrorCount?: number;
         repairCount?: number; cachedInputTokens?: number;
+        // Phase-2/3 harness counters (P4, additive — see migration 0011).
+        groundingLintHits?: number; loopGuardHits?: number; escalated?: boolean;
+        groundingToolCalls?: number; groundingUnavailable?: number;
+        lastTurnLatencyMs?: number | null;
     },
 ): Promise<void> {
     await db.prepare(
         `INSERT INTO request_logs
          (user_id, model, input_tokens, output_tokens, cost_usd, duration_ms,
-          task_type, turn_index, tool_error_count, repair_count, cached_input_tokens)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          task_type, turn_index, tool_error_count, repair_count, cached_input_tokens,
+          grounding_lint_hits, loop_guard_hits, escalated, grounding_tool_calls,
+          grounding_unavailable, last_turn_latency_ms)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).bind(
         data.userId, data.model, data.inputTokens, data.outputTokens, data.costUsd, data.durationMs,
         data.taskType ?? null, data.turnIndex ?? null, data.toolErrorCount ?? null,
         data.repairCount ?? null, data.cachedInputTokens ?? null,
+        data.groundingLintHits ?? null, data.loopGuardHits ?? null,
+        data.escalated === undefined ? null : data.escalated ? 1 : 0,
+        data.groundingToolCalls ?? null, data.groundingUnavailable ?? null,
+        data.lastTurnLatencyMs ?? null,
     ).run();
 }
 

@@ -7,11 +7,13 @@ import {
   recordLoopGuardHit,
   getRepairCount,
   recordEscalation,
+  recordGroundingUnavailable,
+  recordTurnLatency,
 } from './turn-telemetry';
 import type { AgentEvent } from './vendor/types';
 
-const toolEnd = (isError: boolean): AgentEvent =>
-  ({ type: 'tool_execution_end', toolCallId: 't1', toolName: 'edit', result: { content: [] }, isError }) as AgentEvent;
+const toolEnd = (isError: boolean, toolName = 'edit'): AgentEvent =>
+  ({ type: 'tool_execution_end', toolCallId: 't1', toolName, result: { content: [] }, isError }) as AgentEvent;
 
 const repairResult = (text: string): AgentEvent =>
   ({
@@ -75,5 +77,41 @@ describe('turn telemetry', () => {
     expect(nextTurnTelemetry().escalated).toBe(true);
     resetTurnTelemetry();
     expect(nextTurnTelemetry().escalated).toBe(false);
+  });
+
+  it('counts unity_api_search tool executions and resets to 0 per send (P4)', () => {
+    expect(nextTurnTelemetry().groundingToolCalls).toBe(0);
+    recordTelemetryEvent(toolEnd(false, 'unity_api_search'));
+    recordTelemetryEvent(toolEnd(false, 'unity_api_search'));
+    recordTelemetryEvent(toolEnd(false, 'edit')); // other tools don't count
+    expect(nextTurnTelemetry().groundingToolCalls).toBe(2);
+    resetTurnTelemetry();
+    expect(nextTurnTelemetry().groundingToolCalls).toBe(0);
+  });
+
+  it('still counts a failed unity_api_search execution as both a grounding-tool-call and a tool error', () => {
+    recordTelemetryEvent(toolEnd(true, 'unity_api_search'));
+    const snapshot = nextTurnTelemetry();
+    expect(snapshot.groundingToolCalls).toBe(1);
+    expect(snapshot.toolErrorCount).toBe(1);
+  });
+
+  it('counts grounding-unavailable results and resets to 0 per send (P4)', () => {
+    expect(nextTurnTelemetry().groundingUnavailable).toBe(0);
+    recordGroundingUnavailable();
+    recordGroundingUnavailable();
+    expect(nextTurnTelemetry().groundingUnavailable).toBe(2);
+    resetTurnTelemetry();
+    expect(nextTurnTelemetry().groundingUnavailable).toBe(0);
+  });
+
+  it('lastTurnLatencyMs defaults to null, can be recorded, and resets to null per send (P4)', () => {
+    expect(nextTurnTelemetry().lastTurnLatencyMs).toBeNull();
+    recordTurnLatency(1234);
+    expect(nextTurnTelemetry().lastTurnLatencyMs).toBe(1234);
+    recordTurnLatency(42); // overwrites — only the latest completed request's latency is kept
+    expect(nextTurnTelemetry().lastTurnLatencyMs).toBe(42);
+    resetTurnTelemetry();
+    expect(nextTurnTelemetry().lastTurnLatencyMs).toBeNull();
   });
 });

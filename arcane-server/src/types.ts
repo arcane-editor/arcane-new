@@ -29,7 +29,23 @@ export interface ChatCompletionRequest {
         reasoningLevel?: 'low' | 'mid' | 'high' | 'super';
         planPhase?: 'planning' | 'executing';
         sessionId?: string;
-        telemetry?: { turnIndex?: number; toolErrorCount?: number; repairCount?: number };
+        telemetry?: {
+            turnIndex?: number;
+            toolErrorCount?: number;
+            repairCount?: number;
+            /** Ask-mode grounding-linter revise cycles this send (P2.2). */
+            groundingLintHits?: number;
+            /** Repeat-call guard suppressions this send (P3.2). */
+            loopGuardHits?: number;
+            /** Whether repair-triggered tier escalation fired this send (P3.6). */
+            escalated?: boolean;
+            /** `unity_api_search` tool executions this send (P4). */
+            groundingToolCalls?: number;
+            /** `unity_api_search` "ok:false" (grounding UNAVAILABLE) results this send (P4). */
+            groundingUnavailable?: number;
+            /** Wall-clock latency (ms) of the previous request this send, or null (P4). */
+            lastTurnLatencyMs?: number | null;
+        };
     };
 }
 
@@ -66,6 +82,6 @@ export interface ToolCall {
 export type StreamEvent =
     | { type: 'text'; content: string }
     | { type: 'tool_call'; id: string; name: string; arguments: string; finished: boolean }
-    | { type: 'usage'; input_tokens: number; output_tokens: number }
+    | { type: 'usage'; input_tokens: number; output_tokens: number; cached_input_tokens?: number }
     | { type: 'thinking'; thought: string; signature: string }
     | { type: 'error'; message: string };

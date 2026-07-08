@@ -65,3 +65,13 @@ Note: several "Gaps" above are now closed in code — compaction exists (`vendor
 ## Verification
 
 The internal Unity eval lives at `tooling/unity-eval/` (12 seed tasks across codegen / grounding / agentic families, scored by unity-analyzers + file/answer checks against fixture projects). Run: `bun run eval -- --base-url <url> --api-key-env <VAR> --model <id> --label <name>`. Baselines are committed under `tooling/unity-eval/results/baselines/`. Every prompt/model/routing change ships with a before/after run.
+
+## Prompt caching status (2026-07)
+
+No cache breakpoints are sent on any request today, and that's deliberate, not an oversight:
+
+- **Cloudflare Workers AI exposes no prefix-caching / `cache_control` API.** Checked the Workers AI product docs for any mention of prompt caching, `cache_control`, or prefix caching (input-token cost reduction on a repeated prefix, the way Anthropic's/OpenAI's APIs expose it) — found none. Workers AI's own docs page doesn't describe a token-level input-caching mechanism at all.
+- **AI Gateway's caching (the layer we do route through, `CF_AI_GATEWAY_ID`) is exact-match, full-response caching, not prefix caching.** Checked `developers.cloudflare.com/ai-gateway/configuration/caching/`: the cache key hashes the full request body (provider, endpoint, model, auth header, and the *entire* messages/tools/params payload) and any difference — a single changed token anywhere, including the volatile tail — is a full cache miss; on a hit it returns the whole cached response verbatim. That's useless for agentic traffic: every turn's message history differs (new user text, tool results, growing context), so no two agent-loop requests are ever byte-identical, and even if one were, replaying a stale *whole response* isn't what we want mid-loop.
+- **Therefore:** no cache breakpoints are sent, and none would help under either mechanism as they exist today.
+- **The STABLE/VOLATILE prompt split is kept anyway** (`services/prompts/index.ts`'s `decorate()` — stable base prompt + Unity context crib prefix, volatile per-request facts/graph-snapshot tail). It costs nothing to maintain and means the day Workers AI (or a routed alternative provider) adds real prefix-caching, Arcane's request shape already has the stable/volatile boundary in the right place — no prompt-restructuring project required, just wiring a `cache_control`-equivalent onto the existing split.
+- **Skipped (D, optional per P4 brief):** a server-side embedding cache for `/v1/unity/api/search` (same normalized query re-embeds today) — out of scope for this pass; flagged here for a future task.

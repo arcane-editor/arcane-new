@@ -25,7 +25,7 @@ import type {
   AssistantMessage,
 } from './vendor/types';
 import { AssistantMessageEventStream } from './vendor/event-stream';
-import { nextTurnTelemetry } from './turn-telemetry';
+import { nextTurnTelemetry, recordTurnLatency } from './turn-telemetry';
 import { convertToOpenAI } from './openai-format';
 import { combineSignals, computeBackoffMs, isTransient, raceWithTimeout, sleep, TimeoutRaceError } from './stream-retry';
 
@@ -41,6 +41,12 @@ interface ArcaneStreamEvent {
   thought?: string;
   input_tokens?: number;
   output_tokens?: number;
+  /**
+   * Provider-reported cached-prefix input tokens, when available. 0/undefined
+   * today — CF Workers AI exposes no prefix-caching API (see AI-SPEC.md
+   * "Prompt caching status") — parsed here for forward-compatibility only.
+   */
+  cached_input_tokens?: number;
   message?: string;
 }
 
@@ -108,6 +114,11 @@ async function doStream(
   stream: AssistantMessageEventStream,
   cfg: ResolvedArcaneStreamConfig,
 ): Promise<void> {
+  // Wall-clock start for this request's `lastTurnLatencyMs` telemetry (P4) —
+  // covers the full request including any connect retries, since a retried
+  // attempt is still logically the same outgoing turn.
+  const requestStartTime = Date.now();
+
   const token = useAuthStore.getState().token;
   if (!token) {
     stream.push({
@@ -394,7 +405,17 @@ async function doStream(
             });
             return;
           }
-          // 'usage' events are informational — skip for now
+          case 'usage': {
+            // Not pushed through the AssistantMessageEventStream (its event
+            // type is vendor code we don't touch) — recorded directly here
+            // instead: the last-completed-request latency into turn-telemetry
+            // (surfaced to the server on the NEXT request, P4) and a session-
+            // cumulative counter into the ai store (for later UI surfacing;
+            // nothing renders it yet).
+            recordTurnLatency(Date.now() - requestStartTime);
+            useAiStore.getState().recordSessionUsage(event.input_tokens ?? 0, event.output_tokens ?? 0);
+            break;
+          }
         }
       }
     }

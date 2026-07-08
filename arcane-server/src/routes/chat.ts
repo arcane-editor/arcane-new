@@ -53,7 +53,11 @@ async function checkHourlyLimit(db: D1Database, userId: number): Promise<{ allow
 async function logUsage(
     db: D1Database, user: AuthPayload, model: string,
     inputTokens: number, outputTokens: number, durationMs: number,
-    extras: { taskType?: string; turnIndex?: number; toolErrorCount?: number; repairCount?: number; cachedInputTokens?: number },
+    extras: {
+        taskType?: string; turnIndex?: number; toolErrorCount?: number; repairCount?: number; cachedInputTokens?: number;
+        groundingLintHits?: number; loopGuardHits?: number; escalated?: boolean;
+        groundingToolCalls?: number; groundingUnavailable?: number; lastTurnLatencyMs?: number | null;
+    },
 ): Promise<void> {
     const cost = estimateCost(model, inputTokens, outputTokens);
     const periodStart = getCurrentPeriodStart();
@@ -95,6 +99,7 @@ chatRouter.post('/v1/chat/completions', async (c) => {
             const toolCalls: Array<{ id: string; name: string; arguments: string }> = [];
             let inputTokens = 0;
             let outputTokens = 0;
+            let cachedInputTokens = 0;
 
             for await (const event of streamCompletion(body, env)) {
                 if (event.type === 'text') content += event.content;
@@ -102,6 +107,7 @@ chatRouter.post('/v1/chat/completions', async (c) => {
                 if (event.type === 'usage') {
                     inputTokens = event.input_tokens;
                     outputTokens = event.output_tokens;
+                    cachedInputTokens = event.cached_input_tokens ?? 0;
                 }
                 // Surface upstream errors instead of silently returning empty content.
                 if (event.type === 'error') throw new Error(event.message);
@@ -113,6 +119,13 @@ chatRouter.post('/v1/chat/completions', async (c) => {
                 turnIndex: body.metadata?.telemetry?.turnIndex,
                 toolErrorCount: body.metadata?.telemetry?.toolErrorCount,
                 repairCount: body.metadata?.telemetry?.repairCount,
+                cachedInputTokens,
+                groundingLintHits: body.metadata?.telemetry?.groundingLintHits,
+                loopGuardHits: body.metadata?.telemetry?.loopGuardHits,
+                escalated: body.metadata?.telemetry?.escalated,
+                groundingToolCalls: body.metadata?.telemetry?.groundingToolCalls,
+                groundingUnavailable: body.metadata?.telemetry?.groundingUnavailable,
+                lastTurnLatencyMs: body.metadata?.telemetry?.lastTurnLatencyMs,
             });
 
             return c.json({
@@ -150,12 +163,14 @@ chatRouter.post('/v1/chat/completions', async (c) => {
     return streamSSE(c, async (stream) => {
         let inputTokens = 0;
         let outputTokens = 0;
+        let cachedInputTokens = 0;
 
         try {
             for await (const event of streamCompletion(body, env)) {
                 if (event.type === 'usage') {
                     inputTokens = event.input_tokens;
                     outputTokens = event.output_tokens;
+                    cachedInputTokens = event.cached_input_tokens ?? 0;
                 }
                 await stream.writeSSE({ data: JSON.stringify(event) });
             }
@@ -172,6 +187,13 @@ chatRouter.post('/v1/chat/completions', async (c) => {
                 turnIndex: body.metadata?.telemetry?.turnIndex,
                 toolErrorCount: body.metadata?.telemetry?.toolErrorCount,
                 repairCount: body.metadata?.telemetry?.repairCount,
+                cachedInputTokens,
+                groundingLintHits: body.metadata?.telemetry?.groundingLintHits,
+                loopGuardHits: body.metadata?.telemetry?.loopGuardHits,
+                escalated: body.metadata?.telemetry?.escalated,
+                groundingToolCalls: body.metadata?.telemetry?.groundingToolCalls,
+                groundingUnavailable: body.metadata?.telemetry?.groundingUnavailable,
+                lastTurnLatencyMs: body.metadata?.telemetry?.lastTurnLatencyMs,
             });
         }
     });
