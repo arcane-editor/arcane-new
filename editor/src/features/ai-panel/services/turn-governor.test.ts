@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
-import { withTurnGovernor, resetTurnGovernor, DEFAULT_TURN_CAPS, WRAP_UP_TEXT } from './turn-governor';
+import { withTurnGovernor, resetTurnGovernor, grantExtraCalls, DEFAULT_TURN_CAPS, WRAP_UP_TEXT } from './turn-governor';
 import type { Context, StreamFn, StreamOptions } from './vendor/types';
 import { AssistantMessageEventStream } from './vendor/event-stream';
 
@@ -125,5 +125,46 @@ describe('withTurnGovernor', () => {
     governed(CTX, opts(undefined));
 
     expect(calls()[0].tools).toEqual([]); // treated as 'mid', cap 1 reached immediately
+  });
+
+  it('grantExtraCalls(1) at cap allows one more call through untouched', () => {
+    const { streamFn, calls } = recordingStreamFn();
+    const governed = withTurnGovernor(streamFn, () => ({ caps: { mid: 2 } }));
+
+    governed(CTX, opts('mid')); // call 1: below cap
+    governed(CTX, opts('mid')); // call 2: AT cap, stripped
+    grantExtraCalls(1);
+    governed(CTX, opts('mid')); // call 3: extra grant used, untouched
+
+    expect(calls()[1].tools).toEqual([]); // capped
+    expect(calls()[2].tools.length).toBe(1); // grant allowed through
+  });
+
+  it('call after grantExtraCalls grant is consumed stays capped', () => {
+    const { streamFn, calls } = recordingStreamFn();
+    const governed = withTurnGovernor(streamFn, () => ({ caps: { mid: 2 } }));
+
+    governed(CTX, opts('mid')); // call 1
+    governed(CTX, opts('mid')); // call 2: AT cap
+    grantExtraCalls(1);
+    governed(CTX, opts('mid')); // call 3: grant used, untouched
+    governed(CTX, opts('mid')); // call 4: grant consumed, now capped
+
+    expect(calls()[2].tools.length).toBe(1); // grant allowed
+    expect(calls()[3].tools).toEqual([]); // back to capped
+  });
+
+  it('reset clears the extra-calls grant', () => {
+    const { streamFn, calls } = recordingStreamFn();
+    const governed = withTurnGovernor(streamFn, () => ({ caps: { mid: 2 } }));
+
+    governed(CTX, opts('mid')); // call 1: below cap
+    governed(CTX, opts('mid')); // call 2: AT cap, stripped
+    grantExtraCalls(1);
+    resetTurnGovernor();
+    governed(CTX, opts('mid')); // fresh send, call 1 — untouched again
+
+    expect(calls()[1].tools).toEqual([]); // second call was capped
+    expect(calls()[2].tools.length).toBe(1); // reset cleared the grant + reset count, fresh send
   });
 });

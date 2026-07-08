@@ -41,7 +41,7 @@ import {
   resetCompileGate,
 } from './unity-tools';
 import { withCheckpoint } from './checkpoints/checkpoint-gate';
-import { withTurnGovernor, resetTurnGovernor } from './turn-governor';
+import { withTurnGovernor, resetTurnGovernor, grantExtraCalls } from './turn-governor';
 import { withRepeatCallGuard, resetRepeatCallGuard } from './tool-guards';
 import { resetTurnTelemetry, recordTelemetryEvent, recordGroundingLintHit } from './turn-telemetry';
 import {
@@ -426,6 +426,10 @@ export class AgentService {
     useAiStore
       .getState()
       .addSystemMessage(`Grounding check — revising: ${violations.length} project-mismatch issue(s)`);
+    // Reserve a turn for the revise prompt: the shared governor counter already
+    // tracks the main ask-mode send; this grant ensures the revise request can run
+    // even if the main send exhausted its cap (tools stay stripped but we get the message through).
+    grantExtraCalls(1);
     await this.agent.prompt(buildReviseMessage(violations));
   }
 

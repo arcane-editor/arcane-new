@@ -58,11 +58,26 @@ export interface TurnGovernorConfig {
 
 let callCount = 0;
 let noticeFired = false;
+let extraCallsGranted = 0;
 
 /** Reset the per-send call count + notice flag. Call once per user send (mirrors `resetCompileGate`). */
 export function resetTurnGovernor(): void {
   callCount = 0;
   noticeFired = false;
+  extraCallsGranted = 0;
+}
+
+/**
+ * Grant extra calls for the current send only. Used by grounding-lint's revise
+ * turn (P2.2) to bypass the turn cap when running a second `agent.prompt` after
+ * the main send has exhausted the budget. The grant is consumed by the next
+ * over-cap call and cleared by `resetTurnGovernor`.
+ *
+ * **Single intended caller**: agent-service.ts `runGroundingLint`, immediately
+ * before the revise `agent.prompt(buildReviseMessage(...))`.
+ */
+export function grantExtraCalls(n = 1): void {
+  extraCallsGranted += n;
 }
 
 function normalizeEffort(reasoning: string | undefined): Effort {
@@ -115,13 +130,21 @@ export function withTurnGovernor(
     const config = getConfig();
     const cap = config.caps?.[effort] ?? DEFAULT_TURN_CAPS[effort];
 
-    if (callCount < cap) {
+    // Below the cap, pass through untouched. At or beyond the cap, allow only
+    // if an extra call has been granted (e.g., for grounding-lint revise).
+    const exceedsNormalCap = callCount >= cap;
+    const canUseGrant = exceedsNormalCap && extraCallsGranted > 0;
+
+    if (!exceedsNormalCap || canUseGrant) {
+      if (canUseGrant) {
+        extraCallsGranted--;
+      }
       return streamFn(context, options);
     }
 
-    // At the cap, and defensively for any call beyond it (shouldn't happen
-    // once stripping takes effect, but a model could theoretically still
-    // try) — same treatment every time.
+    // At the cap (and no extra grants), and defensively for any call beyond it
+    // (shouldn't happen once stripping takes effect, but a model could
+    // theoretically still try) — same treatment every time.
     if (!noticeFired) {
       noticeFired = true;
       (config.onCapReached ?? defaultOnCapReached)(effort, cap);
