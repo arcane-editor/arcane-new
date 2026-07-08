@@ -16,6 +16,19 @@ const documentVersions = new Map<string, number>();
  */
 const openCounts = new Map<string, number>();
 
+/**
+ * Per-path "generation" counter, bumped by `forgetDocument`. `syncDocumentOpen`
+ * returns the path's current epoch as a claim token; `syncDocumentClose` can
+ * be given that token back to make its close a no-op if a `forgetDocument`
+ * (LSP restart resync) happened in between — see `forgetDocument` for the
+ * failure trace this guards against.
+ */
+const documentEpochs = new Map<string, number>();
+
+function currentEpoch(filePath: string): number {
+  return documentEpochs.get(filePath) ?? 0;
+}
+
 function isSyncablePath(filePath: string): boolean {
   // Ignore virtual/invalid paths (diff://, auth://, empty, etc.)
   return !!filePath && !filePath.includes('://');
@@ -49,20 +62,25 @@ export function getOpenDocumentUris(): Set<string> {
  * to `syncDocumentChange` (existing dedup behavior — callers that "open" an
  * already-tracked file are really just pushing a content update, e.g. the
  * completion provider's defensive re-open path).
+ *
+ * Returns the path's current epoch — a claim token callers that might race a
+ * `forgetDocument` (e.g. an ephemeral diagnostics fetch, see `diagnostics.ts`)
+ * should hold onto and pass back to `syncDocumentClose` so a stale close
+ * can't tear down state a restart resync already rebuilt without them.
  */
 export function syncDocumentOpen(
   client: LspClient,
   filePath: string,
   content: string,
   languageId: string,
-): void {
-  if (!isSyncablePath(filePath)) return;
+): number {
+  if (!isSyncablePath(filePath)) return currentEpoch(filePath);
 
   const count = openCounts.get(filePath) ?? 0;
   if (count > 0) {
     openCounts.set(filePath, count + 1);
     syncDocumentChange(client, filePath, content);
-    return;
+    return currentEpoch(filePath);
   }
 
   const version = 1;
@@ -79,6 +97,7 @@ export function syncDocumentOpen(
     },
   });
   console.info('[LSP] didOpen sent', { filePath, uri, languageId });
+  return currentEpoch(filePath);
 }
 
 /**
@@ -119,12 +138,23 @@ export function syncDocumentChange(
  * version tracking on the 1→0 transition (the last outstanding "open"
  * closing). A close for an untracked path (count already 0, or never opened)
  * is a no-op — the count is never allowed to go negative.
+ *
+ * If `epoch` is provided (the claim token `syncDocumentOpen` returned to this
+ * caller) and it doesn't match the path's CURRENT epoch, the whole close is a
+ * no-op — a `forgetDocument` (LSP restart resync) happened between this
+ * caller's open and its close, so the caller's claim predates state the
+ * resync already rebuilt from scratch; applying it would tear down the
+ * restarted server's tracking for an interest it never actually held. Callers
+ * that don't hold a claim token (real editor-tab close paths) omit `epoch`
+ * and close unconditionally, exactly as before.
  */
 export function syncDocumentClose(
   client: LspClient,
   filePath: string,
+  epoch?: number,
 ): void {
   if (!isSyncablePath(filePath)) return;
+  if (epoch !== undefined && epoch !== currentEpoch(filePath)) return;
 
   const count = openCounts.get(filePath) ?? 0;
   if (count <= 0) return;
@@ -170,6 +200,7 @@ export function syncDocumentSave(
 export function resetDocumentVersions(): void {
   documentVersions.clear();
   openCounts.clear();
+  documentEpochs.clear();
 }
 
 /**
@@ -179,8 +210,20 @@ export function resetDocumentVersions(): void {
  * some ref-count) from before the crash, but the new server has no record of
  * them, so tracking is fully reset to 0 (not merely decremented) regardless
  * of how many outstanding "opens" it had.
+ *
+ * Also bumps the path's epoch, invalidating any claim tokens `syncDocumentOpen`
+ * handed out before this call. Guards a restart-timing race: an ephemeral
+ * open (e.g. `diagnostics.ts`'s one-shot fetch) can be in flight when the LSP
+ * crashes; `handleClientCrash`'s resync calls `forgetDocument` then
+ * `syncDocumentOpen` for the tab's own interest (a fresh 0→1 open under the
+ * new epoch) before the ephemeral fetch's `finally` gets a chance to close
+ * its now-stale pre-crash interest. Without the epoch check, that stale close
+ * would see ref-count 1 and send a REAL `didClose` to the just-restarted
+ * server for a document the tab still considers open, silently breaking sync
+ * for that tab until a full close+reopen.
  */
 export function forgetDocument(filePath: string): void {
   documentVersions.delete(filePath);
   openCounts.delete(filePath);
+  documentEpochs.set(filePath, currentEpoch(filePath) + 1);
 }

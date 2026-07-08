@@ -121,4 +121,95 @@ describe('document-sync ref-counted open tracking', () => {
       'textDocument/didOpen',
     ]);
   });
+
+  // Residual Critical from the P3.3 re-review (trace (c)): tab opens, then an
+  // ephemeral diagnostics fetch opens (count 2). The LSP crashes mid-fetch;
+  // the restart resync (`stores/workspace.ts`) calls `forgetDocument` (hard
+  // reset + epoch bump) then re-opens for the tab (count 0→1, new epoch)
+  // *before* the pre-crash ephemeral fetch's `finally` gets to close. Without
+  // epoch-scoping, that stale close would see ref-count 1 and send a REAL
+  // `didClose` to the freshly-restarted server, silently breaking sync for
+  // the still-open tab.
+  describe('epoch-scoped close (restart-resync race)', () => {
+    it('a stale-epoch close after forgetDocument+resync is a no-op — the doc stays tracked and sync continues (trace c)', () => {
+      const { client, calls } = fakeClient();
+      const path = '/proj/Foo.cs';
+
+      // Tab opens for real (count 0→1).
+      syncDocumentOpen(client, path, 'tab v1', 'csharp');
+      // Ephemeral diagnostics fetch opens while the tab is open (count 1→2);
+      // captures the epoch as its claim token, exactly like
+      // `diagnostics.ts`'s `requestFileDiagnostics` does.
+      const ephemeralEpoch = syncDocumentOpen(client, path, 'ephemeral snapshot', 'csharp');
+
+      // LSP crashes mid-fetch. Restart resync hard-resets tracking and
+      // re-opens for the tab's own interest — a NEW epoch.
+      forgetDocument(path);
+      syncDocumentOpen(client, path, 'tab v1', 'csharp');
+
+      // The pre-crash ephemeral fetch's `finally` now runs, closing with its
+      // now-stale epoch claim — must be a no-op, not a real didClose.
+      syncDocumentClose(client, path, ephemeralEpoch);
+
+      expect(getOpenDocumentUris().has(fileUri(path))).toBe(true);
+      expect(calls.filter((c) => c.method === 'textDocument/didClose')).toEqual([]);
+
+      // The tab's subsequent edits keep syncing — this is exactly what
+      // silently broke before the fix (an unscoped close would have wiped
+      // tracking, turning this into a no-op until a full close+reopen).
+      syncDocumentChange(client, path, 'tab v2');
+      expect(calls.map((c) => c.method)).toEqual([
+        'textDocument/didOpen', // tab's initial open
+        'textDocument/didChange', // ephemeral open dedups (count 1→2)
+        'textDocument/didOpen', // resync's real open after forgetDocument
+        'textDocument/didChange', // tab's post-resync edit
+      ]);
+    });
+
+    it('a stale-epoch close is a no-op even when the ref-count is exactly 1 (would otherwise trigger a real didClose)', () => {
+      const { client, calls } = fakeClient();
+      const path = '/proj/Baz.cs';
+
+      const staleEpoch = syncDocumentOpen(client, path, 'v1', 'csharp'); // epoch 0
+      forgetDocument(path); // epoch → 1, tracking cleared
+      syncDocumentOpen(client, path, 'v2', 'csharp'); // count 0→1 under epoch 1
+
+      syncDocumentClose(client, path, staleEpoch); // stale epoch 0 !== current 1
+
+      expect(getOpenDocumentUris().has(fileUri(path))).toBe(true);
+      expect(calls.filter((c) => c.method === 'textDocument/didClose')).toEqual([]);
+    });
+
+    it('a normal ephemeral open/close pair (no forget in between) still closes properly since the epoch matches', () => {
+      const { client, calls } = fakeClient();
+      const path = '/proj/Qux.cs';
+
+      const epoch = syncDocumentOpen(client, path, 'v1', 'csharp');
+      syncDocumentClose(client, path, epoch);
+
+      expect(getOpenDocumentUris().has(fileUri(path))).toBe(false);
+      expect(calls.map((c) => c.method)).toEqual([
+        'textDocument/didOpen',
+        'textDocument/didClose',
+      ]);
+    });
+
+    it('a close without an epoch arg (user-tab callers) applies unconditionally, even after a forgetDocument bumped the epoch', () => {
+      const { client, calls } = fakeClient();
+      const path = '/proj/Quux.cs';
+
+      syncDocumentOpen(client, path, 'v1', 'csharp');
+      forgetDocument(path); // bumps epoch, clears tracking
+      syncDocumentOpen(client, path, 'v2', 'csharp'); // count 0→1 again
+
+      syncDocumentClose(client, path); // no epoch arg — unconditional, as before the fix
+
+      expect(getOpenDocumentUris().has(fileUri(path))).toBe(false);
+      expect(calls.map((c) => c.method)).toEqual([
+        'textDocument/didOpen',
+        'textDocument/didOpen',
+        'textDocument/didClose',
+      ]);
+    });
+  });
 });

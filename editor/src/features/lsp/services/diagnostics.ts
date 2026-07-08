@@ -11,6 +11,11 @@
 // prior `alreadyOpen`-snapshot approach, which had exactly that race: an
 // ephemeral open that outlived a user opening the same file in a real tab
 // during its settle window would close the tab's backing document on exit).
+// The close also passes back the epoch `syncDocumentOpen` returned, so if an
+// LSP crash/restart resync (`stores/workspace.ts`) races the fetch and calls
+// `forgetDocument` mid-flight, this fetch's now-stale close is a no-op
+// instead of sending a real `didClose` for a document the resync already
+// re-opened under a new epoch (see `document-sync.ts`'s `forgetDocument`).
 //
 // Consumed by the ai-panel's LSP diagnostics gate (`unity-tools/lsp-gate.ts`),
 // which runs inside the agent's tool loop — so this must never hang or throw.
@@ -115,8 +120,10 @@ export async function requestFileDiagnostics(
 
   const uri = fileUri(absPath);
 
+  let epoch: number | undefined;
+
   try {
-    syncDocumentOpen(client, absPath, content, 'csharp');
+    epoch = syncDocumentOpen(client, absPath, content, 'csharp');
 
     const pull = delay(OPEN_SETTLE_MS, undefined).then(() =>
       client
@@ -136,6 +143,6 @@ export async function requestFileDiagnostics(
   } catch {
     return [];
   } finally {
-    syncDocumentClose(client, absPath);
+    syncDocumentClose(client, absPath, epoch);
   }
 }
