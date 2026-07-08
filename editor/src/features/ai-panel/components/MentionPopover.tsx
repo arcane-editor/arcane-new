@@ -120,6 +120,7 @@ function MentionPopover({ open, query, anchorRect, onPick, onClose }: Props) {
     { guid: string; path: string; relPath: string; basename: string }[]
   >([]);
   const [loadingAssets, setLoadingAssets] = useState(false);
+  const [hasFetchedAssets, setHasFetchedAssets] = useState(false);
   const indexStatus = useUnityIndexStore((s) => s.status);
 
   // The category the user has drilled into (null = level-1 category menu).
@@ -179,9 +180,12 @@ function MentionPopover({ open, query, anchorRect, onPick, onClose }: Props) {
   }, [effectiveCategory, open, workspacePath, allFiles.length, loadingFiles, isUnityProject]);
 
   // ─── Lazy-load the guid map when entering the Assets category ────
+  // Gate on index being ready; use hasFetchedAssets to prevent refire on empty guid map.
   useEffect(() => {
     if (effectiveCategory !== 'assets') return;
-    if (!open || !isUnityProject || allAssets.length > 0 || loadingAssets) return;
+    if (!open || !isUnityProject) return;
+    if (indexStatus !== 'ready') return;
+    if (hasFetchedAssets || loadingAssets) return;
     setLoadingAssets(true);
     getGuidMap()
       .then((map) => {
@@ -195,12 +199,14 @@ function MentionPopover({ open, query, anchorRect, onPick, onClose }: Props) {
               basename: p.split('/').pop() ?? p,
             })),
         );
+        setHasFetchedAssets(true);
       })
       .catch(() => {
         /* fail silently */
+        setHasFetchedAssets(true);
       })
       .finally(() => setLoadingAssets(false));
-  }, [effectiveCategory, open, isUnityProject, allAssets.length, loadingAssets, workspacePath]);
+  }, [effectiveCategory, open, isUnityProject, indexStatus, hasFetchedAssets, loadingAssets, workspacePath]);
 
   // ─── Item lists per category ──────────────────────────────────
   const fileItems = useMemo<FileItem[]>(() => {
@@ -336,6 +342,13 @@ function MentionPopover({ open, query, anchorRect, onPick, onClose }: Props) {
   useEffect(() => {
     if (!open) setActiveCategory(null);
   }, [open]);
+
+  // Reset hasFetchedAssets when leaving the Assets category or when index status changes away from ready.
+  useEffect(() => {
+    if (effectiveCategory !== 'assets' || indexStatus !== 'ready') {
+      setHasFetchedAssets(false);
+    }
+  }, [effectiveCategory, indexStatus]);
 
   // Keyboard: ↑/↓ navigate, Enter drills/picks, Backspace steps back a level.
   useEffect(() => {
