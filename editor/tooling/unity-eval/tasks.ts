@@ -116,7 +116,10 @@ export const TASKS: EvalTask[] = [
     prompt: 'How do I change a material\'s main color from a script at runtime in this project?',
     checks: [
       { type: 'answer_matches', pattern: '\\.color\\s*=|"_Color"' },
-      { type: 'answer_not_matches', pattern: '_BaseColor' },
+      // Scoped to the quoted/recommendation form: since P2.1's contrast facts, a
+      // CORRECT answer often explains "_BaseColor is the URP name — wrong here";
+      // bare `_BaseColor` failed those correct contrast answers (phase2 runs).
+      { type: 'answer_not_matches', pattern: '"_BaseColor"' },
     ],
   },
   {
@@ -124,7 +127,9 @@ export const TASKS: EvalTask[] = [
     prompt: 'Show me the idiomatic way to read WASD movement input in this project.',
     checks: [
       { type: 'answer_matches', pattern: 'InputAction|InputSystem|InputValue' },
-      { type: 'answer_not_matches', pattern: 'Input\\.GetAxis' },
+      // Invocation-scoped (same rationale as grounding-deprecated-loadlevel):
+      // correct answers may cite Input.GetAxis only to negate it.
+      { type: 'answer_not_matches', pattern: 'Input\\.GetAxis\\s*\\(' },
     ],
   },
   {
@@ -132,7 +137,9 @@ export const TASKS: EvalTask[] = [
     prompt: 'Show me the idiomatic way to read WASD movement input in this project.',
     checks: [
       { type: 'answer_matches', pattern: 'Input\\.GetAxis' },
-      { type: 'answer_not_matches', pattern: 'UnityEngine\\.InputSystem' },
+      // using-directive-scoped: contrast facts make correct answers mention the
+      // InputSystem package by name to warn against it.
+      { type: 'answer_not_matches', pattern: 'using\\s+UnityEngine\\.InputSystem' },
     ],
   },
 
@@ -234,7 +241,9 @@ export const TASKS: EvalTask[] = [
       // toward "new everything", but `activeInputHandler: 0` makes legacy
       // `Input.GetAxis` the actually-correct answer for this project.
       { type: 'answer_matches', pattern: 'Input\\.GetAxis' },
-      { type: 'answer_not_matches', pattern: 'UnityEngine\\.InputSystem|InputAction' },
+      // Code-recommendation forms only; prose negation ("don't use InputAction
+      // here — the package isn't installed") is a correct grounded answer.
+      { type: 'answer_not_matches', pattern: 'using\\s+UnityEngine\\.InputSystem|new\\s+InputAction' },
     ],
   },
   {
