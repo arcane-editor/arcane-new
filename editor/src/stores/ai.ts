@@ -99,6 +99,18 @@ export interface ClaudeCommand {
   description?: string;
 }
 
+/**
+ * A single entry in Arcane's own in-loop todo list (`todo_update` tool calls,
+ * P3.5). The Claude/ACP sibling of `ClaudePlanEntry` above — kept as a
+ * separate shape (rather than reusing `ClaudePlanEntry`) since the two are
+ * populated by unrelated sources (a local tool call vs. an ACP `plan`
+ * update) and don't need to share a wire format.
+ */
+export interface ArcanePlanEntry {
+  text: string;
+  status: 'pending' | 'in_progress' | 'done';
+}
+
 /** Plan-mode lifecycle. */
 export type PlanPhase = 'idle' | 'planning' | 'awaiting-execute' | 'executing';
 
@@ -129,6 +141,13 @@ interface AiState {
   claudeBridgeRunning: boolean;
   /** Claude's streamed TODO/plan checklist (ACP `plan` update). */
   claudePlan: ClaudePlanEntry[];
+  /**
+   * Arcane's own in-loop todo list, maintained via the `todo_update` tool
+   * (P3.5). `null` means "no list yet this conversation" (distinct from `[]`,
+   * an explicit empty list) so `PlanList` can tell "nothing to show" apart
+   * from "the other agent's plan is what's live".
+   */
+  arcanePlan: ArcanePlanEntry[] | null;
   /** Slash commands the Claude bridge advertises for this session. */
   claudeAvailableCommands: ClaudeCommand[];
   /** Claude's active mode, if it self-switches mid-thread. */
@@ -166,6 +185,7 @@ interface AiState {
   setClaudeEffort: (effort: ClaudeEffort) => void;
   setClaudeBridgeRunning: (running: boolean) => void;
   setClaudePlan: (plan: ClaudePlanEntry[]) => void;
+  setArcanePlan: (plan: ArcanePlanEntry[] | null) => void;
   setClaudeAvailableCommands: (commands: ClaudeCommand[]) => void;
   setClaudeCurrentMode: (mode: string | null) => void;
   setClaudeAcpSessionId: (id: string | null) => void;
@@ -256,6 +276,7 @@ export const useAiStore = create<AiState>((set, get) => ({
   claudeEffort: 'high',
   claudeBridgeRunning: false,
   claudePlan: [],
+  arcanePlan: null,
   claudeAvailableCommands: [],
   claudeCurrentMode: null,
   claudeAcpSessionId: null,
@@ -449,6 +470,7 @@ export const useAiStore = create<AiState>((set, get) => ({
       errorMessage: null,
       sessionId: null,
       claudePlan: [],
+      arcanePlan: null,
       claudeAvailableCommands: [],
       claudeCurrentMode: null,
       claudeAcpSessionId: null,
@@ -477,6 +499,7 @@ export const useAiStore = create<AiState>((set, get) => ({
       claudeEffort: session.claudeEffort ?? s.claudeEffort,
       claudePermissionMode: session.claudePermissionMode ?? s.claudePermissionMode,
       claudePlan: [],
+      arcanePlan: null,
       claudeAvailableCommands: [],
       claudeCurrentMode: null,
       attachments: [],
@@ -499,6 +522,7 @@ export const useAiStore = create<AiState>((set, get) => ({
   setClaudeEffort: (effort: ClaudeEffort) => set({ claudeEffort: effort }),
   setClaudeBridgeRunning: (running: boolean) => set({ claudeBridgeRunning: running }),
   setClaudePlan: (plan: ClaudePlanEntry[]) => set({ claudePlan: plan }),
+  setArcanePlan: (plan: ArcanePlanEntry[] | null) => set({ arcanePlan: plan }),
   setClaudeAvailableCommands: (commands: ClaudeCommand[]) =>
     set({ claudeAvailableCommands: commands }),
   setClaudeCurrentMode: (mode: string | null) => set({ claudeCurrentMode: mode }),

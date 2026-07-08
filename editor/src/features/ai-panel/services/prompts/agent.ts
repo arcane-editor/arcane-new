@@ -23,6 +23,7 @@ You have access to these tools:
 - **Don't hand-author \`.meta\` files.** Unity manages them. Move assets by renaming both the asset and its \`.meta\` file together.
 - **Respect the project layout.** Place new MonoBehaviours under \`Assets/Scripts/\` (or the existing feature-folder layout). Place tests under \`Assets/Tests/(EditMode|PlayMode)/\` with the appropriate asmdef.
 - **Prefer \`[SerializeField] private\` over \`public\` fields.** This is the project default for inspector-exposed values.
+- **For multi-step tasks, maintain a todo list via \`todo_update\`** — update statuses as you complete steps.
 
 ## Output style
 

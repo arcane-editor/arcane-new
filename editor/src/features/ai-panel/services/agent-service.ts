@@ -16,6 +16,7 @@ import { createWriteTool } from './vendor/tools/write';
 import { createEditTool } from './vendor/tools/edit';
 import { createBashTool } from './vendor/tools/bash';
 import { createListTool } from './vendor/tools/list';
+import { createTodoTool } from './todo-tool';
 import {
   createGraphifyExplainTool,
   createGraphifyPathTool,
@@ -95,7 +96,9 @@ function getCurrentWorkspacePath(): string {
 
 /**
  * ASK + PLAN-planning → read + list (no mutations).
- * AGENT and PLAN-execution → all five (read, list, write, edit, bash).
+ * AGENT and PLAN-execution → all five (read, list, write, edit, bash), plus
+ * `todo_update` (P3.5's in-loop todo tool — mutating modes only, since a
+ * read-only conversation has no multi-step work to track).
  *
  * Graphify tools (query, explain, path) are read-only and join every mode
  * when a graph has been built for the workspace.
@@ -198,6 +201,7 @@ function createToolsForPromptMode(mode: PromptMode, workspacePath: string): Agen
       operations: tauriBashOperations,
       allowedRoot,
     }),
+    createTodoTool(),
   ].map(withRepeatCallGuard);
 }
 
@@ -326,6 +330,10 @@ export class AgentService {
     resetRepeatCallGuard();
     // Fresh touched-file registry for the verified-pass closing check (P3.4).
     beginVerifiedPass();
+    // Fresh todo list per user turn (P3.5) — a new send starts with no plan
+    // until the model calls todo_update again, same "cleared on new send"
+    // rule the other per-turn state above follows.
+    useAiStore.getState().setArcanePlan(null);
 
     // Resolve attachments. File + Unity-doc become a text prefix; image
     // attachments become content blocks routed through promptStructured().

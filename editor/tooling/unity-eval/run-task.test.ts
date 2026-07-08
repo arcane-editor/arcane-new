@@ -286,6 +286,16 @@ describe('buildTools', () => {
     expect(names).not.toContain('bash');
   });
 
+  it('includes todo_update in agent mode (P3.5 tool-list parity with prod)', () => {
+    const tools = buildTools({ ...task, mode: 'agent' }, '/tmp/unused', fakeGroundingClient, '2022.3.45f1');
+    expect(tools.map((t) => t.name)).toContain('todo_update');
+  });
+
+  it('excludes todo_update in ask mode (matching prod — mutating modes only)', () => {
+    const tools = buildTools({ ...task, mode: 'ask' }, '/tmp/unused', fakeGroundingClient, '2022.3.45f1');
+    expect(tools.map((t) => t.name)).not.toContain('todo_update');
+  });
+
   it('wraps agent-mode write/edit with the analyzer gate (F-5.3 parity, wrapCs equivalent)', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'eval-buildtools-'));
     try {

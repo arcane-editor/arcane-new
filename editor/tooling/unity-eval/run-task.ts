@@ -13,6 +13,7 @@ import { createListTool } from '../../src/features/ai-panel/services/vendor/tool
 import { createWriteTool } from '../../src/features/ai-panel/services/vendor/tools/write';
 import { createEditTool } from '../../src/features/ai-panel/services/vendor/tools/edit';
 import { createBashTool } from '../../src/features/ai-panel/services/vendor/tools/bash';
+import { createTodoTool, type TodoItem } from '../../src/features/ai-panel/services/todo-tool';
 import type { AgentTool, StreamFn } from '../../src/features/ai-panel/services/vendor/types';
 import { buildAskPrompt } from '../../src/features/ai-panel/services/prompts/ask';
 import { buildAgentPrompt } from '../../src/features/ai-panel/services/prompts/agent';
@@ -94,6 +95,20 @@ export function buildTools(
     createEditTool(workDir, { operations: localEditOperations }),
     workDir,
   );
+  // Eval parity (P3.5): the SAME todo_update tool prod's agent mode gets, so
+  // eval and prod models see an identical toolset (this file's whole premise
+  // — see the module doc comment). There's no ai-store in the eval harness to
+  // push to, so `onUpdate` just captures the latest list into `todoState`
+  // instead of the prod default's store push; nothing reads it today (calls
+  // are already tracked automatically via `tool_execution_start` into
+  // `toolCalls`, same as every other tool, which is what backs the
+  // `tool_called`/`tool_not_called` checks) but capturing real state here
+  // (rather than a bare `() => {}`) mirrors the other DI-seam defaults in
+  // this file and keeps the door open for a future check.
+  const todoState: { items: TodoItem[] } = { items: [] };
+  const todo = createTodoTool((items) => {
+    todoState.items = items;
+  });
   return [
     read,
     list,
@@ -101,6 +116,7 @@ export function buildTools(
     write,
     edit,
     createBashTool(workDir, { operations: localBashOperations }),
+    todo,
   ].map(withRepeatCallGuard);
 }
 
