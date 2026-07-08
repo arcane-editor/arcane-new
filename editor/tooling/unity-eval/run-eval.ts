@@ -6,6 +6,16 @@
  *     --api-key-env CF_API_TOKEN --model @cf/moonshotai/kimi-k2.7-code \
  *     --label cf-mid [--filter grounding] [--reasoning-level high] [--repeats 3]
  *
+ * `--preset cf-low|cf-mid|cf-high|server-mid` (`presets.ts`) fills in
+ * `--base-url`/`--api-key-env`/`--model`/`--reasoning-level`/`--label` from a
+ * known-good per-model config — the `cf-*` presets need `CF_ACCOUNT_ID` +
+ * `CF_API_TOKEN` in the environment (Variant A), `server-mid` needs
+ * `DEV_JWT` against a locally running arcane-server (Variant B; see
+ * README.md). Any explicit flag passed alongside `--preset` overrides that
+ * preset's value for just that field:
+ *
+ *   CF_ACCOUNT_ID=<id> CF_API_TOKEN=<token> bun tooling/unity-eval/run-eval.ts --preset cf-mid
+ *
  * `--repeats N` (default 1) runs each task N times sequentially and reduces
  * the N per-attempt results to one majority verdict per task via
  * `aggregate.ts`'s `aggregateAttempts` (pass iff `passCount >= ceil(N/2)`) —
@@ -39,6 +49,7 @@ import { renderReport } from './report';
 import { aggregateAttempts, type AggregatedTaskResult } from './aggregate';
 import { TASKS } from './tasks';
 import type { TaskResult } from './eval-types';
+import { resolvePreset } from './presets';
 
 const { values } = parseArgs({
   options: {
@@ -48,6 +59,7 @@ const { values } = parseArgs({
     label: { type: 'string' },
     filter: { type: 'string' },
     'reasoning-level': { type: 'string' },
+    preset: { type: 'string' },
     record: { type: 'boolean', default: false },
     'server-url': { type: 'string', default: 'http://localhost:8787' },
     'recordings-dir': { type: 'string' },
@@ -55,13 +67,34 @@ const { values } = parseArgs({
   },
 });
 
-const baseUrl = values['base-url'];
-const apiKeyEnv = values['api-key-env'];
-const model = values.model;
-const label = (values.label ?? model ?? 'run').replace(/[^\w.@-]/g, '-');
-const reasoningLevel = values['reasoning-level'];
+let resolved: ReturnType<typeof resolvePreset>;
+try {
+  resolved = resolvePreset(
+    values.preset,
+    {
+      baseUrl: values['base-url'],
+      apiKeyEnv: values['api-key-env'],
+      model: values.model,
+      reasoningLevel: values['reasoning-level'],
+      label: values.label,
+    },
+    process.env,
+  );
+} catch (err) {
+  console.error(err instanceof Error ? err.message : String(err));
+  process.exit(1);
+}
+
+const baseUrl = resolved.baseUrl;
+const apiKeyEnv = resolved.apiKeyEnv;
+const model = resolved.model;
+const label = (resolved.label ?? model ?? 'run').replace(/[^\w.@-]/g, '-');
+const reasoningLevel = resolved.reasoningLevel;
 if (!baseUrl || !apiKeyEnv || !model) {
-  console.error('Required: --base-url --api-key-env --model. See file header.');
+  console.error(
+    'Required: --base-url --api-key-env --model (or --preset cf-low|cf-mid|cf-high|server-mid). ' +
+      'See file header.',
+  );
   process.exit(1);
 }
 const apiKey = process.env[apiKeyEnv];

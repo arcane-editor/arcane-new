@@ -14,6 +14,7 @@ function mkResult(pass: boolean): TaskResult {
     outputTokens: 0,
     groundingCacheMisses: 0,
     recordFailures: 0,
+    toolCalls: [],
   };
 }
 

@@ -143,6 +143,13 @@ export async function runTask(
 
   const maxTurns = task.maxTurns ?? DEFAULT_MAX_TURNS;
   let turns = 0;
+  // Chronological tool names for the whole run, backing the
+  // `tool_called`/`tool_not_called` checks (`checks.ts`). Recorded on
+  // `tool_execution_start` — i.e. at actual execution, not merely when the
+  // model *requests* a tool call (a request that errors out before dispatch,
+  // e.g. a schema-invalid call, would never reach execution) — so this list
+  // reflects tools that genuinely ran.
+  const toolCalls: string[] = [];
   // Soft cap: turn_start fires and the next LLM call dispatches in the same
   // tick, while this abort lands asynchronously via the event listener — so
   // the loop may execute one extra turn before it actually stops. The
@@ -151,6 +158,8 @@ export async function runTask(
     if (event.type === 'turn_start') {
       turns++;
       if (turns > maxTurns) agent.abort();
+    } else if (event.type === 'tool_execution_start') {
+      toolCalls.push(event.toolName);
     }
   });
 
@@ -176,7 +185,7 @@ export async function runTask(
     error = `max turns exceeded (${turns} > ${maxTurns})`;
   }
 
-  const checks = await runChecks(task.checks, { workDir, finalAnswer });
+  const checks = await runChecks(task.checks, { workDir, finalAnswer, toolCalls });
   if (!opts?.keepWorkDir) await rm(workDir, { recursive: true, force: true });
 
   return {
@@ -191,5 +200,6 @@ export async function runTask(
     error,
     groundingCacheMisses: 'misses' in apiClient ? apiClient.misses : 0,
     recordFailures: 'recordFailures' in apiClient ? apiClient.recordFailures : 0,
+    toolCalls,
   };
 }

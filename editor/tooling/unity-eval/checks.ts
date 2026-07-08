@@ -47,7 +47,7 @@ async function tryRead(workDir: string, rel: string): Promise<string | null> {
 
 async function runOne(
   spec: CheckSpec,
-  ctx: { workDir: string; finalAnswer: string },
+  ctx: { workDir: string; finalAnswer: string; toolCalls?: string[] },
 ): Promise<CheckOutcome> {
   switch (spec.type) {
     case 'file_exists': {
@@ -83,12 +83,22 @@ async function runOne(
       const want = spec.type === 'answer_matches';
       return { spec, pass: hit === want, detail: `answer pattern ${hit ? 'matched' : 'did not match'}` };
     }
+    case 'tool_called':
+    case 'tool_not_called': {
+      const called = (ctx.toolCalls ?? []).includes(spec.tool);
+      const want = spec.type === 'tool_called';
+      return {
+        spec,
+        pass: called === want,
+        detail: `tool "${spec.tool}" ${called ? 'was called' : 'was not called'}`,
+      };
+    }
   }
 }
 
 export async function runChecks(
   specs: CheckSpec[],
-  ctx: { workDir: string; finalAnswer: string },
+  ctx: { workDir: string; finalAnswer: string; toolCalls?: string[] },
 ): Promise<CheckOutcome[]> {
   const out: CheckOutcome[] = [];
   for (const spec of specs) out.push(await runOne(spec, ctx));

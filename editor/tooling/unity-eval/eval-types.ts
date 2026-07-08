@@ -4,7 +4,11 @@ export type CheckSpec =
   | { type: 'file_not_contains'; path: string; pattern: string; flags?: string }
   | { type: 'analyzer_clean'; glob: string }
   | { type: 'answer_matches'; pattern: string; flags?: string }
-  | { type: 'answer_not_matches'; pattern: string; flags?: string };
+  | { type: 'answer_not_matches'; pattern: string; flags?: string }
+  // Asserts a tool (by its `AgentTool.name`, e.g. `unity_api_search`) was, or
+  // was not, executed at least once during the run — see `TaskResult.toolCalls`.
+  | { type: 'tool_called'; tool: string }
+  | { type: 'tool_not_called'; tool: string };
 
 export interface EvalTask {
   id: string;
@@ -25,6 +29,10 @@ export interface TaskResult {
   wallMs: number;
   inputTokens: number;
   outputTokens: number;
+  // Chronological list of every tool name actually executed during the run
+  // (recorded on `tool_execution_start`, once per execution — see
+  // `run-task.ts`). Backs the `tool_called`/`tool_not_called` checks.
+  toolCalls: string[];
   error?: string;
   // Unity grounding tool (`unity_api_search`) cache misses against the
   // recorded fixtures — see `api-recordings.ts`. Always 0 in `--record` mode

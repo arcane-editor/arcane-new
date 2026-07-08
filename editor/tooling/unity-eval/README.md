@@ -11,14 +11,22 @@ too much into a single number.
 
 ## What it is
 
-12 seed tasks across three families:
+24 tasks across three families:
 
-- **codegen** (4) — agent mode, asked to create/extend a script. Scored by
+- **codegen** (8) — agent mode, asked to create/extend a script. Scored by
   `file_exists` / `file_contains` / `file_not_contains` + `analyzer_clean`.
-- **grounding** (4) — ask mode, asked a question with a version/pipeline-
-  dependent correct answer (URP vs Built-in color property, new Input System
-  vs legacy `Input.GetAxis`). Scored by `answer_matches` / `answer_not_matches`
-  against the model's final text answer.
+  4 of the 8 are grounding-heavy "trap" tasks on `urp2022-legacyinput` (see
+  below): the correct code still has to use *this project's* legacy input
+  approach and URP/Lit shader property despite the render pipeline being URP.
+- **grounding** (12) — ask mode, asked a question with a version/pipeline-
+  dependent correct answer (URP vs Built-in color/texture property, new Input
+  System vs legacy `Input.GetAxis`, deprecated-API awareness). Scored by
+  `answer_matches` / `answer_not_matches` against the model's final text
+  answer, and — for the three tasks where the correct answer is an exact
+  property/shader-name string the injected facts block doesn't itself state
+  (`grounding-urp-texture`, `grounding-urp-shader-name`,
+  `grounding-trap-shader`) — a `tool_called: unity_api_search` check that the
+  model actually grounded itself instead of guessing.
 - **agentic** (4) — agent mode, multi-step tasks requiring investigation
   (find a bug, not just apply a patch) and Unity-safe editing (e.g. rename a
   serialized field without losing Inspector-set values). Scored by file
@@ -71,6 +79,47 @@ bun run eval -- --base-url <url> --api-key-env <ENV_VAR> --model <model-id> --la
   `passCount >= ceil(N/2)` — see `aggregate.ts`). Use this to separate a real
   regression from run-to-run noise (see "Run-to-run variance is real" below)
   at the cost of an `N`×increase in requests/cost/time.
+
+### Per-model presets (`--preset`)
+
+`--preset cf-low|cf-mid|cf-high|server-mid` (`presets.ts`) fills in
+`--base-url`/`--api-key-env`/`--model`/`--reasoning-level`/`--label` from a
+known-good config for that model/tier, so you don't have to hand-copy model
+ids out of `arcane-server/src/config/plans.ts`'s `INTENSITY_CONFIG`. Any
+explicit flag passed alongside `--preset` overrides that preset's value for
+just that field. Preset labels mirror `results/baselines/` naming
+(`cf-mid-kimi-k2.7`, `cf-high-glm-5.2`) so a preset run's result JSON slots in
+next to the existing baselines without a rename.
+
+| Preset | Model | Needs |
+|---|---|---|
+| `cf-low` | `@cf/qwen/qwen2.5-coder-32b-instruct` | `CF_ACCOUNT_ID`, `CF_API_TOKEN` |
+| `cf-mid` | `@cf/moonshotai/kimi-k2.7-code` | `CF_ACCOUNT_ID`, `CF_API_TOKEN` |
+| `cf-high` | `@cf/zai-org/glm-5.2` | `CF_ACCOUNT_ID`, `CF_API_TOKEN` |
+| `server-mid` | (server-routed, Variant B) | `DEV_JWT` against a local `wrangler dev` arcane-server |
+
+Single preset:
+
+```bash
+cd editor && CF_ACCOUNT_ID=<id> CF_API_TOKEN=<token> bun run eval -- --preset cf-mid
+```
+
+Matrix — run every `cf-*` preset back to back (e.g. before/after a harness or
+prompt change):
+
+```bash
+cd editor
+for preset in cf-low cf-mid cf-high; do
+  CF_ACCOUNT_ID=<id> CF_API_TOKEN=<token> bun run eval -- --preset "$preset" --label "$preset-after"
+done
+```
+
+**Every harness, prompt, or routing change must be validated against at
+least `cf-low` and `cf-mid` before merging** — `cf-low` is the tier most
+likely to expose a prompt/tool change that only works when the model is
+already strong, and `cf-mid` is today's production default; a change that
+only gets tested against `cf-high` can silently regress the two tiers most
+users actually run on.
 
 ### Results JSON
 
@@ -195,7 +244,7 @@ Add an entry to the `TASKS` array in `tasks.ts`:
 {
   id: 'family-short-slug',              // unique, kebab-case
   family: 'codegen' | 'grounding' | 'agentic',
-  fixture: 'builtin-legacy' | 'urp-newinput',
+  fixture: 'builtin-legacy' | 'urp-newinput' | 'urp2022-legacyinput',
   mode: 'agent' | 'ask',                // 'ask' gets no write/edit/bash tools
   prompt: 'What to ask the agent.',
   checks: [ /* one or more CheckSpec */ ],
@@ -215,9 +264,21 @@ Check types (`eval-types.ts`):
 | `analyzer_clean` | `glob` | no error-severity `editor-api-in-runtime` findings across matched files |
 | `answer_matches` | `pattern`, `flags?` | regex matches the model's final text answer |
 | `answer_not_matches` | `pattern`, `flags?` | regex does not match the model's final text answer |
+| `tool_called` | `tool` | the named tool (`AgentTool.name`, e.g. `unity_api_search`) was executed at least once during the run |
+| `tool_not_called` | `tool` | the named tool was never executed during the run |
+
+`tool_called`/`tool_not_called` are scored against `TaskResult.toolCalls` — a
+chronological list of tool names recorded on the agent loop's
+`tool_execution_start` event (`run-task.ts`), i.e. tools that actually ran,
+not merely ones the model attempted to call. Available in both `ask` and
+`agent` mode, since Unity grounding tools (`unity_api_search`,
+`get_unity_docs`) are wired into every mode (see "Grounding tools" below).
 
 A task passes only if every check passes and the run didn't error out or
-exceed `maxTurns`.
+exceed `maxTurns`. `tasks.test.ts` runs pure structural self-tests over the
+whole `TASKS` array (unique ids, fixtures that exist on disk, valid check
+kinds, ask-mode tasks never asserting a file-mutation check, agent-mode
+codegen tasks always asserting at least one file check) — no LLM involved.
 
 ## Fixtures
 
@@ -260,7 +321,11 @@ but wrong ones.
   from `ProjectSettings.asset` — the same authoritative source production's
   `detectInputSystem` uses — specifically so this fixture reports "legacy"
   correctly instead of guessing "new" from the render pipeline or the
-  missing package.
+  missing package. Also home to six of the tasks added to grow the suite
+  past its original 12: `grounding-trap-shader`/`grounding-trap-input` (the
+  same trap from both directions — URP-correct shader property, legacy-
+  correct input) and four `codegen-trap-*` tasks that ask the agent to write
+  code and check it lands on the right side of the trap.
 
 ## Baseline results
 
@@ -273,6 +338,13 @@ in `results/baselines/`.
 |---|---|---|---|---|---|---|
 | cf-mid-kimi-k2.7 | @cf/moonshotai/kimi-k2.7-code | 4/4 | 3/4 | 4/4 | **11/12** | 174k/12.6k |
 | cf-high-glm-5.2 | @cf/zai-org/glm-5.2 | 4/4 | 2/4 | 4/4 | **10/12** | 154k/11.2k |
+
+**These predate the 12→24 task grow (P1.6)** — they were captured against
+the original 4/4/4 suite and the counts/percentages above don't reflect the
+current 8 codegen / 12 grounding / 4 agentic split. Re-capture via
+`--preset cf-mid`/`--preset cf-high` (or `cf-low`, not yet baselined) to get
+numbers comparable to the current suite before drawing conclusions from a
+diff against the table below.
 
 What failed, concretely — every failure across both runs is **pipeline/input
 grounding**, exactly the gap the design doc targets:
