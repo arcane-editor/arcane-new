@@ -1,0 +1,14 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!129 &1
+PlayerSettings:
+  m_ObjectHideFlags: 0
+  serializedVersion: 26
+  productGUID: 00000000000000000000000000000000
+  companyName: DefaultCompany
+  productName: urp2022-legacyinput
+  defaultScreenOrientation: 4
+  targetDevice: 2
+  useOnDemandResources: 0
+  accelerometerFrequency: 60
+  activeInputHandler: 0

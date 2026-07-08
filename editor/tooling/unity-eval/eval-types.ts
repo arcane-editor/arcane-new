@@ -9,7 +9,7 @@ export type CheckSpec =
 export interface EvalTask {
   id: string;
   family: 'codegen' | 'grounding' | 'agentic';
-  fixture: 'builtin-legacy' | 'urp-newinput';
+  fixture: 'builtin-legacy' | 'urp-newinput' | 'urp2022-legacyinput';
   mode: 'ask' | 'agent';
   prompt: string;
   checks: CheckSpec[];

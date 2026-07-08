@@ -221,7 +221,7 @@ exceed `maxTurns`.
 
 ## Fixtures
 
-Two minimal Unity project skeletons live under `fixtures/`, each with a real
+Three minimal Unity project skeletons live under `fixtures/`, each with a real
 `ProjectSettings/ProjectVersion.txt` and `Packages/manifest.json` so
 `fixture-facts.ts` can derive version/pipeline/input facts the same way the
 real app's `unity-facts.ts` does — this is what lets the grounding tasks
@@ -247,6 +247,20 @@ but wrong ones.
 - **`urp-newinput`** — Universal Render Pipeline, new Input System.
   - `Assets/Scripts/Health.cs` — a minimal `MonoBehaviour` with `maxHealth`/
     `Current`, extended by `codegen-damage-event`.
+- **`urp2022-legacyinput`** — the trap fixture: Universal Render Pipeline
+  (2022.3 LTS) with the project still pinned to the LEGACY Input Manager
+  (`ProjectSettings/ProjectSettings.asset`'s `activeInputHandler: 0`), and no
+  `com.unity.inputsystem` package in the manifest either way. This is the
+  cross-combination that breaks two shortcuts at once: inferring input
+  system from package presence (there's nothing to infer from — the package
+  is simply absent, same as `builtin-legacy`), and a model's training-default
+  assumption that "URP project" implies "new Input System" (they're
+  independent settings; plenty of real projects pair one render pipeline
+  with either input system). `fixture-facts.ts` reads `activeInputHandler`
+  from `ProjectSettings.asset` — the same authoritative source production's
+  `detectInputSystem` uses — specifically so this fixture reports "legacy"
+  correctly instead of guessing "new" from the render pipeline or the
+  missing package.
 
 ## Baseline results
 

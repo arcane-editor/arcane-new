@@ -8,6 +8,15 @@ import { join } from 'node:path';
 
 type RenderPipeline = 'URP' | 'HDRP' | 'Built-in';
 
+/** Tri-state Unity input-system configuration (see `detectInputSystemState` below). */
+type InputSystemState = 'Legacy' | 'New' | 'Both';
+
+const INPUT_SYSTEM_WORDING: Record<InputSystemState, string> = {
+  Legacy: 'Input Manager (legacy)',
+  New: 'Input System (new)',
+  Both: 'Both (Input Manager + Input System)',
+};
+
 /**
  * Structured equivalent of the grounding context production derives via
  * `getUnityGroundingContext()` (`ai-panel/services/prompts/unity-facts.ts`)
@@ -18,13 +27,50 @@ type RenderPipeline = 'URP' | 'HDRP' | 'Built-in';
 export interface FixtureGroundingContext {
   unityVersion: string;
   renderPipeline: RenderPipeline;
-  inputSystem: 'New' | 'Legacy';
+  inputSystem: InputSystemState;
 }
 
 interface RawFixtureFacts {
   version: string;
   pipeline: RenderPipeline;
-  isNewInput: boolean;
+  inputSystem: InputSystemState;
+}
+
+async function tryRead(path: string): Promise<string | null> {
+  try {
+    return await readFile(path, 'utf8');
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Bun-safe PORT of `detectInputSystem` (`ai-panel/services/prompts/
+ * unity-facts.ts`, ~lines 54-62): `ProjectSettings/ProjectSettings.asset`'s
+ * `activeInputHandler` is Unity's authoritative input-system flag (0 =
+ * legacy Input Manager, 1 = new Input System, 2 = both) — NOT
+ * `com.unity.inputsystem` package presence, which is only a proxy and gets
+ * it wrong for a project that added/kept the package without ever switching
+ * `Edit > Project Settings > Player > Active Input Handling` (or the
+ * reverse: switched to the new Input System while the package is still
+ * present under a different name/version). Package presence is used below
+ * ONLY as a fallback for fixtures that ship no `ProjectSettings.asset` at
+ * all (matching this file's pre-existing fixtures, none of which have one).
+ */
+async function detectInputSystemState(
+  fixtureDir: string,
+  hasInputSystemPkg: boolean,
+): Promise<InputSystemState> {
+  const projectSettings = await tryRead(
+    join(fixtureDir, 'ProjectSettings', 'ProjectSettings.asset'),
+  );
+  if (projectSettings) {
+    const m = projectSettings.match(/activeInputHandler:\s*(\d)/);
+    if (m) {
+      return m[1] === '0' ? 'Legacy' : m[1] === '1' ? 'New' : 'Both';
+    }
+  }
+  return hasInputSystemPkg ? 'New' : 'Legacy';
 }
 
 async function detectFixtureFacts(fixtureDir: string): Promise<RawFixtureFacts> {
@@ -45,18 +91,19 @@ async function detectFixtureFacts(fixtureDir: string): Promise<RawFixtureFacts> 
       ? 'HDRP'
       : 'Built-in';
 
-  return { version, pipeline, isNewInput: !!deps['com.unity.inputsystem'] };
+  const inputSystem = await detectInputSystemState(fixtureDir, !!deps['com.unity.inputsystem']);
+
+  return { version, pipeline, inputSystem };
 }
 
 export async function buildFixtureFacts(fixtureDir: string): Promise<string> {
-  const { version, pipeline, isNewInput } = await detectFixtureFacts(fixtureDir);
-  const input = isNewInput ? 'Input System (new)' : 'Input Manager (legacy)';
+  const { version, pipeline, inputSystem } = await detectFixtureFacts(fixtureDir);
 
   return [
     '## Unity project facts (authoritative — match these)',
     `- Unity version: ${version}`,
     `- Render pipeline: ${pipeline}`,
-    `- Input system: ${input}`,
+    `- Input system: ${INPUT_SYSTEM_WORDING[inputSystem]}`,
   ].join('\n');
 }
 
@@ -68,6 +115,6 @@ export async function buildFixtureFacts(fixtureDir: string): Promise<string> {
  * production's `getUnityGroundingContext()` does.
  */
 export async function buildFixtureGroundingContext(fixtureDir: string): Promise<FixtureGroundingContext> {
-  const { version, pipeline, isNewInput } = await detectFixtureFacts(fixtureDir);
-  return { unityVersion: version, renderPipeline: pipeline, inputSystem: isNewInput ? 'New' : 'Legacy' };
+  const { version, pipeline, inputSystem } = await detectFixtureFacts(fixtureDir);
+  return { unityVersion: version, renderPipeline: pipeline, inputSystem };
 }
