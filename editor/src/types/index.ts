@@ -109,6 +109,7 @@ export interface SettingsSchema {
   'graphify.autoRebuildOnSave': boolean;
   'graphify.rebuildOnCommit': boolean;
   'graphify.suppressFirstOpenToast': boolean;
+  'ai.checkpoints.enabled': boolean;
   'unity.analyzers.enabled': boolean;
   'unity.compileGate.enabled': boolean;
   'unity.lspGate.enabled': boolean;

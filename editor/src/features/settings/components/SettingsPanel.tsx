@@ -34,6 +34,7 @@ const SETTING_DEFINITIONS: SettingDefinition[] = [
       "'Courier New', monospace",
     ], category: 'Terminal', label: 'Font Family', description: 'Controls the font family of the terminal. System fonts only — web fonts cause cell-measurement issues in xterm.' },
   { key: 'terminal.cursorBlink', type: 'boolean', category: 'Terminal', label: 'Cursor Blink', description: 'Controls whether the terminal cursor blinks.' },
+  { key: 'ai.checkpoints.enabled', type: 'boolean', category: 'AI', label: 'Checkpoints', description: 'Snapshot files before the AI writes to them, so you can restore a turn (and everything after it) from the chat timeline.' },
   { key: 'unity.analyzers.enabled', type: 'boolean', category: 'Unity', label: 'Analyzers', description: 'Enable Unity-aware static analyzers (incorrect API usage, lifecycle ordering, etc.).' },
   { key: 'unity.compileGate.enabled', type: 'boolean', category: 'Unity', label: 'AI Compile Verification', description: 'After the AI writes C#, recompile via the Unity bridge and feed real compiler errors back so it self-corrects (requires a connected Unity Editor).' },
   { key: 'unity.lspGate.enabled', type: 'boolean', category: 'Unity', label: 'AI Language Server Verification', description: 'After the AI writes C#, check the language server for diagnostic errors and feed them back so it self-corrects — works even without a connected Unity Editor.' },

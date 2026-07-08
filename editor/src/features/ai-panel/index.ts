@@ -14,6 +14,13 @@ export { restoreLatestSessionForWorkspace } from './services/session-restore';
 export { fixConsoleError } from './services/fix-console-error';
 export type { VerifiedCardData } from './services/verified-pass';
 export { summarizeSceneDiff } from './services/summarize-scene-diff';
+export { computeRestorePlan, getSkippedTooLargePaths } from './services/checkpoints/restore-plan';
+export type {
+  CheckpointEntry,
+  CheckpointTurn,
+  RestorePlanEntry,
+} from './services/checkpoints/restore-plan';
+export { saveCheckpoints, loadCheckpoints } from './services/checkpoints/checkpoint-store-io';
 export type {
   AgentKind,
   Attachment,

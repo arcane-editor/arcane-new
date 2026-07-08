@@ -10,6 +10,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { homeDir, join } from '@tauri-apps/api/path';
 import type { AiMessage } from '../../../stores/ai';
+import { deleteCheckpointsFile } from './checkpoints/checkpoint-store-io';
 import type {
   AgentKind,
   ChatMode,
@@ -171,6 +172,9 @@ export async function deleteSession(sessionId: string): Promise<void> {
   } catch (error) {
     console.warn('Failed to delete session:', error);
   }
+  // GC (P5.2): co-delete this session's checkpoint file — the checkpoint
+  // sibling of a `.meta` co-delete. Best-effort; a missing file is fine.
+  await deleteCheckpointsFile(sessionId).catch(() => {});
 }
 
 /** Rename (re-title) a session in place. */

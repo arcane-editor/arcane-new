@@ -11,6 +11,7 @@ import PlanActions from './PlanActions';
 import ClaudePlanList from './ClaudePlanList';
 import PermissionRequestBlock from './PermissionRequestBlock';
 import VerifiedCard from './VerifiedCard';
+import CheckpointRow from './CheckpointRow';
 
 function MessageList() {
   const messages = useAiStore((s) => s.messages);
@@ -41,7 +42,12 @@ function MessageList() {
         const node = (() => {
           switch (msg.role) {
             case 'user':
-              return <UserMessage key={msg.id} message={msg} />;
+              return (
+                <div key={msg.id}>
+                  <UserMessage message={msg} />
+                  <CheckpointRow userMessageId={msg.id} />
+                </div>
+              );
             case 'assistant':
               return (
                 <AssistantMessage

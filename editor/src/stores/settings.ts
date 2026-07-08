@@ -20,6 +20,7 @@ const DEFAULT_SETTINGS: SettingsSchema = {
   'graphify.autoRebuildOnSave': false,
   'graphify.rebuildOnCommit': false,
   'graphify.suppressFirstOpenToast': false,
+  'ai.checkpoints.enabled': true,
   'unity.analyzers.enabled': true,
   'unity.compileGate.enabled': true,
   'unity.lspGate.enabled': true,

@@ -40,6 +40,7 @@ import {
   withLspDiagnosticsGate,
   resetCompileGate,
 } from './unity-tools';
+import { withCheckpoint } from './checkpoints/checkpoint-gate';
 import { resetTurnTelemetry, recordTelemetryEvent, recordGroundingLintHit } from './turn-telemetry';
 import {
   beginVerifiedPass,
@@ -52,6 +53,7 @@ import { useAuthStore } from '../../../stores/auth';
 import { useWorkspaceStore } from '../../../stores/workspace';
 import { useProjectContextStore } from '../../../stores/project-context';
 import { useSettingsStore } from '../../../stores/settings';
+import { useCheckpointsStore } from '../../../stores/checkpoints';
 import { buildSystemPrompt, defaultPromptModeFor, type PromptMode } from './prompts';
 import { getUnityGroundingContext } from './prompts/unity-facts';
 import type { ContrastFacts } from './prompts/unity-contrast';
@@ -175,13 +177,19 @@ function createToolsForPromptMode(mode: PromptMode, workspacePath: string): Agen
     return g;
   };
 
+  // Checkpoints (P5.2): snapshot the pre-write content before delegating to the
+  // raw write/edit tool, so a turn can be restored later. It sits INSIDE the
+  // cs-gates (wrapCs wraps the checkpoint-wrapped tool, not the other way
+  // around) so snapshots happen right next to the actual write — P5.3 will
+  // later insert an approval gate OUTSIDE the checkpoint; today's order is
+  // just gates(checkpoint(tool)).
   return [
     ...readOnly,
     ...graphTools,
     ...unityRead,
     ...(isUnity ? createUnityMutateTools() : []),
-    wrapCs(writeTool),
-    wrapCs(editTool),
+    wrapCs(withCheckpoint(writeTool, workspacePath)),
+    wrapCs(withCheckpoint(editTool, workspacePath)),
     createBashTool(workspacePath, {
       operations: tauriBashOperations,
       allowedRoot,
@@ -278,6 +286,17 @@ export class AgentService {
       }
       useAiStore.getState().setError('Sign in to use AI.');
       return;
+    }
+
+    // Checkpoints (P5.2): open a new turn for this send so any writes the
+    // agent makes get grouped under it for later restore. Requires a
+    // sessionId — set by `addUserMessage`/`agent_start` before every normal
+    // composer send, but a handful of auxiliary entry points (fixConsoleError)
+    // can reach here before one exists; skip rather than mistag the turn with
+    // a throwaway id (the next send in that conversation checkpoints normally).
+    const sessionIdForTurn = useAiStore.getState().sessionId;
+    if (sessionIdForTurn) {
+      useCheckpointsStore.getState().beginTurn(sessionIdForTurn, this.currentUserMessageId());
     }
 
     const promptMode: PromptMode = opts.promptMode ?? defaultPromptModeFor(opts.mode);
@@ -428,6 +447,21 @@ export class AgentService {
       // runVerifiedPass is already defensive per-step; this is just an extra
       // safety net so a verified-pass failure never surfaces as a send error.
     }
+  }
+
+  /**
+   * The AiMessage id of the most recent user message — the checkpoint turn's
+   * anchor for CheckpointRow. Falls back to a synthesized id on the rare path
+   * that reaches `sendMessage` without one (see the `sessionIdForTurn` guard
+   * above; this only runs when that guard already found a sessionId, which in
+   * practice means `addUserMessage` ran first).
+   */
+  private currentUserMessageId(): string {
+    const messages = useAiStore.getState().messages;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === 'user') return messages[i].id;
+    }
+    return `turn_${Date.now()}`;
   }
 
   abort(): void {

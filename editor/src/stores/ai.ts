@@ -24,6 +24,7 @@ import {
   type VerifiedCardData,
 } from '../features/ai-panel';
 import { useWorkspaceStore } from './workspace';
+import { useCheckpointsStore } from './checkpoints';
 import { notify } from './notifications';
 
 // ---- UI-friendly message types ----
@@ -439,7 +440,7 @@ export const useAiStore = create<AiState>((set, get) => ({
 
   flushSessionNow: () => flushSave(),
 
-  resetConversation: () =>
+  resetConversation: () => {
     set({
       messages: [],
       streamingMessageId: null,
@@ -456,9 +457,11 @@ export const useAiStore = create<AiState>((set, get) => ({
       activePlanPath: null,
       pendingPrompt: null,
       lastAttachments: [],
-    }),
+    });
+    useCheckpointsStore.getState().reset();
+  },
 
-  loadSessionIntoStore: (session: SessionData) =>
+  loadSessionIntoStore: (session: SessionData) => {
     set((s) => ({
       messages: session.messages ?? [],
       streamingMessageId: null,
@@ -481,7 +484,9 @@ export const useAiStore = create<AiState>((set, get) => ({
       activePlanPath: null,
       pendingPrompt: null,
       lastAttachments: [],
-    })),
+    }));
+    void useCheckpointsStore.getState().loadForSession(session.id);
+  },
 
   setMode: (mode: ChatMode) => set({ mode }),
 

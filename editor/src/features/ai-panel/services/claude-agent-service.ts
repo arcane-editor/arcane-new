@@ -18,6 +18,8 @@ import { invoke } from '@tauri-apps/api/core';
 import { ClaudeAcpClient, type AcpInstallInfo } from './claude-acp-client';
 import { useAiStore, type PermissionOption } from '../../../stores/ai';
 import { useWorkspaceStore } from '../../../stores/workspace';
+import { useSettingsStore } from '../../../stores/settings';
+import { useCheckpointsStore } from '../../../stores/checkpoints';
 import { resolveAttachments } from './attachments';
 import { loadMcpServers } from './mcp-config';
 import type {
@@ -324,6 +326,14 @@ class ClaudeAgentService {
 
     const ai = useAiStore.getState();
 
+    // Checkpoints (P5.2): open a new turn so `handleFsWrite`'s pre-write
+    // snapshots below get grouped for later restore. See the matching guard
+    // in agent-service.ts's sendMessage for why a missing sessionId means
+    // skipping rather than mistagging the turn.
+    if (ai.sessionId) {
+      useCheckpointsStore.getState().beginTurn(ai.sessionId, this.currentUserMessageId());
+    }
+
     // Resolve @-context + images into ACP content blocks before the turn starts
     // so attachment errors surface immediately.
     const prompt = await this.buildPromptBlocks(text, attachments);
@@ -626,8 +636,27 @@ class ClaudeAgentService {
   }
 
   private async handleFsWrite(params: AcpFsWriteParams): Promise<null> {
+    // Checkpoints (P5.2): snapshot the pre-write content before the actual
+    // write, same rule as the Arcane path's checkpoint-gate.ts — read-before-
+    // write is the only order that captures the pre-image at all. ACP
+    // fs/write_text_file paths are absolute per spec, so no cwd resolution
+    // needed here (unlike checkpoint-gate.ts, which resolves the vendor
+    // write/edit tools' relative-or-absolute path convention).
+    if (useSettingsStore.getState().getSetting('ai.checkpoints.enabled') !== false) {
+      const before = await invoke<string>('read_file', { path: params.path }).catch(() => null);
+      useCheckpointsStore.getState().recordPreWrite(params.path, before);
+    }
     await invoke('write_file', { path: params.path, contents: params.content });
     return null;
+  }
+
+  /** The AiMessage id of the most recent user message — mirrors agent-service.ts's helper. */
+  private currentUserMessageId(): string {
+    const messages = useAiStore.getState().messages;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === 'user') return messages[i].id;
+    }
+    return `turn_${Date.now()}`;
   }
 
   private handlePermissionRequest(

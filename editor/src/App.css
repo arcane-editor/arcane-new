@@ -3659,6 +3659,66 @@ html, body, #root {
   color: var(--text-secondary);
 }
 
+/* ---- AI Panel: Checkpoint row (P5.2 restore timeline) ---- */
+.ai-checkpoint-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 12px 8px 40px;
+  padding: 3px 0;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.ai-checkpoint-icon {
+  flex-shrink: 0;
+  opacity: 0.6;
+}
+.ai-checkpoint-label {
+  white-space: nowrap;
+}
+.ai-checkpoint-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 10.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+.ai-checkpoint-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--text-primary) 6%, transparent);
+  color: var(--text-primary);
+}
+.ai-checkpoint-btn.is-confirming {
+  border-color: color-mix(in srgb, var(--error-text, #dc2626) 45%, var(--border));
+  color: var(--error-text, #dc2626);
+}
+.ai-checkpoint-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+.ai-checkpoint-spinner {
+  animation: ai-checkpoint-spin 0.8s linear infinite;
+}
+@keyframes ai-checkpoint-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.ai-checkpoint-result {
+  color: var(--text-secondary);
+  opacity: 0.85;
+}
+
 /* ---- AI Panel: Verified-pass card (P3.4) ---- */
 .ai-verified-card {
   margin: 8px 12px;
