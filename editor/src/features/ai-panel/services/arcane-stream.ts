@@ -2,6 +2,14 @@
  * Arcane server streaming integration.
  * Implements the StreamFn that replaces PI's direct provider calls
  * with calls to the Arcane Cloudflare Workers server.
+ *
+ * Hardening (P3.1): the initial connect (fetch + non-OK response) is
+ * retried with linear backoff on network errors / 429 / 5xx, bounded by a
+ * per-attempt connect timeout; once SSE bytes start arriving, an idle-gap
+ * watchdog aborts the read if no chunk arrives for too long. Both timeouts
+ * exist because Cloudflare Workers AI has, in practice, hung for as long as
+ * ~53 minutes with no response — see `stream-retry.ts` and the eval
+ * harness's `eval-stream.ts`, which share the same primitives.
  */
 
 import { useAuthStore } from '../../../stores/auth';
@@ -9,11 +17,13 @@ import { useAiStore } from '../../../stores/ai';
 import type {
   Context,
   StreamOptions,
+  StreamFn,
   AssistantMessage,
 } from './vendor/types';
 import { AssistantMessageEventStream } from './vendor/event-stream';
 import { nextTurnTelemetry } from './turn-telemetry';
 import { convertToOpenAI } from './openai-format';
+import { combineSignals, computeBackoffMs, isTransient, raceWithTimeout, sleep, TimeoutRaceError } from './stream-retry';
 
 const ARCANE_SERVER_URL = 'https://api.arcaneai.org';
 
@@ -30,31 +40,69 @@ interface ArcaneStreamEvent {
   message?: string;
 }
 
-/**
- * StreamFn implementation that calls the Arcane server.
- * Converts PI's context format to OpenAI-compatible format,
- * streams SSE events, and converts them to PI's AssistantMessageEvent format.
- */
-export function arcaneStream(
-  context: Context,
-  options: StreamOptions,
-): AssistantMessageEventStream {
-  const stream = new AssistantMessageEventStream();
-
-  doStream(context, options, stream).catch((error) => {
-    stream.push({
-      type: 'error',
-      error: error instanceof Error ? error : new Error(String(error)),
-    });
-  });
-
-  return stream;
+export interface ArcaneStreamHardeningConfig {
+  /** Injectable for tests; defaults to global `fetch`. Production call sites never pass this. */
+  fetchImpl?: typeof fetch;
+  /** Total attempts (including the first) for the initial connect phase, before any SSE byte is read. Default 3. */
+  maxAttempts?: number;
+  /** Linear backoff base: delay before retry N is `retryBaseDelayMs * N` (default 5000 -> 5s, 10s). */
+  retryBaseDelayMs?: number;
+  /** Per-attempt connect timeout, matching the eval harness's hardening. Default 180_000ms. */
+  connectTimeoutMs?: number;
+  /** Idle-gap watchdog once streaming: abort if no SSE chunk arrives within this window. Default 90_000ms. */
+  idleTimeoutMs?: number;
 }
+
+interface ResolvedArcaneStreamConfig {
+  fetchImpl: typeof fetch;
+  maxAttempts: number;
+  retryBaseDelayMs: number;
+  connectTimeoutMs: number;
+  idleTimeoutMs: number;
+}
+
+function abortedMessage(): AssistantMessage {
+  return { role: 'assistant', content: [], stopReason: 'aborted', timestamp: Date.now() };
+}
+
+/**
+ * Builds a StreamFn against the Arcane server with the given hardening
+ * config. Exists mainly so tests can inject a fake `fetch` and tiny
+ * timeouts/attempt counts; production uses the pre-built `arcaneStream`
+ * below (defaults only, real `fetch`) so the `agent-service.ts` call site
+ * (`streamFn: arcaneStream`) never changes.
+ */
+export function createArcaneStreamFn(config: ArcaneStreamHardeningConfig = {}): StreamFn {
+  const resolved: ResolvedArcaneStreamConfig = {
+    fetchImpl: config.fetchImpl ?? fetch,
+    maxAttempts: config.maxAttempts ?? 3,
+    retryBaseDelayMs: config.retryBaseDelayMs ?? 5_000,
+    connectTimeoutMs: config.connectTimeoutMs ?? 180_000,
+    idleTimeoutMs: config.idleTimeoutMs ?? 90_000,
+  };
+
+  return (context: Context, options: StreamOptions): AssistantMessageEventStream => {
+    const stream = new AssistantMessageEventStream();
+
+    doStream(context, options, stream, resolved).catch((error) => {
+      stream.push({
+        type: 'error',
+        error: error instanceof Error ? error : new Error(String(error)),
+      });
+    });
+
+    return stream;
+  };
+}
+
+/** Production StreamFn — default hardening config, real `fetch`. */
+export const arcaneStream: StreamFn = createArcaneStreamFn();
 
 async function doStream(
   context: Context,
   options: StreamOptions,
   stream: AssistantMessageEventStream,
+  cfg: ResolvedArcaneStreamConfig,
 ): Promise<void> {
   const token = useAuthStore.getState().token;
   if (!token) {
@@ -87,7 +135,11 @@ async function doStream(
   // server still clamps to the model's published max). Q&A rarely needs 8k;
   // agentic edits / plans can. Caps the output cost driver alongside compaction.
   const maxTokensByTask = { chat: 16384, plan: 24576, edit: 24576 } as const;
-  const body = {
+  // Built once and sent unchanged on every retry attempt below: telemetry's
+  // `turnIndex` increments once per agent-loop turn, so a retried attempt
+  // (still the same logical turn/request) must not inflate it by calling
+  // `nextTurnTelemetry()` again per attempt.
+  const requestBody = JSON.stringify({
     messages,
     tools: tools.length > 0 ? tools : undefined,
     stream: true,
@@ -98,48 +150,83 @@ async function doStream(
       reasoningLevel: options.reasoning ?? 'mid',
       telemetry: nextTurnTelemetry(),
     },
-  };
+  });
 
-  let response: Response;
-  try {
-    response = await fetch(`${ARCANE_SERVER_URL}/v1/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify(body),
-      signal: options.signal,
-    });
-  } catch (error) {
-    if (error instanceof DOMException && error.name === 'AbortError') {
-      stream.push({
-        type: 'done',
-        message: {
-          role: 'assistant',
-          content: [],
-          stopReason: 'aborted',
-          timestamp: Date.now(),
+  let response: Response | undefined;
+
+  for (let attempt = 1; attempt <= cfg.maxAttempts; attempt++) {
+    const signal = combineSignals([options.signal, AbortSignal.timeout(cfg.connectTimeoutMs)]);
+
+    let attemptResponse: Response;
+    try {
+      attemptResponse = await cfg.fetchImpl(`${ARCANE_SERVER_URL}/v1/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
         },
+        body: requestBody,
+        signal,
       });
-      return;
+    } catch (error) {
+      // A genuine caller cancellation (user hit stop / navigated away) is
+      // not a transient failure worth retrying — surface the existing
+      // clean "aborted" done event immediately, same as before hardening.
+      // (Our own per-attempt connect timeout above also throws here, but
+      // `options.signal` — the *caller's* signal — won't be aborted in
+      // that case, so it falls through to the retry path below instead.)
+      if (options.signal?.aborted) {
+        stream.push({ type: 'done', message: abortedMessage() });
+        return;
+      }
+      if (attempt >= cfg.maxAttempts) {
+        throw error instanceof Error ? error : new Error(String(error));
+      }
+      const delay = computeBackoffMs(attempt, cfg.retryBaseDelayMs);
+      try {
+        await sleep(delay, options.signal);
+      } catch {
+        stream.push({ type: 'done', message: abortedMessage() });
+        return;
+      }
+      continue;
     }
-    throw error;
+
+    if (!attemptResponse.ok) {
+      if (attemptResponse.status === 401 || attemptResponse.status === 403) {
+        // Expired/revoked token: clear local auth state so the Arcane
+        // sign-in gate appears and we avoid repeated unauthorized calls.
+        // Never retried — a retry would just repeat the same 401/403.
+        await useAuthStore.getState().logout().catch(() => {});
+        throw new Error('Authentication expired. Please log in again.');
+      }
+
+      if (isTransient(attemptResponse.status) && attempt < cfg.maxAttempts) {
+        const delay = computeBackoffMs(attempt, cfg.retryBaseDelayMs);
+        try {
+          await sleep(delay, options.signal);
+        } catch {
+          stream.push({ type: 'done', message: abortedMessage() });
+          return;
+        }
+        continue;
+      }
+
+      const errorText = await attemptResponse.text().catch(() => 'Unknown error');
+      if (attemptResponse.status === 429) {
+        throw new Error('Rate limit exceeded. Please wait a moment and try again.');
+      }
+      throw new Error(`Server error (${attemptResponse.status}): ${errorText}`);
+    }
+
+    response = attemptResponse;
+    break;
   }
 
-  if (!response.ok) {
-    const errorText = await response.text().catch(() => 'Unknown error');
-    if (response.status === 401 || response.status === 403) {
-      // Expired/revoked token: clear local auth state so the Arcane sign-in
-      // gate appears and we avoid repeated unauthorized calls.
-      await useAuthStore.getState().logout().catch(() => {});
-      throw new Error('Authentication expired. Please log in again.');
-    }
-    if (response.status === 429) {
-      throw new Error('Rate limit exceeded. Please wait a moment and try again.');
-    }
-    throw new Error(`Server error (${response.status}): ${errorText}`);
-  }
+  // Unreachable in practice: the loop above always either returns, throws,
+  // or sets `response` before falling out. Guards TypeScript's control-flow
+  // analysis of `response`.
+  if (!response) throw new Error('Arcane stream: exhausted retries with no response');
 
   if (!response.body) {
     throw new Error('No response body');
@@ -148,7 +235,9 @@ async function doStream(
   // Emit start event
   stream.push({ type: 'start' });
 
-  // Parse SSE stream
+  // Parse SSE stream. From here on, failures are NOT retried — partial
+  // content already delivered to the caller can't be replayed into a fresh
+  // request.
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
@@ -159,7 +248,18 @@ async function doStream(
 
   try {
     while (true) {
-      const { done, value } = await reader.read();
+      // Idle-gap watchdog: race each read individually rather than keeping a
+      // persistent resettable timer, so the guarded gap is naturally "time
+      // since the last chunk" (or since the stream started, for the first
+      // chunk) with no separate reset bookkeeping.
+      const { done, value } = await raceWithTimeout(
+        reader.read(),
+        cfg.idleTimeoutMs,
+        `Stream stalled — no data for ${cfg.idleTimeoutMs}ms`,
+        () => {
+          reader.cancel().catch(() => {});
+        },
+      );
       if (done) break;
 
       buffer += decoder.decode(value, { stream: true });
@@ -278,6 +378,22 @@ async function doStream(
         }
       }
     }
+  } catch (err) {
+    if (err instanceof TimeoutRaceError) {
+      stream.push({
+        type: 'error',
+        error: err,
+        partial: {
+          role: 'assistant',
+          content: contentBlocks,
+          stopReason: 'error',
+          errorMessage: err.message,
+          timestamp: Date.now(),
+        },
+      });
+      return;
+    }
+    throw err;
   } finally {
     reader.releaseLock();
   }

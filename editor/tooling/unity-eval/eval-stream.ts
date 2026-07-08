@@ -6,6 +6,7 @@
 
 import { AssistantMessageEventStream } from '../../src/features/ai-panel/services/vendor/event-stream';
 import { convertToOpenAI } from '../../src/features/ai-panel/services/openai-format';
+import { combineSignals, computeBackoffMs, isTransient, sleep } from '../../src/features/ai-panel/services/stream-retry';
 import type {
   StreamFn,
   AssistantMessage,
@@ -66,10 +67,6 @@ interface OpenAIChatResponse {
   usage?: { prompt_tokens?: number; completion_tokens?: number };
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 // Pre-existing eval default, used only when no `requestState` is supplied —
 // preserves existing direct constructions/tests that don't thread one
 // through. Real eval runs (`run-eval.ts`) always pass a `requestState` so
@@ -102,9 +99,7 @@ export function createEvalStreamFn(
         // only added below, from the eventual successful response.
         usage.requests++;
 
-        const signals: AbortSignal[] = [AbortSignal.timeout(requestTimeoutMs)];
-        if (options.signal) signals.push(options.signal);
-        const signal = AbortSignal.any(signals);
+        const signal = combineSignals([AbortSignal.timeout(requestTimeoutMs), options.signal]);
 
         let res: Response;
         try {
@@ -129,21 +124,20 @@ export function createEvalStreamFn(
           if (options.signal?.aborted) throw err instanceof Error ? err : new Error(String(err));
           const reason = err instanceof Error ? err.message : String(err);
           if (attempt >= maxAttempts) throw err instanceof Error ? err : new Error(reason);
-          const delay = retryBaseDelayMs * attempt;
+          const delay = computeBackoffMs(attempt, retryBaseDelayMs);
           console.error(`[eval-stream] ${cfg.label} attempt ${attempt} failed (${reason}); retrying in ${delay}ms`);
-          await sleep(delay);
+          await sleep(delay, options.signal);
           continue;
         }
 
         if (!res.ok) {
           const bodyText = await res.text();
-          const transient = res.status === 429 || res.status >= 500;
-          if (transient && attempt < maxAttempts) {
-            const delay = retryBaseDelayMs * attempt;
+          if (isTransient(res.status) && attempt < maxAttempts) {
+            const delay = computeBackoffMs(attempt, retryBaseDelayMs);
             console.error(
               `[eval-stream] ${cfg.label} attempt ${attempt} failed (HTTP ${res.status}); retrying in ${delay}ms`,
             );
-            await sleep(delay);
+            await sleep(delay, options.signal);
             continue;
           }
           throw new Error(`${cfg.label} HTTP ${res.status}: ${bodyText}`);
