@@ -9,7 +9,11 @@
  * watchdog aborts the read if no chunk arrives for too long. Both timeouts
  * exist because Cloudflare Workers AI has, in practice, hung for as long as
  * ~53 minutes with no response — see `stream-retry.ts` and the eval
- * harness's `eval-stream.ts`, which share the same primitives.
+ * harness's `eval-stream.ts`, which share the same primitives. The connect
+ * timeout is a plain, cancellable `AbortController` (not `AbortSignal.
+ * timeout()`, which can't be disarmed) — it's cleared the moment the
+ * connect phase succeeds, so it never governs the SSE read loop; only the
+ * idle-gap watchdog does once streaming has started.
  */
 
 import { useAuthStore } from '../../../stores/auth';
@@ -155,41 +159,57 @@ async function doStream(
   let response: Response | undefined;
 
   for (let attempt = 1; attempt <= cfg.maxAttempts; attempt++) {
-    const signal = combineSignals([options.signal, AbortSignal.timeout(cfg.connectTimeoutMs)]);
+    // Dedicated connect-phase timeout: a plain `AbortController` we control
+    // directly, NOT `AbortSignal.timeout()` — that timer can't be cancelled,
+    // so it would keep running past a successful connect and abort the SSE
+    // reader mid-stream once it fires (Finding 1). The `finally` below
+    // clears it the instant this attempt's fetch settles — success or
+    // failure — so it only ever bounds "time to first response," never the
+    // read loop that follows a successful connect.
+    const connectController = new AbortController();
+    const connectTimer = setTimeout(() => connectController.abort(), cfg.connectTimeoutMs);
+    const signal = combineSignals([options.signal, connectController.signal]);
 
     let attemptResponse: Response;
     try {
-      attemptResponse = await cfg.fetchImpl(`${ARCANE_SERVER_URL}/v1/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: requestBody,
-        signal,
-      });
-    } catch (error) {
-      // A genuine caller cancellation (user hit stop / navigated away) is
-      // not a transient failure worth retrying — surface the existing
-      // clean "aborted" done event immediately, same as before hardening.
-      // (Our own per-attempt connect timeout above also throws here, but
-      // `options.signal` — the *caller's* signal — won't be aborted in
-      // that case, so it falls through to the retry path below instead.)
-      if (options.signal?.aborted) {
-        stream.push({ type: 'done', message: abortedMessage() });
-        return;
-      }
-      if (attempt >= cfg.maxAttempts) {
-        throw error instanceof Error ? error : new Error(String(error));
-      }
-      const delay = computeBackoffMs(attempt, cfg.retryBaseDelayMs);
       try {
-        await sleep(delay, options.signal);
-      } catch {
-        stream.push({ type: 'done', message: abortedMessage() });
-        return;
+        attemptResponse = await cfg.fetchImpl(`${ARCANE_SERVER_URL}/v1/chat/completions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: requestBody,
+          signal,
+        });
+      } catch (error) {
+        // A genuine caller cancellation (user hit stop / navigated away) is
+        // not a transient failure worth retrying — surface the existing
+        // clean "aborted" done event immediately, same as before hardening.
+        // (Our own per-attempt connect timeout above also throws here, but
+        // `options.signal` — the *caller's* signal — won't be aborted in
+        // that case, so it falls through to the retry path below instead.)
+        if (options.signal?.aborted) {
+          stream.push({ type: 'done', message: abortedMessage() });
+          return;
+        }
+        if (attempt >= cfg.maxAttempts) {
+          throw error instanceof Error ? error : new Error(String(error));
+        }
+        const delay = computeBackoffMs(attempt, cfg.retryBaseDelayMs);
+        try {
+          await sleep(delay, options.signal);
+        } catch {
+          stream.push({ type: 'done', message: abortedMessage() });
+          return;
+        }
+        continue;
       }
-      continue;
+    } finally {
+      // Disarm regardless of outcome: a successful connect must not carry
+      // this timer into the read loop, and a failed/retried attempt must
+      // not leak it into the next iteration's lifetime.
+      clearTimeout(connectTimer);
     }
 
     if (!attemptResponse.ok) {

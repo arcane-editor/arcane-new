@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, mock } from 'bun:test';
 import type { AssistantMessageEvent, Context, StreamOptions } from './vendor/types';
+import { sleep } from './stream-retry';
 
 // arcane-stream.ts pulls in `useAuthStore` / `useAiStore`, which (via the
 // ai-panel barrel / theme store) transitively touch `document` — fine in the
@@ -50,6 +51,46 @@ async function drain(events: AsyncIterable<AssistantMessageEvent>): Promise<Assi
   const collected: AssistantMessageEvent[] = [];
   for await (const ev of events) collected.push(ev);
   return collected;
+}
+
+/** Like `sseResponse`, but drips one chunk every `chunkDelayMs` instead of
+ * enqueueing everything synchronously — used to simulate a stream whose
+ * total lifetime exceeds the connect timeout while each individual gap
+ * stays well under the idle-timeout threshold.
+ *
+ * Critically, this wires `signal` into the stream the same way a real
+ * `fetch()` response body does: if the signal the request was made with
+ * later aborts *while the body is still being read*, the read errors out.
+ * That's the actual mechanism behind Finding 1 — passing a signal into
+ * `fetch` doesn't just gate the connect phase, it keeps observing that
+ * signal for the lifetime of the body read, so a fake that ignores `signal`
+ * entirely can't reproduce the bug it's meant to guard against. */
+function delayedSseResponse(chunks: string[], chunkDelayMs: number, signal?: AbortSignal, status = 200): Response {
+  let index = 0;
+  const body = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      if (signal?.aborted) {
+        controller.error(new DOMException('The operation was aborted.', 'TimeoutError'));
+        return;
+      }
+      if (index >= chunks.length) {
+        controller.close();
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, chunkDelayMs));
+      if (signal?.aborted) {
+        controller.error(new DOMException('The operation was aborted.', 'TimeoutError'));
+        return;
+      }
+      controller.enqueue(new TextEncoder().encode(chunks[index]));
+      index++;
+    },
+    cancel() {
+      // no-op: mirrors a real stream's cancel() being a no-op once the
+      // reader has already errored/closed.
+    },
+  });
+  return new Response(body, { status });
 }
 
 beforeEach(() => {
@@ -242,6 +283,75 @@ describe('createArcaneStreamFn', () => {
     expect(events.some((e) => e.type === 'text_delta')).toBe(true);
     expect(events.some((e) => e.type === 'error')).toBe(true);
     expect(events.some((e) => e.type === 'done')).toBe(false);
+  });
+
+  it('does not abort a long-lived stream once connected — the connect timer is disarmed after a successful connect (Finding 1 regression guard)', async () => {
+    // connectTimeoutMs (50ms) is deliberately much smaller than the stream's
+    // total lifetime (~100ms across 5 chunks @ 20ms apart) — each individual
+    // gap stays well under the (default, 90s) idle threshold. Before the
+    // fix, the old `AbortSignal.timeout(connectTimeoutMs)` kept ticking
+    // after a successful connect and aborted the reader once it fired,
+    // regardless of how healthy the stream was.
+    let calls = 0;
+    const fetchImpl = (async (_url: string, init?: { signal?: AbortSignal }) => {
+      calls++;
+      await sleep(10); // connects well within the 50ms connect timeout
+      // Thread the real fetch signal through, same as production's `fetch`
+      // would — this is what makes the test capable of catching Finding 1
+      // (see `delayedSseResponse`'s doc comment).
+      return delayedSseResponse(
+        [
+          'data: {"type":"text","content":"a"}\n\n',
+          'data: {"type":"text","content":"b"}\n\n',
+          'data: {"type":"text","content":"c"}\n\n',
+          'data: {"type":"text","content":"d"}\n\n',
+          'data: {"type":"text","content":"e"}\n\n',
+          'data: [DONE]\n\n',
+        ],
+        20,
+        init?.signal,
+      );
+    }) as unknown as typeof fetch;
+
+    const streamFn = createArcaneStreamFn({ fetchImpl, connectTimeoutMs: 50 });
+    const events = await drain(streamFn(ctx, opts()));
+
+    expect(calls).toBe(1); // never retried — the connect timer never fired after a successful connect
+    expect(events.some((e) => e.type === 'error')).toBe(false);
+    const done = events.find((e) => e.type === 'done') as Extract<AssistantMessageEvent, { type: 'done' }>;
+    expect(done).toBeDefined();
+    const text = done.message.content.map((c) => (c.type === 'text' ? c.text : '')).join('');
+    expect(text).toBe('abcde');
+  });
+
+  it('retries when the connect phase itself exceeds connectTimeoutMs, then succeeds — a timed-out connect is transient, not a caller abort', async () => {
+    let calls = 0;
+    const fetchImpl = ((_url: string, init?: { signal?: AbortSignal }) => {
+      calls++;
+      const attemptNumber = calls;
+      return new Promise<Response>((resolve, reject) => {
+        if (attemptNumber === 1) {
+          // Never resolves on its own — only reacts to the connect
+          // timeout's own abort signal, same as real `fetch` rejecting once
+          // its `AbortController` fires. No caller signal is involved here
+          // (`opts()` below passes none), so this must NOT be treated as a
+          // caller cancellation — it must fall into the retry path.
+          init?.signal?.addEventListener('abort', () => {
+            reject(new DOMException('The operation was aborted.', 'TimeoutError'));
+          });
+          return;
+        }
+        resolve(sseResponse(['data: {"type":"text","content":"hello"}\n\n', 'data: [DONE]\n\n']));
+      });
+    }) as unknown as typeof fetch;
+
+    const streamFn = createArcaneStreamFn({ fetchImpl, connectTimeoutMs: 20, retryBaseDelayMs: 1 });
+    const events = await drain(streamFn(ctx, opts()));
+
+    expect(calls).toBe(2); // first attempt's connect-phase timeout fired -> retried, not treated as a caller abort
+    const done = events.find((e) => e.type === 'done') as Extract<AssistantMessageEvent, { type: 'done' }>;
+    expect(done).toBeDefined();
+    expect(done.message.content[0]).toEqual({ type: 'text', text: 'hello' });
   });
 
   it('surfaces "not logged in" without ever calling fetch', async () => {

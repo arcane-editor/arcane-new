@@ -126,15 +126,14 @@ describe('raceWithTimeout', () => {
   });
 
   it('rejects with a TimeoutRaceError and invokes onTimeout when the inner promise never settles in time', async () => {
-    const onTimeout = mock(() => {});
     const neverSettles = new Promise<string>(() => {});
     await expect(raceWithTimeout(neverSettles, 20, 'stalled')).rejects.toThrow(TimeoutRaceError);
-    expect(onTimeout).toHaveBeenCalledTimes(0); // not passed in this call
-    const onTimeout2 = mock(() => {});
-    await expect(raceWithTimeout(new Promise(() => {}), 20, 'stalled', onTimeout2)).rejects.toMatchObject({
+
+    const onTimeout = mock(() => {});
+    await expect(raceWithTimeout(new Promise(() => {}), 20, 'stalled', onTimeout)).rejects.toMatchObject({
       name: 'TimeoutRaceError',
       message: 'stalled',
     });
-    expect(onTimeout2).toHaveBeenCalledTimes(1);
+    expect(onTimeout).toHaveBeenCalledTimes(1);
   });
 });

@@ -2,6 +2,10 @@
  * Non-streaming OpenAI-compatible StreamFn for the eval harness. Headless runs
  * don't need incremental deltas, so we do one POST per turn and emit a single
  * 'done' event carrying the finished assistant message.
+ *
+ * Behavior note: retry classification now comes from the shared
+ * `isTransient` in `stream-retry.ts`, which also treats HTTP 408 as
+ * transient — a delta from this harness's original 429/5xx-only retry set.
  */
 
 import { AssistantMessageEventStream } from '../../src/features/ai-panel/services/vendor/event-stream';
