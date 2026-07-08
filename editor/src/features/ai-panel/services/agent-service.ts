@@ -296,8 +296,14 @@ export class AgentService {
     // composer send, but a handful of auxiliary entry points (fixConsoleError)
     // can reach here before one exists; skip rather than mistag the turn with
     // a throwaway id (the next send in that conversation checkpoints normally).
+    // Also gated on `ai.checkpoints.enabled` (default on) — the same setting
+    // check `checkpoint-gate.ts`'s per-write recording uses, so a turn never
+    // opens when the feature is off.
     const sessionIdForTurn = useAiStore.getState().sessionId;
-    if (sessionIdForTurn) {
+    if (
+      sessionIdForTurn &&
+      useSettingsStore.getState().getSetting('ai.checkpoints.enabled') !== false
+    ) {
       useCheckpointsStore.getState().beginTurn(sessionIdForTurn, this.currentUserMessageId());
     }
 

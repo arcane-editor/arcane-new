@@ -23,6 +23,7 @@ import {
 } from './features/project';
 import { AiChatPanel, MaximizedAiOverlay, restoreLatestSessionForWorkspace } from './features/ai-panel';
 import { useAiStore } from './stores/ai';
+import { useCheckpointsStore } from './stores/checkpoints';
 import { GraphifyIntroModal, computeBuildOpts, startGraphifyAutoRebuild } from './features/graphify';
 import { initAsmdefFeature } from './features/asmdef';
 import { initUnityPackagesFeature } from './features/unity-packages';
@@ -202,10 +203,11 @@ function App() {
     return unsub;
   }, []);
 
-  // Best-effort flush of the chat session on reload/navigation (can't await).
+  // Best-effort flush of the chat session (and its checkpoints) on reload/navigation (can't await).
   useEffect(() => {
     const onBeforeUnload = () => {
       void useAiStore.getState().flushSessionNow();
+      void useCheckpointsStore.getState().flushCheckpointsNow();
     };
     window.addEventListener('beforeunload', onBeforeUnload);
     return () => window.removeEventListener('beforeunload', onBeforeUnload);

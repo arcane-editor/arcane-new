@@ -21,6 +21,8 @@ export type {
   RestorePlanEntry,
 } from './services/checkpoints/restore-plan';
 export { saveCheckpoints, loadCheckpoints } from './services/checkpoints/checkpoint-store-io';
+export { runRestorePlan, filterAppliedRestoreEntries } from './services/checkpoints/apply-restore';
+export type { ApplyRestoreDeps, ApplyRestoreOutcome } from './services/checkpoints/apply-restore';
 export type {
   AgentKind,
   Attachment,

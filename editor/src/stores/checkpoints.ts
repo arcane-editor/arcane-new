@@ -57,6 +57,8 @@ export interface RestoreResult {
   restored: string[];
   /** Paths skipped because their pre-image exceeded the snapshot size cap. */
   skippedTooLarge: string[];
+  /** Paths whose restore operation failed (logged via console.warn — see `applyRestorePlan`). */
+  failed: string[];
 }
 
 interface CheckpointsState {
@@ -73,6 +75,8 @@ interface CheckpointsState {
   restoreFile: (turnId: string, path: string) => Promise<RestoreResult>;
   /** Load a session's persisted checkpoint turns (e.g. on session resume). */
   loadForSession: (sessionId: string) => Promise<void>;
+  /** Force an immediate persist, bypassing the debounce (used on app close — mirrors `flushSessionNow`). */
+  flushCheckpointsNow: () => Promise<void>;
   reset: () => void;
 }
 
@@ -96,27 +100,31 @@ function schedulePersist(): void {
   }, PERSIST_DEBOUNCE_MS);
 }
 
-// ---- Restore side effects (workspace/git — dynamic import, see header) ----
-
-async function applyRestorePlan(plan: RestorePlanEntry[]): Promise<string[]> {
-  const { coDeleteMeta } = await import('../features/explorer');
-  const applied: string[] = [];
-  for (const restoreEntry of plan) {
-    try {
-      if (restoreEntry.action === 'delete') {
-        await invoke('delete_path', { path: restoreEntry.path });
-        await coDeleteMeta(restoreEntry.path).catch(() => {});
-      } else {
-        await invoke('write_file', { path: restoreEntry.path, contents: restoreEntry.content ?? '' });
-      }
-      applied.push(restoreEntry.path);
-    } catch (err) {
-      console.warn(`[checkpoints] failed to restore ${restoreEntry.path}:`, err);
-    }
+/** Bypasses the debounce and persists immediately — mirrors `stores/ai.ts`'s `flushSave`. */
+function flushPersist(): Promise<void> {
+  if (persistTimer) {
+    clearTimeout(persistTimer);
+    persistTimer = null;
   }
-  return applied;
+  return persistNow();
 }
 
+// ---- Restore side effects (workspace/git — dynamic import, see header) ----
+
+async function applyRestorePlan(
+  plan: RestorePlanEntry[],
+): Promise<{ applied: string[]; failed: string[] }> {
+  const { coDeleteMeta } = await import('../features/explorer');
+  const { runRestorePlan } = await import('../features/ai-panel');
+  return runRestorePlan(plan, {
+    deletePath: (path) => invoke('delete_path', { path }),
+    writeFile: (path, contents) => invoke('write_file', { path, contents }),
+    coDeleteMeta,
+  });
+}
+
+/** `plan` must already be restricted to the APPLIED subset (see `filterAppliedRestoreEntries`)
+ *  — a failed delete must never close its tab as if the restore had happened. */
 async function refreshAfterRestore(plan: RestorePlanEntry[]): Promise<void> {
   const { useWorkspaceStore } = await import('./workspace');
   const ws = useWorkspaceStore.getState();
@@ -179,23 +187,25 @@ export const useCheckpointsStore = create<CheckpointsState>((set, get) => ({
   },
 
   restoreTurn: async (turnId) => {
-    const { computeRestorePlan, getSkippedTooLargePaths } = await import('../features/ai-panel');
+    const { computeRestorePlan, getSkippedTooLargePaths, filterAppliedRestoreEntries } =
+      await import('../features/ai-panel');
     const { turns } = get();
     const plan = computeRestorePlan(turns, turnId);
     const skippedTooLarge = getSkippedTooLargePaths(turns, turnId);
-    const restored = await applyRestorePlan(plan);
-    await refreshAfterRestore(plan);
-    return { restored, skippedTooLarge };
+    const { applied, failed } = await applyRestorePlan(plan);
+    await refreshAfterRestore(filterAppliedRestoreEntries(plan, applied));
+    return { restored: applied, skippedTooLarge, failed };
   },
 
   restoreFile: async (turnId, path) => {
-    const { computeRestorePlan, getSkippedTooLargePaths } = await import('../features/ai-panel');
+    const { computeRestorePlan, getSkippedTooLargePaths, filterAppliedRestoreEntries } =
+      await import('../features/ai-panel');
     const { turns } = get();
     const plan = computeRestorePlan(turns, turnId).filter((e) => e.path === path);
     const skippedTooLarge = getSkippedTooLargePaths(turns, turnId).filter((p) => p === path);
-    const restored = await applyRestorePlan(plan);
-    await refreshAfterRestore(plan);
-    return { restored, skippedTooLarge };
+    const { applied, failed } = await applyRestorePlan(plan);
+    await refreshAfterRestore(filterAppliedRestoreEntries(plan, applied));
+    return { restored: applied, skippedTooLarge, failed };
   },
 
   loadForSession: async (sessionId) => {
@@ -207,6 +217,8 @@ export const useCheckpointsStore = create<CheckpointsState>((set, get) => ({
       turns.length > MAX_TURNS_PER_SESSION ? turns.slice(turns.length - MAX_TURNS_PER_SESSION) : turns;
     set({ turns: capped, sessionId });
   },
+
+  flushCheckpointsNow: () => flushPersist(),
 
   reset: () => {
     if (persistTimer) {

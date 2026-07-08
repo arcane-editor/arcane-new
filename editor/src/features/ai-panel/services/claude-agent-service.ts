@@ -329,8 +329,14 @@ class ClaudeAgentService {
     // Checkpoints (P5.2): open a new turn so `handleFsWrite`'s pre-write
     // snapshots below get grouped for later restore. See the matching guard
     // in agent-service.ts's sendMessage for why a missing sessionId means
-    // skipping rather than mistagging the turn.
-    if (ai.sessionId) {
+    // skipping rather than mistagging the turn. Also gated on
+    // `ai.checkpoints.enabled` (default on) — the same setting check
+    // `handleFsWrite`'s own recording uses below, so a turn never opens when
+    // the feature is off.
+    if (
+      ai.sessionId &&
+      useSettingsStore.getState().getSetting('ai.checkpoints.enabled') !== false
+    ) {
       useCheckpointsStore.getState().beginTurn(ai.sessionId, this.currentUserMessageId());
     }
 
