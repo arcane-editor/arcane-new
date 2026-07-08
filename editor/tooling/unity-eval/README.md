@@ -75,6 +75,62 @@ in a baseline for comparison, copy the JSON into `results/baselines/` and
 force-add it (`git add -f tooling/unity-eval/results/baselines/<file>.json`);
 that curated subdir is the one exception meant to be committed.
 
+## Grounding tools (`unity_api_search` / `get_unity_docs`)
+
+Both `ask` and `agent` mode tasks get the same Unity read tools production
+wires for every mode (`agent-service.ts`'s mode→tool map) — including
+`unity_api_search`, the version-accurate API/docs grounding tool that hits
+`arcane-server`'s `/v1/unity/api/search` + `/lookup` routes in production.
+Since the eval must stay offline, deterministic, and CI-safe, it never talks
+to that server directly. Instead `api-recordings.ts` implements the same
+`UnityApiClient` interface (`unity-tools/api-search-tool.ts`) two ways:
+
+- **Replay (default, every normal run).** Reads committed JSON recordings
+  from `fixtures/api-recordings/<fixture-name>/<hash>.json`, where
+  `<hash>` is a sha256 of the *normalized* request (`{ endpoint, query |
+  type+member, unityVersion, renderPipeline, inputSystem }` — query text is
+  trimmed, lowercased, and has internal whitespace collapsed first, so
+  near-identical phrasing across runs/models still hits the same recording).
+  Never touches the network: a cache miss logs one warning line to stderr
+  (endpoint, normalized query/type+member, fixture) and returns
+  `{ ok: false, reason: 'offline' }` — the same shape `unity_api_search`
+  already renders as `[Unity grounding UNAVAILABLE: offline] ...`.
+- **Record (`--record`).** Performs the real HTTP call against a live
+  arcane-server and writes each response — success or failure — to its
+  recording file before returning it, so a `--record` run is always live
+  *and* capturing:
+
+  ```bash
+  # 1. start arcane-server locally (see "Variant B" below for minting a JWT)
+  cd arcane-server && npm run dev
+
+  # 2. run with --record, reusing the same --api-key-env token as the
+  #    arcane-server bearer token (no separate auth flag)
+  cd editor && DEV_JWT=<token> bun run eval -- \
+    --base-url http://localhost:8787/v1 --api-key-env DEV_JWT --model unused \
+    --label local-record --record \
+    [--server-url http://localhost:8787] [--recordings-dir <dir>]
+  ```
+
+  `--server-url` defaults to `http://localhost:8787`; `--recordings-dir`
+  overrides the default `fixtures/api-recordings/` (useful for a scratch
+  re-record you don't intend to commit).
+
+**Known limitation.** Replay hits depend on the model repeating normalized
+query text close enough to something already recorded. New models, new
+prompts, or a model just phrasing a search differently *will* produce
+misses — this is expected, not silent: each miss logs a warning and
+increments a per-task counter surfaced as `groundingCacheMisses` on the
+`TaskResult` and summed into the run's results JSON. A run with nonzero
+`groundingCacheMisses` isn't automatically wrong, but it means some
+`unity_api_search` calls that turn saw `UNAVAILABLE: offline` instead of
+real data — treat elevated miss counts as a cue to re-record (`--record` is
+cheap: it's just one more live pass over the same tasks). Recordings also
+carry a `recordedAt` timestamp — they're a point-in-time snapshot of
+whatever the corpus (Vectorize/D1) contained at capture time, so a stale
+recording can silently diverge from what production would return today if
+the corpus has since been re-ingested.
+
 ## Adding a task
 
 Add an entry to the `TASKS` array in `tasks.ts`:
@@ -158,13 +214,18 @@ grounding**, exactly the gap the design doc targets:
 
 Caveats to keep honest:
 
-- **Fidelity gaps.** The harness wires up only the 5 basic fs tools
+- **Fidelity gaps.** *(Recorded 2026-07-08, ahead of the grounding-tool
+  wiring below.)* The harness wired up only the 5 basic fs tools
   (read/list/write/edit/bash) — no `unity_api_search`, no analyzer/compile
   gates — even though the system prompts advertise those tools. So the
   grounding scores above measure the bare model's Unity knowledge *without*
   the product's grounding tools; production, which does have them, may do
   better. The harness also pins `max_tokens: 8192` vs production's 16384
-  (chat) / 24576 (plan, edit).
+  (chat) / 24576 (plan, edit). Since then, `unity_api_search` + `get_unity_docs`
+  have been wired into every mode via replay/record recordings (see
+  "Grounding tools" above) — these baselines predate that and should be
+  re-captured to measure its effect; analyzer/compile gates and the
+  `max_tokens` gap remain open.
 - **Run-to-run variance is real.** Grounding tasks flipped pass/fail between
   runs of the same model. Treat single-run deltas of ±1 task as noise; the
   12-task suite is a smoke gate, not a benchmark. Grow the task set before

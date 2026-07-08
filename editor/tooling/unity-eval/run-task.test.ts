@@ -1,8 +1,14 @@
 import { describe, it, expect } from 'bun:test';
 import { AssistantMessageEventStream } from '../../src/features/ai-panel/services/vendor/event-stream';
 import type { StreamFn, AssistantMessage } from '../../src/features/ai-panel/services/vendor/types';
-import { runTask } from './run-task';
+import type { UnityApiClient } from '../../src/features/ai-panel/services/unity-tools/api-search-tool';
+import { runTask, buildTools } from './run-task';
 import type { EvalTask } from './eval-types';
+
+const fakeGroundingClient: UnityApiClient = {
+  search: async () => ({ ok: true, data: [] }),
+  lookup: async () => ({ ok: true, data: [] }),
+};
 
 /** Plays a canned sequence of assistant messages, one per LLM call. */
 function scriptedStreamFn(script: AssistantMessage['content'][]): StreamFn {
@@ -92,5 +98,39 @@ describe('runTask', () => {
     expect(result.pass).toBe(false);
     expect(result.error).toContain('max turns exceeded');
     expect(result.turns).toBeLessThanOrEqual(runawayTask.maxTurns! + 1);
+  });
+
+  it('surfaces groundingCacheMisses on the result (0 when the grounding tool is never called)', async () => {
+    const streamFn = scriptedStreamFn([[{ type: 'text', text: 'no tools needed' }]]);
+    const usage = { input: 0, output: 0, requests: 0 };
+    const result = await runTask({ ...task, mode: 'ask' }, streamFn, usage);
+    expect(result.groundingCacheMisses).toBe(0);
+  });
+});
+
+describe('buildTools', () => {
+  it('includes unity_api_search and get_unity_docs in ask mode (matching prod\'s mode→tool map)', () => {
+    const tools = buildTools(task, '/tmp/unused', fakeGroundingClient, '2022.3.45f1');
+    const names = tools.map((t) => t.name);
+    expect(names).toContain('unity_api_search');
+    expect(names).toContain('get_unity_docs');
+  });
+
+  it('includes unity_api_search and get_unity_docs in agent mode too, alongside write/edit/bash', () => {
+    const tools = buildTools({ ...task, mode: 'agent' }, '/tmp/unused', fakeGroundingClient, '2022.3.45f1');
+    const names = tools.map((t) => t.name);
+    expect(names).toContain('unity_api_search');
+    expect(names).toContain('get_unity_docs');
+    expect(names).toContain('write');
+    expect(names).toContain('edit');
+    expect(names).toContain('bash');
+  });
+
+  it('excludes write/edit/bash in ask mode', () => {
+    const tools = buildTools({ ...task, mode: 'ask' }, '/tmp/unused', fakeGroundingClient, '2022.3.45f1');
+    const names = tools.map((t) => t.name);
+    expect(names).not.toContain('write');
+    expect(names).not.toContain('edit');
+    expect(names).not.toContain('bash');
   });
 });

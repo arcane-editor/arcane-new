@@ -16,6 +16,9 @@ import { createBashTool } from '../../src/features/ai-panel/services/vendor/tool
 import type { AgentTool, StreamFn } from '../../src/features/ai-panel/services/vendor/types';
 import { buildAskPrompt } from '../../src/features/ai-panel/services/prompts/ask';
 import { buildAgentPrompt } from '../../src/features/ai-panel/services/prompts/agent';
+import { createUnityApiSearchTool } from '../../src/features/ai-panel/services/unity-tools/api-search-tool';
+import type { UnityApiClient } from '../../src/features/ai-panel/services/unity-tools/api-search-tool';
+import { createGetUnityDocsTool } from '../../src/features/ai-panel/services/unity-tools/docs-tool';
 import {
   localReadOperations,
   localWriteOperations,
@@ -23,7 +26,8 @@ import {
   localBashOperations,
   localListOperations,
 } from './local-operations';
-import { buildFixtureFacts } from './fixture-facts';
+import { buildFixtureFacts, buildFixtureGroundingContext } from './fixture-facts';
+import { createRecordingApiClient, createReplayApiClient } from './api-recordings';
 import { runChecks } from './checks';
 import type { EvalTask, TaskResult } from './eval-types';
 import type { UsageTotals } from './eval-stream';
@@ -31,13 +35,41 @@ import type { UsageTotals } from './eval-stream';
 const FIXTURES_DIR = new URL('./fixtures/', import.meta.url).pathname;
 const DEFAULT_MAX_TURNS = 12;
 
-function buildTools(task: EvalTask, workDir: string): AgentTool[] {
+// Committed replay recordings live here by default; `--record` may point
+// elsewhere via `--recordings-dir` (see `run-eval.ts`).
+export const DEFAULT_RECORDINGS_DIR = new URL('./fixtures/api-recordings/', import.meta.url).pathname;
+
+/**
+ * Grounding client wiring for a task run. Defaults to replay (the offline,
+ * committed-fixture path every eval run uses); `record` switches to the live
+ * `--record` client (`run-eval.ts --record`), which always requires the
+ * eval's existing chat auth mechanism's token, reused here as the
+ * arcane-server bearer token.
+ */
+export interface GroundingConfig {
+  recordingsDir?: string;
+  record?: { serverUrl: string; token: string };
+}
+
+export function buildTools(
+  task: EvalTask,
+  workDir: string,
+  groundingClient: UnityApiClient,
+  unityVersion: string | null,
+): AgentTool[] {
   const read = createReadTool(workDir, { operations: localReadOperations });
   const list = createListTool(workDir, { operations: localListOperations });
-  if (task.mode === 'ask') return [read, list];
+  // Unity read tools join every mode, matching prod's mode→tool map
+  // (`agent-service.ts` — unity read tools are available in 'ask' too).
+  const unityTools: AgentTool[] = [
+    createUnityApiSearchTool(groundingClient),
+    createGetUnityDocsTool(() => unityVersion),
+  ];
+  if (task.mode === 'ask') return [read, list, ...unityTools];
   return [
     read,
     list,
+    ...unityTools,
     createWriteTool(workDir, { operations: localWriteOperations }),
     createEditTool(workDir, { operations: localEditOperations }),
     createBashTool(workDir, { operations: localBashOperations }),
@@ -48,7 +80,7 @@ export async function runTask(
   task: EvalTask,
   streamFn: StreamFn,
   usage: UsageTotals,
-  opts?: { keepWorkDir?: boolean },
+  opts?: { keepWorkDir?: boolean; grounding?: GroundingConfig },
 ): Promise<TaskResult> {
   const workDir = await mkdtemp(join(tmpdir(), `unity-eval-${task.id}-`));
   await cp(join(FIXTURES_DIR, task.fixture), workDir, { recursive: true });
@@ -57,11 +89,23 @@ export async function runTask(
   const facts = await buildFixtureFacts(workDir);
   const systemPrompt = `${base}\n\n${facts}`;
 
+  const groundingCtx = await buildFixtureGroundingContext(workDir);
+  const recordingsDir = opts?.grounding?.recordingsDir ?? DEFAULT_RECORDINGS_DIR;
+  const fixtureCtx = { fixture: task.fixture, ...groundingCtx };
+  const apiClient = opts?.grounding?.record
+    ? createRecordingApiClient(
+        opts.grounding.record.serverUrl,
+        opts.grounding.record.token,
+        recordingsDir,
+        fixtureCtx,
+      )
+    : createReplayApiClient(recordingsDir, fixtureCtx);
+
   const usageBefore = { ...usage };
   const agent = new Agent({
     systemPrompt,
     model: { id: 'eval', name: 'eval', provider: 'eval' },
-    tools: buildTools(task, workDir),
+    tools: buildTools(task, workDir, apiClient, groundingCtx.unityVersion),
     streamFn,
     convertToLlm,
     contextWindow: 131072,
@@ -115,5 +159,6 @@ export async function runTask(
     inputTokens: usage.input - usageBefore.input,
     outputTokens: usage.output - usageBefore.output,
     error,
+    groundingCacheMisses: 'misses' in apiClient ? apiClient.misses : 0,
   };
 }

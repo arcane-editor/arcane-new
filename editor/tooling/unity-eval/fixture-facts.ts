@@ -6,7 +6,28 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-export async function buildFixtureFacts(fixtureDir: string): Promise<string> {
+type RenderPipeline = 'URP' | 'HDRP' | 'Built-in';
+
+/**
+ * Structured equivalent of the grounding context production derives via
+ * `getUnityGroundingContext()` (`ai-panel/services/prompts/unity-facts.ts`)
+ * — same shape the version-accurate API tools (`unity_api_search`) key their
+ * Vectorize/D1 filters on. Used to construct the eval's replay/record
+ * grounding client (`api-recordings.ts`) instead of the store-backed getter.
+ */
+export interface FixtureGroundingContext {
+  unityVersion: string;
+  renderPipeline: RenderPipeline;
+  inputSystem: 'New' | 'Legacy';
+}
+
+interface RawFixtureFacts {
+  version: string;
+  pipeline: RenderPipeline;
+  isNewInput: boolean;
+}
+
+async function detectFixtureFacts(fixtureDir: string): Promise<RawFixtureFacts> {
   const versionTxt = await readFile(
     join(fixtureDir, 'ProjectSettings', 'ProjectVersion.txt'),
     'utf8',
@@ -18,14 +39,18 @@ export async function buildFixtureFacts(fixtureDir: string): Promise<string> {
   ) as { dependencies?: Record<string, string> };
   const deps = manifest.dependencies ?? {};
 
-  const pipeline = deps['com.unity.render-pipelines.universal']
+  const pipeline: RenderPipeline = deps['com.unity.render-pipelines.universal']
     ? 'URP'
     : deps['com.unity.render-pipelines.high-definition']
       ? 'HDRP'
       : 'Built-in';
-  const input = deps['com.unity.inputsystem']
-    ? 'Input System (new)'
-    : 'Input Manager (legacy)';
+
+  return { version, pipeline, isNewInput: !!deps['com.unity.inputsystem'] };
+}
+
+export async function buildFixtureFacts(fixtureDir: string): Promise<string> {
+  const { version, pipeline, isNewInput } = await detectFixtureFacts(fixtureDir);
+  const input = isNewInput ? 'Input System (new)' : 'Input Manager (legacy)';
 
   return [
     '## Unity project facts (authoritative — match these)',
@@ -33,4 +58,16 @@ export async function buildFixtureFacts(fixtureDir: string): Promise<string> {
     `- Render pipeline: ${pipeline}`,
     `- Input system: ${input}`,
   ].join('\n');
+}
+
+/**
+ * Structured grounding context (version/pipeline/input) for the same
+ * fixture `buildFixtureFacts` reads — feeds `createReplayApiClient` /
+ * `createRecordingApiClient` (`api-recordings.ts`) so the eval's
+ * `unity_api_search` tool keys its cache/requests exactly the way
+ * production's `getUnityGroundingContext()` does.
+ */
+export async function buildFixtureGroundingContext(fixtureDir: string): Promise<FixtureGroundingContext> {
+  const { version, pipeline, isNewInput } = await detectFixtureFacts(fixtureDir);
+  return { unityVersion: version, renderPipeline: pipeline, inputSystem: isNewInput ? 'New' : 'Legacy' };
 }

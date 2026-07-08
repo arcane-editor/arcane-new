@@ -26,4 +26,8 @@ export interface TaskResult {
   inputTokens: number;
   outputTokens: number;
   error?: string;
+  // Unity grounding tool (`unity_api_search`) cache misses against the
+  // recorded fixtures — see `api-recordings.ts`. Always 0 in `--record` mode
+  // (there's no cache to miss; every call is live).
+  groundingCacheMisses: number;
 }
