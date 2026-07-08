@@ -2,7 +2,7 @@ import { Type, type Static } from '@sinclair/typebox';
 import type { AgentTool } from '../vendor/types';
 import { txt } from './text-result';
 import type { ApiSignature, ApiSearchHit, GroundingResult } from './api-client';
-import { recordGroundingUnavailable } from '../turn-telemetry';
+import { recordGroundingToolCall, recordGroundingUnavailable } from '../turn-telemetry';
 
 // Injected dependency — mirrors `unityApiSearch`/`unityApiLookup` from
 // `./api-client` exactly, but as an interface so this module never imports
@@ -97,6 +97,10 @@ export function createUnityApiSearchTool(client: UnityApiClient): AgentTool {
       'signature/overloads (this prevents hallucinated APIs). Pass `member` as "Type.Member" for an exact lookup.',
     parameters: schema,
     async execute(_id, params) {
+      // Count this genuine execution (guard is outermost, so suppressed calls
+      // never reach here). Increment regardless of lookup vs search branch.
+      recordGroundingToolCall();
+
       const { query, member } = params as Static<typeof schema>;
 
       // Exact-signature path when a "Type.Member" is provided.

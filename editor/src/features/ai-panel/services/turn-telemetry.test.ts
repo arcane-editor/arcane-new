@@ -7,6 +7,7 @@ import {
   recordLoopGuardHit,
   getRepairCount,
   recordEscalation,
+  recordGroundingToolCall,
   recordGroundingUnavailable,
   recordTurnLatency,
 } from './turn-telemetry';
@@ -79,21 +80,21 @@ describe('turn telemetry', () => {
     expect(nextTurnTelemetry().escalated).toBe(false);
   });
 
-  it('counts unity_api_search tool executions and resets to 0 per send (P4)', () => {
+  it('counts grounding tool calls via recordGroundingToolCall and resets to 0 per send (P4)', () => {
     expect(nextTurnTelemetry().groundingToolCalls).toBe(0);
-    recordTelemetryEvent(toolEnd(false, 'unity_api_search'));
-    recordTelemetryEvent(toolEnd(false, 'unity_api_search'));
-    recordTelemetryEvent(toolEnd(false, 'edit')); // other tools don't count
+    recordGroundingToolCall();
+    recordGroundingToolCall();
     expect(nextTurnTelemetry().groundingToolCalls).toBe(2);
     resetTurnTelemetry();
     expect(nextTurnTelemetry().groundingToolCalls).toBe(0);
   });
 
-  it('still counts a failed unity_api_search execution as both a grounding-tool-call and a tool error', () => {
-    recordTelemetryEvent(toolEnd(true, 'unity_api_search'));
-    const snapshot = nextTurnTelemetry();
-    expect(snapshot.groundingToolCalls).toBe(1);
-    expect(snapshot.toolErrorCount).toBe(1);
+  it('tool_execution_end for unity_api_search no longer increments groundingToolCalls (P4)', () => {
+    // Counter is now at the execution layer in api-search-tool.ts, not here
+    expect(nextTurnTelemetry().groundingToolCalls).toBe(0);
+    recordTelemetryEvent(toolEnd(false, 'unity_api_search'));
+    recordTelemetryEvent(toolEnd(false, 'unity_api_search'));
+    expect(nextTurnTelemetry().groundingToolCalls).toBe(0);
   });
 
   it('counts grounding-unavailable results and resets to 0 per send (P4)', () => {

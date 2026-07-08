@@ -12,7 +12,7 @@
  * module-scope store (or Monaco) import into one of these two files.
  */
 
-import { describe, it, expect } from 'bun:test';
+import { describe, it, expect, beforeEach } from 'bun:test';
 import {
   createUnityApiSearchTool,
   type UnityApiClient,
@@ -23,12 +23,18 @@ import type {
   ApiSignature,
   GroundingResult,
 } from '../../src/features/ai-panel/services/unity-tools/api-client';
+import {
+  resetTurnTelemetry,
+  nextTurnTelemetry,
+} from '../../src/features/ai-panel/services/turn-telemetry';
 
 function textOf(result: { content: { type: string; text?: string }[] }): string {
   return result.content.map((c) => c.text ?? '').join('\n');
 }
 
 describe('DI seam — unity_api_search', () => {
+  beforeEach(() => resetTurnTelemetry());
+
   it('formats hits from an injected fake client', async () => {
     const hits: ApiSearchHit[] = [
       {
@@ -121,6 +127,48 @@ describe('DI seam — unity_api_search', () => {
       '[Unity grounding UNAVAILABLE: signed-out] Do NOT guess API signatures. ' +
         'State uncertainty, or use get_unity_docs for the documentation URL.',
     );
+  });
+
+  it('executing the tool increments groundingToolCalls in telemetry snapshot', async () => {
+    const fakeClient: UnityApiClient = {
+      search: async () => ({ ok: true, data: [] }),
+      lookup: async () => ({ ok: true, data: [] }),
+    };
+
+    const tool = createUnityApiSearchTool(fakeClient);
+    expect(nextTurnTelemetry().groundingToolCalls).toBe(0);
+    await tool.execute('call-exec-1', { query: 'apply force' });
+    expect(nextTurnTelemetry().groundingToolCalls).toBe(1);
+    await tool.execute('call-exec-2', { query: 'raycast' });
+    expect(nextTurnTelemetry().groundingToolCalls).toBe(2);
+  });
+
+  it('ok:false client increments groundingUnavailable (regression test)', async () => {
+    const reasons: Array<Extract<GroundingResult<never>, { ok: false }>['reason']> = [
+      'signed-out',
+      'no-unity-version',
+      'offline',
+      'http-500',
+    ];
+
+    for (const reason of reasons) {
+      resetTurnTelemetry();
+      const fakeClient: UnityApiClient = {
+        search: async () => ({ ok: false, reason }),
+        lookup: async () => ({ ok: false, reason }),
+      };
+
+      const tool = createUnityApiSearchTool(fakeClient);
+      expect(nextTurnTelemetry().groundingUnavailable).toBe(0);
+      // Trigger search path (no member parameter)
+      await tool.execute('call-search-unavail', { query: 'test' });
+      expect(nextTurnTelemetry().groundingUnavailable).toBe(1);
+
+      // Trigger lookup path (with member parameter)
+      resetTurnTelemetry();
+      await tool.execute('call-lookup-unavail', { query: 'Rigidbody.AddForce', member: 'Rigidbody.AddForce' });
+      expect(nextTurnTelemetry().groundingUnavailable).toBe(1);
+    }
   });
 });
 

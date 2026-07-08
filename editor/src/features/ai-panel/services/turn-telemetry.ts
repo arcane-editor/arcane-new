@@ -62,6 +62,16 @@ export function recordLoopGuardHit(): void {
 }
 
 /**
+ * Called once per genuine `unity_api_search` tool execution this send
+ * (P4, inside `api-search-tool.ts`'s execute method). Counts only actual
+ * executions that pass the repeat-call guard (guard is outermost), not event
+ * emissions which include suppressed calls. Imported directly by `api-search-tool.ts`.
+ */
+export function recordGroundingToolCall(): void {
+  current.groundingToolCalls++;
+}
+
+/**
  * Called once per `unity_api_search` "ok:false" (grounding UNAVAILABLE) result
  * this send — imported directly by `api-search-tool.ts` since that's the only
  * place both the lookup and search unavailable paths are visible (P4).
@@ -109,13 +119,6 @@ const REPAIR_MARKERS = ['[Unity compile]', '[Unity analyzers]', '[C# language se
 
 export function recordTelemetryEvent(event: AgentEvent): void {
   if (event.type === 'tool_execution_end') {
-    // Grounding-tool-call counter (P4): the agent loop emits this event for
-    // every tool execution (including ones the repeat-call guard suppresses
-    // internally), so this is the cleanest existing observation point for
-    // "how many times did the model reach for Unity API grounding this send."
-    if (event.toolName === 'unity_api_search') {
-      current.groundingToolCalls++;
-    }
     if (event.isError) {
       current.toolErrorCount++;
       return;
