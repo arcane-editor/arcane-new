@@ -85,6 +85,7 @@ for (const task of tasks) {
 }
 
 const groundingCacheMisses = results.reduce((sum, r) => sum + r.groundingCacheMisses, 0);
+const recordFailures = results.reduce((sum, r) => sum + r.recordFailures, 0);
 
 const resultsDir = new URL('./results/', import.meta.url).pathname;
 await mkdir(resultsDir, { recursive: true });
@@ -92,7 +93,7 @@ const stamp = new Date().toISOString().replace(/[:.]/g, '-');
 const outPath = join(resultsDir, `${stamp}-${label}.json`);
 await writeFile(
   outPath,
-  JSON.stringify({ label, model, baseUrl, usage, groundingCacheMisses, results }, null, 2),
+  JSON.stringify({ label, model, baseUrl, usage, groundingCacheMisses, recordFailures, results }, null, 2),
 );
 
 console.log(renderReport(results, label));
@@ -101,5 +102,11 @@ if (groundingCacheMisses > 0) {
   console.error(
     `[unity-eval] ${groundingCacheMisses} grounding cache miss(es) — see warnings above. ` +
       `Re-record with --record if these are expected (new model/prompt phrasing).`,
+  );
+}
+if (recordFailures > 0) {
+  console.error(
+    `[unity-eval] ${recordFailures} grounding record failure/failures — see warnings above. ` +
+      `Check token/server status and re-record with --record.`,
   );
 }

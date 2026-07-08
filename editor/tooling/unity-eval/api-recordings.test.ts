@@ -205,4 +205,133 @@ describe('createRecordingApiClient', () => {
       expect(result).toEqual({ ok: false, reason: 'signed-out' });
     });
   });
+
+  it('increments recordFailures counter on failure responses', async () => {
+    await withTempDir(async (dir) => {
+      globalThis.fetch = (async () => new Response('server error', { status: 500 })) as typeof fetch;
+      const client = createRecordingApiClient('http://localhost:8787', 'dev-jwt', dir, ctx);
+
+      const result1 = await client.search('apply force');
+      expect(result1).toEqual({ ok: false, reason: 'http-500' });
+      expect(client.recordFailures).toBe(1);
+
+      const result2 = await client.lookup('Rigidbody', 'AddForce');
+      expect(result2).toEqual({ ok: false, reason: 'http-500' });
+      expect(client.recordFailures).toBe(2);
+    });
+  });
+
+  it('logs warning on search failure', async () => {
+    await withTempDir(async (dir) => {
+      globalThis.fetch = (async () => new Response('server error', { status: 500 })) as typeof fetch;
+      const logs: string[] = [];
+      const originalError = console.error;
+      console.error = ((msg: string) => {
+        logs.push(msg);
+      }) as typeof console.error;
+
+      try {
+        const client = createRecordingApiClient('http://localhost:8787', 'dev-jwt', dir, ctx);
+        await client.search('apply force at a point');
+
+        expect(logs.length).toBe(1);
+        expect(logs[0]).toContain('[unity-eval] grounding record FAILURE');
+        expect(logs[0]).toContain('search');
+        expect(logs[0]).toContain('"apply force at a point"');
+        expect(logs[0]).toContain('reason=http-500');
+        expect(logs[0]).toContain(`fixture=${ctx.fixture}`);
+      } finally {
+        console.error = originalError;
+      }
+    });
+  });
+
+  it('logs warning on lookup failure', async () => {
+    await withTempDir(async (dir) => {
+      globalThis.fetch = (async () => {
+        throw new Error('network error');
+      }) as typeof fetch;
+      const logs: string[] = [];
+      const originalError = console.error;
+      console.error = ((msg: string) => {
+        logs.push(msg);
+      }) as typeof console.error;
+
+      try {
+        const client = createRecordingApiClient('http://localhost:8787', 'dev-jwt', dir, ctx);
+        await client.lookup('Rigidbody', 'AddForce');
+
+        expect(logs.length).toBe(1);
+        expect(logs[0]).toContain('[unity-eval] grounding record FAILURE');
+        expect(logs[0]).toContain('lookup');
+        expect(logs[0]).toContain('Rigidbody.AddForce');
+        expect(logs[0]).toContain('reason=offline');
+      } finally {
+        console.error = originalError;
+      }
+    });
+  });
+
+  it('logs warning on signed-out failure', async () => {
+    await withTempDir(async (dir) => {
+      const logs: string[] = [];
+      const originalError = console.error;
+      console.error = ((msg: string) => {
+        logs.push(msg);
+      }) as typeof console.error;
+
+      try {
+        const client = createRecordingApiClient('http://localhost:8787', '', dir, ctx);
+        await client.search('apply force');
+
+        expect(logs.length).toBe(1);
+        expect(logs[0]).toContain('[unity-eval] grounding record FAILURE');
+        expect(logs[0]).toContain('reason=signed-out');
+        expect(client.recordFailures).toBe(1);
+      } finally {
+        console.error = originalError;
+      }
+    });
+  });
+
+  it('records failure responses to file and still returns the failure result', async () => {
+    await withTempDir(async (dir) => {
+      globalThis.fetch = (async () => new Response('server error', { status: 500 })) as typeof fetch;
+      const logs: string[] = [];
+      const originalError = console.error;
+      console.error = ((msg: string) => {
+        logs.push(msg);
+      }) as typeof console.error;
+
+      try {
+        const client = createRecordingApiClient('http://localhost:8787', 'dev-jwt', dir, ctx);
+        const result = await client.lookup('Rigidbody', 'AddForce');
+
+        expect(result).toEqual({ ok: false, reason: 'http-500' });
+        expect(logs.length).toBe(1);
+
+        const key = lookupRequestKey('Rigidbody', 'AddForce', ctx);
+        const raw = await readFile(join(dir, ctx.fixture, `${key}.json`), 'utf8');
+        const recorded = JSON.parse(raw);
+        expect(recorded.response).toEqual({ ok: false, reason: 'http-500' });
+      } finally {
+        console.error = originalError;
+      }
+    });
+  });
+
+  it('does not increment recordFailures on success', async () => {
+    await withTempDir(async (dir) => {
+      globalThis.fetch = (async (url: string, init?: RequestInit) => {
+        return new Response(JSON.stringify({ version: '2022.3', results: [{ breadcrumb: 'Rigidbody.AddForce' }] }), {
+          status: 200,
+        });
+      }) as typeof fetch;
+
+      const client = createRecordingApiClient('http://localhost:8787', 'dev-jwt', dir, ctx);
+      await client.search('apply force');
+
+      expect(client.recordFailures).toBe(0);
+    });
+  });
 });

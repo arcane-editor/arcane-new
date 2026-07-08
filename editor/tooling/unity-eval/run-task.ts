@@ -160,5 +160,6 @@ export async function runTask(
     outputTokens: usage.output - usageBefore.output,
     error,
     groundingCacheMisses: 'misses' in apiClient ? apiClient.misses : 0,
+    recordFailures: 'recordFailures' in apiClient ? apiClient.recordFailures : 0,
   };
 }

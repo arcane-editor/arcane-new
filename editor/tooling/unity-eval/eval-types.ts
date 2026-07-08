@@ -30,4 +30,9 @@ export interface TaskResult {
   // recorded fixtures — see `api-recordings.ts`. Always 0 in `--record` mode
   // (there's no cache to miss; every call is live).
   groundingCacheMisses: number;
+  // Failures (`ok: false`) recorded during `--record` mode runs. Always 0 in
+  // replay mode (misses don't count as failures). Surfaced alongside
+  // `groundingCacheMisses` to signal recording quality issues (bad token,
+  // server down, etc.) — see `api-recordings.ts` for warning logs.
+  recordFailures: number;
 }

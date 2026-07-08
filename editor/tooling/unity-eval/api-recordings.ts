@@ -180,14 +180,17 @@ export function createReplayApiClient(
  * the live HTTP call against `serverUrl`, and writes the resulting
  * `GroundingResult` (success or failure) to the recording file before
  * returning it — so re-recording captures whatever the server actually said,
- * good or bad, for human review.
+ * good or bad, for human review. Exposes `recordFailures` counter for callers
+ * to surface in results — see `run-task.ts`.
  */
 export function createRecordingApiClient(
   serverUrl: string,
   token: string,
   recordingsDir: string,
   ctx: GroundingFixtureCtx,
-): UnityApiClient {
+): UnityApiClient & { recordFailures: number } {
+  let recordFailures = 0;
+
   async function postJson<T>(path: string, body: unknown): Promise<GroundingResult<T>> {
     if (!token) return { ok: false, reason: 'signed-out' };
     try {
@@ -205,6 +208,14 @@ export function createRecordingApiClient(
 
   async function recordAndReturn<T>(req: NormalizedRequest, key: string, result: GroundingResult<T>) {
     const path = recordingFilePath(recordingsDir, ctx.fixture, key);
+    if (!result.ok) {
+      recordFailures++;
+      const label = req.endpoint === 'search' ? `"${req.query}"` : req.member ? `${req.type}.${req.member}` : req.type;
+      console.error(
+        `[unity-eval] grounding record FAILURE: ${req.endpoint} ${label} (fixture=${ctx.fixture}) — ` +
+          `reason=${result.reason} recording to ${path}`,
+      );
+    }
     await mkdir(dirname(path), { recursive: true });
     const file: RecordingFile = { recordedAt: new Date().toISOString(), request: req, response: result };
     await writeFile(path, JSON.stringify(file, null, 2) + '\n');
@@ -238,6 +249,9 @@ export function createRecordingApiClient(
         ? { ok: true, data: result.data.signatures ?? [] }
         : result;
       return recordAndReturn(req, lookupRequestKey(type, member, ctx), mapped);
+    },
+    get recordFailures() {
+      return recordFailures;
     },
   };
 }
