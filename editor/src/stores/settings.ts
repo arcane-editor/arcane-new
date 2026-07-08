@@ -22,6 +22,7 @@ const DEFAULT_SETTINGS: SettingsSchema = {
   'graphify.suppressFirstOpenToast': false,
   'unity.analyzers.enabled': true,
   'unity.compileGate.enabled': true,
+  'unity.lspGate.enabled': true,
   'unity.nearMissDiagnostics.enabled': true,
   'unity.rename.formerlySerializedAs': true,
   'unity.serializationDiagnostics.enabled': true,

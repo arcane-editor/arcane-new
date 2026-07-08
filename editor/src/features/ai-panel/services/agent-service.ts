@@ -37,6 +37,7 @@ import {
   createUnityMutateTools,
   withUnityAnalyzerGate,
   withUnityCompileGate,
+  withLspDiagnosticsGate,
   resetCompileGate,
 } from './unity-tools';
 import { resetTurnTelemetry, recordTelemetryEvent, recordGroundingLintHit } from './turn-telemetry';
@@ -129,6 +130,9 @@ function createToolsForPromptMode(mode: PromptMode, workspacePath: string): Agen
   // Default-on for Unity projects; the gate itself no-ops when no bridge is connected.
   const compileGateOn =
     isUnity && settings.getSetting('unity.compileGate.enabled') !== false;
+  // LSP diagnostics gate: csharp-ls error-severity diagnostics fed back to the
+  // agent. Default-on; the gate itself no-ops when csharp-ls isn't running.
+  const lspGateOn = isUnity && settings.getSetting('unity.lspGate.enabled') !== false;
   const unityRead: AgentTool[] = isUnity ? createUnityReadTools() : [];
 
   if (mode === 'ask' || mode === 'plan-planning') {
@@ -146,10 +150,12 @@ function createToolsForPromptMode(mode: PromptMode, workspacePath: string): Agen
     allowedRoot,
   });
 
-  // Wrap .cs write/edit with the analyzer gate (instant, offline, regex) first,
-  // then the compile gate (authoritative, online) on the OUTSIDE so it runs last.
+  // Wrap .cs write/edit with the analyzer gate (instant, offline, regex) innermost,
+  // then the LSP gate (csharp-ls, live but no engine needed), then the compile gate
+  // (authoritative, needs a live Unity bridge) on the OUTSIDE so it runs last.
   const wrapCs = (t: AgentTool): AgentTool => {
     let g = analyzersOn ? withUnityAnalyzerGate(t, workspacePath) : t;
+    if (lspGateOn) g = withLspDiagnosticsGate(g, workspacePath);
     if (compileGateOn) g = withUnityCompileGate(g, workspacePath);
     return g;
   };

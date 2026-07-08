@@ -11,6 +11,7 @@ import { withUnityCompileGate as createCompileGate } from './compile-gate';
 export { createUnityMutateTools } from './mutate-tools';
 export { withUnityAnalyzerGate } from './analyzer-gate';
 export { resetCompileGate } from './compile-gate';
+export { withLspDiagnosticsGate } from './lsp-gate';
 export { unityApiSearch, unityApiLookup } from './api-client';
 
 /**

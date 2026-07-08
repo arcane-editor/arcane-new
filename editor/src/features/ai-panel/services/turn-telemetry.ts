@@ -31,7 +31,7 @@ export function nextTurnTelemetry(): TurnTelemetry {
   return { ...current };
 }
 
-const REPAIR_MARKERS = ['[Unity compile]', '[Unity analyzers]'];
+const REPAIR_MARKERS = ['[Unity compile]', '[Unity analyzers]', '[C# language server]'];
 
 export function recordTelemetryEvent(event: AgentEvent): void {
   if (event.type === 'tool_execution_end' && event.isError) {

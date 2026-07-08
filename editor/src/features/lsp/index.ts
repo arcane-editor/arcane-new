@@ -12,6 +12,11 @@ export {
 } from './services/document-sync';
 export { registerLspProviders, attachClientToProviders } from './services/providers';
 export {
+  requestFileDiagnostics,
+  type FileDiag,
+  type FileDiagSeverity,
+} from './services/diagnostics';
+export {
   registerRenamePostProcessor,
   type RenamePostProcessor,
   type RenamePostProcessContext,

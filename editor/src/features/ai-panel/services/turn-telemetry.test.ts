@@ -37,6 +37,11 @@ describe('turn telemetry', () => {
     expect(nextTurnTelemetry().repairCount).toBe(2);
   });
 
+  it('counts LSP diagnostics gate repair feedback (P3.3)', () => {
+    recordTelemetryEvent(repairResult('[C# language server] 1 error(s) in Foo.cs:\n  • line 3: CS0246'));
+    expect(nextTurnTelemetry().repairCount).toBe(1);
+  });
+
   it('counts grounding-lint revise hits and resets to 0 per send', () => {
     expect(nextTurnTelemetry().groundingLintHits).toBe(0);
     recordGroundingLintHit();
