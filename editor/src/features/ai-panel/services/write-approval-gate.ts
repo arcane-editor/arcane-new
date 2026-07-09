@@ -10,6 +10,16 @@
  * "we don't silently touch serialized data" guarantee. Checkpoints (P5.2)
  * are what make 'auto' a safe opt-in in the first place.
  *
+ * Known tradeoff — preview/apply staleness window for `edit`: the diff shown
+ * in the approval prompt is computed from a disk read at prompt time; the
+ * real edit tool re-reads and re-applies when the user approves. If the file
+ * changed on disk in between (external editor, another tool), the applied
+ * result can differ from the preview — `applyEdits` matches the FIRST
+ * occurrence of oldText against the fresh content. Accepted for v1: the
+ * sequential tool loop makes agent-side interleaving impossible, and
+ * checkpoints (P5.2) make any surprise revertable. A pre-execute content
+ * recheck would close it if this ever bites in practice.
+ *
  * NOT applied to the eval harness (`tooling/unity-eval`) — its `run-task.ts`
  * builds write/edit tools directly (see `buildTools`) without this gate. Eval
  * runs are unattended measurement, not an interactive UX; there's no user to
