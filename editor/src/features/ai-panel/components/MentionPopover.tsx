@@ -116,6 +116,7 @@ function MentionPopover({ open, query, anchorRect, onPick, onClose }: Props) {
   const isUnityProject = useProjectContextStore((s) => s.isUnityProject);
   const [allFiles, setAllFiles] = useState<{ path: string; relPath: string; basename: string }[]>([]);
   const [loadingFiles, setLoadingFiles] = useState(false);
+  const [hasFetchedFiles, setHasFetchedFiles] = useState(false);
   const [allAssets, setAllAssets] = useState<
     { guid: string; path: string; relPath: string; basename: string }[]
   >([]);
@@ -157,9 +158,11 @@ function MentionPopover({ open, query, anchorRect, onPick, onClose }: Props) {
   const isCategoryLevel = effectiveCategory === null;
 
   // ─── Lazy-load workspace files when entering the Files category ──
+  // Use hasFetchedFiles to prevent refire on an empty (or all-filtered) result.
   useEffect(() => {
     if (effectiveCategory !== 'files') return;
-    if (!open || !workspacePath || allFiles.length > 0 || loadingFiles) return;
+    if (!open || !workspacePath) return;
+    if (hasFetchedFiles || loadingFiles) return;
     setLoadingFiles(true);
     invoke<string[]>('scan_all_files', { workspacePath })
       .then((paths) => {
@@ -172,12 +175,14 @@ function MentionPopover({ open, query, anchorRect, onPick, onClose }: Props) {
               basename: p.split('/').pop() ?? p,
             })),
         );
+        setHasFetchedFiles(true);
       })
       .catch(() => {
         /* fail silently */
+        setHasFetchedFiles(true);
       })
       .finally(() => setLoadingFiles(false));
-  }, [effectiveCategory, open, workspacePath, allFiles.length, loadingFiles, isUnityProject]);
+  }, [effectiveCategory, open, workspacePath, hasFetchedFiles, loadingFiles, isUnityProject]);
 
   // ─── Lazy-load the guid map when entering the Assets category ────
   // Gate on index being ready; use hasFetchedAssets to prevent refire on empty guid map.

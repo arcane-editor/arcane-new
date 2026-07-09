@@ -29,6 +29,8 @@ describe('renderReport', () => {
     expect(report).toContain('1/1');
     expect(report).not.toContain('flaky');
     expect(report).not.toContain('repeats=');
+    expect(report).toContain('| Turns | Wall (s) | Tokens in/out |');
+    expect(report).not.toContain('(Σ)');
   });
 
   it('N=3 flaky task: shows passCount/N and a flakiness marker', () => {
@@ -43,6 +45,7 @@ describe('renderReport', () => {
     expect(report).toContain('~');
     expect(report).toContain('repeats=3');
     expect(report).toContain('flaky');
+    expect(report).toContain('| Turns (Σ) | Wall (s) (Σ) | Tokens in/out (Σ) |');
   });
 
   it('totals row counts aggregated verdicts, not raw attempts', () => {

@@ -64,6 +64,9 @@ export async function fixConsoleError(entry: UnityLogEntry): Promise<void> {
   const prompt = await buildFixPrompt(entry);
   const effort = useAiStore.getState().effort;
   useAiStore.getState().setMode('agent');
+  const firstLine = entry.message.split('\n')[0] ?? '';
+  const summary = firstLine.length > 80 ? `${firstLine.slice(0, 80)}…` : firstLine;
+  useAiStore.getState().addUserMessage(`Fix this console error: ${summary}`);
   useUiStore.getState().setActiveRightSidebarView('ai-panel');
   useUiStore.getState().setRightSidebarVisible(true);
   await getAgentService().sendMessage(prompt, { mode: 'agent', effort });

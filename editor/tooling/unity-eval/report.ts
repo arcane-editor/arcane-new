@@ -20,7 +20,12 @@ export function renderReport(results: AggregatedTaskResult[], label: string): st
     `**${total}/${results.length} passed**` + (repeats > 1 ? ` (repeats=${repeats}, majority scoring)` : ''),
     '',
   );
-  lines.push('| Task | Family | Pass | Score | Turns | Wall (s) | Tokens in/out | Failing checks |');
+  // At repeats > 1 these columns are sums across attempts, not per-attempt
+  // values — label them accordingly so the table isn't misread.
+  const sumSuffix = repeats > 1 ? ' (Σ)' : '';
+  lines.push(
+    `| Task | Family | Pass | Score | Turns${sumSuffix} | Wall (s)${sumSuffix} | Tokens in/out${sumSuffix} | Failing checks |`,
+  );
   lines.push('|---|---|---|---|---|---|---|---|');
   for (const r of results) {
     const turns = r.attempts.reduce((sum, a) => sum + a.turns, 0);

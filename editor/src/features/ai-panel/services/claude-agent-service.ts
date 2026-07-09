@@ -391,7 +391,8 @@ class ClaudeAgentService {
       (a) =>
         a.kind === 'unity-doc' ||
         a.kind === 'unity-context' ||
-        a.kind === 'unity-object',
+        a.kind === 'unity-object' ||
+        a.kind === 'unity-asset',
     );
     if (unityish.length > 0) {
       const resolved = await resolveAttachments(unityish);

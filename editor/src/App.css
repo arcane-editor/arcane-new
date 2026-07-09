@@ -373,6 +373,11 @@ html, body, #root {
   color: var(--text-primary);
 }
 
+.asset-viewer-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .sidebar-tree {
   flex: 1;
   overflow: hidden;
