@@ -1,13 +1,17 @@
 /**
  * ToolCallBlock — collapsible block showing a tool invocation with args and result.
  *
- * P5.1: the header now shows a humanized title (`humanize-tool-call.ts`)
- * instead of the raw tool name + `JSON.stringify(arguments)` dump — raw args
- * are still available behind a "Show raw" sub-toggle. When the tool result
- * carries structured `diffs` (see `diff-decorator.ts` for how the Arcane path
- * populates that field; the Claude/ACP path already did), the block
- * auto-expands and each diff gets an "Open file" affordance plus a per-file
- * "Revert" button backed by P5.2's checkpoint store.
+ * P5.1: the header now shows a humanized title (`humanize-tool-call.ts`,
+ * passed the workspace root so an absolute `args.path` displays relative —
+ * review finding) instead of the raw tool name + `JSON.stringify(arguments)`
+ * dump — raw args are still available behind a "Show raw" sub-toggle. When
+ * the tool result carries structured `diffs` (see `diff-decorator.ts` for how
+ * the Arcane path populates that field; the Claude/ACP path already did), the
+ * block auto-expands and each diff gets an "Open file" affordance plus a
+ * per-file "Revert" button backed by P5.2's checkpoint store — its outcome is
+ * decided by `checkpoints/revert-outcome.ts` (review finding: `restoreFile`
+ * never throws, so success/failure must be read out of its `RestoreResult`,
+ * not assumed).
  */
 
 import { useState, useEffect } from 'react';
@@ -28,6 +32,7 @@ import { humanizeToolCall } from '../services/humanize-tool-call';
 import { useWorkspaceStore } from '../../../stores/workspace';
 import { useCheckpointsStore } from '../../../stores/checkpoints';
 import { findCheckpointTurnForPath } from '../services/checkpoints/checkpoint-selection';
+import { decideRevertOutcome } from '../services/checkpoints/revert-outcome';
 import DiffBlock from './DiffBlock';
 
 interface ToolCallBlockProps {
@@ -68,6 +73,7 @@ function DiffWithActions({
   const restoreFile = useCheckpointsStore((s) => s.restoreFile);
   const [busy, setBusy] = useState(false);
   const [reverted, setReverted] = useState(false);
+  const [revertFailed, setRevertFailed] = useState(false);
 
   const matchedTurn = turnUserMessageId
     ? findCheckpointTurnForPath(turns, turnUserMessageId, diff.path)
@@ -78,12 +84,22 @@ function DiffWithActions({
     void useWorkspaceStore.getState().openFile(diff.path, name);
   }
 
+  // Review fix: `restoreFile` resolves a `RestoreResult` (restored/failed/
+  // skippedTooLarge) and never throws, so a failed or skipped restore must be
+  // read out of the result — awaiting it alone is not "it worked". On failure
+  // the button stays active (not `reverted`) and shows an inline error state
+  // instead of silently claiming success.
   async function revert() {
     if (!matchedTurn || busy || reverted) return;
     setBusy(true);
     try {
-      await restoreFile(matchedTurn.turnId, diff.path);
-      setReverted(true);
+      const result = await restoreFile(matchedTurn.turnId, diff.path);
+      if (decideRevertOutcome(result, diff.path) === 'reverted') {
+        setReverted(true);
+        setRevertFailed(false);
+      } else {
+        setRevertFailed(true);
+      }
     } finally {
       setBusy(false);
     }
@@ -98,17 +114,23 @@ function DiffWithActions({
         </button>
         <button
           type="button"
-          className="ai-diff-action-btn"
+          className={`ai-diff-action-btn${revertFailed ? ' is-error' : ''}`}
           onClick={() => void revert()}
           disabled={!matchedTurn || busy || reverted}
-          title={!matchedTurn ? 'No checkpoint recorded for this file/turn' : undefined}
+          title={
+            !matchedTurn
+              ? 'No checkpoint recorded for this file/turn'
+              : revertFailed
+                ? 'Revert failed — see console for details. Click to retry.'
+                : undefined
+          }
         >
           {busy ? (
             <Loader2 size={11} className="ai-checkpoint-spinner" />
           ) : (
             <>
               <RotateCcw size={11} />
-              {reverted ? 'Reverted' : 'Revert'}
+              {reverted ? 'Reverted' : revertFailed ? 'Revert failed' : 'Revert'}
             </>
           )}
         </button>
@@ -122,6 +144,11 @@ function ToolCallBlock({ toolCall, status, turnUserMessageId }: ToolCallBlockPro
   const hasDiffs = (status?.diffs?.length ?? 0) > 0;
   const [expanded, setExpanded] = useState(hasDiffs);
   const [showRaw, setShowRaw] = useState(false);
+  // Review fix (Finding 4): write/edit/list schemas allow absolute paths, and
+  // the tools echo them back verbatim, so `args.path` isn't always
+  // workspace-relative. Pass the workspace root down so `humanizeToolCall`
+  // can relativize it instead of rendering a full filesystem path.
+  const workspacePath = useWorkspaceStore((s) => s.workspacePath);
 
   // Auto-expand the moment diffs arrive (the Arcane path only attaches them
   // once the write/edit call finishes — the block is already mounted and
@@ -131,7 +158,12 @@ function ToolCallBlock({ toolCall, status, turnUserMessageId }: ToolCallBlockPro
     if (hasDiffs) setExpanded(true);
   }, [hasDiffs]);
 
-  const humanized = humanizeToolCall(toolCall.name, toolCall.arguments, status);
+  const humanized = humanizeToolCall(
+    toolCall.name,
+    toolCall.arguments,
+    status,
+    workspacePath ?? undefined,
+  );
 
   return (
     <div className="ai-tool-call">

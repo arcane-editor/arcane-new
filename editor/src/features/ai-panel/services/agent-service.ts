@@ -196,8 +196,9 @@ function createToolsForPromptMode(mode: PromptMode, workspacePath: string): Agen
   // annotated) but stays INSIDE the repeat-call guard applied by the trailing
   // `.map(withRepeatCallGuard)` below (so a suppressed repeat call never
   // triggers a redundant pair of diff reads). Full order, outer → inner:
-  // guard(diffs(gates(checkpoint(tool)))). See diff-decorator.ts's header for
-  // why gates-vs-diffs ordering doesn't affect correctness either way.
+  // guard(diffs(gates(checkpoint(tool)))). This order is required, not
+  // stylistic — see diff-decorator.ts's header for why a gate hit silently
+  // drops `diffs` if a gate ever ends up outside (wrapping) this decorator.
   return [
     ...readOnly,
     ...graphTools,

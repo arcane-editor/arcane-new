@@ -1,23 +1,34 @@
 /**
  * Humanized tool-call titles (P5.1) — pure, store-free mapping from a raw
- * `(toolName, args)` pair (+ optional live status, for diff line counts) to a
- * short human-readable `{ title, subtitle? }`, replacing the raw tool name +
- * `JSON.stringify(arguments)` `ToolCallBlock` used to show by default.
+ * `(toolName, args)` pair (+ optional live status, for diff line counts; +
+ * optional workspacePath, for path relativization) to a short human-readable
+ * `{ title, subtitle? }`, replacing the raw tool name + `JSON.stringify(arguments)`
+ * `ToolCallBlock` used to show by default.
  *
- * Path display: tool args carry whatever path the model wrote, and the
- * system prompt (`prompts/agent.ts`: "All file paths are relative to this
- * project root unless absolute paths are given") means that in the normal
- * case `args.path` is ALREADY workspace-relative (e.g. "Assets/Scripts/
- * Player.cs") — so this module deliberately does NOT take a workspacePath
- * param and does NOT try to relativize `status.diffs[].path` (which IS
- * absolute — see `diff-decorator.ts`). It only reads `args.path` for display
- * and uses `status.diffs` purely for the +/- line-count arithmetic. This
- * keeps the function fully pure (3 params, matching the brief) and trivially
- * Bun-testable with no store/Tauri seam at all.
+ * Path display: the system prompt (`prompts/agent.ts`: "All file paths are
+ * relative to this project root unless absolute paths are given") means
+ * `args.path` is USUALLY already workspace-relative (e.g. "Assets/Scripts/
+ * Player.cs") — but the write/edit/list tool schemas explicitly document
+ * `path` as "Absolute or relative" and echo whatever the model supplied
+ * straight back in their text result, so a model can (and in practice does)
+ * pass, or later reuse, an absolute path (review finding: a full filesystem
+ * path like `/Users/dev/MyProj/Assets/Scripts/Player.cs` rendering verbatim
+ * in the header). `workspacePath` (optional, 4th param — `ToolCallBlock`
+ * passes it from `useWorkspaceStore`) lets this module relativize an
+ * absolute `args.path` the same case-tolerant way `lsp-gate.ts`'s
+ * `toRelativePath` does; see `relativizePath` below for the exact fallback
+ * when the path isn't under the known workspace root. This module still does
+ * NOT try to relativize `status.diffs[].path` (which IS always absolute —
+ * see `diff-decorator.ts` — but is never rendered by this module, only fed to
+ * the +/- counter).
  *
- * +/- counts reuse `generateDiff` from the vendor edit utilities (the same
- * function `DiffBlock` uses to render) so the numbers shown in the collapsed
- * header always agree with the diff a user sees when they expand it.
+ * +/- counts are computed from the `diff` package's `structuredPatch(...)`
+ * hunks, whose lines carry an unambiguous single-char prefix (`' '|'+'|'-'`)
+ * in a dedicated array field — NOT by re-parsing a joined patch string, which
+ * is ambiguous: an added line whose CONTENT starts with `++` (e.g. `++i;`)
+ * serializes to a patch line reading `+++i;`, indistinguishable by
+ * string-prefix from a `+++ filename` file header (review finding — the
+ * previous implementation silently dropped such lines as "headers").
  *
  * Unrecognized tool names (the `default` branch) return the name unchanged —
  * this is deliberately also the behavior for the Claude/ACP path, whose tool
@@ -26,7 +37,7 @@
  * falling through to "name as-is" is correct there, not a gap.
  */
 
-import { generateDiff } from './vendor/tools/edit-diff';
+import { structuredPatch } from 'diff';
 
 export interface HumanizeDiff {
   path: string;
@@ -55,27 +66,50 @@ function basename(p: string): string {
   return idx === -1 ? norm : norm.slice(idx + 1);
 }
 
-function argPath(args: Record<string, unknown>): string {
-  return typeof args.path === 'string' && args.path.trim() !== '' ? args.path : '(unknown file)';
+function isAbsolutePath(p: string): boolean {
+  return p.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(p);
 }
 
-/** Line-arithmetic +/- count over a unified diff, matching what `DiffBlock` renders. */
+/**
+ * Relativize an absolute `args.path` against the workspace root, the same
+ * case-tolerant way `lsp-gate.ts`'s `toRelativePath` does (macOS/Windows
+ * default to case-insensitive filesystems, so a workspace opened as
+ * `/Users/x/Proj` should still match a model-supplied `/users/x/proj/...`).
+ * A relative path is returned unchanged — the common case. An absolute path
+ * that ISN'T under the known root, or when no `workspacePath` was passed at
+ * all, falls back to just the basename: not the literal path the model
+ * wrote, but strictly better than rendering a full absolute filesystem path,
+ * and consistent with `humanizeRead` already only ever showing a basename.
+ */
+function relativizePath(path: string, workspacePath?: string): string {
+  if (!isAbsolutePath(path)) return path;
+  if (workspacePath) {
+    const normRoot = (workspacePath.endsWith('/') ? workspacePath : `${workspacePath}/`).toLowerCase();
+    if (path.toLowerCase().startsWith(normRoot)) return path.slice(normRoot.length);
+  }
+  return basename(path);
+}
+
+function argPath(args: Record<string, unknown>, workspacePath?: string): string {
+  if (typeof args.path !== 'string' || args.path.trim() === '') return '(unknown file)';
+  return relativizePath(args.path, workspacePath);
+}
+
+/**
+ * Line-arithmetic +/- count via `structuredPatch`'s hunks — each hunk line
+ * has an unambiguous single-char prefix (index 0 is ' '/'+'/'-'), so this
+ * can't misread an added/removed line whose own content happens to start
+ * with '+' or '-' as a patch-header line (see this module's header).
+ */
 function countChangedLines(oldText: string, newText: string): { added: number; removed: number } {
-  const { diff } = generateDiff(oldText, newText, 'file');
+  const { hunks } = structuredPatch('file', 'file', oldText, newText);
   let added = 0;
   let removed = 0;
-  for (const line of diff.split('\n')) {
-    if (
-      line.startsWith('+++') ||
-      line.startsWith('---') ||
-      line.startsWith('@@') ||
-      line.startsWith('Index:') ||
-      line.startsWith('===')
-    ) {
-      continue;
+  for (const hunk of hunks) {
+    for (const line of hunk.lines) {
+      if (line[0] === '+') added++;
+      else if (line[0] === '-') removed++;
     }
-    if (line.startsWith('+')) added++;
-    else if (line.startsWith('-')) removed++;
   }
   return { added, removed };
 }
@@ -97,16 +131,18 @@ function humanizeWriteOrEdit(
   verb: 'Wrote' | 'Edited',
   args: Record<string, unknown>,
   status: HumanizeStatus | undefined,
+  workspacePath: string | undefined,
 ): HumanizedToolCall {
-  return { title: `${verb} ${argPath(args)}${diffCountsSuffix(status?.diffs)}` };
+  return { title: `${verb} ${argPath(args, workspacePath)}${diffCountsSuffix(status?.diffs)}` };
 }
 
 function humanizeRead(args: Record<string, unknown>): HumanizedToolCall {
   return { title: `Read ${basename(argPath(args))}` };
 }
 
-function humanizeList(args: Record<string, unknown>): HumanizedToolCall {
-  const path = typeof args.path === 'string' && args.path.trim() !== '' ? args.path : null;
+function humanizeList(args: Record<string, unknown>, workspacePath: string | undefined): HumanizedToolCall {
+  const rawPath = typeof args.path === 'string' && args.path.trim() !== '' ? args.path : null;
+  const path = rawPath ? relativizePath(rawPath, workspacePath) : null;
   return { title: path ? `Listed ${path}` : 'Listed workspace root' };
 }
 
@@ -193,21 +229,24 @@ const UNITY_TOOL_NAMES = new Set([
  * `ToolCallBlock`'s header. `status` (live/complete tool-call state,
  * `stores/ai.ts`'s `ToolCallStatus`) is optional — a just-started call has
  * none yet, and write/edit titles simply omit the +/- suffix until it arrives.
+ * `workspacePath` (optional) is used to relativize an absolute `args.path` —
+ * see this module's header.
  */
 export function humanizeToolCall(
   name: string,
   args: Record<string, unknown>,
   status?: HumanizeStatus,
+  workspacePath?: string,
 ): HumanizedToolCall {
   switch (name) {
     case 'write':
-      return humanizeWriteOrEdit('Wrote', args, status);
+      return humanizeWriteOrEdit('Wrote', args, status, workspacePath);
     case 'edit':
-      return humanizeWriteOrEdit('Edited', args, status);
+      return humanizeWriteOrEdit('Edited', args, status, workspacePath);
     case 'read':
       return humanizeRead(args);
     case 'list':
-      return humanizeList(args);
+      return humanizeList(args, workspacePath);
     case 'bash':
       return humanizeBash(args);
     case 'todo_update':

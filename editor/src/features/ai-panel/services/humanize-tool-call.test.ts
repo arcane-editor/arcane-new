@@ -55,6 +55,87 @@ describe('humanizeToolCall', () => {
     });
   });
 
+  describe('header-prefix collisions (regression — Finding 1)', () => {
+    it('counts an added line whose content starts with "++" (e.g. "++i;") as +1, not a dropped header', () => {
+      const out = humanizeToolCall(
+        'edit',
+        { path: 'Foo.cs' },
+        { diffs: [{ path: '/abs/Foo.cs', oldText: 'a\n', newText: 'a\n++i;\n' }] },
+      );
+      expect(out.title).toBe('Edited Foo.cs (+1 −0)');
+    });
+
+    it('counts a removed line whose content starts with "--" (e.g. "--count;") as -1', () => {
+      const out = humanizeToolCall(
+        'edit',
+        { path: 'Foo.cs' },
+        { diffs: [{ path: '/abs/Foo.cs', oldText: 'a\n--count;\n', newText: 'a\n' }] },
+      );
+      expect(out.title).toBe('Edited Foo.cs (+0 −1)');
+    });
+
+    it('counts an added line starting with "=== section ===" as a normal addition, not a dropped separator', () => {
+      const out = humanizeToolCall(
+        'edit',
+        { path: 'Foo.cs' },
+        { diffs: [{ path: '/abs/Foo.cs', oldText: 'a\n', newText: 'a\n=== section ===\n' }] },
+      );
+      expect(out.title).toBe('Edited Foo.cs (+1 −0)');
+    });
+  });
+
+  describe('path relativization (regression — Finding 4)', () => {
+    it('relativizes an absolute path under the workspace root', () => {
+      const out = humanizeToolCall(
+        'edit',
+        { path: '/Users/dev/MyProj/Assets/Scripts/Player.cs' },
+        undefined,
+        '/Users/dev/MyProj',
+      );
+      expect(out.title).toBe('Edited Assets/Scripts/Player.cs');
+    });
+
+    it('matches the workspace root case-tolerantly', () => {
+      const out = humanizeToolCall(
+        'write',
+        { path: '/USERS/dev/myproj/Assets/Foo.cs' },
+        undefined,
+        '/Users/dev/MyProj',
+      );
+      expect(out.title).toBe('Wrote Assets/Foo.cs');
+    });
+
+    it('falls back to the basename for an absolute path outside the workspace root', () => {
+      const out = humanizeToolCall('edit', { path: '/etc/hosts' }, undefined, '/Users/dev/MyProj');
+      expect(out.title).toBe('Edited hosts');
+    });
+
+    it('falls back to the basename for an absolute path when no workspacePath is given at all', () => {
+      const out = humanizeToolCall('edit', { path: '/Users/dev/MyProj/Assets/Foo.cs' });
+      expect(out.title).toBe('Edited Foo.cs');
+    });
+
+    it('leaves a relative path unchanged regardless of workspacePath', () => {
+      const out = humanizeToolCall(
+        'edit',
+        { path: 'Assets/Scripts/Player.cs' },
+        undefined,
+        '/Users/dev/MyProj',
+      );
+      expect(out.title).toBe('Edited Assets/Scripts/Player.cs');
+    });
+
+    it('also relativizes an absolute path for the "list" tool', () => {
+      const out = humanizeToolCall(
+        'list',
+        { path: '/Users/dev/MyProj/Assets/Scripts' },
+        undefined,
+        '/Users/dev/MyProj',
+      );
+      expect(out.title).toBe('Listed Assets/Scripts');
+    });
+  });
+
   describe('read', () => {
     it('shows only the basename, not the full path', () => {
       const out = humanizeToolCall('read', { path: 'Assets/Scripts/Player.cs' });

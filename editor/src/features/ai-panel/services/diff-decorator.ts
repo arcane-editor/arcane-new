@@ -27,11 +27,17 @@
  * Wiring (agent-service.ts's `createToolsForPromptMode`): this decorator sits
  * OUTSIDE the cs-gates (`wrapCs`) and the checkpoint snapshot, but INSIDE the
  * repeat-call guard — the final composition is `guard(diffs(gates(checkpoint(tool))))`.
- * Outside the gates so the diff reflects the FINAL on-disk content once any
- * gate-driven repair has happened (the gates only ever append text — they
- * never touch the file, so this ordering doesn't matter for correctness, but
- * "outside" is the conceptually right spot: the diff describes what actually
- * landed on disk for this call, and gates just narrate that afterward).
+ * This is NOT a stylistic choice — diffs MUST stay outside the gates, or a
+ * gate hit silently drops them. `analyzer-gate.ts` (and the other cs-gates)
+ * rebuild their result as `{ content: [...res.content, note] }` on a hit,
+ * WITHOUT spreading `res` first — so any field a wrapper already attached to
+ * `res` before reaching the gate (like this decorator's `diffs`) is dropped
+ * the moment a gate is the outermost layer around it. Putting
+ * `withResultDiffs` outside every gate means it's always the LAST thing to
+ * touch the result on the way out, so `diffs` reaches `ToolCallBlock` no
+ * matter which gates fired. See `diff-decorator.test.ts`'s "composition
+ * order" tests, which pin this down in both directions (diffs outside a gate
+ * that rebuilds-without-spreading survive; diffs inside one don't).
  * Inside the guard so a suppressed repeat call never triggers a redundant
  * pair of diff reads. `allowedRoot` must match the wrapped tool's own sandbox
  * for the same reason `checkpoint-gate.ts` requires it: an out-of-root path

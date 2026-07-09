@@ -3998,6 +3998,11 @@ html, body, #root {
   cursor: not-allowed;
   opacity: 0.55;
 }
+.ai-diff-action-btn.is-error {
+  border-color: color-mix(in srgb, var(--error-text, #dc2626) 45%, var(--border));
+  color: var(--error-text, #dc2626);
+  opacity: 1;
+}
 
 /* ---- AI Panel: Diff block (Claude edit-review) ---- */
 .ai-diff-block {

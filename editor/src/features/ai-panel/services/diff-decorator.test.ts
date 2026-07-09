@@ -140,4 +140,57 @@ describe('withResultDiffs', () => {
 
     expect(res.diffs?.[0].path).toBe('/proj/sub/Foo.cs');
   });
+
+  describe('composition order (regression — Finding 3)', () => {
+    // Mimics `unity-tools/analyzer-gate.ts`'s rebuild-on-hit: on a gate hit it
+    // returns `{ content: [...res.content, note] }` — deliberately WITHOUT
+    // spreading `res` first, exactly like the real gate. Any field a wrapper
+    // sitting BELOW this gate already attached (e.g. `diffs`) is dropped the
+    // instant this gate becomes the outermost layer.
+    function fakeAnalyzerGateHit(tool: AgentTool): AgentTool {
+      return {
+        ...tool,
+        async execute(id, params, signal, onUpdate) {
+          const res = await tool.execute(id, params, signal, onUpdate);
+          return { content: [...res.content, { type: 'text', text: '[fake gate] hit' }] };
+        },
+      };
+    }
+
+    it('diffs OUTSIDE the gate (the pinned agent-service.ts order) survive a gate hit', async () => {
+      const inner = fakeTool('Successfully edited /proj/Foo.cs', 'edit');
+      const gated = fakeAnalyzerGateHit(inner); // gate wraps the raw tool (innermost)
+      const tool = withResultDiffs(gated, CWD, {
+        // diffs wraps the gated tool (outermost) — mirrors guard(diffs(gates(tool)))
+        deps: { readFile: queueReader(['old\n', 'new\n']) },
+      });
+
+      const res = await tool.execute('call-1', { path: 'Foo.cs' });
+
+      expect(res.diffs).toEqual([{ path: '/proj/Foo.cs', oldText: 'old\n', newText: 'new\n' }]);
+      expect(res.content.some((c) => c.type === 'text' && c.text.includes('[fake gate] hit'))).toBe(
+        true,
+      );
+    });
+
+    it('documents why the reverse order (diffs INSIDE the gate) would silently drop diffs', async () => {
+      const inner = fakeTool('Successfully edited /proj/Foo.cs', 'edit');
+      const diffed = withResultDiffs(inner, CWD, {
+        deps: { readFile: queueReader(['old\n', 'new\n']) },
+      });
+      // Gate is now the OUTERMOST wrapper — what agent-service.ts's comment
+      // used to (wrongly) claim didn't matter: `gates(diffs(tool))` instead
+      // of the pinned `diffs(gates(tool))`.
+      const wrongOrder = fakeAnalyzerGateHit(diffed);
+
+      const res = await wrongOrder.execute('call-1', { path: 'Foo.cs' });
+
+      // The gate's `{ content: [...res.content, note] }` rebuild doesn't
+      // spread `res`, so `res.diffs` (attached one layer down, by
+      // withResultDiffs) never reaches the caller — this is exactly the bug
+      // `diff-decorator.ts`'s header now documents, and why the real
+      // composition in `agent-service.ts` must keep diffs outside the gates.
+      expect(res.diffs).toBeUndefined();
+    });
+  });
 });
