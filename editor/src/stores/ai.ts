@@ -56,6 +56,14 @@ export interface AiMessage {
     toolName?: string;
     options: PermissionOption[];
     resolvedOptionId?: string;
+    /**
+     * One-line summary of the action being approved (P5.1), e.g. "enter Play
+     * Mode" or "run EditMode tests" — passed through from `approval-gate.ts`'s
+     * `requestEngineApproval` verb summary. Rendered under the title in
+     * `PermissionRequestBlock`. Only the engine-mutate (Arcane) approval path
+     * sets this today; Claude/ACP permission requests leave it undefined.
+     */
+    detail?: string;
   };
   /** Attachments shown above this message (user role only) */
   attachments?: Attachment[];
@@ -211,6 +219,7 @@ interface AiState {
     toolCallId: string,
     toolName: string | undefined,
     options: PermissionOption[],
+    detail?: string,
   ) => string;
   resolvePermissionRequest: (toolCallId: string, optionId: string) => void;
   addAttachment: (attachment: Attachment) => void;
@@ -588,12 +597,13 @@ export const useAiStore = create<AiState>((set, get) => ({
     toolCallId: string,
     toolName: string | undefined,
     options: PermissionOption[],
+    detail?: string,
   ) => {
     const id = nextId();
     const msg: AiMessage = {
       id,
       role: 'permissionRequest',
-      permissionRequest: { toolCallId, toolName, options },
+      permissionRequest: { toolCallId, toolName, options, detail },
       timestamp: Date.now(),
     };
     set((s) => ({ messages: [...s.messages, msg] }));

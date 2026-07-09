@@ -3604,6 +3604,13 @@ html, body, #root {
   letter-spacing: 0.1px;
 }
 
+.ai-panel-permission-detail {
+  margin: -4px 0 8px 18px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+}
+
 .ai-panel-permission-actions {
   display: flex;
   flex-wrap: wrap;
@@ -3926,6 +3933,70 @@ html, body, #root {
 }
 .ai-tool-call-code-error {
   color: var(--error-text);
+}
+
+.ai-tool-call-subtitle {
+  margin-bottom: 8px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+  opacity: 0.85;
+  word-break: break-word;
+}
+
+.ai-tool-call-raw-toggle {
+  display: inline-block;
+  margin-bottom: 4px;
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 10.5px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  opacity: 0.75;
+}
+.ai-tool-call-raw-toggle:hover {
+  opacity: 1;
+  color: var(--text-primary);
+}
+
+/* ---- AI Panel: per-diff Open file / Revert actions (P5.1) ---- */
+.ai-diff-actions-wrap {
+  margin-bottom: 6px;
+}
+.ai-diff-actions {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.ai-diff-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 10.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+.ai-diff-action-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--text-primary) 6%, transparent);
+  color: var(--text-primary);
+}
+.ai-diff-action-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 /* ---- AI Panel: Diff block (Claude edit-review) ---- */

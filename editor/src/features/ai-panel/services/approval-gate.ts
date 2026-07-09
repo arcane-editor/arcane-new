@@ -23,10 +23,15 @@ export function requestEngineApproval(
   summary: string,
   signal?: AbortSignal,
 ): Promise<Decision> {
-  useAiStore.getState().addPermissionRequest(toolCallId, toolName, [
-    { optionId: 'approve', name: summary ? `Allow: ${summary}` : 'Allow', kind: 'allow_once' },
-    { optionId: 'reject', name: 'Reject', kind: 'reject_once' },
-  ]);
+  useAiStore.getState().addPermissionRequest(
+    toolCallId,
+    toolName,
+    [
+      { optionId: 'approve', name: summary ? `Allow: ${summary}` : 'Allow', kind: 'allow_once' },
+      { optionId: 'reject', name: 'Reject', kind: 'reject_once' },
+    ],
+    summary || undefined,
+  );
   return new Promise<Decision>((resolve) => {
     pending.set(toolCallId, resolve);
     signal?.addEventListener('abort', () => {

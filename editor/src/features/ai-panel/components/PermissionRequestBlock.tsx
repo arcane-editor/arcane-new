@@ -48,6 +48,8 @@ function PermissionRequestBlock({ message }: Props) {
         </span>
       </div>
 
+      {req.detail && <div className="ai-panel-permission-detail">{req.detail}</div>}
+
       <div className="ai-panel-permission-actions">
         {req.options.map((opt) => {
           const Icon = KIND_TO_ICON[opt.kind] ?? Check;

@@ -25,3 +25,32 @@ export function selectCheckpointTurnsForMessage(
 ): CheckpointTurn[] {
   return turns.filter((t) => t.userMessageId === userMessageId && t.entries.length > 0);
 }
+
+/**
+ * P5.1 per-file Revert (on a diff rendered in `ToolCallBlock`): find the
+ * checkpoint turn to restore against for a given path.
+ *
+ * `CheckpointEntry.toolCallId` (restore-plan.ts) documents itself as "the
+ * tool call that triggered this snapshot, if known (future per-file revert
+ * UI)" — but it's never actually populated: `checkpoint-gate.ts`'s
+ * `recordPreWrite` call, and `stores/checkpoints.ts`'s `recordPreWrite`
+ * action signature, don't thread a toolCallId through at all. Rather than
+ * wire that up (out of scope here — see the P5.1 brief), this matches by
+ * (user-message turn, path) instead: scope to the turns already selected by
+ * `selectCheckpointTurnsForMessage` for this message, then find the one that
+ * recorded an entry for `path`. Picks the LAST (most recent) matching turn —
+ * the plan-execution edge case that function's header documents can yield
+ * more than one non-empty turn per message, and a later turn's entry is the
+ * one a still-visible diff on screen actually corresponds to.
+ */
+export function findCheckpointTurnForPath(
+  turns: CheckpointTurn[],
+  userMessageId: string,
+  path: string,
+): CheckpointTurn | undefined {
+  const candidates = selectCheckpointTurnsForMessage(turns, userMessageId);
+  for (let i = candidates.length - 1; i >= 0; i--) {
+    if (candidates[i].entries.some((e) => e.path === path)) return candidates[i];
+  }
+  return undefined;
+}

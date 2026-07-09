@@ -36,9 +36,17 @@ function MessageList() {
 
   const showPlanActions = planPhase === 'awaiting-execute';
 
+  // P5.1: track the most recent preceding user message id so ToolCallBlock's
+  // per-file Revert can look up the right checkpoint turn
+  // (`findCheckpointTurnForPath` matches by (userMessageId, path) — see that
+  // function's header for why toolCallId isn't available instead).
+  let currentUserMessageId: string | null = null;
+
   return (
     <div className="ai-panel-messages" ref={scrollRef}>
       {messages.map((msg, idx) => {
+        if (msg.role === 'user') currentUserMessageId = msg.id;
+
         const node = (() => {
           switch (msg.role) {
             case 'user':
@@ -54,6 +62,7 @@ function MessageList() {
                   key={msg.id}
                   message={msg}
                   toolCalls={toolCalls}
+                  turnUserMessageId={currentUserMessageId}
                 />
               );
             case 'permissionRequest':

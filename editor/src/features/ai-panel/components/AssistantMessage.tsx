@@ -15,9 +15,16 @@ import StreamingIndicator from './StreamingIndicator';
 interface AssistantMessageProps {
   message: AiMessage;
   toolCalls: Map<string, ToolCallStatus>;
+  /**
+   * The id of the user message that started this turn (P5.1) — threaded down
+   * to `ToolCallBlock` so its per-file Revert button can find the matching
+   * checkpoint turn. `null` when there's no preceding user message (shouldn't
+   * normally happen, but session-restore edge cases are defensive here).
+   */
+  turnUserMessageId: string | null;
 }
 
-function AssistantMessage({ message, toolCalls }: AssistantMessageProps) {
+function AssistantMessage({ message, toolCalls, turnUserMessageId }: AssistantMessageProps) {
   const blocks = message.content ?? [];
 
   return (
@@ -48,6 +55,7 @@ function AssistantMessage({ message, toolCalls }: AssistantMessageProps) {
                   key={tc.id}
                   toolCall={tc}
                   status={toolCalls.get(tc.id)}
+                  turnUserMessageId={turnUserMessageId}
                 />
               );
             }

@@ -42,6 +42,7 @@ import {
   resetCompileGate,
 } from './unity-tools';
 import { withCheckpoint } from './checkpoints/checkpoint-gate';
+import { withResultDiffs } from './diff-decorator';
 import { withTurnGovernor, resetTurnGovernor, grantExtraCalls } from './turn-governor';
 import { withTurnEscalation, resetTurnEscalation } from './turn-escalation';
 import { withRepeatCallGuard, resetRepeatCallGuard } from './tool-guards';
@@ -186,18 +187,28 @@ function createToolsForPromptMode(mode: PromptMode, workspacePath: string): Agen
   // Checkpoints (P5.2): snapshot the pre-write content before delegating to the
   // raw write/edit tool, so a turn can be restored later. It sits INSIDE the
   // cs-gates (wrapCs wraps the checkpoint-wrapped tool, not the other way
-  // around) so snapshots happen right next to the actual write — P5.3 will
-  // later insert an approval gate OUTSIDE the checkpoint; today's order is
-  // just gates(checkpoint(tool)). `allowedRoot` must match the tools' own
-  // sandbox so out-of-root writes (which the tools reject internally) don't
-  // record phantom snapshots.
+  // around) so snapshots happen right next to the actual write. `allowedRoot`
+  // must match the tools' own sandbox so out-of-root writes (which the tools
+  // reject internally) don't record phantom snapshots.
+  //
+  // Structured diffs (P5.1): `withResultDiffs` sits OUTSIDE the cs-gates (so
+  // the diff it attaches reflects the FINAL result the gates have already
+  // annotated) but stays INSIDE the repeat-call guard applied by the trailing
+  // `.map(withRepeatCallGuard)` below (so a suppressed repeat call never
+  // triggers a redundant pair of diff reads). Full order, outer → inner:
+  // guard(diffs(gates(checkpoint(tool)))). See diff-decorator.ts's header for
+  // why gates-vs-diffs ordering doesn't affect correctness either way.
   return [
     ...readOnly,
     ...graphTools,
     ...unityRead,
     ...(isUnity ? createUnityMutateTools() : []),
-    wrapCs(withCheckpoint(writeTool, workspacePath, { allowedRoot })),
-    wrapCs(withCheckpoint(editTool, workspacePath, { allowedRoot })),
+    withResultDiffs(wrapCs(withCheckpoint(writeTool, workspacePath, { allowedRoot })), workspacePath, {
+      allowedRoot,
+    }),
+    withResultDiffs(wrapCs(withCheckpoint(editTool, workspacePath, { allowedRoot })), workspacePath, {
+      allowedRoot,
+    }),
     createBashTool(workspacePath, {
       operations: tauriBashOperations,
       allowedRoot,
