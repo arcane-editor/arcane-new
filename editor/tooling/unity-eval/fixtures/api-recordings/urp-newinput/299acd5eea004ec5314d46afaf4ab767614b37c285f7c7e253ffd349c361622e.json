@@ -1,0 +1,103 @@
+{
+  "recordedAt": "2026-07-09T01:51:58.148Z",
+  "request": {
+    "endpoint": "search",
+    "query": "rigidbody linearvelocity unity 6000",
+    "unityVersion": "6000.3.5f2",
+    "renderPipeline": "URP",
+    "inputSystem": "New"
+  },
+  "response": {
+    "ok": true,
+    "data": [
+      {
+        "score": 0.68497795,
+        "docType": "api",
+        "type": "Rigidbody2D",
+        "member": "linearVelocity",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.Rigidbody2D.linearVelocity",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Rigidbody2D-linearVelocity.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rigidbody2D.linearVelocity — public Vector2 linearVelocity { get; set; }"
+      },
+      {
+        "score": 0.67549443,
+        "docType": "api",
+        "type": "Rigidbody",
+        "member": "linearVelocity",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.Rigidbody.linearVelocity",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Rigidbody-linearVelocity.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rigidbody.linearVelocity — public Vector3 linearVelocity { get; set; }"
+      },
+      {
+        "score": 0.66620415,
+        "docType": "api",
+        "type": "Rigidbody2D",
+        "member": "linearVelocityY",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.Rigidbody2D.linearVelocityY",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Rigidbody2D-linearVelocityY.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rigidbody2D.linearVelocityY — public float linearVelocityY { get; set; }"
+      },
+      {
+        "score": 0.65845937,
+        "docType": "api",
+        "type": "ArticulationBody",
+        "member": "linearVelocity",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.ArticulationBody.linearVelocity",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/ArticulationBody-linearVelocity.html",
+        "deprecated": false,
+        "text": "UnityEngine.ArticulationBody.linearVelocity — public Vector3 linearVelocity { get; set; }"
+      },
+      {
+        "score": 0.6553375,
+        "docType": "api",
+        "type": "PhysicsBodyDefinition",
+        "member": "linearVelocity",
+        "namespace": "UnityEngine.LowLevelPhysics2D",
+        "breadcrumb": "UnityEngine.LowLevelPhysics2D.PhysicsBodyDefinition.linearVelocity",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/PhysicsBodyDefinition-linearVelocity.html",
+        "deprecated": false,
+        "text": "UnityEngine.LowLevelPhysics2D.PhysicsBodyDefinition.linearVelocity — public Vector2 linearVelocity { get; set; }"
+      },
+      {
+        "score": 0.6527878,
+        "docType": "api",
+        "type": "PhysicsBody",
+        "member": "linearVelocity",
+        "namespace": "UnityEngine.LowLevelPhysics2D",
+        "breadcrumb": "UnityEngine.LowLevelPhysics2D.PhysicsBody.linearVelocity",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/PhysicsBody-linearVelocity.html",
+        "deprecated": false,
+        "text": "UnityEngine.LowLevelPhysics2D.PhysicsBody.linearVelocity — public Vector2 linearVelocity { get; set; }"
+      },
+      {
+        "score": 0.6375663,
+        "docType": "api",
+        "type": "Rigidbody2D",
+        "member": "linearVelocityX",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.Rigidbody2D.linearVelocityX",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Rigidbody2D-linearVelocityX.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rigidbody2D.linearVelocityX — public float linearVelocityX { get; set; }"
+      },
+      {
+        "score": 0.6353372,
+        "docType": "api",
+        "type": "ParticleSystemEmitterVelocityMode",
+        "member": "Rigidbody",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.ParticleSystemEmitterVelocityMode.Rigidbody",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/ParticleSystemEmitterVelocityMode-Rigidbody.html",
+        "deprecated": false,
+        "text": "UnityEngine.ParticleSystemEmitterVelocityMode.Rigidbody — ParticleSystemEmitterVelocityMode Rigidbody"
+      }
+    ]
+  }
+}

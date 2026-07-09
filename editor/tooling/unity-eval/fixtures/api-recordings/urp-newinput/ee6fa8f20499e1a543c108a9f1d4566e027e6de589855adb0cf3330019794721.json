@@ -1,0 +1,103 @@
+{
+  "recordedAt": "2026-07-09T01:28:33.917Z",
+  "request": {
+    "endpoint": "search",
+    "query": "unityengine.events.unityevent",
+    "unityVersion": "6000.3.5f2",
+    "renderPipeline": "URP",
+    "inputSystem": "New"
+  },
+  "response": {
+    "ok": true,
+    "data": [
+      {
+        "score": 0.77723,
+        "docType": "api",
+        "type": "UnityEvent`3",
+        "member": "UnityEvent`3",
+        "namespace": "UnityEngine.Events",
+        "breadcrumb": "UnityEngine.Events.UnityEvent`3.UnityEvent`3",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/UnityEvent`3.html",
+        "deprecated": false,
+        "text": "UnityEngine.Events.UnityEvent`3.UnityEvent`3 — public class UnityEvent`3"
+      },
+      {
+        "score": 0.7744486,
+        "docType": "api",
+        "type": "UnityEvent",
+        "member": "UnityEvent",
+        "namespace": "UnityEngine.Events",
+        "breadcrumb": "UnityEngine.Events.UnityEvent.UnityEvent",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/UnityEvent.html",
+        "deprecated": false,
+        "text": "UnityEngine.Events.UnityEvent.UnityEvent — public class UnityEvent"
+      },
+      {
+        "score": 0.7598566,
+        "docType": "api",
+        "type": "UnityEvent`1",
+        "member": "AddListener",
+        "namespace": "UnityEngine.Events",
+        "breadcrumb": "UnityEngine.Events.UnityEvent`1.AddListener",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/UnityEvent`1.AddListener.html",
+        "deprecated": false,
+        "text": "UnityEngine.Events.UnityEvent`1.AddListener — void AddListener(UnityAction<T0> call)"
+      },
+      {
+        "score": 0.75424105,
+        "docType": "api",
+        "type": "UnityEvent`2",
+        "member": "UnityEvent`2",
+        "namespace": "UnityEngine.Events",
+        "breadcrumb": "UnityEngine.Events.UnityEvent`2.UnityEvent`2",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/UnityEvent`2.html",
+        "deprecated": false,
+        "text": "UnityEngine.Events.UnityEvent`2.UnityEvent`2 — public class UnityEvent`2"
+      },
+      {
+        "score": 0.74911743,
+        "docType": "api",
+        "type": "UnityEvent`1",
+        "member": "UnityEvent`1",
+        "namespace": "UnityEngine.Events",
+        "breadcrumb": "UnityEngine.Events.UnityEvent`1.UnityEvent`1",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/UnityEvent`1.html",
+        "deprecated": false,
+        "text": "UnityEngine.Events.UnityEvent`1.UnityEvent`1 — public class UnityEvent`1"
+      },
+      {
+        "score": 0.7482973,
+        "docType": "api",
+        "type": "UnityEvent`2",
+        "member": "AddListener",
+        "namespace": "UnityEngine.Events",
+        "breadcrumb": "UnityEngine.Events.UnityEvent`2.AddListener",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/UnityEvent`2.AddListener.html",
+        "deprecated": false,
+        "text": "UnityEngine.Events.UnityEvent`2.AddListener — void AddListener(UnityAction<T0, T1> call)"
+      },
+      {
+        "score": 0.74181503,
+        "docType": "api",
+        "type": "UnityEvent`3",
+        "member": "Invoke",
+        "namespace": "UnityEngine.Events",
+        "breadcrumb": "UnityEngine.Events.UnityEvent`3.Invoke",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/UnityEvent`3.Invoke.html",
+        "deprecated": false,
+        "text": "UnityEngine.Events.UnityEvent`3.Invoke — void Invoke(T0 arg0, T1 arg1, T2 arg2)"
+      },
+      {
+        "score": 0.73658353,
+        "docType": "api",
+        "type": "UnityEvent`1",
+        "member": "RemoveListener",
+        "namespace": "UnityEngine.Events",
+        "breadcrumb": "UnityEngine.Events.UnityEvent`1.RemoveListener",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/UnityEvent`1.RemoveListener.html",
+        "deprecated": false,
+        "text": "UnityEngine.Events.UnityEvent`1.RemoveListener — void RemoveListener(UnityAction<T0> call)"
+      }
+    ]
+  }
+}

@@ -1,0 +1,103 @@
+{
+  "recordedAt": "2026-07-09T02:01:56.566Z",
+  "request": {
+    "endpoint": "search",
+    "query": "urp scriptablerenderpass blit fullscreen material",
+    "unityVersion": "6000.3.5f2",
+    "renderPipeline": "URP",
+    "inputSystem": "New"
+  },
+  "response": {
+    "ok": true,
+    "data": [
+      {
+        "score": 0.552971,
+        "docType": "api",
+        "type": "ScriptableRenderContext",
+        "member": "BeginRenderPass",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.ScriptableRenderContext.BeginRenderPass",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/ScriptableRenderContext.BeginRenderPass.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.ScriptableRenderContext.BeginRenderPass — void BeginRenderPass(int width, int height, int volumeDepth, int samples, NativeArray<AttachmentDescriptor> attachments, int depthAttachmentIndex, int shadingRateImageAttachmentIndex)"
+      },
+      {
+        "score": 0.5480171,
+        "docType": "api",
+        "type": "XRRenderPass",
+        "member": "foveatedRenderingInfo",
+        "namespace": "UnityEngine.XR",
+        "breadcrumb": "UnityEngine.XR.XRRenderPass.foveatedRenderingInfo",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/XRRenderPass-foveatedRenderingInfo.html",
+        "deprecated": false,
+        "text": "UnityEngine.XR.XRRenderPass.foveatedRenderingInfo — IntPtr foveatedRenderingInfo"
+      },
+      {
+        "score": 0.54329175,
+        "docType": "api",
+        "type": "UnityWebRequestMultimedia",
+        "member": "GetMovieTexture",
+        "namespace": "UnityEngine.Networking",
+        "breadcrumb": "UnityEngine.Networking.UnityWebRequestMultimedia.GetMovieTexture",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/UnityWebRequestMultimedia.GetMovieTexture.html",
+        "deprecated": true,
+        "text": "UnityEngine.Networking.UnityWebRequestMultimedia.GetMovieTexture — UnityWebRequest GetMovieTexture(string uri) (DEPRECATED: MovieTexture is deprecated. Use VideoPlayer instead.)"
+      },
+      {
+        "score": 0.54209274,
+        "docType": "api",
+        "type": "FullScreenMovieScalingMode",
+        "member": "Fill",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.FullScreenMovieScalingMode.Fill",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/FullScreenMovieScalingMode-Fill.html",
+        "deprecated": false,
+        "text": "UnityEngine.FullScreenMovieScalingMode.Fill — FullScreenMovieScalingMode Fill"
+      },
+      {
+        "score": 0.54002625,
+        "docType": "api",
+        "type": "FullScreenMovieControlMode",
+        "member": "Full",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.FullScreenMovieControlMode.Full",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/FullScreenMovieControlMode-Full.html",
+        "deprecated": false,
+        "text": "UnityEngine.FullScreenMovieControlMode.Full — FullScreenMovieControlMode Full"
+      },
+      {
+        "score": 0.5360496,
+        "docType": "api",
+        "type": "RayTracingInstanceCullingMaterialTest",
+        "member": "deniedShaderPasses",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.RayTracingInstanceCullingMaterialTest.deniedShaderPasses",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/RayTracingInstanceCullingMaterialTest-deniedShaderPasses.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.RayTracingInstanceCullingMaterialTest.deniedShaderPasses — string[] deniedShaderPasses"
+      },
+      {
+        "score": 0.53562737,
+        "docType": "api",
+        "type": "ScriptableRenderContext",
+        "member": "EndSubPass",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.ScriptableRenderContext.EndSubPass",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/ScriptableRenderContext.EndSubPass.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.ScriptableRenderContext.EndSubPass — void EndSubPass()"
+      },
+      {
+        "score": 0.5348912,
+        "docType": "api",
+        "type": "MacFullscreenMode",
+        "member": "FullscreenWindow",
+        "namespace": "UnityEditor",
+        "breadcrumb": "UnityEditor.MacFullscreenMode.FullscreenWindow",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/MacFullscreenMode-FullscreenWindow.html",
+        "deprecated": false,
+        "text": "UnityEditor.MacFullscreenMode.FullscreenWindow — MacFullscreenMode FullscreenWindow"
+      }
+    ]
+  }
+}

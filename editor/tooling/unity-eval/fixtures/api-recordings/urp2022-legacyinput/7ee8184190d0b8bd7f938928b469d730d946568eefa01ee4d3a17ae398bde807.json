@@ -1,10 +1,10 @@
 {
-  "recordedAt": "2026-07-09T02:15:28.022Z",
+  "recordedAt": "2026-07-09T01:40:05.058Z",
   "request": {
     "endpoint": "search",
-    "query": "rigidbody.addforce",
+    "query": "set material color property",
     "unityVersion": "2022.3.45f1",
-    "renderPipeline": "Built-in",
+    "renderPipeline": "URP",
     "inputSystem": "Legacy"
   },
   "response": {

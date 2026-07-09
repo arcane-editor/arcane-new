@@ -1,8 +1,9 @@
 {
-  "recordedAt": "2026-07-09T02:15:28.022Z",
+  "recordedAt": "2026-07-09T01:49:29.333Z",
   "request": {
-    "endpoint": "search",
-    "query": "rigidbody.addforce",
+    "endpoint": "lookup",
+    "type": "Material",
+    "member": "SetColor",
     "unityVersion": "2022.3.45f1",
     "renderPipeline": "Built-in",
     "inputSystem": "Legacy"

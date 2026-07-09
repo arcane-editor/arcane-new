@@ -1,0 +1,26 @@
+{
+  "recordedAt": "2026-07-09T01:32:51.122Z",
+  "request": {
+    "endpoint": "lookup",
+    "type": "CanvasGroup",
+    "member": "alpha",
+    "unityVersion": "6000.3.5f2",
+    "renderPipeline": "URP",
+    "inputSystem": "New"
+  },
+  "response": {
+    "ok": true,
+    "data": [
+      {
+        "namespace": "UnityEngine",
+        "type": "CanvasGroup",
+        "member": "alpha",
+        "kind": "property",
+        "signature": "public float alpha { get; set; }",
+        "assembly": "UnityEngine.UIModule",
+        "deprecated": false,
+        "docUrl": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/CanvasGroup-alpha.html"
+      }
+    ]
+  }
+}

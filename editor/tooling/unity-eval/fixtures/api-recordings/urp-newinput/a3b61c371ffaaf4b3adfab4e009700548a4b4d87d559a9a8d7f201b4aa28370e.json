@@ -1,0 +1,103 @@
+{
+  "recordedAt": "2026-07-09T02:00:36.827Z",
+  "request": {
+    "endpoint": "search",
+    "query": "packages com.unity.render-pipelines.core runtime utilities blit.hlsl",
+    "unityVersion": "6000.3.5f2",
+    "renderPipeline": "URP",
+    "inputSystem": "New"
+  },
+  "response": {
+    "ok": true,
+    "data": [
+      {
+        "score": 0.6297339,
+        "docType": "api",
+        "type": "RenderPipelineGlobalSettings",
+        "member": "RenderPipelineGlobalSettings",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.RenderPipelineGlobalSettings.RenderPipelineGlobalSettings",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/RenderPipelineGlobalSettings.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.RenderPipelineGlobalSettings.RenderPipelineGlobalSettings — public class RenderPipelineGlobalSettings"
+      },
+      {
+        "score": 0.62349397,
+        "docType": "api",
+        "type": "GraphicsFormat",
+        "member": "B10G11R11_UFloatPack32",
+        "namespace": "UnityEngine.Experimental.Rendering",
+        "breadcrumb": "UnityEngine.Experimental.Rendering.GraphicsFormat.B10G11R11_UFloatPack32",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/GraphicsFormat-B10G11R11_UFloatPack32.html",
+        "deprecated": false,
+        "text": "UnityEngine.Experimental.Rendering.GraphicsFormat.B10G11R11_UFloatPack32 — GraphicsFormat B10G11R11_UFloatPack32"
+      },
+      {
+        "score": 0.61860466,
+        "docType": "api",
+        "type": "BuiltinShaderDefine",
+        "member": "SHADER_API_GLES32",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.BuiltinShaderDefine.SHADER_API_GLES32",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/BuiltinShaderDefine-SHADER_API_GLES32.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.BuiltinShaderDefine.SHADER_API_GLES32 — BuiltinShaderDefine SHADER_API_GLES32"
+      },
+      {
+        "score": 0.61730987,
+        "docType": "api",
+        "type": "BlendOp",
+        "member": "HSLSaturation",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.BlendOp.HSLSaturation",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/BlendOp-HSLSaturation.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.BlendOp.HSLSaturation — BlendOp HSLSaturation"
+      },
+      {
+        "score": 0.6151736,
+        "docType": "api",
+        "type": "GraphicsSettings",
+        "member": "allConfiguredRenderPipelines",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.GraphicsSettings.allConfiguredRenderPipelines",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/GraphicsSettings-allConfiguredRenderPipelines.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.GraphicsSettings.allConfiguredRenderPipelines — public RenderPipelineAsset[] allConfiguredRenderPipelines { get; }"
+      },
+      {
+        "score": 0.6129247,
+        "docType": "api",
+        "type": "GraphicsFormat",
+        "member": "A1R5G5B5_UNormPack16",
+        "namespace": "UnityEngine.Experimental.Rendering",
+        "breadcrumb": "UnityEngine.Experimental.Rendering.GraphicsFormat.A1R5G5B5_UNormPack16",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/GraphicsFormat-A1R5G5B5_UNormPack16.html",
+        "deprecated": false,
+        "text": "UnityEngine.Experimental.Rendering.GraphicsFormat.A1R5G5B5_UNormPack16 — GraphicsFormat A1R5G5B5_UNormPack16"
+      },
+      {
+        "score": 0.6124501,
+        "docType": "api",
+        "type": "BlendOp",
+        "member": "HSLHue",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.BlendOp.HSLHue",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/BlendOp-HSLHue.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.BlendOp.HSLHue — BlendOp HSLHue"
+      },
+      {
+        "score": 0.6118595,
+        "docType": "api",
+        "type": "LightProbeOutsideHullStrategy",
+        "member": "kLightProbeSearchTetrahedralHull",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.LightProbeOutsideHullStrategy.kLightProbeSearchTetrahedralHull",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/LightProbeOutsideHullStrategy-kLightProbeSearchTetrahedralHull.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.LightProbeOutsideHullStrategy.kLightProbeSearchTetrahedralHull — LightProbeOutsideHullStrategy kLightProbeSearchTetrahedralHull"
+      }
+    ]
+  }
+}

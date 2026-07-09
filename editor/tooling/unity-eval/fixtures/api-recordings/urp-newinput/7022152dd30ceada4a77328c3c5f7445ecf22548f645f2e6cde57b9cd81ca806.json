@@ -1,0 +1,103 @@
+{
+  "recordedAt": "2026-07-09T02:00:08.038Z",
+  "request": {
+    "endpoint": "search",
+    "query": "scriptablerenderpass blit camera texture urp",
+    "unityVersion": "6000.3.5f2",
+    "renderPipeline": "URP",
+    "inputSystem": "New"
+  },
+  "response": {
+    "ok": true,
+    "data": [
+      {
+        "score": 0.57719755,
+        "docType": "api",
+        "type": "XRRenderPass",
+        "member": "GetRenderParameter",
+        "namespace": "UnityEngine.XR",
+        "breadcrumb": "UnityEngine.XR.XRRenderPass.GetRenderParameter",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/XRRenderPass.GetRenderParameter.html",
+        "deprecated": false,
+        "text": "UnityEngine.XR.XRRenderPass.GetRenderParameter — void GetRenderParameter(Camera camera, int renderParameterIndex, ref XRRenderParameter renderParameter)"
+      },
+      {
+        "score": 0.57012033,
+        "docType": "api",
+        "type": "ScriptableRenderContext",
+        "member": "DrawGizmos",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.ScriptableRenderContext.DrawGizmos",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/ScriptableRenderContext.DrawGizmos.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.ScriptableRenderContext.DrawGizmos — void DrawGizmos(Camera camera, GizmoSubset gizmoSubset)"
+      },
+      {
+        "score": 0.5699853,
+        "docType": "api",
+        "type": "ImageConversion",
+        "member": "EncodeToEXR",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.ImageConversion.EncodeToEXR",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/ImageConversion.EncodeToEXR.html",
+        "deprecated": false,
+        "text": "UnityEngine.ImageConversion.EncodeToEXR — Byte[] EncodeToEXR(Texture2D tex, EXRFlags flags)"
+      },
+      {
+        "score": 0.56372726,
+        "docType": "api",
+        "type": "RenderPipeline",
+        "member": "SupportsRenderRequest",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.RenderPipeline.SupportsRenderRequest",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/RenderPipeline.SupportsRenderRequest.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.RenderPipeline.SupportsRenderRequest — bool SupportsRenderRequest<RequestData>(Camera camera, RequestData data)"
+      },
+      {
+        "score": 0.56194055,
+        "docType": "api",
+        "type": "ScriptableRenderContext",
+        "member": "DrawUIOverlay",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.ScriptableRenderContext.DrawUIOverlay",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/ScriptableRenderContext.DrawUIOverlay.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.ScriptableRenderContext.DrawUIOverlay — void DrawUIOverlay(Camera camera)"
+      },
+      {
+        "score": 0.5598079,
+        "docType": "api",
+        "type": "ScriptableRenderContext",
+        "member": "BeginRenderPass",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.ScriptableRenderContext.BeginRenderPass",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/ScriptableRenderContext.BeginRenderPass.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.ScriptableRenderContext.BeginRenderPass — void BeginRenderPass(int width, int height, int volumeDepth, int samples, NativeArray<AttachmentDescriptor> attachments, int depthAttachmentIndex, int shadingRateImageAttachmentIndex)"
+      },
+      {
+        "score": 0.55868655,
+        "docType": "api",
+        "type": "InputDeviceCharacteristics",
+        "member": "Camera",
+        "namespace": "UnityEngine.XR",
+        "breadcrumb": "UnityEngine.XR.InputDeviceCharacteristics.Camera",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/InputDeviceCharacteristics-Camera.html",
+        "deprecated": false,
+        "text": "UnityEngine.XR.InputDeviceCharacteristics.Camera — InputDeviceCharacteristics Camera"
+      },
+      {
+        "score": 0.5554696,
+        "docType": "api",
+        "type": "ScriptableCullingParameters",
+        "member": "cameraProperties",
+        "namespace": "UnityEngine.Rendering",
+        "breadcrumb": "UnityEngine.Rendering.ScriptableCullingParameters.cameraProperties",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/ScriptableCullingParameters-cameraProperties.html",
+        "deprecated": false,
+        "text": "UnityEngine.Rendering.ScriptableCullingParameters.cameraProperties — public CameraProperties cameraProperties { get; set; }"
+      }
+    ]
+  }
+}

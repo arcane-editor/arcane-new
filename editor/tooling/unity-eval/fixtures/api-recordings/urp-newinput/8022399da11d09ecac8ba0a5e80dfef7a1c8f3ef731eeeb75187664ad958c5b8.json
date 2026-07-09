@@ -1,0 +1,103 @@
+{
+  "recordedAt": "2026-07-09T01:52:15.792Z",
+  "request": {
+    "endpoint": "search",
+    "query": "playerinput component send messages onmove inputvalue",
+    "unityVersion": "6000.3.5f2",
+    "renderPipeline": "URP",
+    "inputSystem": "New"
+  },
+  "response": {
+    "ok": true,
+    "data": [
+      {
+        "score": 0.60140157,
+        "docType": "api",
+        "type": "SynchronizeInputs",
+        "member": "SynchronizeInputs",
+        "namespace": "UnityEngine.PlayerLoop",
+        "breadcrumb": "UnityEngine.PlayerLoop.SynchronizeInputs.SynchronizeInputs",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/SynchronizeInputs.html",
+        "deprecated": false,
+        "text": "UnityEngine.PlayerLoop.SynchronizeInputs.SynchronizeInputs — public struct SynchronizeInputs"
+      },
+      {
+        "score": 0.60014707,
+        "docType": "api",
+        "type": "EditorConnection",
+        "member": "Send",
+        "namespace": "UnityEditor.Networking.PlayerConnection",
+        "breadcrumb": "UnityEditor.Networking.PlayerConnection.EditorConnection.Send",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/EditorConnection.Send.html",
+        "deprecated": false,
+        "text": "UnityEditor.Networking.PlayerConnection.EditorConnection.Send — void Send(Guid messageId, Byte[] data, int playerId)"
+      },
+      {
+        "score": 0.59549266,
+        "docType": "api",
+        "type": "PlayerState",
+        "member": "value__",
+        "namespace": "Unity.Multiplayer.PlayMode.Editor",
+        "breadcrumb": "Unity.Multiplayer.PlayMode.Editor.PlayerState.value__",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/PlayerState-value__.html",
+        "deprecated": false,
+        "text": "Unity.Multiplayer.PlayMode.Editor.PlayerState.value__ — int value__"
+      },
+      {
+        "score": 0.59019303,
+        "docType": "api",
+        "type": "Component",
+        "member": "SendMessageUpwards",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.Component.SendMessageUpwards",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Component.SendMessageUpwards.html",
+        "deprecated": false,
+        "text": "UnityEngine.Component.SendMessageUpwards — void SendMessageUpwards(string methodName, object value, SendMessageOptions options)"
+      },
+      {
+        "score": 0.58266515,
+        "docType": "api",
+        "type": "PlayerConnectionInitiateMode",
+        "member": "value__",
+        "namespace": "UnityEditor",
+        "breadcrumb": "UnityEditor.PlayerConnectionInitiateMode.value__",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/PlayerConnectionInitiateMode-value__.html",
+        "deprecated": false,
+        "text": "UnityEditor.PlayerConnectionInitiateMode.value__ — int value__"
+      },
+      {
+        "score": 0.5821797,
+        "docType": "api",
+        "type": "IEditorPlayerConnection",
+        "member": "Send",
+        "namespace": "UnityEngine.Networking.PlayerConnection",
+        "breadcrumb": "UnityEngine.Networking.PlayerConnection.IEditorPlayerConnection.Send",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/IEditorPlayerConnection.Send.html",
+        "deprecated": false,
+        "text": "UnityEngine.Networking.PlayerConnection.IEditorPlayerConnection.Send — void Send(Guid messageId, Byte[] data)"
+      },
+      {
+        "score": 0.57993096,
+        "docType": "api",
+        "type": "CheckTexFieldInput",
+        "member": "CheckTexFieldInput",
+        "namespace": "UnityEngine.PlayerLoop",
+        "breadcrumb": "UnityEngine.PlayerLoop.CheckTexFieldInput.CheckTexFieldInput",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/CheckTexFieldInput.html",
+        "deprecated": false,
+        "text": "UnityEngine.PlayerLoop.CheckTexFieldInput.CheckTexFieldInput — public struct CheckTexFieldInput"
+      },
+      {
+        "score": 0.5791901,
+        "docType": "api",
+        "type": "ChannelClient",
+        "member": "Send",
+        "namespace": "UnityEditor.MPE",
+        "breadcrumb": "UnityEditor.MPE.ChannelClient.Send",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/ChannelClient.Send.html",
+        "deprecated": false,
+        "text": "UnityEditor.MPE.ChannelClient.Send — void Send(string data)"
+      }
+    ]
+  }
+}

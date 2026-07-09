@@ -1,0 +1,103 @@
+{
+  "recordedAt": "2026-07-09T02:00:19.219Z",
+  "request": {
+    "endpoint": "search",
+    "query": "fullscreenpassrendererfeature",
+    "unityVersion": "6000.3.5f2",
+    "renderPipeline": "URP",
+    "inputSystem": "New"
+  },
+  "response": {
+    "ok": true,
+    "data": [
+      {
+        "score": 0.58127576,
+        "docType": "api",
+        "type": "XRRenderPass",
+        "member": "foveatedRenderingInfo",
+        "namespace": "UnityEngine.XR",
+        "breadcrumb": "UnityEngine.XR.XRRenderPass.foveatedRenderingInfo",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/XRRenderPass-foveatedRenderingInfo.html",
+        "deprecated": false,
+        "text": "UnityEngine.XR.XRRenderPass.foveatedRenderingInfo — IntPtr foveatedRenderingInfo"
+      },
+      {
+        "score": 0.5781646,
+        "docType": "api",
+        "type": "FullScreenMovieControlMode",
+        "member": "Full",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.FullScreenMovieControlMode.Full",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/FullScreenMovieControlMode-Full.html",
+        "deprecated": false,
+        "text": "UnityEngine.FullScreenMovieControlMode.Full — FullScreenMovieControlMode Full"
+      },
+      {
+        "score": 0.5704668,
+        "docType": "api",
+        "type": "FullScreenMovieControlMode",
+        "member": "Hidden",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.FullScreenMovieControlMode.Hidden",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/FullScreenMovieControlMode-Hidden.html",
+        "deprecated": false,
+        "text": "UnityEngine.FullScreenMovieControlMode.Hidden — FullScreenMovieControlMode Hidden"
+      },
+      {
+        "score": 0.5677987,
+        "docType": "api",
+        "type": "FullScreenMode",
+        "member": "FullScreenMode",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.FullScreenMode.FullScreenMode",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/FullScreenMode.html",
+        "deprecated": false,
+        "text": "UnityEngine.FullScreenMode.FullScreenMode — public enum FullScreenMode"
+      },
+      {
+        "score": 0.56687444,
+        "docType": "api",
+        "type": "Screen",
+        "member": "fullScreenMode",
+        "namespace": "UnityEngine.Device",
+        "breadcrumb": "UnityEngine.Device.Screen.fullScreenMode",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Screen-fullScreenMode.html",
+        "deprecated": false,
+        "text": "UnityEngine.Device.Screen.fullScreenMode — public FullScreenMode fullScreenMode { get; set; }"
+      },
+      {
+        "score": 0.5662392,
+        "docType": "api",
+        "type": "FullScreenMovieControlMode",
+        "member": "FullScreenMovieControlMode",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.FullScreenMovieControlMode.FullScreenMovieControlMode",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/FullScreenMovieControlMode.html",
+        "deprecated": false,
+        "text": "UnityEngine.FullScreenMovieControlMode.FullScreenMovieControlMode — public enum FullScreenMovieControlMode"
+      },
+      {
+        "score": 0.5645988,
+        "docType": "api",
+        "type": "MacFullscreenMode",
+        "member": "FullscreenWindow",
+        "namespace": "UnityEditor",
+        "breadcrumb": "UnityEditor.MacFullscreenMode.FullscreenWindow",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/MacFullscreenMode-FullscreenWindow.html",
+        "deprecated": false,
+        "text": "UnityEditor.MacFullscreenMode.FullscreenWindow — MacFullscreenMode FullscreenWindow"
+      },
+      {
+        "score": 0.558276,
+        "docType": "api",
+        "type": "FullScreenMode",
+        "member": "ExclusiveFullScreen",
+        "namespace": "UnityEngine",
+        "breadcrumb": "UnityEngine.FullScreenMode.ExclusiveFullScreen",
+        "url": "https://docs.unity3d.com/6000.3/Documentation/ScriptReference/FullScreenMode-ExclusiveFullScreen.html",
+        "deprecated": false,
+        "text": "UnityEngine.FullScreenMode.ExclusiveFullScreen — FullScreenMode ExclusiveFullScreen"
+      }
+    ]
+  }
+}
