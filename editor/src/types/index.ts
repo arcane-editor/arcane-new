@@ -111,6 +111,8 @@ export interface SettingsSchema {
   'graphify.suppressFirstOpenToast': boolean;
   'ai.checkpoints.enabled': boolean;
   'ai.escalation.enabled': boolean;
+  'ai.edits.applyMode': 'approve' | 'auto';
+  'ai.edits.alwaysApproveUnityAssets': boolean;
   'unity.analyzers.enabled': boolean;
   'unity.compileGate.enabled': boolean;
   'unity.lspGate.enabled': boolean;

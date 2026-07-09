@@ -42,6 +42,7 @@ import {
   resetCompileGate,
 } from './unity-tools';
 import { withCheckpoint } from './checkpoints/checkpoint-gate';
+import { withWriteApproval } from './write-approval-gate';
 import { withResultDiffs } from './diff-decorator';
 import { withTurnGovernor, resetTurnGovernor, grantExtraCalls } from './turn-governor';
 import { withTurnEscalation, resetTurnEscalation } from './turn-escalation';
@@ -185,31 +186,43 @@ function createToolsForPromptMode(mode: PromptMode, workspacePath: string): Agen
   };
 
   // Checkpoints (P5.2): snapshot the pre-write content before delegating to the
-  // raw write/edit tool, so a turn can be restored later. It sits INSIDE the
-  // cs-gates (wrapCs wraps the checkpoint-wrapped tool, not the other way
-  // around) so snapshots happen right next to the actual write. `allowedRoot`
-  // must match the tools' own sandbox so out-of-root writes (which the tools
+  // raw write/edit tool, so a turn can be restored later. `allowedRoot` must
+  // match the tools' own sandbox so out-of-root writes (which the tools
   // reject internally) don't record phantom snapshots.
+  //
+  // Pre-apply write approval (P5.3): `withWriteApproval` sits OUTSIDE the
+  // checkpoint (prompt first; snapshot only for writes that actually proceed
+  // — a rejected write returns before ever calling `withCheckpoint`, so no
+  // snapshot is recorded and the raw tool's `onFileWritten`/`onFileEdited`
+  // never fire either) but INSIDE the cs-gates (analyzer/lsp/compile — see
+  // `write-approval-gate.ts`'s header for why those needed an explicit
+  // `isRejectedWrite` early-out to stay inert on a rejected write, since they
+  // always run and post-process whatever result comes back).
   //
   // Structured diffs (P5.1): `withResultDiffs` sits OUTSIDE the cs-gates (so
   // the diff it attaches reflects the FINAL result the gates have already
   // annotated) but stays INSIDE the repeat-call guard applied by the trailing
   // `.map(withRepeatCallGuard)` below (so a suppressed repeat call never
   // triggers a redundant pair of diff reads). Full order, outer → inner:
-  // guard(diffs(gates(checkpoint(tool)))). This order is required, not
-  // stylistic — see diff-decorator.ts's header for why a gate hit silently
-  // drops `diffs` if a gate ever ends up outside (wrapping) this decorator.
+  // guard(diffs(gates(withWriteApproval(checkpoint(tool))))). This order is
+  // required, not stylistic — see diff-decorator.ts's header for why a gate
+  // hit silently drops `diffs` if a gate ever ends up outside (wrapping) this
+  // decorator.
   return [
     ...readOnly,
     ...graphTools,
     ...unityRead,
     ...(isUnity ? createUnityMutateTools() : []),
-    withResultDiffs(wrapCs(withCheckpoint(writeTool, workspacePath, { allowedRoot })), workspacePath, {
-      allowedRoot,
-    }),
-    withResultDiffs(wrapCs(withCheckpoint(editTool, workspacePath, { allowedRoot })), workspacePath, {
-      allowedRoot,
-    }),
+    withResultDiffs(
+      wrapCs(withWriteApproval(withCheckpoint(writeTool, workspacePath, { allowedRoot }), workspacePath, { allowedRoot })),
+      workspacePath,
+      { allowedRoot },
+    ),
+    withResultDiffs(
+      wrapCs(withWriteApproval(withCheckpoint(editTool, workspacePath, { allowedRoot }), workspacePath, { allowedRoot })),
+      workspacePath,
+      { allowedRoot },
+    ),
     createBashTool(workspacePath, {
       operations: tauriBashOperations,
       allowedRoot,

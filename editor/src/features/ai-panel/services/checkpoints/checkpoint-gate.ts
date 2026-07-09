@@ -5,19 +5,20 @@
 // delegate call — reading after would see the NEW content, not the pre-image
 // the whole feature exists to preserve.
 //
-// Wiring (agent-service.ts's `createToolsForPromptMode`): `wrapCs(withCheckpoint(tool))`
+// Wiring (agent-service.ts's `createToolsForPromptMode`): `wrapCs(withWriteApproval(withCheckpoint(tool)))`
 // — checkpoint is the INNERMOST wrapper (closest to the raw write/edit tool),
-// with the analyzer/lsp/compile gates layered outside it. None of those gates
-// can prevent the underlying write from being attempted (they only annotate
-// the result afterward). The one pre-write rejection the inner tools DO make
-// themselves is the Assets/ sandbox: vendor/tools/write.ts and edit.ts call
-// `resolveWithinRoot` internally and silently return an error-text result
-// (no write, no onFileWritten) for out-of-root paths. This gate applies the
-// SAME `allowedRoot` check up front and skips the snapshot when the path is
-// out of root — otherwise it would record phantom entries for writes that
-// never happen (wrong "Checkpoint · N files" counts, and false state for
-// P5.3's approval gate). P5.3 will later insert that approval gate OUTSIDE
-// the checkpoint; today's order is just gates(checkpoint(tool)).
+// with P5.3's `withWriteApproval` (write-approval-gate.ts) layered directly
+// outside it, and the analyzer/lsp/compile gates outside that. None of the
+// cs-gates can prevent the underlying write from being attempted (they only
+// annotate the result afterward) — but `withWriteApproval` CAN and does: a
+// rejected write returns before ever calling this gate's `execute`, so no
+// snapshot is recorded for it. The one pre-write rejection the inner tools DO
+// make themselves is the Assets/ sandbox: vendor/tools/write.ts and edit.ts
+// call `resolveWithinRoot` internally and silently return an error-text
+// result (no write, no onFileWritten) for out-of-root paths. This gate
+// applies the SAME `allowedRoot` check up front and skips the snapshot when
+// the path is out of root — otherwise it would record phantom entries for
+// writes that never happen (wrong "Checkpoint · N files" counts).
 //
 // Settings-gated on `ai.checkpoints.enabled` (default on). Known limitation
 // (documented in the P5.2 report too): bash-tool mutations are not

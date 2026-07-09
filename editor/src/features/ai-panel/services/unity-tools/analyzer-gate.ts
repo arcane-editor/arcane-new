@@ -3,17 +3,29 @@
 // introduced, append them to the tool result so the agent self-corrects on its
 // next turn (the loop naturally re-iterates until findings clear). Pure decorator
 // over the generic write/edit tools — no vendor-loop changes.
+//
+// P5.3 finding: this gate wraps OUTSIDE `write-approval-gate.ts`, which sits
+// closer to the raw tool — so a REJECTED write still reaches this gate's
+// `execute`. Before the `isRejectedWrite` check below, the `write` branch
+// analyzed `params.content` directly (by design, to avoid a re-read for a
+// write it assumed had landed) — which meant a rejected write got analyzed as
+// if the model's proposed-but-never-applied content were live, misreporting
+// it as "issues introduced by this C# write". The early-out makes a rejected
+// write inert here too (see `write-approval-gate.ts`'s header for the full
+// investigation across all three cs-gates).
 
 import type { AgentTool } from '../vendor/types';
 import { runAnalyzersOnText } from '../../../unity-analyzers';
 import { tauriReadOperations } from '../tool-operations';
 import { resolveToCwd } from '../vendor/tools/path-utils';
+import { isRejectedWrite } from '../write-approval-gate';
 
 export function withUnityAnalyzerGate(tool: AgentTool, cwd: string): AgentTool {
   return {
     ...tool,
     async execute(id, params, signal, onUpdate) {
       const res = await tool.execute(id, params, signal, onUpdate);
+      if (isRejectedWrite(res)) return res;
       const p = (params as { path?: string }).path;
       if (!p || !p.toLowerCase().endsWith('.cs')) return res;
 

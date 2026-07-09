@@ -22,6 +22,7 @@ import {
   type ThinkingContent,
   type ToolCall,
   type VerifiedCardData,
+  resetWriteApprovalSession,
 } from '../features/ai-panel';
 import { useWorkspaceStore } from './workspace';
 import { useCheckpointsStore } from './checkpoints';
@@ -64,6 +65,13 @@ export interface AiMessage {
      * sets this today; Claude/ACP permission requests leave it undefined.
      */
     detail?: string;
+    /**
+     * Pending file diff (P5.3, `write-approval-gate.ts`'s pre-apply gate) —
+     * rendered EXPANDED via `DiffBlock` above the action buttons. Only the
+     * file-write approval path sets this; engine-mutate and Claude/ACP
+     * permission requests leave it undefined.
+     */
+    diff?: { path: string; oldText: string; newText: string };
   };
   /** Attachments shown above this message (user role only) */
   attachments?: Attachment[];
@@ -220,6 +228,7 @@ interface AiState {
     toolName: string | undefined,
     options: PermissionOption[],
     detail?: string,
+    diff?: { path: string; oldText: string; newText: string },
   ) => string;
   resolvePermissionRequest: (toolCallId: string, optionId: string) => void;
   addAttachment: (attachment: Attachment) => void;
@@ -509,6 +518,8 @@ export const useAiStore = create<AiState>((set, get) => ({
       sessionUsage: { input: 0, output: 0, requests: 0 },
     });
     useCheckpointsStore.getState().reset();
+    // P5.3: "Apply all this session" doesn't carry across conversations.
+    resetWriteApprovalSession();
   },
 
   loadSessionIntoStore: (session: SessionData) => {
@@ -538,6 +549,9 @@ export const useAiStore = create<AiState>((set, get) => ({
       sessionUsage: { input: 0, output: 0, requests: 0 },
     }));
     void useCheckpointsStore.getState().loadForSession(session.id);
+    // P5.3: loading a different session is a fresh approval context too —
+    // "Apply all this session" shouldn't leak in from whatever was open before.
+    resetWriteApprovalSession();
   },
 
   setMode: (mode: ChatMode) => set({ mode }),
@@ -598,12 +612,13 @@ export const useAiStore = create<AiState>((set, get) => ({
     toolName: string | undefined,
     options: PermissionOption[],
     detail?: string,
+    diff?: { path: string; oldText: string; newText: string },
   ) => {
     const id = nextId();
     const msg: AiMessage = {
       id,
       role: 'permissionRequest',
-      permissionRequest: { toolCallId, toolName, options, detail },
+      permissionRequest: { toolCallId, toolName, options, detail, diff },
       timestamp: Date.now(),
     };
     set((s) => ({ messages: [...s.messages, msg] }));

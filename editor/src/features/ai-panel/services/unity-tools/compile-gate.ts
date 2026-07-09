@@ -12,6 +12,15 @@
 //
 // Cost guard: a per-file attempt counter caps repair iterations so an
 // un-fixable error (e.g. a missing package, not a code bug) can't loop forever.
+//
+// P5.3 finding: this gate wraps OUTSIDE `write-approval-gate.ts` and, before
+// the `isRejectedWrite` check below, unconditionally triggered a REAL Unity
+// recompile for any `.cs` path regardless of whether the write actually
+// happened — wasteful (a pointless engine round-trip for a change that was
+// rejected) and would burn one of this gate's own `MAX_ATTEMPTS`
+// repair-iteration budget for a "fix" that was never applied. The early-out
+// makes a rejected write inert here too (see `write-approval-gate.ts`'s
+// header for the full investigation across all three cs-gates).
 
 import type { AgentTool, AgentToolResult } from '../vendor/types';
 import { resolveToCwd } from '../vendor/tools/path-utils';
@@ -19,6 +28,7 @@ import { triggerRecompileAndWait } from '../../../unity-bridge';
 import type { CompilerMessage } from '../../../../types/unity';
 import { bridgeConnected } from './shared';
 import { buildCompileHints, type HintLookup } from './compile-hints';
+import { isRejectedWrite } from '../write-approval-gate';
 
 const MAX_ATTEMPTS = 4;
 
@@ -59,6 +69,7 @@ export function withUnityCompileGate(tool: AgentTool, cwd: string, client: HintL
     ...tool,
     async execute(id, params, signal, onUpdate) {
       const res = await tool.execute(id, params, signal, onUpdate);
+      if (isRejectedWrite(res)) return res;
       const p = (params as { path?: string }).path;
       if (!p || !p.toLowerCase().endsWith('.cs')) return res;
 

@@ -3611,6 +3611,11 @@ html, body, #root {
   color: var(--text-secondary);
 }
 
+/* P5.3: pending file-write diff, rendered expanded above the action buttons. */
+.ai-panel-permission-diff {
+  margin-bottom: 8px;
+}
+
 .ai-panel-permission-actions {
   display: flex;
   flex-wrap: wrap;

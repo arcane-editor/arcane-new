@@ -27,11 +27,21 @@
 // effect) — none of which survive a static import under Bun's DOM-less test
 // runtime. A dynamic import defers that whole chain until the default fetcher
 // is actually invoked, which never happens in tests (they always inject a fake).
+//
+// P5.3 finding: unlike `analyzer-gate.ts`/`compile-gate.ts`, this gate was
+// ALREADY incidentally inert on a rejected write — `isSuccessfulWrite` below
+// only matches the vendor tools' literal "Successfully wrote/edited" prefix,
+// and `write-approval-gate.ts`'s rejection text ("User rejected this edit
+// to...") never does. The explicit `isRejectedWrite` check is added anyway,
+// as defense in depth: the "inert" guarantee shouldn't rest solely on two text
+// conventions happening to never collide (see `write-approval-gate.ts`'s
+// header for the full investigation across all three cs-gates).
 
 import { invoke } from '@tauri-apps/api/core';
 import type { AgentTool, AgentToolResult } from '../vendor/types';
 import { resolveToCwd } from '../vendor/tools/path-utils';
 import type { FileDiag } from '../../../lsp';
+import { isRejectedWrite } from '../write-approval-gate';
 
 export type DiagnosticsFetcher = (
   absPath: string,
@@ -85,6 +95,7 @@ export function withLspDiagnosticsGate(
     ...tool,
     async execute(id, params, signal, onUpdate) {
       const res = await tool.execute(id, params, signal, onUpdate);
+      if (isRejectedWrite(res)) return res;
       const p = (params as { path?: string }).path;
       if (!p || !p.toLowerCase().endsWith('.cs')) return res;
       if (!isSuccessfulWrite(res)) return res;

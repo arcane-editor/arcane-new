@@ -1,13 +1,26 @@
 /**
  * PermissionRequestBlock — inline approval UI rendered in the message list
  * when Claude (via ACP `session/request_permission`) asks before running a
- * tool. After the user picks, the buttons lock and show the chosen option.
+ * tool, an Arcane Unity engine-mutate tool asks before touching the live
+ * editor (F-5.6), or Arcane's write/edit tools ask before touching a file
+ * (P5.3, `write-approval-gate.ts`). After the user picks, the buttons lock
+ * and show the chosen option.
+ *
+ * P5.3: when `req.diff` is present (the file-write approval path), the diff
+ * renders EXPANDED above the buttons via `DiffBlock`, with a humanized header
+ * (`humanizeToolCall`, reused from P5.1's tool-call rendering for the exact
+ * same "+N −M" counting) and an "Open file" affordance (P5.1's
+ * `ToolCallBlock` pattern) — no "Revert" button here, since a pending/
+ * rejected write was never checkpointed.
  */
 
-import { Shield, Check, X } from 'lucide-react';
+import { Shield, Check, X, FileText } from 'lucide-react';
 import { useAiStore, type AiMessage } from '../../../stores/ai';
+import { useWorkspaceStore } from '../../../stores/workspace';
 import { getClaudeAgentService } from '../services/claude-agent-service';
-import { resolveEngineApproval } from '../services/approval-gate';
+import { resolvePendingApproval } from '../services/approval-gate';
+import { humanizeToolCall } from '../services/humanize-tool-call';
+import DiffBlock from './DiffBlock';
 
 interface Props {
   message: AiMessage;
@@ -22,21 +35,33 @@ const KIND_TO_ICON: Record<string, typeof Check> = {
 
 function PermissionRequestBlock({ message }: Props) {
   const req = message.permissionRequest;
+  const workspacePath = useWorkspaceStore((s) => s.workspacePath);
   if (!req) return null;
 
   const resolved = !!req.resolvedOptionId;
   const selectedOption = req.options.find((o) => o.optionId === req.resolvedOptionId);
+  const diff = req.diff;
+  const humanized = diff
+    ? humanizeToolCall(req.toolName ?? 'write', { path: diff.path }, { diffs: [diff] }, workspacePath ?? undefined)
+    : null;
 
   function pick(optionId: string) {
     if (resolved) return;
-    // Route to the right backend: Claude uses ACP; the Arcane vendor loop uses
-    // the engine-approval gate (F-5.6). Both converge on resolvePermissionRequest
-    // to lock the buttons.
+    // Route to the right backend: Claude uses ACP; the Arcane vendor loop
+    // (engine-mutate approvals AND P5.3's file-write approvals) uses the
+    // shared approval-gate pending-map flow. Both converge on
+    // resolvePermissionRequest to lock the buttons.
     if (useAiStore.getState().selectedAgent === 'claude') {
       getClaudeAgentService().resolvePermission(req!.toolCallId, optionId);
     } else {
-      resolveEngineApproval(req!.toolCallId, optionId);
+      resolvePendingApproval(req!.toolCallId, optionId);
     }
+  }
+
+  function openFile() {
+    if (!diff) return;
+    const name = diff.path.split('/').pop() ?? diff.path;
+    void useWorkspaceStore.getState().openFile(diff.path, name);
   }
 
   return (
@@ -44,11 +69,28 @@ function PermissionRequestBlock({ message }: Props) {
       <div className="ai-panel-permission-header">
         <Shield size={12} strokeWidth={2} />
         <span className="ai-panel-permission-title">
-          {req.toolName ? `Allow ${req.toolName}?` : 'Allow this action?'}
+          {diff
+            ? 'Approve this file change?'
+            : req.toolName
+              ? `Allow ${req.toolName}?`
+              : 'Allow this action?'}
         </span>
       </div>
 
       {req.detail && <div className="ai-panel-permission-detail">{req.detail}</div>}
+
+      {diff && (
+        <div className="ai-panel-permission-diff">
+          {humanized && <div className="ai-tool-call-body-label">{humanized.title}</div>}
+          <div className="ai-diff-actions">
+            <button type="button" className="ai-diff-action-btn" onClick={openFile}>
+              <FileText size={11} />
+              Open file
+            </button>
+          </div>
+          <DiffBlock path={diff.path} oldText={diff.oldText} newText={diff.newText} />
+        </div>
+      )}
 
       <div className="ai-panel-permission-actions">
         {req.options.map((opt) => {
