@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import type { GitLogEntry, WorktreeInfo, BlameLine, CommitDetail } from '../types';
 import { notify } from './notifications';
 import { useWorkspaceStore } from './workspace';
+import { remoteErrorMessage } from '../features/git';
 
 interface BlameEntry {
   gen: number;
@@ -24,6 +25,17 @@ interface GitStatusResult {
   unstaged: GitFileStatus[];
   ahead: number;
   behind: number;
+}
+
+/**
+ * Result of the `git_push` command. `set_upstream` is `true` only when the
+ * plain push failed with "no upstream branch" and the backend transparently
+ * retried as `push -u origin <branch>` — used to show a "pushed and set
+ * upstream" toast instead of a plain "pushed" one.
+ */
+interface GitPushResult {
+  stdout: string;
+  set_upstream: boolean;
 }
 
 interface GitState {
@@ -395,8 +407,9 @@ export const useGitStore = create<GitState>((set, get) => ({
       await get().refreshStatus(workspacePath);
       notify.success('Fetch completed');
     } catch (err) {
-      set({ lastError: `Fetch failed: ${err}` });
-      notify.error('Fetch failed: ' + err);
+      const message = remoteErrorMessage('Fetch', String(err));
+      set({ lastError: message });
+      notify.error(message);
     } finally {
       set({ isRemoteLoading: false });
     }
@@ -410,8 +423,9 @@ export const useGitStore = create<GitState>((set, get) => ({
       await get().refreshStatus(workspacePath);
       notify.success('Changes pulled successfully');
     } catch (err) {
-      set({ lastError: `Pull failed: ${err}` });
-      notify.error('Pull failed: ' + err);
+      const message = remoteErrorMessage('Pull', String(err));
+      set({ lastError: message });
+      notify.error(message);
     } finally {
       set({ isRemoteLoading: false });
     }
@@ -420,12 +434,13 @@ export const useGitStore = create<GitState>((set, get) => ({
   push: async (workspacePath: string) => {
     set({ isRemoteLoading: true, lastError: null });
     try {
-      await invoke<string>('git_push', { workspacePath });
+      const result = await invoke<GitPushResult>('git_push', { workspacePath });
       await get().refreshStatus(workspacePath);
-      notify.success('Changes pushed successfully');
+      notify.success(result.set_upstream ? 'Pushed and set upstream' : 'Changes pushed successfully');
     } catch (err) {
-      set({ lastError: `Push failed: ${err}` });
-      notify.error('Push failed: ' + err);
+      const message = remoteErrorMessage('Push', String(err));
+      set({ lastError: message });
+      notify.error(message);
     } finally {
       set({ isRemoteLoading: false });
     }

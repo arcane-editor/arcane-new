@@ -540,49 +540,97 @@ pub fn git_discard_all(workspace_path: String) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
-pub fn git_fetch(workspace_path: String) -> Result<String, String> {
+/// Shared runner for the three network-touching git commands (fetch/pull/push).
+///
+/// Two env vars keep a bad credential/URL from hanging the app instead of
+/// failing fast:
+/// - `GIT_TERMINAL_PROMPT=0` disables git's own interactive username/password
+///   prompt (it errors immediately instead, e.g. "could not read Username").
+/// - `GIT_SSH_COMMAND=ssh -oBatchMode=yes` tells ssh to fail rather than
+///   prompt when a key needs a passphrase or a host key must be accepted.
+///   An already-loaded ssh-agent key still works fine under batch mode.
+///
+/// stderr is returned verbatim (not wrapped) on failure so callers — both
+/// `git_push`'s own retry logic and the frontend store — can string-match
+/// specific git failure messages.
+fn run_git_remote(workspace_path: &str, args: &[&str]) -> Result<String, String> {
     let output = Command::new("git")
-        .args(["-C", &workspace_path, "fetch"])
+        .args(["-C", workspace_path])
+        .args(args)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_SSH_COMMAND", "ssh -oBatchMode=yes")
         .output()
         .map_err(|e| e.to_string())?;
 
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(stderr.to_string());
+        return Err(String::from_utf8_lossy(&output.stderr).to_string());
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+#[tauri::command]
+pub fn git_fetch(workspace_path: String) -> Result<String, String> {
+    run_git_remote(&workspace_path, &["fetch"])
 }
 
 #[tauri::command]
 pub fn git_pull(workspace_path: String) -> Result<String, String> {
-    let output = Command::new("git")
-        .args(["-C", &workspace_path, "pull"])
-        .output()
-        .map_err(|e| e.to_string())?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(stderr.to_string());
-    }
-
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    run_git_remote(&workspace_path, &["pull"])
 }
 
+/// Result of `git_push`. `set_upstream` is `true` only when the plain `push`
+/// failed with "no upstream branch" and this call transparently retried as
+/// `push -u origin <branch>` — the frontend uses it to show a "pushed and set
+/// upstream" toast instead of a plain "pushed" one. `stdout` is git's raw
+/// output from whichever invocation (plain or retried) actually succeeded.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GitPushResult {
+    pub stdout: String,
+    pub set_upstream: bool,
+}
+
+/// Push the current branch. If the branch has no configured upstream (first
+/// push of a new local branch), automatically resolve the current branch name
+/// and retry once as `push -u origin <branch>` so the caller never has to
+/// make a second round-trip. Any other failure (auth, rejected non-fast-
+/// forward, etc.) is returned as-is with no retry.
 #[tauri::command]
-pub fn git_push(workspace_path: String) -> Result<String, String> {
-    let output = Command::new("git")
-        .args(["-C", &workspace_path, "push"])
-        .output()
-        .map_err(|e| e.to_string())?;
+pub fn git_push(workspace_path: String) -> Result<GitPushResult, String> {
+    match run_git_remote(&workspace_path, &["push"]) {
+        Ok(stdout) => Ok(GitPushResult {
+            stdout,
+            set_upstream: false,
+        }),
+        Err(err) => {
+            if !err.contains("has no upstream branch") {
+                return Err(err);
+            }
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(stderr.to_string());
+            let branch_output = Command::new("git")
+                .args(["-C", &workspace_path, "rev-parse", "--abbrev-ref", "HEAD"])
+                .output()
+                .map_err(|e| e.to_string())?;
+            if !branch_output.status.success() {
+                // Couldn't resolve the current branch — surface the original push error.
+                return Err(err);
+            }
+            let branch = String::from_utf8_lossy(&branch_output.stdout)
+                .trim()
+                .to_string();
+            if branch.is_empty() || branch == "HEAD" {
+                // Detached HEAD or unresolvable ref — nothing sensible to set
+                // upstream on; surface the original push error.
+                return Err(err);
+            }
+
+            let stdout = run_git_remote(&workspace_path, &["push", "-u", "origin", &branch])?;
+            Ok(GitPushResult {
+                stdout,
+                set_upstream: true,
+            })
+        }
     }
-
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
 #[tauri::command]
@@ -1697,6 +1745,253 @@ mod commit_detail_tests {
         assert!(
             err.contains("invalid"),
             "expected validation error, got: {err}"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// A7: Push/pull/fetch robustness — run_git_remote env vars + auto set-upstream
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod remote_ops_tests {
+    use super::*;
+
+    fn run_git(path: &str, args: &[&str]) -> String {
+        let mut full: Vec<&str> = vec!["-C", path];
+        full.extend_from_slice(args);
+        let output = Command::new("git").args(&full).output().unwrap();
+        assert!(
+            output.status.success(),
+            "git {:?} failed: {}",
+            args,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    }
+
+    /// A bare repo (no working tree) that stands in for a remote "origin",
+    /// with its HEAD symbolic-ref pointing at a not-yet-existing `main` —
+    /// mirroring a freshly created empty GitHub/GitLab repo.
+    fn init_bare_origin() -> tempfile::TempDir {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().to_str().unwrap();
+        run_git(path, &["init", "--bare", "--initial-branch=main"]);
+        tmp
+    }
+
+    /// A bare origin already containing one commit on `main`, pushed from a
+    /// disposable seed checkout. Unlike `init_bare_origin`, cloning *this*
+    /// repo gives `main` real upstream tracking from the clone itself
+    /// (`git clone` only sets up tracking for branches that already exist on
+    /// the remote) — needed so tests can put the "no upstream branch" case
+    /// on a genuinely untracked *second* branch, matching how it happens in
+    /// practice (a fresh local branch that's never been pushed).
+    fn seeded_bare_origin() -> tempfile::TempDir {
+        let bare_tmp = init_bare_origin();
+        let bare_path = bare_tmp.path().to_str().unwrap().to_string();
+
+        let seed_tmp = tempfile::tempdir().unwrap();
+        let seed_path = seed_tmp.path().to_str().unwrap().to_string();
+        run_git(&seed_path, &["init", "--initial-branch=main"]);
+        run_git(&seed_path, &["config", "user.email", "test@example.com"]);
+        run_git(&seed_path, &["config", "user.name", "Test User"]);
+        write_and_commit(&seed_path, "seed.txt", "seed\n", "seed commit");
+        run_git(&seed_path, &["remote", "add", "origin", &bare_path]);
+        run_git(&seed_path, &["push", "-u", "origin", "main"]);
+
+        bare_tmp
+    }
+
+    /// Clone `bare_path` into a fresh working directory and configure a local
+    /// commit identity (clone doesn't inherit global user.name/email in a
+    /// sandboxed test environment).
+    fn clone_into_work(bare_path: &str) -> tempfile::TempDir {
+        let tmp = tempfile::tempdir().unwrap();
+        let work_path = tmp.path().to_str().unwrap().to_string();
+        let output = Command::new("git")
+            .args(["clone", bare_path, &work_path])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "clone failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        run_git(&work_path, &["config", "user.email", "test@example.com"]);
+        run_git(&work_path, &["config", "user.name", "Test User"]);
+        tmp
+    }
+
+    fn write_and_commit(work_path: &str, file_name: &str, contents: &str, message: &str) {
+        std::fs::write(std::path::Path::new(work_path).join(file_name), contents).unwrap();
+        run_git(work_path, &["add", file_name]);
+        run_git(work_path, &["commit", "-m", message]);
+    }
+
+    #[test]
+    fn push_new_branch_auto_sets_upstream() {
+        let bare_tmp = seeded_bare_origin();
+        let bare_path = bare_tmp.path().to_str().unwrap().to_string();
+        let work_tmp = clone_into_work(&bare_path);
+        let work_path = work_tmp.path().to_str().unwrap().to_string();
+
+        // `main` is tracked (from the clone); a brand-new local branch is
+        // not — that's the "first push of a new local branch" case A7 fixes.
+        run_git(&work_path, &["switch", "-c", "feature"]);
+        write_and_commit(&work_path, "a.txt", "hello\n", "feature commit");
+
+        // Plain `git push` on `feature` fails with "no upstream branch".
+        // `git_push` must detect that and transparently retry as
+        // `push -u origin feature`.
+        let result = git_push(work_path.clone()).expect("push should succeed via auto-retry");
+        assert!(
+            result.set_upstream,
+            "expected the no-upstream retry path to have fired"
+        );
+
+        let remote_cfg = run_git(&work_path, &["config", "--get", "branch.feature.remote"]);
+        assert_eq!(remote_cfg, "origin");
+        let merge_cfg = run_git(&work_path, &["config", "--get", "branch.feature.merge"]);
+        assert_eq!(merge_cfg, "refs/heads/feature");
+
+        // The bare origin actually received the branch + commit.
+        let bare_log = run_git(&bare_path, &["log", "-1", "--format=%s", "feature"]);
+        assert_eq!(bare_log, "feature commit");
+    }
+
+    #[test]
+    fn ordinary_push_after_upstream_set_does_not_report_set_upstream() {
+        let bare_tmp = seeded_bare_origin();
+        let bare_path = bare_tmp.path().to_str().unwrap().to_string();
+        let work_tmp = clone_into_work(&bare_path);
+        let work_path = work_tmp.path().to_str().unwrap().to_string();
+
+        run_git(&work_path, &["switch", "-c", "feature"]);
+        write_and_commit(&work_path, "a.txt", "hello\n", "feature commit 1");
+        let first = git_push(work_path.clone()).unwrap();
+        assert!(first.set_upstream, "first push should have set upstream");
+
+        write_and_commit(&work_path, "b.txt", "world\n", "feature commit 2");
+        let second = git_push(work_path.clone()).unwrap();
+        assert!(
+            !second.set_upstream,
+            "a push on an already-tracked branch should not need the retry"
+        );
+
+        let bare_log = run_git(&bare_path, &["log", "-1", "--format=%s", "feature"]);
+        assert_eq!(bare_log, "feature commit 2");
+    }
+
+    #[test]
+    fn fetch_and_pull_retrieve_remote_commits() {
+        let bare_tmp = init_bare_origin();
+        let bare_path = bare_tmp.path().to_str().unwrap().to_string();
+
+        // work1 establishes `main` on the bare origin.
+        let work1_tmp = clone_into_work(&bare_path);
+        let work1_path = work1_tmp.path().to_str().unwrap().to_string();
+        write_and_commit(&work1_path, "a.txt", "hello\n", "first commit");
+        git_push(work1_path.clone()).unwrap();
+
+        // work2 clones after `main` exists, so git itself sets up tracking —
+        // this exercises the ordinary (non-retry) fetch/pull path.
+        let work2_tmp = clone_into_work(&bare_path);
+        let work2_path = work2_tmp.path().to_str().unwrap().to_string();
+
+        // A second commit lands on the origin via work1.
+        write_and_commit(&work1_path, "b.txt", "world\n", "second commit");
+        let push_result = git_push(work1_path.clone()).unwrap();
+        assert!(!push_result.set_upstream);
+
+        // `git_fetch` updates the remote-tracking ref but not work2's local
+        // `main` or working tree.
+        git_fetch(work2_path.clone()).unwrap();
+        let remote_tracking_log =
+            run_git(&work2_path, &["log", "-1", "--format=%s", "origin/main"]);
+        assert_eq!(remote_tracking_log, "second commit");
+        let local_log_before_pull = run_git(&work2_path, &["log", "-1", "--format=%s"]);
+        assert_eq!(local_log_before_pull, "first commit");
+
+        // `git_pull` fast-forwards the local branch.
+        git_pull(work2_path.clone()).unwrap();
+        let local_log_after_pull = run_git(&work2_path, &["log", "-1", "--format=%s"]);
+        assert_eq!(local_log_after_pull, "second commit");
+    }
+
+    #[test]
+    fn push_no_upstream_retry_to_nonexistent_origin_remote_errors_cleanly() {
+        // A repo with one commit and a remote that is NOT named "origin" —
+        // `git push` still fails with "has no upstream branch" (that message
+        // doesn't depend on the remote's name), but `git_push`'s hardcoded
+        // `push -u origin <branch>` retry target genuinely doesn't exist in
+        // this repo. This must surface a clean Err (not panic, not loop).
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().to_str().unwrap().to_string();
+        run_git(&path, &["init", "--initial-branch=main"]);
+        run_git(&path, &["config", "user.email", "test@example.com"]);
+        run_git(&path, &["config", "user.name", "Test User"]);
+        run_git(&path, &["commit", "--allow-empty", "-m", "init"]);
+
+        let bare_tmp = tempfile::tempdir().unwrap();
+        let bare_path = bare_tmp.path().to_str().unwrap().to_string();
+        run_git(&bare_path, &["init", "--bare"]);
+        run_git(&path, &["remote", "add", "not-origin", &bare_path]);
+
+        let result = git_push(path);
+
+        let err = result.expect_err("push should fail: no 'origin' remote to retry against");
+        assert!(!err.is_empty());
+        // Sanity: the "not-origin" remote was untouched (no upstream config
+        // was ever written for it), proving the retry never silently
+        // succeeded against the wrong remote.
+        let bare_has_main = Command::new("git")
+            .args(["-C", &bare_path, "rev-parse", "--verify", "refs/heads/main"])
+            .output()
+            .unwrap();
+        assert!(
+            !bare_has_main.status.success(),
+            "the non-origin remote should not have received a push"
+        );
+    }
+
+    /// Structural proof that `run_git_remote`'s env vars (`GIT_TERMINAL_PROMPT=0`,
+    /// `GIT_SSH_COMMAND=... -oBatchMode=yes`) keep a bad remote from hanging:
+    /// pushing to a URL on the IANA-reserved `.invalid` TLD (RFC 2606,
+    /// guaranteed to never resolve) must fail — via DNS resolution failure —
+    /// well within a hard 5s bound rather than hanging on an interactive
+    /// credential/host-key prompt. Run off the main test thread so that even
+    /// in the worst case (this assertion firing) the test binary itself
+    /// cannot hang: the deadline is enforced by `recv_timeout`, and a detached
+    /// background thread doesn't keep the process alive past the harness's
+    /// own exit.
+    #[test]
+    fn push_to_unreachable_host_fails_fast_not_hang() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().to_str().unwrap().to_string();
+        run_git(&path, &["init", "--initial-branch=main"]);
+        run_git(&path, &["config", "user.email", "test@example.com"]);
+        run_git(&path, &["config", "user.name", "Test User"]);
+        run_git(&path, &["commit", "--allow-empty", "-m", "init"]);
+        run_git(
+            &path,
+            &["remote", "add", "origin", "https://invalid.invalid/nowhere/repo.git"],
+        );
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let result = git_push(path);
+            let _ = tx.send(result);
+        });
+
+        let result = rx.recv_timeout(std::time::Duration::from_secs(5)).expect(
+            "git push hung for >5s instead of failing fast — GIT_TERMINAL_PROMPT/GIT_SSH_COMMAND \
+             may not be applied in run_git_remote",
+        );
+
+        assert!(
+            result.is_err(),
+            "push to an unreachable host should fail, not succeed"
         );
     }
 }
