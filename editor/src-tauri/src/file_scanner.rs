@@ -1,9 +1,9 @@
-use crate::walk_policy;
+use crate::file_index;
 use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use nucleo_matcher::pattern::{Atom, AtomKind, CaseMatching, Normalization};
 use nucleo_matcher::{Matcher, Utf32Str};
 use serde::Serialize;
-use std::collections::{BinaryHeap, HashSet};
+use std::collections::BinaryHeap;
 use std::cmp::Ordering;
 use std::path::Path;
 use std::sync::Mutex;
@@ -183,46 +183,74 @@ impl FileWatcherState {
 
 /// Scan all files respecting .gitignore, with optional extra exclude patterns.
 ///
-/// Uses the shared `walk_policy` module (dotfiles visible except
-/// `.git`/`.DS_Store`, `.gitignore` respected) and appends root-level
-/// `.env`/`.env.*` files the walker didn't already yield (they're
-/// whitelisted even when gitignored — see `walk_policy::root_env_files`).
+/// Uses the shared `walk_policy` module via `file_index::walk_files`
+/// (dotfiles visible except `.git`/`.DS_Store`, `.gitignore` respected) and
+/// appends root-level `.env`/`.env.*` files the walker didn't already yield
+/// (they're whitelisted even when gitignored — see
+/// `walk_policy::root_env_files`).
 #[tauri::command]
 pub fn scan_all_files_v2(
     workspace_path: String,
     extra_excludes: Vec<String>,
 ) -> Result<Vec<String>, String> {
-    let mut builder = walk_policy::policy_walker(&workspace_path);
-    walk_policy::apply_extra_excludes(&mut builder, &workspace_path, &extra_excludes);
-
-    let mut files: Vec<String> = builder
-        .build()
-        .filter_map(|entry| {
-            let entry = entry.ok()?;
-            if entry.file_type()?.is_file() {
-                Some(entry.path().to_string_lossy().to_string())
-            } else {
-                None
-            }
-        })
-        .collect();
-
-    let seen: HashSet<&str> = files.iter().map(|s| s.as_str()).collect();
-    let extra_env_files: Vec<String> = walk_policy::root_env_files(Path::new(&workspace_path))
-        .into_iter()
-        .map(|p| p.to_string_lossy().to_string())
-        .filter(|s| !seen.contains(s.as_str()))
-        .collect();
-    drop(seen);
-    files.extend(extra_env_files);
-
-    Ok(files)
+    Ok(file_index::walk_files(&workspace_path, &extra_excludes))
 }
 
 /// Fuzzy search files in workspace. Returns top N matches.
-/// This runs entirely in Rust — no JS main thread blocking.
-#[tauri::command]
+///
+/// Uses the persistent per-workspace `FileIndexState` (built once via
+/// `build_file_index` and kept warm by the file watcher's
+/// `file_index::apply_delta`) so a keystroke only re-scores cached paths
+/// instead of re-walking the entire workspace. `#[tauri::command(async)]`
+/// dispatches this onto Tauri's blocking thread pool so a cold-cache
+/// rebuild (a full directory walk) cannot stall the main/async runtime the
+/// way a `sync` command would.
+#[tauri::command(async)]
 pub fn fuzzy_search_files(
+    state: tauri::State<'_, file_index::FileIndexState>,
+    workspace_path: String,
+    query: String,
+    max_results: usize,
+    extra_excludes: Vec<String>,
+    file_extensions: Option<Vec<String>>,
+) -> Result<Vec<FuzzyFileResult>, String> {
+    fuzzy_search_files_impl(
+        &state,
+        workspace_path,
+        query,
+        max_results,
+        extra_excludes,
+        file_extensions,
+    )
+}
+
+/// Plain (non-`State`) implementation behind the `fuzzy_search_files`
+/// command — split out so tests can drive it against a bare
+/// `FileIndexState` without standing up a Tauri app.
+///
+/// Cache policy: the cached index is used as-is when it exists, isn't
+/// `stale`, and was built for this exact `(workspace_path, extra_excludes)`
+/// pair; otherwise a fresh walk replaces it (covers the first call, a
+/// workspace switch, an exclude-pattern change, and a `.gitignore`/`.ignore`
+/// edit that flipped `stale` via `file_index::apply_delta`).
+///
+/// Lock discipline: the index's `Vec<String>` is cloned out from under the
+/// mutex — on a cache hit directly, on a miss right after the rebuild — and
+/// all nucleo scoring happens on that local copy with the lock released.
+/// Scoring can touch 100k+ paths and take low-single-digit milliseconds;
+/// holding the lock through that would block `file_index::apply_delta`,
+/// called from the file watcher's debounce task on every filesystem change.
+/// There are no `.await` points in this function, so nothing here can hold
+/// the lock across a yield either way — the clone-then-release is purely to
+/// bound wall-clock hold time on a lock other threads also need.
+///
+/// Race note: the miss path checks the cache, walks unlocked, then
+/// re-locks to store — an `apply_delta` or `build_file_index` call landing
+/// in that gap is simply overwritten by this call's own fresh walk (same
+/// "last writer wins, both outcomes correct" reasoning as
+/// `file_index`'s module doc comment covers for `build_file_index`).
+pub fn fuzzy_search_files_impl(
+    state: &file_index::FileIndexState,
     workspace_path: String,
     query: String,
     max_results: usize,
@@ -233,25 +261,75 @@ pub fn fuzzy_search_files(
         return Ok(vec![]);
     }
 
-    let max_results = if max_results == 0 { 100 } else { max_results };
+    let cached: Option<Vec<String>> = {
+        let guard = state.0.lock().map_err(|e| e.to_string())?;
+        guard.as_ref().and_then(|idx| {
+            if !idx.stale
+                && idx.workspace_path == workspace_path
+                && idx.extra_excludes == extra_excludes
+            {
+                Some(idx.files.clone())
+            } else {
+                None
+            }
+        })
+    };
 
-    // Build the file list using the shared policy walker (dotfiles visible
-    // except .git/.DS_Store, .gitignore respected) plus caller-supplied
-    // exclude globs.
-    let mut builder = walk_policy::policy_walker(&workspace_path);
-    walk_policy::apply_extra_excludes(&mut builder, &workspace_path, &extra_excludes);
+    let files = match cached {
+        Some(files) => files,
+        None => {
+            let fresh = file_index::walk_files(&workspace_path, &extra_excludes);
+            let mut guard = state.0.lock().map_err(|e| e.to_string())?;
+            *guard = Some(file_index::FileIndex {
+                workspace_path: workspace_path.clone(),
+                extra_excludes: extra_excludes.clone(),
+                files: fresh.clone(),
+                stale: false,
+            });
+            fresh
+        }
+    };
+
+    Ok(score_files(
+        &files,
+        &workspace_path,
+        &query,
+        max_results,
+        &file_extensions,
+    ))
+}
+
+/// Scores `files` (an already-walked absolute-path list) against `query`
+/// using nucleo, ranked VS Code quick-open style. Extracted from
+/// `fuzzy_search_files` so the persistent index (`file_index` module) and
+/// the inline-rebuild fallback share the exact same ranking — this function
+/// carries no behavior change from the pre-index scoring logic, only the
+/// walk that used to precede it was removed (callers now pass an
+/// already-walked file list).
+pub fn score_files(
+    files: &[String],
+    workspace_path: &str,
+    query: &str,
+    max_results: usize,
+    file_extensions: &Option<Vec<String>>,
+) -> Vec<FuzzyFileResult> {
+    if query.is_empty() {
+        return vec![];
+    }
+
+    let max_results = if max_results == 0 { 100 } else { max_results };
 
     // Set up nucleo matcher
     let mut matcher = Matcher::new(nucleo_matcher::Config::DEFAULT.match_paths());
     let path_atom = Atom::new(
-        &query,
+        query,
         CaseMatching::Ignore,
         Normalization::Smart,
         AtomKind::Fuzzy,
         false,
     );
     let file_name_atom = Atom::new(
-        &query,
+        query,
         CaseMatching::Ignore,
         Normalization::Smart,
         AtomKind::Fuzzy,
@@ -261,10 +339,10 @@ pub fn fuzzy_search_files(
     let query_lower = query.to_lowercase();
     let query_path_normalized = query_lower.replace('\\', "/");
     let query_char_count = query.chars().count();
-    let prefer_file_name = !query_contains_path_separator(&query);
+    let prefer_file_name = !query_contains_path_separator(query);
 
     let workspace_prefix = if workspace_path.ends_with('/') {
-        workspace_path.clone()
+        workspace_path.to_string()
     } else {
         format!("{}/", workspace_path)
     };
@@ -272,19 +350,7 @@ pub fn fuzzy_search_files(
     // Use a min-heap to keep top N results
     let mut heap: BinaryHeap<ScoredEntry> = BinaryHeap::with_capacity(max_results + 1);
 
-    // Root .env / .env.* files are whitelisted even when gitignored (the
-    // policy walker can't re-include a gitignore-pruned path). Track them
-    // here and drop any the walker itself already yields below, so a
-    // non-gitignored .env is scored exactly once, not twice.
-    let mut pending_env_files: HashSet<String> =
-        walk_policy::root_env_files(Path::new(&workspace_path))
-            .into_iter()
-            .map(|p| p.to_string_lossy().to_string())
-            .collect();
-
-    // Scores and (maybe) pushes a single absolute path into `heap`. Shared
-    // by both the walker loop and the root-env-file whitelist pass below so
-    // gitignored `.env` files are ranked identically to normal matches.
+    // Scores and (maybe) pushes a single absolute path into `heap`.
     let score_and_push = |abs_path: String, matcher: &mut Matcher, heap: &mut BinaryHeap<ScoredEntry>| {
         // Extension filter (cheap; happens before fuzzy match)
         if let Some(ref exts) = file_extensions {
@@ -408,28 +474,12 @@ pub fn fuzzy_search_files(
         }
     };
 
-    for entry in builder.build() {
-        let entry = match entry {
-            Ok(e) => e,
-            Err(_) => continue,
-        };
-
-        if !entry.file_type().map_or(false, |ft| ft.is_file()) {
-            continue;
-        }
-
-        let abs_path = entry.path().to_string_lossy().to_string();
-        // Already yielded by the walker (not gitignored) — no need to add
-        // it again from the whitelist pass below.
-        pending_env_files.remove(&abs_path);
-        score_and_push(abs_path, &mut matcher, &mut heap);
-    }
-
-    // Whitelist pass: any root .env / .env.* file the walker didn't yield
-    // (because it's gitignored) still gets scored and ranked like any other
-    // match — see walk_policy module docs for why this is root-only.
-    for env_path in pending_env_files {
-        score_and_push(env_path, &mut matcher, &mut heap);
+    // `files` is already walked (either the persistent index's cached list,
+    // or a fresh `file_index::walk_files` result on a cache miss) — that
+    // walk already applies the policy walker + root .env whitelist +
+    // caller excludes, so scoring is just one pass over the list.
+    for abs_path in files {
+        score_and_push(abs_path.clone(), &mut matcher, &mut heap);
     }
 
     // Extract + order by score descending for UI consumption.
@@ -447,9 +497,7 @@ pub fn fuzzy_search_files(
             .then_with(|| a.result.relative_path.cmp(&b.result.relative_path))
     });
 
-    let results = entries.into_iter().map(|e| e.result).collect();
-
-    Ok(results)
+    entries.into_iter().map(|e| e.result).collect()
 }
 
 /// Start watching a workspace directory for file changes.
@@ -618,6 +666,14 @@ pub async fn start_file_watcher(
                                     added: std::mem::take(&mut pending_added),
                                     removed: std::mem::take(&mut pending_removed),
                                 };
+                                // Keep the persistent quick-open index warm
+                                // before telling the frontend anything
+                                // changed, so a fuzzy_search_files call
+                                // triggered by the resulting tree refresh
+                                // already sees the updated cache.
+                                let index_state =
+                                    app_for_debounce.state::<file_index::FileIndexState>();
+                                file_index::apply_delta(&index_state, &delta);
                                 let _ = app_for_debounce.emit("file-index-changed", &delta);
                             }
                         }
@@ -816,7 +872,8 @@ mod tests {
     // gitignored root .env is whitelisted exactly once (no duplicate when
     // the walker itself would already yield it).
 
-    use super::{fuzzy_search_files, scan_all_files_v2};
+    use super::{fuzzy_search_files_impl, scan_all_files_v2};
+    use crate::file_index::FileIndexState;
 
     fn init_git_repo_with_gitignore(root: &std::path::Path, gitignore_body: &str) {
         std::fs::create_dir(root.join(".git")).unwrap();
@@ -880,7 +937,8 @@ mod tests {
         std::fs::write(tmp.path().join(".env"), "A=1\n").unwrap();
         std::fs::write(tmp.path().join("other.txt"), "hi\n").unwrap();
 
-        let results = fuzzy_search_files(
+        let results = fuzzy_search_files_impl(
+            &FileIndexState::new(),
             tmp.path().to_str().unwrap().to_string(),
             ".env".to_string(),
             10,
@@ -903,7 +961,8 @@ mod tests {
         init_git_repo_with_gitignore(tmp.path(), "");
         std::fs::write(tmp.path().join(".git").join("config"), "[core]\n").unwrap();
 
-        let results = fuzzy_search_files(
+        let results = fuzzy_search_files_impl(
+            &FileIndexState::new(),
             tmp.path().to_str().unwrap().to_string(),
             "config".to_string(),
             10,
@@ -917,5 +976,133 @@ mod tests {
             "results should never contain .git internals: {:?}",
             results
         );
+    }
+
+    // ── fuzzy_search_files_impl — cache behavior ───────────────────────
+    //
+    // These pin the persistent-index behavior added in Task B5: a cache hit
+    // must not re-walk the filesystem, and cache misses (first call, a
+    // workspace/exclude mismatch, or a stale flag) must fall back to a fresh
+    // walk and repopulate the index for next time.
+
+    use crate::file_index::{self, FileIndex};
+
+    #[test]
+    fn fuzzy_search_files_impl_uses_cached_index_without_rewalking() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("keep.txt"), "hi\n").unwrap();
+        std::fs::write(tmp.path().join("ephemeral.txt"), "bye\n").unwrap();
+        let ws = tmp.path().to_str().unwrap().to_string();
+
+        let state = FileIndexState::new();
+        file_index::build_index(&state, ws.clone(), vec![]).unwrap();
+
+        // Delete a file on disk WITHOUT going through apply_delta. If
+        // fuzzy_search_files_impl re-walked the filesystem it would no
+        // longer see this file; if it trusts the cache (as it should), the
+        // stale-on-disk entry is still scored and returned.
+        std::fs::remove_file(tmp.path().join("ephemeral.txt")).unwrap();
+
+        let results =
+            fuzzy_search_files_impl(&state, ws, "ephemeral".to_string(), 10, vec![], None)
+                .unwrap();
+
+        assert_eq!(
+            results.iter().filter(|r| r.file_name == "ephemeral.txt").count(),
+            1,
+            "expected the cached (disk-deleted) file to still be found: {:?}",
+            results.iter().map(|r| &r.file_name).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn fuzzy_search_files_impl_rebuilds_when_no_index_built_yet() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("fresh.txt"), "hi\n").unwrap();
+        let ws = tmp.path().to_str().unwrap().to_string();
+
+        let state = FileIndexState::new();
+        let results =
+            fuzzy_search_files_impl(&state, ws, "fresh".to_string(), 10, vec![], None).unwrap();
+
+        assert_eq!(results.iter().filter(|r| r.file_name == "fresh.txt").count(), 1);
+        // The inline rebuild must also have populated the index for next time.
+        assert!(state.0.lock().unwrap().is_some());
+    }
+
+    #[test]
+    fn fuzzy_search_files_impl_rebuilds_when_stale() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("late.txt"), "hi\n").unwrap();
+        let ws = tmp.path().to_str().unwrap().to_string();
+
+        let state = FileIndexState::new();
+        // Seed a stale, empty index for this exact workspace/excludes pair —
+        // a matching cache that's merely stale must still trigger a rebuild.
+        {
+            let mut guard = state.0.lock().unwrap();
+            *guard = Some(FileIndex {
+                workspace_path: ws.clone(),
+                extra_excludes: vec![],
+                files: vec![],
+                stale: true,
+            });
+        }
+
+        let results =
+            fuzzy_search_files_impl(&state, ws, "late".to_string(), 10, vec![], None).unwrap();
+
+        assert_eq!(results.iter().filter(|r| r.file_name == "late.txt").count(), 1);
+        assert!(!state.0.lock().unwrap().as_ref().unwrap().stale, "rebuild should clear stale");
+    }
+
+    #[test]
+    fn fuzzy_search_files_impl_rebuilds_on_extra_excludes_mismatch() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("mismatch.txt"), "hi\n").unwrap();
+        let ws = tmp.path().to_str().unwrap().to_string();
+
+        let state = FileIndexState::new();
+        // Index built with different exclude patterns than this call uses.
+        file_index::build_index(&state, ws.clone(), vec!["*.log".to_string()]).unwrap();
+
+        let results = fuzzy_search_files_impl(
+            &state,
+            ws.clone(),
+            "mismatch".to_string(),
+            10,
+            vec![],
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(results.iter().filter(|r| r.file_name == "mismatch.txt").count(), 1);
+        // The mismatch triggers a rebuild that stores fresh (matching)
+        // extra_excludes, so a second identical call now hits the cache.
+        assert_eq!(state.0.lock().unwrap().as_ref().unwrap().extra_excludes, Vec::<String>::new());
+    }
+
+    #[test]
+    fn fuzzy_search_files_impl_rebuilds_on_workspace_mismatch() {
+        let tmp1 = tempfile::tempdir().unwrap();
+        std::fs::write(tmp1.path().join("a.txt"), "1\n").unwrap();
+        let tmp2 = tempfile::tempdir().unwrap();
+        std::fs::write(tmp2.path().join("b.txt"), "2\n").unwrap();
+
+        let state = FileIndexState::new();
+        file_index::build_index(&state, tmp1.path().to_str().unwrap().to_string(), vec![])
+            .unwrap();
+
+        let results = fuzzy_search_files_impl(
+            &state,
+            tmp2.path().to_str().unwrap().to_string(),
+            "b".to_string(),
+            10,
+            vec![],
+            None,
+        )
+        .unwrap();
+
+        assert!(results.iter().any(|r| r.file_name == "b.txt"), "results = {:?}", results);
     }
 }

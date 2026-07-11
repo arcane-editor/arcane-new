@@ -4,6 +4,7 @@ mod terminal;
 mod settings;
 mod search;
 mod file_scanner;
+mod file_index;
 mod unity;
 mod asmdef;
 mod unity_yaml;
@@ -313,6 +314,7 @@ pub fn run() {
         .manage(terminal::TerminalState::new())
         .manage(claude::ClaudeState::new())
         .manage(Mutex::new(file_scanner::FileWatcherState::new()))
+        .manage(file_index::FileIndexState::new())
         .manage(unity_ipc::UnityIpcState::new())
         .manage(dap::DapState::new())
         .manage(search::ContentSearchState::new())
@@ -389,6 +391,7 @@ pub fn run() {
             file_scanner::fuzzy_search_files,
             file_scanner::start_file_watcher,
             file_scanner::stop_file_watcher,
+            file_index::build_file_index,
             unity::detect_unity_project,
             unity::scan_meta_files,
             unity::unity_setup_lsp,

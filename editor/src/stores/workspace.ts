@@ -817,6 +817,17 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     // Refresh git status (async, non-blocking)
     useGitStore.getState().refreshStatus(path);
 
+    // Build the persistent quick-open file index for this workspace
+    // (fire-and-forget — `fuzzy_search_files` rebuilds inline on its own if
+    // this hasn't landed yet by the time the user opens quick-open).
+    // Unconditionally replaces any index left over from a prior workspace.
+    invoke('build_file_index', {
+      workspacePath: path,
+      extraExcludes: get().extraExcludePatterns,
+    }).catch((err) => {
+      console.error('[Workspace] build_file_index failed:', err);
+    });
+
     // Start file watcher and subscribe to its delta events so the tree
     // reflects external filesystem changes (and so files created inside
     // expanded subdirs appear without a manual refresh).
@@ -893,6 +904,20 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     set({ extraExcludePatterns: patterns });
     // Refresh tree so new patterns take effect immediately
     get().refreshTree();
+
+    // Rebuild the quick-open file index so it reflects the new exclude
+    // patterns immediately (fire-and-forget — a mismatched cache would
+    // otherwise self-correct on the next fuzzy_search_files call anyway,
+    // but rebuilding now avoids that one-off inline-rebuild latency hit).
+    const { workspacePath } = get();
+    if (workspacePath) {
+      invoke('build_file_index', {
+        workspacePath,
+        extraExcludes: patterns,
+      }).catch((err) => {
+        console.error('[Workspace] build_file_index failed:', err);
+      });
+    }
   },
 
   setAssetsRoot: async (assetsPath: string) => {
