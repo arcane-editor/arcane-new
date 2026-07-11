@@ -5,6 +5,7 @@ import { useSearchStore } from '../../../stores/search';
 import { useWorkspaceStore } from '../../../stores/workspace';
 import { getFileIcon } from '../../../utils/file-icons';
 import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
+import { useDelayedTrue } from '../../../hooks/useDelayedTrue';
 import { flattenRows } from '../services/search-model';
 
 // Fixed row heights the virtualizer estimates from; `measureElement` (below)
@@ -14,25 +15,6 @@ const MATCH_ROW_HEIGHT = 22;
 // The indeterminate loading bar only appears once a search has been running
 // continuously for this long, so a near-instant search never flashes it.
 const LOADING_BAR_DELAY_MS = 100;
-
-/**
- * Gates a boolean behind a minimum continuous-`true` duration: `value` must
- * stay `true` for `delayMs` before this flips `true`, and it snaps back to
- * `false` the instant `value` does. Used to keep brief/instant searches from
- * flashing the indeterminate loading bar.
- */
-function useDelayedTrue(value: boolean, delayMs: number): boolean {
-  const [delayed, setDelayed] = useState(false);
-  useEffect(() => {
-    if (!value) {
-      setDelayed(false);
-      return;
-    }
-    const timer = setTimeout(() => setDelayed(true), delayMs);
-    return () => clearTimeout(timer);
-  }, [value, delayMs]);
-  return delayed;
-}
 
 function plural(count: number): string {
   return count === 1 ? '' : 's';

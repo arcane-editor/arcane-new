@@ -8,6 +8,12 @@ import { useWorkspaceStore } from '../../../stores/workspace';
 import { useProjectContextStore } from '../../../stores/project-context';
 import { isMac as platformIsMac } from '../../../utils/platform';
 import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
+import { useDelayedTrue } from '../../../hooks/useDelayedTrue';
+
+// The indeterminate loading bar only appears once a file search has been
+// running continuously for this long, so the index-backed search (usually
+// sub-10ms) never flashes it.
+const LOADING_BAR_DELAY_MS = 100;
 
 interface PaletteModalProps {
   initialMode: 'commands' | 'files';
@@ -58,9 +64,7 @@ function highlightMatches(text: string, matchIndices: number[]): React.ReactNode
 function PaletteModal({ initialMode, onClose }: PaletteModalProps) {
   const getCommands = useCommandsStore((s) => s.getCommands);
   const workspacePath = useWorkspaceStore((s) => s.workspacePath);
-  const openFiles = useWorkspaceStore((s) => s.openFiles);
   const openFile = useWorkspaceStore((s) => s.openFile);
-  const extraExcludePatterns = useWorkspaceStore((s) => s.extraExcludePatterns);
   const isUnityProject = useProjectContextStore((s) => s.isUnityProject);
 
   const [inputValue, setInputValue] = useState(() =>
@@ -95,49 +99,63 @@ function PaletteModal({ initialMode, onClose }: PaletteModalProps) {
       .sort((a, b) => b.score - a.score);
   }, [isCommandMode, query, getCommands]);
 
-  // File search: async, Rust-backed; debounce comes from useDebouncedValue above
+  // Recent files: shown in file mode while the query is empty. Reads
+  // `openFiles` from the store directly (not a reactive subscription) so
+  // unrelated workspace-store updates (e.g. a background tab open/close)
+  // don't re-run this — it only needs a fresh read on mount/mode-change.
+  // Also owns clearing results on entry into command mode.
   useEffect(() => {
     if (isCommandMode) {
       setFileResults([]);
-      return;
-    }
-
-    // No query -> show recent open files
-    if (!debouncedFileQuery) {
-      const prefix = workspacePath ? workspacePath + '/' : '';
-      const seen = new Set<string>();
-      const recentFiles: FuzzyFileResult[] = openFiles
-        .filter((f) => {
-          if (f.path.startsWith('diff://') || f.path.startsWith('auth://')) return false;
-          if (isUnityProject && !f.path.toLowerCase().endsWith('.cs')) return false;
-          if (seen.has(f.path)) return false;
-          seen.add(f.path);
-          return true;
-        })
-        .slice(0, 10)
-        .map((f) => ({
-          path: f.path,
-          relative_path: prefix ? f.path.replace(prefix, '') : f.path,
-          file_name: f.name,
-          score: 0,
-          match_indices: [],
-        }));
-      setFileResults(recentFiles);
       setIsSearching(false);
       return;
     }
+
+    if (debouncedFileQuery) return; // handled by the search effect below
+
+    const { openFiles } = useWorkspaceStore.getState();
+    const prefix = workspacePath ? workspacePath + '/' : '';
+    const seen = new Set<string>();
+    const recentFiles: FuzzyFileResult[] = openFiles
+      .filter((f) => {
+        if (f.path.startsWith('diff://') || f.path.startsWith('auth://')) return false;
+        if (isUnityProject && !f.path.toLowerCase().endsWith('.cs')) return false;
+        if (seen.has(f.path)) return false;
+        seen.add(f.path);
+        return true;
+      })
+      .slice(0, 10)
+      .map((f) => ({
+        path: f.path,
+        relative_path: prefix ? f.path.replace(prefix, '') : f.path,
+        file_name: f.name,
+        score: 0,
+        match_indices: [],
+      }));
+    setFileResults(recentFiles);
+    setIsSearching(false);
+  }, [isCommandMode, debouncedFileQuery, workspacePath, isUnityProject]);
+
+  // File search: async, Rust-backed; debounce comes from useDebouncedValue
+  // above. Stale results are intentionally kept on the screen while a new
+  // search is in flight (and even if it errors) — only the empty-query and
+  // command-mode cases above replace `fileResults` wholesale. This avoids
+  // the list flickering to a loading/empty state on every keystroke.
+  useEffect(() => {
+    if (isCommandMode) return;
+    if (!debouncedFileQuery) return; // handled by the recent-files effect above
 
     setIsSearching(true);
     const gen = ++searchGenRef.current;
 
     (async () => {
       if (!workspacePath) {
-        setFileResults([]);
         setIsSearching(false);
         return;
       }
 
       try {
+        const { extraExcludePatterns } = useWorkspaceStore.getState();
         const results = await invoke<FuzzyFileResult[]>('fuzzy_search_files', {
           workspacePath,
           query: debouncedFileQuery,
@@ -152,17 +170,22 @@ function PaletteModal({ initialMode, onClose }: PaletteModalProps) {
           setIsSearching(false);
         }
       } catch {
+        // Keep stale results on error — just stop the loading state.
         if (gen === searchGenRef.current) {
-          setFileResults([]);
           setIsSearching(false);
         }
       }
     })();
-  }, [isCommandMode, debouncedFileQuery, workspacePath, openFiles, extraExcludePatterns, isUnityProject]);
+  }, [isCommandMode, debouncedFileQuery, workspacePath, isUnityProject]);
 
   const totalResults = isCommandMode ? commandResults.length : fileResults.length;
+  const showLoadingBar = useDelayedTrue(isSearching, LOADING_BAR_DELAY_MS);
 
-  // Reset selection when results change
+  // Reset selection when results change. `query` (not debounced) changes on
+  // every keystroke, so this always snaps back to 0 the instant the user
+  // types — even while stale `fileResults` from the prior query are still
+  // on screen — which keeps the clamp correct without needing to key off
+  // the (intentionally stale-tolerant) results array itself.
   useEffect(() => {
     setSelectedIndex(0);
   }, [totalResults, query, isCommandMode]);
@@ -301,20 +324,15 @@ function PaletteModal({ initialMode, onClose }: PaletteModalProps) {
           style={{
             maxHeight: 350,
             overflowY: 'auto',
+            position: 'relative',
           }}
         >
-          {isSearching && !isCommandMode && query && (
-            <div
-              style={{
-                padding: '8px 14px',
-                color: 'var(--text-secondary)',
-                fontSize: 13,
-                textAlign: 'center',
-              }}
-            >
-              Searching...
-            </div>
-          )}
+          {/* Zero-height sticky anchor: keeps the loading bar pinned to the
+              visible top of the list (not the top of the scrolled content)
+              without shifting any row below it — layout-stable loading. */}
+          <div className="search-progress-anchor">
+            {showLoadingBar && <div className="search-progress-bar" />}
+          </div>
 
           {totalResults > 0 && (
             <div
@@ -434,18 +452,31 @@ function PaletteModal({ initialMode, onClose }: PaletteModalProps) {
             </div>
           )}
 
-          {!isSearching && totalResults === 0 && (
-            <div
-              style={{
-                padding: '12px 14px',
-                color: 'var(--text-secondary)',
-                fontSize: 13,
-                textAlign: 'center',
-              }}
-            >
-              {isCommandMode ? 'No matching commands' : 'No matching files'}
-            </div>
-          )}
+          {isCommandMode
+            ? totalResults === 0 && (
+                <div
+                  style={{
+                    padding: '12px 14px',
+                    color: 'var(--text-secondary)',
+                    fontSize: 13,
+                    textAlign: 'center',
+                  }}
+                >
+                  No matching commands
+                </div>
+              )
+            : !isSearching && query && fileResults.length === 0 && (
+                <div
+                  style={{
+                    padding: '12px 14px',
+                    color: 'var(--text-secondary)',
+                    fontSize: 13,
+                    textAlign: 'center',
+                  }}
+                >
+                  No matching files
+                </div>
+              )}
         </div>
       </div>
     </div>
