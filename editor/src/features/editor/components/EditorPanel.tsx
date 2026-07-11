@@ -56,24 +56,27 @@ function EditorPanel() {
 
   const editorRef = useRef<MonacoEditorNs.IStandaloneCodeEditor | null>(null);
 
-  // Consume pending Go to Definition navigation whenever the active file
-  // changes. The MonacoEditor instance is reused across file switches —
-  // it just swaps its underlying model — so `onMount` only fires once,
-  // not for subsequent navigations. Without this effect, cross-file
-  // Cmd+Click would land at the top of the target file instead of on
-  // the symbol's declaration.
+  // Whenever the active file changes, move keyboard focus into the editor
+  // so the user can start typing immediately — no click-to-focus required
+  // after opening from the explorer, quick-open, or a tab click. If a Go to
+  // Definition / navigate-to-line request is pending, also consume it here:
+  // the MonacoEditor instance is reused across file switches — it just
+  // swaps its underlying model — so `onMount` only fires once, not for
+  // subsequent navigations. Without that, cross-file Cmd+Click would land
+  // at the top of the target file instead of on the symbol's declaration.
   useEffect(() => {
     const editor = editorRef.current;
     if (!editor || !activeFilePath) return;
     const nav = getPendingNavigation();
-    if (!nav) return;
-    clearPendingNavigation();
+    if (nav) clearPendingNavigation();
     // Defer one frame so the model swap initiated by the path-prop
-    // change has actually completed before we move the cursor.
+    // change has actually completed before we move the cursor / focus.
     requestAnimationFrame(() => {
-      const position = { lineNumber: nav.line, column: nav.column };
-      editor.setPosition(position);
-      editor.revealPositionInCenter(position);
+      if (nav) {
+        const position = { lineNumber: nav.line, column: nav.column };
+        editor.setPosition(position);
+        editor.revealPositionInCenter(position);
+      }
       editor.focus();
     });
   }, [activeFilePath]);
@@ -296,6 +299,15 @@ function EditorPanel() {
         }}
         onMount={(editor, monaco) => {
           editorRef.current = editor;
+          // EditorPanel has early-return render paths (AssetViewer,
+          // SceneDiffViewer, structured asset viewers) where this
+          // MonacoEditor instance unmounts without a new one replacing it.
+          // Without this guard, editorRef.current would keep pointing at a
+          // disposed editor, which the activeFilePath-focus effect above
+          // could then try to call .focus() on.
+          editor.onDidDispose(() => {
+            if (editorRef.current === editor) editorRef.current = null;
+          });
 
           const boundLanguage = editor.getModel()?.getLanguageId() ?? activeLanguage;
           console.info('[Editor] Monaco language binding', {
@@ -325,8 +337,13 @@ function EditorPanel() {
             const position = { lineNumber: nav.line, column: nav.column };
             editor.setPosition(position);
             editor.revealPositionInCenter(position);
-            editor.focus();
           }
+
+          // Focus the editor on mount so the very first file opened in a
+          // fresh Monaco instance also gets keyboard focus, matching the
+          // behavior of subsequent file switches (handled by the
+          // activeFilePath effect above).
+          editor.focus();
 
           // Track cursor position for status bar
           editor.onDidChangeCursorPosition((e) => {
