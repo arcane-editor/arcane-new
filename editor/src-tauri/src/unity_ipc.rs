@@ -1,11 +1,12 @@
+use crate::sync_util::lock_recover;
 use serde::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter, Manager, Window};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::{mpsc, oneshot, Mutex};
 
@@ -45,6 +46,11 @@ pub struct ConnectionChangedPayload {
 
 // ── State ───────────────────────────────────────────────────────────────────
 
+/// One window's Unity IPC bridge: its running server's shutdown signal, the
+/// connected client's write channel, and in-flight RPCs. Each field stays a
+/// `tokio::sync::Mutex` (async lock holders don't poison the way `std::sync`
+/// ones do, and callers already `.await` across these), untouched by the
+/// per-window keying below — only the *registry* of these got a lock.
 pub struct UnityIpcInner {
     pub shutdown_tx: Mutex<Option<mpsc::Sender<()>>>,
     pub client_tx: Mutex<Option<mpsc::Sender<String>>>,
@@ -54,17 +60,89 @@ pub struct UnityIpcInner {
     pub req_counter: AtomicU64,
 }
 
-pub struct UnityIpcState(pub Arc<UnityIpcInner>);
-
-impl UnityIpcState {
-    pub fn new() -> Self {
-        Self(Arc::new(UnityIpcInner {
+impl UnityIpcInner {
+    fn new() -> Self {
+        Self {
             shutdown_tx: Mutex::new(None),
             client_tx: Mutex::new(None),
             pending: Mutex::new(HashMap::new()),
             req_counter: AtomicU64::new(0),
-        }))
+        }
     }
+}
+
+/// Registry of running Unity IPC bridges, keyed by window label — mirrors
+/// the per-window pattern in `lsp.rs`/`dap.rs`/`file_scanner::FileWatcherState`.
+/// Each project window gets its own server/connection/pending-RPC state, so
+/// one window's `unity_ipc_stop` (fired on workspace switch) can never kill
+/// another window's bridge, and Unity editor events are only ever routed to
+/// the window whose project produced them (see the `emit_to` call sites in
+/// `handle_client`/`route_message`). The pipe path is already per-project
+/// (`compute_pipe_path` hashes the workspace) and the frontend guarantees at
+/// most one window per project, so per-window servers can never collide on
+/// a pipe.
+///
+/// The registry lock itself is a plain `std::sync::Mutex` guarding only map
+/// membership (insert / remove / lookup, all synchronous, no `.await` while
+/// held) — plain-data state, so `lock_recover` (poison-tolerant) is the
+/// right fit per its own doc comment. It's wrapped in an outer `Arc` (unlike
+/// `file_scanner`/`file_index`/`search`'s bare `Mutex<...>`) so `lib.rs`'s
+/// `WindowEvent::Destroyed` handler can clone its way to an owned, `'static`
+/// handle to run the (async) shutdown in a spawned task — the same trick
+/// `lsp::LspState`/`dap::DapState` use for their `Arc<Mutex<..>>>` state.
+pub struct UnityIpcState(pub Arc<StdMutex<HashMap<String, Arc<UnityIpcInner>>>>);
+
+impl UnityIpcState {
+    pub fn new() -> Self {
+        Self(Arc::new(StdMutex::new(HashMap::new())))
+    }
+
+    /// Returns this window's IPC state, creating a fresh (idle — no server
+    /// running yet) `UnityIpcInner` the first time this window is seen.
+    pub fn get_or_create(&self, label: &str) -> Arc<UnityIpcInner> {
+        let mut map = lock_recover(&self.0);
+        map.entry(label.to_string())
+            .or_insert_with(|| Arc::new(UnityIpcInner::new()))
+            .clone()
+    }
+
+    /// Stop this window's bridge (if running) and drop its slot entirely.
+    /// Called from `WindowEvent::Destroyed` cleanup in `lib.rs` — idempotent,
+    /// a no-op if the window never started a bridge. Shares the exact
+    /// shutdown path `unity_ipc_stop` uses so a destroyed window's Unity
+    /// connection tears down identically to an explicit stop: the server
+    /// task is signaled to exit, the client channel is dropped, and any
+    /// pending RPCs are failed rather than left to hang until their timeout.
+    pub async fn drop_window(&self, label: &str) {
+        let inner = {
+            let mut map = lock_recover(&self.0);
+            map.remove(label)
+        };
+        if let Some(inner) = inner {
+            shutdown_inner(&inner).await;
+        }
+    }
+}
+
+impl Default for UnityIpcState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Shut down `inner`'s running server (if any): signal its accept-loop task
+/// to stop, drop the client channel, and clear any RPCs still awaiting a
+/// response (dropping their `oneshot::Sender`s resolves the awaiting
+/// receivers to `Err` instead of hanging until timeout). Idempotent — safe
+/// to call on an inner that never started a server or was already stopped.
+/// Shared by the `unity_ipc_stop` command and `UnityIpcState::drop_window`
+/// so both paths tear down identically.
+async fn shutdown_inner(inner: &UnityIpcInner) {
+    if let Some(tx) = inner.shutdown_tx.lock().await.take() {
+        let _ = tx.send(()).await;
+    }
+    *inner.client_tx.lock().await = None;
+    inner.pending.lock().await.clear();
 }
 
 // ── Pipe Path ───────────────────────────────────────────────────────────────
@@ -167,11 +245,14 @@ fn encode_frame(message: &str) -> Vec<u8> {
 #[tauri::command]
 pub async fn unity_ipc_start(
     app: AppHandle,
+    window: Window,
     workspace_path: String,
 ) -> Result<(), String> {
-    let inner = app.state::<UnityIpcState>().0.clone();
+    let label = window.label().to_string();
+    let inner = app.state::<UnityIpcState>().get_or_create(&label);
 
-    // Stop existing server if running
+    // Stop this window's existing server if running (restart-in-place, e.g.
+    // reopening the same project).
     if let Some(tx) = inner.shutdown_tx.lock().await.take() {
         let _ = tx.send(()).await;
     }
@@ -208,6 +289,7 @@ pub async fn unity_ipc_start(
 
     let app_handle = app.clone();
     let ipc_state = inner.clone();
+    let label_for_task = label.clone();
 
     // Unix: accept connections on the listening socket; remove the socket file
     // on shutdown.
@@ -224,7 +306,7 @@ pub async fn unity_ipc_start(
                     accept_result = listener.accept() => {
                         match accept_result {
                             Ok((stream, _)) => {
-                                handle_client(stream, app_handle.clone(), ipc_state.clone()).await;
+                                handle_client(stream, app_handle.clone(), ipc_state.clone(), label_for_task.clone()).await;
                             }
                             Err(e) => {
                                 eprintln!("[UnityIPC] Accept error: {}", e);
@@ -264,11 +346,11 @@ pub async fn unity_ipc_start(
                 match ServerOptions::new().create(&pipe_name) {
                     Ok(next) => {
                         server = next;
-                        handle_client(connected_pipe, app_handle.clone(), ipc_state.clone()).await;
+                        handle_client(connected_pipe, app_handle.clone(), ipc_state.clone(), label_for_task.clone()).await;
                     }
                     Err(e) => {
                         eprintln!("[UnityIPC] Failed to create next pipe instance: {}", e);
-                        handle_client(connected_pipe, app_handle.clone(), ipc_state.clone()).await;
+                        handle_client(connected_pipe, app_handle.clone(), ipc_state.clone(), label_for_task.clone()).await;
                         break;
                     }
                 }
@@ -279,7 +361,7 @@ pub async fn unity_ipc_start(
     Ok(())
 }
 
-async fn handle_client<S>(stream: S, app: AppHandle, state: Arc<UnityIpcInner>)
+async fn handle_client<S>(stream: S, app: AppHandle, state: Arc<UnityIpcInner>, label: String)
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Send + 'static,
 {
@@ -304,8 +386,9 @@ where
         }
     });
 
-    // Emit connection event
-    let _ = app.emit(
+    // Emit connection event (this window only)
+    let _ = app.emit_to(
+        label.as_str(),
         "unity-connection-changed",
         ConnectionChangedPayload {
             connected: true,
@@ -349,7 +432,7 @@ where
 
                     // Parse and route message
                     if let Ok(msg) = serde_json::from_str::<UnityMessage>(&payload) {
-                        route_message(&app, &state, msg).await;
+                        route_message(&app, &state, &label, msg).await;
                     }
                 }
             }
@@ -368,7 +451,8 @@ where
         let mut pending = state.pending.lock().await;
         pending.clear();
     }
-    let _ = app.emit(
+    let _ = app.emit_to(
+        label.as_str(),
         "unity-connection-changed",
         ConnectionChangedPayload {
             connected: false,
@@ -377,14 +461,15 @@ where
     );
 }
 
-async fn route_message(app: &AppHandle, state: &Arc<UnityIpcInner>, msg: UnityMessage) {
+async fn route_message(app: &AppHandle, state: &Arc<UnityIpcInner>, label: &str, msg: UnityMessage) {
     match msg.msg_type.as_str() {
         "connection_init" | "project_info" => {
             // Validate the bridge's protocol version; warn on a major mismatch
             // but still connect (the frontend offers "Update bridge").
             if let Some(pv) = msg.payload.get("protocolVersion").and_then(|v| v.as_u64()) {
                 if pv as u32 != PROTOCOL_VERSION {
-                    let _ = app.emit(
+                    let _ = app.emit_to(
+                        label,
                         "unity-bridge-version-mismatch",
                         serde_json::json!({
                             "ideProtocol": PROTOCOL_VERSION,
@@ -393,7 +478,8 @@ async fn route_message(app: &AppHandle, state: &Arc<UnityIpcInner>, msg: UnityMe
                     );
                 }
             }
-            let _ = app.emit(
+            let _ = app.emit_to(
+                label,
                 "unity-connection-changed",
                 ConnectionChangedPayload {
                     connected: true,
@@ -422,44 +508,44 @@ async fn route_message(app: &AppHandle, state: &Arc<UnityIpcInner>, msg: UnityMe
             }
         }
         "log" => {
-            let _ = app.emit("unity-log", &msg.payload);
+            let _ = app.emit_to(label, "unity-log", &msg.payload);
         }
         "log_batch" => {
-            let _ = app.emit("unity-log-batch", &msg.payload);
+            let _ = app.emit_to(label, "unity-log-batch", &msg.payload);
         }
         "playstate_changed" => {
-            let _ = app.emit("unity-playstate-changed", &msg.payload);
+            let _ = app.emit_to(label, "unity-playstate-changed", &msg.payload);
         }
         "playmode_stats" => {
-            let _ = app.emit("unity-playmode-stats", &msg.payload);
+            let _ = app.emit_to(label, "unity-playmode-stats", &msg.payload);
         }
         "compilation_started" => {
-            let _ = app.emit("unity-compilation", serde_json::json!({ "started": true }));
+            let _ = app.emit_to(label, "unity-compilation", serde_json::json!({ "started": true }));
         }
         "compilation_finished" => {
             let mut payload = msg.payload;
             if let Some(obj) = payload.as_object_mut() {
                 obj.insert("started".to_string(), serde_json::Value::Bool(false));
             }
-            let _ = app.emit("unity-compilation", &payload);
+            let _ = app.emit_to(label, "unity-compilation", &payload);
         }
         "open_file" => {
-            let _ = app.emit("unity-open-file", &msg.payload);
+            let _ = app.emit_to(label, "unity-open-file", &msg.payload);
         }
         "build_progress" => {
-            let _ = app.emit("unity-build-progress", &msg.payload);
+            let _ = app.emit_to(label, "unity-build-progress", &msg.payload);
         }
         "build_result" => {
-            let _ = app.emit("unity-build-result", &msg.payload);
+            let _ = app.emit_to(label, "unity-build-result", &msg.payload);
         }
         "test_event" => {
-            let _ = app.emit("unity-test-event", &msg.payload);
+            let _ = app.emit_to(label, "unity-test-event", &msg.payload);
         }
         "selection_changed" => {
-            let _ = app.emit("unity-selection-changed", &msg.payload);
+            let _ = app.emit_to(label, "unity-selection-changed", &msg.payload);
         }
         "hierarchy_changed" => {
-            let _ = app.emit("unity-hierarchy-changed", &msg.payload);
+            let _ = app.emit_to(label, "unity-hierarchy-changed", &msg.payload);
         }
         "focus_window" => {
             // Could focus the IDE window
@@ -470,20 +556,21 @@ async fn route_message(app: &AppHandle, state: &Arc<UnityIpcInner>, msg: UnityMe
     }
 }
 
+/// Stop this window's Unity IPC server, if any. Only affects this window's
+/// bridge — with two project windows open, switching workspaces in one no
+/// longer tears down the other's connection to its Unity editor.
 #[tauri::command]
-pub async fn unity_ipc_stop(app: AppHandle) -> Result<(), String> {
-    let inner = app.state::<UnityIpcState>().0.clone();
-    if let Some(tx) = inner.shutdown_tx.lock().await.take() {
-        let _ = tx.send(()).await;
-    }
-    *inner.client_tx.lock().await = None;
-    inner.pending.lock().await.clear();
+pub async fn unity_ipc_stop(app: AppHandle, window: Window) -> Result<(), String> {
+    let label = window.label().to_string();
+    let inner = app.state::<UnityIpcState>().get_or_create(&label);
+    shutdown_inner(&inner).await;
     Ok(())
 }
 
 #[tauri::command]
-pub async fn unity_ipc_send(app: AppHandle, message_json: String) -> Result<(), String> {
-    let inner = app.state::<UnityIpcState>().0.clone();
+pub async fn unity_ipc_send(app: AppHandle, window: Window, message_json: String) -> Result<(), String> {
+    let label = window.label().to_string();
+    let inner = app.state::<UnityIpcState>().get_or_create(&label);
     if let Some(tx) = inner.client_tx.lock().await.as_ref() {
         tx.send(message_json)
             .await
@@ -500,11 +587,13 @@ pub async fn unity_ipc_send(app: AppHandle, message_json: String) -> Result<(), 
 #[tauri::command]
 pub async fn unity_ipc_request(
     app: AppHandle,
+    window: Window,
     method: String,
     params: serde_json::Value,
     timeout_ms: Option<u64>,
 ) -> Result<serde_json::Value, String> {
-    let inner = app.state::<UnityIpcState>().0.clone();
+    let label = window.label().to_string();
+    let inner = app.state::<UnityIpcState>().get_or_create(&label);
 
     let id = format!("rpc-{}", inner.req_counter.fetch_add(1, Ordering::Relaxed));
     let (tx, rx) = oneshot::channel::<serde_json::Value>();
@@ -613,5 +702,71 @@ mod tests {
         assert_eq!(a, b);
         assert!(a.starts_with("/tmp/unity-ide-"));
         assert!(a.ends_with(".sock"));
+    }
+
+    // ── UnityIpcState: per-window keying ────────────────────────────────
+    //
+    // `UnityIpcInner` needs no live pipe/socket to construct (its fields are
+    // just tokio primitives — channels, a map, a counter — none of which
+    // touch the filesystem or a real Unity connection), so these exercise
+    // the registry directly rather than mocking a bridge connection.
+
+    #[test]
+    fn get_or_create_returns_distinct_inners_per_window_and_is_stable_within_one() {
+        let state = UnityIpcState::new();
+        let a1 = state.get_or_create("window-a");
+        let a2 = state.get_or_create("window-a");
+        let b = state.get_or_create("window-b");
+
+        assert!(
+            Arc::ptr_eq(&a1, &a2),
+            "the same label must return the same inner across calls"
+        );
+        assert!(
+            !Arc::ptr_eq(&a1, &b),
+            "different labels must get distinct inners"
+        );
+    }
+
+    #[tokio::test]
+    async fn drop_window_removes_only_that_labels_entry() {
+        let state = UnityIpcState::new();
+        let a = state.get_or_create("window-a");
+        let b = state.get_or_create("window-b");
+
+        state.drop_window("window-a").await;
+
+        // "window-a" is gone — the next get_or_create allocates a fresh inner.
+        let a_after = state.get_or_create("window-a");
+        assert!(!Arc::ptr_eq(&a, &a_after));
+        // "window-b" is untouched.
+        let b_after = state.get_or_create("window-b");
+        assert!(Arc::ptr_eq(&b, &b_after));
+    }
+
+    #[tokio::test]
+    async fn drop_window_is_idempotent_when_absent() {
+        let state = UnityIpcState::new();
+        // Never created — must not panic (mirrors WindowEvent::Destroyed
+        // firing for a window that never started a Unity bridge).
+        state.drop_window("never-started").await;
+    }
+
+    #[tokio::test]
+    async fn drop_window_fails_pending_rpcs_instead_of_leaving_them_to_hang() {
+        let state = UnityIpcState::new();
+        let inner = state.get_or_create("window-a");
+        let (tx, rx) = oneshot::channel::<serde_json::Value>();
+        inner
+            .pending
+            .lock()
+            .await
+            .insert("rpc-0".to_string(), tx);
+
+        state.drop_window("window-a").await;
+
+        // Dropping the pending map's sender resolves the awaiting receiver
+        // to Err instead of leaving the caller to hang until its timeout.
+        assert!(rx.await.is_err());
     }
 }

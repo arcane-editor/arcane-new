@@ -676,6 +676,15 @@ pub fn run() {
                 if let Some(state) = window.try_state::<search::ContentSearchState>() {
                     state.drop_window(&label);
                 }
+                // Per-window Unity IPC bridge cleanup
+                if let Some(state) = window.try_state::<unity_ipc::UnityIpcState>() {
+                    let inner = state.0.clone();
+                    let label_clone = label.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let dummy = unity_ipc::UnityIpcState(inner);
+                        dummy.drop_window(&label_clone).await;
+                    });
+                }
 
                 // Last-window-closed behavior:
                 //  - macOS: keep app running with no windows visible
