@@ -1,0 +1,61 @@
+import { describe, it, expect } from 'bun:test';
+import { planFileRestore, stripDiffTabSuffix, type PersistedOpenFile } from './persistence';
+
+describe('stripDiffTabSuffix', () => {
+  it('strips a "(Staged)" suffix', () => {
+    expect(stripDiffTabSuffix('Foo.cs (Staged)')).toBe('Foo.cs');
+  });
+
+  it('strips a "(Working Tree)" suffix', () => {
+    expect(stripDiffTabSuffix('Foo.cs (Working Tree)')).toBe('Foo.cs');
+  });
+
+  it('leaves a name with no diff suffix untouched', () => {
+    expect(stripDiffTabSuffix('Foo.cs')).toBe('Foo.cs');
+  });
+
+  it('does not touch parentheses that are not the diff suffix', () => {
+    expect(stripDiffTabSuffix('Foo (copy).cs')).toBe('Foo (copy).cs');
+  });
+});
+
+describe('planFileRestore (old shape → new loader migration)', () => {
+  it('plans a plain file open for an old-shape entry with no diff field', () => {
+    // Entries persisted before the `diff` field existed have exactly this
+    // shape — migration must keep restoring them as regular files.
+    const entry: PersistedOpenFile = { path: '/proj/Assets/Foo.cs', name: 'Foo.cs' };
+    expect(planFileRestore(entry)).toEqual({
+      kind: 'file',
+      path: '/proj/Assets/Foo.cs',
+      name: 'Foo.cs',
+    });
+  });
+
+  it('plans an openDiffTab call for a staged diff entry, stripping the name suffix', () => {
+    const entry: PersistedOpenFile = {
+      path: 'diff://staged/Assets/Foo.cs',
+      name: 'Foo.cs (Staged)',
+      diff: { filePath: 'Assets/Foo.cs', staged: true },
+    };
+    expect(planFileRestore(entry)).toEqual({
+      kind: 'diff',
+      filePath: 'Assets/Foo.cs',
+      name: 'Foo.cs',
+      staged: true,
+    });
+  });
+
+  it('plans an openDiffTab call for an unstaged (working tree) diff entry', () => {
+    const entry: PersistedOpenFile = {
+      path: 'diff://unstaged/Assets/Bar.cs',
+      name: 'Bar.cs (Working Tree)',
+      diff: { filePath: 'Assets/Bar.cs', staged: false },
+    };
+    expect(planFileRestore(entry)).toEqual({
+      kind: 'diff',
+      filePath: 'Assets/Bar.cs',
+      name: 'Bar.cs',
+      staged: false,
+    });
+  });
+});

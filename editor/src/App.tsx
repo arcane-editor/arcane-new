@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Allotment, LayoutPriority } from 'allotment';
 import { open } from '@tauri-apps/plugin-dialog';
+import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import 'allotment/dist/style.css';
 import {
@@ -39,7 +40,7 @@ import { useUnitySceneStore } from './stores/unity-scene';
 import { useRegisterCommands } from './hooks/useRegisterCommands';
 import { useAutoSave } from './hooks/useAutoSave';
 import { useCloseGuard } from './hooks/useCloseGuard';
-import { useNotificationsStore } from './stores/notifications';
+import { useNotificationsStore, notify } from './stores/notifications';
 import { useCommandsStore } from './stores/commands';
 import { listen } from '@tauri-apps/api/event';
 import { useWorkspaceStore } from './stores/workspace';
@@ -57,7 +58,7 @@ import { useDebugStore } from './stores/debug';
 import { useAuthStore } from './stores/auth';
 import { AuthTab } from './features/auth';
 import { useSceneUsageStore } from './features/unity-context';
-import { loadState, saveState, loadLayoutSizes, saveLayoutSizes } from './utils/persistence';
+import { loadState, saveState, loadLayoutSizes, saveLayoutSizes, planFileRestore } from './utils/persistence';
 import { useRecentsStore } from './stores/recents';
 import { confirmCloseDirty } from './utils/dirty-guard';
 import { safeUnlisten } from './utils/tauri-listener';
@@ -108,6 +109,16 @@ function App() {
     if (restoredRef.current) return;
     restoredRef.current = true;
 
+    // Reap any PTYs (interactive + ACP) left running by this window's
+    // previous incarnation. TerminalState lives in the Rust process and is
+    // keyed by window label, so a webview reload (Cmd+R) — which resets the
+    // frontend terminal store but doesn't touch the backend — would
+    // otherwise orphan every shell from before the reload. Must run before
+    // anything below can create a terminal for the new incarnation
+    // (workspacePath is still null at this point, so nothing has yet); a
+    // no-op on first launch since there's no prior slot for this label.
+    void invoke('terminal_reset_window');
+
     useSettingsStore.getState().loadSettings();
     useAuthStore.getState().loadFromDisk();
     useRecentsStore.getState().reload();
@@ -142,15 +153,27 @@ function App() {
         if (urlPath || workspacePath === persisted?.workspacePath) {
           for (const file of persisted?.openFilePaths ?? []) {
             try {
-              await store.openFile(file.path, file.name);
+              const plan = planFileRestore(file);
+              // Diff tabs refetch their content from git, so restoring them
+              // is never stale even across reloads; falls back to a plain
+              // file open for old-shape entries with no `diff` field, and
+              // tolerates missing/malformed git state the same way a
+              // deleted file is tolerated below.
+              if (plan.kind === 'diff') {
+                await store.openDiffTab(plan.filePath, plan.name, plan.staged);
+              } else {
+                await store.openFile(plan.path, plan.name);
+              }
             } catch {
-              // File may have been deleted — skip
+              // File may have been deleted, or git state unavailable — skip
             }
           }
           if (persisted?.activeFilePath) {
             store.setActiveFile(persisted.activeFilePath);
           }
         }
+      }).catch(() => {
+        notify.warning(`Couldn't open ${workspacePath} — moved or deleted.`);
       });
     }
   }, []);
@@ -308,10 +331,16 @@ function App() {
       timeout = setTimeout(() => {
         saveState({
           workspacePath: state.workspacePath,
+          // diff:// tabs are persisted too (content is refetched from git on
+          // restore, so it's never stale) — only auth:// stays stripped.
           openFilePaths: state.openFiles
-            .filter((f) => !f.path.startsWith('diff://') && !f.path.startsWith('auth://'))
-            .map((f) => ({ path: f.path, name: f.name })),
-          activeFilePath: (state.activeFilePath?.startsWith('diff://') || state.activeFilePath?.startsWith('auth://')) ? null : state.activeFilePath,
+            .filter((f) => !f.path.startsWith('auth://'))
+            .map((f) => ({
+              path: f.path,
+              name: f.name,
+              ...(f.diff ? { diff: { filePath: f.diff.filePath, staged: f.diff.staged } } : {}),
+            })),
+          activeFilePath: state.activeFilePath?.startsWith('auth://') ? null : state.activeFilePath,
         });
       }, 1000);
     });

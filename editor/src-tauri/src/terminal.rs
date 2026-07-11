@@ -121,6 +121,18 @@ fn clone_master_as_writer(_master: &dyn MasterPty) -> Result<std::fs::File, Stri
     Err("Windows PTY writer not implemented".to_string())
 }
 
+/// Reap every PTY (interactive + ACP) belonging to this window's *previous*
+/// incarnation. `TerminalState` is keyed by window label and otherwise only
+/// ever cleaned up on window destroy, so a webview reload (e.g. Cmd+R, which
+/// resets the frontend's terminal store but leaves the Rust process tree
+/// alone) would otherwise orphan every shell that was running before the
+/// reload. Call this once at boot, before spawning any new terminal for the
+/// window — it's a no-op on first launch since there's no prior slot yet.
+#[tauri::command]
+pub fn terminal_reset_window(window: Window, state: tauri::State<'_, TerminalState>) {
+    state.drop_window(window.label());
+}
+
 #[tauri::command]
 pub fn terminal_spawn(
     app_handle: AppHandle,

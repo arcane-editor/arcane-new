@@ -12,9 +12,22 @@ const MAX_RECENT_PROJECTS = 20;
 
 export interface PersistedState {
   workspacePath: string | null;
-  openFilePaths: Array<{ path: string; name: string }>;
+  openFilePaths: PersistedOpenFile[];
   activeFilePath: string | null;
   layoutSizes?: LayoutSizes;
+}
+
+/**
+ * One persisted tab entry. `diff` is present only for staged/unstaged
+ * `diff://` tabs — a `diff://commit/...` variant (a later task) is out of
+ * scope here and must not be persisted via this shape. Old entries written
+ * before this field existed simply omit it, so `diff` stays optional for
+ * backward compatibility.
+ */
+export interface PersistedOpenFile {
+  path: string;
+  name: string;
+  diff?: { filePath: string; staged: boolean };
 }
 
 export interface LayoutSizes {
@@ -39,7 +52,7 @@ export interface RecentProject {
 
 interface WindowState {
   workspacePath: string | null;
-  openFilePaths: Array<{ path: string; name: string }>;
+  openFilePaths: PersistedOpenFile[];
   activeFilePath: string | null;
   layoutSizes?: LayoutSizes;
 }
@@ -234,4 +247,43 @@ export function dropWindowState(label: string): void {
       await win.save();
     } catch { /* ignore */ }
   })();
+}
+
+// ── Restore-tab migration ────────────────────────────────────────────────
+//
+// Pure mapping from a persisted tab entry to the action needed to restore
+// it. Kept separate from App.tsx's restore effect so the old-shape → new-
+// shape migration (entries with no `diff` field at all, from before this
+// field existed) is unit-testable without a Tauri Store or the workspace
+// store.
+
+/** Matches the "(Staged)"/"(Working Tree)" suffix `openDiffTab` appends to a
+ * diff tab's display name, so restoring doesn't double it up. */
+const DIFF_NAME_SUFFIX = / \((Staged|Working Tree)\)$/;
+
+export function stripDiffTabSuffix(name: string): string {
+  return name.replace(DIFF_NAME_SUFFIX, '');
+}
+
+export type RestorePlan =
+  | { kind: 'diff'; filePath: string; name: string; staged: boolean }
+  | { kind: 'file'; path: string; name: string };
+
+/**
+ * Decides how to restore one persisted tab. Entries with a `diff` field
+ * (staged/unstaged only — see `PersistedOpenFile`) are re-opened via
+ * `openDiffTab`, which refetches content from git, so they're never stale.
+ * Entries without it — including every entry persisted before this field
+ * existed — fall back to a plain file open, unchanged from prior behavior.
+ */
+export function planFileRestore(entry: PersistedOpenFile): RestorePlan {
+  if (entry.diff) {
+    return {
+      kind: 'diff',
+      filePath: entry.diff.filePath,
+      name: stripDiffTabSuffix(entry.name),
+      staged: entry.diff.staged,
+    };
+  }
+  return { kind: 'file', path: entry.path, name: entry.name };
 }

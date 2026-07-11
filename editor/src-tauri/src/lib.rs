@@ -358,6 +358,7 @@ pub fn run() {
             git::git_run_unityyamlmerge,
             git::git_resolve_conflict_side,
             git::git_append_gitignore,
+            terminal::terminal_reset_window,
             terminal::terminal_spawn,
             terminal::terminal_write,
             terminal::terminal_resize,
