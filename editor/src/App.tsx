@@ -87,7 +87,7 @@ function App() {
   const restoredRef = useRef(false);
   const [showThemePicker, setShowThemePicker] = useState(false);
   const [paletteMode, setPaletteMode] = useState<'commands' | 'files' | null>(null);
-  const [showBranchPicker, setShowBranchPicker] = useState(false);
+  const [branchPickerMode, setBranchPickerMode] = useState<'switch' | 'create' | null>(null);
   const [unityPicker, setUnityPicker] = useState<UnityPickerMode | null>(null);
   const [newScriptDir, setNewScriptDir] = useState<string | null>(null);
   const persistedLayout = useMemo(() => loadLayoutSizes(), []);
@@ -715,14 +715,14 @@ function App() {
       label: 'Switch Branch',
       category: 'Git',
       keybinding: 'mod+shift+b',
-      handler: () => setShowBranchPicker(true),
+      handler: () => setBranchPickerMode('switch'),
       when: () => useGitStore.getState().isGitRepo,
     },
     {
       id: 'git.createBranch',
       label: 'Create Branch',
       category: 'Git',
-      handler: () => setShowBranchPicker(true),
+      handler: () => setBranchPickerMode('create'),
       when: () => useGitStore.getState().isGitRepo,
     },
     // Unity commands
@@ -1022,8 +1022,8 @@ function App() {
       {paletteMode && (
         <PaletteModal initialMode={paletteMode} onClose={() => setPaletteMode(null)} />
       )}
-      {showBranchPicker && (
-        <BranchPicker onClose={() => setShowBranchPicker(false)} />
+      {branchPickerMode && (
+        <BranchPicker initialMode={branchPickerMode} onClose={() => setBranchPickerMode(null)} />
       )}
       {newScriptDir && (
         <NewScriptModal targetDir={newScriptDir} onClose={() => setNewScriptDir(null)} />

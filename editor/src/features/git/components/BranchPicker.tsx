@@ -2,7 +2,22 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { GitBranch, Check } from 'lucide-react';
 import { useGitStore } from '../../../stores/git';
 import { useWorkspaceStore } from '../../../stores/workspace';
-import { buildBranchResults } from '../services/branch-results';
+import { buildBranchResults, type BranchResultRow } from '../services/branch-results';
+
+/** Create-mode's single selectable action row: "Create branch '<name>'". */
+interface ActionRow {
+  kind: 'action';
+  label: string;
+  name: string;
+}
+
+/** Create-mode's single non-selectable hint row (empty query / name already taken). */
+interface HintRow {
+  kind: 'hint';
+  label: string;
+}
+
+type PickerRow = BranchResultRow | ActionRow | HintRow;
 
 function highlightMatches(text: string, matchIndices: number[]): React.ReactNode {
   if (matchIndices.length === 0) return text;
@@ -18,7 +33,13 @@ function highlightMatches(text: string, matchIndices: number[]): React.ReactNode
   return <>{parts}</>;
 }
 
-function BranchPicker({ onClose }: { onClose: () => void }) {
+function rowKey(row: PickerRow): string {
+  if (row.kind === 'hint') return 'hint';
+  if (row.kind === 'action') return `action-${row.name}`;
+  return `${row.kind}-${row.name}`;
+}
+
+function BranchPicker({ onClose, initialMode = 'switch' }: { onClose: () => void; initialMode?: 'switch' | 'create' }) {
   const workspacePath = useWorkspaceStore((s) => s.workspacePath);
   const branches = useGitStore((s) => s.branches);
   const isBranchesLoading = useGitStore((s) => s.isBranchesLoading);
@@ -27,6 +48,7 @@ function BranchPicker({ onClose }: { onClose: () => void }) {
   const createBranch = useGitStore((s) => s.createBranch);
   const refreshBranches = useGitStore((s) => s.refreshBranches);
 
+  const [mode, setMode] = useState<'switch' | 'create'>(initialMode);
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -43,10 +65,17 @@ function BranchPicker({ onClose }: { onClose: () => void }) {
 
   useEffect(() => { inputRef.current?.focus(); }, []);
 
-  const results = useMemo(
-    () => buildBranchResults(branches, query, currentBranch),
-    [query, branches, currentBranch],
-  );
+  const results: PickerRow[] = useMemo(() => {
+    if (mode === 'create') {
+      const trimmed = query.trim();
+      if (trimmed === '') return [{ kind: 'hint', label: 'Type a branch name' }];
+      if (branches.some((name) => name === trimmed)) {
+        return [{ kind: 'hint', label: `Branch '${trimmed}' already exists` }];
+      }
+      return [{ kind: 'action', label: `Create branch '${trimmed}'`, name: trimmed }];
+    }
+    return buildBranchResults(branches, query, currentBranch);
+  }, [mode, query, branches, currentBranch]);
 
   useEffect(() => { setSelectedIndex(0); }, [query]);
 
@@ -66,7 +95,37 @@ function BranchPicker({ onClose }: { onClose: () => void }) {
   const handleSelect = useCallback(async (index: number) => {
     if (isSubmittingRef.current) return;
     const result = results[index];
-    if (!result || !workspacePath) return;
+    if (!result) return;
+
+    // Create-mode's hint rows ("Type a branch name" / "Branch 'x' already
+    // exists") are display-only — Enter/click on them is a no-op.
+    if (result.kind === 'hint') return;
+
+    // Create-mode's action row: create + checkout, then close.
+    if (result.kind === 'action') {
+      if (!workspacePath) return;
+      isSubmittingRef.current = true;
+      try {
+        await createBranch(workspacePath, result.name, { checkout: true });
+        onClose();
+      } catch (e) {
+        console.error(e);
+      } finally {
+        isSubmittingRef.current = false;
+      }
+      return;
+    }
+
+    // Switch-mode's first-row "＋ Create new branch…" affordance: enter
+    // create mode instead of creating anything yet.
+    if (result.kind === 'create' && result.name === '') {
+      setMode('create');
+      setQuery('');
+      inputRef.current?.focus();
+      return;
+    }
+
+    if (!workspacePath) return;
     isSubmittingRef.current = true;
     try {
       if (result.kind === 'create') {
@@ -101,27 +160,37 @@ function BranchPicker({ onClose }: { onClose: () => void }) {
         style={{ position: 'fixed', top: 0, left: '50%', transform: 'translateX(-50%)', width: 500, maxWidth: '90vw', background: 'var(--bg-primary)', border: '1px solid var(--border)', boxShadow: 'var(--overlay-shadow)', borderRadius: '0 0 6px 6px', overflow: 'hidden' }}>
         <input ref={inputRef} type="text" value={query}
           onChange={(e) => setQuery(e.target.value)} onKeyDown={handleKeyDown}
-          placeholder="Switch to branch..."
+          placeholder={mode === 'create'
+            ? (currentBranch ? `New branch name (from ${currentBranch})…` : 'New branch name…')
+            : 'Switch to branch...'}
+          autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}
           style={{ width: '100%', padding: '10px 14px', background: 'var(--bg-input)', border: 'none', borderBottom: '1px solid var(--border)', color: 'var(--text-primary)', fontSize: 14, outline: 'none', boxSizing: 'border-box' }} />
         <div ref={listRef} style={{ maxHeight: 350, overflowY: 'auto' }}>
-          {results.map((result, index) => (
-            <div key={`${result.kind}-${result.name}`} data-index={index}
-              onMouseEnter={() => setSelectedIndex(index)}
-              onClick={() => handleSelect(index)}
-              style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 14px', cursor: 'pointer', background: index === selectedIndex ? 'var(--hover)' : 'transparent', color: 'var(--text-primary)', fontSize: 13, userSelect: 'none' }}>
-              {result.kind === 'create' ? (
-                <span style={{ flex: 1 }}>
-                  {'＋ Create branch \''}{result.name}{'\''}
-                </span>
-              ) : (
-                <>
-                  <GitBranch size={14} style={{ color: 'var(--text-secondary)', flexShrink: 0 }} />
-                  <span style={{ flex: 1 }}>{highlightMatches(result.name, result.matches)}</span>
-                  {result.name === currentBranch && <Check size={14} style={{ color: 'var(--accent)', flexShrink: 0 }} />}
-                </>
-              )}
-            </div>
-          ))}
+          {results.map((result, index) => {
+            const selectable = result.kind !== 'hint';
+            return (
+              <div key={rowKey(result)} data-index={index}
+                onMouseEnter={() => { if (selectable) setSelectedIndex(index); }}
+                onClick={() => handleSelect(index)}
+                style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 14px', cursor: selectable ? 'pointer' : 'default', background: selectable && index === selectedIndex ? 'var(--hover)' : 'transparent', color: selectable ? 'var(--text-primary)' : 'var(--text-secondary)', fontSize: 13, userSelect: 'none' }}>
+                {result.kind === 'create' ? (
+                  <span style={{ flex: 1 }}>
+                    {result.name === '' ? '＋ Create new branch…' : `＋ Create branch '${result.name}'`}
+                  </span>
+                ) : result.kind === 'action' ? (
+                  <span style={{ flex: 1 }}>{result.label}</span>
+                ) : result.kind === 'hint' ? (
+                  <span style={{ flex: 1 }}>{result.label}</span>
+                ) : (
+                  <>
+                    <GitBranch size={14} style={{ color: 'var(--text-secondary)', flexShrink: 0 }} />
+                    <span style={{ flex: 1 }}>{highlightMatches(result.name, result.matches)}</span>
+                    {result.name === currentBranch && <Check size={14} style={{ color: 'var(--accent)', flexShrink: 0 }} />}
+                  </>
+                )}
+              </div>
+            );
+          })}
           {results.length === 0 && branches.length === 0 && isBranchesLoading && (
             <div style={{ padding: '12px 14px', color: 'var(--text-secondary)', fontSize: 13, textAlign: 'center' }}>
               Loading branches…

@@ -3,10 +3,16 @@ import { buildBranchResults, type BranchRow } from './branch-results';
 
 describe('buildBranchResults', () => {
   describe('empty query', () => {
-    it('pins the current branch first, sorts the rest alphabetically', () => {
+    it('prepends a create row (name \'\') as the first row, before the pinned current branch', () => {
       const rows = buildBranchResults(['feature/b', 'main', 'develop'], '', 'develop');
-      expect(rows.map((r) => r.name)).toEqual(['develop', 'feature/b', 'main']);
-      expect(rows.every((r) => r.kind === 'branch')).toBe(true);
+      expect(rows[0]).toEqual({ kind: 'create', name: '' });
+      expect(rows.map((r) => r.name)).toEqual(['', 'develop', 'feature/b', 'main']);
+    });
+
+    it('pins the current branch first among the branch rows, sorts the rest alphabetically', () => {
+      const rows = buildBranchResults(['feature/b', 'main', 'develop'], '', 'develop');
+      const branchRows = rows.filter((r): r is BranchRow => r.kind === 'branch');
+      expect(branchRows.map((r) => r.name)).toEqual(['develop', 'feature/b', 'main']);
     });
 
     it('is a consistent total ordering (stable across repeated calls, no reshuffling)', () => {
@@ -14,7 +20,7 @@ describe('buildBranchResults', () => {
       const first = buildBranchResults(branches, '', 'mid').map((r) => r.name);
       const second = buildBranchResults([...branches], '', 'mid').map((r) => r.name);
       const third = buildBranchResults(branches.slice().reverse(), '', 'mid').map((r) => r.name);
-      expect(first).toEqual(['mid', 'alpha', 'omega', 'zeta']);
+      expect(first).toEqual(['', 'mid', 'alpha', 'omega', 'zeta']);
       expect(second).toEqual(first);
       // Regardless of the input array's order, the sorted output must be identical —
       // this is what a legal total-ordering comparator guarantees and the old
@@ -23,20 +29,17 @@ describe('buildBranchResults', () => {
       expect(third).toEqual(first);
     });
 
-    it('produces no create row when the query is empty', () => {
-      const rows = buildBranchResults(['main'], '', 'main');
-      expect(rows.some((r) => r.kind === 'create')).toBe(false);
-    });
-
-    it('produces no create row for a whitespace-only query', () => {
+    it('prepends the create row for a whitespace-only query (treated as empty)', () => {
       const rows = buildBranchResults(['main'], '   ', 'main');
-      expect(rows.some((r) => r.kind === 'create')).toBe(false);
-      expect(rows.map((r) => r.name)).toEqual(['main']);
+      expect(rows[0]).toEqual({ kind: 'create', name: '' });
+      expect(rows.map((r) => r.name)).toEqual(['', 'main']);
     });
 
-    it('handles no current branch (null) without throwing and without pinning', () => {
+    it('handles no current branch (null) without throwing: still prepends the create row and does not pin', () => {
       const rows = buildBranchResults(['b', 'a'], '', null);
-      expect(rows.map((r) => r.name)).toEqual(['a', 'b']);
+      expect(rows[0]).toEqual({ kind: 'create', name: '' });
+      const branchRows = rows.filter((r): r is BranchRow => r.kind === 'branch');
+      expect(branchRows.map((r) => r.name)).toEqual(['a', 'b']);
     });
   });
 
@@ -53,6 +56,11 @@ describe('buildBranchResults', () => {
       const branchRows = rows.filter((r): r is BranchRow => r.kind === 'branch');
       // feature/login should score at least as well as feature/logout for query "logi"
       expect(branchRows[0].name).toBe('feature/login');
+    });
+
+    it('does not prepend a create row for a non-empty query (only the trailing create row applies)', () => {
+      const rows = buildBranchResults(['feature/login'], 'feature/logi', 'main');
+      expect(rows[0].kind).toBe('branch');
     });
   });
 
