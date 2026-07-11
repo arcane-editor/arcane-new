@@ -41,11 +41,32 @@
 //! the next `fuzzy_search_files` call anyway since watcher teardown/startup
 //! (`stop_file_watcher`/`start_file_watcher`) is sequenced before/after
 //! `setWorkspace` on the frontend, making this window vanishingly small in
-//! practice. Not worth a generation counter for a self-correcting cache.
+//! practice.
+//!
+//! That "last writer wins, both outcomes correct" reasoning does *not* cover
+//! every interleaving, though — being honest about the one gap the review
+//! for this module traced: if a walk (`build_index`, or the cache-miss path
+//! of `fuzzy_search_files_impl`) has already read a file's directory entry,
+//! that file is then deleted on disk, and the watcher's `apply_delta`
+//! removal for it lands against whatever index is *currently* stored — all
+//! before the walk's own result is stored — then the walk's result (which
+//! still contains the now-deleted path, because it was read before the
+//! delete happened) overwrites the index the removal delta just corrected.
+//! The removal event isn't replayed against the new index (it already fired
+//! once), so the deleted path lingers — and quick-open can offer/open a
+//! path that no longer exists — until the *next* rebuild, not the next
+//! delta. This is low-probability (it needs a walk, a delete, and a delta
+//! for the same path to race within one walk's wall-clock window) and
+//! bounded (self-heals at the next `build_file_index`/cache-miss rebuild),
+//! so it's not worth a generation counter — but it is a real gap, not a
+//! self-correcting one.
 
 use std::collections::HashSet;
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
+
+use ignore::gitignore::{Gitignore, GitignoreBuilder};
+use ignore::overrides::Override;
 
 use crate::file_scanner::FileIndexDelta;
 use crate::walk_policy;
@@ -56,7 +77,14 @@ use crate::walk_policy;
 pub struct FileIndex {
     pub workspace_path: String,
     pub extra_excludes: Vec<String>,
-    pub files: Vec<String>,
+    /// `Arc`-wrapped so a cache hit in `fuzzy_search_files_impl` can clone a
+    /// handle to the list in O(1) (a refcount bump) instead of deep-cloning
+    /// every path string on every keystroke — see that function's doc
+    /// comment. `apply_delta` mutates through `Arc::make_mut`, which only
+    /// deep-clones if some other clone of this `Arc` is alive at that moment
+    /// (i.e. a search that took the O(1) clone is still scoring with the
+    /// lock released) — copy-on-write, not copy-always.
+    pub files: Arc<Vec<String>>,
     /// Set by `apply_delta` when a `.gitignore`/`.ignore` file was added,
     /// removed, or (as far as the watcher can tell) modified — gitignore
     /// *content* controls which paths the walker would even consider, and
@@ -138,7 +166,7 @@ pub fn build_index(
     *guard = Some(FileIndex {
         workspace_path,
         extra_excludes,
-        files,
+        files: Arc::new(files),
         stale: false,
     });
     Ok(count)
@@ -184,6 +212,108 @@ fn is_gitignore_file(path: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Builds a root-scoped `Gitignore` matcher for `workspace_path`, covering
+/// the same two root-level ignore sources `walk_policy::policy_walker`
+/// enables via `git_ignore(true)`/`git_exclude(true)`: the workspace's own
+/// `.gitignore` and `.git/info/exclude`.
+///
+/// Deliberately does NOT attempt nested-`.gitignore` fidelity. The `ignore`
+/// crate's `GitignoreBuilder` matches every glob it's given relative to a
+/// single root (the path passed to `GitignoreBuilder::new`) — folding a
+/// nested `.gitignore`'s patterns into this same builder would evaluate them
+/// relative to the *workspace* root instead of their own directory, which is
+/// silently wrong for directory-relative patterns (e.g. `/build` in
+/// `packages/api/.gitignore` should only match `packages/api/build`, not any
+/// `build` anywhere in the workspace). Faithfully replaying nested
+/// `.gitignore` files requires the same per-directory matcher stack
+/// `ignore::WalkBuilder` (and therefore `policy_walker`) builds while it
+/// walks — not reconstructible from a bare list of added paths without
+/// walking, which would defeat the point of a delta-based update. The
+/// user's global gitignore (`core.excludesFile`) is similarly not consulted
+/// here.
+///
+/// This is a **documented divergence** from a full `walk_files` rebuild: a
+/// newly-created file excluded only by a *nested* `.gitignore` or the global
+/// gitignore is admitted into the index by `apply_delta` even though a
+/// rebuild would exclude it, until the next full rebuild. In practice this
+/// is the uncommon case — Unity projects overwhelmingly gitignore build
+/// output (`Library/`, `Temp/`, `Obj/`, `Logs/`, `Build/`, ...) from a single
+/// root `.gitignore`, which this function does cover, matching Finding 1's
+/// primary concern (thousands of compiler-output files entering the index
+/// during a Unity recompile).
+///
+/// Returns `Err` only if the underlying glob set fails to compile (e.g. an
+/// excessively large/malformed `.gitignore`) — `apply_delta` treats that as
+/// "can't confidently classify this batch" and marks the index stale rather
+/// than risking an excluded path being admitted.
+fn build_delta_gitignore(workspace_path: &str) -> Result<Gitignore, ignore::Error> {
+    let root = Path::new(workspace_path);
+    let mut builder = GitignoreBuilder::new(root);
+    let gitignore_path = root.join(".gitignore");
+    if gitignore_path.is_file() {
+        // `.add` returns partial per-line errors (e.g. one malformed glob
+        // among otherwise-valid ones) and keeps every successfully-parsed
+        // glob — treated as best-effort here, mirroring `Gitignore::new`'s
+        // own documented stance that I/O/parse errors are not fatal.
+        let _ = builder.add(&gitignore_path);
+    }
+    let exclude_path = root.join(".git").join("info").join("exclude");
+    if exclude_path.is_file() {
+        let _ = builder.add(&exclude_path);
+    }
+    builder.build()
+}
+
+/// Returns true if `path` is a *root*-level env file (`.env`, `.env.local`,
+/// ...) living directly inside `workspace_root`. Mirrors
+/// `walk_policy::root_env_files`, which only whitelists root-level env
+/// files — a nested gitignored `.env` (e.g. `packages/api/.env`) is a
+/// documented limitation of that function, carried through here so
+/// `apply_delta` can't admit a path a fresh `walk_files` would exclude.
+fn is_root_env_file(path: &str, workspace_root: &Path) -> bool {
+    let p = Path::new(path);
+    let is_env = p
+        .file_name()
+        .map(|n| walk_policy::is_env_file(&n.to_string_lossy()))
+        .unwrap_or(false);
+    is_env && p.parent() == Some(workspace_root)
+}
+
+/// Returns true if `path` would be excluded by the workspace's root-level
+/// gitignore sources (`gitignore`, from `build_delta_gitignore`) or by
+/// `extra_excludes` (`extra_excludes_override`, from
+/// `walk_policy::build_extra_excludes_override`) — the same two exclusion
+/// sources `walk_files` applies via `policy_walker`/`apply_extra_excludes`,
+/// checked here against a single added path instead of during a directory
+/// walk.
+fn is_path_excluded(
+    path: &str,
+    workspace_root: &Path,
+    gitignore: &Gitignore,
+    extra_excludes_override: Option<&Override>,
+) -> bool {
+    let Ok(rel) = Path::new(path).strip_prefix(workspace_root) else {
+        // Not under the workspace root — shouldn't happen for a path that
+        // already passed `path_has_always_hidden_segment` (the watcher only
+        // ever watches the workspace root and, for linked worktrees, a path
+        // segmented by `.git/...` that's already filtered out above). Can't
+        // classify it against a workspace-rooted matcher without risking a
+        // panic on `matched_path_or_any_parents`' "path is expected to be
+        // under the root" assertion, so treat it as not-excluded — no worse
+        // than this path's handling before this fix.
+        return false;
+    };
+    if gitignore.matched_path_or_any_parents(rel, false).is_ignore() {
+        return true;
+    }
+    if let Some(overrides) = extra_excludes_override {
+        if overrides.matched(rel, false).is_ignore() {
+            return true;
+        }
+    }
+    false
+}
+
 /// Applies a watcher-observed delta to the live index in place, so most
 /// filesystem changes update the cache in microseconds instead of
 /// triggering a full re-walk. Called from `file_scanner::start_file_watcher`'s
@@ -195,11 +325,21 @@ fn is_gitignore_file(path: &str) -> bool {
 /// first `fuzzy_search_files` call will do a full walk regardless.
 ///
 /// - Added paths: skipped if they sit inside an always-hidden directory
-///   (`.git`, `.DS_Store` — see `path_has_always_hidden_segment`), and
+///   (`.git`, `.DS_Store` — see `path_has_always_hidden_segment`), skipped if
+///   they're excluded by the workspace's root `.gitignore`/`.git/info/exclude`
+///   or by `extra_excludes` (see `is_path_excluded` — this is what keeps
+///   gitignored/excluded paths, e.g. Unity `Library/`/`Temp/` compiler
+///   output, out of the index; see that function and
+///   `build_delta_gitignore` for the nested-gitignore/global-gitignore
+///   fidelity this deliberately does not attempt), unless the path is a
+///   root-level env file (`is_root_env_file` — whitelisted even when
+///   gitignored, consistent with `walk_files` always including them), and
 ///   deduped against both the existing index and the rest of the same
-///   batch. Root `.env`/`.env.*` files are never special-cased here — they
-///   aren't `ALWAYS_HIDDEN` names, so they pass through like any other add,
-///   consistent with `walk_files` always including them.
+///   batch. If the gitignore matcher itself can't be built (see
+///   `build_delta_gitignore`'s error case), no paths are admitted from this
+///   batch and the index is marked `stale` instead, so the next
+///   `fuzzy_search_files` call does a full, policy-correct rebuild rather
+///   than risking an excluded path being admitted.
 /// - Removed paths: dropped from the index via a retain filter.
 /// - Any added/removed path named `.gitignore` or `.ignore` flips `stale`
 ///   (see `FileIndex::stale` doc comment) — added/removed paths are still
@@ -231,23 +371,51 @@ pub fn apply_delta(state: &FileIndexState, delta: &FileIndexDelta) {
 
     if !delta.removed.is_empty() {
         let removed: HashSet<&str> = delta.removed.iter().map(|s| s.as_str()).collect();
-        index.files.retain(|f| !removed.contains(f.as_str()));
+        Arc::make_mut(&mut index.files).retain(|f| !removed.contains(f.as_str()));
     }
 
     if !delta.added.is_empty() {
-        let to_add: Vec<String> = {
-            let existing: HashSet<&str> = index.files.iter().map(|s| s.as_str()).collect();
-            let mut seen_new: HashSet<&str> = HashSet::new();
-            delta
-                .added
-                .iter()
-                .filter(|p| !path_has_always_hidden_segment(p))
-                .filter(|p| !existing.contains(p.as_str()))
-                .filter(|p| seen_new.insert(p.as_str()))
-                .cloned()
-                .collect()
-        };
-        index.files.extend(to_add);
+        let workspace_root = Path::new(&index.workspace_path);
+        match build_delta_gitignore(&index.workspace_path) {
+            Ok(gitignore) => {
+                let extra_excludes_override = walk_policy::build_extra_excludes_override(
+                    &index.workspace_path,
+                    &index.extra_excludes,
+                );
+                let to_add: Vec<String> = {
+                    let existing: HashSet<&str> = index.files.iter().map(|s| s.as_str()).collect();
+                    let mut seen_new: HashSet<&str> = HashSet::new();
+                    delta
+                        .added
+                        .iter()
+                        .filter(|p| !path_has_always_hidden_segment(p))
+                        .filter(|p| {
+                            is_root_env_file(p, workspace_root)
+                                || !is_path_excluded(
+                                    p,
+                                    workspace_root,
+                                    &gitignore,
+                                    extra_excludes_override.as_ref(),
+                                )
+                        })
+                        .filter(|p| !existing.contains(p.as_str()))
+                        .filter(|p| seen_new.insert(p.as_str()))
+                        .cloned()
+                        .collect()
+                };
+                if !to_add.is_empty() {
+                    Arc::make_mut(&mut index.files).extend(to_add);
+                }
+            }
+            Err(_) => {
+                // Matcher couldn't be built confidently for this batch —
+                // admit nothing new and force a full rebuild on the next
+                // search instead of risking gitignored/excluded paths
+                // silently entering the cache (see this function's doc
+                // comment and `build_delta_gitignore`'s doc comment).
+                index.stale = true;
+            }
+        }
     }
 }
 
@@ -349,7 +517,7 @@ mod tests {
         );
 
         let guard = state.0.lock().unwrap();
-        assert_eq!(guard.as_ref().unwrap().files, vec!["/ws/new.txt".to_string()]);
+        assert_eq!(*guard.as_ref().unwrap().files, vec!["/ws/new.txt".to_string()]);
     }
 
     #[test]
@@ -360,7 +528,7 @@ mod tests {
             *guard = Some(FileIndex {
                 workspace_path: "/ws".to_string(),
                 extra_excludes: vec![],
-                files: vec!["/ws/existing.txt".to_string()],
+                files: Arc::new(vec!["/ws/existing.txt".to_string()]),
                 stale: false,
             });
         }
@@ -392,7 +560,7 @@ mod tests {
             *guard = Some(FileIndex {
                 workspace_path: "/ws".to_string(),
                 extra_excludes: vec![],
-                files: vec![],
+                files: Arc::new(vec![]),
                 stale: false,
             });
         }
@@ -412,7 +580,7 @@ mod tests {
 
         let guard = state.0.lock().unwrap();
         let files = &guard.as_ref().unwrap().files;
-        assert_eq!(files, &vec!["/ws/keep.txt".to_string()], "files = {:?}", files);
+        assert_eq!(&**files, &vec!["/ws/keep.txt".to_string()], "files = {:?}", files);
     }
 
     #[test]
@@ -423,7 +591,7 @@ mod tests {
             *guard = Some(FileIndex {
                 workspace_path: "/ws".to_string(),
                 extra_excludes: vec![],
-                files: vec![],
+                files: Arc::new(vec![]),
                 stale: false,
             });
         }
@@ -442,6 +610,138 @@ mod tests {
         assert!(files.contains(&"/ws/.env.local".to_string()), "files = {:?}", files);
     }
 
+    // ── apply_delta: added paths vs. gitignore / extra_excludes (Finding 1)
+    //
+    // These use a real tempdir (unlike the fake "/ws" paths above) because
+    // `build_delta_gitignore` reads an actual `.gitignore` file off disk.
+
+    #[test]
+    fn apply_delta_excludes_gitignored_added_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        init_git_repo_with_gitignore(tmp.path(), "Library/\n");
+        let ws = tmp.path().to_str().unwrap().to_string();
+
+        let state = FileIndexState::new();
+        {
+            let mut guard = state.0.lock().unwrap();
+            *guard = Some(FileIndex {
+                workspace_path: ws.clone(),
+                extra_excludes: vec![],
+                files: Arc::new(vec![]),
+                stale: false,
+            });
+        }
+
+        apply_delta(
+            &state,
+            &FileIndexDelta {
+                added: vec![format!("{}/Library/ScriptAssemblies/Foo.dll", ws)],
+                removed: vec![],
+            },
+        );
+
+        let guard = state.0.lock().unwrap();
+        let idx = guard.as_ref().unwrap();
+        assert!(idx.files.is_empty(), "gitignored path should not be admitted: {:?}", idx.files);
+        // Only .gitignore/.ignore content changes flip `stale` — an ordinary
+        // gitignored path being filtered out must not also mark the index
+        // stale (that would force a full rebuild for every Unity recompile).
+        assert!(!idx.stale);
+    }
+
+    #[test]
+    fn apply_delta_excludes_path_matching_extra_excludes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ws = tmp.path().to_str().unwrap().to_string();
+
+        let state = FileIndexState::new();
+        {
+            let mut guard = state.0.lock().unwrap();
+            *guard = Some(FileIndex {
+                workspace_path: ws.clone(),
+                extra_excludes: vec!["Builds/**".to_string()],
+                files: Arc::new(vec![]),
+                stale: false,
+            });
+        }
+
+        apply_delta(
+            &state,
+            &FileIndexDelta {
+                added: vec![format!("{}/Builds/Windows/game.exe", ws)],
+                removed: vec![],
+            },
+        );
+
+        let guard = state.0.lock().unwrap();
+        let files = &guard.as_ref().unwrap().files;
+        assert!(
+            files.is_empty(),
+            "extra_excludes-matched path should not be admitted: {:?}",
+            files
+        );
+    }
+
+    #[test]
+    fn apply_delta_admits_env_file_even_when_gitignored() {
+        let tmp = tempfile::tempdir().unwrap();
+        init_git_repo_with_gitignore(tmp.path(), ".env\n");
+        let ws = tmp.path().to_str().unwrap().to_string();
+
+        let state = FileIndexState::new();
+        {
+            let mut guard = state.0.lock().unwrap();
+            *guard = Some(FileIndex {
+                workspace_path: ws.clone(),
+                extra_excludes: vec![],
+                files: Arc::new(vec![]),
+                stale: false,
+            });
+        }
+
+        apply_delta(
+            &state,
+            &FileIndexDelta {
+                added: vec![format!("{}/.env", ws)],
+                removed: vec![],
+            },
+        );
+
+        let guard = state.0.lock().unwrap();
+        let files = &guard.as_ref().unwrap().files;
+        assert!(files.iter().any(|f| f.ends_with(".env")), "files = {:?}", files);
+    }
+
+    #[test]
+    fn apply_delta_admits_normal_source_file_alongside_gitignore() {
+        let tmp = tempfile::tempdir().unwrap();
+        init_git_repo_with_gitignore(tmp.path(), "Library/\n");
+        let ws = tmp.path().to_str().unwrap().to_string();
+
+        let state = FileIndexState::new();
+        {
+            let mut guard = state.0.lock().unwrap();
+            *guard = Some(FileIndex {
+                workspace_path: ws.clone(),
+                extra_excludes: vec![],
+                files: Arc::new(vec![]),
+                stale: false,
+            });
+        }
+
+        apply_delta(
+            &state,
+            &FileIndexDelta {
+                added: vec![format!("{}/Assets/Scripts/Player.cs", ws)],
+                removed: vec![],
+            },
+        );
+
+        let guard = state.0.lock().unwrap();
+        let files = &guard.as_ref().unwrap().files;
+        assert!(files.iter().any(|f| f.ends_with("Player.cs")), "files = {:?}", files);
+    }
+
     // ── apply_delta: removed ────────────────────────────────────────────
 
     #[test]
@@ -452,7 +752,7 @@ mod tests {
             *guard = Some(FileIndex {
                 workspace_path: "/ws".to_string(),
                 extra_excludes: vec![],
-                files: vec!["/ws/a.txt".to_string(), "/ws/b.txt".to_string()],
+                files: Arc::new(vec!["/ws/a.txt".to_string(), "/ws/b.txt".to_string()]),
                 stale: false,
             });
         }
@@ -466,7 +766,7 @@ mod tests {
         );
 
         let guard = state.0.lock().unwrap();
-        assert_eq!(guard.as_ref().unwrap().files, vec!["/ws/b.txt".to_string()]);
+        assert_eq!(*guard.as_ref().unwrap().files, vec!["/ws/b.txt".to_string()]);
     }
 
     #[test]
@@ -494,7 +794,7 @@ mod tests {
             *guard = Some(FileIndex {
                 workspace_path: "/ws".to_string(),
                 extra_excludes: vec![],
-                files: vec![],
+                files: Arc::new(vec![]),
                 stale: false,
             });
         }
@@ -518,7 +818,7 @@ mod tests {
             *guard = Some(FileIndex {
                 workspace_path: "/ws".to_string(),
                 extra_excludes: vec![],
-                files: vec!["/ws/.ignore".to_string()],
+                files: Arc::new(vec!["/ws/.ignore".to_string()]),
                 stale: false,
             });
         }
@@ -542,7 +842,7 @@ mod tests {
             *guard = Some(FileIndex {
                 workspace_path: "/ws".to_string(),
                 extra_excludes: vec![],
-                files: vec![],
+                files: Arc::new(vec![]),
                 stale: false,
             });
         }

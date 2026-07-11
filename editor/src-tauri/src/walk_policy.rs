@@ -93,17 +93,25 @@ pub fn root_env_files(root: &Path) -> Vec<PathBuf> {
     result
 }
 
-/// Layers caller-supplied exclude globs (e.g. Unity-specific patterns from
-/// the frontend) onto `builder`. Plain globs are treated as ignore rules
-/// (prefixed with `!` so `OverrideBuilder`'s whitelist semantics invert into
-/// excludes) — a caller-supplied glob that already starts with `!` is passed
-/// through unchanged.
+/// Builds the `ignore::overrides::Override` matcher used by
+/// `apply_extra_excludes`. Extracted so `file_index::apply_delta` can apply
+/// the exact same extra-excludes semantics to newly-added paths (checking a
+/// single path against the built matcher) without duplicating the glob
+/// normalization logic used when wiring it into a walk.
 ///
-/// Extracted from the duplicated `OverrideBuilder` blocks that used to live
-/// in `file_scanner::scan_all_files_v2` and `file_scanner::fuzzy_search_files`.
-pub fn apply_extra_excludes(b: &mut WalkBuilder, root: &str, extra_excludes: &[String]) {
+/// Plain globs are treated as ignore rules (prefixed with `!` so
+/// `OverrideBuilder`'s whitelist semantics invert into excludes) — a
+/// caller-supplied glob that already starts with `!` is passed through
+/// unchanged. Returns `None` if `extra_excludes` is empty, every entry is
+/// blank, or the built matcher fails to compile — callers should treat
+/// `None` as "no extra excludes apply", matching `apply_extra_excludes`'s
+/// own silent best-effort handling of a failed build.
+pub fn build_extra_excludes_override(
+    root: &str,
+    extra_excludes: &[String],
+) -> Option<ignore::overrides::Override> {
     if extra_excludes.is_empty() {
-        return;
+        return None;
     }
     let mut overrides = ignore::overrides::OverrideBuilder::new(root);
     for p in extra_excludes {
@@ -118,7 +126,16 @@ pub fn apply_extra_excludes(b: &mut WalkBuilder, root: &str, extra_excludes: &[S
         };
         let _ = overrides.add(&glob);
     }
-    if let Ok(built) = overrides.build() {
+    overrides.build().ok()
+}
+
+/// Layers caller-supplied exclude globs (e.g. Unity-specific patterns from
+/// the frontend) onto `builder`.
+///
+/// Extracted from the duplicated `OverrideBuilder` blocks that used to live
+/// in `file_scanner::scan_all_files_v2` and `file_scanner::fuzzy_search_files`.
+pub fn apply_extra_excludes(b: &mut WalkBuilder, root: &str, extra_excludes: &[String]) {
+    if let Some(built) = build_extra_excludes_override(root, extra_excludes) {
         b.overrides(built);
     }
 }

@@ -6,7 +6,7 @@ use serde::Serialize;
 use std::collections::BinaryHeap;
 use std::cmp::Ordering;
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::mpsc;
 
@@ -234,7 +234,7 @@ pub fn fuzzy_search_files(
 /// workspace switch, an exclude-pattern change, and a `.gitignore`/`.ignore`
 /// edit that flipped `stale` via `file_index::apply_delta`).
 ///
-/// Lock discipline: the index's `Vec<String>` is cloned out from under the
+/// Lock discipline: the index's file list is cloned out from under the
 /// mutex — on a cache hit directly, on a miss right after the rebuild — and
 /// all nucleo scoring happens on that local copy with the lock released.
 /// Scoring can touch 100k+ paths and take low-single-digit milliseconds;
@@ -242,7 +242,11 @@ pub fn fuzzy_search_files(
 /// called from the file watcher's debounce task on every filesystem change.
 /// There are no `.await` points in this function, so nothing here can hold
 /// the lock across a yield either way — the clone-then-release is purely to
-/// bound wall-clock hold time on a lock other threads also need.
+/// bound wall-clock hold time on a lock other threads also need. The list
+/// is `Arc<Vec<String>>` (see `FileIndex::files`), so this per-call clone is
+/// a refcount bump, not a deep copy of every path string — this used to be
+/// a full `Vec<String>` clone (up to ~10MB on a large project) on every
+/// keystroke that hit the cache-hit path.
 ///
 /// Race note: the miss path checks the cache, walks unlocked, then
 /// re-locks to store — an `apply_delta` or `build_file_index` call landing
@@ -261,7 +265,7 @@ pub fn fuzzy_search_files_impl(
         return Ok(vec![]);
     }
 
-    let cached: Option<Vec<String>> = {
+    let cached: Option<Arc<Vec<String>>> = {
         let guard = state.0.lock().map_err(|e| e.to_string())?;
         guard.as_ref().and_then(|idx| {
             if !idx.stale
@@ -275,10 +279,10 @@ pub fn fuzzy_search_files_impl(
         })
     };
 
-    let files = match cached {
+    let files: Arc<Vec<String>> = match cached {
         Some(files) => files,
         None => {
-            let fresh = file_index::walk_files(&workspace_path, &extra_excludes);
+            let fresh = Arc::new(file_index::walk_files(&workspace_path, &extra_excludes));
             let mut guard = state.0.lock().map_err(|e| e.to_string())?;
             *guard = Some(file_index::FileIndex {
                 workspace_path: workspace_path.clone(),
@@ -1044,7 +1048,7 @@ mod tests {
             *guard = Some(FileIndex {
                 workspace_path: ws.clone(),
                 extra_excludes: vec![],
-                files: vec![],
+                files: std::sync::Arc::new(vec![]),
                 stale: true,
             });
         }
