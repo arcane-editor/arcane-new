@@ -28,9 +28,6 @@ export type {
   AgentKind,
   Attachment,
   ChatMode,
-  ClaudeEffort,
-  ClaudeModel,
-  ClaudePermissionMode,
   Effort,
 } from './services/types';
 export type {

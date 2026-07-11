@@ -2,9 +2,6 @@
  * AiChatPanel — top-level container for the AI chat sidebar.
  * Composes the header (agent picker + new-chat button), message list,
  * input area, and error banner.
- *
- * Sign-in gate only applies to the Arcane agent. The Claude agent uses the
- * user's local `claude` CLI auth and works without any Arcane account.
  */
 
 import { useState } from 'react';
@@ -12,7 +9,6 @@ import { RotateCcw, History } from 'lucide-react';
 import { useAiStore } from '../../../stores/ai';
 import { useAuthStore } from '../../../stores/auth';
 import { resetAgentService } from '../services/agent-service';
-import { resetClaudeAgentService } from '../services/claude-agent-service';
 import MessageList from './MessageList';
 import ChatInput from './ChatInput';
 import AiSignInGate from './AiSignInGate';
@@ -21,15 +17,12 @@ import SessionHistory from './SessionHistory';
 
 function AiChatPanel() {
   const loggedIn = useAuthStore((s) => s.loggedIn);
-  const selectedAgent = useAiStore((s) => s.selectedAgent);
   const resetConversation = useAiStore((s) => s.resetConversation);
   const errorMessage = useAiStore((s) => s.errorMessage);
   const setError = useAiStore((s) => s.setError);
   const [historyOpen, setHistoryOpen] = useState(false);
 
-  // Sign-in only gates the Arcane agent. Claude bypasses this — it uses the
-  // user's `claude` CLI auth, not the Arcane account.
-  if (!loggedIn && selectedAgent === 'arcane') {
+  if (!loggedIn) {
     return (
       <div className="ai-panel">
         <div className="ai-panel-header">
@@ -42,11 +35,7 @@ function AiChatPanel() {
 
   function handleNewChat() {
     resetConversation();
-    if (selectedAgent === 'arcane') {
-      resetAgentService();
-    } else {
-      void resetClaudeAgentService();
-    }
+    resetAgentService();
   }
 
   return (

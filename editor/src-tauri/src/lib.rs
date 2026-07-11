@@ -14,7 +14,6 @@ mod unity_tests;
 mod unity_ipc;
 mod dap;
 mod auth;
-mod claude;
 mod graphify;
 mod walk_policy;
 #[cfg(target_os = "macos")]
@@ -323,7 +322,6 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .manage(lsp::LspState::new())
         .manage(terminal::TerminalState::new())
-        .manage(claude::ClaudeState::new())
         .manage(Mutex::new(file_scanner::FileWatcherState::new()))
         .manage(file_index::FileIndexState::new())
         .manage(unity_ipc::UnityIpcState::new())
@@ -393,11 +391,6 @@ pub fn run() {
             terminal::terminal_write,
             terminal::terminal_resize,
             terminal::terminal_kill,
-            terminal::acp_terminal_create,
-            terminal::acp_terminal_output,
-            terminal::acp_terminal_wait,
-            terminal::acp_terminal_kill,
-            terminal::acp_terminal_release,
             file_scanner::scan_all_files_v2,
             file_scanner::fuzzy_search_files,
             file_scanner::start_file_watcher,
@@ -442,10 +435,6 @@ pub fn run() {
             graphify::graphify_path,
             graphify::graphify_load_summary,
             graphify::graphify_enrich_payload,
-            claude::claude_start,
-            claude::claude_send,
-            claude::claude_stop,
-            claude::claude_check_install,
             create_directory_recursive,
             execute_command,
         ])
@@ -476,15 +465,6 @@ pub fn run() {
                     let label_clone = label.clone();
                     tauri::async_runtime::spawn(async move {
                         let dummy = lsp::LspState(inner);
-                        dummy.drop_window(&label_clone).await;
-                    });
-                }
-                // Per-window Claude bridge cleanup
-                if let Some(state) = window.try_state::<claude::ClaudeState>() {
-                    let inner = state.0.clone();
-                    let label_clone = label.clone();
-                    tauri::async_runtime::spawn(async move {
-                        let dummy = claude::ClaudeState(inner);
                         dummy.drop_window(&label_clone).await;
                     });
                 }

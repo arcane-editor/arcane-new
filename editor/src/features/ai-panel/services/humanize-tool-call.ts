@@ -31,10 +31,8 @@
  * previous implementation silently dropped such lines as "headers").
  *
  * Unrecognized tool names (the `default` branch) return the name unchanged —
- * this is deliberately also the behavior for the Claude/ACP path, whose tool
- * "names" here are already Claude's own human-readable ACP titles (see
- * `claude-agent-service.ts`: `update.title || update.kind || 'tool'`), so
- * falling through to "name as-is" is correct there, not a gap.
+ * for any tool whose "name" is already a human-readable title, falling through
+ * to "name as-is" is the correct rendering, not a gap.
  */
 
 import { structuredPatch } from 'diff';

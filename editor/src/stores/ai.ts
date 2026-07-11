@@ -12,9 +12,6 @@ import {
   type AssistantMessage,
   type Attachment,
   type ChatMode,
-  type ClaudeEffort,
-  type ClaudeModel,
-  type ClaudePermissionMode,
   type Effort,
   type SaveSessionInput,
   type SessionData,
@@ -62,14 +59,14 @@ export interface AiMessage {
      * Mode" or "run EditMode tests" — passed through from `approval-gate.ts`'s
      * `requestEngineApproval` verb summary. Rendered under the title in
      * `PermissionRequestBlock`. Only the engine-mutate (Arcane) approval path
-     * sets this today; Claude/ACP permission requests leave it undefined.
+     * sets this today; other permission requests leave it undefined.
      */
     detail?: string;
     /**
      * Pending file diff (P5.3, `write-approval-gate.ts`'s pre-apply gate) —
      * rendered EXPANDED via `DiffBlock` above the action buttons. Only the
-     * file-write approval path sets this; engine-mutate and Claude/ACP
-     * permission requests leave it undefined.
+     * file-write approval path sets this; engine-mutate permission requests
+     * leave it undefined.
      */
     diff?: { path: string; oldText: string; newText: string };
   };
@@ -98,29 +95,13 @@ export interface ToolCallStatus {
   status: 'pending' | 'running' | 'complete' | 'error';
   result?: string;
   isError?: boolean;
-  /** File diffs surfaced by the tool (Claude edit-review). Rendered as DiffBlocks. */
+  /** File diffs surfaced by the tool's edit-review. Rendered as DiffBlocks. */
   diffs?: Array<{ path: string; oldText: string; newText: string }>;
-}
-
-/** A single entry in Claude's streamed TODO/plan list (ACP `plan` update). */
-export interface ClaudePlanEntry {
-  content: string;
-  status: 'pending' | 'in_progress' | 'completed';
-  priority?: string;
-}
-
-/** A slash command advertised by the Claude bridge (ACP `available_commands_update`). */
-export interface ClaudeCommand {
-  name: string;
-  description?: string;
 }
 
 /**
  * A single entry in Arcane's own in-loop todo list (`todo_update` tool calls,
- * P3.5). The Claude/ACP sibling of `ClaudePlanEntry` above — kept as a
- * separate shape (rather than reusing `ClaudePlanEntry`) since the two are
- * populated by unrelated sources (a local tool call vs. an ACP `plan`
- * update) and don't need to share a wire format.
+ * P3.5).
  */
 export interface ArcanePlanEntry {
   text: string;
@@ -159,29 +140,13 @@ interface AiState {
 
   // Which backend the chat is using.
   selectedAgent: AgentKind;
-  claudeModel: ClaudeModel;
-  claudePermissionMode: ClaudePermissionMode;
-  claudeEffort: ClaudeEffort;
-  /**
-   * Whether the Claude bridge subprocess is currently running. The agent
-   * service mirrors its lifecycle into here so UI can show a status pill.
-   */
-  claudeBridgeRunning: boolean;
-  /** Claude's streamed TODO/plan checklist (ACP `plan` update). */
-  claudePlan: ClaudePlanEntry[];
   /**
    * Arcane's own in-loop todo list, maintained via the `todo_update` tool
    * (P3.5). `null` means "no list yet this conversation" (distinct from `[]`,
    * an explicit empty list) so `PlanList` can tell "nothing to show" apart
-   * from "the other agent's plan is what's live".
+   * from a live-but-empty list.
    */
   arcanePlan: ArcanePlanEntry[] | null;
-  /** Slash commands the Claude bridge advertises for this session. */
-  claudeAvailableCommands: ClaudeCommand[];
-  /** Claude's active mode, if it self-switches mid-thread. */
-  claudeCurrentMode: string | null;
-  /** The real ACP sessionId from session/new — needed to resume via session/load. */
-  claudeAcpSessionId: string | null;
 
   // Composer staging
   attachments: Attachment[];
@@ -211,15 +176,7 @@ interface AiState {
   setMode: (mode: ChatMode) => void;
   setEffort: (effort: Effort) => void;
   setSelectedAgent: (agent: AgentKind) => void;
-  setClaudeModel: (model: ClaudeModel) => void;
-  setClaudePermissionMode: (mode: ClaudePermissionMode) => void;
-  setClaudeEffort: (effort: ClaudeEffort) => void;
-  setClaudeBridgeRunning: (running: boolean) => void;
-  setClaudePlan: (plan: ClaudePlanEntry[]) => void;
   setArcanePlan: (plan: ArcanePlanEntry[] | null) => void;
-  setClaudeAvailableCommands: (commands: ClaudeCommand[]) => void;
-  setClaudeCurrentMode: (mode: string | null) => void;
-  setClaudeAcpSessionId: (id: string | null) => void;
   addAssistantTextMessage: (text: string) => string;
   addSystemMessage: (text: string) => string;
   addVerifiedPassMessage: (data: VerifiedCardData) => string;
@@ -266,10 +223,6 @@ function buildSaveInput(): SaveSessionInput | null {
     messages: state.messages,
     agentKind: state.selectedAgent,
     workspacePath: useWorkspaceStore.getState().workspacePath,
-    acpSessionId: state.claudeAcpSessionId,
-    claudeModel: state.claudeModel,
-    claudeEffort: state.claudeEffort,
-    claudePermissionMode: state.claudePermissionMode,
   };
 }
 
@@ -306,15 +259,7 @@ export const useAiStore = create<AiState>((set, get) => ({
   effort: 'high',
   sessionId: null,
   selectedAgent: 'arcane',
-  claudeModel: 'auto',
-  claudePermissionMode: 'default',
-  claudeEffort: 'high',
-  claudeBridgeRunning: false,
-  claudePlan: [],
   arcanePlan: null,
-  claudeAvailableCommands: [],
-  claudeCurrentMode: null,
-  claudeAcpSessionId: null,
   attachments: [],
   planPhase: 'idle',
   activePlanPath: null,
@@ -505,11 +450,7 @@ export const useAiStore = create<AiState>((set, get) => ({
       toolCalls: new Map(),
       errorMessage: null,
       sessionId: null,
-      claudePlan: [],
       arcanePlan: null,
-      claudeAvailableCommands: [],
-      claudeCurrentMode: null,
-      claudeAcpSessionId: null,
       attachments: [],
       planPhase: 'idle',
       activePlanPath: null,
@@ -523,7 +464,7 @@ export const useAiStore = create<AiState>((set, get) => ({
   },
 
   loadSessionIntoStore: (session: SessionData) => {
-    set((s) => ({
+    set(() => ({
       messages: session.messages ?? [],
       streamingMessageId: null,
       isAgentRunning: false,
@@ -532,15 +473,10 @@ export const useAiStore = create<AiState>((set, get) => ({
       sessionId: session.id,
       mode: session.mode ?? 'agent',
       effort: session.effort ?? 'high',
+      // agentKind is coerced to a live kind on load (see session-persistence);
+      // old non-Arcane sessions restore as read-only Arcane transcripts.
       selectedAgent: session.agentKind ?? 'arcane',
-      claudeAcpSessionId: session.acpSessionId ?? null,
-      claudeModel: session.claudeModel ?? s.claudeModel,
-      claudeEffort: session.claudeEffort ?? s.claudeEffort,
-      claudePermissionMode: session.claudePermissionMode ?? s.claudePermissionMode,
-      claudePlan: [],
       arcanePlan: null,
-      claudeAvailableCommands: [],
-      claudeCurrentMode: null,
       attachments: [],
       planPhase: 'idle',
       activePlanPath: null,
@@ -559,17 +495,7 @@ export const useAiStore = create<AiState>((set, get) => ({
   setEffort: (effort: Effort) => set({ effort }),
 
   setSelectedAgent: (agent: AgentKind) => set({ selectedAgent: agent }),
-  setClaudeModel: (model: ClaudeModel) => set({ claudeModel: model }),
-  setClaudePermissionMode: (mode: ClaudePermissionMode) =>
-    set({ claudePermissionMode: mode }),
-  setClaudeEffort: (effort: ClaudeEffort) => set({ claudeEffort: effort }),
-  setClaudeBridgeRunning: (running: boolean) => set({ claudeBridgeRunning: running }),
-  setClaudePlan: (plan: ClaudePlanEntry[]) => set({ claudePlan: plan }),
   setArcanePlan: (plan: ArcanePlanEntry[] | null) => set({ arcanePlan: plan }),
-  setClaudeAvailableCommands: (commands: ClaudeCommand[]) =>
-    set({ claudeAvailableCommands: commands }),
-  setClaudeCurrentMode: (mode: string | null) => set({ claudeCurrentMode: mode }),
-  setClaudeAcpSessionId: (id: string | null) => set({ claudeAcpSessionId: id }),
 
   addAssistantTextMessage: (text: string) => {
     const id = nextId();

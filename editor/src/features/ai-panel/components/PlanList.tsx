@@ -1,13 +1,6 @@
 /**
- * PlanList — renders the active agent's live plan/TODO checklist. Generalized
- * (P3.5) from the Claude-only `ClaudePlanList` to also cover Arcane's own
- * in-loop `todo_update` tool: reads `claudePlan` (ACP `plan` update) when the
- * Claude agent is selected, or `arcanePlan` (todo_update tool calls) when the
- * Arcane agent is selected — i.e. whichever store field the ACTIVE agent
- * populates. Gating on `selectedAgent` (rather than "whichever is non-null")
- * matters because switching agents doesn't clear the other's plan state, so a
- * stale Claude plan could otherwise linger onscreen while chatting with
- * Arcane, or vice versa.
+ * PlanList — renders Arcane's live in-loop plan/TODO checklist, populated by
+ * the `todo_update` tool (P3.5, `arcanePlan`).
  *
  * Distinct from PlanActions (the Arcane markdown-plan workflow).
  */
@@ -23,17 +16,12 @@ interface PlanEntry {
 }
 
 function PlanList() {
-  const claudePlan = useAiStore((s) => s.claudePlan);
   const arcanePlan = useAiStore((s) => s.arcanePlan);
-  const selectedAgent = useAiStore((s) => s.selectedAgent);
 
-  const entries: PlanEntry[] =
-    selectedAgent === 'claude'
-      ? claudePlan.map((e) => ({ text: e.content, status: e.status }))
-      : (arcanePlan ?? []).map((e) => ({
-          text: e.text,
-          status: e.status === 'done' ? 'completed' : e.status,
-        }));
+  const entries: PlanEntry[] = (arcanePlan ?? []).map((e) => ({
+    text: e.text,
+    status: e.status === 'done' ? 'completed' : e.status,
+  }));
 
   if (entries.length === 0) return null;
 

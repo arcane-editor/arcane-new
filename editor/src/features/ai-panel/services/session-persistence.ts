@@ -2,23 +2,18 @@
  * Session persistence — saves/loads AI chat sessions as JSON files.
  * Location: ~/.arcane/sessions/<sessionId>.json
  *
- * Sessions are saved for BOTH agents (Arcane + Claude). Each record carries the
- * agent kind, workspace path, a human title, and (for Claude) the real ACP
- * sessionId so the chat can be resumed via ACP session/load.
+ * Each record carries the agent kind, workspace path, a human title, and the
+ * transcript. Older records on disk may still carry a now-removed agent kind
+ * (e.g. `'claude'`) plus its extra fields; those extra JSON keys are ignored on
+ * load and `agentKind` is coerced to a live kind via `coerceAgentKind`, so old
+ * sessions restore read-only and run as Arcane.
  */
 
 import { invoke } from '@tauri-apps/api/core';
 import { homeDir, join } from '@tauri-apps/api/path';
 import type { AiMessage } from '../../../stores/ai';
 import { deleteCheckpointsFile } from './checkpoints/checkpoint-store-io';
-import type {
-  AgentKind,
-  ChatMode,
-  ClaudeEffort,
-  ClaudeModel,
-  ClaudePermissionMode,
-  Effort,
-} from './types';
+import { coerceAgentKind, type AgentKind, type ChatMode, type Effort } from './types';
 
 export interface SessionData {
   id: string;
@@ -31,11 +26,6 @@ export interface SessionData {
   agentKind: AgentKind;
   workspacePath: string | null;
   title: string;
-  /** Claude only — the real ACP sessionId, for session/load resume. */
-  acpSessionId?: string | null;
-  claudeModel?: ClaudeModel;
-  claudeEffort?: ClaudeEffort;
-  claudePermissionMode?: ClaudePermissionMode;
 }
 
 /** Lightweight header used by the history list (no full message bodies). */
@@ -57,10 +47,6 @@ export interface SaveSessionInput {
   agentKind: AgentKind;
   workspacePath: string | null;
   title?: string;
-  acpSessionId?: string | null;
-  claudeModel?: ClaudeModel;
-  claudeEffort?: ClaudeEffort;
-  claudePermissionMode?: ClaudePermissionMode;
 }
 
 let sessionsDir: string | null = null;
@@ -126,10 +112,6 @@ export async function saveSession(input: SaveSessionInput): Promise<boolean> {
     agentKind: input.agentKind,
     workspacePath: input.workspacePath,
     title: input.title ?? deriveTitle(input.messages),
-    acpSessionId: input.acpSessionId ?? null,
-    claudeModel: input.claudeModel,
-    claudeEffort: input.claudeEffort,
-    claudePermissionMode: input.claudePermissionMode,
   };
 
   try {
@@ -158,7 +140,11 @@ export async function loadSession(sessionId: string): Promise<SessionData | null
   const filePath = `${dir}/${sessionId}.json`;
   try {
     const content = await invoke<string>('read_file', { path: filePath });
-    return JSON.parse(content) as SessionData;
+    const data = JSON.parse(content) as SessionData;
+    // Migration: coerce a now-removed agent kind (e.g. 'claude') to a live one
+    // so restore/resume treat the session as Arcane rather than crashing.
+    data.agentKind = coerceAgentKind(data.agentKind);
+    return data;
   } catch {
     return null;
   }
@@ -219,7 +205,7 @@ export async function listSessions(workspacePath?: string | null): Promise<Sessi
       summaries.push({
         id: data.id,
         title: data.title ?? deriveTitle(data.messages ?? []),
-        agentKind: data.agentKind ?? 'arcane',
+        agentKind: coerceAgentKind(data.agentKind),
         workspacePath: data.workspacePath ?? null,
         createdAt: data.createdAt ?? 0,
         updatedAt: data.updatedAt ?? 0,

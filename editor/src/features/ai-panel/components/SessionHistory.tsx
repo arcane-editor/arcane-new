@@ -1,12 +1,13 @@
 /**
  * SessionHistory — a dropdown list of past chat sessions for the current
- * workspace (both Arcane + Claude). Opening a session loads its transcript and
- * resumes it: Arcane replays history into the agent; Claude re-attaches via ACP
- * session/load. Supports delete + rename.
+ * workspace. Opening a session loads its transcript and resumes it by replaying
+ * history into the Arcane agent. Supports delete + rename. Older sessions saved
+ * under a now-removed agent kind restore read-only as Arcane (agentKind is
+ * coerced on load — see session-persistence).
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Sparkles, Bot, Trash2, Pencil, X, Check } from 'lucide-react';
+import { Sparkles, Trash2, Pencil, X, Check } from 'lucide-react';
 import { useAiStore } from '../../../stores/ai';
 import { useWorkspaceStore } from '../../../stores/workspace';
 import {
@@ -17,7 +18,6 @@ import {
   type SessionSummary,
 } from '../services/session-persistence';
 import { getAgentService } from '../services/agent-service';
-import { getClaudeAgentService } from '../services/claude-agent-service';
 
 interface Props {
   open: boolean;
@@ -76,11 +76,7 @@ function SessionHistory({ open, onClose }: Props) {
       const data = await loadSession(summary.id);
       if (!data) return;
       loadSessionIntoStore(data);
-      if (data.agentKind === 'claude') {
-        if (data.acpSessionId) void getClaudeAgentService().resumeSession(data.acpSessionId);
-      } else {
-        getAgentService().resume(data.messages);
-      }
+      getAgentService().resume(data.messages);
       onClose();
     },
     [loadSessionIntoStore, onClose],
@@ -105,7 +101,7 @@ function SessionHistory({ open, onClose }: Props) {
           sessions.map((s) => (
             <div key={s.id} className="ai-history-item">
               <span className="ai-history-icon">
-                {s.agentKind === 'claude' ? <Bot size={13} /> : <Sparkles size={13} />}
+                <Sparkles size={13} />
               </span>
               {editingId === s.id ? (
                 <input

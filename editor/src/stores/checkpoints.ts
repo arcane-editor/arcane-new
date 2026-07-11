@@ -3,8 +3,7 @@
  *
  * Every agent write/edit that actually proceeds is preceded by a snapshot of
  * the file's content immediately before the write (`recordPreWrite`, wired
- * from `checkpoint-gate.ts` for the Arcane path and `claude-agent-service.ts`'s
- * `handleFsWrite` for the Claude/ACP path). Snapshots are grouped per user
+ * from `checkpoint-gate.ts` for the Arcane path). Snapshots are grouped per user
  * turn (`beginTurn`) so "Restore" undoes everything a turn — and every turn
  * after it — did to a file. This is CONTENT SNAPSHOTS, not shadow git (the
  * approved P5.2 plan): the pre-image is already in memory at the hook points,

@@ -1,9 +1,9 @@
 /**
- * AgentPicker — header dropdown that switches between the Arcane Agent
- * (cloud) and Claude Agent (local `claude` CLI via ACP bridge).
+ * AgentPicker — header dropdown for the chat agent. Currently only the Arcane
+ * Agent (cloud) is available; the popover keeps a disabled "coming soon"
+ * placeholder for future external agents.
  *
  * Matches the Zed pattern: clickable label with a chevron in the panel header.
- * Opens a popover with: Arcane Agent / External Agents / Claude Agent.
  */
 
 import { useEffect, useRef, useState } from 'react';
@@ -16,7 +16,6 @@ interface AgentOption {
   value: AgentKind;
   label: string;
   description: string;
-  group: 'arcane' | 'external';
 }
 
 const AGENTS: AgentOption[] = [
@@ -24,13 +23,6 @@ const AGENTS: AgentOption[] = [
     value: 'arcane',
     label: 'Arcane Agent',
     description: 'Hosted agent using your Arcane account.',
-    group: 'arcane',
-  },
-  {
-    value: 'claude',
-    label: 'Claude Agent',
-    description: 'Your local Claude Code, via Agent Client Protocol.',
-    group: 'external',
   },
 ];
 
@@ -108,9 +100,6 @@ function AgentPicker() {
       }
     : null;
 
-  const arcaneOpts = AGENTS.filter((a) => a.group === 'arcane');
-  const externalOpts = AGENTS.filter((a) => a.group === 'external');
-
   return (
     <>
       <button
@@ -137,39 +126,7 @@ function AgentPicker() {
             style={popoverStyle}
             role="menu"
           >
-            {arcaneOpts.map((a) => {
-              const selected = selectedAgent === a.value;
-              return (
-                <button
-                  key={a.value}
-                  type="button"
-                  role="menuitemradio"
-                  aria-checked={selected}
-                  className={`ai-panel-mode-menu-item ${selected ? 'is-selected' : ''}`}
-                  onClick={() => pick(a.value)}
-                >
-                  <span className="ai-panel-mode-menu-icon">
-                    <Sparkles size={14} strokeWidth={2} />
-                  </span>
-                  <span className="ai-panel-mode-menu-text">
-                    <span className="ai-panel-mode-menu-label">{a.label}</span>
-                    <span className="ai-panel-mode-menu-desc">{a.description}</span>
-                  </span>
-                  {selected && (
-                    <Check
-                      size={13}
-                      className="ai-panel-mode-menu-check"
-                      strokeWidth={2.5}
-                    />
-                  )}
-                </button>
-              );
-            })}
-
-            {externalOpts.length > 0 && (
-              <div className="ai-panel-agent-menu-section">External Agents</div>
-            )}
-            {externalOpts.map((a) => {
+            {AGENTS.map((a) => {
               const selected = selectedAgent === a.value;
               return (
                 <button

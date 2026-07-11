@@ -1,7 +1,6 @@
 /**
  * PermissionRequestBlock — inline approval UI rendered in the message list
- * when Claude (via ACP `session/request_permission`) asks before running a
- * tool, an Arcane Unity engine-mutate tool asks before touching the live
+ * when an Arcane Unity engine-mutate tool asks before touching the live
  * editor (F-5.6), or Arcane's write/edit tools ask before touching a file
  * (P5.3, `write-approval-gate.ts`). After the user picks, the buttons lock
  * and show the chosen option.
@@ -15,9 +14,8 @@
  */
 
 import { Shield, Check, X, FileText } from 'lucide-react';
-import { useAiStore, type AiMessage } from '../../../stores/ai';
+import { type AiMessage } from '../../../stores/ai';
 import { useWorkspaceStore } from '../../../stores/workspace';
-import { getClaudeAgentService } from '../services/claude-agent-service';
 import { resolvePendingApproval } from '../services/approval-gate';
 import { humanizeToolCall } from '../services/humanize-tool-call';
 import DiffBlock from './DiffBlock';
@@ -47,15 +45,10 @@ function PermissionRequestBlock({ message }: Props) {
 
   function pick(optionId: string) {
     if (resolved) return;
-    // Route to the right backend: Claude uses ACP; the Arcane vendor loop
-    // (engine-mutate approvals AND P5.3's file-write approvals) uses the
-    // shared approval-gate pending-map flow. Both converge on
-    // resolvePermissionRequest to lock the buttons.
-    if (useAiStore.getState().selectedAgent === 'claude') {
-      getClaudeAgentService().resolvePermission(req!.toolCallId, optionId);
-    } else {
-      resolvePendingApproval(req!.toolCallId, optionId);
-    }
+    // The Arcane vendor loop (engine-mutate approvals AND P5.3's file-write
+    // approvals) uses the shared approval-gate pending-map flow, which resolves
+    // the pending promise and locks the buttons.
+    resolvePendingApproval(req!.toolCallId, optionId);
   }
 
   function openFile() {

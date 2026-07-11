@@ -4,13 +4,12 @@
  *
  * Mirrors the load+resume sequence in SessionHistory.openSession: load the
  * latest session for the workspace, rehydrate the store, then re-attach the
- * agent (Arcane replays history; Claude re-attaches via ACP session/load).
+ * Arcane agent by replaying its history.
  */
 
 import { useAiStore } from '../../../stores/ai';
 import { loadLatestSession } from './session-persistence';
 import { getAgentService } from './agent-service';
-import { getClaudeAgentService } from './claude-agent-service';
 
 /**
  * Restore the latest saved session for `workspacePath` into the live store and
@@ -31,11 +30,6 @@ export async function restoreLatestSessionForWorkspace(
   if (after.isAgentRunning || after.messages.length > 0) return false;
 
   after.loadSessionIntoStore(data);
-
-  if (data.agentKind === 'claude') {
-    if (data.acpSessionId) void getClaudeAgentService().resumeSession(data.acpSessionId);
-  } else {
-    getAgentService().resume(data.messages);
-  }
+  getAgentService().resume(data.messages);
   return true;
 }

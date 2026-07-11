@@ -9,32 +9,26 @@ export type ChatMode = 'ask' | 'agent' | 'plan';
 // model id. 'super' is the "Extra High" tier.
 export type Effort = 'low' | 'mid' | 'high' | 'super';
 
-/** Which agent backend the panel is currently talking to. */
-export type AgentKind = 'arcane' | 'claude';
+/**
+ * Which agent backend the panel is talking to. Only 'arcane' remains — the
+ * former local Claude Code / ACP-bridge agent was removed. Kept as a named
+ * type (rather than inlining the literal) so persisted-session migration and
+ * future external agents have a single place to widen.
+ */
+export type AgentKind = 'arcane';
 
 /**
- * Claude model selection. 'auto' lets Claude Code's own router pick.
- * The other values are family aliases that resolve to the latest in-family
- * model server-side, matching Claude Code's `--model` flag.
+ * Coerce a persisted `agentKind` value (an arbitrary string read off disk —
+ * older sessions carry now-removed kinds like `'claude'`) to a live
+ * `AgentKind`. Anything that isn't a currently-supported kind falls back to
+ * `'arcane'`, so old transcripts restore read-only and simply run as Arcane
+ * rather than crashing the history list or restore path. Pure function.
  */
-export type ClaudeModel = 'auto' | 'opus' | 'sonnet' | 'haiku';
+const KNOWN_AGENT_KINDS: readonly AgentKind[] = ['arcane'];
 
-/**
- * Claude permission mode. Matches Claude Code's `--permission-mode` flag and
- * ACP's `session/set_mode`. `auto` and `dontAsk` are intentionally omitted from
- * v1 because they require plan-tier or pre-approved-tools setup.
- */
-export type ClaudePermissionMode =
-  | 'default'
-  | 'acceptEdits'
-  | 'plan'
-  | 'bypassPermissions';
-
-/**
- * Claude reasoning effort. Matches Claude Code's `--effort` flag. The Zed
- * screenshot shows 'Xhigh' as the active level — this is the literal value.
- */
-export type ClaudeEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+export function coerceAgentKind(value: unknown): AgentKind {
+  return KNOWN_AGENT_KINDS.includes(value as AgentKind) ? (value as AgentKind) : 'arcane';
+}
 
 export type Attachment =
   | {

@@ -10,9 +10,7 @@
  *   │ └──────────────────────────────────────────────┘   │
  *   └────────────────────────────────────────────────────┘
  *
- * The toolbar's left side swaps based on which agent is selected:
- *   - Arcane: ModeSelector + EffortSelector
- *   - Claude: ClaudeModelPicker + ClaudePermissionModePicker + ClaudeEffortPicker
+ * The toolbar's left side hosts the Arcane ModeSelector + EffortSelector.
  */
 
 import { useRef, useState } from 'react';
@@ -20,20 +18,15 @@ import { ArrowUp, Square } from 'lucide-react';
 import { useAiStore } from '../../../stores/ai';
 import { useWorkspaceStore } from '../../../stores/workspace';
 import { getAgentService } from '../services/agent-service';
-import { getClaudeAgentService } from '../services/claude-agent-service';
 import { planController } from '../services/plan-controller';
 import LexicalChatInput, { type LexicalChatInputHandle } from './LexicalChatInput';
 import ModeSelector from './ModeSelector';
 import EffortSelector from './EffortSelector';
-import ClaudeModelPicker from './ClaudeModelPicker';
-import ClaudePermissionModePicker from './ClaudePermissionModePicker';
-import ClaudeEffortPicker from './ClaudeEffortPicker';
 import AttachmentBar from './AttachmentBar';
 import ImageAttachButton from './ImageAttachButton';
 
 function ChatInput() {
   const isAgentRunning = useAiStore((s) => s.isAgentRunning);
-  const selectedAgent = useAiStore((s) => s.selectedAgent);
   const mode = useAiStore((s) => s.mode);
   const effort = useAiStore((s) => s.effort);
   const addUserMessage = useAiStore((s) => s.addUserMessage);
@@ -49,13 +42,6 @@ function ChatInput() {
     addUserMessage(text, attachments);
     useAiStore.getState().clearAttachments();
 
-    if (selectedAgent === 'claude') {
-      // Claude path: ACP bridge. @-context + images are converted to ACP
-      // content blocks inside the service (buildPromptBlocks).
-      void getClaudeAgentService().sendPrompt(text, attachments);
-      return;
-    }
-
     if (mode === 'plan') {
       planController.startPlanning(text, attachments);
     } else {
@@ -64,23 +50,17 @@ function ChatInput() {
   }
 
   function handleStop() {
-    if (selectedAgent === 'claude') {
-      void getClaudeAgentService().cancel();
-    } else {
-      getAgentService().abort();
-    }
+    getAgentService().abort();
   }
 
   const canSend = !!workspacePath && hasText && !isAgentRunning;
 
   const placeholder =
-    selectedAgent === 'claude'
-      ? 'Talk to your local Claude Code. @ for context, ⏎ to send.'
-      : mode === 'ask'
-        ? 'Ask a question about your Unity project. @ for context, ⏎ to send.'
-        : mode === 'plan'
-          ? 'Describe what you want to build. @ for context, ⏎ to plan.'
-          : 'Plan, build, edit. @ for context, ⏎ to send.';
+    mode === 'ask'
+      ? 'Ask a question about your Unity project. @ for context, ⏎ to send.'
+      : mode === 'plan'
+        ? 'Describe what you want to build. @ for context, ⏎ to plan.'
+        : 'Plan, build, edit. @ for context, ⏎ to send.';
 
   return (
     <div className="ai-panel-input-area">
@@ -101,18 +81,8 @@ function ChatInput() {
 
         <div className="ai-panel-composer-toolbar">
           <div className="ai-panel-composer-toolbar-left">
-            {selectedAgent === 'claude' ? (
-              <>
-                <ClaudeModelPicker />
-                <ClaudePermissionModePicker />
-                <ClaudeEffortPicker />
-              </>
-            ) : (
-              <>
-                <ModeSelector />
-                <EffortSelector />
-              </>
-            )}
+            <ModeSelector />
+            <EffortSelector />
           </div>
           <div className="ai-panel-composer-toolbar-right">
             <ImageAttachButton />

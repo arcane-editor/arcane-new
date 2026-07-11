@@ -118,7 +118,7 @@ function App() {
     if (restoredRef.current) return;
     restoredRef.current = true;
 
-    // Reap any PTYs (interactive + ACP) left running by this window's
+    // Reap any PTYs left running by this window's
     // previous incarnation. TerminalState lives in the Rust process and is
     // keyed by window label, so a webview reload (Cmd+R) — which resets the
     // frontend terminal store but doesn't touch the backend — would
