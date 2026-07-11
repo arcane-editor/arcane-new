@@ -103,6 +103,44 @@ fn is_git_state_path(path_str: &str) -> bool {
         || normalized.ends_with("/.git/packed-refs")
 }
 
+/// If `<ws_path>/.git` is a `gitdir:` pointer file (i.e. `ws_path` is a linked
+/// git worktree, not the main repo), return the real git dir it points at —
+/// typically `<main-repo>/.git/worktrees/<name>`. That directory holds the
+/// worktree's own HEAD/refs and lives outside the watched workspace root, so
+/// callers use this to watch it in addition to the workspace root. Returns
+/// `None` for a normal repo (`.git` is a directory) or no `.git` at all.
+fn resolve_linked_git_dir(ws_path: &str) -> Option<std::path::PathBuf> {
+    let dot_git = std::path::Path::new(ws_path).join(".git");
+    if !dot_git.is_file() {
+        return None;
+    }
+    let content = std::fs::read_to_string(&dot_git).ok()?;
+    let gitdir = content.strip_prefix("gitdir:")?.trim();
+    let p = std::path::PathBuf::from(gitdir);
+    Some(if p.is_absolute() {
+        p
+    } else {
+        std::path::Path::new(ws_path).join(p)
+    })
+}
+
+/// Returns true if `path_str` is a git-state file under `git_dir` — the
+/// resolved linked-worktree git dir from `resolve_linked_git_dir`. Mirrors
+/// `is_git_state_path`'s ref/HEAD/packed-refs matching, but scoped to an
+/// arbitrary directory (the worktree gitdir isn't named `.git` and doesn't
+/// live under the workspace root, so the `/.git/...` suffix checks above
+/// don't apply here).
+fn is_git_state_path_in_dir(path_str: &str, git_dir: &str) -> bool {
+    let normalized = path_str.replace('\\', "/");
+    let normalized_dir = git_dir.replace('\\', "/");
+    if !normalized.starts_with(normalized_dir.as_str()) {
+        return false;
+    }
+    normalized.ends_with("/HEAD")
+        || normalized.contains("/refs/")
+        || normalized.ends_with("/packed-refs")
+}
+
 fn query_contains_path_separator(query: &str) -> bool {
     query.contains('/') || query.contains('\\')
 }
@@ -417,6 +455,15 @@ pub async fn start_file_watcher(
     let app_handle = app.clone();
     let ws_path = workspace_path.clone();
 
+    // Linked git worktrees keep `<ws>/.git` as a `gitdir:` pointer file; the
+    // real HEAD/refs live in the main repo's `.git/worktrees/<name>/`, outside
+    // the workspace root we watch below. Resolve it up front so the event
+    // loop can recognize git-state changes there too.
+    let linked_git_dir = resolve_linked_git_dir(&ws_path);
+    let linked_git_dir_str = linked_git_dir
+        .as_ref()
+        .map(|p| p.to_string_lossy().to_string());
+
     // Debounce channel: collect events, emit after 500ms quiet period
     let (event_tx, mut event_rx) = mpsc::channel::<Event>(256);
 
@@ -449,7 +496,11 @@ pub async fn start_file_watcher(
                             let mut git_state_touched = false;
                             for path in &event.paths {
                                 let path_str = path.to_string_lossy().to_string();
-                                if is_git_state_path(&path_str) {
+                                if is_git_state_path(&path_str)
+                                    || linked_git_dir_str.as_deref().is_some_and(|d| {
+                                        is_git_state_path_in_dir(&path_str, d)
+                                    })
+                                {
                                     git_state_touched = true;
                                 }
                                 match event.kind {
@@ -491,15 +542,24 @@ pub async fn start_file_watcher(
                             // Debounce: wait 500ms for more events
                             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
-                            // Drain any remaining events in the channel. We
-                            // don't re-check git state here — those events are
-                            // still part of the burst we already fired for, and
-                            // any *new* checkout that arrives after the sleep
-                            // window will land in the next outer iteration of
-                            // this loop and re-evaluate `last_git_emit`.
+                            // Drain any remaining events in the channel. Git-state
+                            // paths seen here DO count toward `git_state_touched`:
+                            // a `git checkout` can still be rewriting HEAD/refs when
+                            // the leading-edge emit above fires, so that emit can
+                            // race a not-yet-updated HEAD. Folding drained git-state
+                            // events into the same `git_state_touched` flag lets the
+                            // trailing re-emit below correct for that once the whole
+                            // burst has settled.
                             while let Ok(event) = event_rx.try_recv() {
                                 for path in &event.paths {
                                     let path_str = path.to_string_lossy().to_string();
+                                    if is_git_state_path(&path_str)
+                                        || linked_git_dir_str.as_deref().is_some_and(|d| {
+                                            is_git_state_path_in_dir(&path_str, d)
+                                        })
+                                    {
+                                        git_state_touched = true;
+                                    }
                                     match event.kind {
                                         notify::EventKind::Create(_) => {
                                             if path.is_file() {
@@ -519,6 +579,23 @@ pub async fn start_file_watcher(
                                         _ => {}
                                     }
                                 }
+                            }
+
+                            // Trailing re-emit: if the burst (leading batch or
+                            // drain) touched git state, fire once more now that
+                            // the burst has fully settled — this is the read
+                            // that's guaranteed to see the post-checkout HEAD,
+                            // correcting for the race above. Reset `last_git_emit`
+                            // so this emit isn't itself swallowed by the 100ms
+                            // dedup window (at this point >=500ms have elapsed
+                            // since any leading-edge emit) and so an unrelated
+                            // burst that starts right after gets its own fresh
+                            // dedup window. This runs once per burst — it's
+                            // outside the drain `while` loop — so it can't fire
+                            // once per drained event.
+                            if git_state_touched {
+                                let _ = app_for_debounce.emit("git-state-changed", ());
+                                last_git_emit = Some(std::time::Instant::now());
                             }
 
                             if !pending_added.is_empty() || !pending_removed.is_empty() {
@@ -541,6 +618,20 @@ pub async fn start_file_watcher(
     watcher
         .watch(Path::new(&ws_path), RecursiveMode::Recursive)
         .map_err(|e| format!("Failed to watch: {}", e))?;
+
+    // Also watch the linked worktree's real git dir (tiny — a handful of
+    // files) so branch switches inside a worktree emit `git-state-changed`
+    // too. Non-fatal on failure: the main repo's `.git` can sit outside
+    // sandbox scope in unusual setups, and losing just this fast path still
+    // leaves normal-repo git-state detection working.
+    if let Some(ref git_dir) = linked_git_dir {
+        if let Err(e) = watcher.watch(git_dir, RecursiveMode::Recursive) {
+            eprintln!(
+                "[file_scanner] Failed to watch linked git dir {:?}: {}",
+                git_dir, e
+            );
+        }
+    }
 
     state.watcher = Some(watcher);
     state._shutdown_tx = Some(shutdown_tx);
@@ -587,5 +678,98 @@ mod tests {
     #[test]
     fn ignore_case_keeps_pascalcase_name_match() {
         assert!(matches(CaseMatching::Ignore, "IITapplication", "Assets/IITApplication.cs"));
+    }
+
+    // ── resolve_linked_git_dir ───────────────────────────────────────────
+
+    use super::{is_git_state_path_in_dir, resolve_linked_git_dir};
+
+    #[test]
+    fn resolve_linked_git_dir_none_for_real_git_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir(tmp.path().join(".git")).unwrap();
+        assert_eq!(resolve_linked_git_dir(tmp.path().to_str().unwrap()), None);
+    }
+
+    #[test]
+    fn resolve_linked_git_dir_none_when_missing() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert_eq!(resolve_linked_git_dir(tmp.path().to_str().unwrap()), None);
+    }
+
+    #[test]
+    fn resolve_linked_git_dir_resolves_absolute_pointer() {
+        let tmp = tempfile::tempdir().unwrap();
+        let real_git_dir = tmp.path().join("main-repo/.git/worktrees/feature");
+        std::fs::create_dir_all(&real_git_dir).unwrap();
+        let ws = tmp.path().join("worktree-ws");
+        std::fs::create_dir_all(&ws).unwrap();
+        std::fs::write(
+            ws.join(".git"),
+            format!("gitdir: {}\n", real_git_dir.display()),
+        )
+        .unwrap();
+
+        assert_eq!(
+            resolve_linked_git_dir(ws.to_str().unwrap()),
+            Some(real_git_dir)
+        );
+    }
+
+    #[test]
+    fn resolve_linked_git_dir_resolves_relative_pointer() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ws = tmp.path().join("worktree-ws");
+        std::fs::create_dir_all(&ws).unwrap();
+        std::fs::write(ws.join(".git"), "gitdir: ../main/.git/worktrees/feature\n").unwrap();
+
+        assert_eq!(
+            resolve_linked_git_dir(ws.to_str().unwrap()),
+            Some(ws.join("../main/.git/worktrees/feature"))
+        );
+    }
+
+    // ── is_git_state_path_in_dir ─────────────────────────────────────────
+
+    const WORKTREE_GITDIR: &str = "/main-repo/.git/worktrees/feature";
+
+    #[test]
+    fn is_git_state_path_in_dir_matches_head() {
+        assert!(is_git_state_path_in_dir(
+            "/main-repo/.git/worktrees/feature/HEAD",
+            WORKTREE_GITDIR
+        ));
+    }
+
+    #[test]
+    fn is_git_state_path_in_dir_matches_refs() {
+        assert!(is_git_state_path_in_dir(
+            "/main-repo/.git/worktrees/feature/refs/heads/main",
+            WORKTREE_GITDIR
+        ));
+    }
+
+    #[test]
+    fn is_git_state_path_in_dir_matches_packed_refs() {
+        assert!(is_git_state_path_in_dir(
+            "/main-repo/.git/worktrees/feature/packed-refs",
+            WORKTREE_GITDIR
+        ));
+    }
+
+    #[test]
+    fn is_git_state_path_in_dir_rejects_paths_outside_dir() {
+        assert!(!is_git_state_path_in_dir(
+            "/main-repo/.git/worktrees/other/HEAD",
+            WORKTREE_GITDIR
+        ));
+    }
+
+    #[test]
+    fn is_git_state_path_in_dir_rejects_unrelated_file_inside_dir() {
+        assert!(!is_git_state_path_in_dir(
+            "/main-repo/.git/worktrees/feature/index",
+            WORKTREE_GITDIR
+        ));
     }
 }

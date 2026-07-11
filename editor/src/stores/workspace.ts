@@ -847,13 +847,17 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
         // The Rust watcher emits this event the instant `.git/HEAD` or any
         // branch-pointer ref is rewritten — i.e., when the user runs
-        // `git checkout` (in our terminal or anywhere else). Refresh the git
-        // store immediately so the status bar branch name updates without
-        // waiting for window-focus or a manual git operation.
+        // `git checkout` (in our terminal or anywhere else). Refresh both the
+        // status (current branch, ahead/behind, dirty files) and the branch
+        // list immediately so the status bar and branch switcher update
+        // without waiting for window-focus or a manual git operation —
+        // otherwise a branch created in the terminal shows up in the status
+        // bar but not in the branch list (or vice versa).
         const unlistenGit = await listen<void>('git-state-changed', () => {
           const wp = get().workspacePath;
           if (wp) {
             useGitStore.getState().refreshStatus(wp).catch(() => {});
+            useGitStore.getState().refreshBranches(wp).catch(() => {});
           }
         });
         unlistenGitState = unlistenGit;
