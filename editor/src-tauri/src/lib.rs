@@ -15,6 +15,7 @@ mod dap;
 mod auth;
 mod claude;
 mod graphify;
+mod walk_policy;
 #[cfg(target_os = "macos")]
 mod menu;
 
@@ -51,8 +52,10 @@ fn read_directory(path: String) -> Result<Vec<FileEntry>, String> {
             let entry = entry.ok()?;
             let name = entry.file_name().to_string_lossy().to_string();
 
-            // Skip hidden files
-            if name.starts_with('.') {
+            // Skip only the always-hidden entries (.git, .DS_Store); other
+            // dotfiles (.env, .gitignore, ...) are visible in the tree. See
+            // walk_policy::is_always_hidden.
+            if walk_policy::is_always_hidden(&name) {
                 return None;
             }
 
@@ -148,7 +151,7 @@ fn scan_all_files(workspace_path: String) -> Result<Vec<String>, String> {
         .filter_entry(|entry| {
             let name = entry.file_name().to_string_lossy();
             if entry.file_type().is_dir() {
-                if name.starts_with('.') { return false; }
+                if walk_policy::is_always_hidden(&name) { return false; }
                 if skip_dirs.contains(&name.as_ref()) { return false; }
             }
             true

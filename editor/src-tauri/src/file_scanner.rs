@@ -1,9 +1,9 @@
-use ignore::WalkBuilder;
+use crate::walk_policy;
 use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use nucleo_matcher::pattern::{Atom, AtomKind, CaseMatching, Normalization};
 use nucleo_matcher::{Matcher, Utf32Str};
 use serde::Serialize;
-use std::collections::BinaryHeap;
+use std::collections::{BinaryHeap, HashSet};
 use std::cmp::Ordering;
 use std::path::Path;
 use std::sync::Mutex;
@@ -182,41 +182,20 @@ impl FileWatcherState {
 // ── Commands ────────────────────────────────────────────────────────────────
 
 /// Scan all files respecting .gitignore, with optional extra exclude patterns.
+///
+/// Uses the shared `walk_policy` module (dotfiles visible except
+/// `.git`/`.DS_Store`, `.gitignore` respected) and appends root-level
+/// `.env`/`.env.*` files the walker didn't already yield (they're
+/// whitelisted even when gitignored — see `walk_policy::root_env_files`).
 #[tauri::command]
 pub fn scan_all_files_v2(
     workspace_path: String,
     extra_excludes: Vec<String>,
 ) -> Result<Vec<String>, String> {
-    let mut builder = WalkBuilder::new(&workspace_path);
-    builder
-        .hidden(true)         // skip hidden files/dirs
-        .git_ignore(true)     // respect .gitignore
-        .git_global(true)     // respect global gitignore
-        .git_exclude(true);   // respect .git/info/exclude
+    let mut builder = walk_policy::policy_walker(&workspace_path);
+    walk_policy::apply_extra_excludes(&mut builder, &workspace_path, &extra_excludes);
 
-    // Add extra exclude patterns (e.g., Unity-specific).
-    // OverrideBuilder treats plain globs as whitelist rules, so we prefix
-    // with '!' to express ignore/exclude semantics from frontend patterns.
-    if !extra_excludes.is_empty() {
-        let mut overrides = ignore::overrides::OverrideBuilder::new(&workspace_path);
-        for p in &extra_excludes {
-            let trimmed = p.trim();
-            if trimmed.is_empty() {
-                continue;
-            }
-            let glob = if trimmed.starts_with('!') {
-                trimmed.to_string()
-            } else {
-                format!("!{}", trimmed)
-            };
-            let _ = overrides.add(&glob);
-        }
-        if let Ok(built) = overrides.build() {
-            builder.overrides(built);
-        }
-    }
-
-    let files: Vec<String> = builder
+    let mut files: Vec<String> = builder
         .build()
         .filter_map(|entry| {
             let entry = entry.ok()?;
@@ -227,6 +206,15 @@ pub fn scan_all_files_v2(
             }
         })
         .collect();
+
+    let seen: HashSet<&str> = files.iter().map(|s| s.as_str()).collect();
+    let extra_env_files: Vec<String> = walk_policy::root_env_files(Path::new(&workspace_path))
+        .into_iter()
+        .map(|p| p.to_string_lossy().to_string())
+        .filter(|s| !seen.contains(s.as_str()))
+        .collect();
+    drop(seen);
+    files.extend(extra_env_files);
 
     Ok(files)
 }
@@ -247,32 +235,11 @@ pub fn fuzzy_search_files(
 
     let max_results = if max_results == 0 { 100 } else { max_results };
 
-    // Build the file list using .gitignore-aware walker
-    let mut builder = WalkBuilder::new(&workspace_path);
-    builder
-        .hidden(true)
-        .git_ignore(true)
-        .git_global(true)
-        .git_exclude(true);
-
-    if !extra_excludes.is_empty() {
-        let mut overrides = ignore::overrides::OverrideBuilder::new(&workspace_path);
-        for p in &extra_excludes {
-            let trimmed = p.trim();
-            if trimmed.is_empty() {
-                continue;
-            }
-            let glob = if trimmed.starts_with('!') {
-                trimmed.to_string()
-            } else {
-                format!("!{}", trimmed)
-            };
-            let _ = overrides.add(&glob);
-        }
-        if let Ok(built) = overrides.build() {
-            builder.overrides(built);
-        }
-    }
+    // Build the file list using the shared policy walker (dotfiles visible
+    // except .git/.DS_Store, .gitignore respected) plus caller-supplied
+    // exclude globs.
+    let mut builder = walk_policy::policy_walker(&workspace_path);
+    walk_policy::apply_extra_excludes(&mut builder, &workspace_path, &extra_excludes);
 
     // Set up nucleo matcher
     let mut matcher = Matcher::new(nucleo_matcher::Config::DEFAULT.match_paths());
@@ -305,28 +272,34 @@ pub fn fuzzy_search_files(
     // Use a min-heap to keep top N results
     let mut heap: BinaryHeap<ScoredEntry> = BinaryHeap::with_capacity(max_results + 1);
 
-    for entry in builder.build() {
-        let entry = match entry {
-            Ok(e) => e,
-            Err(_) => continue,
-        };
+    // Root .env / .env.* files are whitelisted even when gitignored (the
+    // policy walker can't re-include a gitignore-pruned path). Track them
+    // here and drop any the walker itself already yields below, so a
+    // non-gitignored .env is scored exactly once, not twice.
+    let mut pending_env_files: HashSet<String> =
+        walk_policy::root_env_files(Path::new(&workspace_path))
+            .into_iter()
+            .map(|p| p.to_string_lossy().to_string())
+            .collect();
 
-        if !entry.file_type().map_or(false, |ft| ft.is_file()) {
-            continue;
-        }
-
+    // Scores and (maybe) pushes a single absolute path into `heap`. Shared
+    // by both the walker loop and the root-env-file whitelist pass below so
+    // gitignored `.env` files are ranked identically to normal matches.
+    let score_and_push = |abs_path: String, matcher: &mut Matcher, heap: &mut BinaryHeap<ScoredEntry>| {
         // Extension filter (cheap; happens before fuzzy match)
         if let Some(ref exts) = file_extensions {
             if !exts.is_empty() {
-                let ext_ok = entry.path().extension()
+                let ext_ok = Path::new(&abs_path)
+                    .extension()
                     .and_then(|e| e.to_str())
                     .map(|e| exts.iter().any(|x| x.eq_ignore_ascii_case(e)))
                     .unwrap_or(false);
-                if !ext_ok { continue; }
+                if !ext_ok {
+                    return;
+                }
             }
         }
 
-        let abs_path = entry.path().to_string_lossy().to_string();
         let relative_path = if abs_path.starts_with(&workspace_prefix) {
             abs_path[workspace_prefix.len()..].to_string()
         } else {
@@ -338,8 +311,8 @@ pub fn fuzzy_search_files(
         // of relative_path.
         let mut path_buf = Vec::new();
         let path_haystack = Utf32Str::new(&relative_path, &mut path_buf);
-        let Some(path_score) = path_atom.score(path_haystack, &mut matcher) else {
-            continue;
+        let Some(path_score) = path_atom.score(path_haystack, matcher) else {
+            return;
         };
 
         let file_name = Path::new(&abs_path)
@@ -349,7 +322,7 @@ pub fn fuzzy_search_files(
 
         let mut file_name_buf = Vec::new();
         let file_name_haystack = Utf32Str::new(&file_name, &mut file_name_buf);
-        let file_name_score = file_name_atom.score(file_name_haystack, &mut matcher);
+        let file_name_score = file_name_atom.score(file_name_haystack, matcher);
 
         let file_name_lower = file_name.to_lowercase();
         let file_stem_lower = Path::new(&file_name)
@@ -399,7 +372,7 @@ pub fn fuzzy_search_files(
 
         // Match indices are for relative_path highlighting in the UI.
         let mut indices = Vec::new();
-        path_atom.indices(path_haystack, &mut matcher, &mut indices);
+        path_atom.indices(path_haystack, matcher, &mut indices);
         indices.sort();
         indices.dedup();
 
@@ -433,6 +406,30 @@ pub fn fuzzy_search_files(
         if heap.len() > max_results {
             heap.pop();
         }
+    };
+
+    for entry in builder.build() {
+        let entry = match entry {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+
+        if !entry.file_type().map_or(false, |ft| ft.is_file()) {
+            continue;
+        }
+
+        let abs_path = entry.path().to_string_lossy().to_string();
+        // Already yielded by the walker (not gitignored) — no need to add
+        // it again from the whitelist pass below.
+        pending_env_files.remove(&abs_path);
+        score_and_push(abs_path, &mut matcher, &mut heap);
+    }
+
+    // Whitelist pass: any root .env / .env.* file the walker didn't yield
+    // (because it's gitignored) still gets scored and ranked like any other
+    // match — see walk_policy module docs for why this is root-only.
+    for env_path in pending_env_files {
+        score_and_push(env_path, &mut matcher, &mut heap);
     }
 
     // Extract + order by score descending for UI consumption.
@@ -810,5 +807,115 @@ mod tests {
             "/main-repo/.git/worktrees/feature-backup/refs/heads/x",
             WORKTREE_GITDIR
         ));
+    }
+
+    // ── scan_all_files_v2 / fuzzy_search_files — walk_policy wiring ───────
+    //
+    // These pin the interim wiring described in walk_policy's module docs:
+    // .git is never surfaced, non-gitignored dotfiles are visible, and a
+    // gitignored root .env is whitelisted exactly once (no duplicate when
+    // the walker itself would already yield it).
+
+    use super::{fuzzy_search_files, scan_all_files_v2};
+
+    fn init_git_repo_with_gitignore(root: &std::path::Path, gitignore_body: &str) {
+        std::fs::create_dir(root.join(".git")).unwrap();
+        std::fs::write(root.join(".gitignore"), gitignore_body).unwrap();
+    }
+
+    #[test]
+    fn scan_all_files_v2_never_yields_git_internals() {
+        let tmp = tempfile::tempdir().unwrap();
+        init_git_repo_with_gitignore(tmp.path(), "");
+        std::fs::write(tmp.path().join(".git").join("HEAD"), "ref: refs/heads/main\n").unwrap();
+        std::fs::write(tmp.path().join("visible.txt"), "hi\n").unwrap();
+
+        let files = scan_all_files_v2(tmp.path().to_str().unwrap().to_string(), vec![]).unwrap();
+
+        assert!(files.iter().any(|f| f.ends_with("visible.txt")), "files = {:?}", files);
+        // Substring check must be path-component-aware: ".gitignore" itself
+        // is a legitimate result and literally contains the substring
+        // ".git", so a bare `contains(".git")` would false-positive on it.
+        assert!(
+            !files.iter().any(|f| f.contains("/.git/")),
+            "files should never contain .git internals: {:?}",
+            files
+        );
+    }
+
+    #[test]
+    fn scan_all_files_v2_whitelists_gitignored_root_env_without_duplicating() {
+        let tmp = tempfile::tempdir().unwrap();
+        init_git_repo_with_gitignore(tmp.path(), ".env\nsecret.txt\n");
+        std::fs::write(tmp.path().join(".env"), "A=1\n").unwrap();
+        std::fs::write(tmp.path().join("secret.txt"), "shh\n").unwrap();
+        std::fs::write(tmp.path().join("visible.txt"), "hi\n").unwrap();
+
+        let files = scan_all_files_v2(tmp.path().to_str().unwrap().to_string(), vec![]).unwrap();
+
+        let env_matches: Vec<&String> = files.iter().filter(|f| f.ends_with(".env")).collect();
+        assert_eq!(env_matches.len(), 1, "expected .env exactly once, got {:?}", files);
+        assert!(!files.iter().any(|f| f.ends_with("secret.txt")), "files = {:?}", files);
+        assert!(files.iter().any(|f| f.ends_with("visible.txt")), "files = {:?}", files);
+    }
+
+    #[test]
+    fn scan_all_files_v2_does_not_duplicate_non_gitignored_env_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        // No .gitignore rule for .env — the walker itself yields it, so the
+        // root_env_files append pass must not add a second copy.
+        init_git_repo_with_gitignore(tmp.path(), "");
+        std::fs::write(tmp.path().join(".env"), "A=1\n").unwrap();
+
+        let files = scan_all_files_v2(tmp.path().to_str().unwrap().to_string(), vec![]).unwrap();
+
+        let env_matches: Vec<&String> = files.iter().filter(|f| f.ends_with(".env")).collect();
+        assert_eq!(env_matches.len(), 1, "expected .env exactly once, got {:?}", files);
+    }
+
+    #[test]
+    fn fuzzy_search_files_finds_gitignored_root_env_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        init_git_repo_with_gitignore(tmp.path(), ".env\n");
+        std::fs::write(tmp.path().join(".env"), "A=1\n").unwrap();
+        std::fs::write(tmp.path().join("other.txt"), "hi\n").unwrap();
+
+        let results = fuzzy_search_files(
+            tmp.path().to_str().unwrap().to_string(),
+            ".env".to_string(),
+            10,
+            vec![],
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(
+            results.iter().filter(|r| r.file_name == ".env").count(),
+            1,
+            "expected exactly one .env match, got {:?}",
+            results.iter().map(|r| &r.file_name).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn fuzzy_search_files_never_yields_git_internals() {
+        let tmp = tempfile::tempdir().unwrap();
+        init_git_repo_with_gitignore(tmp.path(), "");
+        std::fs::write(tmp.path().join(".git").join("config"), "[core]\n").unwrap();
+
+        let results = fuzzy_search_files(
+            tmp.path().to_str().unwrap().to_string(),
+            "config".to_string(),
+            10,
+            vec![],
+            None,
+        )
+        .unwrap();
+
+        assert!(
+            !results.iter().any(|r| r.path.contains("/.git/")),
+            "results should never contain .git internals: {:?}",
+            results
+        );
     }
 }
