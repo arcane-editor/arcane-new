@@ -58,26 +58,9 @@ function ActivityBar() {
         >
           <Icon size={24} />
           {id === 'source-control' && changedCount > 0 && (
-            <div
-              style={{
-                position: 'absolute',
-                top: '-2px',
-                right: '-2px',
-                background: 'var(--accent)',
-                color: 'var(--text-active)',
-                borderRadius: '50%',
-                minWidth: '18px',
-                height: '18px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: '9px',
-                fontWeight: 600,
-                padding: '0 3px',
-              }}
-            >
+            <span className="activity-bar-badge">
               {changedCount > 99 ? '99+' : changedCount}
-            </div>
+            </span>
           )}
         </button>
       ))}
