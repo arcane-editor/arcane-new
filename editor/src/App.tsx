@@ -40,7 +40,7 @@ import { useUnitySceneStore } from './stores/unity-scene';
 import { useRegisterCommands } from './hooks/useRegisterCommands';
 import { useAutoSave } from './hooks/useAutoSave';
 import { useCloseGuard } from './hooks/useCloseGuard';
-import { useNotificationsStore, notify } from './stores/notifications';
+import { useNotificationsStore } from './stores/notifications';
 import { useCommandsStore } from './stores/commands';
 import { listen } from '@tauri-apps/api/event';
 import { useWorkspaceStore } from './stores/workspace';
@@ -58,7 +58,14 @@ import { useDebugStore } from './stores/debug';
 import { useAuthStore } from './stores/auth';
 import { AuthTab } from './features/auth';
 import { useSceneUsageStore } from './features/unity-context';
-import { loadState, saveState, loadLayoutSizes, saveLayoutSizes, planFileRestore } from './utils/persistence';
+import {
+  loadState,
+  saveState,
+  loadLayoutSizes,
+  saveLayoutSizes,
+  planFileRestore,
+  resolveActiveFilePath,
+} from './utils/persistence';
 import { useRecentsStore } from './stores/recents';
 import { confirmCloseDirty } from './utils/dirty-guard';
 import { safeUnlisten } from './utils/tauri-listener';
@@ -151,6 +158,7 @@ function App() {
       const store = useWorkspaceStore.getState();
       store.setWorkspace(workspacePath).then(async () => {
         if (urlPath || workspacePath === persisted?.workspacePath) {
+          const restoredPaths: string[] = [];
           for (const file of persisted?.openFilePaths ?? []) {
             try {
               const plan = planFileRestore(file);
@@ -164,16 +172,29 @@ function App() {
               } else {
                 await store.openFile(plan.path, plan.name);
               }
+              // Read back the path actually assigned to the new tab (rather
+              // than re-deriving diff:// formatting here) so this stays in
+              // sync with openDiffTab/openFile's own path shape.
+              const current = useWorkspaceStore.getState().activeFilePath;
+              if (current) restoredPaths.push(current);
             } catch {
               // File may have been deleted, or git state unavailable — skip
             }
           }
-          if (persisted?.activeFilePath) {
-            store.setActiveFile(persisted.activeFilePath);
+          // Only honor the persisted active path if that tab actually
+          // restored; otherwise fall back to the last tab that did (or leave
+          // activeFilePath alone if nothing restored) so a stale active
+          // pointer never leaves the editor showing a blank WelcomeScreen.
+          const activeToSet = resolveActiveFilePath(persisted?.activeFilePath, restoredPaths);
+          if (activeToSet) {
+            store.setActiveFile(activeToSet);
           }
         }
-      }).catch(() => {
-        notify.warning(`Couldn't open ${workspacePath} — moved or deleted.`);
+      }).catch((err) => {
+        // setWorkspace's own catch already surfaces a user-facing toast
+        // (path + "moved or deleted" hint) before rethrowing — this handler
+        // only needs to keep the rejection from becoming unhandled.
+        console.error('[App] Failed to restore workspace:', err);
       });
     }
   }, []);

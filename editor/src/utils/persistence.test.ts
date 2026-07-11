@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { planFileRestore, stripDiffTabSuffix, type PersistedOpenFile } from './persistence';
+import { planFileRestore, resolveActiveFilePath, stripDiffTabSuffix, type PersistedOpenFile } from './persistence';
 
 describe('stripDiffTabSuffix', () => {
   it('strips a "(Staged)" suffix', () => {
@@ -57,5 +57,25 @@ describe('planFileRestore (old shape → new loader migration)', () => {
       name: 'Bar.cs',
       staged: false,
     });
+  });
+});
+
+describe('resolveActiveFilePath (post-restore active-tab fallback)', () => {
+  it('honors the persisted active path when it restored successfully', () => {
+    const restored = ['/proj/Assets/Foo.cs', '/proj/Assets/Bar.cs'];
+    expect(resolveActiveFilePath('/proj/Assets/Bar.cs', restored)).toBe('/proj/Assets/Bar.cs');
+  });
+
+  it('falls back to the last successfully restored path when the active entry failed to restore', () => {
+    // e.g. a staged diff tab whose git state changed between sessions, so
+    // openDiffTab threw and the entry was skipped — the persisted active
+    // path never made it into openFiles.
+    const restored = ['/proj/Assets/Foo.cs', '/proj/Assets/Bar.cs'];
+    expect(resolveActiveFilePath('diff://staged/Assets/Stale.cs', restored)).toBe('/proj/Assets/Bar.cs');
+  });
+
+  it('returns null when nothing restored, so the caller leaves activeFilePath untouched', () => {
+    expect(resolveActiveFilePath('/proj/Assets/Foo.cs', [])).toBeNull();
+    expect(resolveActiveFilePath(null, [])).toBeNull();
   });
 });

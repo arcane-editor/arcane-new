@@ -743,7 +743,13 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       entries = await invoke<FileEntry[]>('read_directory', { path: treeRoot });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      notify.error(`Failed to open workspace: ${msg}`);
+      // This is the sole user-facing toast for a setWorkspace failure — every
+      // caller (boot restore, "Open Recent", explorer refresh, the nested-
+      // project prompt, etc.) either lets this rejection propagate/logs it
+      // silently or relies on this toast entirely for user feedback. Keep the
+      // path + an actionable hint here rather than duplicating a toast at
+      // each call site.
+      notify.error(`Couldn't open ${path} — it may have been moved or deleted. (${msg})`);
       set({ isLoadingTree: false });
       throw err;
     }

@@ -287,3 +287,26 @@ export function planFileRestore(entry: PersistedOpenFile): RestorePlan {
   }
   return { kind: 'file', path: entry.path, name: entry.name };
 }
+
+/**
+ * Picks which tab should be active once the restore loop finishes. Restoring
+ * an entry can fail mid-loop (deleted file, stale diff/git state), so the
+ * persisted `activeFilePath` may not correspond to anything that actually
+ * made it back into `openFiles` — setting it anyway leaves the workspace
+ * store pointed at a path with no matching tab, and the editor falls back to
+ * a blank WelcomeScreen even though other tabs did restore successfully.
+ *
+ * Prefers the persisted active path when it's among the successfully
+ * restored paths; otherwise falls back to the last successfully restored
+ * path (`restoredPaths` is in restore order); returns `null` when nothing
+ * restored, so the caller can leave `activeFilePath` untouched.
+ */
+export function resolveActiveFilePath(
+  persistedActive: string | null | undefined,
+  restoredPaths: string[],
+): string | null {
+  if (persistedActive && restoredPaths.includes(persistedActive)) {
+    return persistedActive;
+  }
+  return restoredPaths.length > 0 ? restoredPaths[restoredPaths.length - 1] : null;
+}
