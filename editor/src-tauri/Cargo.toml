@@ -42,6 +42,17 @@ notify = { version = "7", features = ["macos_fsevent"] }
 nucleo-matcher = "0.3"
 sha1 = "0.10"
 
+# macOS-only: objc2 shim for the dock right-click menu ("New Window"). tao's
+# NSApplication delegate does not implement `applicationDockMenu:`, and neither
+# tauri 2.10 / tao 0.34 / muda 0.17 expose a dock-menu API, so we add the
+# selector to the running delegate class at startup (see src/dock.rs). These
+# crates are already transitive deps (via tao); versions match Cargo.lock
+# (objc2 0.6.4, objc2-app-kit/objc2-foundation 0.3.2) so no new resolution.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSResponder", "NSMenu", "NSMenuItem"] }
+objc2-foundation = { version = "0.3", features = ["NSString"] }
+
 [dev-dependencies]
 tempfile = "3"
 

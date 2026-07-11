@@ -19,6 +19,8 @@ mod sync_util;
 mod walk_policy;
 #[cfg(target_os = "macos")]
 mod menu;
+#[cfg(target_os = "macos")]
+mod dock;
 
 use serde::{Deserialize, Serialize};
 use tauri::Manager;
@@ -489,6 +491,36 @@ async fn debug_panic_async() {
     panic!("debug_panic_async: intentional panic for C8 crash-hardening verification");
 }
 
+/// Show/focus the existing "welcome" (project-manager) window, or create it if
+/// none exists. Shared by the macOS dock-icon `RunEvent::Reopen` handler and by
+/// the dock right-click menu's "New Window" action (`dock::install_dock_menu`).
+///
+/// macOS-only: `RunEvent::Reopen` and the dock menu are both macOS-only
+/// surfaces, so gating this here keeps it out of other platforms' builds
+/// (no dead-code warnings) while sharing one implementation.
+#[cfg(target_os = "macos")]
+pub(crate) fn open_or_focus_welcome(app: &tauri::AppHandle) {
+    use tauri::Manager;
+    if let Some(w) = app.webview_windows().get("welcome") {
+        let _ = w.show();
+        let _ = w.set_focus();
+    } else {
+        let app = app.clone();
+        tauri::async_runtime::spawn(async move {
+            let _ = tauri::WebviewWindowBuilder::new(
+                &app,
+                "welcome",
+                tauri::WebviewUrl::App("index.html?view=welcome".into()),
+            )
+            .title("Arcane")
+            .inner_size(720.0, 480.0)
+            .min_inner_size(600.0, 360.0)
+            .resizable(true)
+            .build();
+        });
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     install_panic_hook();
@@ -650,6 +682,16 @@ pub fn run() {
                         menu::handle_menu_event(&app_for_event, event.id().as_ref());
                     });
                 }
+                // Dock right-click → "New Window". macOS-only: there is no
+                // Tauri v2 dock/jumplist API, so this splices `applicationDockMenu:`
+                // onto tao's app-delegate class via objc2 (see src/dock.rs).
+                //
+                // Windows note: a Windows taskbar jumplist "New Window" entry is
+                // NOT implemented — Tauri v2 exposes no jumplist API without a
+                // custom plugin. Launching the .exe again already opens an
+                // independent window (this app registers no single-instance
+                // plugin), which is the intended multi-window behavior there.
+                dock::install_dock_menu(handle);
             }
             Ok(())
         })
@@ -722,25 +764,7 @@ pub fn run() {
             {
                 if let tauri::RunEvent::Reopen { has_visible_windows, .. } = &event {
                     if !has_visible_windows {
-                        use tauri::Manager;
-                        if let Some(w) = app_handle.webview_windows().get("welcome") {
-                            let _ = w.show();
-                            let _ = w.set_focus();
-                        } else {
-                            let app = app_handle.clone();
-                            tauri::async_runtime::spawn(async move {
-                                let _ = tauri::WebviewWindowBuilder::new(
-                                    &app,
-                                    "welcome",
-                                    tauri::WebviewUrl::App("index.html?view=welcome".into()),
-                                )
-                                .title("Arcane")
-                                .inner_size(720.0, 480.0)
-                                .min_inner_size(600.0, 360.0)
-                                .resizable(true)
-                                .build();
-                            });
-                        }
+                        open_or_focus_welcome(app_handle);
                     }
                 }
             }
