@@ -1079,6 +1079,15 @@ pub fn git_append_gitignore(
 // A1: Branch lifecycle — create / rename / delete
 // ---------------------------------------------------------------------------
 
+/// Validate that a branch name does not start with '-' and is not empty.
+/// This prevents leading dashes from being parsed as git flags.
+fn validate_ref_name(name: &str) -> Result<(), String> {
+    if name.is_empty() || name.starts_with('-') {
+        return Err(format!("invalid branch name: '{name}'"));
+    }
+    Ok(())
+}
+
 /// Create a new branch. When `checkout` is true, uses `git switch -c <name>
 /// [<base>]` so the new branch also becomes HEAD; otherwise `git branch
 /// <name> [<base>]` creates it without touching the working tree.
@@ -1089,6 +1098,11 @@ pub fn git_create_branch(
     base: Option<String>,
     checkout: bool,
 ) -> Result<(), String> {
+    validate_ref_name(&name)?;
+    if let Some(ref b) = base {
+        validate_ref_name(b)?;
+    }
+
     let mut args: Vec<String> = vec!["-C".into(), workspace_path];
     if checkout {
         args.push("switch".into());
@@ -1121,6 +1135,9 @@ pub fn git_rename_branch(
     old_name: String,
     new_name: String,
 ) -> Result<(), String> {
+    validate_ref_name(&old_name)?;
+    validate_ref_name(&new_name)?;
+
     let output = Command::new("git")
         .args(["-C", &workspace_path, "branch", "-m", &old_name, &new_name])
         .output()
@@ -1138,6 +1155,8 @@ pub fn git_rename_branch(
 /// message and offer to retry with `force: true`.
 #[tauri::command]
 pub fn git_delete_branch(workspace_path: String, name: String, force: bool) -> Result<(), String> {
+    validate_ref_name(&name)?;
+
     let flag = if force { "-D" } else { "-d" };
     let output = Command::new("git")
         .args(["-C", &workspace_path, "branch", flag, &name])
@@ -1289,5 +1308,87 @@ mod branch_lifecycle_tests {
 
         let branches = git_list_branches(path).unwrap();
         assert!(!branches.contains(&"unmerged-branch2".to_string()));
+    }
+
+    #[test]
+    fn create_branch_rejects_leading_dash_name() {
+        let tmp = init_repo();
+        let path = tmp.path().to_str().unwrap().to_string();
+
+        let result = git_create_branch(path.clone(), "-D".into(), Some("main".into()), false);
+
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("invalid branch name"),
+            "expected 'invalid branch name' in error, got: {err}"
+        );
+        // Verify main still exists (wasn't force-deleted by the malicious input)
+        let branches = git_list_branches(path).unwrap();
+        assert!(branches.contains(&"main".to_string()));
+    }
+
+    #[test]
+    fn delete_branch_rejects_leading_dash_name() {
+        let tmp = init_repo();
+        let path = tmp.path().to_str().unwrap().to_string();
+
+        let result = git_delete_branch(path, "-x".into(), false);
+
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("invalid branch name"),
+            "expected 'invalid branch name' in error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn rename_branch_rejects_leading_dash_old_name() {
+        let tmp = init_repo();
+        let path = tmp.path().to_str().unwrap().to_string();
+
+        let result = git_rename_branch(path, "-m".into(), "new".into());
+
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("invalid branch name"),
+            "expected 'invalid branch name' in error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn rename_branch_rejects_leading_dash_new_name() {
+        let tmp = init_repo();
+        let path = tmp.path().to_str().unwrap().to_string();
+        git_create_branch(path.clone(), "old".into(), None, false).unwrap();
+
+        let result = git_rename_branch(path, "old".into(), "-m".into());
+
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("invalid branch name"),
+            "expected 'invalid branch name' in error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn create_branch_rejects_leading_dash_base() {
+        let tmp = init_repo();
+        let path = tmp.path().to_str().unwrap().to_string();
+
+        let result = git_create_branch(
+            path.clone(),
+            "feature".into(),
+            Some("-D".into()),
+            false,
+        );
+
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("invalid branch name"),
+            "expected 'invalid branch name' in error, got: {err}"
+        );
+        // Verify main still exists
+        let branches = git_list_branches(path).unwrap();
+        assert!(branches.contains(&"main".to_string()));
     }
 }
