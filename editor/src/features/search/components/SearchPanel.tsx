@@ -129,7 +129,7 @@ function SearchPanel() {
 
   const showNoResults =
     !isSearching &&
-    query.trim().length >= 3 &&
+    query.length >= 3 &&
     results.length === 0 &&
     activeSearchId !== null &&
     activeSearchId > 0;
@@ -309,7 +309,7 @@ function SearchPanel() {
                 data-index={virtualItem.index}
                 ref={rowVirtualizer.measureElement}
                 className="search-match-row"
-                onClick={() => handleMatchClick(filePath, match.lineNumber, match.matchStart)}
+                onClick={() => handleMatchClick(filePath, match.lineNumber, match.matchStart + (match.lineStart ?? 0))}
                 title={`Line ${match.lineNumber}: ${match.lineContent.trim()}`}
                 style={{
                   position: 'absolute',
