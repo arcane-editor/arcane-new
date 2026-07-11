@@ -16,7 +16,10 @@ export function bindGlobalShortcutsToMonaco(
       const tag = `${cmd.id}|${cmd.keybinding}`;
       if (registered.has(tag)) continue;
       const bitfield = parseHotkeyToMonaco(cmd.keybinding, monaco);
-      if (bitfield === null) continue;
+      if (bitfield === null) {
+        if (import.meta.env.DEV) console.warn('[Shortcuts] Unparseable keybinding, not bound in editor:', cmd.keybinding, cmd.id);
+        continue;
+      }
       const cmdId = cmd.id;
       editor.addCommand(bitfield, () => {
         const live = useCommandsStore.getState().commands.get(cmdId);
