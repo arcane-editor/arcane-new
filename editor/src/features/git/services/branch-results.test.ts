@@ -65,6 +65,8 @@ describe('buildBranchResults', () => {
     it('is absent when the query exactly matches after trimming surrounding whitespace', () => {
       const rows = buildBranchResults(['main', 'develop'], '  main  ', 'main');
       expect(rows.some((r) => r.kind === 'create')).toBe(false);
+      // Verify that the branch row IS present (not vacuously passing on empty array)
+      expect(rows.map((r) => r.name)).toContain('main');
     });
 
     it('is present and appended last when the query matches no branch exactly', () => {
@@ -96,8 +98,16 @@ describe('buildBranchResults', () => {
     });
 
     it('appends the create row after all branch rows regardless of branch count', () => {
-      const rows = buildBranchResults(['a', 'b', 'c'], 'zzz-new', 'a');
-      expect(rows.every((r, i) => (r.kind === 'create' ? i === rows.length - 1 : true))).toBe(true);
+      const rows = buildBranchResults(['feature-one', 'feature-two', 'main'], 'feat', 'main');
+      const branchRows = rows.filter((r) => r.kind === 'branch');
+      const createRows = rows.filter((r) => r.kind === 'create');
+      // Verify that several branches fuzzy-match the query
+      expect(branchRows.length).toBeGreaterThan(1);
+      expect(branchRows.map((r) => r.name)).toContain('feature-one');
+      expect(branchRows.map((r) => r.name)).toContain('feature-two');
+      // Verify that the create row is present and comes last
+      expect(createRows).toHaveLength(1);
+      expect(rows[rows.length - 1].kind).toBe('create');
     });
   });
 });

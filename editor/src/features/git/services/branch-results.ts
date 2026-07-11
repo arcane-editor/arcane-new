@@ -38,7 +38,7 @@ export function buildBranchResults(
   const rows: BranchRow[] = trimmed
     ? branches
         .map((name): BranchRow | null => {
-          const result = fuzzyMatch(query, name);
+          const result = fuzzyMatch(trimmed, name);
           if (!result) return null;
           return { kind: 'branch', name, matches: result.matches, score: result.score };
         })
