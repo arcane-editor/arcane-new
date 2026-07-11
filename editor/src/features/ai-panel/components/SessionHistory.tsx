@@ -118,6 +118,7 @@ function SessionHistory({ open, onClose }: Props) {
                     }
                   }}
                   onClick={(e) => e.stopPropagation()}
+                  autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}
                 />
               ) : (
                 <button className="ai-history-title" onClick={() => openSession(s)} title={s.title}>

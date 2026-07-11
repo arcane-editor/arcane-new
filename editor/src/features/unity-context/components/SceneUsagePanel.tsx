@@ -152,6 +152,7 @@ function SceneUsagePanel() {
             onChange={(e) => setFilter(e.target.value)}
             className="scene-usage-search-input"
             aria-label="Filter assets or game objects"
+            autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}
           />
         </div>
       )}

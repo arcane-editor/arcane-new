@@ -330,6 +330,7 @@ function SourceControlPanel() {
             }
           }}
           rows={1}
+          autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}
         />
         <label className="scm-amend-checkbox">
           <input

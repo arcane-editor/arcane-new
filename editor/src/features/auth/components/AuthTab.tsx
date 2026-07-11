@@ -161,6 +161,7 @@ function AuthTab() {
                     onChange={(e) => setPromoCode(e.target.value)}
                     style={inputStyle}
                     placeholder="Enter promo code"
+                    autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}
                   />
                 </div>
               </>

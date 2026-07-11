@@ -57,6 +57,7 @@ export function TypedConfirmDialog({
           value={value}
           placeholder={confirmText}
           spellCheck={false}
+          autoComplete="off" autoCorrect="off" autoCapitalize="off"
           onChange={(e) => setValue(e.target.value)}
           style={{
             width: '100%',

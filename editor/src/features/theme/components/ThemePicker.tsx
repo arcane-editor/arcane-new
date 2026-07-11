@@ -94,6 +94,7 @@ function ThemePicker({ onClose }: ThemePickerProps) {
             setSelectedIndex(0);
           }}
           onKeyDown={handleKeyDown}
+          autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}
         />
         <div className="theme-picker-list">
           {filteredThemes.map((theme, index) => (

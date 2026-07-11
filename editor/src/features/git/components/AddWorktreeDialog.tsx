@@ -85,6 +85,7 @@ function AddWorktreeDialog({ onClose }: { onClose: () => void }) {
             <div style={{ display: 'flex', gap: 6 }}>
               <input ref={inputRef} type="text" value={path} onChange={(e) => setPath(e.target.value)}
                 placeholder="/absolute/path/to/worktree"
+                autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}
                 style={{ flex: 1, padding: '8px 10px', background: 'var(--bg-input)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-primary)', fontSize: 13, outline: 'none' }} />
               <button onClick={browse}
                 style={{ padding: '8px 12px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-primary)', cursor: 'pointer', fontSize: 12 }}>
@@ -116,6 +117,7 @@ function AddWorktreeDialog({ onClose }: { onClose: () => void }) {
                 <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>New branch name</span>
                 <input type="text" value={newBranch} onChange={(e) => setNewBranch(e.target.value)}
                   placeholder="feature/x"
+                  autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}
                   style={{ padding: '8px 10px', background: 'var(--bg-input)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-primary)', fontSize: 13, outline: 'none' }} />
               </label>
               <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>

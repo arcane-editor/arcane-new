@@ -91,6 +91,7 @@ export function UnityAssetPickerModal({ mode, onClose }: Props) {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={onKeyDown}
+          autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}
         />
         <div className="palette-list">
           {query && results.length === 0 && (

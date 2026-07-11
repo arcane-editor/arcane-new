@@ -153,6 +153,7 @@ function SearchPanel() {
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={handleKeyDown}
               spellCheck={false}
+              autoComplete="off" autoCorrect="off" autoCapitalize="off"
             />
           </div>
           <div className="search-toggle-group">
@@ -196,6 +197,7 @@ function SearchPanel() {
               value={includePattern}
               onChange={(e) => setIncludePattern(e.target.value)}
               spellCheck={false}
+              autoComplete="off" autoCorrect="off" autoCapitalize="off"
             />
             <input
               className="search-filter-input"
@@ -204,6 +206,7 @@ function SearchPanel() {
               value={excludePattern}
               onChange={(e) => setExcludePattern(e.target.value)}
               spellCheck={false}
+              autoComplete="off" autoCorrect="off" autoCapitalize="off"
             />
           </div>
         )}

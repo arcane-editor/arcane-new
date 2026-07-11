@@ -186,6 +186,7 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="settings-search-input"
+          autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}
         />
       </div>
 

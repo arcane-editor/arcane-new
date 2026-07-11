@@ -23,6 +23,7 @@ export function WatchPanel() {
           placeholder="Add expression…"
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && add()}
+          autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}
         />
         <button onClick={add} title="Add watch"><Plus size={13} /></button>
       </div>

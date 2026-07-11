@@ -141,6 +141,7 @@ function UnityConsolePanel() {
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
             placeholder="Filter..."
+            autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}
             style={{
               width: '100%',
               padding: '3px 6px 3px 22px',

@@ -120,6 +120,7 @@ export function NewScriptModal({ targetDir, onClose }: Props) {
           value={name}
           placeholder="MyBehaviour"
           spellCheck={false}
+          autoComplete="off" autoCorrect="off" autoCapitalize="off"
           onChange={(e) => setName(e.target.value)}
           onBlur={() => name && setName(suggestPascalCase(name))}
           onKeyDown={(e) => e.key === 'Enter' && void create()}
@@ -136,6 +137,7 @@ export function NewScriptModal({ targetDir, onClose }: Props) {
               value={targetType}
               placeholder="PlayerController"
               spellCheck={false}
+              autoComplete="off" autoCorrect="off" autoCapitalize="off"
               onChange={(e) => setTargetType(e.target.value)}
               style={inputStyle}
             />
@@ -147,6 +149,7 @@ export function NewScriptModal({ targetDir, onClose }: Props) {
           value={namespace}
           placeholder="(none)"
           spellCheck={false}
+          autoComplete="off" autoCorrect="off" autoCapitalize="off"
           onChange={(e) => setNamespace(e.target.value)}
           style={inputStyle}
         />
