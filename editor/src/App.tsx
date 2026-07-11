@@ -736,6 +736,13 @@ function App() {
       handler: () => setShowBranchPicker(true),
       when: () => useGitStore.getState().isGitRepo,
     },
+    {
+      id: 'git.createBranch',
+      label: 'Create Branch',
+      category: 'Git',
+      handler: () => setShowBranchPicker(true),
+      when: () => useGitStore.getState().isGitRepo,
+    },
     // Unity commands
     {
       id: 'unity.play',

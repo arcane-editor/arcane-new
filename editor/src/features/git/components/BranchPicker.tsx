@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { GitBranch, Check } from 'lucide-react';
-import { fuzzyMatch } from '../../../utils/fuzzy-match';
 import { useGitStore } from '../../../stores/git';
 import { useWorkspaceStore } from '../../../stores/workspace';
+import { buildBranchResults } from '../services/branch-results';
 
 function highlightMatches(text: string, matchIndices: number[]): React.ReactNode {
   if (matchIndices.length === 0) return text;
@@ -21,37 +21,41 @@ function highlightMatches(text: string, matchIndices: number[]): React.ReactNode
 function BranchPicker({ onClose }: { onClose: () => void }) {
   const workspacePath = useWorkspaceStore((s) => s.workspacePath);
   const branches = useGitStore((s) => s.branches);
+  const isBranchesLoading = useGitStore((s) => s.isBranchesLoading);
   const currentBranch = useGitStore((s) => s.branch);
   const switchBranch = useGitStore((s) => s.switchBranch);
+  const createBranch = useGitStore((s) => s.createBranch);
   const refreshBranches = useGitStore((s) => s.refreshBranches);
 
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  // Guards against re-entrant submits (e.g. Enter held/double-pressed while a
+  // switch/create is already in flight).
+  const isSubmittingRef = useRef(false);
 
   useEffect(() => {
+    // The store's `branches` persists across mounts, so this refresh is a
+    // background update — cached branches render immediately, no flash.
     if (workspacePath) refreshBranches(workspacePath);
   }, [workspacePath, refreshBranches]);
 
   useEffect(() => { inputRef.current?.focus(); }, []);
 
-  const results = useMemo(() => {
-    if (!query.trim()) {
-      return branches.map((b) => ({ name: b, matches: [] as number[], score: 0 }))
-        .sort((a, b) => (a.name === currentBranch ? -1 : b.name === currentBranch ? 1 : 0));
-    }
-    return branches
-      .map((b) => {
-        const result = fuzzyMatch(query, b);
-        if (!result) return null;
-        return { name: b, matches: result.matches, score: result.score };
-      })
-      .filter((r): r is NonNullable<typeof r> => r !== null)
-      .sort((a, b) => b.score - a.score);
-  }, [query, branches, currentBranch]);
+  const results = useMemo(
+    () => buildBranchResults(branches, query, currentBranch),
+    [query, branches, currentBranch],
+  );
 
   useEffect(() => { setSelectedIndex(0); }, [query]);
+
+  // If the underlying branch list changes out from under an active query
+  // (e.g. a background refresh removes a branch), clamp instead of resetting
+  // to the top — avoids stealing focus off the user's current selection.
+  useEffect(() => {
+    setSelectedIndex((i) => (results.length === 0 ? 0 : Math.min(i, results.length - 1)));
+  }, [results.length]);
 
   useEffect(() => {
     if (!listRef.current) return;
@@ -60,13 +64,26 @@ function BranchPicker({ onClose }: { onClose: () => void }) {
   }, [selectedIndex]);
 
   const handleSelect = useCallback(async (index: number) => {
+    if (isSubmittingRef.current) return;
     const result = results[index];
     if (!result || !workspacePath) return;
-    if (result.name !== currentBranch) {
-      try { await switchBranch(workspacePath, result.name); } catch (e) { console.error(e); }
+    isSubmittingRef.current = true;
+    try {
+      if (result.kind === 'create') {
+        await createBranch(workspacePath, result.name, { checkout: true });
+      } else if (result.name !== currentBranch) {
+        await switchBranch(workspacePath, result.name);
+      }
+      onClose();
+    } catch (e) {
+      // The store action already toasts the error (e.g. invalid branch name
+      // rejected by the backend) — keep the picker open so the user can
+      // correct the input instead of dismissing on failure.
+      console.error(e);
+    } finally {
+      isSubmittingRef.current = false;
     }
-    onClose();
-  }, [results, workspacePath, currentBranch, switchBranch, onClose]);
+  }, [results, workspacePath, currentBranch, switchBranch, createBranch, onClose]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     switch (e.key) {
@@ -88,16 +105,29 @@ function BranchPicker({ onClose }: { onClose: () => void }) {
           style={{ width: '100%', padding: '10px 14px', background: 'var(--bg-input)', border: 'none', borderBottom: '1px solid var(--border)', color: 'var(--text-primary)', fontSize: 14, outline: 'none', boxSizing: 'border-box' }} />
         <div ref={listRef} style={{ maxHeight: 350, overflowY: 'auto' }}>
           {results.map((result, index) => (
-            <div key={result.name} data-index={index}
+            <div key={`${result.kind}-${result.name}`} data-index={index}
               onMouseEnter={() => setSelectedIndex(index)}
               onClick={() => handleSelect(index)}
               style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 14px', cursor: 'pointer', background: index === selectedIndex ? 'var(--hover)' : 'transparent', color: 'var(--text-primary)', fontSize: 13, userSelect: 'none' }}>
-              <GitBranch size={14} style={{ color: 'var(--text-secondary)', flexShrink: 0 }} />
-              <span style={{ flex: 1 }}>{highlightMatches(result.name, result.matches)}</span>
-              {result.name === currentBranch && <Check size={14} style={{ color: 'var(--accent)', flexShrink: 0 }} />}
+              {result.kind === 'create' ? (
+                <span style={{ flex: 1 }}>
+                  {'＋ Create branch \''}{result.name}{'\''}
+                </span>
+              ) : (
+                <>
+                  <GitBranch size={14} style={{ color: 'var(--text-secondary)', flexShrink: 0 }} />
+                  <span style={{ flex: 1 }}>{highlightMatches(result.name, result.matches)}</span>
+                  {result.name === currentBranch && <Check size={14} style={{ color: 'var(--accent)', flexShrink: 0 }} />}
+                </>
+              )}
             </div>
           ))}
-          {results.length === 0 && (
+          {results.length === 0 && branches.length === 0 && isBranchesLoading && (
+            <div style={{ padding: '12px 14px', color: 'var(--text-secondary)', fontSize: 13, textAlign: 'center' }}>
+              Loading branches…
+            </div>
+          )}
+          {results.length === 0 && !isBranchesLoading && (
             <div style={{ padding: '12px 14px', color: 'var(--text-secondary)', fontSize: 13, textAlign: 'center' }}>
               No matching branches
             </div>

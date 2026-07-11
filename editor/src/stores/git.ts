@@ -29,6 +29,7 @@ interface GitStatusResult {
 interface GitState {
   branch: string | null;
   branches: string[];
+  isBranchesLoading: boolean;
   stagedFiles: GitFileStatus[];
   unstagedFiles: GitFileStatus[];
   commitMessage: string;
@@ -132,6 +133,7 @@ async function reloadAfterCheckout(
 export const useGitStore = create<GitState>((set, get) => ({
   branch: null,
   branches: [],
+  isBranchesLoading: false,
   stagedFiles: [],
   unstagedFiles: [],
   commitMessage: '',
@@ -179,11 +181,18 @@ export const useGitStore = create<GitState>((set, get) => ({
   },
 
   refreshBranches: async (workspacePath: string) => {
+    // Note: `branches` is intentionally left untouched until the fetch
+    // resolves — stale branches stay on screen (no flash to empty) while
+    // this refresh runs in the background. Consumers gate a "Loading…"
+    // affordance on `branches.length === 0 && isBranchesLoading`.
+    set({ isBranchesLoading: true });
     try {
       const branches = await invoke<string[]>('git_list_branches', { workspacePath });
       set({ branches });
     } catch {
       set({ branches: [] });
+    } finally {
+      set({ isBranchesLoading: false });
     }
   },
 
@@ -419,6 +428,7 @@ export const useGitStore = create<GitState>((set, get) => ({
   reset: () => set({
     branch: null,
     branches: [],
+    isBranchesLoading: false,
     stagedFiles: [],
     unstagedFiles: [],
     commitMessage: '',
