@@ -917,18 +917,6 @@ pub fn diff_unity_assets(
 
 // ── Tauri commands ───────────────────────────────────────────────────────--
 
-/// `git show :<path>` — the index (staged) blob, stage 0. Empty string on any
-/// failure (untracked / not staged / no repo), mirroring `git::git_show_head`.
-fn show_index(workspace_path: &str, file_path: &str) -> String {
-    let output = std::process::Command::new("git")
-        .args(["-C", workspace_path, "show", &format!(":{file_path}")])
-        .output();
-    match output {
-        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).to_string(),
-        _ => String::new(),
-    }
-}
-
 /// `git show <rev>:<path>`. Empty string on any failure.
 fn show_rev(workspace_path: &str, rev: &str, file_path: &str) -> String {
     let output = std::process::Command::new("git")
@@ -952,9 +940,16 @@ pub fn unity_scene_diff(
     file_path: String,
     staged: bool,
 ) -> Result<SceneDiff, String> {
-    let old_content = git::git_show_head(workspace_path.clone(), file_path.clone()).unwrap_or_default();
+    // `git_show_head` / `git_show_index` classify their failures: Ok("") for
+    // the benign missing-in-HEAD/index cases (new/untracked file, staged
+    // deletion — which diff cleanly against empty), Err only for real git
+    // failures (e.g. broken repo). Real errors are propagated: the frontend's
+    // `SceneDiffViewer` catches a rejected `unity_scene_diff` invoke, logs
+    // it, and falls back to the plain Monaco text diff (`onFallback`), so an
+    // Err here degrades gracefully instead of rendering a bogus empty diff.
+    let old_content = git::git_show_head(workspace_path.clone(), file_path.clone())?;
     let new_content = if staged {
-        show_index(&workspace_path, &file_path)
+        git::git_show_index(workspace_path.clone(), file_path.clone())?
     } else {
         let full_path = std::path::Path::new(&workspace_path).join(&file_path);
         std::fs::read_to_string(&full_path).unwrap_or_default()

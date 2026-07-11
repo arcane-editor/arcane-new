@@ -2925,6 +2925,38 @@ mod staged_diff_tests {
         assert!(!err.is_empty());
     }
 
+    // --- git_blame_file ----------------------------------------------------
+
+    #[tokio::test]
+    async fn blame_untracked_or_missing_path_returns_empty_vec() {
+        let tmp = init_repo();
+        let path = tmp.path().to_str().unwrap().to_string();
+
+        // Untracked (on disk, never committed): `fatal: no such path ... in
+        // HEAD` — classified as "nothing to blame", not an error.
+        std::fs::write(std::path::Path::new(&path).join("new.txt"), "hello\n").unwrap();
+        let lines = git_blame_file(path.clone(), "new.txt".into()).await.unwrap();
+        assert!(lines.is_empty());
+
+        // Never existed anywhere: same stderr shape, same classification.
+        let lines = git_blame_file(path, "never-existed.txt".into())
+            .await
+            .unwrap();
+        assert!(lines.is_empty());
+    }
+
+    #[tokio::test]
+    async fn blame_bogus_repo_path_errors() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().to_str().unwrap().to_string();
+        // Deliberately NOT a git repo — no `git init` here.
+
+        let result = git_blame_file(path, "a.txt".into()).await;
+
+        let err = result.expect_err("a non-git directory must error, not Ok(vec![])");
+        assert!(!err.is_empty());
+    }
+
     // --- serde contract: GitStatusResult / GitFileStatus field names ------
 
     /// Pins the exact JSON field names the frontend's `GitStatusResult`/
