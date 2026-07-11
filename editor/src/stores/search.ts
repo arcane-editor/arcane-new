@@ -154,6 +154,8 @@ export const useSearchStore = create<SearchState>((set, get) => ({
           includePatterns: parseGlobList(includePattern),
           excludePatterns: parseGlobList(excludePattern),
           fileExtensions: isUnity ? ['cs'] : null,
+          maxTotalMatches: null,
+          maxMatchesPerFile: null,
         },
       });
       // No further action here: results arrive via the batch/complete
