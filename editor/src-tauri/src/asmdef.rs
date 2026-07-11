@@ -10,6 +10,7 @@
 //! resolves `GUID:<hex>` references through the meta-file GUID map, and exposes
 //! `resolve_owning_assembly` implementing Unity's predefined-assembly rules.
 
+use crate::sync_util::lock_recover;
 use regex::Regex;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -326,18 +327,19 @@ fn graph_cache() -> &'static Mutex<Option<GraphCache>> {
 #[tauri::command]
 pub fn asmdef_build_graph(workspace_path: String) -> Result<Vec<AsmdefNode>, String> {
     let nodes = build_graph(Path::new(&workspace_path));
-    if let Ok(mut cache) = graph_cache().lock() {
-        *cache = Some(GraphCache {
-            workspace: workspace_path,
-            nodes: nodes.clone(),
-        });
-    }
+    let mut cache = lock_recover(graph_cache());
+    *cache = Some(GraphCache {
+        workspace: workspace_path,
+        nodes: nodes.clone(),
+    });
+    drop(cache);
     Ok(nodes)
 }
 
 #[tauri::command]
 pub fn asmdef_graph_get(workspace_path: String) -> Result<Vec<AsmdefNode>, String> {
-    if let Ok(cache) = graph_cache().lock() {
+    {
+        let cache = lock_recover(graph_cache());
         if let Some(c) = cache.as_ref() {
             if c.workspace == workspace_path {
                 return Ok(c.nodes.clone());

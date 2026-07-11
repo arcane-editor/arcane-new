@@ -15,6 +15,7 @@ mod unity_ipc;
 mod dap;
 mod auth;
 mod graphify;
+mod sync_util;
 mod walk_policy;
 #[cfg(target_os = "macos")]
 mod menu;
@@ -41,6 +42,12 @@ pub struct FileContent {
     pub content: String,
 }
 
+/// Stays `sync` (not converted for C8): a single non-recursive `fs::read_dir`
+/// call — no walk, bounded by one directory's entry count — invoked very
+/// frequently (every lazy file-tree expand). Cheap enough that main-thread
+/// dispatch is the right tradeoff (an `async` command still pays IPC/task
+/// scheduling overhead), and its only fallible operation (`fs::read_dir`) is
+/// already funneled through `?`/`Result`, not a panic path.
 #[tauri::command]
 fn read_directory(path: String) -> Result<Vec<FileEntry>, String> {
     let entries = fs::read_dir(&path).map_err(|e| e.to_string())?;
@@ -108,7 +115,17 @@ fn path_exists(path: String) -> bool {
     Path::new(&path).is_file()
 }
 
-#[tauri::command]
+/// `async`: full recursive `WalkDir` walk over the workspace (TS/JS project
+/// files, used by the Monaco TS worker to seed the in-memory FS). Dispatched
+/// onto Tauri's blocking thread pool (see `tauri::command(async)` on a
+/// non-`async fn`) instead of the main thread — see C8's crash-hardening
+/// notes on `debug_panic_sync`/`debug_panic_async` in `run()` for why: a
+/// panic here (e.g. a symlink cycle or permissions edge case `WalkDir`
+/// doesn't fully guard against) would otherwise unwind across the native
+/// webview's FFI callback and abort the whole process. `invoke()` on the
+/// frontend is a `Promise` either way, so this is not a breaking change for
+/// callers.
+#[tauri::command(async)]
 fn scan_workspace_files(path: String) -> Result<Vec<String>, String> {
     let skip_dirs: &[&str] = &[
         "node_modules", "target", ".git", "dist", "build", ".next", ".nuxt",
@@ -154,7 +171,11 @@ fn scan_workspace_files(path: String) -> Result<Vec<String>, String> {
     Ok(files)
 }
 
-#[tauri::command]
+/// `async` for the same reason as `scan_workspace_files` above — a full
+/// recursive `WalkDir` over the entire workspace (used for AI-context file
+/// enumeration and the Unity scene-context panel), moved off the main thread
+/// so it can't block the UI or, if it panics, take down every window.
+#[tauri::command(async)]
 fn scan_all_files(workspace_path: String) -> Result<Vec<String>, String> {
     let skip_dirs: &[&str] = &["node_modules", "target", ".git", "dist", "build", ".next", ".nuxt"];
     let files: Vec<String> = WalkDir::new(&workspace_path)
@@ -214,7 +235,14 @@ fn delete_path(path: String) -> Result<(), String> {
     }
 }
 
-#[tauri::command]
+/// `async`: reads an arbitrary-length list of files synchronously in a tight
+/// loop (used to bulk-load TS lib/type-declaration files for the Monaco TS
+/// worker — can be dozens to low hundreds of files per call on a large
+/// workspace). Same reasoning as the two `WalkDir`-based commands above:
+/// moved off the main thread so a slow disk or an unexpected panic
+/// (`fs::read_to_string` on a file that changes underfoot, etc.) can't stall
+/// or crash the whole app.
+#[tauri::command(async)]
 fn read_files_bulk(paths: Vec<String>) -> Result<Vec<FileContent>, String> {
     let results: Vec<FileContent> = paths
         .into_iter()
@@ -229,7 +257,13 @@ fn read_files_bulk(paths: Vec<String>) -> Result<Vec<FileContent>, String> {
 
 /// Scans ALL .d.ts files in node_modules — this is how VS Code resolves
 /// subpath imports like `@trpc/server/adapters/express`.
-#[tauri::command]
+///
+/// `async` (C8, bonus finding beyond the originally-scoped candidate list —
+/// this walk wasn't named in the C8 task brief but is the same shape of risk
+/// as `scan_workspace_files`/`scan_all_files`): `node_modules` in a large JS
+/// project routinely has tens of thousands of entries, so this is at least
+/// as heavy as the two `WalkDir` commands already converted above.
+#[tauri::command(async)]
 fn scan_node_modules_types(workspace_path: String) -> Result<Vec<String>, String> {
     let node_modules = Path::new(&workspace_path).join("node_modules");
     if !node_modules.is_dir() {
@@ -311,8 +345,158 @@ async fn execute_command(
     })
 }
 
+/// Installs a process-wide panic hook: prints the panic (message + source
+/// location) to stderr via Rust's default hook (unchanged formatting/output
+/// tooling may already parse), then best-effort appends the same
+/// information as one line to `panics.log` under the app data dir.
+///
+/// This does NOT change panic semantics anywhere — it's pure observability.
+/// See `debug_panic_sync`/`debug_panic_async` below for what actually
+/// happens (crash vs. contained) when a command panics; this hook fires
+/// either way and is the only place a sync-command crash (which takes the
+/// whole process down before any other code could log it) gets a chance to
+/// leave a trace before the process dies.
+///
+/// Every step here is best-effort: a failure to create the directory, open
+/// the file, or write to it is silently swallowed. A panic *inside the
+/// panic hook itself* would trigger Rust's "panic while panicking" abort
+/// immediately, which is strictly worse than just losing the log line, so
+/// nothing here is allowed to fail loudly.
+fn install_panic_hook() {
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        // Run the default hook first — its stderr formatting (backtrace
+        // hint, thread name, etc.) is more complete than anything hand-rolled
+        // here, and this preserves that output for anyone watching a
+        // terminal/dev console.
+        default_hook(info);
+
+        let location = info
+            .location()
+            .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
+            .unwrap_or_else(|| "<unknown location>".to_string());
+        let payload = if let Some(s) = info.payload().downcast_ref::<&str>() {
+            (*s).to_string()
+        } else if let Some(s) = info.payload().downcast_ref::<String>() {
+            s.clone()
+        } else {
+            "<non-string panic payload>".to_string()
+        };
+        let thread_name = std::thread::current()
+            .name()
+            .unwrap_or("<unnamed>")
+            .to_string();
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default();
+        let line = format!(
+            "[{}.{:03}] thread '{}' panicked at {}: {}\n",
+            ts.as_secs(),
+            ts.subsec_millis(),
+            thread_name,
+            location,
+            payload
+        );
+
+        let Some(mut path) = dirs::data_dir() else {
+            return;
+        };
+        path.push("editor");
+        if std::fs::create_dir_all(&path).is_err() {
+            return;
+        }
+        path.push("panics.log");
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+        {
+            let _ = std::io::Write::write_all(&mut f, line.as_bytes());
+        }
+    }));
+}
+
+/// Dev-only, unregistered-in-release command used to empirically verify
+/// crash-containment behavior for the C8 hardening pass (see
+/// `debug_panic_async` below for the async counterpart and the source-reading
+/// this is based on).
+///
+/// Per tauri 2.x's command dispatch (`tauri-macros` `wrapper::body_blocking`,
+/// generated for any `#[tauri::command]` *without* the `async` modifier — see
+/// `~/.cargo/registry/src/*/tauri-macros-2.5.5/src/command/wrapper.rs`), a
+/// blocking command's body runs inline, synchronously, on whatever thread
+/// delivered the IPC message (`WebviewWindow::on_message`, called directly
+/// from the platform webview's IPC callback — for the default wry runtime
+/// that's the native webview delegate on the main UI thread). That callback
+/// is a Rust fn called back *from* the native (Objective-C/COM/GTK) webview
+/// through an `extern "C"` boundary. Unwinding a panic across an `extern "C"`
+/// boundary is UB, and since Rust 1.71 the runtime detects this and aborts
+/// the process immediately — this project sets no `panic = "abort"` profile
+/// anywhere (checked: no such key in `src-tauri/Cargo.toml`), so the abort
+/// here is the FFI-boundary safety net kicking in, not a build setting.
+///
+/// EXPECTED (documented, not yet empirically verified — see manual-pass note
+/// in the C8 report): invoking this command from any window kills the entire
+/// process, i.e. every window, reproducing the reported "one window crashes,
+/// all windows die" bug. This is exactly the failure mode C8's other changes
+/// (poison recovery, sync→async conversion of heavy commands) mitigate
+/// around, since fixing the FFI-abort itself would require process-per-window
+/// isolation (see the future-work note on `run()` below) — out of scope for
+/// this pragmatic pass.
+#[cfg(debug_assertions)]
+#[tauri::command]
+fn debug_panic_sync() {
+    panic!("debug_panic_sync: intentional panic for C8 crash-hardening verification");
+}
+
+/// Dev-only, unregistered-in-release command — async counterpart of
+/// `debug_panic_sync`.
+///
+/// Per the same dispatch code (`wrapper::body_async`, used for any
+/// `#[tauri::command(async)]` or `async fn` command), the command's future is
+/// handed to `resolver.respond_async_serialized`, which wraps it in
+/// `tauri::async_runtime::spawn` — a `tokio::spawn` under this project's
+/// default (tokio) async runtime feature. A panic inside a spawned tokio task
+/// is caught by tokio's own per-task unwind boundary (each task is polled
+/// inside a `catch_unwind`); the task's `JoinHandle` would observe a
+/// `JoinError::is_panic()` if anyone awaited it, but nothing here does — the
+/// response future itself panicked, so the frontend's `invoke()` promise for
+/// this call simply never resolves or rejects. Critically, the panic does
+/// NOT propagate to the tokio worker thread or the process: every other
+/// window, and every other in-flight command on the same worker thread pool,
+/// keeps running.
+///
+/// EXPECTED (documented, not yet empirically verified — manual-pass item):
+/// calling this command hangs only the calling frontend's promise for this
+/// one invocation; the app (all windows) stays up. This is the behavior
+/// step 4 (sync→async conversion) leans on: moving heavy fs-walk commands
+/// onto this path trades "possible unhandled panic kills everyone" for
+/// "possible unhandled panic strands one promise."
+#[cfg(debug_assertions)]
+#[tauri::command(async)]
+async fn debug_panic_async() {
+    panic!("debug_panic_async: intentional panic for C8 crash-hardening verification");
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    install_panic_hook();
+
+    // ── Future work (deferred, out of scope for C8's pragmatic pass) ──────
+    // The structural fix for "one window's bug takes down every window" is
+    // process-per-window isolation (spawn a child process per project
+    // window instead of sharing one Rust process/Mutex-guarded state across
+    // all of them). C8 deliberately does NOT do that — it's a much larger
+    // change (IPC between a supervisor process and per-window worker
+    // processes, window lifecycle/restart UX, etc.). What C8 does instead:
+    // poison-recover the shared std::sync::Mutex state so one panic doesn't
+    // permanently wedge every other window's access to that state
+    // (`sync_util::lock_recover`), move the heaviest sync fs-walk commands
+    // onto tokio's task-isolated async dispatch path so a panic there can't
+    // reach the FFI-boundary abort path at all, and log panics (this hook)
+    // so a crash leaves a paper trail. Revisit process-per-window isolation
+    // if sync-command panics remain a recurring source of whole-app crashes
+    // after this pass.
     tauri::Builder::default()
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_opener::init())
@@ -340,6 +524,10 @@ pub fn run() {
             delete_path,
             read_files_bulk,
             scan_node_modules_types,
+            #[cfg(debug_assertions)]
+            debug_panic_sync,
+            #[cfg(debug_assertions)]
+            debug_panic_async,
             settings::read_settings,
             settings::write_settings,
             search::start_content_search,

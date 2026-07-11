@@ -1,3 +1,4 @@
+use crate::sync_util::lock_recover;
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions, create_dir_all};
 use std::io::Write as _;
@@ -42,12 +43,11 @@ fn trace_open_session(header: &str, truncate: bool) {
         .ok();
 
     let slot = TRACE.get_or_init(|| StdMutex::new(None));
-    if let Ok(mut guard) = slot.lock() {
-        *guard = file;
-        if let Some(f) = guard.as_mut() {
-            let _ = writeln!(f, "{}", header);
-            let _ = f.flush();
-        }
+    let mut guard = lock_recover(slot);
+    *guard = file;
+    if let Some(f) = guard.as_mut() {
+        let _ = writeln!(f, "{}", header);
+        let _ = f.flush();
     }
 }
 
@@ -62,11 +62,10 @@ fn trace_append(language: &str, prefix: &str, body: &str) {
         Some(s) => s,
         None => return,
     };
-    if let Ok(mut guard) = slot.lock() {
-        if let Some(f) = guard.as_mut() {
-            let _ = writeln!(f, "[{} {}] {} {}", ts_unix(), language, prefix, body);
-            let _ = f.flush();
-        }
+    let mut guard = lock_recover(slot);
+    if let Some(f) = guard.as_mut() {
+        let _ = writeln!(f, "[{} {}] {} {}", ts_unix(), language, prefix, body);
+        let _ = f.flush();
     }
 }
 

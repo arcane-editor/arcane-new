@@ -1,3 +1,4 @@
+use crate::sync_util::lock_recover;
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use serde::Serialize;
 use std::collections::HashMap;
@@ -39,13 +40,12 @@ impl TerminalState {
     }
 
     pub fn drop_window(&self, label: &str) {
-        if let Ok(mut map) = self.windows.lock() {
-            if let Some(mut slot) = map.remove(label) {
-                let ids: Vec<u32> = slot.instances.keys().copied().collect();
-                for id in ids {
-                    if let Some(mut inst) = slot.instances.remove(&id) {
-                        let _ = inst.child.kill();
-                    }
+        let mut map = lock_recover(&self.windows);
+        if let Some(mut slot) = map.remove(label) {
+            let ids: Vec<u32> = slot.instances.keys().copied().collect();
+            for id in ids {
+                if let Some(mut inst) = slot.instances.remove(&id) {
+                    let _ = inst.child.kill();
                 }
             }
         }
@@ -120,7 +120,7 @@ pub fn terminal_spawn(
 ) -> Result<u32, String> {
     let label = window.label().to_string();
     let id = {
-        let mut map = state.windows.lock().map_err(|e| e.to_string())?;
+        let mut map = lock_recover(&state.windows);
         let slot = map.entry(label.clone()).or_insert_with(WindowSlot::new);
         let current = slot.next_id;
         slot.next_id += 1;
@@ -217,7 +217,7 @@ pub fn terminal_spawn(
         _reader_thread: Some(reader_thread),
     };
 
-    let mut map = state.windows.lock().map_err(|e| e.to_string())?;
+    let mut map = lock_recover(&state.windows);
     let slot = map.entry(label).or_insert_with(WindowSlot::new);
     slot.instances.insert(id, instance);
 
@@ -232,7 +232,7 @@ pub fn terminal_write(
     data: String,
 ) -> Result<(), String> {
     let label = window.label();
-    let mut map = state.windows.lock().map_err(|e| e.to_string())?;
+    let mut map = lock_recover(&state.windows);
     let slot = map
         .get_mut(label)
         .ok_or_else(|| format!("No terminal window slot for {}", label))?;
@@ -258,7 +258,7 @@ pub fn terminal_resize(
     cols: u16,
 ) -> Result<(), String> {
     let label = window.label();
-    let map = state.windows.lock().map_err(|e| e.to_string())?;
+    let map = lock_recover(&state.windows);
     let slot = map
         .get(label)
         .ok_or_else(|| format!("No terminal window slot for {}", label))?;
@@ -282,7 +282,7 @@ pub fn terminal_kill(
     id: u32,
 ) -> Result<(), String> {
     let label = window.label();
-    let mut map = state.windows.lock().map_err(|e| e.to_string())?;
+    let mut map = lock_recover(&state.windows);
     if let Some(slot) = map.get_mut(label) {
         if let Some(mut instance) = slot.instances.remove(&id) {
             let _ = instance.child.kill();

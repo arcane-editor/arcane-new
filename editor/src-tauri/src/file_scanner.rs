@@ -1,4 +1,5 @@
 use crate::file_index;
+use crate::sync_util::lock_recover;
 use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use nucleo_matcher::pattern::{Atom, AtomKind, CaseMatching, Normalization};
 use nucleo_matcher::{Matcher, Utf32Str};
@@ -188,7 +189,12 @@ impl FileWatcherState {
 /// appends root-level `.env`/`.env.*` files the walker didn't already yield
 /// (they're whitelisted even when gitignored — see
 /// `walk_policy::root_env_files`).
-#[tauri::command]
+///
+/// `async` (C8, bonus finding — see `lib.rs::scan_all_files`'s doc comment
+/// for the general reasoning): a full policy-aware recursive walk, same risk
+/// shape as `lib.rs`'s simpler `scan_all_files`, used by the Unity
+/// scene-context panel. Moved off the main thread for the same reasons.
+#[tauri::command(async)]
 pub fn scan_all_files_v2(
     workspace_path: String,
     extra_excludes: Vec<String>,
@@ -266,7 +272,7 @@ pub fn fuzzy_search_files_impl(
     }
 
     let cached: Option<Arc<Vec<String>>> = {
-        let guard = state.0.lock().map_err(|e| e.to_string())?;
+        let guard = lock_recover(&state.0);
         guard.as_ref().and_then(|idx| {
             if !idx.stale
                 && idx.workspace_path == workspace_path
@@ -283,7 +289,7 @@ pub fn fuzzy_search_files_impl(
         Some(files) => files,
         None => {
             let fresh = Arc::new(file_index::walk_files(&workspace_path, &extra_excludes));
-            let mut guard = state.0.lock().map_err(|e| e.to_string())?;
+            let mut guard = lock_recover(&state.0);
             *guard = Some(file_index::FileIndex {
                 workspace_path: workspace_path.clone(),
                 extra_excludes: extra_excludes.clone(),
@@ -512,7 +518,7 @@ pub async fn start_file_watcher(
     workspace_path: String,
 ) -> Result<(), String> {
     let state = app.state::<Mutex<FileWatcherState>>();
-    let mut state = state.lock().map_err(|e| e.to_string())?;
+    let mut state = lock_recover(&state);
 
     // Stop existing watcher if any
     state.watcher = None;
@@ -718,7 +724,7 @@ pub async fn start_file_watcher(
 #[tauri::command]
 pub async fn stop_file_watcher(app: AppHandle) -> Result<(), String> {
     let state = app.state::<Mutex<FileWatcherState>>();
-    let mut state = state.lock().map_err(|e| e.to_string())?;
+    let mut state = lock_recover(&state);
     state.watcher = None;
     state._shutdown_tx = None;
     Ok(())

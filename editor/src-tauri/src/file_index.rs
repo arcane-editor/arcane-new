@@ -69,6 +69,7 @@ use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use ignore::overrides::Override;
 
 use crate::file_scanner::FileIndexDelta;
+use crate::sync_util::lock_recover;
 use crate::walk_policy;
 
 /// A workspace's cached file list plus the parameters it was built with, so
@@ -162,7 +163,7 @@ pub fn build_index(
 ) -> Result<usize, String> {
     let files = walk_files(&workspace_path, &extra_excludes);
     let count = files.len();
-    let mut guard = state.0.lock().map_err(|e| e.to_string())?;
+    let mut guard = lock_recover(&state.0);
     *guard = Some(FileIndex {
         workspace_path,
         extra_excludes,
@@ -351,11 +352,10 @@ pub fn apply_delta(state: &FileIndexState, delta: &FileIndexDelta) {
     // otherwise permanently break the index for the rest of the session —
     // this is a background watcher task with no way to surface an error to
     // the user, so recovering the guard and continuing best-effort beats
-    // silently going dark on every future filesystem change.
-    let mut guard = match state.0.lock() {
-        Ok(g) => g,
-        Err(poisoned) => poisoned.into_inner(),
-    };
+    // silently going dark on every future filesystem change. See
+    // `sync_util::lock_recover` for why that's safe for this plain-data
+    // state.
+    let mut guard = lock_recover(&state.0);
     let Some(index) = guard.as_mut() else {
         return;
     };

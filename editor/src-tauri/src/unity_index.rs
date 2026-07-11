@@ -15,6 +15,7 @@
 //! without a full rescan. Coarse progress is emitted via the
 //! `unity-index-progress` Tauri event.
 
+use crate::sync_util::lock_recover;
 use crate::unity_yaml;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -425,7 +426,8 @@ fn ensure_index(
 
     if !force {
         // In-process cache hit?
-        if let Ok(cache) = index_cache().lock() {
+        {
+            let cache = lock_recover(index_cache());
             if let Some(state) = cache.as_ref() {
                 if state.workspace == ws_str && state.unity_version == unity_version {
                     return (state.clone(), true);
@@ -434,17 +436,17 @@ fn ensure_index(
         }
         // Persisted fresh file?
         if let Some(state) = load_fresh(workspace, unity_version) {
-            if let Ok(mut cache) = index_cache().lock() {
-                *cache = Some(state.clone());
-            }
+            let mut cache = lock_recover(index_cache());
+            *cache = Some(state.clone());
+            drop(cache);
             return (state, true);
         }
     }
 
     let state = build_state(workspace, unity_version, window);
-    if let Ok(mut cache) = index_cache().lock() {
-        *cache = Some(state.clone());
-    }
+    let mut cache = lock_recover(index_cache());
+    *cache = Some(state.clone());
+    drop(cache);
     (state, false)
 }
 
@@ -461,7 +463,8 @@ pub(crate) fn get_or_build(workspace_path: &str) -> IndexState {
 
     // Reuse the in-process cache regardless of unity version (queries don't
     // need version-keying; the build command handles freshness).
-    if let Ok(cache) = index_cache().lock() {
+    {
+        let cache = lock_recover(index_cache());
         if let Some(state) = cache.as_ref() {
             if state.workspace == ws_str {
                 return state.clone();
@@ -475,9 +478,9 @@ pub(crate) fn get_or_build(workspace_path: &str) -> IndexState {
     if let Ok(content) = std::fs::read_to_string(index_file(workspace)) {
         if let Ok(wrapper) = serde_json::from_str::<PersistedIndex>(&content) {
             if wrapper.schema_version == SCHEMA_VERSION && wrapper.project_path == ws_str {
-                if let Ok(mut cache) = index_cache().lock() {
-                    *cache = Some(wrapper.state.clone());
-                }
+                let mut cache = lock_recover(index_cache());
+                *cache = Some(wrapper.state.clone());
+                drop(cache);
                 return wrapper.state;
             }
         }
@@ -594,9 +597,9 @@ pub fn unity_index_apply_delta(
     // Persist + cache the updated state (preserve its unity_version).
     let version = state.unity_version.clone();
     persist(workspace, &version, &state);
-    if let Ok(mut cache) = index_cache().lock() {
-        *cache = Some(state);
-    }
+    let mut cache = lock_recover(index_cache());
+    *cache = Some(state);
+    drop(cache);
     Ok(())
 }
 
@@ -628,9 +631,7 @@ mod tests {
 
     /// Reset the in-process cache so tests don't leak state into one another.
     fn clear_cache() {
-        if let Ok(mut c) = index_cache().lock() {
-            *c = None;
-        }
+        *lock_recover(index_cache()) = None;
     }
 
     const SCRIPT_GUID: &str = "0123456789abcdef0123456789abcdef";
