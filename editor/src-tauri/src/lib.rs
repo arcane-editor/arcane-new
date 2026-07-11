@@ -315,6 +315,7 @@ pub fn run() {
         .manage(Mutex::new(file_scanner::FileWatcherState::new()))
         .manage(unity_ipc::UnityIpcState::new())
         .manage(dap::DapState::new())
+        .manage(search::ContentSearchState::new())
         .invoke_handler(tauri::generate_handler![
             read_directory,
             read_file,
@@ -330,6 +331,8 @@ pub fn run() {
             settings::read_settings,
             settings::write_settings,
             search::search_in_files,
+            search::start_content_search,
+            search::cancel_content_search,
             lsp::lsp_start,
             lsp::lsp_send,
             lsp::lsp_stop,
