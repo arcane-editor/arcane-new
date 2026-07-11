@@ -160,6 +160,11 @@ interface TabMenuItem {
 }
 
 function TabMenu({ x, y, realPath, workspacePath, onClose, onAction, onCloseTab }: TabMenuProps) {
+  function handleItem(cb: () => void) {
+    cb();
+    onClose();
+  }
+
   const closeItems: TabMenuItem[] = [
     { label: 'Close', onClick: onCloseTab },
     { label: 'Close Others', onClick: () => onAction('tab.closeOthers') },
@@ -172,14 +177,18 @@ function TabMenu({ x, y, realPath, workspacePath, onClose, onAction, onCloseTab 
           label: 'Copy Path',
           icon: Copy,
           onClick: () => {
-            void navigator.clipboard.writeText(realPath);
+            void navigator.clipboard.writeText(realPath).catch((err) => {
+              console.error('[TabBar] Failed to copy path:', err);
+            });
           },
         },
         {
           label: 'Copy Relative Path',
           icon: Copy,
           onClick: () => {
-            void navigator.clipboard.writeText(toRelativePath(realPath, workspacePath));
+            void navigator.clipboard.writeText(toRelativePath(realPath, workspacePath)).catch((err) => {
+              console.error('[TabBar] Failed to copy relative path:', err);
+            });
           },
         },
         {
@@ -247,7 +256,7 @@ function TabMenu({ x, y, realPath, workspacePath, onClose, onAction, onCloseTab 
               return (
                 <button
                   key={item.label}
-                  onClick={item.onClick}
+                  onClick={() => handleItem(item.onClick)}
                   onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg-hover)')}
                   onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
                   style={{

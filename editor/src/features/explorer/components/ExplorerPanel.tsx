@@ -404,10 +404,14 @@ function ExplorerPanel() {
           onRename={() => setRenamingNodeId(contextMenu.nodeId)}
           onDelete={() => handleDelete(contextMenu.path)}
           onCopyPath={() => {
-            void navigator.clipboard.writeText(contextMenu.path);
+            void navigator.clipboard.writeText(contextMenu.path).catch((err) => {
+              console.error('[Explorer] Failed to copy path:', err);
+            });
           }}
           onCopyRelativePath={() => {
-            void navigator.clipboard.writeText(toRelativePath(contextMenu.path, workspacePath));
+            void navigator.clipboard.writeText(toRelativePath(contextMenu.path, workspacePath)).catch((err) => {
+              console.error('[Explorer] Failed to copy relative path:', err);
+            });
           }}
           onRevealInOs={() => {
             revealItemInDir(contextMenu.path).catch((err) => {
