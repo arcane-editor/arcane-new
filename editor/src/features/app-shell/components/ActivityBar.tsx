@@ -3,6 +3,7 @@ import { useUiStore, type SidebarView } from '../../../stores/ui';
 import { useCommandsStore } from '../../../stores/commands';
 import { useProjectContextStore } from '../../../stores/project-context';
 import { useSettingsStore } from '../../../stores/settings';
+import { useGitStore } from '../../../stores/git';
 
 const SIDEBAR_ITEMS: Array<{ id: SidebarView; icon: typeof Files; label: string }> = [
   { id: 'explorer', icon: Files, label: 'Explorer' },
@@ -17,6 +18,13 @@ function ActivityBar() {
   const debuggerEnabled = useSettingsStore((s) => s.getSetting('unity.debugger.enabled') !== false);
   const hierarchyEnabled = useSettingsStore((s) => s.getSetting('unity.hierarchyPanel.enabled') !== false);
   const testRunnerEnabled = useSettingsStore((s) => s.getSetting('unity.testRunner.enabled') !== false);
+
+  // Narrow selector: only re-render when changed file count changes
+  const changedCount = useGitStore((s) => {
+    const allChanges = [...s.stagedFiles, ...s.unstagedFiles].map((f) => f.path);
+    const uniquePaths = new Set(allChanges);
+    return uniquePaths.size;
+  });
 
   const items: typeof SIDEBAR_ITEMS = [
     ...SIDEBAR_ITEMS,
@@ -49,6 +57,28 @@ function ActivityBar() {
           title={label}
         >
           <Icon size={24} />
+          {id === 'source-control' && changedCount > 0 && (
+            <div
+              style={{
+                position: 'absolute',
+                top: '-2px',
+                right: '-2px',
+                background: 'var(--accent)',
+                color: 'var(--text-active)',
+                borderRadius: '50%',
+                minWidth: '18px',
+                height: '18px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '9px',
+                fontWeight: 600,
+                padding: '0 3px',
+              }}
+            >
+              {changedCount > 99 ? '99+' : changedCount}
+            </div>
+          )}
         </button>
       ))}
 
