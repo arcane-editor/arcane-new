@@ -213,7 +213,8 @@ fn collect_files(workspace: &Path) -> Vec<PathBuf> {
 
 fn emit_progress(window: Option<&Window>, phase: &str, done: usize, total: usize) {
     if let Some(w) = window {
-        let _ = w.emit(
+        let _ = w.emit_to(
+            w.label(),
             "unity-index-progress",
             serde_json::json!({ "phase": phase, "done": done, "total": total }),
         );

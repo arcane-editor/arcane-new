@@ -270,9 +270,15 @@ pub fn scan_all_files_v2(
 /// dispatches this onto Tauri's blocking thread pool so a cold-cache
 /// rebuild (a full directory walk) cannot stall the main/async runtime the
 /// way a `sync` command would.
+///
+/// `window` is auto-injected by Tauri (no frontend invoke change needed —
+/// same precedent as `terminal.rs`'s `terminal_spawn`); the index lookup is
+/// keyed by `window.label()` so one window's fuzzy search never reads or
+/// rebuilds another window's cached index.
 #[tauri::command(async)]
 pub fn fuzzy_search_files(
     state: tauri::State<'_, file_index::FileIndexState>,
+    window: tauri::Window,
     workspace_path: String,
     query: String,
     max_results: usize,
@@ -281,6 +287,7 @@ pub fn fuzzy_search_files(
 ) -> Result<Vec<FuzzyFileResult>, String> {
     fuzzy_search_files_impl(
         &state,
+        window.label(),
         workspace_path,
         query,
         max_results,
@@ -293,11 +300,12 @@ pub fn fuzzy_search_files(
 /// command — split out so tests can drive it against a bare
 /// `FileIndexState` without standing up a Tauri app.
 ///
-/// Cache policy: the cached index is used as-is when it exists, isn't
+/// Cache policy: `label`'s cached index is used as-is when it exists, isn't
 /// `stale`, and was built for this exact `(workspace_path, extra_excludes)`
 /// pair; otherwise a fresh walk replaces it (covers the first call, a
 /// workspace switch, an exclude-pattern change, and a `.gitignore`/`.ignore`
-/// edit that flipped `stale` via `file_index::apply_delta`).
+/// edit that flipped `stale` via `file_index::apply_delta`). Every other
+/// window's entry is untouched either way.
 ///
 /// Lock discipline: the index's file list is cloned out from under the
 /// mutex — on a cache hit directly, on a miss right after the rebuild — and
@@ -320,6 +328,7 @@ pub fn fuzzy_search_files(
 /// `file_index`'s module doc comment covers for `build_file_index`).
 pub fn fuzzy_search_files_impl(
     state: &file_index::FileIndexState,
+    label: &str,
     workspace_path: String,
     query: String,
     max_results: usize,
@@ -332,7 +341,7 @@ pub fn fuzzy_search_files_impl(
 
     let cached: Option<Arc<Vec<String>>> = {
         let guard = lock_recover(&state.0);
-        guard.as_ref().and_then(|idx| {
+        guard.get(label).and_then(|idx| {
             if !idx.stale
                 && idx.workspace_path == workspace_path
                 && idx.extra_excludes == extra_excludes
@@ -349,12 +358,15 @@ pub fn fuzzy_search_files_impl(
         None => {
             let fresh = Arc::new(file_index::walk_files(&workspace_path, &extra_excludes));
             let mut guard = lock_recover(&state.0);
-            *guard = Some(file_index::FileIndex {
-                workspace_path: workspace_path.clone(),
-                extra_excludes: extra_excludes.clone(),
-                files: fresh.clone(),
-                stale: false,
-            });
+            guard.insert(
+                label.to_string(),
+                file_index::FileIndex {
+                    workspace_path: workspace_path.clone(),
+                    extra_excludes: extra_excludes.clone(),
+                    files: fresh.clone(),
+                    stale: false,
+                },
+            );
             fresh
         }
     };
@@ -845,7 +857,7 @@ pub async fn start_file_watcher(
                             if index_needs_rebuild {
                                 let index_state =
                                     app_for_debounce.state::<file_index::FileIndexState>();
-                                file_index::mark_stale(&index_state);
+                                file_index::mark_stale(&index_state, &label_for_debounce);
                             }
 
                             if !pending_added.is_empty() || !pending_removed.is_empty() {
@@ -860,7 +872,7 @@ pub async fn start_file_watcher(
                                 // already sees the updated cache.
                                 let index_state =
                                     app_for_debounce.state::<file_index::FileIndexState>();
-                                file_index::apply_delta(&index_state, &delta);
+                                file_index::apply_delta(&index_state, &label_for_debounce, &delta);
                                 let _ = app_for_debounce.emit_to(
                                     label_for_debounce.as_str(),
                                     "file-index-changed",
@@ -921,6 +933,13 @@ pub async fn stop_file_watcher(app: AppHandle, window: tauri::Window) -> Result<
 mod tests {
     use nucleo_matcher::pattern::{Atom, AtomKind, CaseMatching, Normalization};
     use nucleo_matcher::{Matcher, Utf32Str};
+
+    /// Fixed window label used by the `fuzzy_search_files_impl`/`file_index`
+    /// tests below — these tests exercise a single window's cache behavior,
+    /// not cross-window isolation (that's covered by `file_index.rs`'s own
+    /// `two_labels_hold_independent_indexes` test and the
+    /// `FileWatcherState` multi-window tests further down this module).
+    const LABEL: &str = "test-window";
 
     /// Returns true if `query` fuzzy-matches `haystack` under the given casing.
     /// Mirrors the gate in `fuzzy_search_files`: an entry whose path fails to
@@ -1246,6 +1265,7 @@ mod tests {
 
         let results = fuzzy_search_files_impl(
             &FileIndexState::new(),
+            LABEL,
             tmp.path().to_str().unwrap().to_string(),
             ".env".to_string(),
             10,
@@ -1270,6 +1290,7 @@ mod tests {
 
         let results = fuzzy_search_files_impl(
             &FileIndexState::new(),
+            LABEL,
             tmp.path().to_str().unwrap().to_string(),
             "config".to_string(),
             10,
@@ -1302,7 +1323,7 @@ mod tests {
         let ws = tmp.path().to_str().unwrap().to_string();
 
         let state = FileIndexState::new();
-        file_index::build_index(&state, ws.clone(), vec![]).unwrap();
+        file_index::build_index(&state, LABEL, ws.clone(), vec![]).unwrap();
 
         // Delete a file on disk WITHOUT going through apply_delta. If
         // fuzzy_search_files_impl re-walked the filesystem it would no
@@ -1311,7 +1332,7 @@ mod tests {
         std::fs::remove_file(tmp.path().join("ephemeral.txt")).unwrap();
 
         let results =
-            fuzzy_search_files_impl(&state, ws, "ephemeral".to_string(), 10, vec![], None)
+            fuzzy_search_files_impl(&state, LABEL, ws, "ephemeral".to_string(), 10, vec![], None)
                 .unwrap();
 
         assert_eq!(
@@ -1330,11 +1351,12 @@ mod tests {
 
         let state = FileIndexState::new();
         let results =
-            fuzzy_search_files_impl(&state, ws, "fresh".to_string(), 10, vec![], None).unwrap();
+            fuzzy_search_files_impl(&state, LABEL, ws, "fresh".to_string(), 10, vec![], None)
+                .unwrap();
 
         assert_eq!(results.iter().filter(|r| r.file_name == "fresh.txt").count(), 1);
         // The inline rebuild must also have populated the index for next time.
-        assert!(state.0.lock().unwrap().is_some());
+        assert!(state.0.lock().unwrap().get(LABEL).is_some());
     }
 
     #[test]
@@ -1348,19 +1370,26 @@ mod tests {
         // a matching cache that's merely stale must still trigger a rebuild.
         {
             let mut guard = state.0.lock().unwrap();
-            *guard = Some(FileIndex {
-                workspace_path: ws.clone(),
-                extra_excludes: vec![],
-                files: std::sync::Arc::new(vec![]),
-                stale: true,
-            });
+            guard.insert(
+                LABEL.to_string(),
+                FileIndex {
+                    workspace_path: ws.clone(),
+                    extra_excludes: vec![],
+                    files: std::sync::Arc::new(vec![]),
+                    stale: true,
+                },
+            );
         }
 
         let results =
-            fuzzy_search_files_impl(&state, ws, "late".to_string(), 10, vec![], None).unwrap();
+            fuzzy_search_files_impl(&state, LABEL, ws, "late".to_string(), 10, vec![], None)
+                .unwrap();
 
         assert_eq!(results.iter().filter(|r| r.file_name == "late.txt").count(), 1);
-        assert!(!state.0.lock().unwrap().as_ref().unwrap().stale, "rebuild should clear stale");
+        assert!(
+            !state.0.lock().unwrap().get(LABEL).unwrap().stale,
+            "rebuild should clear stale"
+        );
     }
 
     // `file_index::mark_stale` is what the watcher event loop calls for
@@ -1378,27 +1407,40 @@ mod tests {
         let ws = tmp.path().to_str().unwrap().to_string();
 
         let state = FileIndexState::new();
-        file_index::build_index(&state, ws.clone(), vec![]).unwrap();
-        assert!(!state.0.lock().unwrap().as_ref().unwrap().stale);
+        file_index::build_index(&state, LABEL, ws.clone(), vec![]).unwrap();
+        assert!(!state.0.lock().unwrap().get(LABEL).unwrap().stale);
 
         // Simulate the directory-rename gap: a new file appears on disk
         // without ever going through `apply_delta` (as it wouldn't for a
         // renamed directory's contents), and the event loop's only recourse
         // is to mark the whole index stale.
         std::fs::write(tmp.path().join("renamed_in.txt"), "hi\n").unwrap();
-        file_index::mark_stale(&state);
-        assert!(state.0.lock().unwrap().as_ref().unwrap().stale, "mark_stale should flip the flag");
+        file_index::mark_stale(&state, LABEL);
+        assert!(
+            state.0.lock().unwrap().get(LABEL).unwrap().stale,
+            "mark_stale should flip the flag"
+        );
 
-        let results =
-            fuzzy_search_files_impl(&state, ws, "renamed_in".to_string(), 10, vec![], None)
-                .unwrap();
+        let results = fuzzy_search_files_impl(
+            &state,
+            LABEL,
+            ws,
+            "renamed_in".to_string(),
+            10,
+            vec![],
+            None,
+        )
+        .unwrap();
 
         assert_eq!(
             results.iter().filter(|r| r.file_name == "renamed_in.txt").count(),
             1,
             "stale rebuild should have picked up the file added outside apply_delta"
         );
-        assert!(!state.0.lock().unwrap().as_ref().unwrap().stale, "rebuild should clear stale");
+        assert!(
+            !state.0.lock().unwrap().get(LABEL).unwrap().stale,
+            "rebuild should clear stale"
+        );
     }
 
     #[test]
@@ -1409,10 +1451,11 @@ mod tests {
 
         let state = FileIndexState::new();
         // Index built with different exclude patterns than this call uses.
-        file_index::build_index(&state, ws.clone(), vec!["*.log".to_string()]).unwrap();
+        file_index::build_index(&state, LABEL, ws.clone(), vec!["*.log".to_string()]).unwrap();
 
         let results = fuzzy_search_files_impl(
             &state,
+            LABEL,
             ws.clone(),
             "mismatch".to_string(),
             10,
@@ -1424,7 +1467,10 @@ mod tests {
         assert_eq!(results.iter().filter(|r| r.file_name == "mismatch.txt").count(), 1);
         // The mismatch triggers a rebuild that stores fresh (matching)
         // extra_excludes, so a second identical call now hits the cache.
-        assert_eq!(state.0.lock().unwrap().as_ref().unwrap().extra_excludes, Vec::<String>::new());
+        assert_eq!(
+            state.0.lock().unwrap().get(LABEL).unwrap().extra_excludes,
+            Vec::<String>::new()
+        );
     }
 
     #[test]
@@ -1435,11 +1481,12 @@ mod tests {
         std::fs::write(tmp2.path().join("b.txt"), "2\n").unwrap();
 
         let state = FileIndexState::new();
-        file_index::build_index(&state, tmp1.path().to_str().unwrap().to_string(), vec![])
+        file_index::build_index(&state, LABEL, tmp1.path().to_str().unwrap().to_string(), vec![])
             .unwrap();
 
         let results = fuzzy_search_files_impl(
             &state,
+            LABEL,
             tmp2.path().to_str().unwrap().to_string(),
             "b".to_string(),
             10,

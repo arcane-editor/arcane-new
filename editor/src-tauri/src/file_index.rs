@@ -69,7 +69,7 @@
 //! so it's not worth a generation counter — but it is a real gap, not a
 //! self-correcting one.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
@@ -104,13 +104,24 @@ pub struct FileIndex {
     pub stale: bool,
 }
 
-/// Managed via `.manage(FileIndexState::new())` in `lib.rs`. `None` until
-/// the first `build_file_index` call for a workspace.
-pub struct FileIndexState(pub Mutex<Option<FileIndex>>);
+/// Managed via `.manage(FileIndexState::new())` in `lib.rs`. Keyed by window
+/// label — mirrors `lsp.rs`/`file_scanner::FileWatcherState` — so two windows
+/// open on different workspaces never clobber each other's cached index. No
+/// entry exists for a label until the first `build_file_index` call for that
+/// window.
+pub struct FileIndexState(pub Mutex<HashMap<String, FileIndex>>);
 
 impl FileIndexState {
     pub fn new() -> Self {
-        Self(Mutex::new(None))
+        Self(Mutex::new(HashMap::new()))
+    }
+
+    /// Drop this window's cached index, if any. Called from
+    /// `WindowEvent::Destroyed` cleanup in `lib.rs` — idempotent, a no-op if
+    /// the window never built an index.
+    pub fn drop_window(&self, label: &str) {
+        let mut guard = lock_recover(&self.0);
+        guard.remove(label);
     }
 }
 
@@ -162,22 +173,27 @@ pub fn walk_files(workspace_path: &str, extra_excludes: &[String]) -> Vec<String
 /// Plain (non-`State`) implementation behind the `build_file_index` command
 /// — split out so tests can drive it against a bare `FileIndexState`
 /// without standing up a Tauri app. Walks the workspace, then
-/// unconditionally replaces whatever index is currently stored (see the
-/// module doc comment's "Race with `build_file_index`" section).
+/// unconditionally replaces whatever index is currently stored for `label`
+/// (see the module doc comment's "Race with `build_file_index`" section) —
+/// every other window's entry is untouched.
 pub fn build_index(
     state: &FileIndexState,
+    label: &str,
     workspace_path: String,
     extra_excludes: Vec<String>,
 ) -> Result<usize, String> {
     let files = walk_files(&workspace_path, &extra_excludes);
     let count = files.len();
     let mut guard = lock_recover(&state.0);
-    *guard = Some(FileIndex {
-        workspace_path,
-        extra_excludes,
-        files: Arc::new(files),
-        stale: false,
-    });
+    guard.insert(
+        label.to_string(),
+        FileIndex {
+            workspace_path,
+            extra_excludes,
+            files: Arc::new(files),
+            stale: false,
+        },
+    );
     Ok(count)
 }
 
@@ -187,13 +203,18 @@ pub fn build_index(
 /// rebuilds inline as a fallback if this hasn't landed yet). `async` so a
 /// cold build (full directory walk) runs on Tauri's blocking thread pool
 /// instead of the main runtime.
+///
+/// `window` is auto-injected by Tauri (no frontend invoke change needed —
+/// same precedent as `terminal.rs`'s `terminal_spawn`); the index is keyed
+/// by `window.label()` so only the *calling* window's own entry is replaced.
 #[tauri::command(async)]
 pub fn build_file_index(
     state: tauri::State<'_, FileIndexState>,
+    window: tauri::Window,
     workspace_path: String,
     extra_excludes: Vec<String>,
 ) -> Result<usize, String> {
-    build_index(&state, workspace_path, extra_excludes)
+    build_index(&state, window.label(), workspace_path, extra_excludes)
 }
 
 /// Returns true if any path component of `path` is an `ALWAYS_HIDDEN` name
@@ -325,10 +346,11 @@ fn is_path_excluded(
     false
 }
 
-/// Marks the current index (if any) stale, forcing the next
-/// `fuzzy_search_files` call to do a full, policy-correct rebuild instead of
-/// trusting the cached list. No-op if no index has been built yet — nothing
-/// to mark.
+/// Marks `label`'s current index (if any) stale, forcing the next
+/// `fuzzy_search_files` call for that window to do a full, policy-correct
+/// rebuild instead of trusting the cached list. No-op if that window has no
+/// index built yet — nothing to mark. Every other window's entry is
+/// untouched.
 ///
 /// Used by `file_scanner`'s watcher event loop for filesystem changes
 /// `apply_delta`'s added/removed-path delta model can't represent at all —
@@ -336,9 +358,9 @@ fn is_path_excluded(
 /// per-file events for the moved subtree), or a `.gitignore`/`.ignore`
 /// content edit (`Modify(Data)`, not add/remove) that changes what the
 /// walker would include.
-pub fn mark_stale(state: &FileIndexState) {
+pub fn mark_stale(state: &FileIndexState, label: &str) {
     let mut guard = lock_recover(&state.0);
-    if let Some(index) = guard.as_mut() {
+    if let Some(index) = guard.get_mut(label) {
         index.stale = true;
     }
 }
@@ -375,7 +397,7 @@ pub fn mark_stale(state: &FileIndexState) {
 ///   applied in the same call so the index reflects the raw filesystem
 ///   event even while marked stale; the next `fuzzy_search_files` call
 ///   discards this best-effort state anyway once it does a full rebuild.
-pub fn apply_delta(state: &FileIndexState, delta: &FileIndexDelta) {
+pub fn apply_delta(state: &FileIndexState, label: &str, delta: &FileIndexDelta) {
     // A poisoned mutex (some other thread panicked while holding it) would
     // otherwise permanently break the index for the rest of the session —
     // this is a background watcher task with no way to surface an error to
@@ -384,7 +406,7 @@ pub fn apply_delta(state: &FileIndexState, delta: &FileIndexDelta) {
     // `sync_util::lock_recover` for why that's safe for this plain-data
     // state.
     let mut guard = lock_recover(&state.0);
-    let Some(index) = guard.as_mut() else {
+    let Some(index) = guard.get_mut(label) else {
         return;
     };
 
@@ -451,6 +473,11 @@ pub fn apply_delta(state: &FileIndexState, delta: &FileIndexDelta) {
 mod tests {
     use super::*;
 
+    /// Fixed window label used by every single-window test in this module —
+    /// only the new "two labels coexist independently" test uses a second
+    /// label alongside this one.
+    const LABEL: &str = "test-window";
+
     fn init_git_repo_with_gitignore(root: &Path, gitignore_body: &str) {
         std::fs::create_dir(root.join(".git")).unwrap();
         std::fs::write(root.join(".gitignore"), gitignore_body).unwrap();
@@ -465,11 +492,12 @@ mod tests {
         std::fs::write(tmp.path().join("b.txt"), "b").unwrap();
 
         let state = FileIndexState::new();
-        let count = build_index(&state, tmp.path().to_str().unwrap().to_string(), vec![]).unwrap();
+        let count =
+            build_index(&state, LABEL, tmp.path().to_str().unwrap().to_string(), vec![]).unwrap();
         assert_eq!(count, 2);
 
         let guard = state.0.lock().unwrap();
-        let idx = guard.as_ref().unwrap();
+        let idx = guard.get(LABEL).unwrap();
         assert_eq!(idx.files.len(), 2);
         assert!(!idx.stale);
         assert_eq!(idx.workspace_path, tmp.path().to_str().unwrap());
@@ -484,10 +512,10 @@ mod tests {
         std::fs::write(tmp.path().join("visible.txt"), "hi").unwrap();
 
         let state = FileIndexState::new();
-        build_index(&state, tmp.path().to_str().unwrap().to_string(), vec![]).unwrap();
+        build_index(&state, LABEL, tmp.path().to_str().unwrap().to_string(), vec![]).unwrap();
 
         let guard = state.0.lock().unwrap();
-        let files = &guard.as_ref().unwrap().files;
+        let files = &guard.get(LABEL).unwrap().files;
         assert!(files.iter().any(|f| f.ends_with("visible.txt")), "files = {:?}", files);
         assert!(!files.iter().any(|f| f.ends_with("secret.txt")), "files = {:?}", files);
         assert!(!files.iter().any(|f| f.contains("/.git/")), "files = {:?}", files);
@@ -500,10 +528,10 @@ mod tests {
         std::fs::write(tmp.path().join(".env"), "A=1\n").unwrap();
 
         let state = FileIndexState::new();
-        build_index(&state, tmp.path().to_str().unwrap().to_string(), vec![]).unwrap();
+        build_index(&state, LABEL, tmp.path().to_str().unwrap().to_string(), vec![]).unwrap();
 
         let guard = state.0.lock().unwrap();
-        let files = &guard.as_ref().unwrap().files;
+        let files = &guard.get(LABEL).unwrap().files;
         let env_matches = files.iter().filter(|f| f.ends_with(".env")).count();
         assert_eq!(env_matches, 1, "files = {:?}", files);
     }
@@ -517,13 +545,37 @@ mod tests {
         std::fs::write(tmp2.path().join("three.txt"), "3").unwrap();
 
         let state = FileIndexState::new();
-        build_index(&state, tmp1.path().to_str().unwrap().to_string(), vec![]).unwrap();
-        build_index(&state, tmp2.path().to_str().unwrap().to_string(), vec![]).unwrap();
+        build_index(&state, LABEL, tmp1.path().to_str().unwrap().to_string(), vec![]).unwrap();
+        build_index(&state, LABEL, tmp2.path().to_str().unwrap().to_string(), vec![]).unwrap();
 
         let guard = state.0.lock().unwrap();
-        let idx = guard.as_ref().unwrap();
+        let idx = guard.get(LABEL).unwrap();
         assert_eq!(idx.workspace_path, tmp2.path().to_str().unwrap());
         assert_eq!(idx.files.len(), 2);
+    }
+
+    // ── FileIndexState: per-label independence (multi-window) ───────────
+
+    #[test]
+    fn two_labels_hold_independent_indexes() {
+        let tmp_a = tempfile::tempdir().unwrap();
+        std::fs::write(tmp_a.path().join("a-only.txt"), "a").unwrap();
+        let tmp_b = tempfile::tempdir().unwrap();
+        std::fs::write(tmp_b.path().join("b-only.txt"), "b").unwrap();
+
+        let state = FileIndexState::new();
+        build_index(&state, "window-a", tmp_a.path().to_str().unwrap().to_string(), vec![])
+            .unwrap();
+        build_index(&state, "window-b", tmp_b.path().to_str().unwrap().to_string(), vec![])
+            .unwrap();
+
+        let guard = state.0.lock().unwrap();
+        let idx_a = guard.get("window-a").unwrap();
+        let idx_b = guard.get("window-b").unwrap();
+        assert_eq!(idx_a.workspace_path, tmp_a.path().to_str().unwrap());
+        assert!(idx_a.files.iter().any(|f| f.ends_with("a-only.txt")), "files = {:?}", idx_a.files);
+        assert_eq!(idx_b.workspace_path, tmp_b.path().to_str().unwrap());
+        assert!(idx_b.files.iter().any(|f| f.ends_with("b-only.txt")), "files = {:?}", idx_b.files);
     }
 
     // ── mark_stale ──────────────────────────────────────────────────────
@@ -533,18 +585,21 @@ mod tests {
         let state = FileIndexState::new();
         {
             let mut guard = state.0.lock().unwrap();
-            *guard = Some(FileIndex {
-                workspace_path: "/ws".to_string(),
-                extra_excludes: vec![],
-                files: Arc::new(vec!["/ws/a.txt".to_string()]),
-                stale: false,
-            });
+            guard.insert(
+                LABEL.to_string(),
+                FileIndex {
+                    workspace_path: "/ws".to_string(),
+                    extra_excludes: vec![],
+                    files: Arc::new(vec!["/ws/a.txt".to_string()]),
+                    stale: false,
+                },
+            );
         }
 
-        mark_stale(&state);
+        mark_stale(&state, LABEL);
 
         let guard = state.0.lock().unwrap();
-        let idx = guard.as_ref().unwrap();
+        let idx = guard.get(LABEL).unwrap();
         assert!(idx.stale);
         // Only the flag flips — the cached file list itself is untouched.
         assert_eq!(*idx.files, vec!["/ws/a.txt".to_string()]);
@@ -553,9 +608,9 @@ mod tests {
     #[test]
     fn mark_stale_is_noop_when_no_index_built() {
         let state = FileIndexState::new();
-        // Should not panic even though guard is None.
-        mark_stale(&state);
-        assert!(state.0.lock().unwrap().is_none());
+        // Should not panic even though there's no entry for this label.
+        mark_stale(&state, LABEL);
+        assert!(state.0.lock().unwrap().get(LABEL).is_none());
     }
 
     // ── apply_delta: added ──────────────────────────────────────────────
@@ -563,13 +618,14 @@ mod tests {
     #[test]
     fn apply_delta_adds_new_paths() {
         let state = FileIndexState::new();
-        build_index(&state, "/ws".to_string(), vec![]).unwrap();
+        build_index(&state, LABEL, "/ws".to_string(), vec![]).unwrap();
         // build_index on a nonexistent "/ws" yields zero files; seed
         // manually isn't needed since apply_delta doesn't require the path
         // to exist on disk (it's a pure in-memory list update).
 
         apply_delta(
             &state,
+            LABEL,
             &FileIndexDelta {
                 added: vec!["/ws/new.txt".to_string()],
                 removed: vec![],
@@ -577,7 +633,7 @@ mod tests {
         );
 
         let guard = state.0.lock().unwrap();
-        assert_eq!(*guard.as_ref().unwrap().files, vec!["/ws/new.txt".to_string()]);
+        assert_eq!(*guard.get(LABEL).unwrap().files, vec!["/ws/new.txt".to_string()]);
     }
 
     #[test]
@@ -585,16 +641,20 @@ mod tests {
         let state = FileIndexState::new();
         {
             let mut guard = state.0.lock().unwrap();
-            *guard = Some(FileIndex {
-                workspace_path: "/ws".to_string(),
-                extra_excludes: vec![],
-                files: Arc::new(vec!["/ws/existing.txt".to_string()]),
-                stale: false,
-            });
+            guard.insert(
+                LABEL.to_string(),
+                FileIndex {
+                    workspace_path: "/ws".to_string(),
+                    extra_excludes: vec![],
+                    files: Arc::new(vec!["/ws/existing.txt".to_string()]),
+                    stale: false,
+                },
+            );
         }
 
         apply_delta(
             &state,
+            LABEL,
             &FileIndexDelta {
                 added: vec![
                     "/ws/existing.txt".to_string(),
@@ -606,7 +666,7 @@ mod tests {
         );
 
         let guard = state.0.lock().unwrap();
-        let files = &guard.as_ref().unwrap().files;
+        let files = &guard.get(LABEL).unwrap().files;
         assert_eq!(files.iter().filter(|f| f.as_str() == "/ws/existing.txt").count(), 1);
         assert_eq!(files.iter().filter(|f| f.as_str() == "/ws/new.txt").count(), 1);
         assert_eq!(files.len(), 2);
@@ -617,16 +677,20 @@ mod tests {
         let state = FileIndexState::new();
         {
             let mut guard = state.0.lock().unwrap();
-            *guard = Some(FileIndex {
-                workspace_path: "/ws".to_string(),
-                extra_excludes: vec![],
-                files: Arc::new(vec![]),
-                stale: false,
-            });
+            guard.insert(
+                LABEL.to_string(),
+                FileIndex {
+                    workspace_path: "/ws".to_string(),
+                    extra_excludes: vec![],
+                    files: Arc::new(vec![]),
+                    stale: false,
+                },
+            );
         }
 
         apply_delta(
             &state,
+            LABEL,
             &FileIndexDelta {
                 added: vec![
                     "/ws/.git/COMMIT_EDITMSG".to_string(),
@@ -639,7 +703,7 @@ mod tests {
         );
 
         let guard = state.0.lock().unwrap();
-        let files = &guard.as_ref().unwrap().files;
+        let files = &guard.get(LABEL).unwrap().files;
         assert_eq!(&**files, &vec!["/ws/keep.txt".to_string()], "files = {:?}", files);
     }
 
@@ -648,16 +712,20 @@ mod tests {
         let state = FileIndexState::new();
         {
             let mut guard = state.0.lock().unwrap();
-            *guard = Some(FileIndex {
-                workspace_path: "/ws".to_string(),
-                extra_excludes: vec![],
-                files: Arc::new(vec![]),
-                stale: false,
-            });
+            guard.insert(
+                LABEL.to_string(),
+                FileIndex {
+                    workspace_path: "/ws".to_string(),
+                    extra_excludes: vec![],
+                    files: Arc::new(vec![]),
+                    stale: false,
+                },
+            );
         }
 
         apply_delta(
             &state,
+            LABEL,
             &FileIndexDelta {
                 added: vec!["/ws/.env".to_string(), "/ws/.env.local".to_string()],
                 removed: vec![],
@@ -665,7 +733,7 @@ mod tests {
         );
 
         let guard = state.0.lock().unwrap();
-        let files = &guard.as_ref().unwrap().files;
+        let files = &guard.get(LABEL).unwrap().files;
         assert!(files.contains(&"/ws/.env".to_string()), "files = {:?}", files);
         assert!(files.contains(&"/ws/.env.local".to_string()), "files = {:?}", files);
     }
@@ -684,16 +752,20 @@ mod tests {
         let state = FileIndexState::new();
         {
             let mut guard = state.0.lock().unwrap();
-            *guard = Some(FileIndex {
-                workspace_path: ws.clone(),
-                extra_excludes: vec![],
-                files: Arc::new(vec![]),
-                stale: false,
-            });
+            guard.insert(
+                LABEL.to_string(),
+                FileIndex {
+                    workspace_path: ws.clone(),
+                    extra_excludes: vec![],
+                    files: Arc::new(vec![]),
+                    stale: false,
+                },
+            );
         }
 
         apply_delta(
             &state,
+            LABEL,
             &FileIndexDelta {
                 added: vec![format!("{}/Library/ScriptAssemblies/Foo.dll", ws)],
                 removed: vec![],
@@ -701,7 +773,7 @@ mod tests {
         );
 
         let guard = state.0.lock().unwrap();
-        let idx = guard.as_ref().unwrap();
+        let idx = guard.get(LABEL).unwrap();
         assert!(idx.files.is_empty(), "gitignored path should not be admitted: {:?}", idx.files);
         // Only .gitignore/.ignore content changes flip `stale` — an ordinary
         // gitignored path being filtered out must not also mark the index
@@ -717,16 +789,20 @@ mod tests {
         let state = FileIndexState::new();
         {
             let mut guard = state.0.lock().unwrap();
-            *guard = Some(FileIndex {
-                workspace_path: ws.clone(),
-                extra_excludes: vec!["Builds/**".to_string()],
-                files: Arc::new(vec![]),
-                stale: false,
-            });
+            guard.insert(
+                LABEL.to_string(),
+                FileIndex {
+                    workspace_path: ws.clone(),
+                    extra_excludes: vec!["Builds/**".to_string()],
+                    files: Arc::new(vec![]),
+                    stale: false,
+                },
+            );
         }
 
         apply_delta(
             &state,
+            LABEL,
             &FileIndexDelta {
                 added: vec![format!("{}/Builds/Windows/game.exe", ws)],
                 removed: vec![],
@@ -734,7 +810,7 @@ mod tests {
         );
 
         let guard = state.0.lock().unwrap();
-        let files = &guard.as_ref().unwrap().files;
+        let files = &guard.get(LABEL).unwrap().files;
         assert!(
             files.is_empty(),
             "extra_excludes-matched path should not be admitted: {:?}",
@@ -751,16 +827,20 @@ mod tests {
         let state = FileIndexState::new();
         {
             let mut guard = state.0.lock().unwrap();
-            *guard = Some(FileIndex {
-                workspace_path: ws.clone(),
-                extra_excludes: vec![],
-                files: Arc::new(vec![]),
-                stale: false,
-            });
+            guard.insert(
+                LABEL.to_string(),
+                FileIndex {
+                    workspace_path: ws.clone(),
+                    extra_excludes: vec![],
+                    files: Arc::new(vec![]),
+                    stale: false,
+                },
+            );
         }
 
         apply_delta(
             &state,
+            LABEL,
             &FileIndexDelta {
                 added: vec![format!("{}/.env", ws)],
                 removed: vec![],
@@ -768,7 +848,7 @@ mod tests {
         );
 
         let guard = state.0.lock().unwrap();
-        let files = &guard.as_ref().unwrap().files;
+        let files = &guard.get(LABEL).unwrap().files;
         assert!(files.iter().any(|f| f.ends_with(".env")), "files = {:?}", files);
     }
 
@@ -781,16 +861,20 @@ mod tests {
         let state = FileIndexState::new();
         {
             let mut guard = state.0.lock().unwrap();
-            *guard = Some(FileIndex {
-                workspace_path: ws.clone(),
-                extra_excludes: vec![],
-                files: Arc::new(vec![]),
-                stale: false,
-            });
+            guard.insert(
+                LABEL.to_string(),
+                FileIndex {
+                    workspace_path: ws.clone(),
+                    extra_excludes: vec![],
+                    files: Arc::new(vec![]),
+                    stale: false,
+                },
+            );
         }
 
         apply_delta(
             &state,
+            LABEL,
             &FileIndexDelta {
                 added: vec![format!("{}/Assets/Scripts/Player.cs", ws)],
                 removed: vec![],
@@ -798,7 +882,7 @@ mod tests {
         );
 
         let guard = state.0.lock().unwrap();
-        let files = &guard.as_ref().unwrap().files;
+        let files = &guard.get(LABEL).unwrap().files;
         assert!(files.iter().any(|f| f.ends_with("Player.cs")), "files = {:?}", files);
     }
 
@@ -809,16 +893,20 @@ mod tests {
         let state = FileIndexState::new();
         {
             let mut guard = state.0.lock().unwrap();
-            *guard = Some(FileIndex {
-                workspace_path: "/ws".to_string(),
-                extra_excludes: vec![],
-                files: Arc::new(vec!["/ws/a.txt".to_string(), "/ws/b.txt".to_string()]),
-                stale: false,
-            });
+            guard.insert(
+                LABEL.to_string(),
+                FileIndex {
+                    workspace_path: "/ws".to_string(),
+                    extra_excludes: vec![],
+                    files: Arc::new(vec!["/ws/a.txt".to_string(), "/ws/b.txt".to_string()]),
+                    stale: false,
+                },
+            );
         }
 
         apply_delta(
             &state,
+            LABEL,
             &FileIndexDelta {
                 added: vec![],
                 removed: vec!["/ws/a.txt".to_string()],
@@ -826,22 +914,23 @@ mod tests {
         );
 
         let guard = state.0.lock().unwrap();
-        assert_eq!(*guard.as_ref().unwrap().files, vec!["/ws/b.txt".to_string()]);
+        assert_eq!(*guard.get(LABEL).unwrap().files, vec!["/ws/b.txt".to_string()]);
     }
 
     #[test]
     fn apply_delta_is_noop_when_no_index_built() {
         let state = FileIndexState::new();
-        // Should not panic even though guard is None.
+        // Should not panic even though there's no entry for this label.
         apply_delta(
             &state,
+            LABEL,
             &FileIndexDelta {
                 added: vec!["/ws/a.txt".to_string()],
                 removed: vec![],
             },
         );
         let guard = state.0.lock().unwrap();
-        assert!(guard.is_none());
+        assert!(guard.get(LABEL).is_none());
     }
 
     // ── apply_delta: .gitignore / .ignore → stale ──────────────────────
@@ -851,23 +940,27 @@ mod tests {
         let state = FileIndexState::new();
         {
             let mut guard = state.0.lock().unwrap();
-            *guard = Some(FileIndex {
-                workspace_path: "/ws".to_string(),
-                extra_excludes: vec![],
-                files: Arc::new(vec![]),
-                stale: false,
-            });
+            guard.insert(
+                LABEL.to_string(),
+                FileIndex {
+                    workspace_path: "/ws".to_string(),
+                    extra_excludes: vec![],
+                    files: Arc::new(vec![]),
+                    stale: false,
+                },
+            );
         }
 
         apply_delta(
             &state,
+            LABEL,
             &FileIndexDelta {
                 added: vec!["/ws/.gitignore".to_string()],
                 removed: vec![],
             },
         );
 
-        assert!(state.0.lock().unwrap().as_ref().unwrap().stale);
+        assert!(state.0.lock().unwrap().get(LABEL).unwrap().stale);
     }
 
     #[test]
@@ -875,23 +968,27 @@ mod tests {
         let state = FileIndexState::new();
         {
             let mut guard = state.0.lock().unwrap();
-            *guard = Some(FileIndex {
-                workspace_path: "/ws".to_string(),
-                extra_excludes: vec![],
-                files: Arc::new(vec!["/ws/.ignore".to_string()]),
-                stale: false,
-            });
+            guard.insert(
+                LABEL.to_string(),
+                FileIndex {
+                    workspace_path: "/ws".to_string(),
+                    extra_excludes: vec![],
+                    files: Arc::new(vec!["/ws/.ignore".to_string()]),
+                    stale: false,
+                },
+            );
         }
 
         apply_delta(
             &state,
+            LABEL,
             &FileIndexDelta {
                 added: vec![],
                 removed: vec!["/ws/.ignore".to_string()],
             },
         );
 
-        assert!(state.0.lock().unwrap().as_ref().unwrap().stale);
+        assert!(state.0.lock().unwrap().get(LABEL).unwrap().stale);
     }
 
     #[test]
@@ -899,23 +996,27 @@ mod tests {
         let state = FileIndexState::new();
         {
             let mut guard = state.0.lock().unwrap();
-            *guard = Some(FileIndex {
-                workspace_path: "/ws".to_string(),
-                extra_excludes: vec![],
-                files: Arc::new(vec![]),
-                stale: false,
-            });
+            guard.insert(
+                LABEL.to_string(),
+                FileIndex {
+                    workspace_path: "/ws".to_string(),
+                    extra_excludes: vec![],
+                    files: Arc::new(vec![]),
+                    stale: false,
+                },
+            );
         }
 
         apply_delta(
             &state,
+            LABEL,
             &FileIndexDelta {
                 added: vec!["/ws/normal.txt".to_string()],
                 removed: vec![],
             },
         );
 
-        assert!(!state.0.lock().unwrap().as_ref().unwrap().stale);
+        assert!(!state.0.lock().unwrap().get(LABEL).unwrap().stale);
     }
 
     // ── path_has_always_hidden_segment / is_gitignore_file ─────────────
@@ -933,5 +1034,47 @@ mod tests {
         assert!(is_gitignore_file("/ws/nested/.ignore"));
         assert!(!is_gitignore_file("/ws/.gitignore.bak"));
         assert!(!is_gitignore_file("/ws/other.txt"));
+    }
+
+    // ── FileIndexState::drop_window ─────────────────────────────────────
+
+    #[test]
+    fn drop_window_removes_only_that_label() {
+        let state = FileIndexState::new();
+        {
+            let mut guard = state.0.lock().unwrap();
+            guard.insert(
+                "window-a".to_string(),
+                FileIndex {
+                    workspace_path: "/ws-a".to_string(),
+                    extra_excludes: vec![],
+                    files: Arc::new(vec![]),
+                    stale: false,
+                },
+            );
+            guard.insert(
+                "window-b".to_string(),
+                FileIndex {
+                    workspace_path: "/ws-b".to_string(),
+                    extra_excludes: vec![],
+                    files: Arc::new(vec![]),
+                    stale: false,
+                },
+            );
+        }
+
+        state.drop_window("window-a");
+
+        let guard = state.0.lock().unwrap();
+        assert!(guard.get("window-a").is_none());
+        assert!(guard.get("window-b").is_some(), "window-b's entry must survive");
+    }
+
+    #[test]
+    fn drop_window_is_idempotent_when_absent() {
+        let state = FileIndexState::new();
+        // Must not panic when the window never built an index.
+        state.drop_window("never-built");
+        assert!(state.0.lock().unwrap().is_empty());
     }
 }

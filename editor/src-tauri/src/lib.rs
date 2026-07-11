@@ -668,6 +668,14 @@ pub fn run() {
                         dummy.drop_window(&label_clone).await;
                     });
                 }
+                // Per-window file index cleanup
+                if let Some(state) = window.try_state::<file_index::FileIndexState>() {
+                    state.drop_window(&label);
+                }
+                // Per-window content search cursor cleanup
+                if let Some(state) = window.try_state::<search::ContentSearchState>() {
+                    state.drop_window(&label);
+                }
 
                 // Last-window-closed behavior:
                 //  - macOS: keep app running with no windows visible

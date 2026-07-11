@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
@@ -15,8 +15,9 @@ use grep_regex::{RegexMatcher, RegexMatcherBuilder};
 use grep_searcher::sinks::UTF8;
 use grep_searcher::{BinaryDetection, Searcher, SearcherBuilder};
 use ignore::WalkState;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, State, Window};
 
+use crate::sync_util::lock_recover;
 use crate::walk_policy;
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -64,18 +65,37 @@ fn default_max_matches_per_file() -> usize {
     200
 }
 
-/// Frontend-managed cancellation cursor. `latest` holds the id of the most
-/// recent search; any worker whose id differs quits. Managed in `lib.rs` via
-/// `.manage(ContentSearchState::new())`.
-pub struct ContentSearchState {
-    pub latest: Arc<AtomicU64>,
-}
+/// Frontend-managed cancellation cursor, keyed by window label — mirrors
+/// `lsp.rs`/`file_scanner::FileWatcherState`/`file_index::FileIndexState` so
+/// a search started in one window can never cancel or race another window's
+/// in-flight search. Each label's cursor holds the id of that window's most
+/// recent search; any worker whose id differs from its window's cursor
+/// quits. Managed in `lib.rs` via `.manage(ContentSearchState::new())`.
+pub struct ContentSearchState(Mutex<HashMap<String, Arc<AtomicU64>>>);
 
 impl ContentSearchState {
     pub fn new() -> Self {
-        Self {
-            latest: Arc::new(AtomicU64::new(0)),
-        }
+        Self(Mutex::new(HashMap::new()))
+    }
+
+    /// Returns `label`'s cancellation cursor, creating a fresh
+    /// `Arc<AtomicU64>` (starting at 0) the first time this window is seen.
+    /// The returned `Arc` is cloned into the search's worker/emitter threads
+    /// so `cancel_content_search`/a newer `start_content_search` call for
+    /// this same label can advance it out from under them.
+    pub fn cursor(&self, label: &str) -> Arc<AtomicU64> {
+        let mut map = lock_recover(&self.0);
+        map.entry(label.to_string()).or_default().clone()
+    }
+
+    /// Drop this window's cursor, if any. Called from `WindowEvent::Destroyed`
+    /// cleanup in `lib.rs` — idempotent, a no-op if the window never started
+    /// a search. Any in-flight worker threads already hold their own `Arc`
+    /// clone of the cursor, so this doesn't cancel them; it only lets the
+    /// window's entry stop occupying the map after the window is gone.
+    pub fn drop_window(&self, label: &str) {
+        let mut map = lock_recover(&self.0);
+        map.remove(label);
     }
 }
 
@@ -730,21 +750,30 @@ fn root_env_set(workspace_path: &str) -> HashSet<String> {
         .collect()
 }
 
-fn emit_event(app: &AppHandle, event: ContentEvent) {
+/// Emits to `label`'s window only (`emit_to`) rather than every window — a
+/// search started in one window must never deliver batches/completion into
+/// another window's Search panel.
+fn emit_event(app: &AppHandle, label: &str, event: ContentEvent) {
     match event {
         ContentEvent::Batch(b) => {
-            let _ = app.emit(EVENT_BATCH, &b);
+            let _ = app.emit_to(label, EVENT_BATCH, &b);
         }
         ContentEvent::Complete(c) => {
-            let _ = app.emit(EVENT_COMPLETE, &c);
+            let _ = app.emit_to(label, EVENT_COMPLETE, &c);
         }
     }
 }
 
 /// Starts a streaming content search. Validates the pattern and globs
-/// synchronously (the only `Err` path), records `search_id` as the latest run,
-/// then spawns the engine and returns immediately. Results arrive as
-/// `search-results-batch` events, terminated by one `search-complete`.
+/// synchronously (the only `Err` path), records `search_id` as the latest run
+/// for the calling window, then spawns the engine and returns immediately.
+/// Results arrive as `search-results-batch` events, terminated by one
+/// `search-complete` — both delivered only to the calling window.
+///
+/// `window` is auto-injected by Tauri (no frontend invoke change needed —
+/// same precedent as `terminal.rs`'s `terminal_spawn`); the cancellation
+/// cursor is keyed by `window.label()` so a search started in one window
+/// can't be cancelled by, or race, another window's search.
 ///
 /// `#[tauri::command(async)]` keeps even the (small) validation off the UI
 /// thread.
@@ -752,29 +781,35 @@ fn emit_event(app: &AppHandle, event: ContentEvent) {
 pub fn start_content_search(
     app: AppHandle,
     state: State<'_, ContentSearchState>,
+    window: Window,
     search_id: u64,
     options: ContentSearchOptions,
 ) -> Result<(), String> {
     let engine = Engine::build(&options)?;
+    let label = window.label().to_string();
+    let latest = state.cursor(&label);
     // This search becomes the current one; any older run's workers now see a
     // mismatched id and quit.
-    state.latest.store(search_id, Ordering::SeqCst);
-    let latest = Arc::clone(&state.latest);
+    latest.store(search_id, Ordering::SeqCst);
     let app = app.clone();
     thread::spawn(move || {
-        run_engine(engine, search_id, latest, move |event| emit_event(&app, event));
+        run_engine(engine, search_id, latest, move |event| {
+            emit_event(&app, &label, event)
+        });
     });
     Ok(())
 }
 
-/// Cancels any in-flight search older than `search_id` by advancing `latest`.
-/// To cancel a run with id `k` without starting a new one, pass a `search_id`
-/// strictly greater than `k` (e.g. the frontend's next counter tick); workers
-/// whose id no longer equals `latest` quit, and the run still emits
-/// `search-complete` with `cancelled: true`.
+/// Cancels any in-flight search older than `search_id` for the calling
+/// window by advancing its cursor. To cancel a run with id `k` without
+/// starting a new one, pass a `search_id` strictly greater than `k` (e.g. the
+/// frontend's next counter tick); workers whose id no longer equals the
+/// cursor quit, and the run still emits `search-complete` with
+/// `cancelled: true`. Only the calling window's cursor is touched.
 #[tauri::command]
-pub fn cancel_content_search(state: State<'_, ContentSearchState>, search_id: u64) {
-    state.latest.fetch_max(search_id, Ordering::SeqCst);
+pub fn cancel_content_search(state: State<'_, ContentSearchState>, window: Window, search_id: u64) {
+    let latest = state.cursor(window.label());
+    latest.fetch_max(search_id, Ordering::SeqCst);
 }
 
 #[cfg(test)]
@@ -1292,12 +1327,56 @@ mod tests {
     #[test]
     fn cancel_advances_latest_monotonically() {
         let state = ContentSearchState::new();
-        state.latest.store(5, Ordering::SeqCst);
+        let latest = state.cursor("test");
+        latest.store(5, Ordering::SeqCst);
         // fetch_max: a lower id does not regress latest.
-        state.latest.fetch_max(3, Ordering::SeqCst);
-        assert_eq!(state.latest.load(Ordering::SeqCst), 5);
+        latest.fetch_max(3, Ordering::SeqCst);
+        assert_eq!(latest.load(Ordering::SeqCst), 5);
         // A higher id advances it (cancelling run 5).
-        state.latest.fetch_max(9, Ordering::SeqCst);
-        assert_eq!(state.latest.load(Ordering::SeqCst), 9);
+        latest.fetch_max(9, Ordering::SeqCst);
+        assert_eq!(latest.load(Ordering::SeqCst), 9);
+        // The cursor fetched again for the same label is the same one --
+        // `cursor` returns a clone of the same Arc, not a fresh one.
+        assert_eq!(state.cursor("test").load(Ordering::SeqCst), 9);
+    }
+
+    // ── ContentSearchState: per-label independence (multi-window) ───────
+    //
+    // Pins the actual fix for "a search in window B cancels window A's
+    // in-flight search": each window label gets its own cursor, so advancing
+    // one label's cursor (as `cancel_content_search`/a newer
+    // `start_content_search` would) must never advance another label's.
+
+    #[test]
+    fn two_labels_get_independent_cursors() {
+        let state = ContentSearchState::new();
+        let cursor_a = state.cursor("window-a");
+        let cursor_b = state.cursor("window-b");
+
+        cursor_a.store(7, Ordering::SeqCst);
+
+        assert_eq!(cursor_a.load(Ordering::SeqCst), 7);
+        assert_eq!(cursor_b.load(Ordering::SeqCst), 0, "window-b's cursor must be untouched");
+
+        // Advancing window-b now must not affect window-a either.
+        cursor_b.fetch_max(3, Ordering::SeqCst);
+        assert_eq!(cursor_a.load(Ordering::SeqCst), 7, "window-a's cursor must stay at 7");
+        assert_eq!(cursor_b.load(Ordering::SeqCst), 3);
+    }
+
+    #[test]
+    fn drop_window_removes_only_that_labels_cursor() {
+        let state = ContentSearchState::new();
+        let cursor_a = state.cursor("window-a");
+        cursor_a.store(42, Ordering::SeqCst);
+        let _cursor_b = state.cursor("window-b");
+
+        state.drop_window("window-a");
+
+        // A fresh `cursor("window-a")` call after drop must start over at 0
+        // rather than resurrecting the old Arc's value.
+        assert_eq!(state.cursor("window-a").load(Ordering::SeqCst), 0);
+        // window-b is untouched.
+        assert_eq!(state.cursor("window-b").load(Ordering::SeqCst), 0);
     }
 }

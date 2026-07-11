@@ -108,9 +108,15 @@ pub async fn graphify_check(app: AppHandle) -> Result<GraphifyCheck, String> {
 /// `root` (optional) narrows scanning to a workspace subdirectory; `include_ext`
 /// (optional) filters extracted code files by extension. The frontend uses
 /// these for Unity projects (root=Assets, include_ext=[.cs]).
+///
+/// `window` is auto-injected by Tauri (no frontend invoke change needed —
+/// same precedent as `terminal.rs`'s `terminal_spawn`); progress events are
+/// emitted only to the calling window via `emit_to` so a graph build kicked
+/// off in one window's project doesn't spam another window's UI.
 #[tauri::command]
 pub async fn graphify_build(
     app: AppHandle,
+    window: tauri::Window,
     workspace_path: String,
     root: Option<String>,
     include_ext: Option<Vec<String>>,
@@ -159,14 +165,14 @@ pub async fn graphify_build(
                 let trimmed = text.trim().to_string();
                 if !trimmed.is_empty() {
                     last_stdout_line = Some(trimmed.clone());
-                    let _ = app.emit("graphify-build-progress", &trimmed);
+                    let _ = app.emit_to(window.label(), "graphify-build-progress", &trimmed);
                 }
             }
             CommandEvent::Stderr(line) => {
                 let text = String::from_utf8_lossy(&line).to_string();
                 let trimmed = text.trim().to_string();
                 if !trimmed.is_empty() {
-                    let _ = app.emit("graphify-build-progress", &trimmed);
+                    let _ = app.emit_to(window.label(), "graphify-build-progress", &trimmed);
                 }
             }
             CommandEvent::Terminated(payload) => {
