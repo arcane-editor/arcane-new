@@ -245,8 +245,8 @@ function ExplorerPanel() {
       if (myGen !== revealGenRef.current) return;
       const api = treeApiRef.current;
       if (!api) return;
+      // select() calls scrollTo() internally; no need for explicit scroll
       api.select(path, { align: 'center' });
-      api.scrollTo(path, 'center');
     });
   }
 
@@ -295,10 +295,10 @@ function ExplorerPanel() {
   }, []);
 
   // Auto-reveal: expand/select the active file whenever it changes, gated
-  // on the `explorer.autoReveal` setting and the explorer actually being
-  // the visible sidebar view. Both are read fresh inside the listener (not
-  // captured here) so flipping the setting or switching sidebar views takes
-  // effect on the very next file switch without needing to re-subscribe.
+  // on the `explorer.autoReveal` setting and the sidebar being visible.
+  // Both are read fresh inside the listener (not captured here) so flipping
+  // the setting or hiding the sidebar takes effect on the very next file
+  // switch without needing to re-subscribe.
   useEffect(() => {
     const unsub = useWorkspaceStore.subscribe((state, prevState) => {
       if (state.activeFilePath === prevState.activeFilePath) return;
@@ -307,7 +307,7 @@ function ExplorerPanel() {
       if (path.startsWith('diff://') || path.startsWith('auth://')) return;
       if (useSettingsStore.getState().getSetting('explorer.autoReveal') === false) return;
       const ui = useUiStore.getState();
-      if (!ui.sidebarVisible || ui.activeSidebarView !== 'explorer') return;
+      if (!ui.sidebarVisible) return;
       void revealPath(path);
     });
     return unsub;
