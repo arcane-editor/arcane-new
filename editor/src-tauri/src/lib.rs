@@ -555,6 +555,7 @@ pub fn run() {
             git::git_stash_pop,
             git::git_stash_drop,
             git::git_show_head,
+            git::git_show_index,
             git::git_unstage_all,
             git::git_discard_file,
             git::git_discard_all,

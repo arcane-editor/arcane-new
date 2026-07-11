@@ -514,6 +514,14 @@ pub fn git_stash_drop(workspace_path: String, index: u32) -> Result<(), String> 
     Ok(())
 }
 
+/// Fetch a file's content at HEAD (`git show HEAD:<file_path>`).
+///
+/// `Ok(String::new())` for the "no HEAD version" cases (new/untracked file —
+/// same stderr shapes `git_show_file_at` already classifies: `does not exist
+/// in 'HEAD'` when the path never existed, `exists on disk, but not in
+/// 'HEAD'` when it's untracked on disk); `Err(stderr)` for everything else
+/// (e.g. `workspace_path` isn't a git repo at all), so a genuinely broken repo
+/// is no longer indistinguishable from a plain new file.
 #[tauri::command]
 pub fn git_show_head(workspace_path: String, file_path: String) -> Result<String, String> {
     let output = Command::new("git")
@@ -522,8 +530,51 @@ pub fn git_show_head(workspace_path: String, file_path: String) -> Result<String
         .map_err(|e| e.to_string())?;
 
     if !output.status.success() {
-        // New/untracked file — no HEAD version
-        return Ok(String::new());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let missing_path =
+            stderr.contains("does not exist in") || stderr.contains("exists on disk, but not in");
+        if missing_path {
+            return Ok(String::new());
+        }
+        return Err(stderr.to_string());
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+/// Content of `file_path` as staged in the index (`git show :<file_path>` —
+/// stage 0).
+///
+/// `Ok(String::new())` when the path isn't in the index at all — untracked
+/// (`fatal: path '<p>' exists on disk, but not in the index`), never existed
+/// (`fatal: path '<p>' does not exist (neither on disk nor in the index)`),
+/// or a staged deletion (which leaves the same "exists on disk, but not in
+/// the index" shape once removed from the index). `Err(stderr)` for
+/// everything else — including unmerged/conflicted paths, which have no
+/// stage 0 at all (`fatal: path '<p>' is in the index, but not at stage 0`)
+/// and so must not be silently swallowed into an empty diff.
+#[tauri::command]
+pub fn git_show_index(workspace_path: String, file_path: String) -> Result<String, String> {
+    let spec = format!(":{}", file_path);
+    let output = Command::new("git")
+        .args(["-C", &workspace_path, "show", &spec])
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        // Note: unlike `git_show_file_at`'s `<rev>:<path>` form (whose
+        // "missing" message is `does not exist in '<rev>'`), the stage-0
+        // `:<path>` form phrases the never-existed case as `does not exist
+        // (neither on disk nor in the index)` — no trailing "in" — so the
+        // "does not exist" check here is intentionally broader than
+        // `git_show_file_at`'s.
+        let missing_from_index =
+            stderr.contains("does not exist") || stderr.contains("exists on disk, but not in");
+        if missing_from_index {
+            return Ok(String::new());
+        }
+        return Err(stderr.to_string());
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
@@ -1120,7 +1171,16 @@ pub async fn git_blame_file(
         .map_err(|e| e.to_string())?;
 
     if !output.status.success() {
-        return Ok(Vec::new());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        // Untracked / never-existed paths (blame has no history to walk):
+        // `fatal: no such path '<p>' in HEAD`. Everything else (e.g. a bogus
+        // repo path) is a real failure and must not be swallowed into an
+        // empty blame result.
+        let missing_path = stderr.contains("no such path") || stderr.contains("does not exist");
+        if missing_path {
+            return Ok(Vec::new());
+        }
+        return Err(stderr.to_string());
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -2701,5 +2761,224 @@ mod stash_and_amend_tests {
         let log = git_log(path, None).unwrap();
         assert_eq!(log.len(), 2);
         assert_eq!(log[0].message, "third commit");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// T5: Staged-diff correctness — git_show_index + tightened error
+// classification for git_show_head / git_blame_file, plus a serde contract
+// pin for GitStatusResult (the frontend consumes these exact field names).
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod staged_diff_tests {
+    use super::*;
+
+    /// Every git invocation in this module ignores the host's global/system
+    /// gitconfig (`GIT_CONFIG_GLOBAL`/`GIT_CONFIG_SYSTEM` -> `/dev/null`) so a
+    /// developer machine's commit signing, hooks, or aliases can't make these
+    /// tests hang or fail. Applied to the *setup* commands this module runs
+    /// directly (init/config/add/commit/rm) — the production commands under
+    /// test (`git_show_head`/`git_show_index`/`git_blame_file`) never invoke
+    /// `git commit`, so they carry no signing/hook risk of their own.
+    fn run_git(path: &str, args: &[&str]) -> String {
+        let mut full: Vec<&str> = vec!["-C", path];
+        full.extend_from_slice(args);
+        let output = Command::new("git")
+            .args(&full)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git {:?} failed: {}",
+            args,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    }
+
+    /// Repo with one committed file (`a.txt`), so HEAD is valid and there is
+    /// a tracked file to stage/edit/delete in tests.
+    fn init_repo() -> tempfile::TempDir {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().to_str().unwrap();
+        run_git(path, &["init", "--initial-branch=main"]);
+        run_git(path, &["config", "user.email", "test@example.com"]);
+        run_git(path, &["config", "user.name", "Test User"]);
+        std::fs::write(std::path::Path::new(path).join("a.txt"), "line1\n").unwrap();
+        run_git(path, &["add", "a.txt"]);
+        run_git(path, &["commit", "-m", "init"]);
+        tmp
+    }
+
+    // --- git_show_index ------------------------------------------------
+
+    #[test]
+    fn show_index_returns_staged_version_not_worktree() {
+        let tmp = init_repo();
+        let path = tmp.path().to_str().unwrap().to_string();
+
+        // Stage one change...
+        std::fs::write(std::path::Path::new(&path).join("a.txt"), "line1-staged\n").unwrap();
+        run_git(&path, &["add", "a.txt"]);
+        // ...then make a further UNSTAGED change on top.
+        std::fs::write(std::path::Path::new(&path).join("a.txt"), "line1-worktree\n").unwrap();
+
+        let indexed = git_show_index(path, "a.txt".into()).unwrap();
+        assert_eq!(
+            indexed, "line1-staged\n",
+            "git_show_index must return the INDEX content, not the working tree"
+        );
+    }
+
+    #[test]
+    fn show_index_untracked_file_returns_empty() {
+        let tmp = init_repo();
+        let path = tmp.path().to_str().unwrap().to_string();
+
+        std::fs::write(std::path::Path::new(&path).join("new.txt"), "hello\n").unwrap();
+
+        let content = git_show_index(path, "new.txt".into()).unwrap();
+        assert_eq!(content, "");
+    }
+
+    #[test]
+    fn show_index_staged_deletion_returns_empty() {
+        let tmp = init_repo();
+        let path = tmp.path().to_str().unwrap().to_string();
+
+        run_git(&path, &["rm", "--cached", "a.txt"]);
+
+        let content = git_show_index(path, "a.txt".into()).unwrap();
+        assert_eq!(content, "");
+    }
+
+    #[test]
+    fn show_index_never_existed_path_returns_empty() {
+        let tmp = init_repo();
+        let path = tmp.path().to_str().unwrap().to_string();
+
+        // A path that was never on disk and never staged at all — git phrases
+        // this differently ("does not exist (neither on disk nor in the
+        // index)") from the plain-untracked case, but it's still "not in the
+        // index" and must not surface as an error.
+        let content = git_show_index(path, "totally-missing.txt".into()).unwrap();
+        assert_eq!(content, "");
+    }
+
+    #[test]
+    fn show_index_unmerged_path_errors() {
+        let tmp = init_repo();
+        let path = tmp.path().to_str().unwrap().to_string();
+
+        run_git(&path, &["switch", "-c", "branch-a"]);
+        std::fs::write(std::path::Path::new(&path).join("a.txt"), "a-version\n").unwrap();
+        run_git(&path, &["commit", "-am", "a"]);
+        run_git(&path, &["switch", "main"]);
+        run_git(&path, &["switch", "-c", "branch-b"]);
+        std::fs::write(std::path::Path::new(&path).join("a.txt"), "b-version\n").unwrap();
+        run_git(&path, &["commit", "-am", "b"]);
+
+        // Merge branch-a into branch-b — conflicts on a.txt, leaving it
+        // unmerged (no stage 0). This `git merge` is expected to fail (exit
+        // non-zero) — that's the conflict itself, not a test setup error.
+        let _ = Command::new("git")
+            .args(["-C", &path, "merge", "--no-edit", "branch-a"])
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .output()
+            .unwrap();
+
+        let result = git_show_index(path, "a.txt".into());
+        let err = result.expect_err("unmerged path has no stage 0 and must error, not Ok(\"\")");
+        assert!(
+            !err.is_empty(),
+            "expected a non-empty stderr message, got empty string"
+        );
+    }
+
+    // --- git_show_head ---------------------------------------------------
+
+    #[test]
+    fn show_head_new_file_not_yet_in_head_returns_empty() {
+        let tmp = init_repo();
+        let path = tmp.path().to_str().unwrap().to_string();
+
+        std::fs::write(std::path::Path::new(&path).join("new.txt"), "hello\n").unwrap();
+        run_git(&path, &["add", "new.txt"]);
+
+        let content = git_show_head(path, "new.txt".into()).unwrap();
+        assert_eq!(content, "");
+    }
+
+    #[test]
+    fn show_head_bogus_repo_path_errors() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().to_str().unwrap().to_string();
+        // Deliberately NOT a git repo — no `git init` here.
+
+        let result = git_show_head(path, "a.txt".into());
+
+        let err = result.expect_err("a non-git directory must error, not Ok(\"\")");
+        assert!(!err.is_empty());
+    }
+
+    // --- serde contract: GitStatusResult / GitFileStatus field names ------
+
+    /// Pins the exact JSON field names the frontend's `GitStatusResult`/
+    /// `GitFileStatus` TypeScript types consume (see
+    /// `src/features/git`/`src/stores/git.ts`). A future rename or
+    /// `#[serde(rename)]` change here would otherwise silently break the
+    /// frontend without any type error, since the Tauri IPC boundary is
+    /// JSON, not shared types.
+    #[test]
+    fn git_status_result_serde_field_names() {
+        let file = GitFileStatus {
+            path: "src/a.txt".to_string(),
+            absolute_path: "/repo/src/a.txt".to_string(),
+            status: "modified".to_string(),
+            staged: true,
+            conflicted: false,
+        };
+        let file_value = serde_json::to_value(&file).unwrap();
+        let file_obj = file_value.as_object().unwrap();
+        assert!(file_obj.contains_key("path"));
+        assert!(file_obj.contains_key("absolute_path"));
+        assert!(file_obj.contains_key("status"));
+        assert!(file_obj.contains_key("staged"));
+        assert!(file_obj.contains_key("conflicted"));
+        assert_eq!(file_obj.len(), 5, "unexpected extra/missing field on GitFileStatus");
+
+        let result = GitStatusResult {
+            branch: "main".to_string(),
+            staged: vec![file],
+            unstaged: vec![],
+            ahead: 1,
+            behind: 2,
+        };
+        let value = serde_json::to_value(&result).unwrap();
+        let obj = value.as_object().unwrap();
+        assert!(obj.contains_key("branch"));
+        assert!(obj.contains_key("staged"));
+        assert!(obj.contains_key("unstaged"));
+        assert!(obj.contains_key("ahead"));
+        assert!(obj.contains_key("behind"));
+        assert_eq!(obj.len(), 5, "unexpected extra/missing field on GitStatusResult");
+
+        // Values round-trip as expected (not just key presence).
+        assert_eq!(obj["branch"], serde_json::json!("main"));
+        assert_eq!(obj["ahead"], serde_json::json!(1));
+        assert_eq!(obj["behind"], serde_json::json!(2));
+        let staged_arr = obj["staged"].as_array().unwrap();
+        assert_eq!(staged_arr.len(), 1);
+        assert_eq!(staged_arr[0]["path"], serde_json::json!("src/a.txt"));
+        assert_eq!(
+            staged_arr[0]["absolute_path"],
+            serde_json::json!("/repo/src/a.txt")
+        );
+        assert_eq!(staged_arr[0]["status"], serde_json::json!("modified"));
+        assert_eq!(staged_arr[0]["conflicted"], serde_json::json!(false));
     }
 }

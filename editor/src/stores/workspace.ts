@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import type { FileEntry, TreeNode, OpenFile } from '../types';
+import type { FileEntry, TreeNode, OpenFile, DiffInfo } from '../types';
 import { initMonaco } from '../features/editor';
 import {
   lspManager,
@@ -1096,32 +1096,69 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   },
 
   openDiffTab: async (filePath: string, fileName: string, staged: boolean) => {
-    const { workspacePath, openFiles } = get();
+    const { workspacePath } = get();
     if (!workspacePath) return;
 
     const diffPath = `diff://${staged ? 'staged' : 'unstaged'}/${filePath}`;
 
-    // If already open, just activate
-    const existing = openFiles.find((f) => f.path === diffPath);
-    if (existing) {
-      set({ activeFilePath: diffPath });
-      return;
+    let originalContent = '';
+    let modifiedContent = '';
+    let originalFailed = false;
+    let modifiedFailed = false;
+    let originalError: unknown = null;
+    let modifiedError: unknown = null;
+
+    if (staged) {
+      // Staged diff: HEAD vs INDEX. A staged deletion naturally renders as
+      // content -> empty (git_show_index returns "" once a path is removed
+      // from the index).
+      try {
+        originalContent = await invoke<string>('git_show_head', { workspacePath, filePath });
+      } catch (err) {
+        originalFailed = true;
+        originalError = err;
+      }
+      try {
+        modifiedContent = await invoke<string>('git_show_index', { workspacePath, filePath });
+      } catch (err) {
+        modifiedFailed = true;
+        modifiedError = err;
+      }
+    } else {
+      // Unstaged diff: INDEX vs worktree. Unmerged/conflicted paths have no
+      // stage 0, so git_show_index errors for them — fall back to HEAD so
+      // conflicts keep the pre-existing HEAD-vs-worktree behavior. Untracked
+      // files: the index side is "" as before.
+      try {
+        originalContent = await invoke<string>('git_show_index', { workspacePath, filePath });
+      } catch {
+        try {
+          originalContent = await invoke<string>('git_show_head', { workspacePath, filePath });
+        } catch (err) {
+          originalFailed = true;
+          originalError = err;
+        }
+      }
+      try {
+        modifiedContent = await invoke<string>('read_file', {
+          path: `${workspacePath}/${filePath}`,
+        });
+      } catch (err) {
+        // File deleted — modifiedContent stays empty. Still tracked as a
+        // failure below so a fully broken repo/workspace (both sides
+        // erroring) surfaces a toast instead of a silently empty diff.
+        modifiedFailed = true;
+        modifiedError = err;
+      }
     }
 
-    // Fetch HEAD content (empty for new/untracked files)
-    const originalContent = await invoke<string>('git_show_head', {
-      workspacePath,
-      filePath,
-    });
-
-    // Fetch current content (empty for deleted files)
-    let modifiedContent = '';
-    try {
-      modifiedContent = await invoke<string>('read_file', {
-        path: `${workspacePath}/${filePath}`,
-      });
-    } catch {
-      // File deleted — modifiedContent stays empty
+    if (originalFailed && modifiedFailed) {
+      const detail = [originalError, modifiedError]
+        .filter((e): e is unknown => e != null)
+        .map((e) => (e instanceof Error ? e.message : String(e)))
+        .join('; ');
+      notify.error(`Couldn't load diff for ${fileName}: ${detail}`);
+      return;
     }
 
     // Unity scene/prefab/asset files get a semantic tree diff instead of the
@@ -1133,66 +1170,85 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       isUnityAssetFile(fileName) &&
       useSettingsStore.getState().settings['unity.sceneDiff.enabled'];
 
-    const file: OpenFile = {
-      path: diffPath,
-      name: `${fileName} (${staged ? 'Staged' : 'Working Tree'})`,
-      content: '',
-      isDirty: false,
-      diff: {
-        originalContent,
-        modifiedContent,
-        filePath,
-        staged,
-        semanticCandidate,
-      },
-    };
+    set((state) => {
+      const idx = state.openFiles.findIndex((f) => f.path === diffPath);
+      if (idx !== -1) {
+        // Stale-tab fix: re-clicking an already-open diff tab must refresh
+        // its content in place (new `diff` object reference — Monaco's
+        // DiffEditor won't re-render on a mutated object) rather than just
+        // activating the old, possibly-stale tab.
+        const existing = state.openFiles[idx];
+        const openFiles = state.openFiles.slice();
+        openFiles[idx] = {
+          ...existing,
+          diff: { ...(existing.diff as DiffInfo), originalContent, modifiedContent, semanticCandidate },
+        };
+        return { openFiles, activeFilePath: diffPath };
+      }
 
-    set((state) => ({
-      openFiles: [...state.openFiles, file],
-      activeFilePath: diffPath,
-    }));
+      const file: OpenFile = {
+        path: diffPath,
+        name: `${fileName} (${staged ? 'Staged' : 'Working Tree'})`,
+        content: '',
+        isDirty: false,
+        diff: {
+          originalContent,
+          modifiedContent,
+          filePath,
+          staged,
+          semanticCandidate,
+        },
+      };
+      return { openFiles: [...state.openFiles, file], activeFilePath: diffPath };
+    });
   },
 
   openCommitDiffTab: async (hash: string, filePath: string, title: string) => {
-    const { workspacePath, openFiles } = get();
+    const { workspacePath } = get();
     if (!workspacePath) return;
 
     const diffPath = `diff://commit/${hash}/${filePath}`;
-
-    // If already open, just activate
-    const existing = openFiles.find((f) => f.path === diffPath);
-    if (existing) {
-      set({ activeFilePath: diffPath });
-      return;
-    }
 
     // Original = the file as it stood before the commit (`<hash>^`); modified
     // = the file as the commit left it. `git_show_file_at` returns "" for a
     // root commit's nonexistent parent or a path that didn't exist at that
     // revision — i.e. added/deleted files diff cleanly against empty.
+    // Content sources are immutable revs, so refetching on every click (see
+    // below) is cheap and harmless.
     const [originalContent, modifiedContent] = await Promise.all([
       invoke<string>('git_show_file_at', { workspacePath, rev: `${hash}^`, filePath }),
       invoke<string>('git_show_file_at', { workspacePath, rev: hash, filePath }),
     ]);
 
-    const file: OpenFile = {
-      path: diffPath,
-      name: title,
-      content: '',
-      isDirty: false,
-      diff: {
-        originalContent,
-        modifiedContent,
-        filePath,
-        staged: false,
-        commitHash: hash,
-      },
-    };
+    set((state) => {
+      const idx = state.openFiles.findIndex((f) => f.path === diffPath);
+      if (idx !== -1) {
+        // Same stale-tab fix as openDiffTab (also picks up label changes).
+        const existing = state.openFiles[idx];
+        const openFiles = state.openFiles.slice();
+        openFiles[idx] = {
+          ...existing,
+          name: title,
+          diff: { ...(existing.diff as DiffInfo), originalContent, modifiedContent },
+        };
+        return { openFiles, activeFilePath: diffPath };
+      }
 
-    set((state) => ({
-      openFiles: [...state.openFiles, file],
-      activeFilePath: diffPath,
-    }));
+      const file: OpenFile = {
+        path: diffPath,
+        name: title,
+        content: '',
+        isDirty: false,
+        diff: {
+          originalContent,
+          modifiedContent,
+          filePath,
+          staged: false,
+          commitHash: hash,
+        },
+      };
+      return { openFiles: [...state.openFiles, file], activeFilePath: diffPath };
+    });
   },
 
   refreshTree: async () => {
