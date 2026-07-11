@@ -3,7 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import type { GitLogEntry, WorktreeInfo, BlameLine, CommitDetail } from '../types';
 import { notify } from './notifications';
 import { useWorkspaceStore } from './workspace';
-import { remoteErrorMessage } from '../features/git';
+import { remoteErrorMessage } from '../utils/remote-errors';
 
 interface BlameEntry {
   gen: number;

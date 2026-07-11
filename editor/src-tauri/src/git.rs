@@ -540,27 +540,77 @@ pub fn git_discard_all(workspace_path: String) -> Result<(), String> {
     Ok(())
 }
 
+/// Decide what `GIT_SSH_COMMAND` should be set to for a remote git call, if
+/// anything. git resolves its SSH transport with the precedence
+/// `GIT_SSH_COMMAND` (env) > `core.sshCommand` (config) > plain `ssh`, so
+/// unconditionally setting the env var would silently clobber a user's
+/// corporate proxy wrapper or custom transport. Decision table:
+///
+/// | `GIT_SSH_COMMAND` env | `core.sshCommand` config | result |
+/// |-----------------------|--------------------------|--------|
+/// | set (non-empty)       | anything                 | `Some("<env> -oBatchMode=yes")` — keep the user's transport, add batch mode so it fails instead of prompting |
+/// | unset/blank           | set (non-empty)          | `None` — set nothing; env beats config, so setting the env var would override the user's configured transport (`GIT_TERMINAL_PROMPT=0` still applies) |
+/// | unset/blank           | unset/blank              | `Some("ssh -oBatchMode=yes")` — default ssh in batch mode |
+fn ssh_command_override(env_val: Option<String>, config_val: Option<String>) -> Option<String> {
+    if let Some(env) = env_val.filter(|v| !v.trim().is_empty()) {
+        return Some(format!("{env} -oBatchMode=yes"));
+    }
+    if config_val.is_some_and(|v| !v.trim().is_empty()) {
+        return None;
+    }
+    Some("ssh -oBatchMode=yes".to_string())
+}
+
+/// Read `core.sshCommand` from the repo's effective git config (local >
+/// global > system). Returns `None` when unset or blank.
+fn core_ssh_command(workspace_path: &str) -> Option<String> {
+    let output = Command::new("git")
+        .args(["-C", workspace_path, "config", "--get", "core.sshCommand"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    (!value.is_empty()).then_some(value)
+}
+
 /// Shared runner for the three network-touching git commands (fetch/pull/push).
 ///
-/// Two env vars keep a bad credential/URL from hanging the app instead of
-/// failing fast:
-/// - `GIT_TERMINAL_PROMPT=0` disables git's own interactive username/password
-///   prompt (it errors immediately instead, e.g. "could not read Username").
-/// - `GIT_SSH_COMMAND=ssh -oBatchMode=yes` tells ssh to fail rather than
-///   prompt when a key needs a passphrase or a host key must be accepted.
-///   An already-loaded ssh-agent key still works fine under batch mode.
+/// `GIT_TERMINAL_PROMPT=0` is always set: it disables git's own interactive
+/// username/password prompt (it errors immediately instead, e.g. "could not
+/// read Username").
+///
+/// The SSH transport is nudged into batch mode (fail rather than prompt when
+/// a key needs a passphrase or a host key must be accepted; an already-loaded
+/// ssh-agent key still works fine) *without* clobbering a transport the user
+/// configured themselves — see [`ssh_command_override`] for the precedence
+/// rules.
 ///
 /// stderr is returned verbatim (not wrapped) on failure so callers — both
 /// `git_push`'s own retry logic and the frontend store — can string-match
 /// specific git failure messages.
 fn run_git_remote(workspace_path: &str, args: &[&str]) -> Result<String, String> {
-    let output = Command::new("git")
+    let env_ssh = std::env::var("GIT_SSH_COMMAND").ok();
+    // Only consult git config when the env var can't decide on its own
+    // (`git config --get` is one cheap local subprocess, but skipping it
+    // when the env var wins is free).
+    let config_ssh = if env_ssh.as_deref().is_some_and(|v| !v.trim().is_empty()) {
+        None
+    } else {
+        core_ssh_command(workspace_path)
+    };
+
+    let mut command = Command::new("git");
+    command
         .args(["-C", workspace_path])
         .args(args)
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .env("GIT_SSH_COMMAND", "ssh -oBatchMode=yes")
-        .output()
-        .map_err(|e| e.to_string())?;
+        .env("GIT_TERMINAL_PROMPT", "0");
+    if let Some(ssh_command) = ssh_command_override(env_ssh, config_ssh) {
+        command.env("GIT_SSH_COMMAND", ssh_command);
+    }
+
+    let output = command.output().map_err(|e| e.to_string())?;
 
     if !output.status.success() {
         return Err(String::from_utf8_lossy(&output.stderr).to_string());
@@ -1955,43 +2005,136 @@ mod remote_ops_tests {
         );
     }
 
-    /// Structural proof that `run_git_remote`'s env vars (`GIT_TERMINAL_PROMPT=0`,
-    /// `GIT_SSH_COMMAND=... -oBatchMode=yes`) keep a bad remote from hanging:
-    /// pushing to a URL on the IANA-reserved `.invalid` TLD (RFC 2606,
-    /// guaranteed to never resolve) must fail — via DNS resolution failure —
-    /// well within a hard 5s bound rather than hanging on an interactive
-    /// credential/host-key prompt. Run off the main test thread so that even
-    /// in the worst case (this assertion firing) the test binary itself
-    /// cannot hang: the deadline is enforced by `recv_timeout`, and a detached
-    /// background thread doesn't keep the process alive past the harness's
-    /// own exit.
+    // Note: interactive-prompt suppression (GIT_TERMINAL_PROMPT=0 / ssh batch
+    // mode preventing hangs on real remotes) is intentionally covered by code
+    // read of `run_git_remote`, not by a test — a network/DNS-dependent test
+    // is flaky offline and a DNS failure precedes any prompt anyway.
+
+    // --- ssh_command_override decision table (pure fn, no subprocess) ------
+
     #[test]
-    fn push_to_unreachable_host_fails_fast_not_hang() {
+    fn ssh_override_composes_batch_mode_onto_existing_env_var() {
+        assert_eq!(
+            ssh_command_override(Some("ssh -i /corp/key -F /corp/config".into()), None),
+            Some("ssh -i /corp/key -F /corp/config -oBatchMode=yes".into())
+        );
+    }
+
+    #[test]
+    fn ssh_override_env_var_wins_over_core_ssh_command_config() {
+        // Mirrors git's own precedence: env beats config.
+        assert_eq!(
+            ssh_command_override(Some("custom-ssh".into()), Some("/bin/echo".into())),
+            Some("custom-ssh -oBatchMode=yes".into())
+        );
+    }
+
+    #[test]
+    fn ssh_override_defers_to_core_ssh_command_config_when_env_unset() {
+        // Setting GIT_SSH_COMMAND here would clobber the user's configured
+        // transport, so nothing must be set at all.
+        assert_eq!(ssh_command_override(None, Some("/bin/echo".into())), None);
+    }
+
+    #[test]
+    fn ssh_override_defaults_to_batch_ssh_when_nothing_configured() {
+        assert_eq!(
+            ssh_command_override(None, None),
+            Some("ssh -oBatchMode=yes".into())
+        );
+    }
+
+    #[test]
+    fn ssh_override_treats_blank_values_as_unset() {
+        assert_eq!(
+            ssh_command_override(Some(String::new()), None),
+            Some("ssh -oBatchMode=yes".into())
+        );
+        assert_eq!(
+            ssh_command_override(None, Some("  ".into())),
+            Some("ssh -oBatchMode=yes".into())
+        );
+        assert_eq!(
+            ssh_command_override(Some("  ".into()), Some("/bin/echo".into())),
+            None
+        );
+    }
+
+    // --- core.sshCommand fixture ------------------------------------------
+
+    #[test]
+    fn configured_core_ssh_command_suppresses_the_env_override() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().to_str().unwrap().to_string();
         run_git(&path, &["init", "--initial-branch=main"]);
-        run_git(&path, &["config", "user.email", "test@example.com"]);
-        run_git(&path, &["config", "user.name", "Test User"]);
-        run_git(&path, &["commit", "--allow-empty", "-m", "init"]);
-        run_git(
-            &path,
-            &["remote", "add", "origin", "https://invalid.invalid/nowhere/repo.git"],
-        );
 
-        let (tx, rx) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
-            let result = git_push(path);
-            let _ = tx.send(result);
-        });
+        // Baseline: whatever the ambient (global/system) config says, it is
+        // not our sentinel — proving the Some below comes from the local key.
+        assert_ne!(core_ssh_command(&path), Some("/bin/echo".to_string()));
 
-        let result = rx.recv_timeout(std::time::Duration::from_secs(5)).expect(
-            "git push hung for >5s instead of failing fast — GIT_TERMINAL_PROMPT/GIT_SSH_COMMAND \
-             may not be applied in run_git_remote",
-        );
+        run_git(&path, &["config", "core.sshCommand", "/bin/echo"]);
+        assert_eq!(core_ssh_command(&path), Some("/bin/echo".to_string()));
 
+        // With core.sshCommand configured and no GIT_SSH_COMMAND env var,
+        // run_git_remote must not set the env var (the user's configured
+        // transport wins).
+        assert_eq!(ssh_command_override(None, core_ssh_command(&path)), None);
+    }
+
+    // --- no-retry pass-through cases --------------------------------------
+
+    #[test]
+    fn detached_head_push_failure_does_not_trigger_set_upstream_retry() {
+        let bare_tmp = seeded_bare_origin();
+        let bare_path = bare_tmp.path().to_str().unwrap().to_string();
+        let work_tmp = clone_into_work(&bare_path);
+        let work_path = work_tmp.path().to_str().unwrap().to_string();
+
+        run_git(&work_path, &["checkout", "--detach"]);
+        write_and_commit(&work_path, "a.txt", "hello\n", "detached commit");
+
+        let err = git_push(work_path.clone()).expect_err("push from detached HEAD should fail");
+        // git's detached-HEAD message ("You are not currently on a branch.")
+        // does not contain "has no upstream branch", so the `-u origin`
+        // retry must not fire and the raw error passes through verbatim.
         assert!(
-            result.is_err(),
-            "push to an unreachable host should fail, not succeed"
+            err.contains("not currently on a branch"),
+            "expected the detached-HEAD error verbatim, got: {err}"
         );
+        // The retry never invented an upstream for HEAD.
+        let head_cfg = Command::new("git")
+            .args(["-C", &work_path, "config", "--get", "branch.HEAD.remote"])
+            .output()
+            .unwrap();
+        assert!(
+            !head_cfg.status.success(),
+            "no branch.HEAD.remote should have been configured"
+        );
+    }
+
+    #[test]
+    fn non_fast_forward_rejection_passes_through_without_retry() {
+        let bare_tmp = seeded_bare_origin();
+        let bare_path = bare_tmp.path().to_str().unwrap().to_string();
+
+        // work1 advances origin/main; work2 (cloned at the same seed) commits
+        // without pulling, so its push is a non-fast-forward rejection.
+        let work1_tmp = clone_into_work(&bare_path);
+        let work1_path = work1_tmp.path().to_str().unwrap().to_string();
+        let work2_tmp = clone_into_work(&bare_path);
+        let work2_path = work2_tmp.path().to_str().unwrap().to_string();
+
+        write_and_commit(&work1_path, "a.txt", "one\n", "advance origin");
+        assert!(!git_push(work1_path.clone()).unwrap().set_upstream);
+
+        write_and_commit(&work2_path, "b.txt", "two\n", "stale commit");
+        let err = git_push(work2_path.clone()).expect_err("non-fast-forward push should fail");
+        assert!(
+            err.contains("[rejected]"),
+            "expected git's rejection to pass through verbatim, got: {err}"
+        );
+        // No retry rewrote history: origin/main still points at work1's commit.
+        let bare_log = run_git(&bare_path, &["log", "-1", "--format=%s", "main"]);
+        assert_eq!(bare_log, "advance origin");
     }
 }
