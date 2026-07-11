@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { listen } from '@tauri-apps/api/event';
+import { listenScoped } from '../../utils/tauri-listener';
 import type { PlayModeStats } from '../../types/unity';
 
 const MAX_SAMPLES = 60; // ~15s of history at 4Hz
@@ -28,7 +28,7 @@ let initialized = false;
 export function initUnityTelemetry(): void {
   if (initialized) return;
   initialized = true;
-  listen<PlayModeStats>('unity-playmode-stats', (e) => {
+  listenScoped<PlayModeStats>('unity-playmode-stats', (e) => {
     useTelemetryStore.getState().push(e.payload);
   }).catch(() => {
     initialized = false;

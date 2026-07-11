@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { listen } from '@tauri-apps/api/event';
+import { listenScoped } from '../utils/tauri-listener';
 import { useWorkspaceStore } from './workspace';
 import { useProjectContextStore } from './project-context';
 import {
@@ -87,7 +87,7 @@ function isAsmdefPath(p: string): boolean {
 function initAsmdefIndexListener(): void {
   if (listenerInitialized) return;
   listenerInitialized = true;
-  listen<FileIndexDelta>('file-index-changed', (event) => {
+  listenScoped<FileIndexDelta>('file-index-changed', (event) => {
     if (!useProjectContextStore.getState().isUnityProject) return;
     const all = [...(event.payload.added ?? []), ...(event.payload.removed ?? [])];
     if (!all.some(isAsmdefPath)) return;

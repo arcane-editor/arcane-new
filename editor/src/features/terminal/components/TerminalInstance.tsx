@@ -4,12 +4,11 @@ import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
 import { invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
 import { useTerminalStore } from '../../../stores/terminal';
 import { useThemeStore } from '../../../stores/theme';
 import { useSettingsStore } from '../../../stores/settings';
 import { registerTerminal, unregisterTerminal } from '../../theme';
-import { safeUnlisten } from '../../../utils/tauri-listener';
+import { safeUnlisten, listenScoped } from '../../../utils/tauri-listener';
 
 interface Props {
   id: number;
@@ -91,7 +90,7 @@ function TerminalInstance({ id }: Props) {
         invoke('terminal_write', { id, data }).catch(() => {});
       });
 
-      listen<{ id: number; data: string }>('terminal-output', (event) => {
+      listenScoped<{ id: number; data: string }>('terminal-output', (event) => {
         if (event.payload.id === id) {
           localTerm.write(event.payload.data);
         }
@@ -100,7 +99,7 @@ function TerminalInstance({ id }: Props) {
         else unlistenOutputFn = fn;
       });
 
-      listen<{ id: number; exit_code: number | null }>('terminal-exit', (event) => {
+      listenScoped<{ id: number; exit_code: number | null }>('terminal-exit', (event) => {
         if (event.payload.id === id) {
           localTerm.write('\r\n\x1b[90m[Process exited]\x1b[0m\r\n');
           useTerminalStore.getState().markExited(id);

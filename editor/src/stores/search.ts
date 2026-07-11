@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
+import { listenScoped } from '../utils/tauri-listener';
 import {
   parseGlobList,
   applyBatch,
@@ -62,7 +62,7 @@ function toStreamState(state: SearchState): StreamState {
 function ensureListeners(): Promise<void> {
   if (!listenersPromise) {
     listenersPromise = Promise.all([
-      listen<SearchBatchPayload>('search-results-batch', (event) => {
+      listenScoped<SearchBatchPayload>('search-results-batch', (event) => {
         useSearchStore.setState((current) => {
           const streamState = toStreamState(current);
           const next = applyBatch(streamState, event.payload);
@@ -72,7 +72,7 @@ function ensureListeners(): Promise<void> {
           return next === streamState ? current : next;
         });
       }),
-      listen<SearchCompletePayload>('search-complete', (event) => {
+      listenScoped<SearchCompletePayload>('search-complete', (event) => {
         useSearchStore.setState((current) => {
           const streamState = toStreamState(current);
           const next = applyComplete(streamState, event.payload);

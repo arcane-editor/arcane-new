@@ -4,7 +4,7 @@
 
 use tauri::{
     menu::{AboutMetadata, Menu, MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder},
-    AppHandle, Emitter, Wry,
+    AppHandle, Emitter, Manager, Wry,
 };
 
 #[cfg(target_os = "macos")]
@@ -136,5 +136,16 @@ pub fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
 }
 
 pub fn handle_menu_event(app: &AppHandle, event_id: &str) {
-    let _ = app.emit("menu-action", event_id.to_string());
+    let focused = app
+        .webview_windows()
+        .into_iter()
+        .find(|(_, w)| w.is_focused().unwrap_or(false));
+    match focused {
+        Some((label, _)) => {
+            let _ = app.emit_to(label.as_str(), "menu-action", event_id.to_string());
+        }
+        None => {
+            let _ = app.emit("menu-action", event_id.to_string());
+        }
+    }
 }

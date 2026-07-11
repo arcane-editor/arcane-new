@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { listen } from '@tauri-apps/api/event';
+import { listenScoped } from '../../../utils/tauri-listener';
 import {
   findAssetUsages,
   findInstanceUsages,
@@ -149,7 +149,7 @@ let invalidationListenerInitialized = false;
 function initInvalidationListener() {
   if (invalidationListenerInitialized) return;
   invalidationListenerInitialized = true;
-  listen<{ added: string[]; removed: string[] }>('file-index-changed', (event) => {
+  listenScoped<{ added: string[]; removed: string[] }>('file-index-changed', (event) => {
     const all = [...(event.payload.added ?? []), ...(event.payload.removed ?? [])];
     const relevant = all.some((p) => {
       const lower = p.toLowerCase();

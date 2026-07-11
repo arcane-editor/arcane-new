@@ -8,7 +8,8 @@
  */
 
 import { create } from 'zustand';
-import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import type { UnlistenFn } from '@tauri-apps/api/event';
+import { listenScoped } from '../utils/tauri-listener';
 import {
   graphifyBuild,
   graphifyCheck,
@@ -110,7 +111,7 @@ export const useGraphifyStore = create<GraphifyState>((set, get) => ({
     // status badge can display them as a live indicator.
     let unlisten: UnlistenFn | null = null;
     try {
-      unlisten = await listen<string>('graphify-build-progress', (event) => {
+      unlisten = await listenScoped<string>('graphify-build-progress', (event) => {
         const line = String(event.payload ?? '').replace(/^\[arcane-graph\]\s*/, '');
         if (line) set({ progressMessage: line });
       });

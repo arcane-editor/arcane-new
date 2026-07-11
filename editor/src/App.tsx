@@ -43,7 +43,7 @@ import { useAutoSave } from './hooks/useAutoSave';
 import { useCloseGuard } from './hooks/useCloseGuard';
 import { useNotificationsStore } from './stores/notifications';
 import { useCommandsStore } from './stores/commands';
-import { listen } from '@tauri-apps/api/event';
+import { listenScoped } from './utils/tauri-listener';
 import { useWorkspaceStore } from './stores/workspace';
 import { useUiStore } from './stores/ui';
 import { useTerminalStore } from './stores/terminal';
@@ -264,7 +264,7 @@ function App() {
     let unlisten: (() => void) | null = null;
     let cancelled = false;
     (async () => {
-      const fn = await listen<string>('menu-action', (event) => {
+      const fn = await listenScoped<string>('menu-action', (event) => {
         useCommandsStore.getState().executeCommand(event.payload);
       });
       if (cancelled) safeUnlisten(fn);

@@ -1,6 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
-import { safeUnlisten } from '../../../utils/tauri-listener';
+import { safeUnlisten, listenScoped } from '../../../utils/tauri-listener';
 
 interface PendingRequest {
   resolve: (value: unknown) => void;
@@ -119,12 +118,12 @@ export class LspClient {
     // `lsp_start` returns, so registering listeners after the invoke
     // would race against that — early stderr lines (e.g. the `csharp-ls
     // 0.22.0.0 initializing` banner) would be lost.
-    this.unlisten = await listen<LspEventPayload>('lsp-message', (event) => {
+    this.unlisten = await listenScoped<LspEventPayload>('lsp-message', (event) => {
       if (event.payload.language !== this.languageId) return;
       this.handleMessage(event.payload.body);
     });
 
-    this.unlistenExited = await listen<LspEventPayload>('lsp-exited', (event) => {
+    this.unlistenExited = await listenScoped<LspEventPayload>('lsp-exited', (event) => {
       if (event.payload.language !== this.languageId) return;
       if (!this.running) return; // Already stopped via stop()
       console.warn(`[LSP ${this.languageId}] Server process exited unexpectedly`);
@@ -141,7 +140,7 @@ export class LspClient {
     });
 
     // Capture stderr lines into a ring buffer for diagnostics surfacing.
-    this.unlistenStderr = await listen<LspEventPayload>('lsp-stderr', (event) => {
+    this.unlistenStderr = await listenScoped<LspEventPayload>('lsp-stderr', (event) => {
       if (event.payload.language !== this.languageId) return;
       this.stderrRing.push(event.payload.body);
       if (this.stderrRing.length > STDERR_RING_SIZE) {

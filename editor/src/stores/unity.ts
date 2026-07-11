@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
-import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import type { UnlistenFn } from '@tauri-apps/api/event';
+import { listenScoped } from '../utils/tauri-listener';
 import type {
   UnityLogEntry,
   UnityProjectInfo,
@@ -127,7 +128,7 @@ export const useUnityStore = create<UnityState>((set, get) => ({
     // Clean up any existing listeners
     get().teardownListeners();
 
-    const u1 = await listen<ConnectionChangedPayload>('unity-connection-changed', (event) => {
+    const u1 = await listenScoped<ConnectionChangedPayload>('unity-connection-changed', (event) => {
       const isConnected = event.payload.connected;
       if (reloadGraceTimer) {
         clearTimeout(reloadGraceTimer);
@@ -155,7 +156,7 @@ export const useUnityStore = create<UnityState>((set, get) => ({
       }
     });
 
-    const u2 = await listen<UnityLogEntry>('unity-log', (event) => {
+    const u2 = await listenScoped<UnityLogEntry>('unity-log', (event) => {
       const entry = { ...event.payload, parsedFrames: parseStackTrace(event.payload.stackTrace ?? '') };
       set((state) => {
         const logs = [...state.logs, entry];
@@ -163,7 +164,7 @@ export const useUnityStore = create<UnityState>((set, get) => ({
       });
     });
 
-    const u3 = await listen<UnityLogEntry[]>('unity-log-batch', (event) => {
+    const u3 = await listenScoped<UnityLogEntry[]>('unity-log-batch', (event) => {
       const entries = (event.payload ?? []).map((e) => ({
         ...e,
         parsedFrames: parseStackTrace(e.stackTrace ?? ''),
@@ -174,14 +175,14 @@ export const useUnityStore = create<UnityState>((set, get) => ({
       });
     });
 
-    const u4 = await listen<PlaystateChangedPayload>('unity-playstate-changed', (event) => {
+    const u4 = await listenScoped<PlaystateChangedPayload>('unity-playstate-changed', (event) => {
       set({
         playState: event.payload.state,
         isCompiling: event.payload.isCompiling,
       });
     });
 
-    const u5 = await listen<CompilationPayload>('unity-compilation', (event) => {
+    const u5 = await listenScoped<CompilationPayload>('unity-compilation', (event) => {
       // started=true → compiling; started=false → finished (carries the report).
       set({
         isCompiling: event.payload.started,
@@ -189,13 +190,13 @@ export const useUnityStore = create<UnityState>((set, get) => ({
       });
     });
 
-    const u6 = await listen<OpenFilePayload>('unity-open-file', (event) => {
+    const u6 = await listenScoped<OpenFilePayload>('unity-open-file', (event) => {
       const { path } = event.payload;
       const fileName = path.split('/').pop() ?? path;
       useWorkspaceStore.getState().openFile(path, fileName);
     });
 
-    const u7 = await listen<{ ideProtocol: number; bridgeProtocol: number }>(
+    const u7 = await listenScoped<{ ideProtocol: number; bridgeProtocol: number }>(
       'unity-bridge-version-mismatch',
       (event) => {
         useNotificationsStore.getState().addNotification({

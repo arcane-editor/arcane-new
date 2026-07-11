@@ -1,5 +1,6 @@
 import { create } from 'zustand';
-import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import type { UnlistenFn } from '@tauri-apps/api/event';
+import { listenScoped } from '../utils/tauri-listener';
 import { bridgeRpc, type SceneHierarchy, type SelectionObject } from '../features/unity-bridge';
 import { useUnityStore } from './unity';
 
@@ -82,8 +83,8 @@ export const useUnitySceneStore = create<UnitySceneState>((set, get) => ({
       }, 300);
     };
 
-    const u1 = await listen('unity-hierarchy-changed', scheduleRefresh);
-    const u2 = await listen('unity-selection-changed', () => {
+    const u1 = await listenScoped('unity-hierarchy-changed', scheduleRefresh);
+    const u2 = await listenScoped('unity-selection-changed', () => {
       // Selection is cheap — update it eagerly (independent of the hierarchy
       // debounce) so editor-side selection reflects in <500ms.
       void bridgeRpc

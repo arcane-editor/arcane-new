@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
+import { listenScoped } from '../utils/tauri-listener';
 import { useWorkspaceStore } from './workspace';
 import { useProjectContextStore } from './project-context';
 import { useSettingsStore } from './settings';
@@ -162,7 +162,7 @@ let progressListenerInitialized = false;
 function initProgressListener(): void {
   if (progressListenerInitialized) return;
   progressListenerInitialized = true;
-  listen<IndexProgress>('unity-index-progress', (event) => {
+  listenScoped<IndexProgress>('unity-index-progress', (event) => {
     // Only surface progress while a build is in flight.
     if (useUnityIndexStore.getState().status === 'building') {
       useUnityIndexStore.setState({ progress: event.payload });
@@ -212,7 +212,7 @@ function indexEnabled(): boolean {
 function initDeltaListener(): void {
   if (deltaListenerInitialized) return;
   deltaListenerInitialized = true;
-  listen<FileIndexDelta>('file-index-changed', (event) => {
+  listenScoped<FileIndexDelta>('file-index-changed', (event) => {
     if (!indexEnabled()) return;
 
     const added = (event.payload.added ?? []).filter(isIndexRelevant);

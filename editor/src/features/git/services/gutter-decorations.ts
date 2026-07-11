@@ -1,7 +1,8 @@
 import type { Monaco } from '@monaco-editor/react';
 import type { editor as MonacoEditor } from 'monaco-editor';
 import { invoke } from '@tauri-apps/api/core';
-import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import type { UnlistenFn } from '@tauri-apps/api/event';
+import { listenScoped } from '../../../utils/tauri-listener';
 
 // `stores/workspace` is imported dynamically (inside `attachGitGutter` below)
 // rather than statically here. A static import transitively reaches
@@ -220,7 +221,7 @@ export function attachGitGutter(
   });
 
   let unlistenGitState: UnlistenFn | null = null;
-  listen('git-state-changed', () => {
+  listenScoped('git-state-changed', () => {
     void refresh(currentPath());
   }).then((fn) => {
     if (disposed) {

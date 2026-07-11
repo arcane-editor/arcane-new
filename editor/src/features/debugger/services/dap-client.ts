@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
-import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import type { UnlistenFn } from '@tauri-apps/api/event';
+import { listenScoped } from '../../../utils/tauri-listener';
 
 /**
  * Debug Adapter Protocol client. Speaks DAP to the Rust DAP host (`dap.rs`)
@@ -65,10 +66,10 @@ class DapClient {
     if (this.running) return;
     // Attach listeners BEFORE starting so we don't miss the adapter's early
     // 'initialized' event (the host emits the instant dap_start returns).
-    this.unlistenMessage = await listen<string>('dap-message', (e) => {
+    this.unlistenMessage = await listenScoped<string>('dap-message', (e) => {
       this.handleMessage(e.payload);
     });
-    this.unlistenExited = await listen('dap-exited', () => {
+    this.unlistenExited = await listenScoped('dap-exited', () => {
       this.handleExit();
     });
     try {

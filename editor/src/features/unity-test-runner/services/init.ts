@@ -1,4 +1,4 @@
-import { listen } from '@tauri-apps/api/event';
+import { listenScoped } from '../../../utils/tauri-listener';
 import { useTestStore } from '../stores/test-store';
 
 let initialized = false;
@@ -12,7 +12,7 @@ let initialized = false;
 export function initTestRunner(): void {
   if (initialized) return;
   initialized = true;
-  listen<Record<string, unknown>>('unity-test-event', (e) => {
+  listenScoped<Record<string, unknown>>('unity-test-event', (e) => {
     useTestStore.getState().applyEvent(e.payload);
   }).catch(() => {
     initialized = false;

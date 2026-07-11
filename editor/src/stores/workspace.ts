@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
+import { listenScoped } from '../utils/tauri-listener';
 import type { FileEntry, TreeNode, OpenFile, DiffInfo } from '../types';
 import { initMonaco } from '../features/editor';
 import {
@@ -833,7 +833,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     // expanded subdirs appear without a manual refresh).
     invoke('start_file_watcher', { workspacePath: path })
       .then(async () => {
-        const unlisten = await listen<FileIndexDelta>('file-index-changed', (event) => {
+        const unlisten = await listenScoped<FileIndexDelta>('file-index-changed', (event) => {
           const delta = event.payload;
           // Unity-only: keep the C# project model in sync when .cs files are
           // added/removed under Assets/ (regenerate .arcane.csproj + nudge
@@ -865,7 +865,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         // without waiting for window-focus or a manual git operation —
         // otherwise a branch created in the terminal shows up in the status
         // bar but not in the branch list (or vice versa).
-        const unlistenGit = await listen<void>('git-state-changed', () => {
+        const unlistenGit = await listenScoped<void>('git-state-changed', () => {
           const wp = get().workspacePath;
           if (wp) {
             useGitStore.getState().refreshStatus(wp).catch(() => {});
