@@ -48,6 +48,14 @@ fn map_status_char(c: char) -> &'static str {
 pub fn git_status(workspace_path: String) -> Result<GitStatusResult, String> {
     let output = Command::new("git")
         .args(["-C", &workspace_path, "status", "--porcelain=v2", "--branch"])
+        // Read-only command: opt out of git's opportunistic `.git/index`
+        // refresh-write. The file watcher treats `.git/index` as a
+        // git-state path (see file_scanner.rs), so without this a
+        // `git-state-changed` event would trigger a `git status` call that
+        // itself rewrites the index, re-triggering the watcher — an
+        // infinite feedback loop. Mutating commands (add/commit/etc.) must
+        // NOT set this — they take a mandatory lock regardless.
+        .env("GIT_OPTIONAL_LOCKS", "0")
         .output()
         .map_err(|e| e.to_string())?;
 
@@ -246,6 +254,8 @@ pub fn git_diff(
 
     let output = Command::new("git")
         .args(&args)
+        // Read-only command — see the comment on `git_status`'s call.
+        .env("GIT_OPTIONAL_LOCKS", "0")
         .output()
         .map_err(|e| e.to_string())?;
 
@@ -277,6 +287,8 @@ pub fn git_diff_file_head(workspace_path: String, file_path: String) -> Result<S
 
     let output = Command::new("git")
         .args(["-C", &workspace_path, "diff", "HEAD", "--", &file_path])
+        // Read-only command — see the comment on `git_status`'s call.
+        .env("GIT_OPTIONAL_LOCKS", "0")
         .output()
         .map_err(|e| e.to_string())?;
 

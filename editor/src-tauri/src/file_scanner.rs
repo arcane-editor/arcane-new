@@ -4,7 +4,7 @@ use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use nucleo_matcher::pattern::{Atom, AtomKind, CaseMatching, Normalization};
 use nucleo_matcher::{Matcher, Utf32Str};
 use serde::Serialize;
-use std::collections::BinaryHeap;
+use std::collections::{BinaryHeap, HashMap};
 use std::cmp::Ordering;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -93,8 +93,18 @@ impl Ord for ScoredEntry {
 // ── Git-state path detection ────────────────────────────────────────────────
 
 /// Returns true if `path_str` points at a git ref-like file (HEAD or a branch
-/// pointer). Used to trigger an instant branch-name refresh on `git checkout`
-/// from outside the app — e.g., in the integrated terminal.
+/// pointer) or another file whose change means the working tree's git status
+/// may have changed (the index, or an in-progress merge/checkout marker).
+/// Used both to trigger an instant branch-name refresh on `git checkout` and
+/// to decide whether a content edit outside `.git` still warrants a
+/// `git-state-changed` refresh (see `worktree_touched` in the debounce task).
+///
+/// `index.lock` is deliberately excluded: git takes that lock for the
+/// duration of a write and removes it when done, so watching it would just
+/// double-fire around every real `index` change. `COMMIT_EDITMSG` and
+/// `FETCH_HEAD` are also excluded as redundant/noisy — a completed commit
+/// already rewrites refs+index (both watched), and a fetch that actually
+/// moved anything already rewrites `refs/remotes/*` (also watched).
 fn is_git_state_path(path_str: &str) -> bool {
     let normalized = path_str.replace('\\', "/");
     normalized.ends_with("/.git/HEAD")
@@ -102,6 +112,9 @@ fn is_git_state_path(path_str: &str) -> bool {
         || normalized.contains("/.git/refs/remotes/")
         || normalized.contains("/.git/refs/tags/")
         || normalized.ends_with("/.git/packed-refs")
+        || normalized.ends_with("/.git/index")
+        || normalized.ends_with("/.git/MERGE_HEAD")
+        || normalized.ends_with("/.git/ORIG_HEAD")
 }
 
 /// If `<ws_path>/.git` is a `gitdir:` pointer file (i.e. `ws_path` is a linked
@@ -158,6 +171,34 @@ fn is_git_state_path_in_dir(path_str: &str, git_dir: &str) -> bool {
     normalized.ends_with("/HEAD")
         || normalized.contains("/refs/")
         || normalized.ends_with("/packed-refs")
+        || normalized.ends_with("/index")
+        || normalized.ends_with("/MERGE_HEAD")
+        || normalized.ends_with("/ORIG_HEAD")
+}
+
+/// True when `path_str` lives inside the workspace `.git` dir (or the linked
+/// worktree git dir) — such paths are handled by the git-state allowlist, not
+/// the worktree-content flag.
+///
+/// Used by the debounce task to decide whether an event belongs to the
+/// worktree-content bucket (`worktree_touched`) or was already accounted for
+/// by the git-state bucket (`git_state_touched`) — the two are mutually
+/// exclusive so a `.git` internals write (e.g. the index rewrite the git-state
+/// path check above targets) doesn't *also* count as a worktree edit.
+fn is_inside_dot_git(path_str: &str, linked_git_dir: Option<&str>) -> bool {
+    let normalized = path_str.replace('\\', "/");
+    if normalized.contains("/.git/") || normalized.ends_with("/.git") {
+        return true;
+    }
+    if let Some(dir) = linked_git_dir {
+        let normalized_dir = dir.replace('\\', "/");
+        let normalized_dir = normalized_dir.trim_end_matches('/');
+        let prefix = format!("{}/", normalized_dir);
+        if normalized == normalized_dir || normalized.starts_with(&prefix) {
+            return true;
+        }
+    }
+    false
 }
 
 fn query_contains_path_separator(query: &str) -> bool {
@@ -166,17 +207,35 @@ fn query_contains_path_separator(query: &str) -> bool {
 
 // ── File Watcher State ──────────────────────────────────────────────────────
 
-pub struct FileWatcherState {
-    pub watcher: Option<RecommendedWatcher>,
-    _shutdown_tx: Option<mpsc::Sender<()>>,
+/// One window's live watcher + its debounce task's shutdown handle. Dropping
+/// a `WatcherSlot` (e.g. via `HashMap::remove`) drops the `RecommendedWatcher`
+/// (stopping the OS-level watch) and the sender, which closes the debounce
+/// task's channel and lets it exit its `select!` loop.
+struct WatcherSlot {
+    _watcher: RecommendedWatcher,
+    _shutdown_tx: mpsc::Sender<()>,
 }
+
+/// Registry of running file watchers, keyed by window label — mirrors the
+/// per-window pattern in `lsp.rs`/`terminal.rs`. Keying by label (rather than
+/// the single previous global slot) is the actual fix for "opening a second
+/// window kills the first window's watcher": each window's `start_file_watcher`
+/// now only ever replaces its own entry.
+pub struct FileWatcherState(Mutex<HashMap<String, WatcherSlot>>);
 
 impl FileWatcherState {
     pub fn new() -> Self {
-        Self {
-            watcher: None,
-            _shutdown_tx: None,
-        }
+        Self(Mutex::new(HashMap::new()))
+    }
+
+    /// Stop and remove this window's watcher, if any. Called from
+    /// `start_file_watcher` (to replace this window's own prior watcher),
+    /// `stop_file_watcher`, and `WindowEvent::Destroyed` cleanup in `lib.rs`
+    /// — idempotent, a no-op if the window never started a watcher or
+    /// already had it stopped.
+    pub fn drop_window(&self, label: &str) {
+        let mut map = lock_recover(&self.0);
+        map.remove(label);
     }
 }
 
@@ -512,17 +571,24 @@ pub fn score_files(
 
 /// Start watching a workspace directory for file changes.
 /// Emits `file-index-changed` Tauri events with delta payloads.
+///
+/// `window` is auto-injected by Tauri (no frontend invoke change needed —
+/// same precedent as `terminal.rs`'s `terminal_spawn`). The watcher this
+/// starts is keyed by `window.label()` in `FileWatcherState`, so only the
+/// *calling* window's previous watcher (if any) is torn down here — a second
+/// window calling this no longer kills the first window's watcher.
 #[tauri::command]
 pub async fn start_file_watcher(
     app: AppHandle,
+    window: tauri::Window,
     workspace_path: String,
 ) -> Result<(), String> {
-    let state = app.state::<Mutex<FileWatcherState>>();
-    let mut state = lock_recover(&state);
+    let label = window.label().to_string();
+    let state = app.state::<FileWatcherState>();
 
-    // Stop existing watcher if any
-    state.watcher = None;
-    state._shutdown_tx = None;
+    // Stop this window's existing watcher, if any — leaves every other
+    // window's slot untouched.
+    state.drop_window(&label);
 
     let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
     let app_handle = app.clone();
@@ -552,6 +618,7 @@ pub async fn start_file_watcher(
 
     // Spawn debounce task
     let app_for_debounce = app_handle.clone();
+    let label_for_debounce = label.clone();
     tokio::spawn(async move {
         let mut pending_added: Vec<String> = Vec::new();
         let mut pending_removed: Vec<String> = Vec::new();
@@ -567,15 +634,38 @@ pub async fn start_file_watcher(
                     match event {
                         Some(event) => {
                             let mut git_state_touched = false;
+                            let mut worktree_touched = false;
                             let mut index_needs_rebuild = false;
                             for path in &event.paths {
                                 let path_str = path.to_string_lossy().to_string();
+                                let inside_dot_git =
+                                    is_inside_dot_git(&path_str, linked_git_dir_str.as_deref());
                                 if is_git_state_path(&path_str)
                                     || linked_git_dir_str.as_deref().is_some_and(|d| {
                                         is_git_state_path_in_dir(&path_str, d)
                                     })
                                 {
                                     git_state_touched = true;
+                                }
+                                // Broadened detection: a content edit anywhere
+                                // in the worktree (outside `.git`) also means
+                                // `git status` may now report differently —
+                                // e.g. a terminal `git add`, an external
+                                // editor save, or Unity writing assets. Gated
+                                // to outside `.git` since that's already
+                                // covered above; excludes Metadata (macOS
+                                // chmod/mtime spam) and Access events.
+                                if !inside_dot_git {
+                                    match event.kind {
+                                        notify::EventKind::Create(_)
+                                        | notify::EventKind::Remove(_)
+                                        | notify::EventKind::Modify(notify::event::ModifyKind::Data(_))
+                                        | notify::EventKind::Modify(notify::event::ModifyKind::Name(_))
+                                        | notify::EventKind::Modify(notify::event::ModifyKind::Any) => {
+                                            worktree_touched = true;
+                                        }
+                                        _ => {}
+                                    }
                                 }
                                 // Any event on .gitignore/.ignore — not just an
                                 // add/remove — can change what the walker would
@@ -634,7 +724,11 @@ pub async fn start_file_watcher(
                                     .map(|t| now.duration_since(t).as_millis() >= 100)
                                     .unwrap_or(true);
                                 if should_emit {
-                                    let _ = app_for_debounce.emit("git-state-changed", ());
+                                    let _ = app_for_debounce.emit_to(
+                                        label_for_debounce.as_str(),
+                                        "git-state-changed",
+                                        (),
+                                    );
                                     last_git_emit = Some(now);
                                 }
                             }
@@ -653,6 +747,10 @@ pub async fn start_file_watcher(
                             while let Ok(event) = event_rx.try_recv() {
                                 for path in &event.paths {
                                     let path_str = path.to_string_lossy().to_string();
+                                    let inside_dot_git = is_inside_dot_git(
+                                        &path_str,
+                                        linked_git_dir_str.as_deref(),
+                                    );
                                     if is_git_state_path(&path_str)
                                         || linked_git_dir_str.as_deref().is_some_and(|d| {
                                             is_git_state_path_in_dir(&path_str, d)
@@ -663,6 +761,18 @@ pub async fn start_file_watcher(
                                     // See the matching check above the leading
                                     // batch's match — same reasoning, applied to
                                     // events drained after the debounce sleep.
+                                    if !inside_dot_git {
+                                        match event.kind {
+                                            notify::EventKind::Create(_)
+                                            | notify::EventKind::Remove(_)
+                                            | notify::EventKind::Modify(notify::event::ModifyKind::Data(_))
+                                            | notify::EventKind::Modify(notify::event::ModifyKind::Name(_))
+                                            | notify::EventKind::Modify(notify::event::ModifyKind::Any) => {
+                                                worktree_touched = true;
+                                            }
+                                            _ => {}
+                                        }
+                                    }
                                     if file_index::is_gitignore_file(&path_str) {
                                         index_needs_rebuild = true;
                                     }
@@ -703,8 +813,22 @@ pub async fn start_file_watcher(
                             // dedup window. This runs once per burst — it's
                             // outside the drain `while` loop — so it can't fire
                             // once per drained event.
-                            if git_state_touched {
-                                let _ = app_for_debounce.emit("git-state-changed", ());
+                            // Also fires for a worktree-content-only burst.
+                            // Unlike `git_state_touched`, `worktree_touched`
+                            // deliberately gets no leading-edge emit (a
+                            // content edit might still be mid-write, and a
+                            // diff against a half-written file is worse than
+                            // a few hundred ms of staleness) — so this
+                            // trailing emit, once the burst has settled, is
+                            // that case's only path to a refresh (e.g. a
+                            // terminal `git add`, an external editor save, or
+                            // Unity writing assets).
+                            if git_state_touched || worktree_touched {
+                                let _ = app_for_debounce.emit_to(
+                                    label_for_debounce.as_str(),
+                                    "git-state-changed",
+                                    (),
+                                );
                                 last_git_emit = Some(std::time::Instant::now());
                             }
 
@@ -737,7 +861,11 @@ pub async fn start_file_watcher(
                                 let index_state =
                                     app_for_debounce.state::<file_index::FileIndexState>();
                                 file_index::apply_delta(&index_state, &delta);
-                                let _ = app_for_debounce.emit("file-index-changed", &delta);
+                                let _ = app_for_debounce.emit_to(
+                                    label_for_debounce.as_str(),
+                                    "file-index-changed",
+                                    &delta,
+                                );
                             }
                         }
                         None => break,
@@ -767,19 +895,25 @@ pub async fn start_file_watcher(
         }
     }
 
-    state.watcher = Some(watcher);
-    state._shutdown_tx = Some(shutdown_tx);
+    {
+        let mut map = lock_recover(&state.0);
+        map.insert(
+            label,
+            WatcherSlot {
+                _watcher: watcher,
+                _shutdown_tx: shutdown_tx,
+            },
+        );
+    }
 
     Ok(())
 }
 
-/// Stop the file watcher.
+/// Stop this window's file watcher. Idempotent.
 #[tauri::command]
-pub async fn stop_file_watcher(app: AppHandle) -> Result<(), String> {
-    let state = app.state::<Mutex<FileWatcherState>>();
-    let mut state = lock_recover(&state);
-    state.watcher = None;
-    state._shutdown_tx = None;
+pub async fn stop_file_watcher(app: AppHandle, window: tauri::Window) -> Result<(), String> {
+    let state = app.state::<FileWatcherState>();
+    state.drop_window(window.label());
     Ok(())
 }
 
@@ -814,9 +948,87 @@ mod tests {
         assert!(matches(CaseMatching::Ignore, "IITapplication", "Assets/IITApplication.cs"));
     }
 
-    // ── resolve_linked_git_dir ───────────────────────────────────────────
+    // ── is_git_state_path ────────────────────────────────────────────────
 
-    use super::{is_git_state_path_in_dir, resolve_linked_git_dir};
+    use super::{
+        is_git_state_path, is_git_state_path_in_dir, is_inside_dot_git, resolve_linked_git_dir,
+    };
+
+    #[test]
+    fn is_git_state_path_table() {
+        let cases: &[(&str, bool)] = &[
+            // Still matched (pre-existing behavior).
+            ("/repo/.git/HEAD", true),
+            ("/repo/.git/refs/heads/main", true),
+            ("/repo/.git/refs/remotes/origin/main", true),
+            ("/repo/.git/refs/tags/v1", true),
+            ("/repo/.git/packed-refs", true),
+            // Newly broadened.
+            ("/repo/.git/index", true),
+            ("/repo/.git/MERGE_HEAD", true),
+            ("/repo/.git/ORIG_HEAD", true),
+            // Must still be rejected: index.lock is transient (held only for
+            // the duration of a write) and would double-fire around every
+            // real index change.
+            ("/repo/.git/index.lock", false),
+            // Object writes are the actual content of every commit — far too
+            // noisy to treat as a status-affecting event.
+            ("/repo/.git/objects/ab/cdef", false),
+            // Deliberately excluded as redundant/noisy — see the doc comment.
+            ("/repo/.git/COMMIT_EDITMSG", false),
+            ("/repo/.git/FETCH_HEAD", false),
+        ];
+        for (path, expected) in cases {
+            assert_eq!(
+                is_git_state_path(path),
+                *expected,
+                "is_git_state_path({:?}) should be {}",
+                path,
+                expected
+            );
+        }
+    }
+
+    // ── is_inside_dot_git ────────────────────────────────────────────────
+
+    #[test]
+    fn is_inside_dot_git_true_for_path_inside_dot_git() {
+        assert!(is_inside_dot_git("/repo/.git/index", None));
+    }
+
+    #[test]
+    fn is_inside_dot_git_true_for_dot_git_itself() {
+        assert!(is_inside_dot_git("/repo/.git", None));
+    }
+
+    #[test]
+    fn is_inside_dot_git_false_for_workspace_file() {
+        assert!(!is_inside_dot_git("/repo/src/main.rs", None));
+    }
+
+    // These two use a linked_git_dir without a literal ".git" path component
+    // so they isolate the linked-dir-prefix branch from the generic
+    // `contains("/.git/")` check above — a *realistic* linked git dir (e.g.
+    // `<main>/.git/worktrees/feature`) would trip that generic check for any
+    // path under it (including a sibling worktree dir), masking whether the
+    // component-boundary prefix logic itself is correct.
+    #[test]
+    fn is_inside_dot_git_true_for_linked_git_dir_when_provided() {
+        assert!(is_inside_dot_git(
+            "/main-repo/worktrees/feature/HEAD",
+            Some("/main-repo/worktrees/feature")
+        ));
+    }
+
+    #[test]
+    fn is_inside_dot_git_false_for_sibling_prefix_of_linked_dir() {
+        assert!(!is_inside_dot_git(
+            "/main-repo/worktrees/feature-backup/HEAD",
+            Some("/main-repo/worktrees/feature")
+        ));
+    }
+
+    // ── resolve_linked_git_dir ───────────────────────────────────────────
 
     #[test]
     fn resolve_linked_git_dir_none_for_real_git_dir() {
@@ -911,9 +1123,41 @@ mod tests {
     }
 
     #[test]
+    fn is_git_state_path_in_dir_matches_index() {
+        assert!(is_git_state_path_in_dir(
+            "/main-repo/.git/worktrees/feature/index",
+            WORKTREE_GITDIR
+        ));
+    }
+
+    #[test]
+    fn is_git_state_path_in_dir_rejects_index_lock() {
+        assert!(!is_git_state_path_in_dir(
+            "/main-repo/.git/worktrees/feature/index.lock",
+            WORKTREE_GITDIR
+        ));
+    }
+
+    #[test]
+    fn is_git_state_path_in_dir_matches_merge_head() {
+        assert!(is_git_state_path_in_dir(
+            "/main-repo/.git/worktrees/feature/MERGE_HEAD",
+            WORKTREE_GITDIR
+        ));
+    }
+
+    #[test]
+    fn is_git_state_path_in_dir_matches_orig_head() {
+        assert!(is_git_state_path_in_dir(
+            "/main-repo/.git/worktrees/feature/ORIG_HEAD",
+            WORKTREE_GITDIR
+        ));
+    }
+
+    #[test]
     fn is_git_state_path_in_dir_rejects_unrelated_file_inside_dir() {
         assert!(!is_git_state_path_in_dir(
-            "/main-repo/.git/worktrees/feature/index",
+            "/main-repo/.git/worktrees/feature/config",
             WORKTREE_GITDIR
         ));
     }
@@ -1205,5 +1449,69 @@ mod tests {
         .unwrap();
 
         assert!(results.iter().any(|r| r.file_name == "b.txt"), "results = {:?}", results);
+    }
+
+    // ── FileWatcherState — per-window keying ──────────────────────────────
+    //
+    // Pins the actual fix for "a second window's start_file_watcher kills
+    // the first window's watcher": the state is now a HashMap keyed by
+    // window label, so two windows' slots must coexist independently and
+    // dropping one must never touch the other.
+
+    use super::{FileWatcherState, WatcherSlot};
+    use notify::{Config, Event, RecommendedWatcher, Watcher};
+    use tokio::sync::mpsc;
+
+    fn dummy_watcher_slot() -> WatcherSlot {
+        let (tx, _rx) = mpsc::channel::<()>(1);
+        let watcher = RecommendedWatcher::new(
+            |_res: Result<Event, notify::Error>| {},
+            Config::default(),
+        )
+        .expect("failed to create a no-op test watcher");
+        WatcherSlot {
+            _watcher: watcher,
+            _shutdown_tx: tx,
+        }
+    }
+
+    #[test]
+    fn file_watcher_state_two_windows_coexist_independently() {
+        let state = FileWatcherState::new();
+        {
+            let mut map = state.0.lock().unwrap();
+            map.insert("window-a".to_string(), dummy_watcher_slot());
+            map.insert("window-b".to_string(), dummy_watcher_slot());
+        }
+        assert_eq!(state.0.lock().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn file_watcher_state_drop_window_removes_only_that_label() {
+        let state = FileWatcherState::new();
+        {
+            let mut map = state.0.lock().unwrap();
+            map.insert("window-a".to_string(), dummy_watcher_slot());
+            map.insert("window-b".to_string(), dummy_watcher_slot());
+        }
+
+        state.drop_window("window-a");
+
+        let map = state.0.lock().unwrap();
+        assert!(!map.contains_key("window-a"), "window-a's slot should be gone");
+        assert!(
+            map.contains_key("window-b"),
+            "window-b's slot must survive window-a's removal"
+        );
+    }
+
+    #[test]
+    fn file_watcher_state_drop_window_is_idempotent_when_absent() {
+        let state = FileWatcherState::new();
+        // Must not panic when the window never had a watcher (or already had
+        // it stopped) — both `stop_file_watcher` and the
+        // `WindowEvent::Destroyed` cleanup call this unconditionally.
+        state.drop_window("never-started");
+        assert!(state.0.lock().unwrap().is_empty());
     }
 }

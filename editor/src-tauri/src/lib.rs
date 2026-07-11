@@ -24,7 +24,6 @@ use serde::{Deserialize, Serialize};
 use tauri::Manager;
 use std::fs;
 use std::path::Path;
-use std::sync::Mutex;
 use walkdir::WalkDir;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -506,7 +505,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .manage(lsp::LspState::new())
         .manage(terminal::TerminalState::new())
-        .manage(Mutex::new(file_scanner::FileWatcherState::new()))
+        .manage(file_scanner::FileWatcherState::new())
         .manage(file_index::FileIndexState::new())
         .manage(unity_ipc::UnityIpcState::new())
         .manage(dap::DapState::new())
@@ -645,6 +644,10 @@ pub fn run() {
                 let label = window.label().to_string();
                 // Per-window terminal cleanup
                 if let Some(state) = window.try_state::<terminal::TerminalState>() {
+                    state.drop_window(&label);
+                }
+                // Per-window file watcher cleanup
+                if let Some(state) = window.try_state::<file_scanner::FileWatcherState>() {
                     state.drop_window(&label);
                 }
                 // Per-window LSP cleanup
