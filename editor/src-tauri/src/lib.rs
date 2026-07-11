@@ -340,6 +340,7 @@ pub fn run() {
             git::git_rename_branch,
             git::git_delete_branch,
             git::git_diff,
+            git::git_diff_file_head,
             git::git_stage_file,
             git::git_unstage_file,
             git::git_stage_all,

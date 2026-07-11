@@ -258,6 +258,37 @@ pub fn git_diff(
     Ok(stdout.to_string())
 }
 
+/// Diff a single file against HEAD, combining staged and unstaged changes —
+/// what the editor gutter should reflect (`git diff <path>` alone would miss
+/// staged-but-uncommitted edits). `HEAD` is a hardcoded literal, never
+/// user-supplied, so it needs no ref validation; `file_path` is passed after
+/// `--` so it can never be parsed as a flag, but an empty path is still
+/// rejected explicitly since `git diff HEAD --` (no path) would diff the
+/// whole tree instead of erroring.
+///
+/// For a file with no HEAD version (untracked/newly added), this returns an
+/// empty diff — the gutter simply shows no decorations for it. Acceptable
+/// for v1.
+#[tauri::command]
+pub fn git_diff_file_head(workspace_path: String, file_path: String) -> Result<String, String> {
+    if file_path.is_empty() {
+        return Err("file path must not be empty".to_string());
+    }
+
+    let output = Command::new("git")
+        .args(["-C", &workspace_path, "diff", "HEAD", "--", &file_path])
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(stderr.to_string());
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    Ok(stdout.to_string())
+}
+
 #[tauri::command]
 pub fn git_stage_file(workspace_path: String, file_path: String) -> Result<(), String> {
     let output = Command::new("git")
@@ -2136,5 +2167,114 @@ mod remote_ops_tests {
         // No retry rewrote history: origin/main still points at work1's commit.
         let bare_log = run_git(&bare_path, &["log", "-1", "--format=%s", "main"]);
         assert_eq!(bare_log, "advance origin");
+    }
+}
+
+#[cfg(test)]
+mod diff_file_head_tests {
+    use super::*;
+
+    fn run_git(path: &str, args: &[&str]) -> String {
+        let mut full: Vec<&str> = vec!["-C", path];
+        full.extend_from_slice(args);
+        let output = Command::new("git").args(&full).output().unwrap();
+        assert!(
+            output.status.success(),
+            "git {:?} failed: {}",
+            args,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    }
+
+    /// Repo with one committed file (`a.txt`), so HEAD is valid and there is
+    /// a tracked file to modify/stage in tests.
+    fn init_repo() -> tempfile::TempDir {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().to_str().unwrap();
+        run_git(path, &["init", "--initial-branch=main"]);
+        run_git(path, &["config", "user.email", "test@example.com"]);
+        run_git(path, &["config", "user.name", "Test User"]);
+        std::fs::write(std::path::Path::new(path).join("a.txt"), "line1\nline2\n").unwrap();
+        run_git(path, &["add", "a.txt"]);
+        run_git(path, &["commit", "-m", "init"]);
+        tmp
+    }
+
+    #[test]
+    fn modifying_a_committed_file_produces_a_non_empty_diff() {
+        let tmp = init_repo();
+        let path = tmp.path().to_str().unwrap().to_string();
+
+        std::fs::write(
+            std::path::Path::new(&path).join("a.txt"),
+            "line1\nline2-modified\n",
+        )
+        .unwrap();
+
+        let diff = git_diff_file_head(path, "a.txt".to_string()).unwrap();
+        assert!(!diff.is_empty());
+        assert!(diff.contains("-line2"));
+        assert!(diff.contains("+line2-modified"));
+    }
+
+    #[test]
+    fn untracked_file_produces_an_empty_diff() {
+        let tmp = init_repo();
+        let path = tmp.path().to_str().unwrap().to_string();
+
+        std::fs::write(std::path::Path::new(&path).join("new.txt"), "hello\n").unwrap();
+
+        let diff = git_diff_file_head(path, "new.txt".to_string()).unwrap();
+        assert_eq!(diff, "");
+    }
+
+    #[test]
+    fn staged_and_unstaged_changes_are_both_included_vs_head() {
+        let tmp = init_repo();
+        let path = tmp.path().to_str().unwrap().to_string();
+
+        // Stage one change...
+        std::fs::write(
+            std::path::Path::new(&path).join("a.txt"),
+            "line1-staged\nline2\n",
+        )
+        .unwrap();
+        run_git(&path, &["add", "a.txt"]);
+
+        // ...then make a further unstaged change on top.
+        std::fs::write(
+            std::path::Path::new(&path).join("a.txt"),
+            "line1-staged\nline2-unstaged\n",
+        )
+        .unwrap();
+
+        let diff = git_diff_file_head(path, "a.txt".to_string()).unwrap();
+        assert!(
+            diff.contains("+line1-staged"),
+            "staged change missing from diff vs HEAD: {diff}"
+        );
+        assert!(
+            diff.contains("+line2-unstaged"),
+            "unstaged change missing from diff vs HEAD: {diff}"
+        );
+    }
+
+    #[test]
+    fn clean_file_produces_an_empty_diff() {
+        let tmp = init_repo();
+        let path = tmp.path().to_str().unwrap().to_string();
+
+        let diff = git_diff_file_head(path, "a.txt".to_string()).unwrap();
+        assert_eq!(diff, "");
+    }
+
+    #[test]
+    fn empty_file_path_is_rejected() {
+        let tmp = init_repo();
+        let path = tmp.path().to_str().unwrap().to_string();
+
+        let err = git_diff_file_head(path, "".to_string()).expect_err("empty path should error");
+        assert!(!err.is_empty());
     }
 }

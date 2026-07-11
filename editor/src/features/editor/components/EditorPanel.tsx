@@ -17,7 +17,7 @@ import { bindGlobalShortcutsToMonaco } from '../services/bind-shortcuts';
 import { registerBetterComments } from '../services/better-comments';
 import { registerUsageHoverProvider } from '../services/usage-hover-provider';
 import { registerUnityDocsHover } from '../services/unity-docs-hover';
-import { registerBlameHoverProvider } from '../../git';
+import { registerBlameHoverProvider, attachGitGutter } from '../../git';
 import { PackageCacheBanner, isPackageCachePath } from '../../unity-packages';
 import { initUsageCodeLens } from '../../unity-context';
 import { initUnityAnalyzers } from '../../unity-analyzers';
@@ -329,6 +329,12 @@ function EditorPanel() {
           registerBetterComments(editor, monaco);
           // Debugger breakpoint gutter (Unity projects; self-gates otherwise).
           attachBreakpointGutter(editor, monaco);
+          // Git changed-lines gutter (vs HEAD); disposed alongside this
+          // editor instance (model swaps on file switch keep it alive and
+          // just trigger a refresh — see attachGitGutter's onDidChangeModel
+          // hookup).
+          const disposeGitGutter = attachGitGutter(editor, monaco);
+          editor.onDidDispose(disposeGitGutter);
 
           // Handle pending Go to Definition navigation
           const nav = getPendingNavigation();

@@ -1151,6 +1151,32 @@ html, body, #root {
 .dbg-watch-expr { color: var(--accent-fg, #9cdcfe); }
 .dbg-watch-value { color: var(--text-primary); margin-left: auto; }
 
+/* ==================== Editor Git Gutter (changed lines vs HEAD) ==================== */
+/* Applied via Monaco's linesDecorationsClassName by attachGitGutter(). */
+.git-gutter-added {
+  border-left: 3px solid var(--git-added);
+}
+.git-gutter-modified {
+  border-left: 3px solid var(--git-modified);
+}
+.git-gutter-deleted {
+  /* Override Monaco's inline `position: absolute` on the decoration
+     element so the triangle below can anchor to this line's own gutter
+     cell instead of the nearest ancestor positioned element. */
+  position: relative !important;
+}
+.git-gutter-deleted::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 4px 4px 0 0;
+  border-color: var(--git-deleted) transparent transparent transparent;
+}
+
 /* ==================== SCM Error Banner ==================== */
 
 .scm-error-banner {
