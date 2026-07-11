@@ -874,6 +874,21 @@ html, body, #root {
   cursor: not-allowed;
 }
 
+.scm-amend-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+
+.scm-amend-checkbox input[type='checkbox'] {
+  cursor: pointer;
+}
+
 .scm-section {
   flex: 1;
   overflow-y: auto;
@@ -4563,6 +4578,40 @@ html, body, #root {
   transition: opacity 0.1s;
 }
 .scm-worktree-item:hover .scm-worktree-actions {
+  opacity: 1;
+}
+
+/* Stashes */
+.scm-stash-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 14px 4px 18px;
+  font-size: 12px;
+  color: var(--text-primary);
+}
+.scm-stash-item:hover {
+  background: var(--hover);
+}
+.scm-stash-message {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.scm-stash-date {
+  color: var(--text-secondary);
+  font-size: 11px;
+  flex-shrink: 0;
+}
+.scm-stash-actions {
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+.scm-stash-item:hover .scm-stash-actions {
   opacity: 1;
 }
 

@@ -334,16 +334,169 @@ pub fn git_stage_all(workspace_path: String) -> Result<(), String> {
     Ok(())
 }
 
+/// Create a commit. When `amend` is `true`, rewrites HEAD (`git commit
+/// --amend -m <message>`) instead of creating a new commit — used by the
+/// "Amend Last Commit" flow. `amend` defaults to `false` when omitted so
+/// existing callers that don't pass it are unaffected.
 #[tauri::command]
-pub fn git_commit(workspace_path: String, message: String) -> Result<(), String> {
+pub fn git_commit(
+    workspace_path: String,
+    message: String,
+    amend: Option<bool>,
+) -> Result<(), String> {
+    let mut args: Vec<&str> = vec!["-C", &workspace_path, "commit"];
+    if amend.unwrap_or(false) {
+        args.push("--amend");
+    }
+    args.push("-m");
+    args.push(&message);
+
     let output = Command::new("git")
-        .args(["-C", &workspace_path, "commit", "-m", &message])
+        .args(&args)
         .output()
         .map_err(|e| e.to_string())?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(stderr.to_string());
+    }
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// A8: Stash push/list/apply/pop/drop
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct StashEntry {
+    pub index: u32,
+    pub message: String,
+    pub date: String,
+}
+
+/// Parse the numeric index out of a `stash@{N}` reflog selector (as produced
+/// by `%gd`). Returns `None` for anything not matching that exact shape.
+fn parse_stash_index(gd: &str) -> Option<u32> {
+    gd.strip_prefix("stash@{")?.strip_suffix('}')?.parse().ok()
+}
+
+/// Build a `stash@{N}` ref from a caller-supplied index. Indices are always
+/// constructed here from a `u32` — never interpolated from a raw string — so
+/// there is no argument-injection surface for `git_stash_apply`/`_pop`/`_drop`.
+fn stash_ref(index: u32) -> String {
+    format!("stash@{{{index}}}")
+}
+
+#[tauri::command]
+pub fn git_stash_push(
+    workspace_path: String,
+    message: Option<String>,
+    include_untracked: bool,
+) -> Result<(), String> {
+    let mut args: Vec<String> = vec![
+        "-C".into(),
+        workspace_path,
+        "stash".into(),
+        "push".into(),
+    ];
+    if include_untracked {
+        args.push("-u".into());
+    }
+    if let Some(m) = message {
+        args.push("-m".into());
+        args.push(m);
+    }
+
+    let output = Command::new("git")
+        .args(args.iter().map(String::as_str).collect::<Vec<_>>())
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).to_string());
+    }
+
+    Ok(())
+}
+
+/// List stashes via `git stash list --format=%gd%x00%gs%x00%ci`: `%gd` is the
+/// `stash@{N}` reflog selector (index parsed from it), `%gs` the reflog
+/// subject (the stash "message"), `%ci` the committer date.
+#[tauri::command]
+pub fn git_stash_list(workspace_path: String) -> Result<Vec<StashEntry>, String> {
+    let output = Command::new("git")
+        .args([
+            "-C",
+            &workspace_path,
+            "stash",
+            "list",
+            "--format=%gd%x00%gs%x00%ci",
+        ])
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).to_string());
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let entries = stdout
+        .lines()
+        .filter_map(|line| {
+            let parts: Vec<&str> = line.splitn(3, '\0').collect();
+            if parts.len() < 3 {
+                return None;
+            }
+            let index = parse_stash_index(parts[0])?;
+            Some(StashEntry {
+                index,
+                message: parts[1].to_string(),
+                date: parts[2].to_string(),
+            })
+        })
+        .collect();
+
+    Ok(entries)
+}
+
+#[tauri::command]
+pub fn git_stash_apply(workspace_path: String, index: u32) -> Result<(), String> {
+    let output = Command::new("git")
+        .args(["-C", &workspace_path, "stash", "apply", &stash_ref(index)])
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).to_string());
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+pub fn git_stash_pop(workspace_path: String, index: u32) -> Result<(), String> {
+    let output = Command::new("git")
+        .args(["-C", &workspace_path, "stash", "pop", &stash_ref(index)])
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).to_string());
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+pub fn git_stash_drop(workspace_path: String, index: u32) -> Result<(), String> {
+    let output = Command::new("git")
+        .args(["-C", &workspace_path, "stash", "drop", &stash_ref(index)])
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).to_string());
     }
 
     Ok(())
@@ -2276,5 +2429,265 @@ mod diff_file_head_tests {
 
         let err = git_diff_file_head(path, "".to_string()).expect_err("empty path should error");
         assert!(!err.is_empty());
+    }
+}
+
+// ---------------------------------------------------------------------------
+// A8: Stash push/list/apply/pop/drop + commit --amend
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod stash_and_amend_tests {
+    use super::*;
+
+    fn run_git(path: &str, args: &[&str]) -> String {
+        let mut full: Vec<&str> = vec!["-C", path];
+        full.extend_from_slice(args);
+        let output = Command::new("git").args(&full).output().unwrap();
+        assert!(
+            output.status.success(),
+            "git {:?} failed: {}",
+            args,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    }
+
+    /// Repo with one committed file (`a.txt`), so HEAD is valid and there is
+    /// a tracked file to modify for stash tests.
+    fn init_repo() -> tempfile::TempDir {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().to_str().unwrap();
+        run_git(path, &["init", "--initial-branch=main"]);
+        run_git(path, &["config", "user.email", "test@example.com"]);
+        run_git(path, &["config", "user.name", "Test User"]);
+        std::fs::write(std::path::Path::new(path).join("a.txt"), "line1\n").unwrap();
+        run_git(path, &["add", "a.txt"]);
+        run_git(path, &["commit", "-m", "init"]);
+        tmp
+    }
+
+    #[test]
+    fn parse_stash_index_extracts_n_from_selector() {
+        assert_eq!(parse_stash_index("stash@{0}"), Some(0));
+        assert_eq!(parse_stash_index("stash@{12}"), Some(12));
+        assert_eq!(parse_stash_index("not-a-selector"), None);
+    }
+
+    #[test]
+    fn stash_ref_builds_selector_from_index() {
+        assert_eq!(stash_ref(0), "stash@{0}");
+        assert_eq!(stash_ref(7), "stash@{7}");
+    }
+
+    #[test]
+    fn stash_push_then_list_reports_index_and_message() {
+        let tmp = init_repo();
+        let path = tmp.path().to_str().unwrap().to_string();
+
+        std::fs::write(std::path::Path::new(&path).join("a.txt"), "line1\nline2\n").unwrap();
+
+        git_stash_push(path.clone(), Some("my custom message".into()), false).unwrap();
+
+        let stashes = git_stash_list(path).unwrap();
+        assert_eq!(stashes.len(), 1);
+        assert_eq!(stashes[0].index, 0);
+        assert!(
+            stashes[0].message.contains("my custom message"),
+            "expected custom message in stash subject, got: {}",
+            stashes[0].message
+        );
+        assert!(!stashes[0].date.is_empty());
+    }
+
+    #[test]
+    fn stash_push_without_message_uses_default_wip_subject() {
+        let tmp = init_repo();
+        let path = tmp.path().to_str().unwrap().to_string();
+
+        std::fs::write(std::path::Path::new(&path).join("a.txt"), "line1\nline2\n").unwrap();
+
+        git_stash_push(path.clone(), None, false).unwrap();
+
+        let stashes = git_stash_list(path).unwrap();
+        assert_eq!(stashes.len(), 1);
+        assert!(
+            stashes[0].message.contains("WIP on main"),
+            "expected default WIP subject, got: {}",
+            stashes[0].message
+        );
+    }
+
+    #[test]
+    fn stash_push_includes_untracked_file_when_requested() {
+        let tmp = init_repo();
+        let path = tmp.path().to_str().unwrap().to_string();
+
+        std::fs::write(std::path::Path::new(&path).join("untracked.txt"), "new\n").unwrap();
+
+        git_stash_push(path.clone(), Some("with untracked".into()), true).unwrap();
+
+        // The untracked file is gone from the working tree after the stash...
+        assert!(!std::path::Path::new(&path).join("untracked.txt").exists());
+
+        // ...and comes back after popping.
+        let stashes = git_stash_list(path.clone()).unwrap();
+        assert_eq!(stashes.len(), 1);
+        git_stash_pop(path.clone(), stashes[0].index).unwrap();
+        assert!(std::path::Path::new(&path).join("untracked.txt").exists());
+    }
+
+    #[test]
+    fn stash_push_without_include_untracked_leaves_untracked_file_on_disk() {
+        let tmp = init_repo();
+        let path = tmp.path().to_str().unwrap().to_string();
+
+        std::fs::write(std::path::Path::new(&path).join("a.txt"), "line1\nline2\n").unwrap();
+        std::fs::write(std::path::Path::new(&path).join("untracked.txt"), "new\n").unwrap();
+
+        git_stash_push(path.clone(), Some("no untracked".into()), false).unwrap();
+
+        // Tracked change was stashed away...
+        let content = std::fs::read_to_string(std::path::Path::new(&path).join("a.txt")).unwrap();
+        assert_eq!(content, "line1\n");
+        // ...but the untracked file was left alone.
+        assert!(std::path::Path::new(&path).join("untracked.txt").exists());
+    }
+
+    #[test]
+    fn stash_pop_restores_file_and_removes_stash_from_list() {
+        let tmp = init_repo();
+        let path = tmp.path().to_str().unwrap().to_string();
+
+        std::fs::write(std::path::Path::new(&path).join("a.txt"), "line1\nline2\n").unwrap();
+        git_stash_push(path.clone(), Some("to pop".into()), false).unwrap();
+
+        // File reverted to HEAD's content after the stash.
+        let content = std::fs::read_to_string(std::path::Path::new(&path).join("a.txt")).unwrap();
+        assert_eq!(content, "line1\n");
+
+        git_stash_pop(path.clone(), 0).unwrap();
+
+        // File back on disk with the stashed change...
+        let content = std::fs::read_to_string(std::path::Path::new(&path).join("a.txt")).unwrap();
+        assert_eq!(content, "line1\nline2\n");
+        // ...and the stash entry is gone.
+        let stashes = git_stash_list(path).unwrap();
+        assert_eq!(stashes.len(), 0);
+    }
+
+    #[test]
+    fn stash_apply_restores_file_but_keeps_stash_entry() {
+        let tmp = init_repo();
+        let path = tmp.path().to_str().unwrap().to_string();
+
+        std::fs::write(std::path::Path::new(&path).join("a.txt"), "line1\nline2\n").unwrap();
+        git_stash_push(path.clone(), Some("to apply".into()), false).unwrap();
+
+        git_stash_apply(path.clone(), 0).unwrap();
+
+        let content = std::fs::read_to_string(std::path::Path::new(&path).join("a.txt")).unwrap();
+        assert_eq!(content, "line1\nline2\n");
+
+        // Unlike pop, apply leaves the stash entry in place.
+        let stashes = git_stash_list(path).unwrap();
+        assert_eq!(stashes.len(), 1);
+        assert_eq!(stashes[0].index, 0);
+    }
+
+    #[test]
+    fn stash_drop_removes_entry_from_list() {
+        let tmp = init_repo();
+        let path = tmp.path().to_str().unwrap().to_string();
+
+        std::fs::write(std::path::Path::new(&path).join("a.txt"), "line1\nline2\n").unwrap();
+        git_stash_push(path.clone(), Some("to drop".into()), false).unwrap();
+        assert_eq!(git_stash_list(path.clone()).unwrap().len(), 1);
+
+        git_stash_drop(path.clone(), 0).unwrap();
+
+        assert_eq!(git_stash_list(path).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn stash_indices_shift_after_drop_of_most_recent() {
+        let tmp = init_repo();
+        let path = tmp.path().to_str().unwrap().to_string();
+
+        std::fs::write(std::path::Path::new(&path).join("a.txt"), "v1\n").unwrap();
+        git_stash_push(path.clone(), Some("first".into()), false).unwrap();
+        std::fs::write(std::path::Path::new(&path).join("a.txt"), "v2\n").unwrap();
+        git_stash_push(path.clone(), Some("second".into()), false).unwrap();
+
+        // Newest stash is index 0.
+        let stashes = git_stash_list(path.clone()).unwrap();
+        assert_eq!(stashes.len(), 2);
+        assert_eq!(stashes[0].index, 0);
+        assert!(stashes[0].message.contains("second"));
+        assert_eq!(stashes[1].index, 1);
+        assert!(stashes[1].message.contains("first"));
+
+        // Dropping stash@{0} ("second") shifts "first" down to index 0.
+        git_stash_drop(path.clone(), 0).unwrap();
+        let stashes = git_stash_list(path).unwrap();
+        assert_eq!(stashes.len(), 1);
+        assert_eq!(stashes[0].index, 0);
+        assert!(stashes[0].message.contains("first"));
+    }
+
+    #[test]
+    fn apply_and_pop_reject_out_of_range_index() {
+        let tmp = init_repo();
+        let path = tmp.path().to_str().unwrap().to_string();
+
+        let apply_err = git_stash_apply(path.clone(), 99).unwrap_err();
+        assert!(!apply_err.is_empty());
+        let pop_err = git_stash_pop(path, 99).unwrap_err();
+        assert!(!pop_err.is_empty());
+    }
+
+    #[test]
+    fn commit_without_amend_creates_a_new_commit() {
+        let tmp = init_repo();
+        let path = tmp.path().to_str().unwrap().to_string();
+
+        std::fs::write(std::path::Path::new(&path).join("b.txt"), "b\n").unwrap();
+        run_git(&path, &["add", "b.txt"]);
+
+        git_commit(path.clone(), "second commit".into(), Some(false)).unwrap();
+
+        let log = git_log(path, None).unwrap();
+        assert_eq!(log.len(), 2);
+        assert_eq!(log[0].message, "second commit");
+        assert_eq!(log[1].message, "init");
+    }
+
+    #[test]
+    fn commit_amend_true_rewrites_head_message_without_new_commit() {
+        let tmp = init_repo();
+        let path = tmp.path().to_str().unwrap().to_string();
+
+        git_commit(path.clone(), "amended message".into(), Some(true)).unwrap();
+
+        let log = git_log(path, None).unwrap();
+        assert_eq!(log.len(), 1, "amend must not add a new commit");
+        assert_eq!(log[0].message, "amended message");
+    }
+
+    #[test]
+    fn commit_amend_omitted_defaults_to_false() {
+        let tmp = init_repo();
+        let path = tmp.path().to_str().unwrap().to_string();
+
+        std::fs::write(std::path::Path::new(&path).join("c.txt"), "c\n").unwrap();
+        run_git(&path, &["add", "c.txt"]);
+
+        // Backward-compat: calling with `amend: None` behaves exactly like
+        // the pre-A8 two-argument signature (plain commit, no amend).
+        git_commit(path.clone(), "third commit".into(), None).unwrap();
+
+        let log = git_log(path, None).unwrap();
+        assert_eq!(log.len(), 2);
+        assert_eq!(log[0].message, "third commit");
     }
 }

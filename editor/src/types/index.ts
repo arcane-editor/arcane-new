@@ -104,6 +104,12 @@ export interface WorktreeInfo {
   is_main: boolean;
 }
 
+export interface StashEntry {
+  index: number;
+  message: string;
+  date: string;
+}
+
 export interface BlameLine {
   line: number;
   sha: string;

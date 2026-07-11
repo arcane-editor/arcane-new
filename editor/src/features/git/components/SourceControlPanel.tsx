@@ -16,6 +16,7 @@ import {
   GitCommitHorizontal,
   GitMerge,
   AlertTriangle,
+  Download,
 } from 'lucide-react';
 import { useWorkspaceStore } from '../../../stores/workspace';
 import { useGitStore, type GitFileStatus } from '../../../stores/git';
@@ -106,6 +107,8 @@ function SourceControlPanel() {
   const unstagedFiles = useGitStore((s) => s.unstagedFiles);
   const commitMessage = useGitStore((s) => s.commitMessage);
   const setCommitMessage = useGitStore((s) => s.setCommitMessage);
+  const amendMode = useGitStore((s) => s.amendMode);
+  const setAmendMode = useGitStore((s) => s.setAmendMode);
   const commit = useGitStore((s) => s.commit);
   const stageFile = useGitStore((s) => s.stageFile);
   const unstageFile = useGitStore((s) => s.unstageFile);
@@ -128,6 +131,12 @@ function SourceControlPanel() {
   const worktrees = useGitStore((s) => s.worktrees);
   const refreshWorktrees = useGitStore((s) => s.refreshWorktrees);
   const removeWorktree = useGitStore((s) => s.removeWorktree);
+  const stashes = useGitStore((s) => s.stashes);
+  const refreshStashes = useGitStore((s) => s.refreshStashes);
+  const stashPush = useGitStore((s) => s.stashPush);
+  const stashApply = useGitStore((s) => s.stashApply);
+  const stashPop = useGitStore((s) => s.stashPop);
+  const stashDrop = useGitStore((s) => s.stashDrop);
   const runUnityYamlMerge = useGitStore((s) => s.runUnityYamlMerge);
   const resolveConflictSide = useGitStore((s) => s.resolveConflictSide);
   const isUnityProject = useProjectContextStore((s) => s.isUnityProject);
@@ -138,6 +147,7 @@ function SourceControlPanel() {
   const [conflictsOpen, setConflictsOpen] = useState(true);
   const [commitsOpen, setCommitsOpen] = useState(true);
   const [worktreesOpen, setWorktreesOpen] = useState(false);
+  const [stashesOpen, setStashesOpen] = useState(false);
   const [showAddWorktree, setShowAddWorktree] = useState(false);
   const [metaWarning, setMetaWarning] = useState<MetaPairingViolation[] | null>(null);
   const [expandedCommits, setExpandedCommits] = useState<Set<string>>(new Set());
@@ -156,8 +166,11 @@ function SourceControlPanel() {
   })();
 
   useEffect(() => {
-    if (workspacePath && isGitRepo) refreshWorktrees(workspacePath);
-  }, [workspacePath, isGitRepo, refreshWorktrees]);
+    if (workspacePath && isGitRepo) {
+      refreshWorktrees(workspacePath);
+      refreshStashes(workspacePath);
+    }
+  }, [workspacePath, isGitRepo, refreshWorktrees, refreshStashes]);
 
   async function handleRemoveWorktree(path: string) {
     if (!workspacePath) return;
@@ -302,12 +315,20 @@ function SourceControlPanel() {
           }}
           rows={1}
         />
+        <label className="scm-amend-checkbox">
+          <input
+            type="checkbox"
+            checked={amendMode}
+            onChange={(e) => setAmendMode(e.target.checked)}
+          />
+          Amend
+        </label>
         <button
           className="scm-commit-btn"
-          disabled={!commitMessage.trim() || stagedFiles.length === 0}
+          disabled={!commitMessage.trim() || (!amendMode && stagedFiles.length === 0)}
           onClick={handleCommit}
         >
-          Commit
+          {amendMode ? 'Amend Last Commit' : 'Commit'}
         </button>
       </div>
 
@@ -594,6 +615,63 @@ function SourceControlPanel() {
         {worktreesOpen && worktrees.length === 0 && (
           <div style={{ padding: '8px 16px', color: 'var(--text-secondary)', fontSize: 12 }}>
             No worktrees
+          </div>
+        )}
+
+        {/* Stashes */}
+        <div
+          className="scm-section-header"
+          onClick={() => setStashesOpen(!stashesOpen)}
+        >
+          <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            {stashesOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+            Stashes
+          </span>
+          <div className="scm-section-right">
+            <div className="scm-section-actions">
+              <button
+                className="scm-file-action-btn"
+                title="Stash Changes"
+                onClick={(e) => { e.stopPropagation(); workspacePath && stashPush(workspacePath); }}
+              >
+                <Plus size={14} />
+              </button>
+            </div>
+            <span className="scm-section-count">{stashes.length}</span>
+          </div>
+        </div>
+        {stashesOpen && stashes.map((s) => (
+          <div key={s.index} className="scm-stash-item" title={s.message}>
+            <span className="scm-stash-message">{s.message}</span>
+            <span className="scm-stash-date">{formatRelativeDate(s.date)}</span>
+            <div className="scm-stash-actions">
+              <button
+                className="scm-file-action-btn"
+                title="Apply Stash"
+                onClick={() => workspacePath && stashApply(workspacePath, s.index)}
+              >
+                <Download size={12} />
+              </button>
+              <button
+                className="scm-file-action-btn"
+                title="Pop Stash"
+                onClick={() => workspacePath && stashPop(workspacePath, s.index)}
+              >
+                <Undo2 size={12} />
+              </button>
+              <button
+                className="scm-file-action-btn"
+                title="Drop Stash"
+                onClick={() => workspacePath && stashDrop(workspacePath, s.index)}
+              >
+                <X size={12} />
+              </button>
+            </div>
+          </div>
+        ))}
+        {stashesOpen && stashes.length === 0 && (
+          <div style={{ padding: '8px 16px', color: 'var(--text-secondary)', fontSize: 12 }}>
+            No stashes
           </div>
         )}
       </div>

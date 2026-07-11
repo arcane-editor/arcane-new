@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
-import type { GitLogEntry, WorktreeInfo, BlameLine, CommitDetail } from '../types';
+import type { GitLogEntry, WorktreeInfo, BlameLine, CommitDetail, StashEntry } from '../types';
 import { notify } from './notifications';
 import { useWorkspaceStore } from './workspace';
 import { remoteErrorMessage } from '../utils/remote-errors';
@@ -45,6 +45,8 @@ interface GitState {
   stagedFiles: GitFileStatus[];
   unstagedFiles: GitFileStatus[];
   commitMessage: string;
+  /** When true, the next `commit()` call rewrites HEAD (`--amend`) instead of creating a new commit. */
+  amendMode: boolean;
   isLoading: boolean;
   isGitRepo: boolean;
   ahead: number;
@@ -55,6 +57,7 @@ interface GitState {
 
   worktrees: WorktreeInfo[];
   isLoadingWorktrees: boolean;
+  stashes: StashEntry[];
   blameGen: number;
   blameCache: Map<string, BlameEntry>;
   inflightBlame: Map<string, Promise<BlameLine[]>>;
@@ -82,6 +85,12 @@ interface GitState {
   discardAll: (workspacePath: string) => Promise<void>;
   commit: (workspacePath: string) => Promise<void>;
   setCommitMessage: (message: string) => void;
+  /**
+   * Toggle amend mode. Enabling it while `commitMessage` is empty prefills
+   * from the latest commit's message (`commitLog[0]?.message`) so the commit
+   * button isn't left disabled by the empty-message guard.
+   */
+  setAmendMode: (amend: boolean) => void;
 
   // Unity-aware (F-9)
   /** Resolve a conflicted Unity YAML file via the UnityYAMLMerge tool. */
@@ -104,6 +113,12 @@ interface GitState {
   ) => Promise<void>;
   removeWorktree: (workspacePath: string, path: string, force?: boolean) => Promise<void>;
   pruneWorktrees: (workspacePath: string) => Promise<void>;
+
+  refreshStashes: (workspacePath: string) => Promise<void>;
+  stashPush: (workspacePath: string, message?: string, includeUntracked?: boolean) => Promise<void>;
+  stashApply: (workspacePath: string, index: number) => Promise<void>;
+  stashPop: (workspacePath: string, index: number) => Promise<void>;
+  stashDrop: (workspacePath: string, index: number) => Promise<void>;
 
   getBlame: (workspacePath: string, absolutePath: string) => Promise<BlameLine[]>;
   invalidateBlameAll: () => void;
@@ -163,6 +178,7 @@ export const useGitStore = create<GitState>((set, get) => ({
   stagedFiles: [],
   unstagedFiles: [],
   commitMessage: '',
+  amendMode: false,
   isLoading: false,
   isGitRepo: false,
   ahead: 0,
@@ -173,6 +189,7 @@ export const useGitStore = create<GitState>((set, get) => ({
 
   worktrees: [],
   isLoadingWorktrees: false,
+  stashes: [],
   blameGen: 0,
   blameCache: new Map(),
   inflightBlame: new Map(),
@@ -352,13 +369,13 @@ export const useGitStore = create<GitState>((set, get) => ({
   },
 
   commit: async (workspacePath: string) => {
-    const { commitMessage } = get();
+    const { commitMessage, amendMode } = get();
     if (!commitMessage.trim()) return;
     try {
-      await invoke('git_commit', { workspacePath, message: commitMessage });
-      set({ commitMessage: '' });
+      await invoke('git_commit', { workspacePath, message: commitMessage, amend: amendMode });
+      set({ commitMessage: '', amendMode: false });
       get().invalidateBlameAll();
-      notify.success('Committed to ' + get().branch);
+      notify.success(amendMode ? 'Amended commit on ' + get().branch : 'Committed to ' + get().branch);
       await get().refreshStatus(workspacePath);
     } catch (err) {
       notify.error(`Commit failed: ${err}`);
@@ -367,6 +384,17 @@ export const useGitStore = create<GitState>((set, get) => ({
   },
 
   setCommitMessage: (message: string) => set({ commitMessage: message }),
+
+  setAmendMode: (amend: boolean) => {
+    if (amend) {
+      const { commitMessage, commitLog } = get();
+      if (!commitMessage.trim() && commitLog[0]?.message) {
+        set({ amendMode: true, commitMessage: commitLog[0].message });
+        return;
+      }
+    }
+    set({ amendMode: amend });
+  },
 
   runUnityYamlMerge: async (workspacePath, toolPath, filePath) => {
     try {
@@ -463,6 +491,7 @@ export const useGitStore = create<GitState>((set, get) => ({
     stagedFiles: [],
     unstagedFiles: [],
     commitMessage: '',
+    amendMode: false,
     isLoading: false,
     isGitRepo: false,
     ahead: 0,
@@ -472,6 +501,7 @@ export const useGitStore = create<GitState>((set, get) => ({
     lastError: null,
     worktrees: [],
     isLoadingWorktrees: false,
+    stashes: [],
     blameGen: 0,
     blameCache: new Map(),
     inflightBlame: new Map(),
@@ -523,6 +553,71 @@ export const useGitStore = create<GitState>((set, get) => ({
       notify.success('Worktrees pruned');
     } catch (err) {
       notify.error(`Prune worktrees failed: ${err}`);
+      throw err;
+    }
+  },
+
+  refreshStashes: async (workspacePath: string) => {
+    try {
+      const stashes = await invoke<StashEntry[]>('git_stash_list', { workspacePath });
+      set({ stashes });
+    } catch {
+      set({ stashes: [] });
+    }
+  },
+
+  stashPush: async (workspacePath, message, includeUntracked = true) => {
+    try {
+      await invoke('git_stash_push', {
+        workspacePath,
+        message: message ?? null,
+        includeUntracked,
+      });
+      await get().refreshStashes(workspacePath);
+      await get().refreshStatus(workspacePath);
+      get().invalidateBlameAll();
+      notify.success('Changes stashed');
+    } catch (err) {
+      notify.error(`Stash failed: ${err}`);
+      throw err;
+    }
+  },
+
+  stashApply: async (workspacePath, index) => {
+    try {
+      await invoke('git_stash_apply', { workspacePath, index });
+      await get().refreshStashes(workspacePath);
+      await get().refreshStatus(workspacePath);
+      get().invalidateBlameAll();
+      notify.success('Stash applied');
+    } catch (err) {
+      notify.error(`Stash apply failed: ${err}`);
+      throw err;
+    }
+  },
+
+  stashPop: async (workspacePath, index) => {
+    try {
+      await invoke('git_stash_pop', { workspacePath, index });
+      await get().refreshStashes(workspacePath);
+      await get().refreshStatus(workspacePath);
+      get().invalidateBlameAll();
+      notify.success('Stash popped');
+    } catch (err) {
+      notify.error(`Stash pop failed: ${err}`);
+      throw err;
+    }
+  },
+
+  stashDrop: async (workspacePath, index) => {
+    try {
+      await invoke('git_stash_drop', { workspacePath, index });
+      await get().refreshStashes(workspacePath);
+      await get().refreshStatus(workspacePath);
+      get().invalidateBlameAll();
+      notify.success('Stash dropped');
+    } catch (err) {
+      notify.error(`Stash drop failed: ${err}`);
       throw err;
     }
   },
