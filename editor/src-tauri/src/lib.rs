@@ -98,6 +98,17 @@ fn write_file(path: String, contents: String) -> Result<(), String> {
     fs::write(&path, &contents).map_err(|e| e.to_string())
 }
 
+/// Cheap existence check for a single candidate file path — no content read,
+/// no error payload. Used by the TS/JS relative-import link/definition
+/// provider (`src/features/editor/services/import-link-provider.ts`) to probe
+/// resolution candidates (`spec`, `spec.ts`, `spec/index.ts`, ...) one at a
+/// time without paying for `read_file`'s UTF-8 decode + error string on the
+/// (common) miss path.
+#[tauri::command]
+fn path_exists(path: String) -> bool {
+    Path::new(&path).is_file()
+}
+
 #[tauri::command]
 fn scan_workspace_files(path: String) -> Result<Vec<String>, String> {
     let skip_dirs: &[&str] = &[
@@ -322,6 +333,7 @@ pub fn run() {
             read_directory,
             read_file,
             write_file,
+            path_exists,
             scan_workspace_files,
             scan_all_files,
             create_file,
@@ -535,4 +547,25 @@ pub fn run() {
                 let _ = (&app_handle, &event);
             }
         });
+}
+
+#[cfg(test)]
+mod path_exists_tests {
+    use super::path_exists;
+
+    #[test]
+    fn true_for_a_real_file_false_for_a_missing_one() {
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("foo.ts");
+        std::fs::write(&file, "export {};").unwrap();
+
+        assert!(path_exists(file.to_string_lossy().to_string()));
+        assert!(!path_exists(tmp.path().join("missing.ts").to_string_lossy().to_string()));
+    }
+
+    #[test]
+    fn false_for_a_directory() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert!(!path_exists(tmp.path().to_string_lossy().to_string()));
+    }
 }
