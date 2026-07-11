@@ -105,6 +105,9 @@ function SourceControlPanel() {
   const openCommitDiffTab = useWorkspaceStore((s) => s.openCommitDiffTab);
   const stagedFiles = useGitStore((s) => s.stagedFiles);
   const unstagedFiles = useGitStore((s) => s.unstagedFiles);
+  const refreshStatus = useGitStore((s) => s.refreshStatus);
+  const refreshBranches = useGitStore((s) => s.refreshBranches);
+  const isLoading = useGitStore((s) => s.isLoading);
   const commitMessage = useGitStore((s) => s.commitMessage);
   const setCommitMessage = useGitStore((s) => s.setCommitMessage);
   const amendMode = useGitStore((s) => s.amendMode);
@@ -167,10 +170,11 @@ function SourceControlPanel() {
 
   useEffect(() => {
     if (workspacePath && isGitRepo) {
+      refreshStatus(workspacePath);
       refreshWorktrees(workspacePath);
       refreshStashes(workspacePath);
     }
-  }, [workspacePath, isGitRepo, refreshWorktrees, refreshStashes]);
+  }, [workspacePath, isGitRepo, refreshStatus, refreshWorktrees, refreshStashes]);
 
   async function handleRemoveWorktree(path: string) {
     if (!workspacePath) return;
@@ -265,12 +269,24 @@ function SourceControlPanel() {
       {/* Sync toolbar */}
       <div className="scm-toolbar">
         <button
+          className={`scm-toolbar-btn${isLoading ? ' loading' : ''}`}
+          title="Refresh"
+          disabled={isLoading}
+          onClick={() => {
+            if (!workspacePath) return;
+            refreshStatus(workspacePath);
+            refreshBranches(workspacePath);
+          }}
+        >
+          <RefreshCw size={14} />
+        </button>
+        <button
           className={`scm-toolbar-btn${isRemoteLoading ? ' loading' : ''}`}
           title="Fetch"
           disabled={isRemoteLoading}
           onClick={() => workspacePath && fetchGit(workspacePath)}
         >
-          <RefreshCw size={14} />
+          <Download size={14} />
         </button>
         <button
           className="scm-toolbar-btn"

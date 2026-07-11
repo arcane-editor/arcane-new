@@ -4,6 +4,7 @@ import type { GitLogEntry, WorktreeInfo, BlameLine, CommitDetail, StashEntry } f
 import { notify } from './notifications';
 import { useWorkspaceStore } from './workspace';
 import { remoteErrorMessage } from '../utils/remote-errors';
+import { singleFlightWithRerun } from '../utils/single-flight';
 
 interface BlameEntry {
   gen: number;
@@ -171,6 +172,61 @@ async function reloadAfterCheckout(
   }
 }
 
+/**
+ * Body of `refreshStatus`, extracted so it can be wrapped in
+ * `singleFlightWithRerun` below: the Rust file watcher now emits
+ * `git-state-changed` on every settled burst of workspace edits, so
+ * `refreshStatus` can be invoked in rapid succession. Without coalescing,
+ * overlapping `git status` invocations waste work and can apply results out
+ * of order (a slow earlier call resolving after a faster later one).
+ *
+ * Error classification: a "not a git repository" failure is the expected
+ * shape when a workspace isn't (or is no longer) a git repo, so it silently
+ * blanks the panel exactly as before. Any OTHER error (a transient git
+ * failure, a permissions issue, etc.) is not treated as "not a repo" — the
+ * existing lists stay on screen, `isGitRepo` is left alone, and the failure
+ * is surfaced via `lastError` (rendered as a banner in SourceControlPanel)
+ * plus a console.error for diagnosability.
+ */
+async function doRefreshStatus(
+  workspacePath: string,
+  set: (partial: Partial<GitState>) => void,
+  get: () => GitState,
+) {
+  try {
+    set({ isLoading: true });
+    const result = await invoke<GitStatusResult>('git_status', { workspacePath });
+    set({
+      branch: result.branch,
+      stagedFiles: result.staged,
+      unstagedFiles: result.unstaged,
+      ahead: result.ahead,
+      behind: result.behind,
+      isGitRepo: true,
+      isLoading: false,
+      lastError: null,
+    });
+    // Also refresh log in background
+    get().refreshLog(workspacePath);
+  } catch (err) {
+    if (String(err).includes('not a git repository')) {
+      set({
+        branch: null,
+        branches: [],
+        stagedFiles: [],
+        unstagedFiles: [],
+        ahead: 0,
+        behind: 0,
+        isGitRepo: false,
+        isLoading: false,
+      });
+    } else {
+      set({ isLoading: false, lastError: `git status failed: ${err}` });
+      console.error('[git] status refresh failed:', err);
+    }
+  }
+}
+
 export const useGitStore = create<GitState>((set, get) => ({
   branch: null,
   branches: [],
@@ -196,34 +252,9 @@ export const useGitStore = create<GitState>((set, get) => ({
   commitDetails: new Map(),
   inflightCommitDetails: new Map(),
 
-  refreshStatus: async (workspacePath: string) => {
-    try {
-      set({ isLoading: true });
-      const result = await invoke<GitStatusResult>('git_status', { workspacePath });
-      set({
-        branch: result.branch,
-        stagedFiles: result.staged,
-        unstagedFiles: result.unstaged,
-        ahead: result.ahead,
-        behind: result.behind,
-        isGitRepo: true,
-        isLoading: false,
-      });
-      // Also refresh log in background
-      get().refreshLog(workspacePath);
-    } catch {
-      set({
-        branch: null,
-        branches: [],
-        stagedFiles: [],
-        unstagedFiles: [],
-        ahead: 0,
-        behind: 0,
-        isGitRepo: false,
-        isLoading: false,
-      });
-    }
-  },
+  refreshStatus: singleFlightWithRerun((workspacePath: string) =>
+    doRefreshStatus(workspacePath, set, get),
+  ),
 
   refreshBranches: async (workspacePath: string) => {
     // Note: `branches` is intentionally left untouched until the fetch
@@ -234,7 +265,8 @@ export const useGitStore = create<GitState>((set, get) => ({
     try {
       const branches = await invoke<string[]>('git_list_branches', { workspacePath });
       set({ branches });
-    } catch {
+    } catch (err) {
+      console.error('[git] refreshBranches failed:', err);
       set({ branches: [] });
     } finally {
       set({ isBranchesLoading: false });
@@ -245,7 +277,8 @@ export const useGitStore = create<GitState>((set, get) => ({
     try {
       const entries = await invoke<GitLogEntry[]>('git_log', { workspacePath });
       set({ commitLog: entries });
-    } catch {
+    } catch (err) {
+      console.error('[git] refreshLog failed:', err);
       set({ commitLog: [] });
     }
   },
@@ -514,7 +547,8 @@ export const useGitStore = create<GitState>((set, get) => ({
     try {
       const worktrees = await invoke<WorktreeInfo[]>('git_worktree_list', { workspacePath });
       set({ worktrees, isLoadingWorktrees: false });
-    } catch {
+    } catch (err) {
+      console.error('[git] refreshWorktrees failed:', err);
       set({ worktrees: [], isLoadingWorktrees: false });
     }
   },
@@ -561,7 +595,8 @@ export const useGitStore = create<GitState>((set, get) => ({
     try {
       const stashes = await invoke<StashEntry[]>('git_stash_list', { workspacePath });
       set({ stashes });
-    } catch {
+    } catch (err) {
+      console.error('[git] refreshStashes failed:', err);
       set({ stashes: [] });
     }
   },
@@ -645,7 +680,8 @@ export const useGitStore = create<GitState>((set, get) => ({
         nextInflight.delete(absolutePath);
         set({ blameCache: nextCache, inflightBlame: nextInflight });
         return lines;
-      } catch {
+      } catch (err) {
+        console.error('[git] getBlame failed:', err);
         const nextInflight = new Map(get().inflightBlame);
         nextInflight.delete(absolutePath);
         set({ inflightBlame: nextInflight });
