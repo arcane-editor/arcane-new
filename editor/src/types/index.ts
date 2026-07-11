@@ -25,6 +25,13 @@ export interface DiffInfo {
    * `openDiffTab` time (see `stores/workspace.ts`).
    */
   semanticCandidate?: boolean;
+  /**
+   * Present only for `diff://commit/<hash>/<relpath>` tabs opened via
+   * `openCommitDiffTab` — the commit hash whose changes are being viewed
+   * (original = `<hash>^`, modified = `<hash>`). Tabs carrying this field are
+   * intentionally excluded from persistence — see `utils/persistence.ts`.
+   */
+  commitHash?: string;
 }
 
 export interface OpenFile {
@@ -40,6 +47,22 @@ export interface GitLogEntry {
   message: string;
   author: string;
   date: string;
+}
+
+/** One changed file within a commit (from `git_show_commit`). */
+export interface CommitFileChange {
+  path: string;
+  /** Same vocabulary as `GitFileStatus.status` ('modified'/'added'/'deleted'/'renamed'/…). */
+  status: string;
+}
+
+/** Full detail for a single commit — metadata + changed-files list. */
+export interface CommitDetail {
+  hash: string;
+  message: string;
+  author: string;
+  date: string;
+  files: CommitFileChange[];
 }
 
 export interface FileContent {

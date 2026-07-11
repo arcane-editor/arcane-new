@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { useWorkspaceStore } from '../../../stores/workspace';
 import { useGitStore, type GitFileStatus } from '../../../stores/git';
+import type { GitLogEntry, CommitFileChange } from '../../../types';
 import { useProjectContextStore } from '../../../stores/project-context';
 import { formatRelativeDate } from '../../../utils/date';
 import AddWorktreeDialog from './AddWorktreeDialog';
@@ -100,6 +101,7 @@ function FileItem({
 function SourceControlPanel() {
   const workspacePath = useWorkspaceStore((s) => s.workspacePath);
   const openDiffTab = useWorkspaceStore((s) => s.openDiffTab);
+  const openCommitDiffTab = useWorkspaceStore((s) => s.openCommitDiffTab);
   const stagedFiles = useGitStore((s) => s.stagedFiles);
   const unstagedFiles = useGitStore((s) => s.unstagedFiles);
   const commitMessage = useGitStore((s) => s.commitMessage);
@@ -121,6 +123,8 @@ function SourceControlPanel() {
   const pull = useGitStore((s) => s.pull);
   const push = useGitStore((s) => s.push);
   const commitLog = useGitStore((s) => s.commitLog);
+  const commitDetails = useGitStore((s) => s.commitDetails);
+  const getCommitDetail = useGitStore((s) => s.getCommitDetail);
   const worktrees = useGitStore((s) => s.worktrees);
   const refreshWorktrees = useGitStore((s) => s.refreshWorktrees);
   const removeWorktree = useGitStore((s) => s.removeWorktree);
@@ -132,10 +136,11 @@ function SourceControlPanel() {
   const [stagedOpen, setStagedOpen] = useState(true);
   const [changesOpen, setChangesOpen] = useState(true);
   const [conflictsOpen, setConflictsOpen] = useState(true);
-  const [commitsOpen, setCommitsOpen] = useState(false);
+  const [commitsOpen, setCommitsOpen] = useState(true);
   const [worktreesOpen, setWorktreesOpen] = useState(false);
   const [showAddWorktree, setShowAddWorktree] = useState(false);
   const [metaWarning, setMetaWarning] = useState<MetaPairingViolation[] | null>(null);
+  const [expandedCommits, setExpandedCommits] = useState<Set<string>>(new Set());
 
   // Conflicted (unmerged) files surface from either array; dedup by path.
   const conflictedFiles = (() => {
@@ -220,6 +225,24 @@ function SourceControlPanel() {
   function handleFileClick(file: GitFileStatus) {
     const fileName = file.path.split('/').pop() || file.path;
     openDiffTab(file.path, fileName, file.staged);
+  }
+
+  function toggleCommit(hash: string) {
+    setExpandedCommits((prev) => {
+      const next = new Set(prev);
+      if (next.has(hash)) {
+        next.delete(hash);
+      } else {
+        next.add(hash);
+        if (workspacePath) getCommitDetail(workspacePath, hash);
+      }
+      return next;
+    });
+  }
+
+  function handleCommitFileClick(entry: GitLogEntry, file: CommitFileChange) {
+    const fileName = file.path.split('/').pop() || file.path;
+    openCommitDiffTab(entry.hash, file.path, `${fileName} @ ${entry.hash.slice(0, 7)}`);
   }
 
   return (
@@ -462,15 +485,49 @@ function SourceControlPanel() {
           </span>
           <span className="scm-section-count">{commitLog.length}</span>
         </div>
-        {commitsOpen && commitLog.map((entry) => (
-          <div key={entry.hash} className="scm-commit-item">
-            <span className="scm-commit-icon"><GitCommitHorizontal size={14} /></span>
-            <span className="scm-commit-message">{entry.message}</span>
-            <span className="scm-commit-meta">
-              {entry.author} &middot; {formatRelativeDate(entry.date)}
-            </span>
-          </div>
-        ))}
+        {commitsOpen && commitLog.map((entry) => {
+          const isExpanded = expandedCommits.has(entry.hash);
+          const detail = commitDetails.get(entry.hash);
+          return (
+            <div key={entry.hash}>
+              <div className="scm-commit-item" onClick={() => toggleCommit(entry.hash)}>
+                <span className="scm-commit-chevron">
+                  {isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                </span>
+                <span className="scm-commit-icon"><GitCommitHorizontal size={14} /></span>
+                <span className="scm-commit-message">{entry.message}</span>
+                <span className="scm-commit-meta">
+                  {entry.author} &middot; {formatRelativeDate(entry.date)}
+                </span>
+              </div>
+              {isExpanded && (
+                <div className="scm-commit-files">
+                  {!detail && (
+                    <div className="scm-commit-files-empty">Loading…</div>
+                  )}
+                  {detail && detail.files.length === 0 && (
+                    <div className="scm-commit-files-empty">No file changes</div>
+                  )}
+                  {detail && detail.files.map((file) => (
+                    <div
+                      key={file.path}
+                      className="scm-file-item scm-commit-file-item"
+                      onClick={() => handleCommitFileClick(entry, file)}
+                    >
+                      <span className="icon" style={{ color: 'var(--text-secondary)', flexShrink: 0 }}>
+                        <File size={14} />
+                      </span>
+                      <span className="scm-file-name">{file.path.split('/').pop()}</span>
+                      <span className={`scm-file-status ${file.status}`}>
+                        {statusLabel(file.status)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
 
         {/* Worktrees */}
         <div

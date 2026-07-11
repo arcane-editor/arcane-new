@@ -333,6 +333,147 @@ pub fn git_show_head(workspace_path: String, file_path: String) -> Result<String
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct CommitFileChange {
+    pub path: String,
+    /// Same vocabulary as `GitFileStatus.status` ("modified"/"added"/"deleted"/
+    /// "renamed"/…) so the frontend's `statusLabel()` helper can be reused
+    /// as-is for the per-file letter (A/M/D/R).
+    pub status: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CommitDetail {
+    pub hash: String,
+    pub message: String,
+    pub author: String,
+    pub date: String,
+    pub files: Vec<CommitFileChange>,
+}
+
+/// Fetch a single commit's metadata + changed-files list.
+///
+/// `--no-patch` suppresses `--name-status` too (both are diff output), so we
+/// can't combine them — instead this runs a single `git show` with
+/// `--name-status` and a `%x00`-delimited `--format` header. Output shape:
+/// `<hash>\0<subject>\0<author>\0<date>` on the first line, a blank line,
+/// then one name-status line per changed file (`M\tpath`, `A\tpath`, or
+/// `R100\told\tnew` for renames — the score-suffixed R/C codes are the only
+/// ones with a third column).
+#[tauri::command]
+pub fn git_show_commit(workspace_path: String, hash: String) -> Result<CommitDetail, String> {
+    validate_ref_name(&hash)?;
+
+    let output = Command::new("git")
+        .args([
+            "-C",
+            &workspace_path,
+            "show",
+            &hash,
+            "--name-status",
+            "--format=%H%x00%s%x00%an%x00%aI",
+        ])
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).to_string());
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut lines = stdout.lines();
+
+    let header = lines
+        .next()
+        .ok_or_else(|| "git show returned no output".to_string())?;
+    let parts: Vec<&str> = header.splitn(4, '\0').collect();
+    if parts.len() < 4 {
+        return Err(format!("unexpected git show header: {header}"));
+    }
+    let commit_hash = parts[0].to_string();
+    let message = parts[1].to_string();
+    let author = parts[2].to_string();
+    let date = parts[3].to_string();
+
+    let mut files: Vec<CommitFileChange> = Vec::new();
+    for line in lines {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let cols: Vec<&str> = line.split('\t').collect();
+        let Some(status_code) = cols.first() else {
+            continue;
+        };
+        let status_char = status_code.chars().next().unwrap_or('?');
+
+        // Rename/copy lines carry three columns: <status>\t<old>\t<new>.
+        // Use the new path; everything else is <status>\t<path>.
+        let path = if (status_char == 'R' || status_char == 'C') && cols.len() >= 3 {
+            cols[2].to_string()
+        } else {
+            cols.get(1).copied().unwrap_or("").to_string()
+        };
+        if path.is_empty() {
+            continue;
+        }
+
+        files.push(CommitFileChange {
+            path,
+            status: map_status_char(status_char).to_string(),
+        });
+    }
+
+    Ok(CommitDetail {
+        hash: commit_hash,
+        message,
+        author,
+        date,
+        files,
+    })
+}
+
+/// Fetch a file's content at a given revision (`git show <rev>:<file_path>`).
+///
+/// Returns `Ok("")` — rather than erroring — for the two "nothing to diff
+/// against" cases the commit-diff UI relies on:
+/// - the path doesn't exist at `rev` (file was added or deleted by the commit
+///   being viewed), and
+/// - `rev` is `<hash>^` on a root commit (no parent to show), which the
+///   caller uses to diff a first-commit file against empty.
+///
+/// Both failure modes surface as `fatal: invalid object name '<rev>'` from
+/// git, indistinguishable by message alone from a genuinely bad revision —
+/// so the root-commit case is recognized by `rev` itself ending in `^`
+/// (that's the only shape this command is ever called with for a parent
+/// reference). A truly invalid `rev` with no trailing `^` still errors.
+#[tauri::command]
+pub fn git_show_file_at(
+    workspace_path: String,
+    rev: String,
+    file_path: String,
+) -> Result<String, String> {
+    validate_ref_name(&rev)?;
+
+    let spec = format!("{rev}:{file_path}");
+    let output = Command::new("git")
+        .args(["-C", &workspace_path, "show", &spec])
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let missing_path =
+            stderr.contains("does not exist in") || stderr.contains("exists on disk, but not in");
+        let root_commit_no_parent = rev.ends_with('^') && stderr.contains("invalid object name");
+        if missing_path || root_commit_no_parent {
+            return Ok(String::new());
+        }
+        return Err(stderr.to_string());
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
 #[tauri::command]
 pub fn git_unstage_all(workspace_path: String) -> Result<(), String> {
     let output = Command::new("git")
@@ -1390,5 +1531,172 @@ mod branch_lifecycle_tests {
         // Verify main still exists
         let branches = git_list_branches(path).unwrap();
         assert!(branches.contains(&"main".to_string()));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// A4: Commit visibility — git_show_commit / git_show_file_at
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod commit_detail_tests {
+    use super::*;
+
+    fn run_git(path: &str, args: &[&str]) -> String {
+        let mut full: Vec<&str> = vec!["-C", path];
+        full.extend_from_slice(args);
+        let output = Command::new("git").args(&full).output().unwrap();
+        assert!(
+            output.status.success(),
+            "git {:?} failed: {}",
+            args,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    }
+
+    fn init_repo() -> tempfile::TempDir {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().to_str().unwrap();
+        run_git(path, &["init", "--initial-branch=main"]);
+        run_git(path, &["config", "user.email", "test@example.com"]);
+        run_git(path, &["config", "user.name", "Test User"]);
+        tmp
+    }
+
+    /// Two-commit fixture:
+    /// - first (root) commit: adds a.txt, b.txt
+    /// - second commit: modifies a.txt, renames b.txt -> c.txt, adds d.txt
+    /// Returns (tmp dir, first hash, second hash).
+    fn two_commit_repo() -> (tempfile::TempDir, String, String) {
+        let tmp = init_repo();
+        let path = tmp.path().to_str().unwrap().to_string();
+
+        std::fs::write(std::path::Path::new(&path).join("a.txt"), "line1\n").unwrap();
+        std::fs::write(std::path::Path::new(&path).join("b.txt"), "b\n").unwrap();
+        run_git(&path, &["add", "a.txt", "b.txt"]);
+        run_git(&path, &["commit", "-m", "first commit"]);
+        let first = run_git(&path, &["rev-parse", "HEAD"]);
+
+        std::fs::write(std::path::Path::new(&path).join("a.txt"), "line1-mod\n").unwrap();
+        run_git(&path, &["mv", "b.txt", "c.txt"]);
+        std::fs::write(std::path::Path::new(&path).join("d.txt"), "new file\n").unwrap();
+        run_git(&path, &["add", "-A"]);
+        run_git(&path, &["commit", "-m", "second commit"]);
+        let second = run_git(&path, &["rev-parse", "HEAD"]);
+
+        (tmp, first, second)
+    }
+
+    #[test]
+    fn show_commit_parses_added_modified_and_renamed_files() {
+        let (tmp, _first, second) = two_commit_repo();
+        let path = tmp.path().to_str().unwrap().to_string();
+
+        let detail = git_show_commit(path, second.clone()).unwrap();
+
+        assert_eq!(detail.hash, second);
+        assert_eq!(detail.message, "second commit");
+        assert_eq!(detail.author, "Test User");
+        assert!(!detail.date.is_empty());
+
+        let mut by_path: HashMap<String, String> = HashMap::new();
+        for f in &detail.files {
+            by_path.insert(f.path.clone(), f.status.clone());
+        }
+        assert_eq!(by_path.get("a.txt"), Some(&"modified".to_string()));
+        assert_eq!(by_path.get("d.txt"), Some(&"added".to_string()));
+        // Rename line (R100\tb.txt\tc.txt) — path is the new path, status is "renamed".
+        assert_eq!(by_path.get("c.txt"), Some(&"renamed".to_string()));
+        assert!(!by_path.contains_key("b.txt"));
+        assert_eq!(detail.files.len(), 3);
+    }
+
+    #[test]
+    fn show_commit_rejects_invalid_hash() {
+        let tmp = init_repo();
+        let path = tmp.path().to_str().unwrap().to_string();
+        run_git(&path, &["commit", "--allow-empty", "-m", "init"]);
+
+        let result = git_show_commit(path, "not-a-real-hash".into());
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn show_commit_rejects_leading_dash_hash() {
+        let tmp = init_repo();
+        let path = tmp.path().to_str().unwrap().to_string();
+        run_git(&path, &["commit", "--allow-empty", "-m", "init"]);
+
+        let result = git_show_commit(path, "-D".into());
+
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("invalid"),
+            "expected validation error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn show_file_at_returns_content_at_both_revisions() {
+        let (tmp, first, second) = two_commit_repo();
+        let path = tmp.path().to_str().unwrap().to_string();
+
+        let at_first = git_show_file_at(path.clone(), first, "a.txt".into()).unwrap();
+        assert_eq!(at_first, "line1\n");
+
+        let at_second = git_show_file_at(path, second, "a.txt".into()).unwrap();
+        assert_eq!(at_second, "line1-mod\n");
+    }
+
+    #[test]
+    fn show_file_at_root_commit_parent_returns_empty() {
+        let (tmp, first, _second) = two_commit_repo();
+        let path = tmp.path().to_str().unwrap().to_string();
+
+        // The root commit has no parent — `<hash>^` for an added-in-first-commit
+        // file must diff against empty, not error.
+        let content = git_show_file_at(path, format!("{first}^"), "a.txt".into()).unwrap();
+        assert_eq!(content, "");
+    }
+
+    #[test]
+    fn show_file_at_missing_path_returns_empty() {
+        let (tmp, _first, second) = two_commit_repo();
+        let path = tmp.path().to_str().unwrap().to_string();
+
+        // d.txt was added in `second`, so it doesn't exist at second^.
+        let content =
+            git_show_file_at(path.clone(), format!("{second}^"), "d.txt".into()).unwrap();
+        assert_eq!(content, "");
+
+        // A path that never existed at all.
+        let content2 = git_show_file_at(path, second, "never-existed.txt".into()).unwrap();
+        assert_eq!(content2, "");
+    }
+
+    #[test]
+    fn show_file_at_rejects_invalid_rev() {
+        let (tmp, _first, _second) = two_commit_repo();
+        let path = tmp.path().to_str().unwrap().to_string();
+
+        let result = git_show_file_at(path, "totally-bogus-rev".into(), "a.txt".into());
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn show_file_at_rejects_leading_dash_rev() {
+        let (tmp, _first, _second) = two_commit_repo();
+        let path = tmp.path().to_str().unwrap().to_string();
+
+        let result = git_show_file_at(path, "-D".into(), "a.txt".into());
+
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("invalid"),
+            "expected validation error, got: {err}"
+        );
     }
 }

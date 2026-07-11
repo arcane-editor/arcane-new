@@ -633,6 +633,7 @@ interface WorkspaceState {
   saveFile: (path: string) => Promise<void>;
   reloadFileFromDisk: (path: string) => Promise<void>;
   openDiffTab: (filePath: string, fileName: string, staged: boolean) => Promise<void>;
+  openCommitDiffTab: (hash: string, filePath: string, title: string) => Promise<void>;
   refreshTree: () => Promise<void>;
   createFile: (parentDir: string, fileName: string) => Promise<string | null>;
   createDirectory: (parentDir: string, dirName: string) => Promise<string | null>;
@@ -1118,6 +1119,48 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         filePath,
         staged,
         semanticCandidate,
+      },
+    };
+
+    set((state) => ({
+      openFiles: [...state.openFiles, file],
+      activeFilePath: diffPath,
+    }));
+  },
+
+  openCommitDiffTab: async (hash: string, filePath: string, title: string) => {
+    const { workspacePath, openFiles } = get();
+    if (!workspacePath) return;
+
+    const diffPath = `diff://commit/${hash}/${filePath}`;
+
+    // If already open, just activate
+    const existing = openFiles.find((f) => f.path === diffPath);
+    if (existing) {
+      set({ activeFilePath: diffPath });
+      return;
+    }
+
+    // Original = the file as it stood before the commit (`<hash>^`); modified
+    // = the file as the commit left it. `git_show_file_at` returns "" for a
+    // root commit's nonexistent parent or a path that didn't exist at that
+    // revision — i.e. added/deleted files diff cleanly against empty.
+    const [originalContent, modifiedContent] = await Promise.all([
+      invoke<string>('git_show_file_at', { workspacePath, rev: `${hash}^`, filePath }),
+      invoke<string>('git_show_file_at', { workspacePath, rev: hash, filePath }),
+    ]);
+
+    const file: OpenFile = {
+      path: diffPath,
+      name: title,
+      content: '',
+      isDirty: false,
+      diff: {
+        originalContent,
+        modifiedContent,
+        filePath,
+        staged: false,
+        commitHash: hash,
       },
     };
 

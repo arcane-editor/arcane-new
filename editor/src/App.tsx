@@ -65,6 +65,7 @@ import {
   saveLayoutSizes,
   planFileRestore,
   resolveActiveFilePath,
+  shouldPersistTab,
 } from './utils/persistence';
 import { useRecentsStore } from './stores/recents';
 import { confirmCloseDirty } from './utils/dirty-guard';
@@ -352,10 +353,13 @@ function App() {
       timeout = setTimeout(() => {
         saveState({
           workspacePath: state.workspacePath,
-          // diff:// tabs are persisted too (content is refetched from git on
-          // restore, so it's never stale) — only auth:// stays stripped.
+          // Staged/unstaged diff:// tabs are persisted too (content is
+          // refetched from git on restore, so it's never stale) — auth://
+          // tabs and diff://commit/... tabs are excluded (see
+          // `shouldPersistTab`: commit-diff tabs have no restore shape and
+          // must never round-trip through PersistedOpenFile.diff).
           openFilePaths: state.openFiles
-            .filter((f) => !f.path.startsWith('auth://'))
+            .filter((f) => shouldPersistTab(f.path))
             .map((f) => ({
               path: f.path,
               name: f.name,

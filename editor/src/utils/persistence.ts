@@ -19,10 +19,10 @@ export interface PersistedState {
 
 /**
  * One persisted tab entry. `diff` is present only for staged/unstaged
- * `diff://` tabs — a `diff://commit/...` variant (a later task) is out of
- * scope here and must not be persisted via this shape. Old entries written
- * before this field existed simply omit it, so `diff` stays optional for
- * backward compatibility.
+ * `diff://` tabs — `diff://commit/...` tabs must never be persisted via this
+ * shape (see `shouldPersistTab`, applied at the write site in App.tsx). Old
+ * entries written before this field existed simply omit it, so `diff` stays
+ * optional for backward compatibility.
  */
 export interface PersistedOpenFile {
   path: string;
@@ -276,6 +276,20 @@ export type RestorePlan =
  * Entries without it — including every entry persisted before this field
  * existed — fall back to a plain file open, unchanged from prior behavior.
  */
+/**
+ * Whether an open tab should ever be written to persisted window state.
+ * `auth://` tabs are virtual (no restore logic exists for them) and
+ * `diff://commit/<hash>/<relpath>` tabs are intentionally never persisted —
+ * `PersistedOpenFile.diff` only has room for the staged/unstaged shape
+ * (`{ filePath, staged }`), so persisting a commit-diff tab as-is would have
+ * it restored via `openDiffTab` (staged/unstaged) on next launch instead of
+ * `openCommitDiffTab` at the right revision. Simplest correct fix: never
+ * write these tabs out in the first place.
+ */
+export function shouldPersistTab(path: string): boolean {
+  return !path.startsWith('auth://') && !path.startsWith('diff://commit/');
+}
+
 export function planFileRestore(entry: PersistedOpenFile): RestorePlan {
   if (entry.diff) {
     return {

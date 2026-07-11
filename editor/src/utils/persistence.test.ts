@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'bun:test';
-import { planFileRestore, resolveActiveFilePath, stripDiffTabSuffix, type PersistedOpenFile } from './persistence';
+import {
+  planFileRestore,
+  resolveActiveFilePath,
+  stripDiffTabSuffix,
+  shouldPersistTab,
+  type PersistedOpenFile,
+} from './persistence';
 
 describe('stripDiffTabSuffix', () => {
   it('strips a "(Staged)" suffix', () => {
@@ -57,6 +63,34 @@ describe('planFileRestore (old shape → new loader migration)', () => {
       name: 'Bar.cs',
       staged: false,
     });
+  });
+});
+
+describe('shouldPersistTab (A4: commit-diff tabs excluded from persistence)', () => {
+  it('persists a plain file tab', () => {
+    expect(shouldPersistTab('/proj/Assets/Foo.cs')).toBe(true);
+  });
+
+  it('persists a staged diff:// tab', () => {
+    expect(shouldPersistTab('diff://staged/Assets/Foo.cs')).toBe(true);
+  });
+
+  it('persists an unstaged diff:// tab', () => {
+    expect(shouldPersistTab('diff://unstaged/Assets/Bar.cs')).toBe(true);
+  });
+
+  it('excludes an auth:// virtual tab', () => {
+    expect(shouldPersistTab('auth://login')).toBe(false);
+  });
+
+  it('excludes a diff://commit/<hash>/<relpath> tab', () => {
+    expect(shouldPersistTab('diff://commit/abc1234/Assets/Foo.cs')).toBe(false);
+  });
+
+  it('excludes a diff://commit/ tab even when the hash looks like "staged" or "unstaged"', () => {
+    // Guards against a naive prefix check that only distinguishes the second
+    // path segment — commit tabs must be excluded regardless of hash value.
+    expect(shouldPersistTab('diff://commit/staged/Assets/Foo.cs')).toBe(false);
   });
 });
 

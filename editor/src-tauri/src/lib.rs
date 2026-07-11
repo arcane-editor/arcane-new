@@ -352,6 +352,8 @@ pub fn run() {
             git::git_pull,
             git::git_push,
             git::git_log,
+            git::git_show_commit,
+            git::git_show_file_at,
             git::git_worktree_list,
             git::git_worktree_add,
             git::git_worktree_remove,

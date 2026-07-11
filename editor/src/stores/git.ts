@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
-import type { GitLogEntry, WorktreeInfo, BlameLine } from '../types';
+import type { GitLogEntry, WorktreeInfo, BlameLine, CommitDetail } from '../types';
 import { notify } from './notifications';
 import { useWorkspaceStore } from './workspace';
 
@@ -47,6 +47,10 @@ interface GitState {
   blameCache: Map<string, BlameEntry>;
   inflightBlame: Map<string, Promise<BlameLine[]>>;
 
+  /** Fetch-once cache of per-commit detail (metadata + changed files), keyed by hash. */
+  commitDetails: Map<string, CommitDetail>;
+  inflightCommitDetails: Map<string, Promise<CommitDetail | null>>;
+
   refreshStatus: (workspacePath: string) => Promise<void>;
   refreshBranches: (workspacePath: string) => Promise<void>;
   refreshLog: (workspacePath: string) => Promise<void>;
@@ -92,6 +96,16 @@ interface GitState {
   getBlame: (workspacePath: string, absolutePath: string) => Promise<BlameLine[]>;
   invalidateBlameAll: () => void;
   invalidateBlameFile: (absolutePath: string) => void;
+
+  /**
+   * Fetch a commit's detail (metadata + changed files) via `git_show_commit`,
+   * caching the result forever (commits are immutable, so — unlike blame —
+   * there's no invalidation path). Concurrent calls for the same hash
+   * collapse onto a single in-flight request. Returns `null` on failure
+   * (already surfaced via `notify.error`) so callers can render an empty
+   * state rather than throwing.
+   */
+  getCommitDetail: (workspacePath: string, hash: string) => Promise<CommitDetail | null>;
 }
 
 /**
@@ -150,6 +164,8 @@ export const useGitStore = create<GitState>((set, get) => ({
   blameGen: 0,
   blameCache: new Map(),
   inflightBlame: new Map(),
+  commitDetails: new Map(),
+  inflightCommitDetails: new Map(),
 
   refreshStatus: async (workspacePath: string) => {
     try {
@@ -444,6 +460,8 @@ export const useGitStore = create<GitState>((set, get) => ({
     blameGen: 0,
     blameCache: new Map(),
     inflightBlame: new Map(),
+    commitDetails: new Map(),
+    inflightCommitDetails: new Map(),
   }),
 
   refreshWorktrees: async (workspacePath: string) => {
@@ -545,5 +563,36 @@ export const useGitStore = create<GitState>((set, get) => ({
     const inflight = new Map(get().inflightBlame);
     inflight.delete(absolutePath);
     set({ blameCache: cache, inflightBlame: inflight });
+  },
+
+  getCommitDetail: async (workspacePath, hash) => {
+    const { commitDetails, inflightCommitDetails } = get();
+    const cached = commitDetails.get(hash);
+    if (cached) return cached;
+    const inflight = inflightCommitDetails.get(hash);
+    if (inflight) return inflight;
+
+    const promise = (async () => {
+      try {
+        const detail = await invoke<CommitDetail>('git_show_commit', { workspacePath, hash });
+        const nextDetails = new Map(get().commitDetails);
+        nextDetails.set(hash, detail);
+        const nextInflight = new Map(get().inflightCommitDetails);
+        nextInflight.delete(hash);
+        set({ commitDetails: nextDetails, inflightCommitDetails: nextInflight });
+        return detail;
+      } catch (err) {
+        const nextInflight = new Map(get().inflightCommitDetails);
+        nextInflight.delete(hash);
+        set({ inflightCommitDetails: nextInflight });
+        notify.error(`Failed to load commit ${hash.slice(0, 7)}: ${err}`);
+        return null;
+      }
+    })();
+
+    const nextInflight = new Map(inflightCommitDetails);
+    nextInflight.set(hash, promise);
+    set({ inflightCommitDetails: nextInflight });
+    return promise;
   },
 }));
