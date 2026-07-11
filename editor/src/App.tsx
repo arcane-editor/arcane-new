@@ -36,6 +36,7 @@ import { SettingsPanel } from './features/settings';
 import { PaletteModal } from './features/command-palette';
 import { BranchPicker, runGitignoreDoctor } from './features/git';
 import { UnityAssetPickerModal, type UnityPickerMode } from './features/unity-quick-open';
+import { setPendingReveal } from './features/explorer';
 import { useUnitySceneStore } from './stores/unity-scene';
 import { useRegisterCommands } from './hooks/useRegisterCommands';
 import { useAutoSave } from './hooks/useAutoSave';
@@ -726,6 +727,11 @@ function App() {
       handler: () => {
         const path = useWorkspaceStore.getState().activeFilePath;
         if (!path) return;
+        // Stash the target before flipping the sidebar view: if the explorer
+        // wasn't already mounted, React hasn't attached its `reveal-in-tree`
+        // listener yet by the time we dispatch below — the pending slot lets
+        // ExplorerPanel pick this up on mount instead of losing the request.
+        setPendingReveal(path);
         useUiStore.getState().setActiveSidebarView('explorer');
         useUiStore.getState().setSidebarVisible(true);
         window.dispatchEvent(new CustomEvent('reveal-in-tree', { detail: { path } }));

@@ -43,6 +43,7 @@ const DEFAULT_SETTINGS: SettingsSchema = {
   'unity.docs.versionMatchedHover': true,
   'unity.explorer.assetsFirst': false,
   'unity.explorer.hideMeta': true,
+  'explorer.autoReveal': true,
   'unity.git.metaPairingChecks': true,
   'unity.git.yamlMergeIntegration': true,
   'unity.testRunner.enabled': true,

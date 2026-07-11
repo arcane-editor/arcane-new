@@ -161,6 +161,7 @@ export interface SettingsSchema {
   'unity.docs.versionMatchedHover': boolean;
   'unity.explorer.assetsFirst': boolean;
   'unity.explorer.hideMeta': boolean;
+  'explorer.autoReveal': boolean;
   'unity.git.metaPairingChecks': boolean;
   'unity.git.yamlMergeIntegration': boolean;
   'unity.testRunner.enabled': boolean;

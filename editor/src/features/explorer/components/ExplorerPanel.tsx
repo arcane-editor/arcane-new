@@ -1,5 +1,5 @@
 import { useRef, useState, useEffect, useMemo } from 'react';
-import { Tree, NodeRendererProps } from 'react-arborist';
+import { Tree, NodeRendererProps, TreeApi } from 'react-arborist';
 import {
   ChevronRight,
   ChevronDown,
@@ -15,6 +15,7 @@ import { useWorkspaceStore } from '../../../stores/workspace';
 import { useGitStore } from '../../../stores/git';
 import { useProjectContextStore } from '../../../stores/project-context';
 import { useSettingsStore } from '../../../stores/settings';
+import { useUiStore } from '../../../stores/ui';
 import { toRelativePath } from '../../../utils/relative-path';
 import type { TreeNode } from '../../../types';
 import ContextMenu from './ContextMenu';
@@ -22,9 +23,24 @@ import InlineInput from './InlineInput';
 import TypedConfirmDialog from './TypedConfirmDialog';
 import ImpactDeleteDialog from './ImpactDeleteDialog';
 import { applyUnityTreeView } from '../services/unity-tree-view';
+import { ancestorDirs, consumePendingReveal } from '../services/reveal';
 
 // Asset/script kinds whose deletion can leave dangling references in scenes/prefabs.
 const REFABLE_DELETE_EXTS = ['.cs', '.prefab', '.asset', '.mat', '.anim', '.controller'];
+
+// Depth-first lookup of a node by id (full path) in the raw (non-view-
+// filtered) store tree. Shared by the toggle handler and reveal's ancestor
+// walk, both of which need to inspect a directory's already-loaded state.
+function findTreeNode(nodes: TreeNode[], id: string): TreeNode | undefined {
+  for (const n of nodes) {
+    if (n.id === id) return n;
+    if (n.children) {
+      const found = findTreeNode(n.children, id);
+      if (found) return found;
+    }
+  }
+  return undefined;
+}
 
 function statusBadge(status: string): { letter: string; className: string } | null {
   switch (status) {
@@ -156,6 +172,15 @@ function ExplorerPanel() {
   );
 
   const treeRef = useRef<HTMLDivElement>(null);
+  // react-arborist's imperative handle — used by `revealPath` to open
+  // ancestor dirs and select/scroll to the active file. `undefined` (not
+  // `null`) to match the `Ref<TreeApi<T> | undefined>` type `<Tree>` forwards.
+  const treeApiRef = useRef<TreeApi<TreeNode> | undefined>(undefined);
+  // Bumped at the start of every `revealPath` call; every async checkpoint
+  // inside it re-checks this against the ref before acting, so a rapid
+  // sequence of reveals (e.g. quick successive file switches) can't let a
+  // slower, superseded call land its open/select/scroll after a newer one.
+  const revealGenRef = useRef(0);
   const [height, setHeight] = useState(0);
   const [width, setWidth] = useState(0);
   // Path of a lone `.meta` pending typed-confirm deletion (F-6.1).
@@ -172,6 +197,58 @@ function ExplorerPanel() {
   } | null>(null);
   const [renamingNodeId, setRenamingNodeId] = useState<string | null>(null);
   const [creatingIn, setCreatingIn] = useState<{ parentPath: string; type: 'file' | 'folder' } | null>(null);
+
+  // Expands every ancestor directory of `path` (lazy-loading children as
+  // needed), then selects + scrolls to it. Reads store state fresh at each
+  // step via `getState()` rather than closed-over hook values, since this
+  // is invoked from long-lived subscriptions/listeners set up once at mount.
+  //
+  // Caveat: if `path` is filtered out of the *displayed* tree (e.g. a
+  // `.meta` file hidden by `unity.explorer.hideMeta` via
+  // `applyUnityTreeView`), react-arborist has no node for that id —
+  // `select`/`scrollTo` below silently no-op. There is nothing more to do
+  // in that case: revealing a file the tree doesn't show isn't meaningful.
+  async function revealPath(path: string): Promise<void> {
+    const myGen = ++revealGenRef.current;
+
+    const { assetsRootPath: root0, workspacePath: wp0, loadChildren: load } =
+      useWorkspaceStore.getState();
+    const root = root0 ?? wp0;
+    if (!root) return;
+
+    const dirs = ancestorDirs(root, path);
+    if (dirs === null) return; // path isn't under this tree's root — nothing to reveal
+
+    for (const dir of dirs) {
+      if (myGen !== revealGenRef.current) return; // superseded by a newer reveal
+      const node = findTreeNode(useWorkspaceStore.getState().tree, dir);
+      // Mirrors the lazy-load check used elsewhere in this file (onToggle,
+      // NodeRenderer's handleClick): an empty/missing children array means
+      // "not loaded yet" (a genuinely empty dir just reloads harmlessly).
+      if (!node?.children || node.children.length === 0) {
+        try {
+          await load(dir);
+        } catch (err) {
+          console.warn('[Explorer] revealPath: loadChildren failed for', dir, err);
+          return;
+        }
+      }
+      if (myGen !== revealGenRef.current) return;
+      treeApiRef.current?.open(dir);
+    }
+
+    // Give React a frame to flush the tree-data/open-state updates from the
+    // loop above into react-arborist's internal node list before selecting.
+    // Not strictly required — `select`/`scrollTo` internally poll for up to
+    // ~1s for the target id to appear — but avoids relying on that solely.
+    requestAnimationFrame(() => {
+      if (myGen !== revealGenRef.current) return;
+      const api = treeApiRef.current;
+      if (!api) return;
+      api.select(path, { align: 'center' });
+      api.scrollTo(path, 'center');
+    });
+  }
 
   useEffect(() => {
     if (!treeRef.current) return;
@@ -191,16 +268,49 @@ function ExplorerPanel() {
       const parent = isUnity ? `${wp}/Assets/Scripts` : wp;
       setCreatingIn({ parentPath: parent, type: 'file' });
     }
-    function onReveal() {
-      // MVP: opening the explorer pane is handled by the command itself.
-      // Full scroll-to-node will be wired with react-arborist's TreeApi later.
+    function onReveal(e: Event) {
+      // Prefer the pending slot over the event's own `detail` — App.tsx
+      // always stashes the path there immediately before dispatching, so
+      // this is the single source of truth for both the already-mounted
+      // case (this listener) and the mount-time consume below. Falling
+      // back to `detail` only guards a future caller that dispatches this
+      // event directly without going through the pending-reveal slot.
+      const detail = (e as CustomEvent<{ path?: string }>).detail;
+      const path = consumePendingReveal() ?? detail?.path ?? null;
+      if (path) void revealPath(path);
     }
     window.addEventListener('request-new-file', onRequestNew);
     window.addEventListener('reveal-in-tree', onReveal);
+
+    // Pick up a reveal request that was stashed before this panel mounted
+    // (e.g. the sidebar was showing a different view when the command ran).
+    const pending = consumePendingReveal();
+    if (pending) void revealPath(pending);
+
     return () => {
       window.removeEventListener('request-new-file', onRequestNew);
       window.removeEventListener('reveal-in-tree', onReveal);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Auto-reveal: expand/select the active file whenever it changes, gated
+  // on the `explorer.autoReveal` setting and the explorer actually being
+  // the visible sidebar view. Both are read fresh inside the listener (not
+  // captured here) so flipping the setting or switching sidebar views takes
+  // effect on the very next file switch without needing to re-subscribe.
+  useEffect(() => {
+    const unsub = useWorkspaceStore.subscribe((state, prevState) => {
+      if (state.activeFilePath === prevState.activeFilePath) return;
+      const path = state.activeFilePath;
+      if (!path) return;
+      if (path.startsWith('diff://') || path.startsWith('auth://')) return;
+      if (useSettingsStore.getState().getSetting('explorer.autoReveal') === false) return;
+      const ui = useUiStore.getState();
+      if (!ui.sidebarVisible || ui.activeSidebarView !== 'explorer') return;
+      void revealPath(path);
+    });
+    return unsub;
   }, []);
 
   if (!workspacePath) {
@@ -351,6 +461,7 @@ function ExplorerPanel() {
         )}
         {height > 0 && width > 0 && (
           <Tree<TreeNode>
+            ref={treeApiRef}
             data={displayTree}
             openByDefault={false}
             indent={16}
@@ -360,17 +471,7 @@ function ExplorerPanel() {
             disableDrag={true}
             disableDrop={true}
             onToggle={(id: string) => {
-              const findNode = (nodes: TreeNode[]): TreeNode | undefined => {
-                for (const n of nodes) {
-                  if (n.id === id) return n;
-                  if (n.children) {
-                    const found = findNode(n.children);
-                    if (found) return found;
-                  }
-                }
-                return undefined;
-              };
-              const node = findNode(tree);
+              const node = findTreeNode(tree, id);
               if (node && node.isDir && node.children && node.children.length === 0) {
                 loadChildren(node.id);
               }

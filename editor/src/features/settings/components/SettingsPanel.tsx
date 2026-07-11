@@ -26,6 +26,7 @@ const SETTING_DEFINITIONS: SettingDefinition[] = [
   { key: 'editor.autoSave', type: 'select', options: ['off', 'afterDelay', 'onFocusChange'], category: 'Editor', label: 'Auto Save', description: 'Controls auto save of editors.' },
   { key: 'editor.autoSaveDelay', type: 'number', min: 100, max: 10000, category: 'Editor', label: 'Auto Save Delay', description: 'Controls the delay in ms after which an editor is saved automatically.' },
   { key: 'editor.betterComments', type: 'boolean', category: 'Editor', label: 'Better Comments', description: 'Highlight tagged comments (// !, // ?, // *, // //, // TODO:, // FIXME:, // HACK:, // NOTE:) with distinct colors.' },
+  { key: 'explorer.autoReveal', type: 'boolean', category: 'Editor', label: 'Auto Reveal Active File', description: 'Automatically expand and select the active file in the Explorer when you switch tabs (manual "Reveal Active File in Explorer" always works regardless of this setting).' },
   { key: 'terminal.fontSize', type: 'number', min: 8, max: 30, category: 'Terminal', label: 'Font Size', description: 'Controls the font size of the terminal.' },
   { key: 'terminal.fontFamily', type: 'select', options: [
       'ui-monospace, SFMono-Regular, Menlo, Monaco, \'Cascadia Mono\', \'Courier New\', monospace',
