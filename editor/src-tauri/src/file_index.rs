@@ -16,9 +16,17 @@
 //! that touches it is synchronous (no `.await` inside a held lock is even
 //! possible here — there are no `await` points in this module at all), so
 //! the only concern is *wall-clock* hold time blocking other threads:
-//! - `apply_delta` only mutates an in-memory `Vec<String>` — no I/O — so it
-//!   holds the lock for the whole operation. That's still on the order of
-//!   microseconds even for a large delta.
+//! - `apply_delta` mostly mutates an in-memory `Vec<String>`, but when the
+//!   delta has any `added` paths it ALSO reads `.gitignore`/
+//!   `.git/info/exclude` off disk (`build_delta_gitignore`, needed to filter
+//!   added paths the same way a fresh walk would) — real I/O, done *while
+//!   the lock is held*. This is a correction of an earlier version of this
+//!   paragraph that claimed "no I/O"; that stopped being true once the
+//!   delta-filter fix (Finding 1) landed. In practice the hold time is still
+//!   bounded — both files are small, local, and normally warm in the OS
+//!   page cache, and the lock has effectively one writer at a time (the
+//!   watcher's debounce task processes one settled burst before the next) —
+//!   but it is no longer accurate to call this "no I/O".
 //! - `build_index` (behind `build_file_index`) walks the filesystem — that
 //!   walk happens *before* the lock is taken; the lock is only held to swap
 //!   in the freshly built `FileIndex`.
@@ -206,7 +214,9 @@ fn path_has_always_hidden_segment(path: &str) -> bool {
 /// Returns true if `path`'s file name is `.gitignore` or `.ignore` — the two
 /// files whose *content* changes what the walker would include, which
 /// `apply_delta` can't cheaply re-evaluate for existing cached entries.
-fn is_gitignore_file(path: &str) -> bool {
+/// `pub(crate)`: also used by `file_scanner`'s watcher event loop to flip a
+/// content edit (any event kind, not just add/remove) into a stale index.
+pub(crate) fn is_gitignore_file(path: &str) -> bool {
     Path::new(path)
         .file_name()
         .map(|n| n == ".gitignore" || n == ".ignore")
@@ -313,6 +323,24 @@ fn is_path_excluded(
         }
     }
     false
+}
+
+/// Marks the current index (if any) stale, forcing the next
+/// `fuzzy_search_files` call to do a full, policy-correct rebuild instead of
+/// trusting the cached list. No-op if no index has been built yet — nothing
+/// to mark.
+///
+/// Used by `file_scanner`'s watcher event loop for filesystem changes
+/// `apply_delta`'s added/removed-path delta model can't represent at all —
+/// e.g. a directory rename, which only delivers directory-path events (no
+/// per-file events for the moved subtree), or a `.gitignore`/`.ignore`
+/// content edit (`Modify(Data)`, not add/remove) that changes what the
+/// walker would include.
+pub fn mark_stale(state: &FileIndexState) {
+    let mut guard = lock_recover(&state.0);
+    if let Some(index) = guard.as_mut() {
+        index.stale = true;
+    }
 }
 
 /// Applies a watcher-observed delta to the live index in place, so most
@@ -496,6 +524,38 @@ mod tests {
         let idx = guard.as_ref().unwrap();
         assert_eq!(idx.workspace_path, tmp2.path().to_str().unwrap());
         assert_eq!(idx.files.len(), 2);
+    }
+
+    // ── mark_stale ──────────────────────────────────────────────────────
+
+    #[test]
+    fn mark_stale_sets_stale_on_existing_index() {
+        let state = FileIndexState::new();
+        {
+            let mut guard = state.0.lock().unwrap();
+            *guard = Some(FileIndex {
+                workspace_path: "/ws".to_string(),
+                extra_excludes: vec![],
+                files: Arc::new(vec!["/ws/a.txt".to_string()]),
+                stale: false,
+            });
+        }
+
+        mark_stale(&state);
+
+        let guard = state.0.lock().unwrap();
+        let idx = guard.as_ref().unwrap();
+        assert!(idx.stale);
+        // Only the flag flips — the cached file list itself is untouched.
+        assert_eq!(*idx.files, vec!["/ws/a.txt".to_string()]);
+    }
+
+    #[test]
+    fn mark_stale_is_noop_when_no_index_built() {
+        let state = FileIndexState::new();
+        // Should not panic even though guard is None.
+        mark_stale(&state);
+        assert!(state.0.lock().unwrap().is_none());
     }
 
     // ── apply_delta: added ──────────────────────────────────────────────

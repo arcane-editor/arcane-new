@@ -102,10 +102,17 @@ pub struct ContentSearchOptions {
     pub exclude_patterns: Vec<String>,
     #[serde(default)]
     pub file_extensions: Option<Vec<String>>,
-    #[serde(default = "default_max_total_matches")]
-    pub max_total_matches: usize,
-    #[serde(default = "default_max_matches_per_file")]
-    pub max_matches_per_file: usize,
+    /// `number | null` on the frontend: an explicit JSON `null` and a
+    /// missing key both deserialize to `None` here (serde's derive treats
+    /// `Option<T>` fields as implicitly optional either way — no
+    /// `#[serde(default = ...)]` needed, and critically none is applied to a
+    /// present-but-null key, which is why this used to be a non-`Option`
+    /// `usize` with a default fn: that combination rejects explicit `null`
+    /// as a type error). Resolved to `default_max_total_matches()` in
+    /// `Engine::build`.
+    pub max_total_matches: Option<usize>,
+    /// See `max_total_matches`; resolved to `default_max_matches_per_file()`.
+    pub max_matches_per_file: Option<usize>,
 }
 
 /// A single match within a line. Field names serialize to camelCase so the
@@ -208,8 +215,14 @@ impl Engine {
             include_set,
             exclude_set,
             file_extensions: options.file_extensions.clone(),
-            max_total_matches: options.max_total_matches.max(1),
-            max_matches_per_file: options.max_matches_per_file.max(1),
+            max_total_matches: options
+                .max_total_matches
+                .unwrap_or_else(default_max_total_matches)
+                .max(1),
+            max_matches_per_file: options
+                .max_matches_per_file
+                .unwrap_or_else(default_max_matches_per_file)
+                .max(1),
             threads,
         })
     }
@@ -782,8 +795,8 @@ mod tests {
             include_patterns: vec![],
             exclude_patterns: vec![],
             file_extensions: None,
-            max_total_matches: default_max_total_matches(),
-            max_matches_per_file: default_max_matches_per_file(),
+            max_total_matches: Some(default_max_total_matches()),
+            max_matches_per_file: Some(default_max_matches_per_file()),
         }
     }
 
@@ -1070,6 +1083,52 @@ mod tests {
         assert!(Engine::build(&opts).is_ok());
     }
 
+    // ── ContentSearchOptions: serde boundary for the cap fields ─────────
+    //
+    // Regression test for the bug this fix wave closes: the frontend sends
+    // explicit `maxTotalMatches: null, maxMatchesPerFile: null` (see
+    // `stores/search.ts`) alongside older/simpler callers that omit the keys
+    // entirely. Both MUST deserialize successfully and resolve to the same
+    // defaults — this crosses the actual serde boundary via `serde_json`
+    // rather than constructing `ContentSearchOptions` directly in Rust,
+    // which is what the branch this fixes was missing (a non-`Option`
+    // `usize` with `#[serde(default = ...)]` builds fine in Rust but rejects
+    // a JSON `null` for that key at the invoke boundary).
+
+    #[test]
+    fn content_search_options_explicit_null_caps_deserialize_and_default() {
+        let json = r#"{
+            "workspacePath": "/tmp",
+            "query": "needle",
+            "maxTotalMatches": null,
+            "maxMatchesPerFile": null
+        }"#;
+        let opts: ContentSearchOptions =
+            serde_json::from_str(json).expect("explicit null caps must deserialize");
+        assert_eq!(opts.max_total_matches, None);
+        assert_eq!(opts.max_matches_per_file, None);
+
+        let engine = Engine::build(&opts).expect("engine should build");
+        assert_eq!(engine.max_total_matches, default_max_total_matches());
+        assert_eq!(engine.max_matches_per_file, default_max_matches_per_file());
+    }
+
+    #[test]
+    fn content_search_options_missing_cap_keys_deserialize_and_default() {
+        let json = r#"{
+            "workspacePath": "/tmp",
+            "query": "needle"
+        }"#;
+        let opts: ContentSearchOptions =
+            serde_json::from_str(json).expect("missing cap keys must deserialize");
+        assert_eq!(opts.max_total_matches, None);
+        assert_eq!(opts.max_matches_per_file, None);
+
+        let engine = Engine::build(&opts).expect("engine should build");
+        assert_eq!(engine.max_total_matches, default_max_total_matches());
+        assert_eq!(engine.max_matches_per_file, default_max_matches_per_file());
+    }
+
     // ── engine end-to-end: basic streaming ──────────────────────────────
 
     #[test]
@@ -1174,7 +1233,7 @@ mod tests {
             fs::write(tmp.path().join(format!("f{i}.txt")), "needle\n").unwrap();
         }
         let mut opts = base_options(tmp.path().to_str().unwrap(), "needle");
-        opts.max_total_matches = 2;
+        opts.max_total_matches = Some(2);
         // Force single-threaded so the total-cap stop is deterministic.
         let mut engine = Engine::build(&opts).unwrap();
         engine.threads = 1;
@@ -1191,7 +1250,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         fs::write(tmp.path().join("many.txt"), "x\nx\nx\nx\nx\n").unwrap();
         let mut opts = base_options(tmp.path().to_str().unwrap(), "x");
-        opts.max_matches_per_file = 2;
+        opts.max_matches_per_file = Some(2);
         let out = run(&opts, 1);
 
         let f = out.file_with("many.txt").unwrap();

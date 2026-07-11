@@ -567,6 +567,7 @@ pub async fn start_file_watcher(
                     match event {
                         Some(event) => {
                             let mut git_state_touched = false;
+                            let mut index_needs_rebuild = false;
                             for path in &event.paths {
                                 let path_str = path.to_string_lossy().to_string();
                                 if is_git_state_path(&path_str)
@@ -575,6 +576,16 @@ pub async fn start_file_watcher(
                                     })
                                 {
                                     git_state_touched = true;
+                                }
+                                // Any event on .gitignore/.ignore — not just an
+                                // add/remove — can change what the walker would
+                                // include. A content edit lands as
+                                // `Modify(Data)`, which the match below doesn't
+                                // otherwise touch, so check this unconditionally
+                                // per event kind rather than only inside the
+                                // Modify(Name) arm.
+                                if file_index::is_gitignore_file(&path_str) {
+                                    index_needs_rebuild = true;
                                 }
                                 match event.kind {
                                     notify::EventKind::Create(_) => {
@@ -586,11 +597,27 @@ pub async fn start_file_watcher(
                                         pending_removed.push(path_str);
                                     }
                                     notify::EventKind::Modify(notify::event::ModifyKind::Name(_)) => {
-                                        // Rename: treat as remove old + add new
+                                        // Rename: treat as remove old + add new.
+                                        // A rename target that isn't a live
+                                        // regular file — a directory (only
+                                        // directory-path events are delivered
+                                        // for a directory rename, never one per
+                                        // file in the moved subtree), or a
+                                        // vanished path we have no way to
+                                        // classify as having been a plain file —
+                                        // can't be captured by a single
+                                        // added/removed delta entry. Mark the
+                                        // whole index stale in that case so the
+                                        // next `fuzzy_search_files` call does a
+                                        // full, policy-correct rebuild instead of
+                                        // leaving orphaned old paths and a
+                                        // missing new subtree until an unrelated
+                                        // rebuild.
                                         if path.exists() && path.is_file() {
                                             pending_added.push(path_str);
                                         } else {
                                             pending_removed.push(path_str);
+                                            index_needs_rebuild = true;
                                         }
                                     }
                                     _ => {}
@@ -633,6 +660,12 @@ pub async fn start_file_watcher(
                                     {
                                         git_state_touched = true;
                                     }
+                                    // See the matching check above the leading
+                                    // batch's match — same reasoning, applied to
+                                    // events drained after the debounce sleep.
+                                    if file_index::is_gitignore_file(&path_str) {
+                                        index_needs_rebuild = true;
+                                    }
                                     match event.kind {
                                         notify::EventKind::Create(_) => {
                                             if path.is_file() {
@@ -643,10 +676,14 @@ pub async fn start_file_watcher(
                                             pending_removed.push(path_str);
                                         }
                                         notify::EventKind::Modify(notify::event::ModifyKind::Name(_)) => {
+                                            // See the matching arm above for why
+                                            // a non-file rename target/vanished
+                                            // path also marks the index stale.
                                             if path.exists() && path.is_file() {
                                                 pending_added.push(path_str);
                                             } else {
                                                 pending_removed.push(path_str);
+                                                index_needs_rebuild = true;
                                             }
                                         }
                                         _ => {}
@@ -669,6 +706,22 @@ pub async fn start_file_watcher(
                             if git_state_touched {
                                 let _ = app_for_debounce.emit("git-state-changed", ());
                                 last_git_emit = Some(std::time::Instant::now());
+                            }
+
+                            // Marked once per burst — see the Modify(Name) arms
+                            // and the .gitignore/.ignore check above — rather
+                            // than once per qualifying path, since one flip is
+                            // all `FileIndex::stale` needs. Done before
+                            // `apply_delta` so a burst that both needs a full
+                            // rebuild AND carries an ordinary add/remove (e.g.
+                            // a directory rename alongside an unrelated file
+                            // edit) still gets the best-effort delta applied
+                            // too — harmless once `stale` forces a rebuild
+                            // anyway, and free correctness in the meantime.
+                            if index_needs_rebuild {
+                                let index_state =
+                                    app_for_debounce.state::<file_index::FileIndexState>();
+                                file_index::mark_stale(&index_state);
                             }
 
                             if !pending_added.is_empty() || !pending_removed.is_empty() {
@@ -1063,6 +1116,44 @@ mod tests {
             fuzzy_search_files_impl(&state, ws, "late".to_string(), 10, vec![], None).unwrap();
 
         assert_eq!(results.iter().filter(|r| r.file_name == "late.txt").count(), 1);
+        assert!(!state.0.lock().unwrap().as_ref().unwrap().stale, "rebuild should clear stale");
+    }
+
+    // `file_index::mark_stale` is what the watcher event loop calls for
+    // filesystem changes `apply_delta`'s add/remove model can't represent
+    // (a directory rename, a `.gitignore` content edit — see file_index.rs's
+    // doc comment). This pins the same contract `fuzzy_search_files_impl`
+    // already gives `apply_delta`-flipped staleness above, but via the new
+    // entry point: a built index, marked stale out-of-band, must trigger a
+    // full rebuild (picking up a file that landed on disk without going
+    // through `apply_delta` at all) on the next call, and clear the flag.
+    #[test]
+    fn fuzzy_search_files_impl_rebuilds_after_mark_stale() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("original.txt"), "hi\n").unwrap();
+        let ws = tmp.path().to_str().unwrap().to_string();
+
+        let state = FileIndexState::new();
+        file_index::build_index(&state, ws.clone(), vec![]).unwrap();
+        assert!(!state.0.lock().unwrap().as_ref().unwrap().stale);
+
+        // Simulate the directory-rename gap: a new file appears on disk
+        // without ever going through `apply_delta` (as it wouldn't for a
+        // renamed directory's contents), and the event loop's only recourse
+        // is to mark the whole index stale.
+        std::fs::write(tmp.path().join("renamed_in.txt"), "hi\n").unwrap();
+        file_index::mark_stale(&state);
+        assert!(state.0.lock().unwrap().as_ref().unwrap().stale, "mark_stale should flip the flag");
+
+        let results =
+            fuzzy_search_files_impl(&state, ws, "renamed_in".to_string(), 10, vec![], None)
+                .unwrap();
+
+        assert_eq!(
+            results.iter().filter(|r| r.file_name == "renamed_in.txt").count(),
+            1,
+            "stale rebuild should have picked up the file added outside apply_delta"
+        );
         assert!(!state.0.lock().unwrap().as_ref().unwrap().stale, "rebuild should clear stale");
     }
 

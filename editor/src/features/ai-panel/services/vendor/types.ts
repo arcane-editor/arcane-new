@@ -160,8 +160,10 @@ export interface DiffContent {
 export interface AgentToolResult {
   content: (TextContent | ImageContent)[];
   /**
-   * Optional file diffs produced by the tool (e.g. Claude's edit-review).
-   * Arcane tools leave this undefined; only the Claude ACP path sets it.
+   * Optional file diffs produced by the tool, rendered by `DiffBlock`.
+   * The Arcane path populates this via `diff-decorator.ts`'s write/edit
+   * wrapper; the former Claude ACP-bridge path (which used to be the only
+   * source of this field) was removed.
    */
   diffs?: DiffContent[];
 }
