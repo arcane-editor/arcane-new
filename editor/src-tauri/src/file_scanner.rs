@@ -109,6 +109,16 @@ fn is_git_state_path(path_str: &str) -> bool {
 /// worktree's own HEAD/refs and lives outside the watched workspace root, so
 /// callers use this to watch it in addition to the workspace root. Returns
 /// `None` for a normal repo (`.git` is a directory) or no `.git` at all.
+///
+/// The returned path is canonicalized: relative `gitdir:` pointers are
+/// resolved lexically first (join keeps `..` components as-is), but `notify`
+/// on macOS delivers watch-event paths fully resolved (no `..`, symlinks
+/// resolved — e.g. `/var` → `/private/var`). Without canonicalizing here, the
+/// prefix match against watch-event paths in `is_git_state_path_in_dir` would
+/// never fire for relative-pointer worktrees. Falls back to the
+/// un-canonicalized path if canonicalize fails (e.g. an odd setup where the
+/// target doesn't exist yet) so callers still get a best-effort value instead
+/// of losing the git dir entirely.
 fn resolve_linked_git_dir(ws_path: &str) -> Option<std::path::PathBuf> {
     let dot_git = std::path::Path::new(ws_path).join(".git");
     if !dot_git.is_file() {
@@ -117,11 +127,12 @@ fn resolve_linked_git_dir(ws_path: &str) -> Option<std::path::PathBuf> {
     let content = std::fs::read_to_string(&dot_git).ok()?;
     let gitdir = content.strip_prefix("gitdir:")?.trim();
     let p = std::path::PathBuf::from(gitdir);
-    Some(if p.is_absolute() {
+    let resolved = if p.is_absolute() {
         p
     } else {
         std::path::Path::new(ws_path).join(p)
-    })
+    };
+    Some(std::fs::canonicalize(&resolved).unwrap_or(resolved))
 }
 
 /// Returns true if `path_str` is a git-state file under `git_dir` — the
@@ -130,10 +141,17 @@ fn resolve_linked_git_dir(ws_path: &str) -> Option<std::path::PathBuf> {
 /// arbitrary directory (the worktree gitdir isn't named `.git` and doesn't
 /// live under the workspace root, so the `/.git/...` suffix checks above
 /// don't apply here).
+///
+/// The prefix match requires a path-component boundary (a trailing `/` after
+/// `git_dir`, or exact equality) — a raw `starts_with` would false-positive on
+/// a sibling worktree dir that shares a name prefix, e.g. `git_dir` =
+/// `.../worktrees/feature` matching `.../worktrees/feature-backup/...`.
 fn is_git_state_path_in_dir(path_str: &str, git_dir: &str) -> bool {
     let normalized = path_str.replace('\\', "/");
     let normalized_dir = git_dir.replace('\\', "/");
-    if !normalized.starts_with(normalized_dir.as_str()) {
+    let normalized_dir = normalized_dir.trim_end_matches('/');
+    let prefix = format!("{}/", normalized_dir);
+    if normalized != normalized_dir && !normalized.starts_with(&prefix) {
         return false;
     }
     normalized.ends_with("/HEAD")
@@ -710,9 +728,13 @@ mod tests {
         )
         .unwrap();
 
+        // Compare against the canonicalized form: on macOS tempfile dirs live
+        // under /var, which canonicalizes to /private/var, so a raw
+        // `real_git_dir` would not equal what `notify` delivers at watch time.
+        let expected = std::fs::canonicalize(&real_git_dir).unwrap();
         assert_eq!(
             resolve_linked_git_dir(ws.to_str().unwrap()),
-            Some(real_git_dir)
+            Some(expected)
         );
     }
 
@@ -721,11 +743,18 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let ws = tmp.path().join("worktree-ws");
         std::fs::create_dir_all(&ws).unwrap();
+        // The target must actually exist for canonicalize() to succeed —
+        // otherwise resolve_linked_git_dir falls back to the un-normalized
+        // (lexically-joined, `..`-containing) path, which is the bug this
+        // test pins the fix for.
+        let real_git_dir = tmp.path().join("main/.git/worktrees/feature");
+        std::fs::create_dir_all(&real_git_dir).unwrap();
         std::fs::write(ws.join(".git"), "gitdir: ../main/.git/worktrees/feature\n").unwrap();
 
+        let expected = std::fs::canonicalize(&real_git_dir).unwrap();
         assert_eq!(
             resolve_linked_git_dir(ws.to_str().unwrap()),
-            Some(ws.join("../main/.git/worktrees/feature"))
+            Some(expected)
         );
     }
 
@@ -769,6 +798,16 @@ mod tests {
     fn is_git_state_path_in_dir_rejects_unrelated_file_inside_dir() {
         assert!(!is_git_state_path_in_dir(
             "/main-repo/.git/worktrees/feature/index",
+            WORKTREE_GITDIR
+        ));
+    }
+
+    // A sibling worktree dir name that shares `git_dir` as a string prefix
+    // (but not as a path-component prefix) must not false-positive.
+    #[test]
+    fn is_git_state_path_in_dir_rejects_sibling_dir_name_prefix() {
+        assert!(!is_git_state_path_in_dir(
+            "/main-repo/.git/worktrees/feature-backup/refs/heads/x",
             WORKTREE_GITDIR
         ));
     }
