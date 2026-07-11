@@ -1,4 +1,5 @@
-import { FilePlus, FolderPlus, FileCode, Pencil, Trash2 } from 'lucide-react';
+import { FilePlus, FolderPlus, FileCode, Pencil, Trash2, Copy, FolderSymlink } from 'lucide-react';
+import { isMac } from '../../../utils/platform';
 
 interface ContextMenuProps {
   x: number;
@@ -10,6 +11,12 @@ interface ContextMenuProps {
   onNewScript?: () => void;
   onRename: () => void;
   onDelete: () => void;
+  /** Copies the absolute filesystem path (shown when provided). */
+  onCopyPath?: () => void;
+  /** Copies the path relative to the workspace root (shown when provided). */
+  onCopyRelativePath?: () => void;
+  /** Reveals the item in the OS file manager (shown when provided). */
+  onRevealInOs?: () => void;
   onClose: () => void;
 }
 
@@ -21,6 +28,9 @@ function ContextMenu({
   onNewScript,
   onRename,
   onDelete,
+  onCopyPath,
+  onCopyRelativePath,
+  onRevealInOs,
   onClose,
 }: ContextMenuProps) {
   function handleItem(cb: () => void) {
@@ -110,6 +120,47 @@ function ContextMenu({
           <Trash2 size={14} style={{ marginRight: 8, flexShrink: 0 }} />
           Delete
         </button>
+        {(onCopyPath || onCopyRelativePath || onRevealInOs) && (
+          <>
+            <div style={{ borderTop: '1px solid var(--border)', margin: '4px 0' }} />
+            {onCopyPath && (
+              <button
+                className="context-menu-item"
+                onClick={() => handleItem(onCopyPath)}
+                style={menuItemStyle}
+                onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg-hover)')}
+                onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+              >
+                <Copy size={14} style={{ marginRight: 8, flexShrink: 0 }} />
+                Copy Path
+              </button>
+            )}
+            {onCopyRelativePath && (
+              <button
+                className="context-menu-item"
+                onClick={() => handleItem(onCopyRelativePath)}
+                style={menuItemStyle}
+                onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg-hover)')}
+                onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+              >
+                <Copy size={14} style={{ marginRight: 8, flexShrink: 0 }} />
+                Copy Relative Path
+              </button>
+            )}
+            {onRevealInOs && (
+              <button
+                className="context-menu-item"
+                onClick={() => handleItem(onRevealInOs)}
+                style={menuItemStyle}
+                onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg-hover)')}
+                onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+              >
+                <FolderSymlink size={14} style={{ marginRight: 8, flexShrink: 0 }} />
+                {isMac() ? 'Reveal in Finder' : 'Reveal in File Manager'}
+              </button>
+            )}
+          </>
+        )}
       </div>
     </>
   );

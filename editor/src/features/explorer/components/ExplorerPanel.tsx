@@ -10,10 +10,12 @@ import {
 } from 'lucide-react';
 import { getFileIcon, getFolderIcon } from '../../../utils/file-icons';
 import { ask } from '@tauri-apps/plugin-dialog';
+import { revealItemInDir } from '@tauri-apps/plugin-opener';
 import { useWorkspaceStore } from '../../../stores/workspace';
 import { useGitStore } from '../../../stores/git';
 import { useProjectContextStore } from '../../../stores/project-context';
 import { useSettingsStore } from '../../../stores/settings';
+import { toRelativePath } from '../../../utils/relative-path';
 import type { TreeNode } from '../../../types';
 import ContextMenu from './ContextMenu';
 import InlineInput from './InlineInput';
@@ -401,6 +403,17 @@ function ExplorerPanel() {
           }
           onRename={() => setRenamingNodeId(contextMenu.nodeId)}
           onDelete={() => handleDelete(contextMenu.path)}
+          onCopyPath={() => {
+            void navigator.clipboard.writeText(contextMenu.path);
+          }}
+          onCopyRelativePath={() => {
+            void navigator.clipboard.writeText(toRelativePath(contextMenu.path, workspacePath));
+          }}
+          onRevealInOs={() => {
+            revealItemInDir(contextMenu.path).catch((err) => {
+              console.error('[Explorer] Failed to reveal item:', err);
+            });
+          }}
           onClose={() => setContextMenu(null)}
         />
       )}

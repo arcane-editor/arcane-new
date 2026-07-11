@@ -1,10 +1,14 @@
 import { useState } from 'react';
-import { X, GitCompare } from 'lucide-react';
+import { X, GitCompare, Copy, FolderSymlink } from 'lucide-react';
+import { revealItemInDir } from '@tauri-apps/plugin-opener';
 import { useWorkspaceStore } from '../../../stores/workspace';
 import { useUiStore, getFlatDiagnosticsForUri } from '../../../stores/ui';
 import { useCommandsStore } from '../../../stores/commands';
 import { getFileIcon } from '../../../utils/file-icons';
 import { confirmCloseDirty } from '../../../utils/dirty-guard';
+import { toRelativePath } from '../../../utils/relative-path';
+import { isMac } from '../../../utils/platform';
+import type { OpenFile } from '../../../types';
 
 const DRAG_MIME = 'application/x-editor-tab-path';
 
@@ -14,8 +18,24 @@ interface TabContextMenu {
   path: string;
 }
 
+/**
+ * Resolves the real, on-disk filesystem path backing a tab so it can be
+ * copied or revealed in the OS file manager. Returns null for tabs that
+ * have no real underlying file (e.g. `auth://` virtual tabs) or when a
+ * `diff://` tab's target can't be resolved because no workspace is open.
+ */
+function resolveRealPath(file: OpenFile | undefined, workspacePath: string | null): string | null {
+  if (!file) return null;
+  if (file.path.startsWith('auth://')) return null;
+  if (file.diff) {
+    return workspacePath ? `${workspacePath}/${file.diff.filePath}` : null;
+  }
+  return file.path;
+}
+
 function TabBar() {
   const openFiles = useWorkspaceStore((s) => s.openFiles);
+  const workspacePath = useWorkspaceStore((s) => s.workspacePath);
   const activeFilePath = useWorkspaceStore((s) => s.activeFilePath);
   const setActiveFile = useWorkspaceStore((s) => s.setActiveFile);
   const closeFile = useWorkspaceStore((s) => s.closeFile);
@@ -100,7 +120,11 @@ function TabBar() {
         <TabMenu
           x={contextMenu.x}
           y={contextMenu.y}
-          path={contextMenu.path}
+          realPath={resolveRealPath(
+            openFiles.find((f) => f.path === contextMenu.path),
+            workspacePath,
+          )}
+          workspacePath={workspacePath}
           onClose={() => setContextMenu(null)}
           onAction={(commandId) => {
             executeCommand(commandId);
@@ -120,19 +144,55 @@ function TabBar() {
 interface TabMenuProps {
   x: number;
   y: number;
-  path: string;
+  /** Real, on-disk path backing the tab; null hides the path/reveal actions. */
+  realPath: string | null;
+  workspacePath: string | null;
   onClose: () => void;
   onAction: (commandId: string) => void;
   onCloseTab: () => void;
 }
 
-function TabMenu({ x, y, onClose, onAction, onCloseTab }: TabMenuProps) {
-  const items: Array<{ label: string; onClick: () => void; danger?: boolean }> = [
+interface TabMenuItem {
+  label: string;
+  onClick: () => void;
+  danger?: boolean;
+  icon?: React.ComponentType<{ size?: number; style?: React.CSSProperties }>;
+}
+
+function TabMenu({ x, y, realPath, workspacePath, onClose, onAction, onCloseTab }: TabMenuProps) {
+  const closeItems: TabMenuItem[] = [
     { label: 'Close', onClick: onCloseTab },
     { label: 'Close Others', onClick: () => onAction('tab.closeOthers') },
     { label: 'Close to the Right', onClick: () => onAction('tab.closeToRight') },
     { label: 'Close All', onClick: () => onAction('tab.closeAll') },
   ];
+  const pathItems: TabMenuItem[] = realPath
+    ? [
+        {
+          label: 'Copy Path',
+          icon: Copy,
+          onClick: () => {
+            void navigator.clipboard.writeText(realPath);
+          },
+        },
+        {
+          label: 'Copy Relative Path',
+          icon: Copy,
+          onClick: () => {
+            void navigator.clipboard.writeText(toRelativePath(realPath, workspacePath));
+          },
+        },
+        {
+          label: isMac() ? 'Reveal in Finder' : 'Reveal in File Manager',
+          icon: FolderSymlink,
+          onClick: () => {
+            revealItemInDir(realPath).catch((err) => {
+              console.error('[TabBar] Failed to reveal item:', err);
+            });
+          },
+        },
+      ]
+    : [];
   return (
     <>
       <div
@@ -156,14 +216,15 @@ function TabMenu({ x, y, onClose, onAction, onCloseTab }: TabMenuProps) {
           color: 'var(--text-primary)',
         }}
       >
-        {items.map((item) => (
+        {closeItems.map((item) => (
           <button
             key={item.label}
             onClick={item.onClick}
             onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg-hover)')}
             onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
             style={{
-              display: 'block',
+              display: 'flex',
+              alignItems: 'center',
               width: '100%',
               padding: '5px 12px',
               background: 'transparent',
@@ -178,6 +239,38 @@ function TabMenu({ x, y, onClose, onAction, onCloseTab }: TabMenuProps) {
             {item.label}
           </button>
         ))}
+        {pathItems.length > 0 && (
+          <>
+            <div style={{ borderTop: '1px solid var(--border)', margin: '4px 0' }} />
+            {pathItems.map((item) => {
+              const Icon = item.icon;
+              return (
+                <button
+                  key={item.label}
+                  onClick={item.onClick}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg-hover)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    width: '100%',
+                    padding: '5px 12px',
+                    background: 'transparent',
+                    border: 'none',
+                    cursor: 'pointer',
+                    fontSize: '13px',
+                    color: 'inherit',
+                    textAlign: 'left',
+                    fontFamily: 'inherit',
+                  }}
+                >
+                  {Icon && <Icon size={14} style={{ marginRight: 8, flexShrink: 0 }} />}
+                  {item.label}
+                </button>
+              );
+            })}
+          </>
+        )}
       </div>
     </>
   );
