@@ -201,9 +201,20 @@ export interface SearchMatch {
   lineContent: string;
   matchStart: number;
   matchEnd: number;
+  /**
+   * UTF-16 offset in the original (pre-trim) line at which `lineContent`
+   * begins; `0` unless the backend preview-trimmed a very long line. The true
+   * editor column of a match is `lineStart + matchStart`.
+   */
+  lineStart?: number;
 }
 
 export interface FileSearchResult {
   path: string;
   matches: SearchMatch[];
+  /**
+   * True when this file's match count hit the backend's per-file cap
+   * (`maxMatchesPerFile`) — more matches exist but were not returned.
+   */
+  truncated?: boolean;
 }
