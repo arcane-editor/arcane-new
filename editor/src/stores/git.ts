@@ -50,6 +50,13 @@ interface GitState {
   refreshBranches: (workspacePath: string) => Promise<void>;
   refreshLog: (workspacePath: string) => Promise<void>;
   switchBranch: (workspacePath: string, branch: string) => Promise<void>;
+  createBranch: (
+    workspacePath: string,
+    name: string,
+    opts?: { base?: string; checkout?: boolean },
+  ) => Promise<void>;
+  renameBranch: (workspacePath: string, oldName: string, newName: string) => Promise<void>;
+  deleteBranch: (workspacePath: string, name: string, force?: boolean) => Promise<void>;
   stageFile: (workspacePath: string, filePath: string) => Promise<void>;
   unstageFile: (workspacePath: string, filePath: string) => Promise<void>;
   stageAll: (workspacePath: string) => Promise<void>;
@@ -84,6 +91,42 @@ interface GitState {
   getBlame: (workspacePath: string, absolutePath: string) => Promise<BlameLine[]>;
   invalidateBlameAll: () => void;
   invalidateBlameFile: (absolutePath: string) => void;
+}
+
+/**
+ * Shared post-checkout reload flow used by both `switchBranch` and
+ * `createBranch` (when `checkout: true`): invalidate blame, refresh git
+ * status, reload any open non-dirty files from disk (the checkout likely
+ * changed their content on disk), refresh the file tree, and warn about any
+ * dirty files that were skipped to avoid clobbering unsaved work.
+ */
+async function reloadAfterCheckout(
+  get: () => GitState,
+  workspacePath: string,
+  branchLabel: string,
+) {
+  get().invalidateBlameAll();
+  await get().refreshStatus(workspacePath);
+
+  const ws = useWorkspaceStore.getState();
+  const reloadable = ws.openFiles.filter(
+    (f) =>
+      !f.isDirty &&
+      !f.path.startsWith('diff://') &&
+      !f.path.startsWith('auth://'),
+  );
+  const skippedDirty = ws.openFiles.filter(
+    (f) => f.isDirty && !f.path.startsWith('diff://') && !f.path.startsWith('auth://'),
+  );
+
+  await Promise.all(reloadable.map((f) => ws.reloadFileFromDisk(f.path)));
+  await ws.refreshTree();
+
+  if (skippedDirty.length > 0) {
+    notify.warning(
+      `Switched to ${branchLabel}. ${skippedDirty.length} file${skippedDirty.length === 1 ? '' : 's'} with unsaved changes were not reloaded.`,
+    );
+  }
 }
 
 export const useGitStore = create<GitState>((set, get) => ({
@@ -156,33 +199,55 @@ export const useGitStore = create<GitState>((set, get) => ({
   switchBranch: async (workspacePath: string, branch: string) => {
     try {
       await invoke('git_switch_branch', { workspacePath, branch });
-      get().invalidateBlameAll();
-      await get().refreshStatus(workspacePath);
-
-      // Reload open files from disk — branch switch likely changed their
-      // content. Skip dirty files (would clobber unsaved work) and virtual
-      // tabs. Refresh the tree so adds/deletes appear too.
-      const ws = useWorkspaceStore.getState();
-      const reloadable = ws.openFiles.filter(
-        (f) =>
-          !f.isDirty &&
-          !f.path.startsWith('diff://') &&
-          !f.path.startsWith('auth://'),
-      );
-      const skippedDirty = ws.openFiles.filter(
-        (f) => f.isDirty && !f.path.startsWith('diff://') && !f.path.startsWith('auth://'),
-      );
-
-      await Promise.all(reloadable.map((f) => ws.reloadFileFromDisk(f.path)));
-      await ws.refreshTree();
-
-      if (skippedDirty.length > 0) {
-        notify.warning(
-          `Switched to ${branch}. ${skippedDirty.length} file${skippedDirty.length === 1 ? '' : 's'} with unsaved changes were not reloaded.`,
-        );
-      }
+      await reloadAfterCheckout(get, workspacePath, branch);
     } catch (err) {
       notify.error(`Failed to switch branch: ${err}`);
+      throw err;
+    }
+  },
+
+  createBranch: async (workspacePath, name, opts) => {
+    const checkout = opts?.checkout ?? false;
+    try {
+      await invoke('git_create_branch', {
+        workspacePath,
+        name,
+        base: opts?.base ?? null,
+        checkout,
+      });
+      if (checkout) {
+        await reloadAfterCheckout(get, workspacePath, name);
+      }
+      await get().refreshBranches(workspacePath);
+    } catch (err) {
+      notify.error(`Failed to create branch: ${err}`);
+      throw err;
+    }
+  },
+
+  renameBranch: async (workspacePath, oldName, newName) => {
+    try {
+      await invoke('git_rename_branch', { workspacePath, oldName, newName });
+      await get().refreshBranches(workspacePath);
+      await get().refreshStatus(workspacePath);
+    } catch (err) {
+      notify.error(`Failed to rename branch: ${err}`);
+      throw err;
+    }
+  },
+
+  deleteBranch: async (workspacePath, name, force) => {
+    try {
+      await invoke('git_delete_branch', { workspacePath, name, force: force ?? false });
+      await get().refreshBranches(workspacePath);
+    } catch (err) {
+      if (String(err).includes('not fully merged')) {
+        notify.error(
+          `Failed to delete branch: ${err}. Retry with force delete to discard its commits.`,
+        );
+      } else {
+        notify.error(`Failed to delete branch: ${err}`);
+      }
       throw err;
     }
   },

@@ -1074,3 +1074,220 @@ pub fn git_append_gitignore(
 
     Ok(to_add)
 }
+
+// ---------------------------------------------------------------------------
+// A1: Branch lifecycle — create / rename / delete
+// ---------------------------------------------------------------------------
+
+/// Create a new branch. When `checkout` is true, uses `git switch -c <name>
+/// [<base>]` so the new branch also becomes HEAD; otherwise `git branch
+/// <name> [<base>]` creates it without touching the working tree.
+#[tauri::command]
+pub fn git_create_branch(
+    workspace_path: String,
+    name: String,
+    base: Option<String>,
+    checkout: bool,
+) -> Result<(), String> {
+    let mut args: Vec<String> = vec!["-C".into(), workspace_path];
+    if checkout {
+        args.push("switch".into());
+        args.push("-c".into());
+    } else {
+        args.push("branch".into());
+    }
+    args.push(name);
+    if let Some(b) = base {
+        args.push(b);
+    }
+
+    let output = Command::new("git")
+        .args(args.iter().map(String::as_str).collect::<Vec<_>>())
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).to_string());
+    }
+
+    Ok(())
+}
+
+/// Rename a branch via `git branch -m <old> <new>`. Works whether or not
+/// `old_name` is the currently checked-out branch.
+#[tauri::command]
+pub fn git_rename_branch(
+    workspace_path: String,
+    old_name: String,
+    new_name: String,
+) -> Result<(), String> {
+    let output = Command::new("git")
+        .args(["-C", &workspace_path, "branch", "-m", &old_name, &new_name])
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).to_string());
+    }
+
+    Ok(())
+}
+
+/// Delete a branch via `git branch -d|-D <name>`. Stderr is passed through
+/// verbatim (not wrapped) so callers can detect git's "not fully merged"
+/// message and offer to retry with `force: true`.
+#[tauri::command]
+pub fn git_delete_branch(workspace_path: String, name: String, force: bool) -> Result<(), String> {
+    let flag = if force { "-D" } else { "-d" };
+    let output = Command::new("git")
+        .args(["-C", &workspace_path, "branch", flag, &name])
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).to_string());
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod branch_lifecycle_tests {
+    use super::*;
+
+    /// Create a throwaway git repo (deterministic `main` initial branch,
+    /// local user identity so commits don't depend on global git config) with
+    /// one empty commit so HEAD is valid.
+    fn init_repo() -> tempfile::TempDir {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().to_str().unwrap();
+        run_git(path, &["init", "--initial-branch=main"]);
+        run_git(path, &["config", "user.email", "test@example.com"]);
+        run_git(path, &["config", "user.name", "Test User"]);
+        run_git(path, &["commit", "--allow-empty", "-m", "init"]);
+        tmp
+    }
+
+    fn run_git(path: &str, args: &[&str]) {
+        let mut full: Vec<&str> = vec!["-C", path];
+        full.extend_from_slice(args);
+        let output = Command::new("git").args(&full).output().unwrap();
+        assert!(
+            output.status.success(),
+            "git {:?} failed: {}",
+            args,
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[test]
+    fn create_branch_from_head() {
+        let tmp = init_repo();
+        let path = tmp.path().to_str().unwrap().to_string();
+
+        git_create_branch(path.clone(), "feature-a".into(), None, false).unwrap();
+
+        let branches = git_list_branches(path).unwrap();
+        assert!(branches.contains(&"feature-a".to_string()));
+    }
+
+    #[test]
+    fn create_branch_with_base() {
+        let tmp = init_repo();
+        let path = tmp.path().to_str().unwrap().to_string();
+        run_git(&path, &["branch", "base-branch"]);
+
+        git_create_branch(
+            path.clone(),
+            "feature-b".into(),
+            Some("base-branch".into()),
+            false,
+        )
+        .unwrap();
+
+        let branches = git_list_branches(path).unwrap();
+        assert!(branches.contains(&"feature-b".to_string()));
+    }
+
+    #[test]
+    fn create_branch_with_checkout_switches_head() {
+        let tmp = init_repo();
+        let path = tmp.path().to_str().unwrap().to_string();
+
+        git_create_branch(path.clone(), "feature-c".into(), None, true).unwrap();
+
+        let status = git_status(path).unwrap();
+        assert_eq!(status.branch, "feature-c");
+    }
+
+    #[test]
+    fn create_branch_without_checkout_leaves_head_unchanged() {
+        let tmp = init_repo();
+        let path = tmp.path().to_str().unwrap().to_string();
+
+        git_create_branch(path.clone(), "feature-d".into(), None, false).unwrap();
+
+        let status = git_status(path).unwrap();
+        assert_eq!(status.branch, "main");
+    }
+
+    #[test]
+    fn rename_branch() {
+        let tmp = init_repo();
+        let path = tmp.path().to_str().unwrap().to_string();
+        git_create_branch(path.clone(), "old-name".into(), None, false).unwrap();
+
+        git_rename_branch(path.clone(), "old-name".into(), "new-name".into()).unwrap();
+
+        let branches = git_list_branches(path).unwrap();
+        assert!(!branches.contains(&"old-name".to_string()));
+        assert!(branches.contains(&"new-name".to_string()));
+    }
+
+    #[test]
+    fn delete_merged_branch() {
+        let tmp = init_repo();
+        let path = tmp.path().to_str().unwrap().to_string();
+        git_create_branch(path.clone(), "merged-branch".into(), None, false).unwrap();
+
+        git_delete_branch(path.clone(), "merged-branch".into(), false).unwrap();
+
+        let branches = git_list_branches(path).unwrap();
+        assert!(!branches.contains(&"merged-branch".to_string()));
+    }
+
+    #[test]
+    fn delete_unmerged_branch_without_force_errs() {
+        let tmp = init_repo();
+        let path = tmp.path().to_str().unwrap().to_string();
+        git_create_branch(path.clone(), "unmerged-branch".into(), None, true).unwrap();
+        std::fs::write(std::path::Path::new(&path).join("file.txt"), "content").unwrap();
+        run_git(&path, &["add", "."]);
+        run_git(&path, &["commit", "-m", "add file"]);
+        run_git(&path, &["switch", "main"]);
+
+        let result = git_delete_branch(path, "unmerged-branch".into(), false);
+
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("not fully merged"),
+            "expected 'not fully merged' in error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn delete_unmerged_branch_with_force_succeeds() {
+        let tmp = init_repo();
+        let path = tmp.path().to_str().unwrap().to_string();
+        git_create_branch(path.clone(), "unmerged-branch2".into(), None, true).unwrap();
+        std::fs::write(std::path::Path::new(&path).join("file2.txt"), "content").unwrap();
+        run_git(&path, &["add", "."]);
+        run_git(&path, &["commit", "-m", "add file2"]);
+        run_git(&path, &["switch", "main"]);
+
+        git_delete_branch(path.clone(), "unmerged-branch2".into(), true).unwrap();
+
+        let branches = git_list_branches(path).unwrap();
+        assert!(!branches.contains(&"unmerged-branch2".to_string()));
+    }
+}
