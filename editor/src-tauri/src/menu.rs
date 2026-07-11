@@ -44,11 +44,6 @@ pub fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     let open_folder = MenuItemBuilder::with_id("file.openFolder", "Open Folder…")
         .accelerator("CmdOrCtrl+O")
         .build(&app_handle)?;
-    let open_folder_new_window = MenuItemBuilder::with_id(
-        "file.openFolderNewWindow",
-        "Open Folder in New Window…",
-    )
-    .build(&app_handle)?;
     let open_recent = MenuItemBuilder::with_id("file.openRecent", "Open Recent…")
         .build(&app_handle)?;
     let save_file = MenuItemBuilder::with_id("file.save", "Save")
@@ -65,7 +60,6 @@ pub fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         .item(&new_window)
         .separator()
         .item(&open_folder)
-        .item(&open_folder_new_window)
         .item(&open_recent)
         .separator()
         .item(&save_file)

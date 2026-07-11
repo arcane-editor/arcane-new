@@ -12,7 +12,27 @@ function WelcomeApp() {
   const remove = useRecentsStore((s) => s.remove);
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => { reload(); }, [reload]);
+  useEffect(() => { void reload(); }, [reload]);
+
+  // The manager window stays open after spawning a project window (it's not
+  // tied to any single project), so recents can go stale on disk — another
+  // window can open/remove a project while this one keeps showing the old
+  // list. Re-read from the shared store whenever the window regains focus.
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    let cancelled = false;
+    (async () => {
+      const fn = await getCurrentWindow().onFocusChanged(({ payload: focused }) => {
+        if (focused) void reload();
+      });
+      if (cancelled) fn();
+      else unlisten = fn;
+    })();
+    return () => {
+      cancelled = true;
+      if (unlisten) unlisten();
+    };
+  }, [reload]);
 
   async function pickFolder() {
     if (busy) return;
@@ -21,7 +41,6 @@ function WelcomeApp() {
       const sel = await open({ directory: true, multiple: false, title: 'Open Folder' });
       if (typeof sel === 'string') {
         await openProjectInNewWindow(sel);
-        await getCurrentWindow().close();
       }
     } finally {
       setBusy(false);
@@ -33,7 +52,6 @@ function WelcomeApp() {
     setBusy(true);
     try {
       await openProjectInNewWindow(path);
-      await getCurrentWindow().close();
     } catch {
       remove(path);
     } finally {

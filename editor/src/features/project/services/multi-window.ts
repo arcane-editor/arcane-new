@@ -1,6 +1,6 @@
 import { WebviewWindow, getAllWebviewWindows, getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { open } from '@tauri-apps/plugin-dialog';
-import { useWorkspaceStore } from '../../../stores/workspace';
+import { invoke } from '@tauri-apps/api/core';
 
 const HASH_PREFIX = 'editor-';
 
@@ -21,6 +21,8 @@ async function findWindowByLabel(label: string): Promise<WebviewWindow | null> {
 
 export async function openProjectInNewWindow(path: string): Promise<void> {
   if (!path) return;
+  const ok = await invoke<boolean>('dir_exists', { path });
+  if (!ok) throw new Error('Project folder not found: ' + path);
   const label = hashLabel(path);
   const existing = await findWindowByLabel(label);
   if (existing) {
@@ -81,10 +83,6 @@ export async function openWelcomeWindow(): Promise<void> {
     wnd.once('tauri://created', () => resolve());
     wnd.once('tauri://error', (e) => reject(e));
   });
-}
-
-export async function requestOpenProjectInThisWindow(path: string): Promise<void> {
-  await useWorkspaceStore.getState().setWorkspace(path);
 }
 
 export async function setProjectWindowTitle(path: string | null): Promise<void> {

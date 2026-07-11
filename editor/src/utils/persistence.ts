@@ -214,6 +214,27 @@ export function loadRecentProjectsFull(): RecentProject[] {
   return cachedRecents.slice();
 }
 
+/**
+ * Re-reads the `projects` key from the shared `recents.json` store and
+ * refreshes `cachedRecents` in place. Unlike `loadRecentProjectsFull` (which
+ * only serves the in-memory cache populated at `hydratePersistence` time),
+ * this hits the tauri-plugin-store resource directly — that resource is
+ * shared app-wide across windows, so a recent-project write from another
+ * window (e.g. opening a project from the welcome/manager window while this
+ * window is also open) is visible here without a reload. Used by the
+ * welcome window's focus-refresh so its recents list doesn't go stale while
+ * it stays open alongside project windows.
+ */
+export async function refreshRecentsCache(): Promise<RecentProject[]> {
+  try {
+    const recents = await getRecents();
+    const arr = (await recents.get<RecentProject[]>('projects')) ?? [];
+    cachedRecents.length = 0;
+    for (const r of arr) cachedRecents.push(r);
+  } catch { /* ignore */ }
+  return cachedRecents.slice();
+}
+
 export function addRecentProject(path: string): void {
   const idx = cachedRecents.findIndex((r) => r.path === path);
   if (idx >= 0) cachedRecents.splice(idx, 1);

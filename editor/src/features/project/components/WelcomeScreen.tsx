@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
-import { useWorkspaceStore } from '../../../stores/workspace';
+import { openProjectInNewWindow } from '../services/multi-window';
 import { loadRecentProjects, removeRecentProject } from '../../../utils/persistence';
 
 function WelcomeScreen({ hasWorkspace = false }: { hasWorkspace?: boolean }) {
@@ -17,13 +17,13 @@ function WelcomeScreen({ hasWorkspace = false }: { hasWorkspace?: boolean }) {
       title: 'Open Folder',
     });
     if (selected) {
-      await useWorkspaceStore.getState().setWorkspace(selected as string);
+      await openProjectInNewWindow(selected as string);
     }
   }
 
   async function openRecent(path: string) {
     try {
-      await useWorkspaceStore.getState().setWorkspace(path);
+      await openProjectInNewWindow(path);
     } catch {
       // Path may have been deleted/moved — drop from recents
       removeRecentProject(path);

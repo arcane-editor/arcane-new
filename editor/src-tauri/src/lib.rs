@@ -114,6 +114,18 @@ fn path_exists(path: String) -> bool {
     Path::new(&path).is_file()
 }
 
+/// Existence check for a project folder — used by the multi-window "open
+/// project" flow (`src/features/project/services/multi-window.ts`) to guard
+/// against spawning a window for a path that's been moved/deleted since it
+/// was recorded in recents. Deliberately separate from `path_exists`: that
+/// command is `is_file()`-only (see its doc comment) and would always return
+/// `false` for a project directory, which is exactly the path this guard
+/// needs to accept.
+#[tauri::command]
+fn dir_exists(path: String) -> bool {
+    Path::new(&path).is_dir()
+}
+
 /// `async`: full recursive `WalkDir` walk over the workspace (TS/JS project
 /// files, used by the Monaco TS worker to seed the in-memory FS). Dispatched
 /// onto Tauri's blocking thread pool (see `tauri::command(async)` on a
@@ -515,6 +527,7 @@ pub fn run() {
             read_file,
             write_file,
             path_exists,
+            dir_exists,
             scan_workspace_files,
             scan_all_files,
             create_file,
@@ -756,5 +769,25 @@ mod path_exists_tests {
     fn false_for_a_directory() {
         let tmp = tempfile::tempdir().unwrap();
         assert!(!path_exists(tmp.path().to_string_lossy().to_string()));
+    }
+}
+
+#[cfg(test)]
+mod dir_exists_tests {
+    use super::dir_exists;
+
+    #[test]
+    fn true_for_a_real_directory_false_for_a_missing_one() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert!(dir_exists(tmp.path().to_string_lossy().to_string()));
+        assert!(!dir_exists(tmp.path().join("missing-project").to_string_lossy().to_string()));
+    }
+
+    #[test]
+    fn false_for_a_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("foo.ts");
+        std::fs::write(&file, "export {};").unwrap();
+        assert!(!dir_exists(file.to_string_lossy().to_string()));
     }
 }

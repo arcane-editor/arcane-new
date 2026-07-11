@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Allotment, LayoutPriority } from 'allotment';
-import { open } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import 'allotment/dist/style.css';
@@ -206,25 +205,6 @@ function App() {
     setProjectWindowTitle(workspacePath ?? null);
   }, [workspacePath]);
 
-  // Listen for explicit "open this project in this window" events
-  useEffect(() => {
-    let unlisten: (() => void) | null = null;
-    let cancelled = false;
-    (async () => {
-      const fn = await getCurrentWindow().listen<{ path: string }>('open-project', (e) => {
-        if (e.payload?.path) {
-          useWorkspaceStore.getState().setWorkspace(e.payload.path);
-        }
-      });
-      if (cancelled) safeUnlisten(fn);
-      else unlisten = fn;
-    })();
-    return () => {
-      cancelled = true;
-      safeUnlisten(unlisten);
-    };
-  }, []);
-
   // Auto-save hook
   useAutoSave();
 
@@ -422,16 +402,7 @@ function App() {
       label: 'Open Folder',
       category: 'File',
       keybinding: 'mod+o',
-      handler: async () => {
-        const selected = await open({
-          directory: true,
-          multiple: false,
-          title: 'Open Folder',
-        });
-        if (selected) {
-          await useWorkspaceStore.getState().setWorkspace(selected as string);
-        }
-      },
+      handler: () => { openFolderInNewWindow(); },
     },
     {
       id: 'file.newWindow',
@@ -439,12 +410,6 @@ function App() {
       category: 'File',
       keybinding: 'mod+shift+n',
       handler: () => { openWelcomeWindow(); },
-    },
-    {
-      id: 'file.openFolderNewWindow',
-      label: 'Open Folder in New Window…',
-      category: 'File',
-      handler: () => { openFolderInNewWindow(); },
     },
     {
       id: 'file.openRecent',

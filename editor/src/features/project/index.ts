@@ -3,6 +3,5 @@ export {
   openProjectInNewWindow,
   openFolderInNewWindow,
   openWelcomeWindow,
-  requestOpenProjectInThisWindow,
   setProjectWindowTitle,
 } from './services/multi-window';

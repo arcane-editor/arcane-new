@@ -4,7 +4,7 @@ import { useWorkspaceStore } from './workspace';
 import { useNotificationsStore } from './notifications';
 import { useSettingsStore } from './settings';
 import { useUnityIndexStore } from './unity-index';
-import { requestOpenProjectInThisWindow } from '../features/project';
+import { openProjectInNewWindow } from '../features/project';
 
 interface UnityProjectInfo {
   is_unity: boolean;
@@ -129,7 +129,7 @@ export const useProjectContextStore = create<ProjectContextState>((set) => ({
           {
             label: 'Open it',
             run: () => {
-              requestOpenProjectInThisWindow(nestedPath).catch((err) => {
+              openProjectInNewWindow(nestedPath).catch((err) => {
                 console.warn('[ProjectContext] Failed to open nested project:', err);
               });
             },
