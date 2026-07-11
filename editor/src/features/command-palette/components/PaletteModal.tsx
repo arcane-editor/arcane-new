@@ -105,6 +105,10 @@ function PaletteModal({ initialMode, onClose }: PaletteModalProps) {
   // don't re-run this — it only needs a fresh read on mount/mode-change.
   // Also owns clearing results on entry into command mode.
   useEffect(() => {
+    // Invalidate any in-flight search before setFileResults, so stale results
+    // cannot clobber the cleared or recent-files list.
+    searchGenRef.current++;
+
     if (isCommandMode) {
       setFileResults([]);
       setIsSearching(false);
