@@ -332,7 +332,6 @@ pub fn run() {
             scan_node_modules_types,
             settings::read_settings,
             settings::write_settings,
-            search::search_in_files,
             search::start_content_search,
             search::cancel_content_search,
             lsp::lsp_start,
