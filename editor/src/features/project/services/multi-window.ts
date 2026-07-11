@@ -53,7 +53,7 @@ export async function openProjectInNewWindow(path: string): Promise<void> {
 }
 
 export async function openFolderInNewWindow(): Promise<void> {
-  const sel = await open({ directory: true, multiple: false, title: 'Open Folder in New Window' });
+  const sel = await open({ directory: true, multiple: false, title: 'Open Folder' });
   if (typeof sel === 'string') await openProjectInNewWindow(sel);
 }
 

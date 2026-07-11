@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { openProjectInNewWindow } from '../services/multi-window';
 import { loadRecentProjects, removeRecentProject } from '../../../utils/persistence';
+import { notify } from '../../../stores/notifications';
 
 function WelcomeScreen({ hasWorkspace = false }: { hasWorkspace?: boolean }) {
   const [recents, setRecents] = useState<string[]>([]);
@@ -17,7 +18,14 @@ function WelcomeScreen({ hasWorkspace = false }: { hasWorkspace?: boolean }) {
       title: 'Open Folder',
     });
     if (selected) {
-      await openProjectInNewWindow(selected as string);
+      try {
+        await openProjectInNewWindow(selected as string);
+      } catch (err) {
+        // Rare (the folder was just picked), but possible: deleted between
+        // pick and open, or the window itself failed to spawn.
+        const msg = err instanceof Error ? err.message : String(err);
+        notify.error(`Couldn't open ${selected} — it may have been moved or deleted. (${msg})`);
+      }
     }
   }
 
@@ -25,7 +33,10 @@ function WelcomeScreen({ hasWorkspace = false }: { hasWorkspace?: boolean }) {
     try {
       await openProjectInNewWindow(path);
     } catch {
-      // Path may have been deleted/moved — drop from recents
+      // Path may have been deleted/moved — drop from recents. The throw
+      // happens before any new window exists (dir_exists guard), so this
+      // window's toast is the only user-visible feedback.
+      notify.error(`Couldn't open ${path} — it may have been moved or deleted.`);
       removeRecentProject(path);
       setRecents(loadRecentProjects());
     }

@@ -1,16 +1,45 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useRecentsStore } from './stores/recents';
 import { openProjectInNewWindow } from './features/project';
+import { safeUnlisten } from './utils/tauri-listener';
 import { formatRelativeDate } from './utils/date';
 import { Folder, FolderOpen } from 'lucide-react';
+
+const ERROR_DISMISS_MS = 6000;
 
 function WelcomeApp() {
   const recents = useRecentsStore((s) => s.recents);
   const reload = useRecentsStore((s) => s.reload);
   const remove = useRecentsStore((s) => s.remove);
   const [busy, setBusy] = useState(false);
+  // Transient inline error (this window mounts no NotificationContainer, so
+  // toasts would be invisible here). Cleared on the next action or after a
+  // few seconds.
+  const [error, setError] = useState<string | null>(null);
+  const errorTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function clearError() {
+    if (errorTimer.current) {
+      clearTimeout(errorTimer.current);
+      errorTimer.current = null;
+    }
+    setError(null);
+  }
+
+  function showError(message: string) {
+    if (errorTimer.current) clearTimeout(errorTimer.current);
+    setError(message);
+    errorTimer.current = setTimeout(() => {
+      errorTimer.current = null;
+      setError(null);
+    }, ERROR_DISMISS_MS);
+  }
+
+  useEffect(() => () => {
+    if (errorTimer.current) clearTimeout(errorTimer.current);
+  }, []);
 
   useEffect(() => { void reload(); }, [reload]);
 
@@ -25,23 +54,29 @@ function WelcomeApp() {
       const fn = await getCurrentWindow().onFocusChanged(({ payload: focused }) => {
         if (focused) void reload();
       });
-      if (cancelled) fn();
+      if (cancelled) safeUnlisten(fn);
       else unlisten = fn;
     })();
     return () => {
       cancelled = true;
-      if (unlisten) unlisten();
+      safeUnlisten(unlisten);
     };
   }, [reload]);
 
   async function pickFolder() {
     if (busy) return;
+    clearError();
     setBusy(true);
     try {
       const sel = await open({ directory: true, multiple: false, title: 'Open Folder' });
       if (typeof sel === 'string') {
         await openProjectInNewWindow(sel);
       }
+    } catch (err) {
+      // Rare (the folder was just picked), but possible: deleted between
+      // pick and open, or the window itself failed to spawn.
+      const msg = err instanceof Error ? err.message : String(err);
+      showError(`Couldn't open the folder — it may have been moved or deleted. (${msg})`);
     } finally {
       setBusy(false);
     }
@@ -49,11 +84,13 @@ function WelcomeApp() {
 
   async function pickRecent(path: string) {
     if (busy) return;
+    clearError();
     setBusy(true);
     try {
       await openProjectInNewWindow(path);
     } catch {
       remove(path);
+      showError(`Couldn't open ${path} — it may have been moved or deleted. Removed from recent projects.`);
     } finally {
       setBusy(false);
     }
@@ -103,6 +140,16 @@ function WelcomeApp() {
         }}>
           Recent Projects
         </div>
+        {error && (
+          <div style={{
+            padding: '8px 14px', fontSize: 12, lineHeight: 1.4,
+            color: 'var(--error-text, #dc2626)',
+            borderBottom: '1px solid var(--border)',
+            overflowWrap: 'break-word',
+          }}>
+            {error}
+          </div>
+        )}
         <div style={{ flex: 1, overflowY: 'auto' }}>
           {recents.length === 0 ? (
             <div style={{ padding: '20px 14px', color: 'var(--text-secondary)', fontSize: 13 }}>

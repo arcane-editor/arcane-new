@@ -40,7 +40,7 @@ import { useUnitySceneStore } from './stores/unity-scene';
 import { useRegisterCommands } from './hooks/useRegisterCommands';
 import { useAutoSave } from './hooks/useAutoSave';
 import { useCloseGuard } from './hooks/useCloseGuard';
-import { useNotificationsStore } from './stores/notifications';
+import { notify, useNotificationsStore } from './stores/notifications';
 import { useCommandsStore } from './stores/commands';
 import { listenScoped } from './utils/tauri-listener';
 import { useWorkspaceStore } from './stores/workspace';
@@ -129,7 +129,7 @@ function App() {
 
     useSettingsStore.getState().loadSettings();
     useAuthStore.getState().loadFromDisk();
-    useRecentsStore.getState().reload();
+    void useRecentsStore.getState().reload();
     // Watch agent activity → auto-rebuild the codebase graph after turns that
     // mutated files. Only fires when a graph already exists.
     startGraphifyAutoRebuild();
@@ -402,7 +402,14 @@ function App() {
       label: 'Open Folder',
       category: 'File',
       keybinding: 'mod+o',
-      handler: () => { openFolderInNewWindow(); },
+      handler: () => {
+        // The dir_exists throw fires before any new window exists, so this
+        // window's toast is the only user-visible feedback on failure.
+        openFolderInNewWindow().catch((err) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          notify.error(`Couldn't open folder — it may have been moved or deleted. (${msg})`);
+        });
+      },
     },
     {
       id: 'file.newWindow',
