@@ -121,6 +121,9 @@ function BranchPicker({ onClose, initialMode = 'switch' }: { onClose: () => void
     if (result.kind === 'create' && result.name === '') {
       setMode('create');
       setQuery('');
+      // Create mode's list is a single row; pin the selection explicitly
+      // rather than relying on the query-change effect to reset it.
+      setSelectedIndex(0);
       inputRef.current?.focus();
       return;
     }
@@ -191,14 +194,13 @@ function BranchPicker({ onClose, initialMode = 'switch' }: { onClose: () => void
               </div>
             );
           })}
-          {results.length === 0 && branches.length === 0 && isBranchesLoading && (
+          {/* The create-row affordance means `results` is never empty, so the
+              loading hint must not key off results.length: on a cold cache
+              (no branches yet) the picker would otherwise show only
+              "＋ Create new branch…", reading as "this repo has no branches". */}
+          {mode === 'switch' && isBranchesLoading && branches.length === 0 && (
             <div style={{ padding: '12px 14px', color: 'var(--text-secondary)', fontSize: 13, textAlign: 'center' }}>
               Loading branches…
-            </div>
-          )}
-          {results.length === 0 && !isBranchesLoading && (
-            <div style={{ padding: '12px 14px', color: 'var(--text-secondary)', fontSize: 13, textAlign: 'center' }}>
-              No matching branches
             </div>
           )}
         </div>
