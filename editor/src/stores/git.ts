@@ -219,11 +219,59 @@ async function doRefreshStatus(
         behind: 0,
         isGitRepo: false,
         isLoading: false,
+        lastError: null,
       });
     } else {
       set({ isLoading: false, lastError: `git status failed: ${err}` });
       console.error('[git] status refresh failed:', err);
     }
+  }
+}
+
+/**
+ * Body of `refreshBranches`, extracted so it can be wrapped in
+ * `singleFlightWithRerun` below — same rationale as `doRefreshStatus`: the
+ * `git-state-changed` watcher event calls `refreshStatus` AND
+ * `refreshBranches` on every settled burst of workspace edits (see
+ * `stores/workspace.ts`), so overlapping `git branch` invocations need
+ * coalescing too.
+ */
+async function doRefreshBranches(
+  workspacePath: string,
+  set: (partial: Partial<GitState>) => void,
+) {
+  // Note: `branches` is intentionally left untouched until the fetch
+  // resolves — stale branches stay on screen (no flash to empty) while
+  // this refresh runs in the background. Consumers gate a "Loading…"
+  // affordance on `branches.length === 0 && isBranchesLoading`.
+  set({ isBranchesLoading: true });
+  try {
+    const branches = await invoke<string[]>('git_list_branches', { workspacePath });
+    set({ branches });
+  } catch (err) {
+    console.error('[git] refreshBranches failed:', err);
+    set({ branches: [] });
+  } finally {
+    set({ isBranchesLoading: false });
+  }
+}
+
+/**
+ * Body of `refreshLog`, extracted so it can be wrapped in
+ * `singleFlightWithRerun` below — `doRefreshStatus` triggers this in the
+ * background on every call, so it inherits the same coalescing need as
+ * `refreshStatus`/`refreshBranches` on the `git-state-changed` event path.
+ */
+async function doRefreshLog(
+  workspacePath: string,
+  set: (partial: Partial<GitState>) => void,
+) {
+  try {
+    const entries = await invoke<GitLogEntry[]>('git_log', { workspacePath });
+    set({ commitLog: entries });
+  } catch (err) {
+    console.error('[git] refreshLog failed:', err);
+    set({ commitLog: [] });
   }
 }
 
@@ -256,32 +304,13 @@ export const useGitStore = create<GitState>((set, get) => ({
     doRefreshStatus(workspacePath, set, get),
   ),
 
-  refreshBranches: async (workspacePath: string) => {
-    // Note: `branches` is intentionally left untouched until the fetch
-    // resolves — stale branches stay on screen (no flash to empty) while
-    // this refresh runs in the background. Consumers gate a "Loading…"
-    // affordance on `branches.length === 0 && isBranchesLoading`.
-    set({ isBranchesLoading: true });
-    try {
-      const branches = await invoke<string[]>('git_list_branches', { workspacePath });
-      set({ branches });
-    } catch (err) {
-      console.error('[git] refreshBranches failed:', err);
-      set({ branches: [] });
-    } finally {
-      set({ isBranchesLoading: false });
-    }
-  },
+  refreshBranches: singleFlightWithRerun((workspacePath: string) =>
+    doRefreshBranches(workspacePath, set),
+  ),
 
-  refreshLog: async (workspacePath: string) => {
-    try {
-      const entries = await invoke<GitLogEntry[]>('git_log', { workspacePath });
-      set({ commitLog: entries });
-    } catch (err) {
-      console.error('[git] refreshLog failed:', err);
-      set({ commitLog: [] });
-    }
-  },
+  refreshLog: singleFlightWithRerun((workspacePath: string) =>
+    doRefreshLog(workspacePath, set),
+  ),
 
   switchBranch: async (workspacePath: string, branch: string) => {
     try {

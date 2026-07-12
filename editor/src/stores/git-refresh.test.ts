@@ -83,4 +83,42 @@ describe('singleFlightWithRerun', () => {
     await expect(wrapped()).rejects.toThrow('boom');
     expect(callCount).toBe(2);
   });
+
+  // `stores/git.ts` wraps `refreshBranches` (and `refreshLog`) in
+  // `singleFlightWithRerun` for the same reason `refreshStatus` already is:
+  // the `git-state-changed` watcher event (stores/workspace.ts) calls
+  // `refreshStatus` AND `refreshBranches` on every settled burst of
+  // workspace edits, so bursts of `git-state-changed` events can otherwise
+  // fire overlapping `git branch` invocations. This test mirrors that
+  // wiring — a fake `doRefreshBranches` body driven by a single underlying
+  // call, wrapped exactly as `git.ts` wraps it — rather than mocking the
+  // store's Tauri `invoke` boundary (no store-level mocking is established
+  // for `git.ts` yet).
+  it('a second concurrent refreshBranches call coalesces onto the first (the git-state-changed watcher event can fire in rapid succession)', async () => {
+    let callCount = 0;
+    const gates: Array<() => void> = [];
+    const doRefreshBranches = (_workspacePath: string) =>
+      new Promise<void>((resolve) => {
+        callCount++;
+        gates.push(resolve);
+      });
+    const refreshBranches = singleFlightWithRerun(doRefreshBranches);
+
+    const first = refreshBranches('/workspace');
+    expect(callCount).toBe(1);
+
+    // Arrives while the first refresh is still in flight (e.g. a second
+    // git-state-changed event before the first git_list_branches resolves).
+    const second = refreshBranches('/workspace');
+    expect(second).toBe(first);
+    expect(callCount).toBe(1);
+
+    gates[0]();
+    await flushUntil(() => callCount === 2);
+    expect(callCount).toBe(2); // exactly one rerun, not a second concurrent call
+
+    gates[1]();
+    await first;
+    await second;
+  });
 });

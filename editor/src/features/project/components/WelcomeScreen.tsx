@@ -32,13 +32,20 @@ function WelcomeScreen({ hasWorkspace = false }: { hasWorkspace?: boolean }) {
   async function openRecent(path: string) {
     try {
       await openProjectInNewWindow(path);
-    } catch {
-      // Path may have been deleted/moved — drop from recents. The throw
-      // happens before any new window exists (dir_exists guard), so this
-      // window's toast is the only user-visible feedback.
-      notify.error(`Couldn't open ${path} — it may have been moved or deleted.`);
-      removeRecentProject(path);
-      setRecents(loadRecentProjects());
+    } catch (err) {
+      // Only drop the recent entry when the project itself is confirmed
+      // gone (tagged by `openProjectInNewWindow`'s `dir_exists` guard, which
+      // throws before any new window exists) — not for a rare window-spawn
+      // failure on an otherwise-valid path.
+      const missing = err instanceof Error && err.name === 'ProjectMissingError';
+      if (missing) {
+        notify.error(`Couldn't open ${path} — it may have been moved or deleted.`);
+        removeRecentProject(path);
+        setRecents(loadRecentProjects());
+      } else {
+        const msg = err instanceof Error ? err.message : String(err);
+        notify.error(`Couldn't open ${path}. (${msg})`);
+      }
     }
   }
 

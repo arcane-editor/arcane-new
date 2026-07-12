@@ -19,10 +19,27 @@ async function findWindowByLabel(label: string): Promise<WebviewWindow | null> {
   return all.find((w) => w.label === label) ?? null;
 }
 
-export async function openProjectInNewWindow(path: string): Promise<void> {
-  if (!path) return;
+export async function openProjectInNewWindow(rawPath: string): Promise<void> {
+  if (!rawPath) return;
+  // Canonicalize FIRST: `unity_ipc::hash_workspace` (Rust) canonicalizes the
+  // workspace path before hashing it into the Unity IPC socket/pipe path. If
+  // this window's label were hashed from the raw path instead, the same
+  // project opened via two different spellings (a symlink, a trailing
+  // slash, `..` segments) would get two different window labels while
+  // colliding on the SAME canonical Unity IPC socket — the second window's
+  // cleanup could then unlink the first window's still-live socket. Doing
+  // this once up front keeps the label, window dedup, `?path=` param, and
+  // recents all on one canonical form.
+  const path = await invoke<string>('canonicalize_path', { path: rawPath });
   const ok = await invoke<boolean>('dir_exists', { path });
-  if (!ok) throw new Error('Project folder not found: ' + path);
+  if (!ok) {
+    // Tagged so callers (WelcomeApp/WelcomeScreen) can tell "the project is
+    // actually gone" apart from a rare window-spawn failure below on an
+    // otherwise-valid path — only the former should drop the recent entry.
+    const err = new Error('Project folder not found: ' + path);
+    err.name = 'ProjectMissingError';
+    throw err;
+  }
   const label = hashLabel(path);
   const existing = await findWindowByLabel(label);
   if (existing) {

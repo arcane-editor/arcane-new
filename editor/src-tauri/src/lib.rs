@@ -128,6 +128,30 @@ fn dir_exists(path: String) -> bool {
     Path::new(&path).is_dir()
 }
 
+/// Canonicalize a project path before `openProjectInNewWindow`
+/// (`src/features/project/services/multi-window.ts`) hashes it into a
+/// per-window label. `unity_ipc::hash_workspace` already canonicalizes the
+/// workspace path when computing the Unity IPC socket/pipe path; if the
+/// window label were hashed from the RAW path instead, the same project
+/// opened via two different spellings (a symlink, a trailing slash, `..`
+/// segments) would get two different window labels — so both windows'
+/// `unity_ipc` sockets collide on the SAME canonical path, and the second
+/// window's cleanup can unlink the first window's still-live socket.
+/// Calling this first and using its result everywhere downstream (label,
+/// window dedup, `?path=` query param, recents) keeps all of that on one
+/// canonical form.
+///
+/// Infallible: falls back to the input path unchanged when canonicalization
+/// fails (e.g. the path doesn't exist, or a permissions error), so a bad
+/// path still flows through to the existing `dir_exists` guard instead of
+/// erroring out early here.
+#[tauri::command]
+fn canonicalize_path(path: String) -> String {
+    std::fs::canonicalize(&path)
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or(path)
+}
+
 /// `async`: full recursive `WalkDir` walk over the workspace (TS/JS project
 /// files, used by the Monaco TS worker to seed the in-memory FS). Dispatched
 /// onto Tauri's blocking thread pool (see `tauri::command(async)` on a
@@ -560,6 +584,7 @@ pub fn run() {
             write_file,
             path_exists,
             dir_exists,
+            canonicalize_path,
             scan_workspace_files,
             scan_all_files,
             create_file,
@@ -813,5 +838,40 @@ mod dir_exists_tests {
         let file = tmp.path().join("foo.ts");
         std::fs::write(&file, "export {};").unwrap();
         assert!(!dir_exists(file.to_string_lossy().to_string()));
+    }
+}
+
+#[cfg(test)]
+mod canonicalize_path_tests {
+    use super::canonicalize_path;
+
+    // Unix-only: creating a symlink on Windows needs elevated privileges /
+    // dev mode, which isn't guaranteed in CI. The fallback test below still
+    // covers Windows.
+    #[cfg(unix)]
+    #[test]
+    fn canonicalizes_a_symlink_to_its_real_target() {
+        let tmp = tempfile::tempdir().unwrap();
+        let real_dir = tmp.path().join("real-project");
+        std::fs::create_dir(&real_dir).unwrap();
+        let link = tmp.path().join("link-project");
+        std::os::unix::fs::symlink(&real_dir, &link).unwrap();
+
+        let expected = std::fs::canonicalize(&real_dir)
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        assert_eq!(canonicalize_path(link.to_string_lossy().into_owned()), expected);
+    }
+
+    #[test]
+    fn falls_back_to_the_input_path_unchanged_when_the_path_does_not_exist() {
+        let tmp = tempfile::tempdir().unwrap();
+        let missing = tmp
+            .path()
+            .join("does-not-exist")
+            .to_string_lossy()
+            .into_owned();
+        assert_eq!(canonicalize_path(missing.clone()), missing);
     }
 }

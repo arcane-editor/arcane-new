@@ -3,7 +3,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useRecentsStore } from './stores/recents';
 import { openProjectInNewWindow } from './features/project';
-import { safeUnlisten } from './utils/tauri-listener';
+import { listenScoped, safeUnlisten } from './utils/tauri-listener';
 import { formatRelativeDate } from './utils/date';
 import { Folder, FolderOpen } from 'lucide-react';
 
@@ -63,6 +63,36 @@ function WelcomeApp() {
     };
   }, [reload]);
 
+  // Keep a stable ref to the latest `pickFolder` closure so the
+  // `menu-action` listener below (registered once, on mount) always invokes
+  // the current one — not a stale closure from the render it subscribed in.
+  const pickFolderRef = useRef<() => void>(() => {});
+
+  // Native menu (macOS): `menu-action` is routed to the FOCUSED window. Now
+  // that the welcome window stays open after spawning a project window,
+  // Cmd+O / Cmd+Shift+N focused HERE would otherwise be silent no-ops — this
+  // window (unlike App.tsx's) has no command registry to bridge
+  // `menu-action` into.
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    let cancelled = false;
+    (async () => {
+      const fn = await listenScoped<string>('menu-action', (event) => {
+        if (event.payload === 'file.openFolder') {
+          pickFolderRef.current();
+        }
+        // 'file.newWindow': no-op — the welcome window IS the new-window
+        // surface and is already open/focused. All other ids: ignored.
+      });
+      if (cancelled) safeUnlisten(fn);
+      else unlisten = fn;
+    })();
+    return () => {
+      cancelled = true;
+      safeUnlisten(unlisten);
+    };
+  }, []);
+
   async function pickFolder() {
     if (busy) return;
     clearError();
@@ -81,6 +111,7 @@ function WelcomeApp() {
       setBusy(false);
     }
   }
+  pickFolderRef.current = pickFolder;
 
   async function pickRecent(path: string) {
     if (busy) return;
@@ -88,9 +119,18 @@ function WelcomeApp() {
     setBusy(true);
     try {
       await openProjectInNewWindow(path);
-    } catch {
-      remove(path);
-      showError(`Couldn't open ${path} — it may have been moved or deleted. Removed from recent projects.`);
+    } catch (err) {
+      // Only drop the recent entry when the project itself is confirmed
+      // gone (tagged by `openProjectInNewWindow`'s `dir_exists` guard) —
+      // not for a rare window-spawn failure on an otherwise-valid path.
+      const missing = err instanceof Error && err.name === 'ProjectMissingError';
+      if (missing) {
+        remove(path);
+        showError(`Couldn't open ${path} — it may have been moved or deleted. Removed from recent projects.`);
+      } else {
+        const msg = err instanceof Error ? err.message : String(err);
+        showError(`Couldn't open ${path}. (${msg})`);
+      }
     } finally {
       setBusy(false);
     }
