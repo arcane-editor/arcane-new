@@ -34,6 +34,7 @@ import { classifyFile, offerClassRenameSync } from '../features/csharp';
 import { detectLanguage } from '../utils/language-detect';
 import { safeUnlisten } from '../utils/tauri-listener';
 import { filesToReload } from '../utils/open-file-reload';
+import { isIgnoreFile } from '../utils/ignore-file';
 
 // Track provider dispose function
 let disposeLspProviders: (() => void) | null = null;
@@ -536,6 +537,7 @@ function toTreeNode(entry: FileEntry): TreeNode {
     id: entry.path,
     name: entry.name,
     isDir: entry.is_dir,
+    ignored: entry.ignored,
     children: entry.is_dir
       ? (entry.children ?? []).map(toTreeNode)
       : undefined,
@@ -609,6 +611,47 @@ async function refreshAffectedDirs(
       }
     }
   }
+}
+
+// Re-classify gitignore status for every already-loaded tree level without
+// touching the tree's structure (no collapse of expanded folders): re-list
+// each loaded directory just for its fresh `ignored` flags and patch them
+// onto the existing nodes. Runs when a .gitignore/.ignore file changes.
+async function refreshIgnoreFlags(get: () => WorkspaceState): Promise<void> {
+  const state = get();
+  const rootPath = state.assetsRootPath ?? state.workspacePath;
+  if (!rootPath) return;
+
+  const dirs: string[] = [rootPath];
+  const collectLoadedDirs = (nodes: TreeNode[]) => {
+    for (const n of nodes) {
+      if (n.isDir && n.children && n.children.length > 0) {
+        dirs.push(n.id);
+        collectLoadedDirs(n.children);
+      }
+    }
+  };
+  collectLoadedDirs(state.tree);
+
+  const flagEntries = await Promise.all(
+    dirs.map(async (dir) => {
+      try {
+        const entries = await invoke<FileEntry[]>('read_directory', { path: dir });
+        return entries.map((e) => [e.path, e.ignored ?? false] as const);
+      } catch {
+        return [] as ReadonlyArray<readonly [string, boolean]>;
+      }
+    }),
+  );
+  const flags = new Map(flagEntries.flat());
+
+  const apply = (nodes: TreeNode[]): TreeNode[] =>
+    nodes.map((n) => ({
+      ...n,
+      ignored: flags.get(n.id) ?? n.ignored,
+      children: n.children ? apply(n.children) : undefined,
+    }));
+  useWorkspaceStore.setState({ tree: apply(get().tree) });
 }
 
 interface WorkspaceState {
@@ -890,6 +933,12 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
           for (const p of filesToReload(store.openFiles, event.payload)) {
             store.reloadFileFromDisk(p, { skipIfDirty: true }).catch((err) => {
               console.warn('[Workspace] live reload failed:', p, err);
+            });
+          }
+          // Editing ignore rules changes which tree entries render dimmed.
+          if (event.payload.some(isIgnoreFile)) {
+            refreshIgnoreFlags(get).catch((err) => {
+              console.warn('[Workspace] ignore-flag refresh failed:', err);
             });
           }
         });
@@ -1309,6 +1358,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
           id: e.path,
           name: e.name,
           isDir: e.is_dir,
+          ignored: e.ignored,
           children: e.is_dir ? (existing?.children ?? []) : undefined,
         };
       });

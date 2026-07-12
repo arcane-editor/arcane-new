@@ -3,6 +3,8 @@ export interface FileEntry {
   path: string;
   is_dir: boolean;
   children?: FileEntry[];
+  /** Gitignored (git check-ignore semantics); rendered dimmed in the tree. */
+  ignored?: boolean;
 }
 
 export interface TreeNode {
@@ -10,6 +12,8 @@ export interface TreeNode {
   name: string;
   isDir: boolean;
   children?: TreeNode[];
+  /** Gitignored (git check-ignore semantics); rendered dimmed in the tree. */
+  ignored?: boolean;
 }
 
 export interface DiffInfo {

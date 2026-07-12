@@ -35,6 +35,68 @@ pub struct FileEntry {
     pub is_dir: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub children: Option<Vec<FileEntry>>,
+    /// Gitignored per `git check-ignore` (exact git semantics: nested
+    /// .gitignore files, info/exclude, global excludesFile). The explorer
+    /// renders these dimmed, VS Code style. Always false outside a git repo.
+    #[serde(default)]
+    pub ignored: bool,
+}
+
+/// Which of `names` (entries of directory `dir`) are gitignored, per
+/// `git -C <dir> check-ignore -z --stdin`. Batch form: one subprocess per
+/// directory listing. Any failure — not a git repo (exit 128), git missing,
+/// broken pipe — degrades to "nothing ignored"; ignore status must never
+/// break the file tree.
+fn classify_ignored(dir: &str, names: &[String]) -> std::collections::HashSet<String> {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    if names.is_empty() {
+        return std::collections::HashSet::new();
+    }
+
+    let child = Command::new("git")
+        .args(["-C", dir, "check-ignore", "-z", "--stdin"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn();
+    let mut child = match child {
+        Ok(c) => c,
+        Err(_) => return std::collections::HashSet::new(),
+    };
+
+    // Feed stdin from a separate thread: check-ignore streams results as it
+    // reads, so on a large listing with many ignored entries both pipes can
+    // fill and a single-threaded write-then-read would deadlock.
+    let writer = child.stdin.take().map(|mut stdin| {
+        let mut buf = Vec::with_capacity(names.iter().map(|n| n.len() + 1).sum());
+        for name in names {
+            buf.extend_from_slice(name.as_bytes());
+            buf.push(0);
+        }
+        std::thread::spawn(move || {
+            let _ = stdin.write_all(&buf);
+        })
+    });
+
+    let output = child.wait_with_output();
+    if let Some(handle) = writer {
+        let _ = handle.join();
+    }
+
+    // Exit 0 = some paths ignored (listed on stdout, NUL-separated verbatim);
+    // 1 = none ignored; 128 = not a repo / git error. stdout is empty in the
+    // latter two, so parsing unconditionally yields the correct empty set.
+    match output {
+        Ok(out) => out
+            .stdout
+            .split(|b| *b == 0)
+            .filter(|s| !s.is_empty())
+            .map(|s| String::from_utf8_lossy(s).into_owned())
+            .collect(),
+        Err(_) => std::collections::HashSet::new(),
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -44,11 +106,12 @@ pub struct FileContent {
 }
 
 /// Stays `sync` (not converted for C8): a single non-recursive `fs::read_dir`
-/// call — no walk, bounded by one directory's entry count — invoked very
-/// frequently (every lazy file-tree expand). Cheap enough that main-thread
-/// dispatch is the right tradeoff (an `async` command still pays IPC/task
-/// scheduling overhead), and its only fallible operation (`fs::read_dir`) is
-/// already funneled through `?`/`Result`, not a panic path.
+/// call plus one short-lived `git check-ignore` batch — no walk, bounded by
+/// one directory's entry count — invoked on every lazy file-tree expand.
+/// Cheap enough that main-thread dispatch is the right tradeoff (an `async`
+/// command still pays IPC/task scheduling overhead), and every fallible
+/// operation is funneled through `?`/`Result` or degrades (ignore status),
+/// not a panic path.
 #[tauri::command]
 fn read_directory(path: String) -> Result<Vec<FileEntry>, String> {
     let entries = fs::read_dir(&path).map_err(|e| e.to_string())?;
@@ -81,9 +144,16 @@ fn read_directory(path: String) -> Result<Vec<FileEntry>, String> {
                 path,
                 is_dir,
                 children: if is_dir { Some(vec![]) } else { None },
+                ignored: false,
             })
         })
         .collect();
+
+    let names: Vec<String> = result.iter().map(|e| e.name.clone()).collect();
+    let ignored = classify_ignored(&path, &names);
+    for entry in &mut result {
+        entry.ignored = ignored.contains(&entry.name);
+    }
 
     // Sort: directories first, then alphabetical case-insensitive
     result.sort_by(|a, b| {
@@ -818,6 +888,101 @@ mod path_exists_tests {
     fn false_for_a_directory() {
         let tmp = tempfile::tempdir().unwrap();
         assert!(!path_exists(tmp.path().to_string_lossy().to_string()));
+    }
+}
+
+#[cfg(test)]
+mod read_directory_ignore_tests {
+    use super::{read_directory, FileEntry};
+    use std::process::Command;
+
+    /// Setup git commands isolate host gitconfig, mirroring git.rs's test
+    /// modules, so signing/hooks/aliases can't break these tests.
+    fn run_git(path: &str, args: &[&str]) {
+        let mut full: Vec<&str> = vec!["-C", path];
+        full.extend_from_slice(args);
+        let output = Command::new("git")
+            .args(&full)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git {:?} failed: {}",
+            args,
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    fn entry<'a>(entries: &'a [FileEntry], name: &str) -> &'a FileEntry {
+        entries
+            .iter()
+            .find(|e| e.name == name)
+            .unwrap_or_else(|| panic!("entry {name} missing from listing"))
+    }
+
+    #[test]
+    fn gitignored_entries_are_marked() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().to_str().unwrap().to_string();
+        run_git(&root, &["init", "-q"]);
+        std::fs::write(tmp.path().join(".gitignore"), "ignored-dir/\n*.log\n").unwrap();
+        std::fs::write(tmp.path().join("kept.txt"), "k").unwrap();
+        std::fs::write(tmp.path().join("a.log"), "l").unwrap();
+        std::fs::create_dir(tmp.path().join("ignored-dir")).unwrap();
+
+        let entries = read_directory(root).unwrap();
+        assert!(entry(&entries, "a.log").ignored);
+        assert!(entry(&entries, "ignored-dir").ignored);
+        assert!(!entry(&entries, "kept.txt").ignored);
+        assert!(!entry(&entries, ".gitignore").ignored);
+    }
+
+    #[test]
+    fn non_repo_directory_marks_nothing() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("a.log"), "l").unwrap();
+        std::fs::write(tmp.path().join("kept.txt"), "k").unwrap();
+
+        let entries = read_directory(tmp.path().to_str().unwrap().to_string()).unwrap();
+        assert!(entries.iter().all(|e| !e.ignored));
+    }
+
+    #[test]
+    fn nested_gitignore_is_honored_for_subdirectory_listings() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().to_str().unwrap().to_string();
+        run_git(&root, &["init", "-q"]);
+        let sub = tmp.path().join("sub");
+        std::fs::create_dir(&sub).unwrap();
+        std::fs::write(sub.join(".gitignore"), "local.txt\n").unwrap();
+        std::fs::write(sub.join("local.txt"), "x").unwrap();
+        std::fs::write(sub.join("other.txt"), "y").unwrap();
+
+        let entries = read_directory(sub.to_str().unwrap().to_string()).unwrap();
+        assert!(entry(&entries, "local.txt").ignored);
+        assert!(!entry(&entries, "other.txt").ignored);
+    }
+
+    /// Invoke-payload contract pin: the frontend consumes these exact field
+    /// names (src/types/index.ts FileEntry).
+    #[test]
+    fn file_entry_serde_contract() {
+        let e = FileEntry {
+            name: "a.ts".into(),
+            path: "/ws/a.ts".into(),
+            is_dir: false,
+            children: None,
+            ignored: true,
+        };
+        let v = serde_json::to_value(&e).unwrap();
+        let obj = v.as_object().unwrap();
+        assert_eq!(obj.get("name").unwrap(), "a.ts");
+        assert_eq!(obj.get("path").unwrap(), "/ws/a.ts");
+        assert_eq!(obj.get("is_dir").unwrap(), false);
+        assert_eq!(obj.get("ignored").unwrap(), true);
+        assert!(!obj.contains_key("children"), "None children are skipped");
     }
 }
 

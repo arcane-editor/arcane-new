@@ -97,7 +97,7 @@ function NodeRenderer({
 
   return (
     <div
-      className={`tree-node${node.isSelected ? ' selected' : ''}`}
+      className={`tree-node${node.isSelected ? ' selected' : ''}${node.data.ignored ? ' dimmed' : ''}`}
       style={isRenaming ? { ...style, zIndex: 20, overflow: 'visible' } : style}
       onClick={isRenaming ? undefined : handleClick}
       onContextMenu={(e) => {

@@ -4,7 +4,6 @@ import {
   ChevronRight,
   Plus,
   Minus,
-  File,
   Folder,
   Lock,
   Undo2,
@@ -14,7 +13,6 @@ import {
   X,
   ExternalLink,
   GitCommitHorizontal,
-  GitMerge,
   AlertTriangle,
   Download,
 } from 'lucide-react';
@@ -24,6 +22,7 @@ import type { GitLogEntry, CommitFileChange } from '../../../types';
 import { useProjectContextStore } from '../../../stores/project-context';
 import { formatRelativeDate } from '../../../utils/date';
 import { canCommit } from '../../../utils/commit-gating';
+import { getFileIcon } from '../../../utils/file-icons';
 import AddWorktreeDialog from './AddWorktreeDialog';
 import { openProjectInNewWindow } from '../../project';
 import {
@@ -68,8 +67,8 @@ function FileItem({
 
   return (
     <div className="scm-file-item" onClick={onClick}>
-      <span className="icon" style={{ color: 'var(--text-secondary)', flexShrink: 0 }}>
-        <File size={14} />
+      <span className="icon" style={{ flexShrink: 0, display: 'flex' }}>
+        {getFileIcon(fileName, 14)}
       </span>
       <span className="scm-file-name">
         {fileName}
@@ -392,8 +391,8 @@ function SourceControlPanel() {
             {conflictsOpen &&
               conflictedFiles.map((file) => (
                 <div key={`conflict-${file.path}`} className="scm-file-item" style={{ flexWrap: 'wrap', height: 'auto' }}>
-                  <span className="icon" style={{ color: 'var(--error-text)', flexShrink: 0 }}>
-                    <GitMerge size={14} />
+                  <span className="icon" style={{ flexShrink: 0, display: 'flex' }}>
+                    {getFileIcon(file.path.split('/').pop() || file.path, 14)}
                   </span>
                   <span
                     className="scm-file-name"
@@ -553,8 +552,8 @@ function SourceControlPanel() {
                       className="scm-file-item scm-commit-file-item"
                       onClick={() => handleCommitFileClick(entry, file)}
                     >
-                      <span className="icon" style={{ color: 'var(--text-secondary)', flexShrink: 0 }}>
-                        <File size={14} />
+                      <span className="icon" style={{ flexShrink: 0, display: 'flex' }}>
+                        {getFileIcon(file.path.split('/').pop() || file.path, 14)}
                       </span>
                       <span className="scm-file-name">{file.path.split('/').pop()}</span>
                       <span className={`scm-file-status ${file.status}`}>

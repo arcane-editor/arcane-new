@@ -421,6 +421,14 @@ html, body, #root {
   padding-left: 6px;
 }
 
+/* Gitignored entries render dimmed, VS Code style. Dim the content spans,
+   not the row, so hover/selection backgrounds stay at full strength. */
+.tree-node.dimmed .node-name,
+.tree-node.dimmed .icon-file,
+.tree-node.dimmed .icon-folder {
+  opacity: 0.5;
+}
+
 .tree-node .icon-folder {
   color: var(--folder-icon);
   flex-shrink: 0;
