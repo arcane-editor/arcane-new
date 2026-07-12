@@ -1,6 +1,6 @@
 name: Release
 
-# Builds the Arcane editor for macOS (Apple Silicon + Intel) and Windows x64,
+# Builds the Arcane editor for macOS (Apple Silicon) and Windows x64,
 # then uploads the installers to the `arcane-releases` R2 bucket.
 #
 # Triggered by pushing a version tag (e.g. `git tag v0.1.0 && git push --tags`)
@@ -27,11 +27,10 @@ jobs:
             bundles: dmg
             asset: Arcane-arm64.dmg
             glob: editor/src-tauri/target/release/bundle/dmg/*.dmg
-          - os: macos-13          # Intel
-            triple: x86_64-apple-darwin
-            bundles: dmg
-            asset: Arcane-x64.dmg
-            glob: editor/src-tauri/target/release/bundle/dmg/*.dmg
+          # macOS Intel (macos-13 / x86_64-apple-darwin / Arcane-x64.dmg)
+          # dropped from distribution as of v0.2.0 — the download option is
+          # gone from the landing page too. Restore a matrix entry here if
+          # Intel support returns.
           - os: windows-latest    # Windows x64
             triple: x86_64-pc-windows-msvc
             bundles: nsis
