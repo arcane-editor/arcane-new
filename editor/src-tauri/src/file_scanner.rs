@@ -634,6 +634,12 @@ pub async fn start_file_watcher(
     tokio::spawn(async move {
         let mut pending_added: Vec<String> = Vec::new();
         let mut pending_removed: Vec<String> = Vec::new();
+        // Files whose CONTENT changed this burst (plain writes, atomic
+        // save-via-rename targets, truncate-recreates). Emitted as
+        // `file-content-changed` so open editor tabs can live-reload; the
+        // frontend filters to open, non-dirty tabs, so over-reporting here
+        // is cheap while a missed path means a stale buffer.
+        let mut content_changed: Vec<String> = Vec::new();
         // Leading-edge dedup so one `git checkout` (which rewrites HEAD, index,
         // refs/heads/<branch>, logs/HEAD all in ~10ms) fires git-state-changed
         // once, not 5+ times.
@@ -692,6 +698,9 @@ pub async fn start_file_watcher(
                                 match event.kind {
                                     notify::EventKind::Create(_) => {
                                         if path.is_file() {
+                                            if !inside_dot_git {
+                                                content_changed.push(path_str.clone());
+                                            }
                                             pending_added.push(path_str);
                                         }
                                     }
@@ -716,10 +725,23 @@ pub async fn start_file_watcher(
                                         // missing new subtree until an unrelated
                                         // rebuild.
                                         if path.exists() && path.is_file() {
+                                            // A rename target is also new
+                                            // content at that path — this is
+                                            // how atomic saves (write temp,
+                                            // rename over target) land.
+                                            if !inside_dot_git {
+                                                content_changed.push(path_str.clone());
+                                            }
                                             pending_added.push(path_str);
                                         } else {
                                             pending_removed.push(path_str);
                                             index_needs_rebuild = true;
+                                        }
+                                    }
+                                    notify::EventKind::Modify(notify::event::ModifyKind::Data(_))
+                                    | notify::EventKind::Modify(notify::event::ModifyKind::Any) => {
+                                        if !inside_dot_git && path.is_file() {
+                                            content_changed.push(path_str);
                                         }
                                     }
                                     _ => {}
@@ -791,6 +813,9 @@ pub async fn start_file_watcher(
                                     match event.kind {
                                         notify::EventKind::Create(_) => {
                                             if path.is_file() {
+                                                if !inside_dot_git {
+                                                    content_changed.push(path_str.clone());
+                                                }
                                                 pending_added.push(path_str);
                                             }
                                         }
@@ -800,12 +825,23 @@ pub async fn start_file_watcher(
                                         notify::EventKind::Modify(notify::event::ModifyKind::Name(_)) => {
                                             // See the matching arm above for why
                                             // a non-file rename target/vanished
-                                            // path also marks the index stale.
+                                            // path also marks the index stale,
+                                            // and why a live rename target also
+                                            // counts as changed content.
                                             if path.exists() && path.is_file() {
+                                                if !inside_dot_git {
+                                                    content_changed.push(path_str.clone());
+                                                }
                                                 pending_added.push(path_str);
                                             } else {
                                                 pending_removed.push(path_str);
                                                 index_needs_rebuild = true;
+                                            }
+                                        }
+                                        notify::EventKind::Modify(notify::event::ModifyKind::Data(_))
+                                        | notify::EventKind::Modify(notify::event::ModifyKind::Any) => {
+                                            if !inside_dot_git && path.is_file() {
+                                                content_changed.push(path_str);
                                             }
                                         }
                                         _ => {}
@@ -877,6 +913,21 @@ pub async fn start_file_watcher(
                                     label_for_debounce.as_str(),
                                     "file-index-changed",
                                     &delta,
+                                );
+                            }
+
+                            if !content_changed.is_empty() {
+                                // One event per settled burst; a burst can
+                                // report the same path many times (editors
+                                // often write in several syscalls), so dedup
+                                // before handing the list to the frontend.
+                                let mut changed = std::mem::take(&mut content_changed);
+                                changed.sort();
+                                changed.dedup();
+                                let _ = app_for_debounce.emit_to(
+                                    label_for_debounce.as_str(),
+                                    "file-content-changed",
+                                    &changed,
                                 );
                             }
                         }

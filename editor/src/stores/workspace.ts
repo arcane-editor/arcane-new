@@ -33,6 +33,7 @@ import { addRecentProject } from '../utils/persistence';
 import { classifyFile, offerClassRenameSync } from '../features/csharp';
 import { detectLanguage } from '../utils/language-detect';
 import { safeUnlisten } from '../utils/tauri-listener';
+import { filesToReload } from '../utils/open-file-reload';
 
 // Track provider dispose function
 let disposeLspProviders: (() => void) | null = null;
@@ -41,6 +42,7 @@ let disposeLspProviders: (() => void) | null = null;
 // so the previous workspace's events stop driving tree refreshes.
 let unlistenFileWatcher: (() => void) | null = null;
 let unlistenGitState: (() => void) | null = null;
+let unlistenContentChanged: (() => void) | null = null;
 let fileWatcherDebounce: ReturnType<typeof setTimeout> | null = null;
 
 // Unity-only: when .cs files are added/removed under Assets/, the generated
@@ -631,7 +633,7 @@ interface WorkspaceState {
   popRecentlyClosed: () => string | null;
   updateFileContent: (path: string, content: string) => void;
   saveFile: (path: string) => Promise<void>;
-  reloadFileFromDisk: (path: string) => Promise<void>;
+  reloadFileFromDisk: (path: string, opts?: { skipIfDirty?: boolean }) => Promise<void>;
   openDiffTab: (filePath: string, fileName: string, staged: boolean) => Promise<void>;
   openCommitDiffTab: (hash: string, filePath: string, title: string) => Promise<void>;
   refreshTree: () => Promise<void>;
@@ -683,6 +685,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     if (unlistenGitState) {
       safeUnlisten(unlistenGitState);
       unlistenGitState = null;
+    }
+    if (unlistenContentChanged) {
+      safeUnlisten(unlistenContentChanged);
+      unlistenContentChanged = null;
     }
     if (fileWatcherDebounce) {
       clearTimeout(fileWatcherDebounce);
@@ -873,6 +879,21 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
           }
         });
         unlistenGitState = unlistenGit;
+
+        // Live-reload open tabs when their file changes on disk (external
+        // editor, git checkout in a terminal, codegen). Dirty tabs are
+        // skipped — unsaved edits always win. reloadFileFromDisk drives the
+        // full pipeline: store content → Monaco (guarded, no re-dirty) →
+        // LSP didChange.
+        const unlistenContent = await listenScoped<string[]>('file-content-changed', (event) => {
+          const store = get();
+          for (const p of filesToReload(store.openFiles, event.payload)) {
+            store.reloadFileFromDisk(p, { skipIfDirty: true }).catch((err) => {
+              console.warn('[Workspace] live reload failed:', p, err);
+            });
+          }
+        });
+        unlistenContentChanged = unlistenContent;
       })
       .catch((err) => {
         console.warn('[Workspace] File watcher failed to start:', err);
@@ -1074,7 +1095,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     maybeRefreshUnityAfterSave(path);
   },
 
-  reloadFileFromDisk: async (path: string) => {
+  reloadFileFromDisk: async (path: string, opts?: { skipIfDirty?: boolean }) => {
     const { openFiles } = get();
     const file = openFiles.find((f) => f.path === path);
     if (!file) return;
@@ -1085,6 +1106,20 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     } catch (err) {
       console.warn('[Workspace] reloadFileFromDisk failed:', path, err);
       return;
+    }
+    // Re-check AFTER the await: the tab may have closed, or (watcher-driven
+    // reloads only) the user may have started typing while the read was in
+    // flight — an external change must never clobber unsaved edits. Default
+    // callers (checkpoint restore, discard, rename-sync) intentionally
+    // overwrite dirty buffers.
+    const current = get().openFiles.find((f) => f.path === path);
+    if (!current) return;
+    if (opts?.skipIfDirty) {
+      if (current.isDirty) return;
+      // Echo suppression: our own saves (and no-op external writes) round-trip
+      // through the watcher; identical content needs no store churn or LSP
+      // didChange.
+      if (current.content === content) return;
     }
     set((state) => ({
       openFiles: state.openFiles.map((f) =>
