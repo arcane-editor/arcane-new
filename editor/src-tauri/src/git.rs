@@ -65,7 +65,14 @@ pub fn git_status(workspace_path: String) -> Result<GitStatusResult, String> {
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
+    Ok(parse_status(&stdout, &workspace_path))
+}
 
+/// Parse `git status --porcelain=v2 --branch` output into the frontend's
+/// status shape. Pure so the porcelain field layout is pinned by direct
+/// tests — a silent field-count mismatch here drops entries from the SCM
+/// panel with no error anywhere.
+fn parse_status(stdout: &str, workspace_path: &str) -> GitStatusResult {
     let mut branch = String::from("HEAD");
     let mut ahead: i32 = 0;
     let mut behind: i32 = 0;
@@ -90,13 +97,15 @@ pub fn git_status(workspace_path: String) -> Result<GitStatusResult, String> {
         }
 
         if let Some(rest) = line.strip_prefix("1 ") {
-            // Ordinary changed entry: 1 XY <sub> <mH> <mI> <mW> <hH> <hI> <path>
-            let parts: Vec<&str> = rest.splitn(9, ' ').collect();
-            if parts.len() < 9 {
+            // Ordinary changed entry: 1 <XY> <sub> <mH> <mI> <mW> <hH> <hI> <path>
+            // — 8 fields after the prefix. splitn's last capture is <path>,
+            // which may contain spaces.
+            let parts: Vec<&str> = rest.splitn(8, ' ').collect();
+            if parts.len() < 8 {
                 continue;
             }
             let xy = parts[0];
-            let path = parts[8];
+            let path = parts[7];
             let mut xy_chars = xy.chars();
             let x = xy_chars.next().unwrap_or('.');
             let y = xy_chars.next().unwrap_or('.');
@@ -122,14 +131,16 @@ pub fn git_status(workspace_path: String) -> Result<GitStatusResult, String> {
                 });
             }
         } else if let Some(rest) = line.strip_prefix("2 ") {
-            // Renamed/copied entry: 2 XY <sub> <mH> <mI> <mW> <hH> <hI> <X><score> <path>\t<origPath>
-            let parts: Vec<&str> = rest.splitn(10, ' ').collect();
-            if parts.len() < 10 {
+            // Renamed/copied entry:
+            //   2 <XY> <sub> <mH> <mI> <mW> <hH> <hI> <X><score> <path>\t<origPath>
+            // — 9 fields after the prefix; the last is <path>\t<origPath>.
+            let parts: Vec<&str> = rest.splitn(9, ' ').collect();
+            if parts.len() < 9 {
                 continue;
             }
             let xy = parts[0];
             // The last field contains <path>\t<origPath>
-            let path_field = parts[9];
+            let path_field = parts[8];
             let path = path_field.split('\t').next().unwrap_or(path_field);
             let mut xy_chars = xy.chars();
             let x = xy_chars.next().unwrap_or('.');
@@ -186,13 +197,13 @@ pub fn git_status(workspace_path: String) -> Result<GitStatusResult, String> {
         }
     }
 
-    Ok(GitStatusResult {
+    GitStatusResult {
         branch,
         staged,
         unstaged,
         ahead,
         behind,
-    })
+    }
 }
 
 #[tauri::command]
@@ -2761,6 +2772,190 @@ mod stash_and_amend_tests {
         let log = git_log(path, None).unwrap();
         assert_eq!(log.len(), 2);
         assert_eq!(log[0].message, "third commit");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Status parsing — pins the porcelain-v2 field layout, in two layers:
+// literal-line fixtures through parse_status (the spec as we read it), and
+// hermetic end-to-end runs of git_status against real git output (the spec
+// as git actually emits it). The second layer exists because a field-count
+// off-by-one in the `1 `/`2 ` arms silently dropped EVERY tracked-file
+// change from the SCM panel while branch/log kept working — an error state
+// invisible to any test that constructs GitStatusResult by hand.
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod status_parse_tests {
+    use super::*;
+
+    const WS: &str = "/ws";
+
+    // ── Layer 1: literal porcelain-v2 lines ────────────────────────────────
+
+    /// Captured verbatim from a real repo (admissions-new, git 2.52.0) — the
+    /// exact line the shipped parser dropped.
+    #[test]
+    fn ordinary_unstaged_modification_is_parsed() {
+        let line = "1 .M N... 100644 100644 100644 5a536053ed889576f9e8b10780fb019a0f6dce72 5a536053ed889576f9e8b10780fb019a0f6dce72 api/controllers/counsellingSlot.controller.ts";
+        let r = parse_status(line, WS);
+        assert_eq!(r.staged.len(), 0);
+        assert_eq!(r.unstaged.len(), 1);
+        let f = &r.unstaged[0];
+        assert_eq!(f.path, "api/controllers/counsellingSlot.controller.ts");
+        assert_eq!(
+            f.absolute_path,
+            "/ws/api/controllers/counsellingSlot.controller.ts"
+        );
+        assert_eq!(f.status, map_status_char('M').to_string());
+        assert!(!f.staged);
+        assert!(!f.conflicted);
+    }
+
+    #[test]
+    fn ordinary_staged_only_modification_goes_to_staged_list() {
+        let line = "1 M. N... 100644 100644 100644 aaaa bbbb src/a.ts";
+        let r = parse_status(line, WS);
+        assert_eq!(r.staged.len(), 1);
+        assert_eq!(r.unstaged.len(), 0);
+        assert!(r.staged[0].staged);
+        assert_eq!(r.staged[0].path, "src/a.ts");
+    }
+
+    #[test]
+    fn ordinary_both_staged_and_unstaged_lands_in_both_lists() {
+        let line = "1 MM N... 100644 100644 100644 aaaa bbbb src/a.ts";
+        let r = parse_status(line, WS);
+        assert_eq!(r.staged.len(), 1);
+        assert_eq!(r.unstaged.len(), 1);
+    }
+
+    #[test]
+    fn ordinary_added_and_deleted_status_chars_map() {
+        let added = parse_status("1 A. N... 000000 100644 100644 0000 bbbb new.ts", WS);
+        assert_eq!(added.staged.len(), 1);
+        assert_eq!(added.staged[0].status, map_status_char('A').to_string());
+
+        let deleted = parse_status("1 .D N... 100644 100644 000000 aaaa 0000 gone.ts", WS);
+        assert_eq!(deleted.unstaged.len(), 1);
+        assert_eq!(deleted.unstaged[0].status, map_status_char('D').to_string());
+    }
+
+    #[test]
+    fn ordinary_path_with_spaces_survives_as_last_field() {
+        let line = "1 .M N... 100644 100644 100644 aaaa bbbb Assets/My Scripts/Player Controller.cs";
+        let r = parse_status(line, WS);
+        assert_eq!(r.unstaged.len(), 1);
+        assert_eq!(r.unstaged[0].path, "Assets/My Scripts/Player Controller.cs");
+    }
+
+    #[test]
+    fn rename_entry_is_parsed_with_new_path() {
+        let line = "2 R. N... 100644 100644 100644 aaaa bbbb R100 src/new.ts\tsrc/old.ts";
+        let r = parse_status(line, WS);
+        assert_eq!(r.staged.len(), 1);
+        assert_eq!(r.staged[0].path, "src/new.ts");
+        assert_eq!(r.staged[0].status, map_status_char('R').to_string());
+        assert_eq!(r.unstaged.len(), 0);
+    }
+
+    #[test]
+    fn unmerged_and_untracked_still_parse() {
+        let out = "u UU N... 100644 100644 100644 100644 aaaa bbbb cccc conflicted.cs\n? junk.log";
+        let r = parse_status(out, WS);
+        assert_eq!(r.unstaged.len(), 2);
+        assert!(r.unstaged[0].conflicted);
+        assert_eq!(r.unstaged[0].status, "conflicted");
+        assert_eq!(r.unstaged[1].status, "untracked");
+    }
+
+    #[test]
+    fn branch_headers_and_unknown_lines_parse_without_entries() {
+        let out = "# branch.oid deadbeef\n# branch.head feat/x\n# branch.upstream origin/feat/x\n# branch.ab +2 -1\n# stash 3\nbogus line";
+        let r = parse_status(out, WS);
+        assert_eq!(r.branch, "feat/x");
+        assert_eq!(r.ahead, 2);
+        assert_eq!(r.behind, 1);
+        assert!(r.staged.is_empty() && r.unstaged.is_empty());
+    }
+
+    // ── Layer 2: end-to-end against real `git status` output ───────────────
+
+    /// Setup commands isolate host gitconfig, mirroring staged_diff_tests.
+    fn run_git(path: &str, args: &[&str]) {
+        let mut full: Vec<&str> = vec!["-C", path];
+        full.extend_from_slice(args);
+        let output = Command::new("git")
+            .args(&full)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git {:?} failed: {}",
+            args,
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    fn init_repo() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().to_str().unwrap();
+        run_git(p, &["init", "-q"]);
+        run_git(p, &["config", "user.email", "t@t.t"]);
+        run_git(p, &["config", "user.name", "t"]);
+        std::fs::write(dir.path().join("a.txt"), "one\n").unwrap();
+        run_git(p, &["add", "a.txt"]);
+        run_git(p, &["commit", "-q", "-m", "init"]);
+        dir
+    }
+
+    #[test]
+    fn e2e_modified_tracked_file_appears_unstaged() {
+        let dir = init_repo();
+        let p = dir.path().to_str().unwrap().to_string();
+        std::fs::write(dir.path().join("a.txt"), "two\n").unwrap();
+        let r = git_status(p).unwrap();
+        assert_eq!(r.staged.len(), 0, "nothing staged yet");
+        assert_eq!(r.unstaged.len(), 1, "the edit must appear as unstaged");
+        assert_eq!(r.unstaged[0].path, "a.txt");
+    }
+
+    #[test]
+    fn e2e_staged_then_edited_appears_in_both_lists() {
+        let dir = init_repo();
+        let p = dir.path().to_str().unwrap().to_string();
+        std::fs::write(dir.path().join("a.txt"), "two\n").unwrap();
+        run_git(&p, &["add", "a.txt"]);
+        let r = git_status(p.clone()).unwrap();
+        assert_eq!(r.staged.len(), 1, "staged edit must appear");
+        assert_eq!(r.unstaged.len(), 0);
+
+        std::fs::write(dir.path().join("a.txt"), "three\n").unwrap();
+        let r = git_status(p).unwrap();
+        assert_eq!(r.staged.len(), 1);
+        assert_eq!(r.unstaged.len(), 1, "second edit must appear unstaged too");
+    }
+
+    #[test]
+    fn e2e_rename_appears_staged() {
+        let dir = init_repo();
+        let p = dir.path().to_str().unwrap().to_string();
+        run_git(&p, &["mv", "a.txt", "b.txt"]);
+        let r = git_status(p).unwrap();
+        assert_eq!(r.staged.len(), 1, "rename must appear staged");
+        assert_eq!(r.staged[0].path, "b.txt");
+    }
+
+    #[test]
+    fn e2e_untracked_file_appears() {
+        let dir = init_repo();
+        let p = dir.path().to_str().unwrap().to_string();
+        std::fs::write(dir.path().join("new.txt"), "x\n").unwrap();
+        let r = git_status(p).unwrap();
+        assert_eq!(r.unstaged.len(), 1);
+        assert_eq!(r.unstaged[0].status, "untracked");
     }
 }
 
