@@ -23,6 +23,7 @@ import { useGitStore, type GitFileStatus } from '../../../stores/git';
 import type { GitLogEntry, CommitFileChange } from '../../../types';
 import { useProjectContextStore } from '../../../stores/project-context';
 import { formatRelativeDate } from '../../../utils/date';
+import { canCommit } from '../../../utils/commit-gating';
 import AddWorktreeDialog from './AddWorktreeDialog';
 import { openProjectInNewWindow } from '../../project';
 import {
@@ -342,7 +343,7 @@ function SourceControlPanel() {
         </label>
         <button
           className="scm-commit-btn"
-          disabled={!commitMessage.trim() || (!amendMode && stagedFiles.length === 0)}
+          disabled={!canCommit(commitMessage, stagedFiles.length, unstagedFiles.length, amendMode)}
           onClick={handleCommit}
         >
           {amendMode ? 'Amend Last Commit' : 'Commit'}

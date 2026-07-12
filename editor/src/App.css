@@ -2077,12 +2077,35 @@ html, body, #root {
 .notification-success .notification-icon { color: var(--success); }
 .notification-warning .notification-icon { color: var(--warning); }
 .notification-error .notification-icon { color: var(--error-text); }
-.notif-icon--info { color: var(--info); }
-.notif-icon--success { color: var(--success); }
-.notif-icon--warning { color: var(--warning); }
-.notif-icon--error { color: var(--error-text); }
+
+.notification-content {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
 
 .notification-message { flex: 1; line-height: 1.4; word-break: break-word; }
+
+.notification-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.notification-action {
+  padding: 3px 10px;
+  font-size: 11px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.notification-action:hover {
+  background: var(--hover);
+}
 
 .notification-dismiss {
   flex-shrink: 0;
@@ -2703,20 +2726,30 @@ html, body, #root {
 }
 
 .activity-bar-badge {
+  /* VS Code-style count badge: a pill hugging the 24px glyph's bottom-right
+     corner (the glyph is centered in the 48px button, so the corner sits
+     ~12px in from the button edge — anchoring to the button corner leaves
+     the badge floating in empty space). Pill radius, not 50%: two-digit
+     and "99+" counts must not render as a squished ellipse. Text uses
+     --bg-primary, which stays readable on --accent in every bundled theme
+     (--text-active is near-invisible on the arcane-dark gold). The ring of
+     activity-bar background separates the badge from the glyph it overlaps. */
   position: absolute;
-  top: -2px;
-  right: -2px;
+  bottom: 6px;
+  right: 6px;
   background: var(--accent);
-  color: var(--text-active);
-  border-radius: 50%;
+  color: var(--bg-primary);
+  border: 2px solid var(--bg-activity-bar);
+  border-radius: 999px;
+  box-sizing: border-box;
   min-width: 18px;
   height: 18px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 600;
-  padding: 0 3px;
+  padding: 0 4px;
 }
 
 /* ==================== Activity Bar Settings ==================== */

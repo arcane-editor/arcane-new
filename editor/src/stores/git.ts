@@ -5,6 +5,7 @@ import { notify } from './notifications';
 import { useWorkspaceStore } from './workspace';
 import { remoteErrorMessage } from '../utils/remote-errors';
 import { singleFlightWithRerun } from '../utils/single-flight';
+import { needsAutoStage } from '../utils/commit-gating';
 
 interface BlameEntry {
   gen: number;
@@ -431,13 +432,19 @@ export const useGitStore = create<GitState>((set, get) => ({
   },
 
   commit: async (workspacePath: string) => {
-    const { commitMessage, amendMode } = get();
+    const { commitMessage, amendMode, stagedFiles, unstagedFiles } = get();
     if (!commitMessage.trim()) return;
     try {
+      // VS Code smart commit: nothing staged → stage everything (including
+      // untracked, via `git add -A`) and commit; a staged subset commits
+      // as-is. Success feedback is the box clearing + lists emptying — no
+      // toast, matching VS Code.
+      if (needsAutoStage(stagedFiles.length, unstagedFiles.length, amendMode)) {
+        await get().stageAll(workspacePath);
+      }
       await invoke('git_commit', { workspacePath, message: commitMessage, amend: amendMode });
       set({ commitMessage: '', amendMode: false });
       get().invalidateBlameAll();
-      notify.success(amendMode ? 'Amended commit on ' + get().branch : 'Committed to ' + get().branch);
       await get().refreshStatus(workspacePath);
     } catch (err) {
       notify.error(`Commit failed: ${err}`);
