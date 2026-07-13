@@ -1,6 +1,15 @@
 /**
  * Retry (T5) — resend a failed turn from its inline `ErrorBlock`.
  *
+ * LATEST TURN ONLY (v1, Cursor-like — T5 fix wave): retry is restricted to
+ * the error block that is the LAST message in the store's timeline. Both
+ * replay inputs are latest-turn-shaped — `getLastSend()` only remembers the
+ * most recent send, and `rewindToLastUserPrompt()` only rewinds the agent's
+ * LAST user prompt — so retrying an OLDER error block would truncate the
+ * store at the right place but rewind/resend the WRONG prompt, silently
+ * drifting the conversation. `retryFailedTurn` bails (with a banner) for a
+ * non-latest error, and `ErrorBlock` disables its Retry button in that case.
+ *
  * `sendMessage` never appends the ai store's UI "user" bubble itself — every
  * normal caller (`ChatInput`, `fixConsoleError`, `summarizeSceneDiff`) calls
  * `useAiStore.getState().addUserMessage(...)` immediately BEFORE calling
@@ -80,7 +89,16 @@ export async function retryFailedTurn(errorMessageId: string): Promise<void> {
     return;
   }
 
-  const target = findRetryTarget(useAiStore.getState().messages, errorMessageId);
+  // Latest turn only (see the file header): both getLastSend() and
+  // rewindToLastUserPrompt() are latest-turn-shaped, so an older error block
+  // cannot be replayed faithfully.
+  const timeline = useAiStore.getState().messages;
+  if (timeline.length === 0 || timeline[timeline.length - 1].id !== errorMessageId) {
+    useAiStore.getState().setError('Only the most recent turn can be retried.');
+    return;
+  }
+
+  const target = findRetryTarget(timeline, errorMessageId);
   if (!target) {
     useAiStore.getState().setError('Nothing to retry.');
     return;

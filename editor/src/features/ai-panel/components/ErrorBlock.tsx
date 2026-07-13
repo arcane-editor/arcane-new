@@ -19,6 +19,11 @@ interface Props {
 function ErrorBlock({ message }: Props) {
   const [expanded, setExpanded] = useState(false);
   const isAgentRunning = useAiStore((s) => s.isAgentRunning);
+  // Retry is latest-turn-only (see retry-turn.ts's header): an older error
+  // block's replay inputs (getLastSend / rewindToLastUserPrompt) are gone,
+  // so its Retry button stays disabled. Cheap selector — compares only the
+  // last message's id.
+  const isLatest = useAiStore((s) => s.messages[s.messages.length - 1]?.id === message.id);
   const turnError = message.turnError;
   if (!turnError) return null;
 
@@ -51,8 +56,8 @@ function ErrorBlock({ message }: Props) {
             type="button"
             className="ai-message-error-retry"
             onClick={handleRetry}
-            disabled={isAgentRunning}
-            title="Retry"
+            disabled={isAgentRunning || !isLatest}
+            title={isLatest ? 'Retry' : 'Only the most recent turn can be retried'}
           >
             Retry
           </button>

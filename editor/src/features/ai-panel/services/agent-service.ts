@@ -484,11 +484,22 @@ export class AgentService {
       return;
     }
 
-    const outcome = detectTurnOutcome(this.agent.getMessages().slice(before), this.abortRequested);
-    if (outcome.type === 'error') {
-      useAiStore.getState().addTurnError(classifyTurnError(outcome.raw));
-    } else if (outcome.type === 'crash') {
-      useAiStore.getState().addTurnError(loopCrashError());
+    // T5 fix wave: a deliberate Stop mid-stream can leave an 'error' tail
+    // (the aborted fetch rejects reader.read(), so arcane-stream pushes an
+    // error event rather than a clean 'aborted' done), and detectTurnOutcome
+    // checks stopReason 'error' (rule 2) BEFORE abortRequested (rule 3) —
+    // reordering those rules would break the toolUse-tail semantics other
+    // callers depend on, so suppress ALL outcome blocks for a user-aborted
+    // send here instead. abortRequested is per-send and only true when the
+    // user stopped THIS turn, so no error/crash block on abort is correct
+    // (the "none on abort" invariant).
+    if (!this.abortRequested) {
+      const outcome = detectTurnOutcome(this.agent.getMessages().slice(before), this.abortRequested);
+      if (outcome.type === 'error') {
+        useAiStore.getState().addTurnError(classifyTurnError(outcome.raw));
+      } else if (outcome.type === 'crash') {
+        useAiStore.getState().addTurnError(loopCrashError());
+      }
     }
   }
 
@@ -601,6 +612,13 @@ export class AgentService {
   /** Seed the agent with a saved session's history so the next prompt continues it. */
   resume(messages: AiMessage[]): void {
     this.agent.setMessages(restoreAgentMessages(messages));
+    // T5 fix wave: a resumed session is a DIFFERENT conversation on the SAME
+    // service instance (SessionHistory's openSession and session-restore both
+    // rehydrate the store + resume() without a dispose()), so a stale
+    // lastSend from the previous chat must never replay into it — in agent
+    // mode that could trigger unintended writes against the wrong context.
+    // dispose() covers New Chat / workspace switch; this covers resume.
+    lastSend = null;
   }
 
   reset(): void {
