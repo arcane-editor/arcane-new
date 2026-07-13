@@ -58,10 +58,22 @@ export function classifyTurnError(raw: string): TurnError {
     const stripped = raw.slice(codeMatch[0].length);
     const kind = classifyServerCode(codeMatch[1]);
     if (kind === 'rate_limit') {
-      return { kind: 'rate_limit', title: 'Rate limited', raw: stripped, retriable: true };
+      return {
+        kind: 'rate_limit',
+        title: 'Rate limited',
+        detail: 'Too many requests — wait a moment and try again.',
+        raw: stripped,
+        retriable: true,
+      };
     }
     if (kind === 'server') {
-      return { kind: 'server', title: 'Server error', raw: stripped, retriable: true };
+      return {
+        kind: 'server',
+        title: 'Server error',
+        detail: 'This is usually temporary — try again in a moment.',
+        raw: stripped,
+        retriable: true,
+      };
     }
     return classifyTurnErrorTable(stripped);
   }

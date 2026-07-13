@@ -120,6 +120,9 @@ describe('classifyTurnError — [code:] marker', () => {
     expect(err.title).toBe('Rate limited');
     expect(err.retriable).toBe(true);
     expect(err.raw).toBe('slow down');
+    // Part 4 (T4 review follow-up): the marker path carries the same
+    // guidance `detail` the substring-table row for this kind carries.
+    expect(err.detail).toBe('Too many requests — wait a moment and try again.');
   });
 
   it('maps a model_error marker to kind server, title "Server error"', () => {
@@ -128,6 +131,7 @@ describe('classifyTurnError — [code:] marker', () => {
     expect(err.title).toBe('Server error');
     expect(err.retriable).toBe(true);
     expect(err.raw).toBe('the model blew up');
+    expect(err.detail).toBe('This is usually temporary — try again in a moment.');
   });
 
   it('maps a server_error marker to kind server, title "Server error"', () => {
@@ -136,6 +140,7 @@ describe('classifyTurnError — [code:] marker', () => {
     expect(err.title).toBe('Server error');
     expect(err.retriable).toBe(true);
     expect(err.raw).toBe('boom');
+    expect(err.detail).toBe('This is usually temporary — try again in a moment.');
   });
 
   it('falls through to the table on an unrecognized code, using the stripped remainder', () => {
