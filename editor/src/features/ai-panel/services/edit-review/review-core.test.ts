@@ -4,6 +4,8 @@ import {
   clearReviewPaths,
   pendingCount,
   listPending,
+  registerForActiveTurn,
+  markRejectFailed,
   type PendingReviewEntry,
 } from './review-core';
 
@@ -275,5 +277,111 @@ describe('listPending', () => {
     };
 
     expect(listPending(entries).map((e) => e.path)).toEqual(['/Alpha.cs', '/Zeta.cs']);
+  });
+});
+
+// registerForActiveTurn / markRejectFailed (T7) — the store's `register` and
+// `reject` actions need a dynamic `import()` of this module's barrel to
+// reach ANY of these pure functions (see `stores/edit-review.ts`'s header:
+// zustand action bodies can't be tested directly under Bun without crashing
+// on that import), so the nontrivial branching those actions rely on —
+// "no active turn is a no-op", "anchor to the LAST turn", "flag a failed
+// reject" — is extracted here and tested directly instead.
+describe('registerForActiveTurn', () => {
+  it('no-ops (returns entries unchanged) when there is no active turn', () => {
+    const entries = registerForActiveTurn({}, [], '/Foo.cs', 'call-1', 1000);
+    expect(entries).toEqual({});
+  });
+
+  it('anchors a brand-new entry to the LAST turn in the list', () => {
+    const entries = registerForActiveTurn(
+      {},
+      [
+        { turnId: 't0', userMessageId: 'msg-0' },
+        { turnId: 't1', userMessageId: 'msg-1' },
+      ],
+      '/Foo.cs',
+      'call-1',
+      1000,
+    );
+
+    expect(entries).toEqual({
+      '/Foo.cs': {
+        path: '/Foo.cs',
+        turnId: 't1',
+        userMessageId: 'msg-1',
+        toolCallIds: ['call-1'],
+        firstChangeAt: 1000,
+        lastChangeAt: 1000,
+      },
+    });
+  });
+
+  it('does not mutate the input record', () => {
+    const original: Record<string, PendingReviewEntry> = {};
+    registerForActiveTurn(original, [{ turnId: 't1', userMessageId: 'msg-1' }], '/Foo.cs', 'call-1', 1000);
+    expect(original).toEqual({});
+  });
+
+  it('dedupe passthrough: re-registering under a NEWER active turn still keeps the ORIGINAL turnId (first pre-image wins)', () => {
+    const first = registerForActiveTurn({}, [{ turnId: 't1', userMessageId: 'msg-1' }], '/Foo.cs', 'call-1', 1000);
+    const second = registerForActiveTurn(
+      first,
+      [{ turnId: 't2', userMessageId: 'msg-2' }],
+      '/Foo.cs',
+      'call-2',
+      2000,
+    );
+
+    expect(second['/Foo.cs'].turnId).toBe('t1');
+    expect(second['/Foo.cs'].userMessageId).toBe('msg-1');
+    expect(second['/Foo.cs'].toolCallIds).toEqual(['call-1', 'call-2']);
+    expect(second['/Foo.cs'].lastChangeAt).toBe(2000);
+  });
+});
+
+describe('markRejectFailed', () => {
+  function fixture(): Record<string, PendingReviewEntry> {
+    return {
+      '/Foo.cs': {
+        path: '/Foo.cs',
+        turnId: 't1',
+        userMessageId: 'msg-1',
+        toolCallIds: ['call-1'],
+        firstChangeAt: 1000,
+        lastChangeAt: 1000,
+      },
+      '/Bar.cs': {
+        path: '/Bar.cs',
+        turnId: 't1',
+        userMessageId: 'msg-1',
+        toolCallIds: ['call-2'],
+        firstChangeAt: 500,
+        lastChangeAt: 500,
+      },
+    };
+  }
+
+  it('sets lastRejectFailed on the matching entry', () => {
+    const result = markRejectFailed(fixture(), '/Foo.cs');
+    expect(result['/Foo.cs'].lastRejectFailed).toBe(true);
+  });
+
+  it('is a no-op (returns the SAME record reference) for a path with no pending entry', () => {
+    const entries = fixture();
+    const result = markRejectFailed(entries, '/Does/Not/Exist.cs');
+    expect(result).toBe(entries);
+  });
+
+  it('does not mutate the input record', () => {
+    const entries = fixture();
+    markRejectFailed(entries, '/Foo.cs');
+    expect(entries['/Foo.cs'].lastRejectFailed).toBeUndefined();
+  });
+
+  it('does not disturb other existing entries', () => {
+    const entries = fixture();
+    const result = markRejectFailed(entries, '/Foo.cs');
+    expect(result['/Bar.cs']).toEqual(entries['/Bar.cs']);
   });
 });

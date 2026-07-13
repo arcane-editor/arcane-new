@@ -100,3 +100,43 @@ export function listPending(entries: Record<string, PendingReviewEntry>): Pendin
     (a, b) => a.firstChangeAt - b.firstChangeAt || a.path.localeCompare(b.path),
   );
 }
+
+// ---- T7 additions ----
+//
+// `stores/edit-review.ts`'s zustand actions reach this module through a
+// dynamic `import()` of the `ai-panel` barrel (Bun-safety — see that store's
+// header), which means the actions THEMSELVES can't be exercised directly
+// from a Bun test without crashing on that import (same limitation
+// `stores/checkpoints.ts` already has, and why it has no direct test file).
+// The two functions below extract the store's nontrivial branching — "no
+// active turn is a no-op", "anchor to the LAST (current) turn", and "flag a
+// failed reject" — so THAT logic stays independently Bun-testable, same
+// spirit as `registerReviewEntry`/`clearReviewPaths` above.
+
+/** Register a review entry anchored to the LAST turn in `turns` (the currently-open checkpoint turn). */
+export function registerForActiveTurn(
+  entries: Record<string, PendingReviewEntry>,
+  turns: { turnId: string; userMessageId: string }[],
+  path: string,
+  toolCallId: string,
+  now: number,
+): Record<string, PendingReviewEntry> {
+  if (turns.length === 0) return entries; // no active turn — no pre-image captured, nothing to reject back to
+  const { turnId, userMessageId } = turns[turns.length - 1];
+  return registerReviewEntry(entries, { path, turnId, userMessageId, toolCallId, now });
+}
+
+/**
+ * Immutable update: flag `path`'s pending entry as having just failed a
+ * reject attempt (e.g. `restoreFile` I/O error) — a fresh successful
+ * register (see `registerReviewEntry`'s dedupe rule above) clears this flag
+ * again. No-op (returns the SAME record reference) if `path` isn't pending.
+ */
+export function markRejectFailed(
+  entries: Record<string, PendingReviewEntry>,
+  path: string,
+): Record<string, PendingReviewEntry> {
+  const existing = entries[path];
+  if (!existing) return entries;
+  return { ...entries, [path]: { ...existing, lastRejectFailed: true } };
+}

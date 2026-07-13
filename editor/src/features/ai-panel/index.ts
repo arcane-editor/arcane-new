@@ -25,6 +25,16 @@ export type {
 export { saveCheckpoints, loadCheckpoints } from './services/checkpoints/checkpoint-store-io';
 export { runRestorePlan, filterAppliedRestoreEntries } from './services/checkpoints/apply-restore';
 export type { ApplyRestoreDeps, ApplyRestoreOutcome } from './services/checkpoints/apply-restore';
+export { decideRevertOutcome } from './services/checkpoints/revert-outcome';
+export type { RevertOutcome } from './services/checkpoints/revert-outcome';
+export {
+  clearReviewPaths,
+  listPending,
+  registerForActiveTurn,
+  markRejectFailed,
+} from './services/edit-review/review-core';
+export type { PendingReviewEntry } from './services/edit-review/review-core';
+export { saveReviews, loadReviews } from './services/edit-review/review-store-io';
 export type {
   AgentKind,
   Attachment,
