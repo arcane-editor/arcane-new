@@ -170,10 +170,15 @@ export interface WriteApprovalOptions {
  * → `summarizeSceneDiff`), so importing the other way would create a
  * cross-feature cycle — `attachments.ts` made the same call for the same
  * reason (see its "Unity asset attachment" section header).
+ *
+ * Exported (T6) so `edit-review/review-registration.ts` can reuse the SAME
+ * check for its own "does this path keep the pre-apply prompt instead of
+ * entering post-hoc review" decision — that module must not carry a THIRD
+ * copy of this extension list.
  */
 const SERIALIZED_UNITY_ASSET_EXTS = ['.unity', '.prefab', '.asset', '.mat', '.controller', '.anim'];
 
-function isSerializedUnityAssetPath(path: string): boolean {
+export function isSerializedUnityAssetPath(path: string): boolean {
   const lower = path.toLowerCase();
   return SERIALIZED_UNITY_ASSET_EXTS.some((ext) => lower.endsWith(ext));
 }
