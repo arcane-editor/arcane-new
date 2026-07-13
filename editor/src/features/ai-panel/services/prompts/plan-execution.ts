@@ -23,11 +23,12 @@ ${args.planContent}
 
 ## How to execute
 
+- At the start, mirror the plan's **Steps** into \`todo_update\`: one item per step, all \`pending\`.
 - Work through the **Steps** section in order, one at a time.
 - For each step:
-  1. Briefly state which step you're starting (e.g. "Step 3: Add CoinPickup component").
+  1. Briefly state which step you're starting (e.g. "Step 3: Add CoinPickup component"), and mark that step's \`todo_update\` item \`in_progress\`.
   2. Use the read/write/edit/bash tools to perform the work.
-  3. When the step is done and verified, **edit the plan file** (\`${args.planPath}\`) to mark its checkbox as complete: change \`- [ ]\` to \`- [x]\` on that step's line.
+  3. When the step is done and verified, **edit the plan file** (\`${args.planPath}\`) to mark its checkbox as complete: change \`- [ ]\` to \`- [x]\` on that step's line — and mark the same \`todo_update\` item \`done\`.
   4. Move to the next step.
 - If a step requires manual user action in the Unity editor (assigning a prefab in the Inspector, adding a component to a scene GameObject), perform every part you can, then mark the step as complete with a short note like \`- [x] **Step 4: Wire CoinPickup to scene** — created prefab; user must drag into Coins/ in MainScene\`.
 - If a step fails (compile error, missing dependency, ambiguous requirement), do **not** silently skip it. Stop, summarize what failed and what you'd need to proceed, and wait for the user.

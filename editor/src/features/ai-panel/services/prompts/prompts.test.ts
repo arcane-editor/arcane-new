@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'bun:test';
 import { buildAskPrompt } from './ask';
 import { buildAgentPrompt } from './agent';
+import { buildPlanExecutionPrompt } from './plan-execution';
 
 describe('prompt personas (anti-terseness regression)', () => {
   const ask = buildAskPrompt('/proj');
@@ -22,5 +23,25 @@ describe('prompt personas (anti-terseness regression)', () => {
     expect(ask).toContain('Investigate before answering');
     expect(agent).toContain('unity_api_search');
     expect(agent).toContain('Read before you edit');
+  });
+});
+
+describe('todo_update instructions (T9)', () => {
+  const agent = buildAgentPrompt('/proj');
+  const planExecution = buildPlanExecutionPrompt({
+    workspacePath: '/proj',
+    planPath: '/proj/.arcane/plans/plan.md',
+    planContent: '## Steps\n\n- [ ] Step 1: Add CoinPickup component',
+  });
+
+  it('agent prompt has a Task tracking section requiring todo_update for multi-step work', () => {
+    expect(agent).toContain('## Task tracking');
+    expect(agent).toContain('todo_update');
+    expect(agent).toContain('in_progress');
+  });
+
+  it('plan-execution prompt ties todo_update to plan steps', () => {
+    expect(planExecution).toContain('todo_update');
+    expect(planExecution).toContain('mirror the plan');
   });
 });

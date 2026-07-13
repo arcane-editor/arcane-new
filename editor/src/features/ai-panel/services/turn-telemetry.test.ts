@@ -10,6 +10,8 @@ import {
   recordGroundingToolCall,
   recordGroundingUnavailable,
   recordTurnLatency,
+  getPreviousSendNudgeCounts,
+  shouldNudgeTodoUpdate,
 } from './turn-telemetry';
 import type { AgentEvent } from './vendor/types';
 
@@ -114,5 +116,64 @@ describe('turn telemetry', () => {
     expect(nextTurnTelemetry().lastTurnLatencyMs).toBe(42);
     resetTurnTelemetry();
     expect(nextTurnTelemetry().lastTurnLatencyMs).toBeNull();
+  });
+});
+
+describe('shouldNudgeTodoUpdate (T9, Part 4 — pure predicate)', () => {
+  it('nudges when the previous send had >=3 mutating calls and 0 todo_update calls', () => {
+    expect(shouldNudgeTodoUpdate(3, 0)).toBe(true);
+    expect(shouldNudgeTodoUpdate(5, 0)).toBe(true);
+  });
+
+  it('does not nudge below the 3-mutating-call threshold', () => {
+    expect(shouldNudgeTodoUpdate(0, 0)).toBe(false);
+    expect(shouldNudgeTodoUpdate(2, 0)).toBe(false);
+  });
+
+  it('does not nudge once todo_update was called at least once, regardless of mutating count', () => {
+    expect(shouldNudgeTodoUpdate(10, 1)).toBe(false);
+    expect(shouldNudgeTodoUpdate(3, 1)).toBe(false);
+  });
+});
+
+describe('nudge counts (T9, Part 4 — local-only, never sent to the server)', () => {
+  beforeEach(() => resetTurnTelemetry());
+
+  it('defaults to zero counts with nothing recorded', () => {
+    resetTurnTelemetry(); // roll the empty starting state into "previous"
+    expect(getPreviousSendNudgeCounts()).toEqual({ mutatingCalls: 0, todoUpdateCalls: 0 });
+  });
+
+  it('counts write/edit/bash tool_execution_end calls as mutating, and todo_update separately', () => {
+    recordTelemetryEvent(toolEnd(false, 'write'));
+    recordTelemetryEvent(toolEnd(false, 'edit'));
+    recordTelemetryEvent(toolEnd(true, 'bash')); // errors still count as an attempted mutation
+    recordTelemetryEvent(toolEnd(false, 'todo_update'));
+    recordTelemetryEvent(toolEnd(false, 'read')); // not mutating, not todo_update — ignored
+
+    resetTurnTelemetry(); // rolls this send's counts into "previous" for the next send
+    expect(getPreviousSendNudgeCounts()).toEqual({ mutatingCalls: 3, todoUpdateCalls: 1 });
+  });
+
+  it('never leaks into the reported TurnTelemetry (metadata.telemetry) snapshot', () => {
+    recordTelemetryEvent(toolEnd(false, 'write'));
+    recordTelemetryEvent(toolEnd(false, 'write'));
+    recordTelemetryEvent(toolEnd(false, 'write'));
+    const snapshot = nextTurnTelemetry() as unknown as Record<string, unknown>;
+    expect(snapshot.mutatingCalls).toBeUndefined();
+    expect(snapshot.todoUpdateCalls).toBeUndefined();
+  });
+
+  it('resets nudge counts to zero for the new send after snapshotting "previous"', () => {
+    recordTelemetryEvent(toolEnd(false, 'write'));
+    recordTelemetryEvent(toolEnd(false, 'write'));
+    recordTelemetryEvent(toolEnd(false, 'write'));
+    resetTurnTelemetry();
+    expect(getPreviousSendNudgeCounts()).toEqual({ mutatingCalls: 3, todoUpdateCalls: 0 });
+    // A second consecutive reset (e.g. a send with no tool calls at all)
+    // rolls the now-empty counts forward — "previous" reflects THAT send, not
+    // the one before it.
+    resetTurnTelemetry();
+    expect(getPreviousSendNudgeCounts()).toEqual({ mutatingCalls: 0, todoUpdateCalls: 0 });
   });
 });

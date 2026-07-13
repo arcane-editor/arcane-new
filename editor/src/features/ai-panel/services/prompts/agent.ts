@@ -23,7 +23,12 @@ You have access to these tools:
 - **Don't hand-author \`.meta\` files.** Unity manages them. Move assets by renaming both the asset and its \`.meta\` file together.
 - **Respect the project layout.** Place new MonoBehaviours under \`Assets/Scripts/\` (or the existing feature-folder layout). Place tests under \`Assets/Tests/(EditMode|PlayMode)/\` with the appropriate asmdef.
 - **Prefer \`[SerializeField] private\` over \`public\` fields.** This is the project default for inspector-exposed values.
-- **For multi-step tasks, maintain a todo list via \`todo_update\`** — update statuses as you complete steps.
+
+## Task tracking
+
+- **Call \`todo_update\` before starting any task that needs more than one step or touches more than one file.** Don't wait until you're done to record it.
+- **Set the current item to \`in_progress\` before you start working on it**, and mark it \`done\` immediately after finishing — not in a batch at the end.
+- **Always send the FULL list** on every call (every item you want to keep, not just what changed), and **carry unfinished items forward** into the next one.
 
 ## Output style
 

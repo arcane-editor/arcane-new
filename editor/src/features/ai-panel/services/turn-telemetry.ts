@@ -47,8 +47,48 @@ const EMPTY_TELEMETRY: TurnTelemetry = {
 
 let current: TurnTelemetry = { ...EMPTY_TELEMETRY };
 
+/**
+ * Cheap harness nudge (T9, Part 4) — mutating tool calls (`write`/`edit`/
+ * `bash`) and `todo_update` calls observed THIS send. Local-only: unlike
+ * `TurnTelemetry` above, this is never read by `nextTurnTelemetry()` and
+ * never reaches `metadata.telemetry` sent to the server — it only drives the
+ * client-side prompt reminder in `agent-service.ts`.
+ */
+interface NudgeCounts {
+  mutatingCalls: number;
+  todoUpdateCalls: number;
+}
+
+const EMPTY_NUDGE_COUNTS: NudgeCounts = { mutatingCalls: 0, todoUpdateCalls: 0 };
+const MUTATING_TOOL_NAMES = new Set(['write', 'edit', 'bash']);
+
+let nudgeCounts: NudgeCounts = { ...EMPTY_NUDGE_COUNTS };
+/** Snapshot of the PREVIOUS send's `nudgeCounts`, captured by `resetTurnTelemetry()`. */
+let previousSendNudgeCounts: NudgeCounts = { ...EMPTY_NUDGE_COUNTS };
+
 export function resetTurnTelemetry(): void {
+  // Snapshot THIS (about-to-be-superseded) send's nudge counts as "previous"
+  // before zeroing them for the new send — `agent-service.ts`'s sendMessage
+  // calls this once, up front, then later reads `getPreviousSendNudgeCounts()`
+  // while assembling the new send's prompt.
+  previousSendNudgeCounts = nudgeCounts;
+  nudgeCounts = { ...EMPTY_NUDGE_COUNTS };
   current = { ...EMPTY_TELEMETRY };
+}
+
+/** Read-only peek at the PREVIOUS send's nudge counts (T9, Part 4) — consulted by `agent-service.ts` at send time. */
+export function getPreviousSendNudgeCounts(): NudgeCounts {
+  return { ...previousSendNudgeCounts };
+}
+
+/**
+ * Pure predicate (T9, Part 4): should this send's outgoing prompt carry the
+ * "maintain your todo list" reminder? True when the previous send did
+ * substantial mutating work (>=3 write/edit/bash calls) without ever calling
+ * `todo_update`.
+ */
+export function shouldNudgeTodoUpdate(mutatingCalls: number, todoUpdateCalls: number): boolean {
+  return mutatingCalls >= 3 && todoUpdateCalls === 0;
 }
 
 /** Called once when the grounding linter fires a revise turn for this send (P2.2). */
@@ -121,8 +161,16 @@ export function recordTelemetryEvent(event: AgentEvent): void {
   if (event.type === 'tool_execution_end') {
     if (event.isError) {
       current.toolErrorCount++;
-      return;
     }
+    // T9 Part 4: count regardless of error — an attempted mutation is still
+    // work the model should have been tracking, and a failed todo_update
+    // call still counts as the model having tried to use the tool.
+    if (MUTATING_TOOL_NAMES.has(event.toolName)) {
+      nudgeCounts.mutatingCalls++;
+    } else if (event.toolName === 'todo_update') {
+      nudgeCounts.todoUpdateCalls++;
+    }
+    return;
   }
   if (event.type === 'message_end' && event.message.role === 'toolResult') {
     const c = event.message.content;

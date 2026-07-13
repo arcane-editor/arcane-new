@@ -49,7 +49,13 @@ import { withTurnGovernor, resetTurnGovernor, grantExtraCalls } from './turn-gov
 import { withTurnEscalation, resetTurnEscalation } from './turn-escalation';
 import { withStreamErrorGuard } from './stream-error-guard';
 import { withRepeatCallGuard, resetRepeatCallGuard } from './tool-guards';
-import { resetTurnTelemetry, recordTelemetryEvent, recordGroundingLintHit } from './turn-telemetry';
+import {
+  resetTurnTelemetry,
+  recordTelemetryEvent,
+  recordGroundingLintHit,
+  getPreviousSendNudgeCounts,
+  shouldNudgeTodoUpdate,
+} from './turn-telemetry';
 import {
   beginVerifiedPass,
   recordTouchedFile,
@@ -95,6 +101,14 @@ function restoreAgentMessages(messages: AiMessage[]): AgentMessage[] {
 }
 
 const PLACEHOLDER_MODEL: Model = { id: 'auto', name: 'auto', provider: 'arcane' };
+
+/**
+ * T9 Part 4: cheap harness nudge, prepended to the outgoing prompt text (same
+ * mechanism as the attachment prefix below) when `shouldNudgeTodoUpdate`
+ * fires for the previous send. No extra model call — this only shapes what
+ * the model reads in its own next turn.
+ */
+const TODO_NUDGE_TEXT = '[Reminder: maintain your todo list with todo_update for multi-step work.]\n\n';
 
 function getCurrentWorkspacePath(): string {
   return useWorkspaceStore.getState().workspacePath ?? '/';
@@ -422,10 +436,8 @@ export class AgentService {
     resetRepeatCallGuard();
     // Fresh touched-file registry for the verified-pass closing check (P3.4).
     beginVerifiedPass();
-    // Fresh todo list per user turn (P3.5) — a new send starts with no plan
-    // until the model calls todo_update again, same "cleared on new send"
-    // rule the other per-turn state above follows.
-    useAiStore.getState().setArcanePlan(null);
+    // T9: the todo list now lives for the whole session, not just this send —
+    // no reset here (see `resetConversation`/`loadSessionIntoStore` in stores/ai.ts).
 
     // Resolve attachments. File + Unity-doc become a text prefix; image
     // attachments become content blocks routed through promptStructured().
@@ -448,6 +460,18 @@ export class AgentService {
         const data = commaIdx >= 0 ? img.dataUrl.slice(commaIdx + 1) : img.dataUrl;
         return { type: 'image' as const, data, mimeType: img.mimeType };
       });
+    }
+
+    // T9 Part 4: cheap harness nudge — agent/plan-execution only (ask and
+    // plan-planning never call mutating tools, so there's nothing to nudge
+    // about). Applied AFTER the attachment prefix above (not folded into the
+    // same assignment) so it stacks with — rather than getting overwritten
+    // by — an attachment prefix on the same send.
+    if (promptMode === 'agent' || promptMode === 'plan-execution') {
+      const prevCounts = getPreviousSendNudgeCounts();
+      if (shouldNudgeTodoUpdate(prevCounts.mutatingCalls, prevCounts.todoUpdateCalls)) {
+        promptText = TODO_NUDGE_TEXT + promptText;
+      }
     }
 
     // T5 outcome-detection choke point: `before` marks where THIS send's own

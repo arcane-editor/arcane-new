@@ -259,6 +259,7 @@ function buildSaveInput(): SaveSessionInput | null {
     messages: state.messages,
     agentKind: state.selectedAgent,
     workspacePath: useWorkspaceStore.getState().workspacePath,
+    arcanePlan: state.arcanePlan,
   };
 }
 
@@ -569,7 +570,10 @@ export const useAiStore = create<AiState>((set, get) => ({
       // agentKind is coerced to a live kind on load (see session-persistence);
       // old non-Arcane sessions restore as read-only Arcane transcripts.
       selectedAgent: session.agentKind ?? 'arcane',
-      arcanePlan: null,
+      // T9: restore the persisted todo list rather than clearing it — a
+      // session file saved before T9 lacks the key entirely (undefined),
+      // which falls back to null same as a fresh conversation.
+      arcanePlan: session.arcanePlan ?? null,
       attachments: [],
       planPhase: 'idle',
       activePlanPath: null,
@@ -589,7 +593,13 @@ export const useAiStore = create<AiState>((set, get) => ({
   setEffort: (effort: Effort) => set({ effort }),
 
   setSelectedAgent: (agent: AgentKind) => set({ selectedAgent: agent }),
-  setArcanePlan: (plan: ArcanePlanEntry[] | null) => set({ arcanePlan: plan }),
+  setArcanePlan: (plan: ArcanePlanEntry[] | null) => {
+    set({ arcanePlan: plan });
+    // T9: persist mid-turn todo_update calls (debounced) so a crash between
+    // updates doesn't lose the list — agent_end's flushSave() still covers
+    // normal turn completion.
+    scheduleSave();
+  },
 
   addAssistantTextMessage: (text: string) => {
     const id = nextId();

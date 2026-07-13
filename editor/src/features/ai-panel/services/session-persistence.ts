@@ -11,7 +11,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { homeDir, join } from '@tauri-apps/api/path';
-import type { AiMessage } from '../../../stores/ai';
+import type { AiMessage, ArcanePlanEntry } from '../../../stores/ai';
 import { deleteCheckpointsFile } from './checkpoints/checkpoint-store-io';
 import { deleteReviewsFile } from './edit-review/review-store-io';
 import { coerceAgentKind, type AgentKind, type ChatMode, type Effort } from './types';
@@ -27,6 +27,14 @@ export interface SessionData {
   agentKind: AgentKind;
   workspacePath: string | null;
   title: string;
+  /**
+   * Arcane's in-loop todo list (`todo_update`, T9) — persisted so it survives
+   * reload/resume. Optional because session files written before T9 never
+   * wrote this key: `JSON.parse` simply leaves it `undefined` on load, which
+   * `loadSessionIntoStore` (stores/ai.ts) coerces to `null` — same as a
+   * brand-new session with no plan yet.
+   */
+  arcanePlan?: ArcanePlanEntry[] | null;
 }
 
 /** Lightweight header used by the history list (no full message bodies). */
@@ -48,6 +56,8 @@ export interface SaveSessionInput {
   agentKind: AgentKind;
   workspacePath: string | null;
   title?: string;
+  /** See `SessionData.arcanePlan`. */
+  arcanePlan?: ArcanePlanEntry[] | null;
 }
 
 let sessionsDir: string | null = null;
@@ -98,12 +108,14 @@ function sanitizeMessagesForPersistence(messages: AiMessage[]): AiMessage[] {
   });
 }
 
-/** Saves the session JSON. Returns true on success, false if the write failed. */
-export async function saveSession(input: SaveSessionInput): Promise<boolean> {
-  const dir = await getSessionsDir();
-  const filePath = `${dir}/${input.id}.json`;
-
-  const data: SessionData = {
+/**
+ * Pure — builds the on-disk record for a save input. No Tauri calls, so this
+ * (and `parseSessionData` below) is directly Bun-testable without a Tauri
+ * runtime, mirroring `checkpoint-store-io.ts`'s `serializeCheckpoints`/
+ * `parseCheckpoints` split.
+ */
+export function buildSessionData(input: SaveSessionInput): SessionData {
+  return {
     id: input.id,
     createdAt: input.messages[0]?.timestamp ?? Date.now(),
     updatedAt: Date.now(),
@@ -113,7 +125,25 @@ export async function saveSession(input: SaveSessionInput): Promise<boolean> {
     agentKind: input.agentKind,
     workspacePath: input.workspacePath,
     title: input.title ?? deriveTitle(input.messages),
+    arcanePlan: input.arcanePlan ?? null,
   };
+}
+
+/**
+ * Pure — parses a saved session JSON string, applying the `agentKind`
+ * migration coercion (see module doc). No Tauri calls.
+ */
+export function parseSessionData(json: string): SessionData {
+  const data = JSON.parse(json) as SessionData;
+  data.agentKind = coerceAgentKind(data.agentKind);
+  return data;
+}
+
+/** Saves the session JSON. Returns true on success, false if the write failed. */
+export async function saveSession(input: SaveSessionInput): Promise<boolean> {
+  const dir = await getSessionsDir();
+  const filePath = `${dir}/${input.id}.json`;
+  const data = buildSessionData(input);
 
   try {
     await invoke('write_file', { path: filePath, contents: JSON.stringify(data, null, 2) });
@@ -141,11 +171,9 @@ export async function loadSession(sessionId: string): Promise<SessionData | null
   const filePath = `${dir}/${sessionId}.json`;
   try {
     const content = await invoke<string>('read_file', { path: filePath });
-    const data = JSON.parse(content) as SessionData;
-    // Migration: coerce a now-removed agent kind (e.g. 'claude') to a live one
-    // so restore/resume treat the session as Arcane rather than crashing.
-    data.agentKind = coerceAgentKind(data.agentKind);
-    return data;
+    // parseSessionData applies the agentKind migration coercion (a now-removed
+    // agent kind like 'claude' restores as 'arcane' rather than crashing).
+    return parseSessionData(content);
   } catch {
     return null;
   }
