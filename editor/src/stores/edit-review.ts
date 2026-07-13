@@ -36,18 +36,21 @@
  * Bun-test note: because `register`/`accept`/`acceptAll`/`clearForPaths`/
  * `reject`/`rejectAll`/`loadForSession` all reach the barrel via a dynamic
  * import the moment they're actually INVOKED (not merely imported), none of
- * them can be exercised end-to-end from a Bun test without crashing the same
- * way a bare *value* import would — `stores/checkpoints.ts` has the
- * identical limitation and has no direct test file of its own. The
- * nontrivial branching each of these actions relies on (turn-anchoring,
- * dedupe, the reject-failure flag) is instead extracted into
- * `review-core.ts` and tested there (`registerForActiveTurn`,
+ * them can be exercised end-to-end from a Bun test against the REAL barrel
+ * without crashing the same way a bare *value* import would —
+ * `stores/checkpoints.ts` has the identical limitation and has no direct
+ * test file of its own. The nontrivial branching each of these actions
+ * relies on (turn-anchoring, dedupe, the reject-failure flag) is extracted
+ * into `review-core.ts` and tested there (`registerForActiveTurn`,
  * `markRejectFailed`, plus the pre-existing `clearReviewPaths`/`listPending`
  * coverage); `register`'s own decision logic is exercised end-to-end via
  * `edit-review-decorator.test.ts` (through a DI seam, not this real store).
- * The one branch here that IS safe to hit directly — no active turn means
- * `register` returns before ever reaching the dynamic import — is covered
- * below; the rest is manual/e2e verification, same as `stores/checkpoints.ts`.
+ * `stores/edit-review.test.ts` covers the branches that return before the
+ * dynamic import fires, plus the register→sessionId-adoption→persist glue
+ * by substituting the barrel with Bun's `mock.module` (which intercepts
+ * dynamic imports too); the remaining glue (real disk round-trip, the
+ * cross-store `restoreFile` call) is manual/e2e verification, same as
+ * `stores/checkpoints.ts`.
  */
 
 import { create } from 'zustand';
@@ -59,7 +62,12 @@ interface EditReviewState {
   entries: Record<string, PendingReviewEntry>;
   sessionId: string | null;
 
-  /** Register `path` as pending review, anchored to the CURRENT (last) checkpoint turn. No-op if no turn is active. */
+  /**
+   * Register `path` as pending review, anchored to the CURRENT (last)
+   * checkpoint turn. No-op if no turn is active. Also adopts the checkpoints
+   * store's live sessionId (stamped by `beginTurn` at send start) so a fresh
+   * conversation — which never calls `loadForSession` — still persists.
+   */
   register: (path: string, toolCallId: string) => void;
   /** Accept keeps the change — removes the path from the pending set only. */
   accept: (path: string) => void;
@@ -113,10 +121,21 @@ async function registerAsync(
   path: string,
   toolCallId: string,
   turns: { turnId: string; userMessageId: string }[],
+  checkpointSessionId: string | null,
 ): Promise<void> {
   const { registerForActiveTurn } = await import('../features/ai-panel');
   useEditReviewStore.setState((s) => ({
     entries: registerForActiveTurn(s.entries, turns, path, toolCallId, Date.now()),
+    // Fresh-session fix (T7 review): a brand-new chat never calls
+    // loadForSession — this store's sessionId would stay null and
+    // persistNow's guard would skip every save for the whole conversation.
+    // Adopt the live session id `beginTurn` authoritatively stamped on the
+    // checkpoints store at send start (register only ever fires inside a
+    // turn, and the two stores are 1:1 by construction), set together with
+    // the entries update. The null-fallback branch is defensive only: an
+    // active turn without a checkpoints sessionId can't happen (`beginTurn`
+    // sets both together, `reset` clears both together).
+    sessionId: checkpointSessionId ?? s.sessionId,
   }));
   schedulePersist();
 }
@@ -135,10 +154,12 @@ export const useEditReviewStore = create<EditReviewState>((set, get) => ({
     // No active turn → no pre-image was ever captured for this write, so a
     // "Reject" would have nothing to restore back to. Checked BEFORE the
     // dynamic import below so this exact branch stays Bun-test-safe (see
-    // this file's header).
-    const turns = useCheckpointsStore.getState().turns;
+    // this file's header). `sessionId` is snapshotted in the SAME getState()
+    // as `turns` so registerAsync adopts a consistent pair — see its
+    // fresh-session comment for why adoption happens on register at all.
+    const { turns, sessionId: checkpointSessionId } = useCheckpointsStore.getState();
     if (turns.length === 0) return;
-    void registerAsync(path, toolCallId, turns);
+    void registerAsync(path, toolCallId, turns, checkpointSessionId);
   },
 
   accept: (path) => {
