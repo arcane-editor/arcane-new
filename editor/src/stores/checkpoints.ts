@@ -66,8 +66,14 @@ interface CheckpointsState {
 
   /** Start a new checkpoint turn for a user send. Subsequent `recordPreWrite` calls append to it. */
   beginTurn: (sessionId: string, userMessageId: string) => void;
-  /** Snapshot a path's content immediately before a write. `null` = the file didn't exist. */
-  recordPreWrite: (path: string, beforeContent: string | null) => void;
+  /**
+   * Snapshot a path's content immediately before a write. `null` = the file
+   * didn't exist. `toolCallId` (T6) is the tool call that triggered this
+   * write — stored on the entry so `checkpoint-selection.ts`'s
+   * `findCheckpointTurnForToolCall` can match the exact call, falling back
+   * to the (userMessageId, path) heuristic when absent.
+   */
+  recordPreWrite: (path: string, beforeContent: string | null, toolCallId?: string) => void;
   /** Restore every path touched by `turnId` (and every turn after it) to its pre-turn-N state. */
   restoreTurn: (turnId: string) => Promise<RestoreResult>;
   /** Same as `restoreTurn`, scoped to a single path. */
@@ -166,18 +172,22 @@ export const useCheckpointsStore = create<CheckpointsState>((set, get) => ({
     schedulePersist();
   },
 
-  recordPreWrite: (path, beforeContent) => {
+  recordPreWrite: (path, beforeContent, toolCallId) => {
     set((s) => {
       if (s.turns.length === 0) return s; // no active turn — nothing wired beginTurn first, no-op
       const last = s.turns[s.turns.length - 1];
-      if (last.entries.some((e) => e.path === path)) return s; // dedupe: first snapshot per path per turn wins
+      // Dedupe: first snapshot per path per turn wins — including its
+      // toolCallId, even if a later same-turn write for this path carries a
+      // different one (see `checkpoint-selection.ts`'s
+      // `findCheckpointTurnForToolCall` fallback for that exact case).
+      if (last.entries.some((e) => e.path === path)) return s;
 
       const entry: CheckpointEntry =
         beforeContent === null
-          ? { path, kind: 'created', timestamp: Date.now() }
+          ? { path, kind: 'created', timestamp: Date.now(), toolCallId }
           : byteLength(beforeContent) > MAX_SNAPSHOT_BYTES
-            ? { path, kind: 'modified', tooLarge: true, timestamp: Date.now() }
-            : { path, kind: 'modified', beforeContent, timestamp: Date.now() };
+            ? { path, kind: 'modified', tooLarge: true, timestamp: Date.now(), toolCallId }
+            : { path, kind: 'modified', beforeContent, timestamp: Date.now(), toolCallId };
 
       const updatedTurn: CheckpointTurn = { ...last, entries: [...last.entries, entry] };
       return { turns: [...s.turns.slice(0, -1), updatedTurn] };

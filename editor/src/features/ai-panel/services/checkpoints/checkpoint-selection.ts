@@ -32,11 +32,13 @@ export function selectCheckpointTurnsForMessage(
  *
  * `CheckpointEntry.toolCallId` (restore-plan.ts) documents itself as "the
  * tool call that triggered this snapshot, if known (future per-file revert
- * UI)" — but it's never actually populated: `checkpoint-gate.ts`'s
- * `recordPreWrite` call, and `stores/checkpoints.ts`'s `recordPreWrite`
- * action signature, don't thread a toolCallId through at all. Rather than
- * wire that up (out of scope here — see the P5.1 brief), this matches by
- * (user-message turn, path) instead: scope to the turns already selected by
+ * UI)". As of T6 it IS populated (`checkpoint-gate.ts`'s `recordPreWrite`
+ * call and `stores/checkpoints.ts`'s `recordPreWrite` action both thread it
+ * through) — `findCheckpointTurnForToolCall` below prefers an exact match on
+ * it. This function remains the fallback (old persisted checkpoints predate
+ * the toolCallId field; a same-turn second write dedupe-shares the first
+ * call's id — see that function's header): it matches by (user-message
+ * turn, path) instead — scope to the turns already selected by
  * `selectCheckpointTurnsForMessage` for this message, then find the one that
  * recorded an entry for `path`. Picks the LAST (most recent) matching turn —
  * the plan-execution edge case that function's header documents can yield
@@ -53,4 +55,36 @@ export function findCheckpointTurnForPath(
     if (candidates[i].entries.some((e) => e.path === path)) return candidates[i];
   }
   return undefined;
+}
+
+/**
+ * T6: the toolCallId-aware version of `findCheckpointTurnForPath`, for the
+ * edit-review "Reject" flow (T7) to find the exact checkpoint turn a
+ * specific tool call's pre-image lives in.
+ *
+ * Exact match first: newest-first scan for a turn containing an entry with
+ * BOTH `entry.toolCallId === toolCallId` AND `entry.path === path` (the path
+ * check guards against a toolCallId somehow colliding across paths, which
+ * shouldn't happen but costs nothing to check). Falls back to
+ * `findCheckpointTurnForPath` (returning `null` instead of `undefined` for
+ * "no match at all") when no entry carries a matching toolCallId — either
+ * because the checkpoint predates T6 (no toolCallId field on the entry at
+ * all), or because this is a same-turn second write to `path`: dedupe in
+ * `stores/checkpoints.ts`'s `recordPreWrite` keeps only the FIRST entry per
+ * path per turn, so a second tool call touching the same path in the same
+ * turn never gets its own entry — the one entry that exists still carries
+ * the FIRST call's toolCallId, not the second's.
+ */
+export function findCheckpointTurnForToolCall(
+  turns: CheckpointTurn[],
+  toolCallId: string,
+  userMessageId: string,
+  path: string,
+): CheckpointTurn | null {
+  for (let i = turns.length - 1; i >= 0; i--) {
+    if (turns[i].entries.some((e) => e.toolCallId === toolCallId && e.path === path)) {
+      return turns[i];
+    }
+  }
+  return findCheckpointTurnForPath(turns, userMessageId, path) ?? null;
 }

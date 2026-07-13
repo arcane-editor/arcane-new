@@ -43,7 +43,14 @@ export interface CheckpointGateDeps {
   isEnabled: () => boolean;
   /** Reads the file's current content; resolves `null` if it doesn't exist (or is unreadable). */
   readBeforeContent: (absPath: string) => Promise<string | null>;
-  recordPreWrite: (absPath: string, beforeContent: string | null) => void;
+  /**
+   * `toolCallId` (T6) — the tool `execute` call's own `id`, threaded through
+   * so the recorded `CheckpointEntry` can carry it (see
+   * `stores/checkpoints.ts`'s `recordPreWrite` and
+   * `checkpoint-selection.ts`'s `findCheckpointTurnForToolCall`). Optional so
+   * existing fakes/deps that don't care about it keep compiling unchanged.
+   */
+  recordPreWrite: (absPath: string, beforeContent: string | null, toolCallId?: string) => void;
 }
 
 export interface CheckpointGateOptions {
@@ -64,8 +71,8 @@ async function defaultReadBeforeContent(absPath: string): Promise<string | null>
   return invoke<string>('read_file', { path: absPath }).catch(() => null);
 }
 
-function defaultRecordPreWrite(absPath: string, beforeContent: string | null): void {
-  useCheckpointsStore.getState().recordPreWrite(absPath, beforeContent);
+function defaultRecordPreWrite(absPath: string, beforeContent: string | null, toolCallId?: string): void {
+  useCheckpointsStore.getState().recordPreWrite(absPath, beforeContent, toolCallId);
 }
 
 const DEFAULT_DEPS: CheckpointGateDeps = {
@@ -104,7 +111,7 @@ export function withCheckpoint(
         }
         if (absPath !== null) {
           const before = await deps.readBeforeContent(absPath);
-          deps.recordPreWrite(absPath, before);
+          deps.recordPreWrite(absPath, before, id);
         }
       }
 

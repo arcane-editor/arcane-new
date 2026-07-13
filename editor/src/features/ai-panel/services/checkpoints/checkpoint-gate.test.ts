@@ -203,6 +203,22 @@ describe('withCheckpoint', () => {
     });
   });
 
+  it('passes the execute id through to recordPreWrite as the toolCallId (T6 plumbing)', async () => {
+    let recordedToolCallId: string | undefined;
+    const deps: CheckpointGateDeps = {
+      isEnabled: () => true,
+      readBeforeContent: async () => 'before-content',
+      recordPreWrite: (_absPath, _before, toolCallId) => {
+        recordedToolCallId = toolCallId;
+      },
+    };
+    const gate = withCheckpoint(fakeTool('Successfully wrote 1 bytes (1 lines) to /proj/Foo.cs'), CWD, { deps });
+
+    await gate.execute('call-xyz', { path: 'Foo.cs', content: 'x' });
+
+    expect(recordedToolCallId).toBe('call-xyz');
+  });
+
   it('still records normally for a path INSIDE allowedRoot', async () => {
     let recordedPath: string | undefined;
     const deps: CheckpointGateDeps = {

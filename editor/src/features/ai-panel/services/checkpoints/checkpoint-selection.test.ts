@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'bun:test';
-import { selectCheckpointTurnsForMessage, findCheckpointTurnForPath } from './checkpoint-selection';
+import {
+  selectCheckpointTurnsForMessage,
+  findCheckpointTurnForPath,
+  findCheckpointTurnForToolCall,
+} from './checkpoint-selection';
 import type { CheckpointEntry, CheckpointTurn } from './restore-plan';
 
 function entry(overrides: Partial<CheckpointEntry> & Pick<CheckpointEntry, 'path'>): CheckpointEntry {
@@ -94,5 +98,44 @@ describe('findCheckpointTurnForPath', () => {
   it('does not match a turn belonging to a different user message', () => {
     const other = turn('t1', 'msg-2', [entry({ path: '/Foo.cs' })]);
     expect(findCheckpointTurnForPath([other], 'msg-1', '/Foo.cs')).toBeUndefined();
+  });
+});
+
+// T6: toolCallId is now actually populated (checkpoint-gate.ts / stores/checkpoints.ts
+// plumbing), so per-file revert can match the EXACT tool call that produced
+// the still-visible diff, instead of the (userMessageId, path) heuristic —
+// which the P5.1-era comment above documents as a fallback for when no entry
+// carries a toolCallId (old persisted checkpoints) or when a same-turn second
+// write dedupe-shares the first call's id.
+describe('findCheckpointTurnForToolCall', () => {
+  it('exact toolCallId match wins over the path heuristic (which would otherwise pick the LAST matching turn)', () => {
+    const first = turn('t1', 'msg-1', [entry({ path: '/Foo.cs', toolCallId: 'call-1' })]);
+    const second = turn('t2', 'msg-1', [entry({ path: '/Foo.cs', toolCallId: 'call-2' })]);
+    const turns = [first, second];
+
+    // Sanity check: the path-only heuristic would pick the LAST turn.
+    expect(findCheckpointTurnForPath(turns, 'msg-1', '/Foo.cs')).toBe(second);
+
+    // But an exact toolCallId match for call-1 must return the FIRST turn.
+    expect(findCheckpointTurnForToolCall(turns, 'call-1', 'msg-1', '/Foo.cs')).toBe(first);
+  });
+
+  it('falls back to the path heuristic when no entry carries a toolCallId (old persisted checkpoints)', () => {
+    const t1 = turn('t1', 'msg-1', [entry({ path: '/Foo.cs' })]); // no toolCallId field at all
+    expect(findCheckpointTurnForToolCall([t1], 'call-unknown', 'msg-1', '/Foo.cs')).toBe(t1);
+  });
+
+  it('falls back to the path heuristic for a same-turn second write (entry carries the FIRST call\'s id, query uses the SECOND\'s)', () => {
+    // Dedupe (stores/checkpoints.ts's recordPreWrite) keeps only the first
+    // snapshot per path per turn, so a second write to the same path within
+    // the same turn never gets its own entry — the entry still carries the
+    // first write's toolCallId.
+    const t1 = turn('t1', 'msg-1', [entry({ path: '/Foo.cs', toolCallId: 'call-1' })]);
+    expect(findCheckpointTurnForToolCall([t1], 'call-2', 'msg-1', '/Foo.cs')).toBe(t1);
+  });
+
+  it('returns null when nothing matches at all (neither exact id nor the path heuristic)', () => {
+    const t1 = turn('t1', 'msg-1', [entry({ path: '/Foo.cs', toolCallId: 'call-1' })]);
+    expect(findCheckpointTurnForToolCall([t1], 'call-x', 'msg-1', '/Bar.cs')).toBeNull();
   });
 });
