@@ -28,9 +28,14 @@ index_name = "unity-docs-v1"
 [vars]
 ENVIRONMENT = "production"
 # AI Gateway id — when set, all Workers AI calls route through it for
-# caching/logging/rate-limits. Left EMPTY for now: the existing "arcane-gateway"
-# is an *authenticated* gateway, which the Workers AI binding cannot pass
-# cf-aig-authorization to. To enable it: in the dashboard open the gateway's
-# Settings and turn OFF "Authenticated Gateway", then set this back to
-# "arcane-gateway" and redeploy. Empty = no gateway (models still work).
-CF_AI_GATEWAY_ID = ""
+# caching/logging/rate-limits. Requests sent via the Workers AI `binding` (as
+# opposed to the public REST endpoint) are pre-authenticated within the
+# account, so an *authenticated* gateway works fine from here — the
+# `cf-aig-authorization` header is only required for the public REST endpoint.
+# See: ai-gateway/configuration/authentication ("Expected behavior").
+# Empty string = no gateway (models still work, just without caching/logging).
+CF_AI_GATEWAY_ID = "arcane-ai-gateway"
+
+[observability]
+enabled = true
+head_sampling_rate = 1

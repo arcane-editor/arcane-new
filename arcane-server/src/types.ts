@@ -84,4 +84,4 @@ export type StreamEvent =
     | { type: 'tool_call'; id: string; name: string; arguments: string; finished: boolean }
     | { type: 'usage'; input_tokens: number; output_tokens: number; cached_input_tokens?: number }
     | { type: 'thinking'; thought: string; signature: string }
-    | { type: 'error'; message: string };
+    | { type: 'error'; code?: 'model_error' | 'rate_limit' | 'server_error'; message: string };

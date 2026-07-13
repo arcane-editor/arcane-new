@@ -5,6 +5,7 @@ import { streamCompletion } from '../services/llm-router.ts';
 import { estimateCost } from '../lib/costs.ts';
 import { getIntensityConfig } from '../config/plans.ts';
 import { upsertUsagePeriod, createRequestLog, getCurrentPeriodStart, getNextPeriodStart, getHourlyCost } from '../lib/db.ts';
+import { logChatError } from '../lib/log.ts';
 import type { AuthPayload } from '../middleware/auth.ts';
 
 export const chatRouter = new Hono<AppEnv>();
@@ -155,6 +156,11 @@ chatRouter.post('/v1/chat/completions', async (c) => {
             });
         } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
+            logChatError(
+                { userId: user.sub, model: body.model, reasoningLevel: body.metadata?.reasoningLevel, taskType: body.metadata?.taskType },
+                'chat.nonstream.catch',
+                message,
+            );
             return c.json({ error: { message, type: 'server_error' } }, 500);
         }
     }
@@ -172,13 +178,25 @@ chatRouter.post('/v1/chat/completions', async (c) => {
                     outputTokens = event.output_tokens;
                     cachedInputTokens = event.cached_input_tokens ?? 0;
                 }
+                if (event.type === 'error') {
+                    logChatError(
+                        { userId: user.sub, model: body.model, reasoningLevel: body.metadata?.reasoningLevel, taskType: body.metadata?.taskType },
+                        'chat.stream.forward',
+                        event.message,
+                    );
+                }
                 await stream.writeSSE({ data: JSON.stringify(event) });
             }
             await stream.writeSSE({ data: '[DONE]' });
         } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
+            logChatError(
+                { userId: user.sub, model: body.model, reasoningLevel: body.metadata?.reasoningLevel, taskType: body.metadata?.taskType },
+                'chat.stream.catch',
+                message,
+            );
             await stream.writeSSE({
-                data: JSON.stringify({ type: 'error', message }),
+                data: JSON.stringify({ type: 'error', code: 'server_error', message }),
             });
         } finally {
             const durationMs = Date.now() - startTime;

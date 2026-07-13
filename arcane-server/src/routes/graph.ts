@@ -94,7 +94,9 @@ graphRouter.post('/v1/graph/enrich', async (c) => {
         return c.json({ error: 'Invalid graph payload' }, 400);
     }
 
-    const model = workersAiProvider(c.env)(ENRICH_MODEL);
+    // Generative enrichment, like chat, is sampled (temperature 0.2) — skip the
+    // gateway cache so a repeat call doesn't replay a stale sampled response.
+    const model = workersAiProvider(c.env, { skipCache: true })(ENRICH_MODEL);
 
     const system = [
         'You are a code-architecture summarizer. You are given a structural code',

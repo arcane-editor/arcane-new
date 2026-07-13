@@ -37,4 +37,17 @@ app.route('/', usageRouter);
 // Admin routes (auth + admin middleware applied inside adminRouter)
 app.route('/', adminRouter);
 
+// Catch-all for anything that escapes route-level try/catch (unexpected
+// throws, middleware failures) — logs structured JSON and never leaks
+// internal error details to the client.
+app.onError((err, c) => {
+    console.error(JSON.stringify({
+        event: 'unhandled_error',
+        path: c.req.path,
+        message: err.message,
+        stack: err.stack,
+    }));
+    return c.json({ error: { message: 'Internal error', type: 'server_error' } }, 500);
+});
+
 export default app;

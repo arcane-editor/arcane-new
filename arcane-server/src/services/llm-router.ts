@@ -11,20 +11,27 @@ export interface WorkersAiEnv {
     CF_AI_GATEWAY_ID?: string;
 }
 
+export interface GatewayOverrides {
+    skipCache?: boolean;
+}
+
 // Shared provider factory (used by chat, embeddings and graph enrichment). The
 // gateway is included only when configured, so a not-yet-created gateway never
 // breaks inference — it just loses the gateway's caching/logging until set.
-export function workersAiProvider(env: WorkersAiEnv) {
+// `gatewayOverrides` lets call sites tune per-request gateway behavior (e.g.
+// skipCache for non-deterministic/sampled completions) without affecting the
+// no-gateway-configured case, where no `gateway` key is sent at all.
+export function workersAiProvider(env: WorkersAiEnv, gatewayOverrides?: GatewayOverrides) {
     return createWorkersAI({
         binding: env.AI,
-        ...(env.CF_AI_GATEWAY_ID ? { gateway: { id: env.CF_AI_GATEWAY_ID } } : {}),
+        ...(env.CF_AI_GATEWAY_ID ? { gateway: { id: env.CF_AI_GATEWAY_ID, ...(gatewayOverrides ?? {}) } } : {}),
     });
 }
 
-export function resolveModel(modelId: string, env: WorkersAiEnv) {
+export function resolveModel(modelId: string, env: WorkersAiEnv, gatewayOverrides?: GatewayOverrides) {
     // modelId is a Workers AI catalog id (e.g. '@cf/zai-org/glm-5.2' or 'minimax/m3'),
     // resolved entirely on the backend from the request's reasoningLevel.
-    return workersAiProvider(env)(modelId as string);
+    return workersAiProvider(env, gatewayOverrides)(modelId as string);
 }
 
 export function convertMessages(messages: ChatMessage[]): ModelMessage[] {
@@ -101,7 +108,10 @@ export function convertTools(tools?: ToolDefinition[]): ToolSet | undefined {
 }
 
 export async function* streamCompletion(req: ChatCompletionRequest, env: WorkersAiEnv): AsyncGenerator<StreamEvent> {
-    const model = resolveModel(req.model, env);
+    // A cached replay of a sampled completion is semantically wrong — chat
+    // completions are non-deterministic (temperature-sampled), so bypass the
+    // gateway cache for this path.
+    const model = resolveModel(req.model, env, { skipCache: true });
     const messages = convertMessages(req.messages);
     const tools = convertTools(req.tools);
 
@@ -149,9 +159,14 @@ export async function* streamCompletion(req: ChatCompletionRequest, env: Workers
             case 'reasoning-delta':
                 yield { type: 'thinking', thought: part.text, signature: '' };
                 break;
-            case 'error':
-                yield { type: 'error', message: String(part.error) };
+            case 'error': {
+                const message = String(part.error);
+                // Workers AI error code 3021 is the platform's rate-limit code;
+                // also match the common textual markers case-insensitively.
+                const isRateLimit = /rate limit|429|3021/i.test(message);
+                yield { type: 'error', code: isRateLimit ? 'rate_limit' : 'model_error', message };
                 break;
+            }
         }
     }
 }
