@@ -48,6 +48,14 @@ interface ArcaneStreamEvent {
    */
   cached_input_tokens?: number;
   message?: string;
+  /**
+   * Structured error classification from the Arcane server (T1's gateway
+   * work), present alongside `message` on `type: 'error'` events. When set,
+   * folded into the error message as a leading `[code:<x>]` marker that
+   * `turn-errors.ts`'s `classifyTurnError` strips and maps precisely (rather
+   * than substring-matching `message`).
+   */
+  code?: 'model_error' | 'rate_limit' | 'server_error';
 }
 
 export interface ArcaneStreamHardeningConfig {
@@ -73,6 +81,33 @@ interface ResolvedArcaneStreamConfig {
 
 function abortedMessage(): AssistantMessage {
   return { role: 'assistant', content: [], stopReason: 'aborted', timestamp: Date.now() };
+}
+
+/**
+ * Builds the `error` event pushed when a stream produced no content blocks
+ * but did see `malformedLines` unparseable `data:` lines — a corrupted
+ * response, distinct from a clean empty turn. Called from both stream-
+ * finalize points (the `[DONE]` branch and the reader-end fallthrough); by
+ * construction `contentBlocks` is empty at both call sites, matching the
+ * other error pushes in this file (`partial` with `stopReason: 'error'` and
+ * `errorMessage` mirroring the thrown error's message).
+ */
+function corruptionErrorEvent(
+  malformedLines: number,
+  contentBlocks: AssistantMessage['content'],
+): { type: 'error'; error: Error; partial: AssistantMessage } {
+  const message = `Response corrupted — ${malformedLines} unreadable event(s) from the server`;
+  return {
+    type: 'error',
+    error: new Error(message),
+    partial: {
+      role: 'assistant',
+      content: contentBlocks,
+      stopReason: 'error',
+      errorMessage: message,
+      timestamp: Date.now(),
+    },
+  };
 }
 
 /**
@@ -228,6 +263,11 @@ async function doStream(
         // Expired/revoked token: clear local auth state so the Arcane
         // sign-in gate appears and we avoid repeated unauthorized calls.
         // Never retried — a retry would just repeat the same 401/403.
+        // Set BEFORE logout() so the notice is already in the store by the
+        // time the sign-in gate replaces the timeline.
+        useAiStore
+          .getState()
+          .setAuthNotice('Your session expired and you were signed out. Sign in again to continue.');
         await useAuthStore.getState().logout().catch(() => {});
         throw new Error('Authentication expired. Please log in again.');
       }
@@ -276,6 +316,11 @@ async function doStream(
   let thinkingIndex = -1;
   let toolCallIndices: Map<string, number> = new Map();
   const contentBlocks: AssistantMessage['content'] = [];
+  // Count of `data:` lines that failed JSON.parse. If the whole stream turns
+  // out to be nothing but noise (no content blocks produced), that's a
+  // corrupted response worth surfacing distinctly rather than silently
+  // finalizing as an empty "done" (which today renders as an empty bubble).
+  let malformedLines = 0;
 
   try {
     while (true) {
@@ -301,6 +346,10 @@ async function doStream(
         if (!line.startsWith('data: ')) continue;
         const data = line.slice(6).trim();
         if (data === '[DONE]') {
+          if (contentBlocks.length === 0 && malformedLines > 0) {
+            stream.push(corruptionErrorEvent(malformedLines, contentBlocks));
+            return;
+          }
           // Stream complete
           const finalMessage: AssistantMessage = {
             role: 'assistant',
@@ -316,6 +365,7 @@ async function doStream(
         try {
           event = JSON.parse(data);
         } catch {
+          malformedLines++;
           continue; // Skip malformed events
         }
 
@@ -392,14 +442,21 @@ async function doStream(
             break;
           }
           case 'error': {
+            // A structured `code` (T1's gateway work) takes precedence: fold
+            // it into a leading `[code:<x>]` marker that `classifyTurnError`
+            // strips and maps precisely, instead of substring-matching
+            // `message` alone.
+            const message = event.code
+              ? `[code:${event.code}] ${event.message}`
+              : (event.message ?? 'Unknown server error');
             stream.push({
               type: 'error',
-              error: new Error(event.message ?? 'Unknown server error'),
+              error: new Error(message),
               partial: {
                 role: 'assistant',
                 content: contentBlocks,
                 stopReason: 'error',
-                errorMessage: event.message,
+                errorMessage: message,
                 timestamp: Date.now(),
               },
             });
@@ -440,6 +497,10 @@ async function doStream(
   }
 
   // If we reach here without [DONE], finalize
+  if (contentBlocks.length === 0 && malformedLines > 0) {
+    stream.push(corruptionErrorEvent(malformedLines, contentBlocks));
+    return;
+  }
   const finalMessage: AssistantMessage = {
     role: 'assistant',
     content: contentBlocks,

@@ -15,9 +15,11 @@ import {
   type Effort,
   type SaveSessionInput,
   type SessionData,
+  type StopReason,
   type TextContent,
   type ThinkingContent,
   type ToolCall,
+  type TurnError,
   type VerifiedCardData,
   resetWriteApprovalSession,
 } from '../features/ai-panel';
@@ -35,11 +37,32 @@ export interface PermissionOption {
 
 export interface AiMessage {
   id: string;
-  role: 'user' | 'assistant' | 'toolResult' | 'system' | 'permissionRequest' | 'verifiedPass';
+  role:
+    | 'user'
+    | 'assistant'
+    | 'toolResult'
+    | 'system'
+    | 'permissionRequest'
+    | 'verifiedPass'
+    | 'error';
   /** User message text */
   text?: string;
   /** Assistant message content blocks (text, thinking, tool calls) */
   content?: (TextContent | ThinkingContent | ToolCall)[];
+  /**
+   * Turn-error classification (T3's `turn-errors.ts`), `role: 'error'` only.
+   * Synthesized at T5's single choke point (outcome detection) — this task
+   * only plumbs the field through the store/persistence layer.
+   */
+  turnError?: TurnError;
+  /**
+   * Assistant provenance copied verbatim from the vendor `AssistantMessage`
+   * at `message_end` (`role: 'assistant'` only) — how the turn ended and,
+   * for an error tail, the raw message. Must survive persistence so a
+   * reloaded session can still detect a prior error tail.
+   */
+  stopReason?: StopReason;
+  errorMessage?: string;
   /** Tool result fields */
   toolCallId?: string;
   toolName?: string;
@@ -132,6 +155,13 @@ interface AiState {
   isAgentRunning: boolean;
   toolCalls: Map<string, ToolCallStatus>;
   errorMessage: string | null;
+  /**
+   * Set by `arcane-stream.ts` right before a 401/403-triggered logout, so
+   * the sign-in gate that replaces the timeline can explain why the user
+   * was signed out. Survives the logout-induced UI switch (unlike a
+   * transient toast) because it lives in this store, not a dismissed one.
+   */
+  authNotice: string | null;
 
   // Configuration
   mode: ChatMode;
@@ -168,6 +198,11 @@ interface AiState {
   addUserMessage: (text: string, attachments?: Attachment[]) => void;
   setAgentRunning: (running: boolean) => void;
   setError: (error: string | null) => void;
+  setAuthNotice: (notice: string | null) => void;
+  /** Appends a `role: 'error'` message (T5's outcome-detection choke point) and flushes it to disk immediately — an error must survive an instant quit. Returns the new message id. */
+  addTurnError: (error: TurnError) => string;
+  /** Drops all messages after `messageId` (keeping it), prunes now-orphaned `toolCalls` entries, and schedules a save. Used by Retry (T5) to roll history back before re-sending. */
+  truncateAfterMessage: (messageId: string) => void;
   resetConversation: () => void;
   /** Load a saved session's messages + config into the store for viewing/resume. */
   loadSessionIntoStore: (session: SessionData) => void;
@@ -255,6 +290,7 @@ export const useAiStore = create<AiState>((set, get) => ({
   isAgentRunning: false,
   toolCalls: new Map(),
   errorMessage: null,
+  authNotice: null,
   mode: 'agent',
   effort: 'high',
   sessionId: null,
@@ -275,12 +311,23 @@ export const useAiStore = create<AiState>((set, get) => ({
           sessionId = generateSessionId();
           set({ sessionId });
         }
-        set({ isAgentRunning: true, errorMessage: null });
+        set({ isAgentRunning: true, errorMessage: null, authNotice: null });
         break;
       }
 
       case 'agent_end': {
-        set({ isAgentRunning: false, streamingMessageId: null });
+        set((s) => ({
+          isAgentRunning: false,
+          streamingMessageId: null,
+          // A streaming message can still be dangling here if the loop died
+          // without a matching message_end (e.g. a crash) — clear its spinner
+          // rather than leaving it frozen mid-stream.
+          messages: s.streamingMessageId
+            ? s.messages.map((m) =>
+                m.id === s.streamingMessageId ? { ...m, isStreaming: false } : m,
+              )
+            : s.messages,
+        }));
         // Persist the finished turn immediately (cancels any pending debounce).
         void flushSave();
         break;
@@ -341,12 +388,17 @@ export const useAiStore = create<AiState>((set, get) => ({
         if (msg.role === 'assistant') {
           const streamId = get().streamingMessageId;
           if (streamId) {
+            const am = msg as AssistantMessage;
             set((s) => ({
               messages: s.messages.map((m) =>
                 m.id === streamId
                   ? {
                       ...m,
-                      content: (msg as AssistantMessage).content ?? [],
+                      content: am.content ?? [],
+                      // THE core fix (T4): today both fields are dropped here
+                      // and an error tail renders as an empty bubble.
+                      stopReason: am.stopReason,
+                      errorMessage: am.errorMessage,
                       isStreaming: false,
                     }
                   : m,
@@ -440,6 +492,43 @@ export const useAiStore = create<AiState>((set, get) => ({
 
   setError: (error: string | null) => set({ errorMessage: error }),
 
+  setAuthNotice: (notice: string | null) => set({ authNotice: notice }),
+
+  addTurnError: (error: TurnError) => {
+    const id = nextId();
+    const msg: AiMessage = {
+      id,
+      role: 'error',
+      turnError: error,
+      timestamp: Date.now(),
+    };
+    set((s) => ({ messages: [...s.messages, msg] }));
+    // Errors must survive an instant quit — flush immediately rather than
+    // the debounced scheduleSave() other turn completions use.
+    void flushSave();
+    return id;
+  },
+
+  truncateAfterMessage: (messageId: string) => {
+    const idx = get().messages.findIndex((m) => m.id === messageId);
+    if (idx === -1) return;
+    set((s) => {
+      const kept = s.messages.slice(0, idx + 1);
+      const keptToolCallIds = new Set<string>();
+      for (const m of kept) {
+        for (const block of m.content ?? []) {
+          if (block.type === 'toolCall') keptToolCallIds.add(block.id);
+        }
+      }
+      const nextToolCalls = new Map<string, ToolCallStatus>();
+      for (const [tcId, status] of s.toolCalls) {
+        if (keptToolCallIds.has(tcId)) nextToolCalls.set(tcId, status);
+      }
+      return { messages: kept, toolCalls: nextToolCalls };
+    });
+    scheduleSave();
+  },
+
   flushSessionNow: () => flushSave(),
 
   resetConversation: () => {
@@ -449,6 +538,7 @@ export const useAiStore = create<AiState>((set, get) => ({
       isAgentRunning: false,
       toolCalls: new Map(),
       errorMessage: null,
+      authNotice: null,
       sessionId: null,
       arcanePlan: null,
       attachments: [],
@@ -470,6 +560,7 @@ export const useAiStore = create<AiState>((set, get) => ({
       isAgentRunning: false,
       toolCalls: new Map(),
       errorMessage: null,
+      authNotice: null,
       sessionId: session.id,
       mode: session.mode ?? 'agent',
       effort: session.effort ?? 'high',

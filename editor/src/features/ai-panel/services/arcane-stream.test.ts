@@ -26,12 +26,16 @@ mock.module('../../../stores/auth', () => ({
 
 let aiState: { mode: 'ask' | 'agent' | 'plan' } = { mode: 'ask' };
 let sessionUsageCalls: Array<{ inputTokens: number; outputTokens: number }> = [];
+let authNoticeCalls: Array<string | null> = [];
 mock.module('../../../stores/ai', () => ({
   useAiStore: {
     getState: () => ({
       ...aiState,
       recordSessionUsage: (inputTokens: number, outputTokens: number) => {
         sessionUsageCalls.push({ inputTokens, outputTokens });
+      },
+      setAuthNotice: (notice: string | null) => {
+        authNoticeCalls.push(notice);
       },
     }),
   },
@@ -105,6 +109,7 @@ beforeEach(() => {
   logoutCalls = 0;
   aiState = { mode: 'ask' };
   sessionUsageCalls = [];
+  authNoticeCalls = [];
   resetTurnTelemetry();
 });
 
@@ -187,6 +192,9 @@ describe('createArcaneStreamFn', () => {
     expect(logoutCalls).toBe(1);
     const errorEvent = events.find((e) => e.type === 'error') as Extract<AssistantMessageEvent, { type: 'error' }>;
     expect(errorEvent.error.message).toMatch(/Authentication expired/);
+    expect(authNoticeCalls).toEqual([
+      'Your session expired and you were signed out. Sign in again to continue.',
+    ]);
   });
 
   it('does not retry a 403 — logs out and signals an authentication error', async () => {
@@ -397,6 +405,70 @@ describe('createArcaneStreamFn', () => {
       { inputTokens: 10, outputTokens: 5 },
       { inputTokens: 3, outputTokens: 2 },
     ]);
+  });
+
+  it('reports corruption when the stream carries only malformed data: lines before [DONE]', async () => {
+    const fetchImpl = (async () =>
+      sseResponse([
+        'data: not json\n\n',
+        'data: {also bad\n\n',
+        'data: {"unterminated": \n\n',
+        'data: [DONE]\n\n',
+      ])) as unknown as typeof fetch;
+
+    const streamFn = createArcaneStreamFn({ fetchImpl });
+    const events = await drain(streamFn(ctx, opts()));
+
+    expect(events.some((e) => e.type === 'done')).toBe(false);
+    const errorEvents = events.filter((e) => e.type === 'error');
+    expect(errorEvents.length).toBe(1);
+    const errorEvent = errorEvents[0] as Extract<AssistantMessageEvent, { type: 'error' }>;
+    expect(errorEvent.error.message).toMatch(/Response corrupted — 3 unreadable/);
+  });
+
+  it('finalizes normally when malformed lines are mixed with real text content', async () => {
+    const fetchImpl = (async () =>
+      sseResponse([
+        'data: not json\n\n',
+        'data: {"type":"text","content":"hello"}\n\n',
+        'data: also not json\n\n',
+        'data: [DONE]\n\n',
+      ])) as unknown as typeof fetch;
+
+    const streamFn = createArcaneStreamFn({ fetchImpl });
+    const events = await drain(streamFn(ctx, opts()));
+
+    expect(events.some((e) => e.type === 'error')).toBe(false);
+    const done = events.find((e) => e.type === 'done') as Extract<AssistantMessageEvent, { type: 'done' }>;
+    expect(done).toBeDefined();
+    expect(done.message.content[0]).toEqual({ type: 'text', text: 'hello' });
+  });
+
+  it('reports corruption when the reader ends (no [DONE]) with only malformed lines', async () => {
+    const fetchImpl = (async () =>
+      sseResponse(['data: not json\n\n', 'data: also bad\n\n'])) as unknown as typeof fetch;
+
+    const streamFn = createArcaneStreamFn({ fetchImpl });
+    const events = await drain(streamFn(ctx, opts()));
+
+    expect(events.some((e) => e.type === 'done')).toBe(false);
+    const errorEvent = events.find((e) => e.type === 'error') as Extract<AssistantMessageEvent, { type: 'error' }>;
+    expect(errorEvent).toBeDefined();
+    expect(errorEvent.error.message).toMatch(/Response corrupted — 2 unreadable/);
+  });
+
+  it('propagates a server error code as a bracketed prefix on the error message', async () => {
+    const fetchImpl = (async () =>
+      sseResponse([
+        'data: {"type":"error","code":"rate_limit","message":"slow down"}\n\n',
+      ])) as unknown as typeof fetch;
+
+    const streamFn = createArcaneStreamFn({ fetchImpl });
+    const events = await drain(streamFn(ctx, opts()));
+
+    const errorEvent = events.find((e) => e.type === 'error') as Extract<AssistantMessageEvent, { type: 'error' }>;
+    expect(errorEvent).toBeDefined();
+    expect(errorEvent.error.message).toBe('[code:rate_limit] slow down');
   });
 
   it('surfaces "not logged in" without ever calling fetch', async () => {
