@@ -2,13 +2,21 @@
  * Pre-apply write approval gate (P5.3) — the fix for the Arcane loop's
  * central trust asymmetry: before this gate, Arcane's write/edit tools
  * applied file changes immediately and only the Claude/ACP path prompted
- * first. `withWriteApproval` makes the Arcane path approve-first too:
- * approve-first is the DEFAULT (`ai.edits.applyMode: 'approve'`), with
- * "Apply all this session" one click away, and serialized Unity assets
- * (.unity/.prefab/.asset/.mat/.controller/.anim) ALWAYS prompt even in auto
- * mode (`ai.edits.alwaysApproveUnityAssets`, default true) — the
- * "we don't silently touch serialized data" guarantee. Checkpoints (P5.2)
- * are what make 'auto' a safe opt-in in the first place.
+ * first. `withWriteApproval` makes the Arcane path approve-first too, for
+ * whichever mode calls for it: `ai.edits.applyMode` now DEFAULTS to
+ * `'auto'` (T8) — Cursor-style auto-apply followed by a post-hoc
+ * Accept/Reject review queue (`stores/edit-review.ts`, `ReviewBar.tsx` /
+ * `ToolCallBlock.tsx`'s per-diff actions) — and THIS gate's own pre-apply
+ * prompt only fires for `'approve'`, the opt-in legacy mode that asks before
+ * every edit reaches disk (with "Apply all this session" one click away).
+ * Regardless of mode, serialized Unity assets
+ * (.unity/.prefab/.asset/.mat/.controller/.anim) ALWAYS prompt via THIS gate
+ * (`ai.edits.alwaysApproveUnityAssets`, default true) — the
+ * "we don't silently touch serialized data" guarantee holds in auto mode
+ * too, and such writes never enter the post-hoc review queue instead (see
+ * `edit-review/review-registration.ts`). Checkpoints (P5.2) are what make
+ * 'auto' a safe default in the first place — every auto-applied write can be
+ * rejected back to its pre-image.
  *
  * Known tradeoff — preview/apply staleness window for `edit`: the diff shown
  * in the approval prompt is computed from a disk read at prompt time; the
@@ -146,7 +154,7 @@ export interface WriteApprovalDeps {
     diff: PendingWriteDiff,
     signal?: AbortSignal,
   ) => Promise<WriteApprovalDecision>;
-  /** `ai.edits.applyMode` setting lookup ('approve' default). */
+  /** `ai.edits.applyMode` setting lookup ('auto' default). */
   getApplyMode: () => 'approve' | 'auto';
   /** `ai.edits.alwaysApproveUnityAssets` setting lookup (true default). */
   getAlwaysApproveUnityAssets: () => boolean;
