@@ -10,6 +10,7 @@ import { useAiStore } from '../../../stores/ai';
 import { useAuthStore } from '../../../stores/auth';
 import { resetAgentService } from '../services/agent-service';
 import MessageList from './MessageList';
+import ReviewBar from './ReviewBar';
 import ChatInput from './ChatInput';
 import AiSignInGate from './AiSignInGate';
 import AgentPicker from './AgentPicker';
@@ -89,6 +90,11 @@ function AiChatPanel() {
 
       {/* Messages */}
       <MessageList />
+
+      {/* T8: Cursor-style Accept/Reject bar for pending auto-applied edits
+          (above the T9-pending persistent-todos spot; hidden when nothing
+          is pending). */}
+      <ReviewBar />
 
       {/* Input */}
       <ChatInput />

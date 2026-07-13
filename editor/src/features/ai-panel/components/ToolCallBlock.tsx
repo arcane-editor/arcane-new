@@ -7,11 +7,19 @@
  * dump — raw args are still available behind a "Show raw" sub-toggle. When
  * the tool result carries structured `diffs` (see `diff-decorator.ts` for how
  * the Arcane path populates that field; the Claude/ACP path already did), the
- * block auto-expands and each diff gets an "Open file" affordance plus a
- * per-file "Revert" button backed by P5.2's checkpoint store — its outcome is
+ * block auto-expands and each diff gets an "Open file" affordance.
+ *
+ * T8: with `ai.edits.applyMode` now defaulting to `'auto'`, most diffs arrive
+ * with a pending `stores/edit-review.ts` entry for their path — those render
+ * Cursor-style Accept/Reject buttons instead of the legacy Revert button
+ * (`DiffWithActions`'s `reviewEntry` branch). Once a path is accepted,
+ * rejected, or never entered review at all (legacy approve-mode writes, or
+ * sessions from before T7), it falls through to the original "Open file" +
+ * per-file "Revert" pair backed by P5.2's checkpoint store — its outcome is
  * decided by `checkpoints/revert-outcome.ts` (review finding: `restoreFile`
  * never throws, so success/failure must be read out of its `RestoreResult`,
- * not assumed).
+ * not assumed). That legacy lookup now prefers the exact toolCallId match
+ * (`findCheckpointTurnForToolCall`, T6) over the old path-only fallback.
  */
 
 import { useState, useEffect } from 'react';
@@ -28,10 +36,12 @@ import {
 } from 'lucide-react';
 import type { ToolCall } from '../services/vendor/types';
 import type { ToolCallStatus } from '../../../stores/ai';
+import { useAiStore } from '../../../stores/ai';
 import { humanizeToolCall } from '../services/humanize-tool-call';
 import { useWorkspaceStore } from '../../../stores/workspace';
 import { useCheckpointsStore } from '../../../stores/checkpoints';
-import { findCheckpointTurnForPath } from '../services/checkpoints/checkpoint-selection';
+import { useEditReviewStore } from '../../../stores/edit-review';
+import { findCheckpointTurnForToolCall } from '../services/checkpoints/checkpoint-selection';
 import { decideRevertOutcome } from '../services/checkpoints/revert-outcome';
 import DiffBlock from './DiffBlock';
 
@@ -61,23 +71,36 @@ interface DiffEntry {
   newText: string;
 }
 
-/** "Open file" + per-file "Revert" affordances wrapped around an (untouched) DiffBlock. */
+/**
+ * "Open file" + per-file review affordances wrapped around an (untouched)
+ * DiffBlock. Two mutually exclusive UIs (T8):
+ *  - A pending `stores/edit-review.ts` entry for `diff.path` → Accept/Reject
+ *    (Cursor-style auto-apply review).
+ *  - No pending entry (legacy approve-mode write, already accepted/rejected,
+ *    or a pre-T7 session) → the original per-file Revert button.
+ */
 function DiffWithActions({
   diff,
   turnUserMessageId,
+  toolCallId,
 }: {
   diff: DiffEntry;
   turnUserMessageId: string | null;
+  toolCallId: string;
 }) {
   const turns = useCheckpointsStore((s) => s.turns);
   const restoreFile = useCheckpointsStore((s) => s.restoreFile);
+  const reviewEntry = useEditReviewStore((s) => s.entries[diff.path]);
+  const accept = useEditReviewStore((s) => s.accept);
+  const reject = useEditReviewStore((s) => s.reject);
+  const isAgentRunning = useAiStore((s) => s.isAgentRunning);
   const [busy, setBusy] = useState(false);
   const [reverted, setReverted] = useState(false);
   const [revertFailed, setRevertFailed] = useState(false);
 
   const matchedTurn = turnUserMessageId
-    ? findCheckpointTurnForPath(turns, turnUserMessageId, diff.path)
-    : undefined;
+    ? findCheckpointTurnForToolCall(turns, toolCallId, turnUserMessageId, diff.path)
+    : null;
 
   function openFile() {
     const name = diff.path.split('/').pop() ?? diff.path;
@@ -103,6 +126,58 @@ function DiffWithActions({
     } finally {
       setBusy(false);
     }
+  }
+
+  // Reject reuses the SAME `restoreFile`-backed flow via the edit-review
+  // store's `reject` action — its returned outcome (and any failure) is
+  // tracked on the store entry itself (`lastRejectFailed`), not local state,
+  // so this button reflects the true persisted state even across remounts.
+  async function handleReject() {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await reject(diff.path);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (reviewEntry) {
+    return (
+      <div className="ai-diff-actions-wrap">
+        <div className="ai-diff-actions">
+          <button type="button" className="ai-diff-action-btn" onClick={openFile}>
+            <FileText size={11} />
+            Open file
+          </button>
+          <button type="button" className="ai-diff-action-btn" onClick={() => accept(diff.path)}>
+            <Check size={11} />
+            Accept
+          </button>
+          <button
+            type="button"
+            className={`ai-diff-action-btn${reviewEntry.lastRejectFailed ? ' is-error' : ''}`}
+            onClick={() => void handleReject()}
+            disabled={isAgentRunning || busy}
+            title={
+              reviewEntry.lastRejectFailed
+                ? 'Reject failed — see console for details. Click to retry.'
+                : undefined
+            }
+          >
+            {busy ? (
+              <Loader2 size={11} className="ai-checkpoint-spinner" />
+            ) : (
+              <>
+                <X size={11} />
+                {reviewEntry.lastRejectFailed ? 'Reject failed' : 'Reject'}
+              </>
+            )}
+          </button>
+        </div>
+        <DiffBlock path={diff.path} oldText={diff.oldText} newText={diff.newText} />
+      </div>
+    );
   }
 
   return (
@@ -209,6 +284,7 @@ function ToolCallBlock({ toolCall, status, turnUserMessageId }: ToolCallBlockPro
                   key={`${d.path}-${i}`}
                   diff={d}
                   turnUserMessageId={turnUserMessageId}
+                  toolCallId={toolCall.id}
                 />
               ))}
             </>
