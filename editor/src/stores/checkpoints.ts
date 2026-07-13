@@ -151,6 +151,23 @@ async function refreshAfterRestore(plan: RestorePlanEntry[]): Promise<void> {
   }
 }
 
+/**
+ * T7 restore interplay: a restore (whether from a checkpoint turn's
+ * "Restore" or from the edit-review store's "Reject") is the single source
+ * of truth for clearing a path's pending review — see `stores/edit-review.ts`'s
+ * header. `plan` must already be restricted to the APPLIED subset (same
+ * `filterAppliedRestoreEntries` requirement `refreshAfterRestore` has): a
+ * failed per-file delete/write must NOT clear that file's review, since
+ * nothing was actually restored for it. Dynamic import (not a static one) —
+ * `edit-review.ts` statically imports THIS store, so a static import here
+ * would be a cycle.
+ */
+async function clearEditReviewFor(plan: RestorePlanEntry[]): Promise<void> {
+  if (plan.length === 0) return;
+  const { useEditReviewStore } = await import('./edit-review');
+  useEditReviewStore.getState().clearForPaths(plan.map((e) => e.path));
+}
+
 export const useCheckpointsStore = create<CheckpointsState>((set, get) => ({
   turns: [],
   sessionId: null,
@@ -202,7 +219,9 @@ export const useCheckpointsStore = create<CheckpointsState>((set, get) => ({
     const plan = computeRestorePlan(turns, turnId);
     const skippedTooLarge = getSkippedTooLargePaths(turns, turnId);
     const { applied, failed } = await applyRestorePlan(plan);
-    await refreshAfterRestore(filterAppliedRestoreEntries(plan, applied));
+    const appliedEntries = filterAppliedRestoreEntries(plan, applied);
+    await refreshAfterRestore(appliedEntries);
+    await clearEditReviewFor(appliedEntries);
     return { restored: applied, skippedTooLarge, failed };
   },
 
@@ -213,7 +232,9 @@ export const useCheckpointsStore = create<CheckpointsState>((set, get) => ({
     const plan = computeRestorePlan(turns, turnId).filter((e) => e.path === path);
     const skippedTooLarge = getSkippedTooLargePaths(turns, turnId).filter((p) => p === path);
     const { applied, failed } = await applyRestorePlan(plan);
-    await refreshAfterRestore(filterAppliedRestoreEntries(plan, applied));
+    const appliedEntries = filterAppliedRestoreEntries(plan, applied);
+    await refreshAfterRestore(appliedEntries);
+    await clearEditReviewFor(appliedEntries);
     return { restored: applied, skippedTooLarge, failed };
   },
 

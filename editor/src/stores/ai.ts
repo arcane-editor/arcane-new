@@ -25,6 +25,7 @@ import {
 } from '../features/ai-panel';
 import { useWorkspaceStore } from './workspace';
 import { useCheckpointsStore } from './checkpoints';
+import { useEditReviewStore } from './edit-review';
 import { notify } from './notifications';
 
 // ---- UI-friendly message types ----
@@ -549,6 +550,7 @@ export const useAiStore = create<AiState>((set, get) => ({
       sessionUsage: { input: 0, output: 0, requests: 0 },
     });
     useCheckpointsStore.getState().reset();
+    useEditReviewStore.getState().reset();
     // P5.3: "Apply all this session" doesn't carry across conversations.
     resetWriteApprovalSession();
   },
@@ -576,6 +578,7 @@ export const useAiStore = create<AiState>((set, get) => ({
       sessionUsage: { input: 0, output: 0, requests: 0 },
     }));
     void useCheckpointsStore.getState().loadForSession(session.id);
+    void useEditReviewStore.getState().loadForSession(session.id);
     // P5.3: loading a different session is a fresh approval context too —
     // "Apply all this session" shouldn't leak in from whatever was open before.
     resetWriteApprovalSession();

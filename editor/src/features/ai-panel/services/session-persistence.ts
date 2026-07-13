@@ -13,6 +13,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { homeDir, join } from '@tauri-apps/api/path';
 import type { AiMessage } from '../../../stores/ai';
 import { deleteCheckpointsFile } from './checkpoints/checkpoint-store-io';
+import { deleteReviewsFile } from './edit-review/review-store-io';
 import { coerceAgentKind, type AgentKind, type ChatMode, type Effort } from './types';
 
 export interface SessionData {
@@ -161,6 +162,8 @@ export async function deleteSession(sessionId: string): Promise<void> {
   // GC (P5.2): co-delete this session's checkpoint file — the checkpoint
   // sibling of a `.meta` co-delete. Best-effort; a missing file is fine.
   await deleteCheckpointsFile(sessionId).catch(() => {});
+  // GC (T7): co-delete this session's pending-review file too.
+  await deleteReviewsFile(sessionId).catch(() => {});
 }
 
 /** Rename (re-title) a session in place. */

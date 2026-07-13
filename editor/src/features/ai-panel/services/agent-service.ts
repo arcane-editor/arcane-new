@@ -44,6 +44,7 @@ import {
 import { withCheckpoint } from './checkpoints/checkpoint-gate';
 import { withWriteApproval } from './write-approval-gate';
 import { withResultDiffs } from './diff-decorator';
+import { withEditReview } from './edit-review/edit-review-decorator';
 import { withTurnGovernor, resetTurnGovernor, grantExtraCalls } from './turn-governor';
 import { withTurnEscalation, resetTurnEscalation } from './turn-escalation';
 import { withStreamErrorGuard } from './stream-error-guard';
@@ -205,25 +206,36 @@ function createToolsForPromptMode(mode: PromptMode, workspacePath: string): Agen
   // the diff it attaches reflects the FINAL result the gates have already
   // annotated) but stays INSIDE the repeat-call guard applied by the trailing
   // `.map(withRepeatCallGuard)` below (so a suppressed repeat call never
-  // triggers a redundant pair of diff reads). Full order, outer → inner:
-  // guard(diffs(gates(withWriteApproval(checkpoint(tool))))). This order is
-  // required, not stylistic — see diff-decorator.ts's header for why a gate
-  // hit silently drops `diffs` if a gate ever ends up outside (wrapping) this
-  // decorator.
+  // triggers a redundant pair of diff reads).
+  //
+  // Edit review (T7): `withEditReview` sits OUTSIDE `withResultDiffs` — it
+  // reads `result.diffs`, the field only `withResultDiffs` attaches, so
+  // wrapping inside it would never see a populated result — and stays INSIDE
+  // the repeat-call guard for the same "no redundant registration for a
+  // suppressed repeat" reason `withResultDiffs` stays inside it. Full order,
+  // outer → inner: guard(editReview(diffs(gates(withWriteApproval(checkpoint(tool)))))).
+  // This order is required, not stylistic — see diff-decorator.ts's header
+  // for why a gate hit silently drops `diffs` if a gate ever ends up outside
+  // (wrapping) that decorator, and edit-review-decorator.ts's header for why
+  // it must wrap outside `withResultDiffs` and inside the repeat-call guard.
   return [
     ...readOnly,
     ...graphTools,
     ...unityRead,
     ...(isUnity ? createUnityMutateTools() : []),
-    withResultDiffs(
-      wrapCs(withWriteApproval(withCheckpoint(writeTool, workspacePath, { allowedRoot }), workspacePath, { allowedRoot })),
-      workspacePath,
-      { allowedRoot },
+    withEditReview(
+      withResultDiffs(
+        wrapCs(withWriteApproval(withCheckpoint(writeTool, workspacePath, { allowedRoot }), workspacePath, { allowedRoot })),
+        workspacePath,
+        { allowedRoot },
+      ),
     ),
-    withResultDiffs(
-      wrapCs(withWriteApproval(withCheckpoint(editTool, workspacePath, { allowedRoot }), workspacePath, { allowedRoot })),
-      workspacePath,
-      { allowedRoot },
+    withEditReview(
+      withResultDiffs(
+        wrapCs(withWriteApproval(withCheckpoint(editTool, workspacePath, { allowedRoot }), workspacePath, { allowedRoot })),
+        workspacePath,
+        { allowedRoot },
+      ),
     ),
     createBashTool(workspacePath, {
       operations: tauriBashOperations,
