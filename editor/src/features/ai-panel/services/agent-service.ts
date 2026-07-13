@@ -46,6 +46,7 @@ import { withWriteApproval } from './write-approval-gate';
 import { withResultDiffs } from './diff-decorator';
 import { withTurnGovernor, resetTurnGovernor, grantExtraCalls } from './turn-governor';
 import { withTurnEscalation, resetTurnEscalation } from './turn-escalation';
+import { withStreamErrorGuard } from './stream-error-guard';
 import { withRepeatCallGuard, resetRepeatCallGuard } from './tool-guards';
 import { resetTurnTelemetry, recordTelemetryEvent, recordGroundingLintHit } from './turn-telemetry';
 import {
@@ -65,6 +66,7 @@ import { getUnityGroundingContext } from './prompts/unity-facts';
 import type { ContrastFacts } from './prompts/unity-contrast';
 import { lintAnswer, buildReviseMessage } from './grounding-lint';
 import { resolveAttachments } from './attachments';
+import { classifyTurnError, detectTurnOutcome, loopCrashError } from './turn-errors';
 import type { Model, AgentTool, AgentMessage, TextContent } from './vendor/types';
 import { TIER_CONTEXT_WINDOWS, type Attachment, type ChatMode, type Effort } from './types';
 
@@ -234,6 +236,22 @@ function createToolsForPromptMode(mode: PromptMode, workspacePath: string): Agen
 let agentInstance: AgentService | null = null;
 let lastWorkspacePath: string | null = null;
 
+/**
+ * The exact `(text, opts)` pair passed to the most recent `sendMessage` call
+ * that got past the isRunning/auth guards (T5). `retry-turn.ts` reads this
+ * via `getLastSend()` to replay a failed turn byte-identical to the
+ * original call, without an import cycle — this module never imports
+ * retry-turn.ts. Cleared in `dispose()` (New Chat / workspace switch), so a
+ * retry attempted after a fresh conversation starts never resends stale
+ * text into the new one.
+ */
+let lastSend: { text: string; opts: SendMessageOptions } | null = null;
+
+/** See `lastSend` above. `null` before any send this process, or after a `dispose()` (New Chat / workspace switch). */
+export function getLastSend(): { text: string; opts: SendMessageOptions } | null {
+  return lastSend;
+}
+
 export interface SendMessageOptions {
   mode: ChatMode;
   effort: Effort;
@@ -253,6 +271,13 @@ export class AgentService {
   private agent: Agent;
   private unsubscribe: (() => void) | null = null;
   private unsubscribeTelemetry: (() => void) | null = null;
+  /**
+   * Set by `abort()`, read (and reset) by `sendMessage`'s outcome inspection
+   * (T5): `detectTurnOutcome` needs to know a user-initiated abort happened
+   * even when the vendor loop's own tail is `stopReason: 'toolUse'` (an
+   * abort mid-tool-execution never gets a chance to reach `'aborted'`).
+   */
+  private abortRequested = false;
 
   constructor() {
     const workspacePath = getCurrentWorkspacePath();
@@ -264,8 +289,11 @@ export class AgentService {
       // Escalation (P3.6) sits INSIDE the governor: the governor's own
       // per-effort call-cap lookup must keep reading the send's ORIGINAL
       // effort (unaffected by escalation), while only the request actually
-      // reaching `arcaneStream` should carry the bumped tier.
-      streamFn: withTurnGovernor(withTurnEscalation(arcaneStream)),
+      // reaching `arcaneStream` should carry the bumped tier. The stream-
+      // error guard (T5) sits OUTERMOST so it catches a synchronous throw
+      // from either of those two decorators as well as the innermost
+      // `arcaneStream` itself.
+      streamFn: withStreamErrorGuard(withTurnGovernor(withTurnEscalation(arcaneStream))),
       convertToLlm,
       reasoning: 'mid',
       // Server picks the model per reasoningLevel; default to the smallest tier's
@@ -273,8 +301,17 @@ export class AgentService {
       contextWindow: 32768,
     });
 
+    // T5: a bug in handleAgentEvent (or anything it transitively touches)
+    // must not take down the whole subscribe callback silently — surface it
+    // as a banner (never a timeline block; this runs from inside an event
+    // handler, not a send's own try/catch).
     this.unsubscribe = this.agent.subscribe((event) => {
-      useAiStore.getState().handleAgentEvent(event);
+      try {
+        useAiStore.getState().handleAgentEvent(event);
+      } catch (error) {
+        console.error('Internal UI error while processing agent events:', error);
+        useAiStore.getState().setError('Internal UI error while processing agent events.');
+      }
     });
     this.unsubscribeTelemetry = this.agent.subscribe((event) => recordTelemetryEvent(event));
   }
@@ -308,6 +345,11 @@ export class AgentService {
   }
 
   async sendMessage(text: string, opts: SendMessageOptions): Promise<void> {
+    // T5: fresh per-send abort tracking — reset unconditionally, even ahead
+    // of the guards below, so a leftover `true` from a prior aborted send
+    // never contaminates this one (mirrors the other per-send resets below).
+    this.abortRequested = false;
+
     // Guard against concurrent entry: callers like fixConsoleError() invoke
     // sendMessage() without the composer's in-flight guard. Bail out before
     // any reset/mutation below (compile-gate budget, turn telemetry) so a
@@ -325,6 +367,11 @@ export class AgentService {
       useAiStore.getState().setError('Sign in to use AI.');
       return;
     }
+
+    // T5: capture the exact send for retry-turn.ts's replay path. Set only
+    // after the guards above so a rejected send (already running / signed
+    // out) never clobbers a real in-flight send's replay target.
+    lastSend = { text, opts };
 
     // Checkpoints (P5.2): open a new turn for this send so any writes the
     // agent makes get grouped under it for later restore. Requires a
@@ -391,6 +438,13 @@ export class AgentService {
       });
     }
 
+    // T5 outcome-detection choke point: `before` marks where THIS send's own
+    // messages start in the agent's history, so the outcome check below
+    // (after the try/catch) only ever classifies the tail this call itself
+    // produced — never an earlier turn's messages in a multi-turn
+    // conversation.
+    const before = this.agent.getMessages().length;
+
     try {
       if (imageBlocks.length > 0) {
         await this.agent.promptStructured([
@@ -415,12 +469,26 @@ export class AgentService {
       }
     } catch (error) {
       if (error instanceof Error && error.message === 'Agent is already running') {
+        // Pre-send validation, not a turn that actually ran (see the
+        // concurrent-entry comment above) — banner only, no turn error.
         useAiStore.getState().setError('Agent is already processing a message.');
         return;
       }
-      useAiStore.getState().setError(
-        error instanceof Error ? error.message : 'An unexpected error occurred.',
-      );
+      // A genuine thrown error still means SOME of the turn ran — keep the
+      // existing banner behavior AND surface an inline error block (T5), then
+      // return so the outcome inspection below never ALSO fires for the same
+      // failure (exactly one error block per failed send).
+      const message = error instanceof Error ? error.message : 'An unexpected error occurred.';
+      useAiStore.getState().setError(message);
+      useAiStore.getState().addTurnError(classifyTurnError(message));
+      return;
+    }
+
+    const outcome = detectTurnOutcome(this.agent.getMessages().slice(before), this.abortRequested);
+    if (outcome.type === 'error') {
+      useAiStore.getState().addTurnError(classifyTurnError(outcome.raw));
+    } else if (outcome.type === 'crash') {
+      useAiStore.getState().addTurnError(loopCrashError());
     }
   }
 
@@ -526,6 +594,7 @@ export class AgentService {
   }
 
   abort(): void {
+    this.abortRequested = true;
     this.agent.abort();
   }
 
@@ -538,10 +607,35 @@ export class AgentService {
     this.agent.reset();
   }
 
+  /**
+   * Retry (T5): drop the last user prompt and everything after it from the
+   * agent's OWN message history — distinct from the ai store's UI
+   * `messages` (see `retry-turn.ts`'s header) — so a re-send doesn't leave
+   * the failed attempt sitting in the LLM context alongside the replay.
+   * No-op while a turn is running (nothing to rewind mid-stream, and the
+   * caller's own `isAgentRunning` bail-out should prevent this anyway) or
+   * when there's no user message to find (e.g. a resumed session cut off
+   * before any prompt).
+   */
+  rewindToLastUserPrompt(): void {
+    if (this.agent.isRunning) return;
+    const msgs = this.agent.getMessages();
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      if (msgs[i].role === 'user') {
+        this.agent.setMessages(msgs.slice(0, i));
+        return;
+      }
+    }
+  }
+
   dispose(): void {
     this.unsubscribe?.();
     this.unsubscribeTelemetry?.();
     this.agent.abort();
+    // T5: a disposed service (New Chat / workspace switch) starts the next
+    // conversation with no replay target — a stale `lastSend` from the
+    // conversation just torn down must never resend into the new one.
+    lastSend = null;
   }
 }
 
