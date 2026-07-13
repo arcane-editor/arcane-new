@@ -93,6 +93,8 @@ chatRouter.post('/v1/chat/completions', async (c) => {
 
     const startTime = Date.now();
     const env = c.env;
+    // Shared context for structured error logs (body.model is already resolved).
+    const errCtx = { userId: user.sub, model: body.model, reasoningLevel: body.metadata?.reasoningLevel, taskType: body.metadata?.taskType };
 
     if (!body.stream) {
         try {
@@ -156,11 +158,7 @@ chatRouter.post('/v1/chat/completions', async (c) => {
             });
         } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
-            logChatError(
-                { userId: user.sub, model: body.model, reasoningLevel: body.metadata?.reasoningLevel, taskType: body.metadata?.taskType },
-                'chat.nonstream.catch',
-                message,
-            );
+            logChatError(errCtx, 'chat.nonstream.catch', message);
             return c.json({ error: { message, type: 'server_error' } }, 500);
         }
     }
@@ -179,22 +177,14 @@ chatRouter.post('/v1/chat/completions', async (c) => {
                     cachedInputTokens = event.cached_input_tokens ?? 0;
                 }
                 if (event.type === 'error') {
-                    logChatError(
-                        { userId: user.sub, model: body.model, reasoningLevel: body.metadata?.reasoningLevel, taskType: body.metadata?.taskType },
-                        'chat.stream.forward',
-                        event.message,
-                    );
+                    logChatError(errCtx, 'chat.stream.forward', event.message);
                 }
                 await stream.writeSSE({ data: JSON.stringify(event) });
             }
             await stream.writeSSE({ data: '[DONE]' });
         } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
-            logChatError(
-                { userId: user.sub, model: body.model, reasoningLevel: body.metadata?.reasoningLevel, taskType: body.metadata?.taskType },
-                'chat.stream.catch',
-                message,
-            );
+            logChatError(errCtx, 'chat.stream.catch', message);
             await stream.writeSSE({
                 data: JSON.stringify({ type: 'error', code: 'server_error', message }),
             });

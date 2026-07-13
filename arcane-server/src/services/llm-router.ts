@@ -107,6 +107,19 @@ export function convertTools(tools?: ToolDefinition[]): ToolSet | undefined {
     return toolSet;
 }
 
+// Classify a stream error for the SSE `code` field. Workers AI binding errors
+// are normalized by workers-ai-provider into an APICallError whose
+// `statusCode` carries the mapped HTTP status (internal codes 3036/3040 →
+// 429), so check that first — the stringified message never contains "429".
+// The message-text fallback covers rate-limit/capacity wording and the raw
+// internal codes for errors that escape normalization.
+function classifyStreamError(error: unknown): 'rate_limit' | 'model_error' {
+    if (typeof error === 'object' && error !== null && (error as { statusCode?: number }).statusCode === 429) {
+        return 'rate_limit';
+    }
+    return /rate limit|\b3036\b|\b3040\b|capacity/i.test(String(error)) ? 'rate_limit' : 'model_error';
+}
+
 export async function* streamCompletion(req: ChatCompletionRequest, env: WorkersAiEnv): AsyncGenerator<StreamEvent> {
     // A cached replay of a sampled completion is semantically wrong — chat
     // completions are non-deterministic (temperature-sampled), so bypass the
@@ -159,14 +172,9 @@ export async function* streamCompletion(req: ChatCompletionRequest, env: Workers
             case 'reasoning-delta':
                 yield { type: 'thinking', thought: part.text, signature: '' };
                 break;
-            case 'error': {
-                const message = String(part.error);
-                // Workers AI error code 3021 is the platform's rate-limit code;
-                // also match the common textual markers case-insensitively.
-                const isRateLimit = /rate limit|429|3021/i.test(message);
-                yield { type: 'error', code: isRateLimit ? 'rate_limit' : 'model_error', message };
+            case 'error':
+                yield { type: 'error', code: classifyStreamError(part.error), message: String(part.error) };
                 break;
-            }
         }
     }
 }
