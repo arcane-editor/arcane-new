@@ -28,7 +28,11 @@ function ErrorBlock({ message }: Props) {
   if (!turnError) return null;
 
   function handleRetry() {
-    void retryFailedTurn(message.id);
+    // Last-resort net (same pattern ChatInput uses): retryFailedTurn's replay
+    // path (resolveAttachments/syncForPromptMode) can throw outside
+    // sendMessage's own try/catch, which would otherwise become an unhandled
+    // rejection instead of a visible error banner.
+    void retryFailedTurn(message.id).catch((e) => useAiStore.getState().setError(String(e)));
   }
 
   return (

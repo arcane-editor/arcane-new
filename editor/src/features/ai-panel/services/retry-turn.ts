@@ -49,6 +49,7 @@
  */
 
 import { useAiStore, type AiMessage } from '../../../stores/ai';
+import { useCheckpointsStore } from '../../../stores/checkpoints';
 import { findRetryTarget } from './turn-errors';
 import { getAgentService, getLastSend } from './agent-service';
 import { planController } from './plan-controller';
@@ -81,6 +82,26 @@ function truncateBeforeUserMessage(userMessageId: string): void {
 function liveAttachments(userMessage: AiMessage): Attachment[] {
   const attachments = userMessage.attachments ?? [];
   return attachments.filter((a) => a.kind !== 'image' || a.dataUrl !== '');
+}
+
+/**
+ * T10 fix wave: reanchor the failed turn's checkpoint entries onto the
+ * replay's freshly minted user bubble id. `addUserMessage` doesn't return
+ * the id it mints, so it's read back from the store immediately after —
+ * safe because `addUserMessage`'s `set()` call is synchronous and nothing
+ * else runs between the two calls, so the store's last user message is
+ * always the bubble `addUserMessage` just appended. Without this, the
+ * failed turn's own checkpoint entries (recorded under `oldUserMessageId`,
+ * the now-truncated-away bubble) would never surface a `CheckpointRow`
+ * again — see `stores/checkpoints.ts`'s `reanchorTurns` header for the full
+ * reasoning.
+ */
+function reanchorRetryCheckpoints(oldUserMessageId: string): void {
+  const messages = useAiStore.getState().messages;
+  const newest = messages[messages.length - 1];
+  if (newest && newest.role === 'user') {
+    useCheckpointsStore.getState().reanchorTurns(oldUserMessageId, newest.id);
+  }
 }
 
 export async function retryFailedTurn(errorMessageId: string): Promise<void> {
@@ -130,6 +151,7 @@ export async function retryFailedTurn(errorMessageId: string): Promise<void> {
 
   if (lastSend) {
     useAiStore.getState().addUserMessage(target.userMessage.text ?? lastSend.text, lastSend.opts.attachments);
+    reanchorRetryCheckpoints(target.userMessage.id);
     await getAgentService().sendMessage(lastSend.text, lastSend.opts);
     return;
   }
@@ -142,6 +164,7 @@ export async function retryFailedTurn(errorMessageId: string): Promise<void> {
   const text = target.userMessage.text ?? '';
   const attachments = liveAttachments(target.userMessage);
   useAiStore.getState().addUserMessage(text, attachments);
+  reanchorRetryCheckpoints(target.userMessage.id);
   await getAgentService().sendMessage(text, {
     mode: current.mode,
     effort: current.effort,

@@ -82,6 +82,22 @@ interface CheckpointsState {
   loadForSession: (sessionId: string) => Promise<void>;
   /** Force an immediate persist, bypassing the debounce (used on app close — mirrors `flushSessionNow`). */
   flushCheckpointsNow: () => Promise<void>;
+  /**
+   * Retry (T10 fix wave): reassign every turn's `userMessageId` from
+   * `oldUserMessageId` to `newUserMessageId`. `retry-turn.ts`'s
+   * `truncateBeforeUserMessage` drops the failed turn's user bubble from the
+   * store, and the replay mints a BRAND NEW bubble id via `addUserMessage`
+   * (the old id is gone for good). Without this remap, the failed turn's own
+   * checkpoint entries — e.g. partial writes made before the failure —
+   * stay anchored to the now-deleted bubble id: `CheckpointRow` only renders
+   * a turn for a LIVE message id (`selectCheckpointTurnsForMessage`), so
+   * those entries become permanently unreachable and their "Restore"
+   * affordance silently disappears (worst case: approve mode, or a review
+   * already accepted, where nothing else can undo those writes). Matches
+   * every turn sharing `oldUserMessageId` (plan-execution can legitimately
+   * stack more than one turn under the same message id).
+   */
+  reanchorTurns: (oldUserMessageId: string, newUserMessageId: string) => void;
   reset: () => void;
 }
 
@@ -249,6 +265,15 @@ export const useCheckpointsStore = create<CheckpointsState>((set, get) => ({
   },
 
   flushCheckpointsNow: () => flushPersist(),
+
+  reanchorTurns: (oldUserMessageId, newUserMessageId) => {
+    set((s) => ({
+      turns: s.turns.map((t) =>
+        t.userMessageId === oldUserMessageId ? { ...t, userMessageId: newUserMessageId } : t,
+      ),
+    }));
+    schedulePersist();
+  },
 
   reset: () => {
     if (persistTimer) {
