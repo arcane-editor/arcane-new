@@ -4,7 +4,7 @@
  * input area, and error banner.
  */
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { RotateCcw, History } from 'lucide-react';
 import { useAiStore } from '../../../stores/ai';
 import { useAuthStore } from '../../../stores/auth';
@@ -20,7 +20,16 @@ function AiChatPanel() {
   const resetConversation = useAiStore((s) => s.resetConversation);
   const errorMessage = useAiStore((s) => s.errorMessage);
   const setError = useAiStore((s) => s.setError);
+  const authNotice = useAiStore((s) => s.authNotice);
+  const setAuthNotice = useAiStore((s) => s.setAuthNotice);
   const [historyOpen, setHistoryOpen] = useState(false);
+
+  // T5: the notice explaining WHY the user was signed out (arcane-stream's
+  // 401/403 path) should disappear once they've actually logged back in,
+  // rather than lingering into the next signed-in session.
+  useEffect(() => {
+    if (loggedIn) setAuthNotice(null);
+  }, [loggedIn, setAuthNotice]);
 
   if (!loggedIn) {
     return (
@@ -28,6 +37,12 @@ function AiChatPanel() {
         <div className="ai-panel-header">
           <AgentPicker />
         </div>
+        {authNotice && (
+          <div className="ai-panel-error">
+            <span>{authNotice}</span>
+            <button onClick={() => setAuthNotice(null)}>x</button>
+          </div>
+        )}
         <AiSignInGate />
       </div>
     );

@@ -4043,6 +4043,99 @@ html, body, #root {
   background: color-mix(in srgb, var(--error-text) 15%, transparent);
 }
 
+/* ---- AI Panel: Error block (T5, inline turn-failure card + Retry) ---- */
+.ai-message-error {
+  margin: 8px 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--error-text) 8%, var(--bg-input));
+  border: 1px solid color-mix(in srgb, var(--error-text) 32%, var(--border));
+}
+
+.ai-message-error-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--error-text);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.ai-message-error-title {
+  letter-spacing: 0.1px;
+}
+
+.ai-message-error-detail {
+  margin: 6px 0 0 18px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+}
+
+.ai-message-error-raw-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 8px;
+  padding: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 11px;
+  color: var(--text-secondary);
+  transition: color 120ms ease;
+}
+
+.ai-message-error-raw-toggle:hover {
+  color: var(--text-primary);
+}
+
+.ai-message-error-raw {
+  margin-top: 6px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--bg-primary);
+  font-family: var(--font-mono, 'Fira Code', monospace);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.ai-message-error-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.ai-message-error-retry {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  background: var(--bg-primary);
+  border: 1px solid color-mix(in srgb, var(--error-text) 50%, var(--border));
+  border-radius: 6px;
+  color: var(--error-text);
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease;
+}
+
+.ai-message-error-retry:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--error-text) 12%, var(--bg-primary));
+}
+
+.ai-message-error-retry:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
 /* ---- AI Panel: Tool call block ---- */
 .ai-tool-call {
   margin: 6px 0;

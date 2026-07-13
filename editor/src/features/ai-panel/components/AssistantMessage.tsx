@@ -8,6 +8,7 @@ import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { AiMessage, ToolCallStatus } from '../../../stores/ai';
 import type { TextContent, ThinkingContent, ToolCall } from '../services/vendor/types';
+import { hasRenderableContent } from '../services/turn-errors';
 import ThinkingBlock from './ThinkingBlock';
 import ToolCallBlock from './ToolCallBlock';
 import StreamingIndicator from './StreamingIndicator';
@@ -25,6 +26,14 @@ interface AssistantMessageProps {
 }
 
 function AssistantMessage({ message, toolCalls, turnUserMessageId }: AssistantMessageProps) {
+  // T5: an error-tail turn with no renderable content (no text/thinking/tool
+  // call — just the bare stopReason/errorMessage T4 preserves) would
+  // otherwise render as an empty bubble; the ErrorBlock that follows it in
+  // the timeline (T5's outcome-detection choke point) carries the actual
+  // message. A turn with SOME partial content before the error still
+  // renders normally here, above the ErrorBlock.
+  if (message.stopReason === 'error' && !hasRenderableContent(message.content)) return null;
+
   const blocks = message.content ?? [];
 
   return (

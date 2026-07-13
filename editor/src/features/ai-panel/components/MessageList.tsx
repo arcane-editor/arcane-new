@@ -12,6 +12,7 @@ import PlanList from './PlanList';
 import PermissionRequestBlock from './PermissionRequestBlock';
 import VerifiedCard from './VerifiedCard';
 import CheckpointRow from './CheckpointRow';
+import ErrorBlock from './ErrorBlock';
 
 function MessageList() {
   const messages = useAiStore((s) => s.messages);
@@ -69,6 +70,8 @@ function MessageList() {
               return <PermissionRequestBlock key={msg.id} message={msg} />;
             case 'verifiedPass':
               return <VerifiedCard key={msg.id} message={msg} />;
+            case 'error':
+              return <ErrorBlock key={msg.id} message={msg} />;
             case 'system':
               return (
                 <div key={msg.id} className="ai-panel-system-message">

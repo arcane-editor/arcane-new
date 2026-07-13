@@ -43,9 +43,16 @@ function ChatInput() {
     useAiStore.getState().clearAttachments();
 
     if (mode === 'plan') {
-      planController.startPlanning(text, attachments);
+      // Last-resort net (T5): agent-service/plan-controller already surface
+      // their own errors via the store, but a bug that throws before that
+      // point would otherwise become an unhandled rejection.
+      void planController
+        .startPlanning(text, attachments)
+        .catch((e) => useAiStore.getState().setError(String(e)));
     } else {
-      getAgentService().sendMessage(text, { mode, effort, attachments });
+      void getAgentService()
+        .sendMessage(text, { mode, effort, attachments })
+        .catch((e) => useAiStore.getState().setError(String(e)));
     }
   }
 
