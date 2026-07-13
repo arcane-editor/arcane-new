@@ -447,7 +447,7 @@ async function doStream(
             // strips and maps precisely, instead of substring-matching
             // `message` alone.
             const message = event.code
-              ? `[code:${event.code}] ${event.message}`
+              ? `[code:${event.code}] ${event.message ?? 'Unknown server error'}`
               : (event.message ?? 'Unknown server error');
             stream.push({
               type: 'error',

@@ -263,11 +263,43 @@ function buildSaveInput(): SaveSessionInput | null {
   };
 }
 
-async function persistSessionNow(): Promise<void> {
+// Serializes the actual disk writes (T10 fix wave): `agent_end`'s flushSave()
+// and `addTurnError`'s flushSave() can both fire for the same turn (a caught
+// send error triggers `addTurnError`'s OWN immediate flush right after
+// `agent_end`'s), so two `saveSession` calls can be in flight at once. The
+// snapshot each call captures via `buildSaveInput()` is correct at
+// invocation time (`addTurnError`'s always includes the error block, since
+// its `set()` runs before its flush), but Tauri's underlying write doesn't
+// guarantee completion order matches invocation order — an out-of-order
+// finish would let the earlier (stale, error-less) write land on disk AFTER
+// the later (correct) one, silently losing the error block and defeating
+// survive-instant-quit. Chaining onto a shared promise forces every write to
+// wait for the previous one to finish, so writes land on disk in the same
+// order they were invoked.
+//
+// The chained step must never REJECT: `saveSession` already resolves to
+// `false` on a handled failure (the `if (!ok)` branch below), but chaining
+// via a bare `.then()` means an unhandled throw would leave `saveChain`
+// permanently rejected — every subsequent `.then()` callback in the chain
+// (i.e. every future save, for the rest of the app's lifetime) would then
+// silently stop running entirely. The try/catch makes this step settle
+// (resolve) unconditionally, exactly like the pre-existing `if (!ok)`
+// contract already promises callers.
+let saveChain: Promise<void> = Promise.resolve();
+
+function persistSessionNow(): Promise<void> {
   const input = buildSaveInput();
-  if (!input) return;
-  const ok = await saveSession(input);
-  if (!ok) notify.warning('Failed to save chat history.');
+  if (!input) return saveChain;
+  saveChain = saveChain.then(async () => {
+    try {
+      const ok = await saveSession(input);
+      if (!ok) notify.warning('Failed to save chat history.');
+    } catch (error) {
+      console.error('Unexpected error saving session:', error);
+      notify.warning('Failed to save chat history.');
+    }
+  });
+  return saveChain;
 }
 
 function scheduleSave(): void {

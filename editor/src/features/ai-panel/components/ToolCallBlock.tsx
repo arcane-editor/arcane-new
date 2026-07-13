@@ -150,7 +150,12 @@ function DiffWithActions({
             <FileText size={11} />
             Open file
           </button>
-          <button type="button" className="ai-diff-action-btn" onClick={() => accept(diff.path)}>
+          <button
+            type="button"
+            className="ai-diff-action-btn"
+            onClick={() => accept(diff.path)}
+            disabled={isAgentRunning || busy}
+          >
             <Check size={11} />
             Accept
           </button>

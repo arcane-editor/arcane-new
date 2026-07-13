@@ -70,7 +70,12 @@ function ReviewBarRow({
           <FileText size={11} />
           Open file
         </button>
-        <button type="button" className="ai-diff-action-btn" onClick={() => accept(entry.path)}>
+        <button
+          type="button"
+          className="ai-diff-action-btn"
+          onClick={() => accept(entry.path)}
+          disabled={isAgentRunning || busy}
+        >
           <Check size={11} />
           Accept
         </button>

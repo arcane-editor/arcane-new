@@ -471,6 +471,21 @@ describe('createArcaneStreamFn', () => {
     expect(errorEvent.error.message).toBe('[code:rate_limit] slow down');
   });
 
+  // T10 fix wave: a coded error with no `message` field used to fall through
+  // to `${event.message}` unguarded, producing the literal string
+  // "[code:rate_limit] undefined" instead of a usable fallback.
+  it('falls back to "Unknown server error" for a coded error with no message', async () => {
+    const fetchImpl = (async () =>
+      sseResponse(['data: {"type":"error","code":"rate_limit"}\n\n'])) as unknown as typeof fetch;
+
+    const streamFn = createArcaneStreamFn({ fetchImpl });
+    const events = await drain(streamFn(ctx, opts()));
+
+    const errorEvent = events.find((e) => e.type === 'error') as Extract<AssistantMessageEvent, { type: 'error' }>;
+    expect(errorEvent).toBeDefined();
+    expect(errorEvent.error.message).toBe('[code:rate_limit] Unknown server error');
+  });
+
   it('surfaces "not logged in" without ever calling fetch', async () => {
     authState.token = null;
     let calls = 0;
