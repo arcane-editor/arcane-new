@@ -111,6 +111,46 @@ describe('classifyTurnError', () => {
   });
 });
 
+// ---- classifyTurnError — leading [code:<x>] marker ----
+
+describe('classifyTurnError — [code:] marker', () => {
+  it('maps a rate_limit marker to kind rate_limit, title "Rate limited", stripping the marker from raw', () => {
+    const err = classifyTurnError('[code:rate_limit] slow down');
+    expect(err.kind).toBe('rate_limit');
+    expect(err.title).toBe('Rate limited');
+    expect(err.retriable).toBe(true);
+    expect(err.raw).toBe('slow down');
+  });
+
+  it('maps a model_error marker to kind server, title "Server error"', () => {
+    const err = classifyTurnError('[code:model_error] the model blew up');
+    expect(err.kind).toBe('server');
+    expect(err.title).toBe('Server error');
+    expect(err.retriable).toBe(true);
+    expect(err.raw).toBe('the model blew up');
+  });
+
+  it('maps a server_error marker to kind server, title "Server error"', () => {
+    const err = classifyTurnError('[code:server_error] boom');
+    expect(err.kind).toBe('server');
+    expect(err.title).toBe('Server error');
+    expect(err.retriable).toBe(true);
+    expect(err.raw).toBe('boom');
+  });
+
+  it('falls through to the table on an unrecognized code, using the stripped remainder', () => {
+    const err = classifyTurnError('[code:some_new_code] Failed to fetch');
+    expect(err.kind).toBe('network');
+    expect(err.title).toBe('Network error');
+    expect(err.raw).toBe('Failed to fetch');
+  });
+
+  it('strips the marker from raw even when it falls through to the table', () => {
+    const err = classifyTurnError('[code:unknown_thing] Some completely unexpected failure blob');
+    expect(err.raw).toBe('Some completely unexpected failure blob');
+  });
+});
+
 // ---- classifyServerCode ----
 
 describe('classifyServerCode', () => {

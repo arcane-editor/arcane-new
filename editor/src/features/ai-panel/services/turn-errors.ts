@@ -40,12 +40,36 @@ const NETWORK_SUBSTRINGS = [
   'no response body',
 ];
 
+/** Matches a leading `[code:<x>]` marker (server-side SSE error code, T4's
+ * `arcane-stream.ts`), e.g. `[code:rate_limit] slow down`. */
+const CODE_MARKER = /^\[code:([a-z_]+)\]\s*/;
+
 /**
  * Classifies a raw error message (from `AssistantMessage.errorMessage` or a
- * caught exception's `.message`) into a `TurnError`. Order matters — first
- * match wins, matching the table in the T3 brief.
+ * caught exception's `.message`) into a `TurnError`. A leading `[code:<x>]`
+ * marker takes precedence over the substring table below: it's stripped from
+ * `raw` first (whether or not the code is recognized), then a recognized
+ * code maps directly to a kind/title; an unrecognized code falls through to
+ * the table on the stripped remainder.
  */
 export function classifyTurnError(raw: string): TurnError {
+  const codeMatch = CODE_MARKER.exec(raw);
+  if (codeMatch) {
+    const stripped = raw.slice(codeMatch[0].length);
+    const kind = classifyServerCode(codeMatch[1]);
+    if (kind === 'rate_limit') {
+      return { kind: 'rate_limit', title: 'Rate limited', raw: stripped, retriable: true };
+    }
+    if (kind === 'server') {
+      return { kind: 'server', title: 'Server error', raw: stripped, retriable: true };
+    }
+    return classifyTurnErrorTable(stripped);
+  }
+  return classifyTurnErrorTable(raw);
+}
+
+/** Substring-based classification table — first match wins (T3 brief). */
+function classifyTurnErrorTable(raw: string): TurnError {
   const lower = raw.toLowerCase();
 
   if (lower.includes('authentication expired') || lower.includes('not logged in')) {
