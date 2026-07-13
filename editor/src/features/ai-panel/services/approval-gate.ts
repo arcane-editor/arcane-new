@@ -56,7 +56,16 @@ export function requestEngineApproval(
   return new Promise<EngineDecision>((resolve) => {
     pending.set(toolCallId, (optionId) => resolve(optionId === 'approve' ? 'approve' : 'reject'));
     signal?.addEventListener('abort', () => {
-      if (pending.delete(toolCallId)) resolve('reject');
+      // T8 fix (abort-stale approval UI): an aborted run used to resolve the
+      // pending promise here without ever telling `PermissionRequestBlock`
+      // — its buttons stayed live and un-resolved even though the tool call
+      // this approval belonged to was already dead. Mirror
+      // `resolvePendingApproval`'s own "lock the buttons" call so the UI
+      // reflects the same rejected outcome the resolved promise carries.
+      if (pending.delete(toolCallId)) {
+        useAiStore.getState().resolvePermissionRequest(toolCallId, 'reject');
+        resolve('reject');
+      }
     });
   });
 }
@@ -92,7 +101,14 @@ export function requestFileWriteApproval(
       else resolve('reject');
     });
     signal?.addEventListener('abort', () => {
-      if (pending.delete(toolCallId)) resolve('reject');
+      // T8 fix (abort-stale approval UI, mirrors `requestEngineApproval`
+      // above) — pre-apply prompts still fire in 'approve' mode and always
+      // for Unity serialized assets, so an aborted run must lock THIS
+      // button UI too, not just resolve the promise.
+      if (pending.delete(toolCallId)) {
+        useAiStore.getState().resolvePermissionRequest(toolCallId, 'reject');
+        resolve('reject');
+      }
     });
   });
 }

@@ -99,18 +99,21 @@ export const tauriBashOperations: BashOperations = {
 /**
  * Called after a file is written by the write tool.
  * Refreshes the file tree and updates open editors.
+ *
+ * T8 fix (false-dirty tabs after an agent write): this used to pair a raw
+ * `read_file` with `updateFileContent`, which unconditionally marks the tab
+ * `isDirty: true` — correct for a USER edit, wrong here since the write
+ * already landed on disk and there's nothing unsaved about it. `reloadFileFromDisk`
+ * (`stores/workspace.ts` — the same primitive `stores/checkpoints.ts`'s
+ * `restoreFile`/`restoreTurn` use to sync a tab after a restore) already
+ * guards unopened files, sets `isDirty: false`, and re-syncs the LSP.
  */
 export function onFileWritten(absolutePath: string): void {
   const store = useWorkspaceStore.getState();
   // Refresh file tree
   store.refreshTree();
-  // If the file is open, re-read its content
-  const openFile = store.openFiles.find((f) => f.path === absolutePath);
-  if (openFile) {
-    invoke<string>('read_file', { path: absolutePath }).then((content) => {
-      store.updateFileContent(absolutePath, content);
-    });
-  }
+  // If the file is open, reload it straight from disk.
+  void store.reloadFileFromDisk(absolutePath);
 }
 
 /**
