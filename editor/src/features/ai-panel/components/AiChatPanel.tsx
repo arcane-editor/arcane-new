@@ -11,6 +11,7 @@ import { useAuthStore } from '../../../stores/auth';
 import { resetAgentService } from '../services/agent-service';
 import MessageList from './MessageList';
 import ReviewBar from './ReviewBar';
+import PlanList from './PlanList';
 import ChatInput from './ChatInput';
 import AiSignInGate from './AiSignInGate';
 import AgentPicker from './AgentPicker';
@@ -92,9 +93,14 @@ function AiChatPanel() {
       <MessageList />
 
       {/* T8: Cursor-style Accept/Reject bar for pending auto-applied edits
-          (above the T9-pending persistent-todos spot; hidden when nothing
-          is pending). */}
+          (hidden when nothing is pending). */}
       <ReviewBar />
+
+      {/* T9: sticky, collapsible in-loop todo list (todo_update tool) — lives
+          for the whole session (not just the current turn), so it sits
+          closer to the composer than the transient ReviewBar above. Hidden
+          entirely when there's no plan yet (see PlanList). */}
+      <PlanList />
 
       {/* Input */}
       <ChatInput />

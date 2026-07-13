@@ -8,7 +8,6 @@ import { useAiStore } from '../../../stores/ai';
 import UserMessage from './UserMessage';
 import AssistantMessage from './AssistantMessage';
 import PlanActions from './PlanActions';
-import PlanList from './PlanList';
 import PermissionRequestBlock from './PermissionRequestBlock';
 import VerifiedCard from './VerifiedCard';
 import CheckpointRow from './CheckpointRow';
@@ -94,7 +93,6 @@ function MessageList() {
         }
         return node;
       })}
-      <PlanList />
       <div ref={bottomRef} />
     </div>
   );
