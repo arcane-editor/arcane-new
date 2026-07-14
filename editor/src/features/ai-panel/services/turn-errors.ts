@@ -21,6 +21,7 @@ export type TurnErrorKind =
   | 'timeout'
   | 'corrupted'
   | 'crash'
+  | 'empty'
   | 'unknown';
 
 export interface TurnError {
@@ -142,6 +143,16 @@ function classifyTurnErrorTable(raw: string): TurnError {
     };
   }
 
+  if (/^empty response/i.test(raw)) {
+    return {
+      kind: 'empty',
+      title: 'Empty response',
+      detail: 'The model returned no output. This is usually transient — try again.',
+      raw,
+      retriable: true,
+    };
+  }
+
   return {
     kind: 'unknown',
     title: 'Something went wrong',
@@ -188,6 +199,21 @@ export type TurnOutcome =
   | { type: 'crash' };
 
 /**
+ * True iff any assistant message in `newMessages` contains a `toolCall`
+ * content block — i.e. the loop actually invoked a tool at some point this
+ * turn, even if that message isn't the last one. Used by `detectTurnOutcome`
+ * rule 5 to distinguish a genuinely empty turn (nothing happened at all —
+ * worth surfacing as an error) from a turn that did real work via tools and
+ * simply ended with no closing text (the model "went silent after acting" —
+ * legitimate, not an error).
+ */
+function turnHasToolCall(newMessages: AgentMessage[]): boolean {
+  return newMessages.some(
+    (m) => m.role === 'assistant' && m.content.some((block) => block.type === 'toolCall'),
+  );
+}
+
+/**
  * Determines how a send ended, given ONLY the messages appended during this
  * send (not the full conversation history). Rules (exact, in order):
  *  1. No assistant message at all -> crash.
@@ -199,7 +225,22 @@ export type TurnOutcome =
  *  4. `stopReason === 'toolUse'` (and not aborted) -> crash (the loop's only
  *     legal exits are error/aborted/end-turn; a toolUse tail means it died
  *     mid-turn).
- *  5. Otherwise -> clean.
+ *  5. The tail stopReason is otherwise a normal end ('stop'/'length'/
+ *     undefined — anything not caught by rules 2-4) but the message has no
+ *     renderable content (`hasRenderableContent` false) AND no assistant
+ *     message this turn ever produced a `toolCall` block -> error, with a
+ *     fixed `'Empty response from the model'` `raw` (classified by
+ *     `classifyTurnError` into the `empty` kind below). VERIFIED against
+ *     `agent-loop.ts`/`arcane-stream.ts`: the loop only re-enters (appending
+ *     another assistant message) when the PREVIOUS assistant message carried
+ *     a toolCall — and `arcane-stream.ts` only ever sets `stopReason:
+ *     'toolUse'` on a message whose OWN content has a toolCall block. So a
+ *     tail message with `stopReason` other than `'toolUse'` provably has no
+ *     toolCall in its own content, but an EARLIER message in the same turn
+ *     can (tool call -> toolResult -> final empty-text assistant message,
+ *     "silence after acting") — hence checking the whole turn, not just the
+ *     tail, before calling this an error.
+ *  6. Otherwise -> clean.
  */
 export function detectTurnOutcome(newMessages: AgentMessage[], abortRequested: boolean): TurnOutcome {
   let lastAssistant: AssistantMessage | undefined;
@@ -223,6 +264,10 @@ export function detectTurnOutcome(newMessages: AgentMessage[], abortRequested: b
 
   if (lastAssistant.stopReason === 'toolUse') {
     return { type: 'crash' };
+  }
+
+  if (!hasRenderableContent(lastAssistant.content) && !turnHasToolCall(newMessages)) {
+    return { type: 'error', raw: 'Empty response from the model' };
   }
 
   return { type: 'clean' };

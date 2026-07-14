@@ -109,6 +109,21 @@ describe('classifyTurnError', () => {
     const err = classifyTurnError('RATE LIMIT hit, back off');
     expect(err.kind).toBe('rate_limit');
   });
+
+  it('classifies "Empty response from the model" as kind empty', () => {
+    const err = classifyTurnError('Empty response from the model');
+    expect(err.kind).toBe('empty');
+    expect(err.retriable).toBe(true);
+    expect(err.title).toBe('Empty response');
+    expect(err.detail).toBe('The model returned no output. This is usually transient — try again.');
+    expect(err.raw).toBe('Empty response from the model');
+  });
+
+  it('classifies the empty-response row case-insensitively', () => {
+    const err = classifyTurnError('EMPTY RESPONSE from the model');
+    expect(err.kind).toBe('empty');
+    expect(err.title).toBe('Empty response');
+  });
 });
 
 // ---- classifyTurnError — leading [code:<x>] marker ----
@@ -254,6 +269,53 @@ describe('detectTurnOutcome', () => {
       false,
     );
     expect(result).toEqual({ type: 'clean' });
+  });
+
+  // ---- empty-tail rule (R2-T3) ----
+
+  it('reports error "Empty response from the model" on a stop tail with no renderable content and no tool calls this turn', () => {
+    const result = detectTurnOutcome(
+      [userMsg(), assistantMsg({ stopReason: 'stop', content: [] })],
+      false,
+    );
+    expect(result).toEqual({ type: 'error', raw: 'Empty response from the model' });
+  });
+
+  it('reports error on a stop tail whose only content is whitespace-only text/thinking', () => {
+    const result = detectTurnOutcome(
+      [assistantMsg({ stopReason: 'stop', content: [{ type: 'text', text: '   ' }] })],
+      false,
+    );
+    expect(result).toEqual({ type: 'error', raw: 'Empty response from the model' });
+  });
+
+  it('reports clean on a stop tail with renderable text (not empty)', () => {
+    const result = detectTurnOutcome(
+      [assistantMsg({ stopReason: 'stop', content: [{ type: 'text', text: 'hello' }] })],
+      false,
+    );
+    expect(result).toEqual({ type: 'clean' });
+  });
+
+  it('reports clean when the stop tail is empty but the turn included a tool call earlier this turn (silence after acting)', () => {
+    const result = detectTurnOutcome(
+      [
+        userMsg(),
+        assistantMsg({
+          stopReason: 'toolUse',
+          content: [{ type: 'toolCall', id: 't1', name: 'read', arguments: {} }],
+        }),
+        { role: 'toolResult', toolCallId: 't1', toolName: 'read', content: 'ok', timestamp: 2 } as AgentMessage,
+        assistantMsg({ stopReason: 'stop', content: [] }),
+      ],
+      false,
+    );
+    expect(result).toEqual({ type: 'clean' });
+  });
+
+  it('reports the same empty-response error when stopReason is undefined (normal-end, never set)', () => {
+    const result = detectTurnOutcome([assistantMsg({ stopReason: undefined, content: [] })], false);
+    expect(result).toEqual({ type: 'error', raw: 'Empty response from the model' });
   });
 });
 
