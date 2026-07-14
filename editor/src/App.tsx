@@ -22,6 +22,7 @@ import {
   setProjectWindowTitle,
 } from './features/project';
 import { AiChatPanel, MaximizedAiOverlay, restoreLatestSessionForWorkspace } from './features/ai-panel';
+import { focusTerminalById } from './features/terminal';
 import { useAiStore } from './stores/ai';
 import { useCheckpointsStore } from './stores/checkpoints';
 import { useEditReviewStore } from './stores/edit-review';
@@ -389,6 +390,70 @@ function App() {
           useTerminalStore.getState().createTerminal(wp);
           useUiStore.getState().setBottomPanelVisible(true);
         }
+      },
+    },
+    {
+      id: 'terminal.split',
+      label: 'Split Terminal',
+      category: 'Terminal',
+      // VS Code parity; verified free (grep across App.tsx keybindings).
+      keybinding: 'mod+\\',
+      handler: () => {
+        const ui = useUiStore.getState();
+        ui.setBottomPanelVisible(true);
+        ui.setActiveBottomTab('terminal');
+
+        const termStore = useTerminalStore.getState();
+        const activeId = termStore.activeTerminalId;
+        if (activeId === null) {
+          // Nothing to split from yet — fall back to a plain new terminal,
+          // same as the "New Terminal" command.
+          const wp = useWorkspaceStore.getState().workspacePath;
+          if (wp) termStore.createTerminal(wp);
+          return;
+        }
+        termStore.splitTerminal(activeId).then((newId) => {
+          // A same-group split doesn't change `activeGroupId`, so
+          // RichTerminalPanel's tab-switch focus effect won't fire for it —
+          // move real keyboard focus into the new pane directly here.
+          if (newId !== null) focusTerminalById(newId);
+        });
+      },
+    },
+    {
+      id: 'terminal.focusNextPane',
+      label: 'Focus Next Terminal Pane',
+      category: 'Terminal',
+      keybinding: 'mod+shift+]',
+      handler: () => {
+        useTerminalStore.getState().focusSiblingPane(1);
+        const id = useTerminalStore.getState().activeTerminalId;
+        if (id !== null) focusTerminalById(id);
+      },
+      // Inert unless the bottom panel is visible AND the active group
+      // actually has more than one pane to cycle between.
+      when: () => {
+        if (!useUiStore.getState().bottomPanelVisible) return false;
+        const termStore = useTerminalStore.getState();
+        const group = termStore.groups.find((g) => g.id === termStore.activeGroupId);
+        return !!group && group.terminalIds.length > 1;
+      },
+    },
+    {
+      id: 'terminal.focusPreviousPane',
+      label: 'Focus Previous Terminal Pane',
+      category: 'Terminal',
+      keybinding: 'mod+shift+[',
+      handler: () => {
+        useTerminalStore.getState().focusSiblingPane(-1);
+        const id = useTerminalStore.getState().activeTerminalId;
+        if (id !== null) focusTerminalById(id);
+      },
+      when: () => {
+        if (!useUiStore.getState().bottomPanelVisible) return false;
+        const termStore = useTerminalStore.getState();
+        const group = termStore.groups.find((g) => g.id === termStore.activeGroupId);
+        return !!group && group.terminalIds.length > 1;
       },
     },
     {
