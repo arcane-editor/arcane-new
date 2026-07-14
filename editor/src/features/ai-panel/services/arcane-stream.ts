@@ -31,6 +31,16 @@ import { combineSignals, computeBackoffMs, isTransient, raceWithTimeout, sleep, 
 
 const ARCANE_SERVER_URL = 'https://api.arcaneai.org';
 
+/**
+ * First-token watchdog default: abort if no SSE chunk arrives at all within
+ * this window of the very first `reader.read()` call (before any content has
+ * streamed). A hung-but-open connect otherwise looks identical to "nothing
+ * happening" for the full 90s idle-gap window below — this bounds it much
+ * tighter since a healthy stream should produce SOMETHING quickly. Every
+ * read after the first keeps falling under the (longer) idle-gap watchdog.
+ */
+const FIRST_TOKEN_TIMEOUT_MS = 25_000;
+
 interface ArcaneStreamEvent {
   type: 'text' | 'tool_call' | 'thinking' | 'usage' | 'error';
   content?: string;
@@ -69,6 +79,15 @@ export interface ArcaneStreamHardeningConfig {
   connectTimeoutMs?: number;
   /** Idle-gap watchdog once streaming: abort if no SSE chunk arrives within this window. Default 90_000ms. */
   idleTimeoutMs?: number;
+  /**
+   * First-token watchdog: governs ONLY the very first `reader.read()` call
+   * (before any chunk has arrived at all). Injectable/overridable the same
+   * way `idleTimeoutMs` is, for tests. Default `FIRST_TOKEN_TIMEOUT_MS`
+   * (25s) — much tighter than the 90s idle-gap window, since a hung connect
+   * with zero bytes ever sent should be surfaced far sooner than a stall
+   * mid-stream.
+   */
+  firstTokenTimeoutMs?: number;
 }
 
 interface ResolvedArcaneStreamConfig {
@@ -77,6 +96,7 @@ interface ResolvedArcaneStreamConfig {
   retryBaseDelayMs: number;
   connectTimeoutMs: number;
   idleTimeoutMs: number;
+  firstTokenTimeoutMs: number;
 }
 
 function abortedMessage(): AssistantMessage {
@@ -124,6 +144,7 @@ export function createArcaneStreamFn(config: ArcaneStreamHardeningConfig = {}): 
     retryBaseDelayMs: config.retryBaseDelayMs ?? 5_000,
     connectTimeoutMs: config.connectTimeoutMs ?? 180_000,
     idleTimeoutMs: config.idleTimeoutMs ?? 90_000,
+    firstTokenTimeoutMs: config.firstTokenTimeoutMs ?? FIRST_TOKEN_TIMEOUT_MS,
   };
 
   return (context: Context, options: StreamOptions): AssistantMessageEventStream => {
@@ -321,21 +342,32 @@ async function doStream(
   // corrupted response worth surfacing distinctly rather than silently
   // finalizing as an empty "done" (which today renders as an empty bubble).
   let malformedLines = 0;
+  // Tracks whether the NEXT `reader.read()` is the very first one this
+  // stream makes — governed by the tighter first-token watchdog below rather
+  // than the 90s idle-gap window, since a hung connect that never sends a
+  // single byte should be surfaced much sooner than a mid-stream stall.
+  // Flipped false right after that first read, regardless of outcome, so
+  // every subsequent read falls back to the idle-gap timeout as before.
+  let firstRead = true;
 
   try {
     while (true) {
       // Idle-gap watchdog: race each read individually rather than keeping a
       // persistent resettable timer, so the guarded gap is naturally "time
       // since the last chunk" (or since the stream started, for the first
-      // chunk) with no separate reset bookkeeping.
+      // chunk) with no separate reset bookkeeping. The very first read gets
+      // the tighter first-token timeout instead of the idle one.
       const { done, value } = await raceWithTimeout(
         reader.read(),
-        cfg.idleTimeoutMs,
-        `Stream stalled — no data for ${cfg.idleTimeoutMs}ms`,
+        firstRead ? cfg.firstTokenTimeoutMs : cfg.idleTimeoutMs,
+        firstRead
+          ? 'Stream stalled before the first token'
+          : `Stream stalled — no data for ${cfg.idleTimeoutMs}ms`,
         () => {
           reader.cancel().catch(() => {});
         },
       );
+      firstRead = false;
       if (done) break;
 
       buffer += decoder.decode(value, { stream: true });

@@ -273,6 +273,27 @@ describe('createArcaneStreamFn', () => {
     expect(events.some((e) => e.type === 'done')).toBe(false);
   });
 
+  it('fires the first-token watchdog when the stream connects but never sends a single byte', async () => {
+    const fetchImpl = (async () => {
+      const body = new ReadableStream<Uint8Array>({
+        pull() {
+          // Never enqueue, never close — a hung-but-open connect with zero
+          // bytes ever sent, distinct from the idle-gap case (which has
+          // already delivered at least one chunk).
+        },
+      });
+      return new Response(body, { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const streamFn = createArcaneStreamFn({ fetchImpl, firstTokenTimeoutMs: 20 });
+    const events = await drain(streamFn(ctx, opts()));
+
+    const errorEvent = events.find((e) => e.type === 'error') as Extract<AssistantMessageEvent, { type: 'error' }>;
+    expect(errorEvent).toBeDefined();
+    expect(errorEvent.error.message).toMatch(/stalled before the first token/i);
+    expect(events.some((e) => e.type === 'done')).toBe(false);
+  });
+
   it('does not retry a failure that happens after the first chunk has already been consumed', async () => {
     let calls = 0;
     let pullCount = 0;
