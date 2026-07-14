@@ -85,6 +85,21 @@ export function requestUserQuestion(
   params: AskUserParams,
   signal?: AbortSignal,
 ): Promise<QuestionAnswer> {
+  // Already-aborted check FIRST (mirrors `write-approval-gate.ts`'s explicit
+  // `signal?.aborted` check ahead of `deps.requestApproval` — the same "real
+  // hang risk" its comment describes): `addEventListener('abort', ...)` never
+  // fires for a signal that was ALREADY aborted before registration, and the
+  // production caller (`ask-user-tool.ts`'s `defaultRequest`) has a genuine
+  // async gap (`await import('./question-gate')`) before reaching here — a
+  // Stop click in that window would otherwise leave this promise pending
+  // forever, hanging the vendor loop with no recovery. No question card is
+  // pushed in this branch (nothing to render — the run is already dead) and
+  // the pending map is never touched.
+  if (signal?.aborted) {
+    void deps.markQuestionCancelled(toolCallId); // harmless no-op today; keeps T8 lock symmetry once Task 2 lands
+    return Promise.resolve({ kind: 'cancelled' });
+  }
+
   void deps.addQuestionRequest(toolCallId, params);
   return new Promise<QuestionAnswer>((resolve) => {
     pending.set(toolCallId, resolve);

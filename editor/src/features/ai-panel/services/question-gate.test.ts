@@ -72,6 +72,26 @@ describe('question-gate', () => {
     expect(hasPendingQuestion('call-2')).toBe(false);
   });
 
+  it('abort (already aborted BEFORE requestUserQuestion) → resolves cancelled immediately, never renders the question', async () => {
+    // The 'abort' event never fires for a signal aborted before the listener
+    // is registered, and the production caller (`ask-user-tool.ts`'s
+    // `defaultRequest`) has a genuine async gap (`await import(...)`) before
+    // reaching the gate — this must resolve WITHOUT depending on that
+    // listener (a real hang risk: see `write-approval-gate.test.ts`'s
+    // "already aborted by the time the diff is ready" sibling test).
+    const { deps, addCalls, cancelCalls } = fakeDeps();
+    setQuestionGateDeps(deps);
+    const controller = new AbortController();
+    controller.abort();
+
+    const result = await requestUserQuestion('call-pre-aborted', QUESTION, controller.signal);
+
+    expect(result).toEqual({ kind: 'cancelled' });
+    expect(addCalls).toEqual([]); // no question card for a dead run
+    expect(cancelCalls).toEqual(['call-pre-aborted']); // store-lock still fired once (T8 symmetry)
+    expect(hasPendingQuestion('call-pre-aborted')).toBe(false); // pending map never touched
+  });
+
   it('resolve-after-abort is a no-op: calling resolvePendingQuestion after the signal already aborted it does nothing', async () => {
     const { deps, cancelCalls } = fakeDeps();
     setQuestionGateDeps(deps);
