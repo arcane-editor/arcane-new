@@ -53,3 +53,5 @@ export type {
   AgentTool,
   AgentToolResult,
 } from './services/vendor/types';
+export { createUpdateCoalescer } from './services/update-coalescer';
+export type { UpdateCoalescer } from './services/update-coalescer';

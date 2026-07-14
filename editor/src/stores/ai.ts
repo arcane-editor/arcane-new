@@ -25,6 +25,7 @@ import {
   type VerifiedCardData,
   resetWriteApprovalSession,
   resolvePendingQuestion,
+  createUpdateCoalescer,
 } from '../features/ai-panel';
 import { useWorkspaceStore } from './workspace';
 import { useCheckpointsStore } from './checkpoints';
@@ -385,6 +386,36 @@ function flushSave(): Promise<void> {
   return persistSessionNow();
 }
 
+// ---- message_update coalescing (R2-T4 Stage 1) ----
+// A streamed turn can fire `message_update` once per token; without
+// coalescing, each one replaces the `messages` array wholesale, forcing a
+// MessageList re-render + a markdown re-parse of the streaming
+// AssistantMessage's text block on every token. `createUpdateCoalescer`
+// caps the effective apply rate to ~1/windowMs (default 40ms, ~25Hz),
+// always applying the LATEST content seen.
+//
+// `apply` re-reads `useAiStore.getState().streamingMessageId` (LIVE state,
+// not a value captured back when the item was pushed) exactly the way the
+// original uncoalesced handler did — so a trailing flush that fires late
+// (after `message_end`/`agent_end` already cleared it, or after
+// `truncateAfterMessage`/`resetConversation`/`loadSessionIntoStore` reset
+// the conversation entirely) finds no matching id and is a safe no-op,
+// never resurrecting stale content onto the wrong message or a fresh one.
+// `message_end`/`agent_end` additionally call `.cancel()` before their own
+// (authoritative) `set()`, so a flush already in flight can't race past
+// them and clobber the final state they just wrote.
+const messageUpdateCoalescer = createUpdateCoalescer<AssistantMessage>({
+  apply: (msg) => {
+    const streamId = useAiStore.getState().streamingMessageId;
+    if (!streamId) return;
+    useAiStore.setState((s) => ({
+      messages: s.messages.map((m) =>
+        m.id === streamId ? { ...m, content: msg.content ?? [] } : m,
+      ),
+    }));
+  },
+});
+
 export const useAiStore = create<AiState>((set, get) => ({
   messages: [],
   streamingMessageId: null,
@@ -417,6 +448,11 @@ export const useAiStore = create<AiState>((set, get) => ({
       }
 
       case 'agent_end': {
+        // Cancel any pending coalesced message_update flush BEFORE this
+        // authoritative set() — a late trailing flush is already a
+        // guarded no-op (see `messageUpdateCoalescer` above), but
+        // cancelling here also stops its pending timer outright.
+        messageUpdateCoalescer.cancel();
         set((s) => ({
           isAgentRunning: false,
           streamingMessageId: null,
@@ -470,21 +506,15 @@ export const useAiStore = create<AiState>((set, get) => ({
       case 'message_update': {
         const msg = event.message;
         if (msg.role === 'assistant') {
-          const streamId = get().streamingMessageId;
-          if (streamId) {
-            set((s) => ({
-              messages: s.messages.map((m) =>
-                m.id === streamId
-                  ? { ...m, content: (msg as AssistantMessage).content ?? [] }
-                  : m,
-              ),
-            }));
-          }
+          messageUpdateCoalescer.push(msg as AssistantMessage);
         }
         break;
       }
 
       case 'message_end': {
+        // Authoritative — drop any pending coalesced flush before it can
+        // race past this final content/stopReason/errorMessage write.
+        messageUpdateCoalescer.cancel();
         const msg = event.message;
         if (msg.role === 'assistant') {
           const streamId = get().streamingMessageId;
