@@ -3639,6 +3639,10 @@ html, body, #root {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.ai-history-title:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 .ai-history-meta {
   font-size: 10px;
   color: var(--text-secondary);

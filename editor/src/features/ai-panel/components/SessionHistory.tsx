@@ -40,6 +40,10 @@ function relativeTime(ts: number): string {
 function SessionHistory({ open, onClose }: Props) {
   const workspacePath = useWorkspaceStore((s) => s.workspacePath);
   const loadSessionIntoStore = useAiStore((s) => s.loadSessionIntoStore);
+  // Drives the disabled affordance on each row's open trigger below — kept in
+  // sync with the guard inside `openSession` itself (belt-and-suspenders: the
+  // guard is what actually prevents the hang if this render is stale).
+  const isAgentRunning = useAiStore((s) => s.isAgentRunning);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [loading, setLoading] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -73,6 +77,12 @@ function SessionHistory({ open, onClose }: Props) {
 
   const openSession = useCallback(
     async (summary: SessionSummary) => {
+      // Guard consistently with session-restore.ts's restoreLatestSessionForWorkspace:
+      // resume()/loadSessionIntoStore() on a RUNNING agent (e.g. mid tool call, or
+      // blocked for minutes on a pending ask_user question) stomps the live session
+      // out from under it, so the in-flight gate promise never resolves and the
+      // agent is stuck "already processing" until New Chat.
+      if (useAiStore.getState().isAgentRunning) return;
       const data = await loadSession(summary.id);
       if (!data) return;
       loadSessionIntoStore(data);
@@ -121,7 +131,12 @@ function SessionHistory({ open, onClose }: Props) {
                   autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}
                 />
               ) : (
-                <button className="ai-history-title" onClick={() => openSession(s)} title={s.title}>
+                <button
+                  className="ai-history-title"
+                  onClick={() => openSession(s)}
+                  disabled={isAgentRunning}
+                  title={isAgentRunning ? 'Stop the running agent before switching chats' : s.title}
+                >
                   <span className="ai-history-title-text">{s.title}</span>
                   <span className="ai-history-meta">
                     {s.messageCount} msg · {relativeTime(s.updatedAt)}

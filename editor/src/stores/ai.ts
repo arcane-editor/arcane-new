@@ -257,6 +257,9 @@ interface AiState {
    * message (`resolvedAnswer` or `cancelled: true`), schedules a save, and —
    * for an answer — resolves the gate's pending promise
    * (`resolvePendingQuestion`) so the blocked `ask_user` tool call can return.
+   * No-op if the message is already locked (answered or cancelled) — mirrors
+   * `QuestionBlock`'s own `locked` check, so a stale click/Enter can't
+   * displace a resolution the model already received.
    */
   resolveQuestionRequest: (
     toolCallId: string,
@@ -785,6 +788,19 @@ export const useAiStore = create<AiState>((set, get) => ({
     toolCallId: string,
     outcome: { answer: string } | { cancelled: true },
   ) => {
+    // Guard against a stale click/Enter arriving after the card already
+    // locked (e.g. the gate's abort path cancelled it while a click was
+    // in flight): re-resolving would let a cancelled card gain a
+    // `resolvedAnswer` (or vice versa), rendering both footers at once
+    // while the model already moved on with the first resolution. Mirrors
+    // `QuestionBlock`'s own `locked` check. An unknown `toolCallId` (no
+    // matching message) falls through unchanged — same no-op as before.
+    const existing = get().messages.find(
+      (m) => m.role === 'questionRequest' && m.questionRequest?.toolCallId === toolCallId,
+    )?.questionRequest;
+    if (existing && (existing.resolvedAnswer !== undefined || existing.cancelled)) {
+      return;
+    }
     set((s) => ({
       messages: s.messages.map((m) =>
         m.role === 'questionRequest' &&
