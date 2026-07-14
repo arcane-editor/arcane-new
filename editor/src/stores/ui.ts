@@ -189,7 +189,12 @@ export const useUiStore = create<UiState>((set, get) => ({
   setLspProgress: (msg) => set({ lspProgress: msg }),
 
   bottomPanelVisible: false,
-  activeBottomTab: 'terminal',
+  // 'unity-console' is not a valid tab in non-Unity workspaces, so
+  // BottomPanel's fallback-to-first-tab logic resolves it to 'terminal'
+  // there — while Unity projects (which do have a 'unity-console' tab) keep
+  // landing on Unity Console by default, same as before the Terminal tab
+  // became available alongside it there.
+  activeBottomTab: 'unity-console',
   toggleBottomPanel: () => set((s) => ({ bottomPanelVisible: !s.bottomPanelVisible })),
   setBottomPanelVisible: (visible) => set({ bottomPanelVisible: visible }),
   setActiveBottomTab: (tab) => set({ activeBottomTab: tab, bottomPanelVisible: true }),
