@@ -1324,6 +1324,22 @@ html, body, #root {
   background: var(--bg-primary);
 }
 
+/* In-place full-screen maximize: same component instance, same DOM node —
+   just escapes the Allotment pane via `position: fixed`. The Allotment pane
+   underneath keeps its last size, so restoring (removing this class) snaps
+   straight back to the prior height with no layout churn. Background is
+   already opaque via `.bottom-panel` above (own rule, not ancestor-relied),
+   so nothing extra is needed here for that. */
+.bottom-panel--maximized {
+  position: fixed;
+  top: 35px; /* --title-bar height */
+  left: 0;
+  right: 0;
+  bottom: 24px; /* status bar height */
+  z-index: 900; /* below AI overlay (1000) */
+  border-top: 1px solid var(--border);
+}
+
 .bottom-panel-header {
   height: 35px;
   display: flex;
@@ -1366,7 +1382,14 @@ html, body, #root {
   border-bottom-color: var(--text-active, #ffffff);
 }
 
-.bottom-panel-close {
+.bottom-panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.bottom-panel-close,
+.bottom-panel-maximize {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1379,7 +1402,8 @@ html, body, #root {
   border-radius: 3px;
 }
 
-.bottom-panel-close:hover {
+.bottom-panel-close:hover,
+.bottom-panel-maximize:hover {
   background: var(--surface-container-highest);
   color: var(--text-primary);
 }

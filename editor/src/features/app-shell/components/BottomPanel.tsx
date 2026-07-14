@@ -1,4 +1,5 @@
-import { X } from 'lucide-react';
+import { useEffect } from 'react';
+import { ChevronDown, ChevronUp, X } from 'lucide-react';
 import { useUiStore, type BottomPanelTab } from '../../../stores/ui';
 import { useProjectContextStore } from '../../../stores/project-context';
 import { RichTerminalPanel } from '../../terminal';
@@ -9,7 +10,26 @@ function BottomPanel() {
   const activeTab = useUiStore((s) => s.activeBottomTab);
   const setActiveTab = useUiStore((s) => s.setActiveBottomTab);
   const setBottomPanelVisible = useUiStore((s) => s.setBottomPanelVisible);
+  const maximized = useUiStore((s) => s.bottomPanelMaximized);
+  const toggleMaximized = useUiStore((s) => s.toggleBottomPanelMaximized);
+  const setMaximized = useUiStore((s) => s.setBottomPanelMaximized);
   const isUnityProject = useProjectContextStore((s) => s.isUnityProject);
+
+  // While maximized, Escape restores normal height — except when focus is
+  // inside a live terminal session (e.g. vim, a TUI), where Escape is a
+  // meaningful keystroke for the running program and must not bubble up to
+  // collapse the panel. Listener is added/removed with the maximized state,
+  // mirroring MaximizedAiOverlay's effect shape.
+  useEffect(() => {
+    if (!maximized) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== 'Escape') return;
+      if ((e.target as HTMLElement).closest?.('.terminal-xterm')) return;
+      setMaximized(false);
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [maximized, setMaximized]);
 
   // Terminal, Problems and Output are always present. Unity projects
   // additionally get a Unity Console tab alongside the real terminal.
@@ -28,7 +48,7 @@ function BottomPanel() {
   const effectiveTab = tabs.some((t) => t.id === activeTab) ? activeTab : tabs[0].id;
 
   return (
-    <div className="bottom-panel">
+    <div className={`bottom-panel${maximized ? ' bottom-panel--maximized' : ''}`}>
       <div className="bottom-panel-header">
         <div className="bottom-panel-tabs">
           {tabs.map((tab) => (
@@ -41,13 +61,22 @@ function BottomPanel() {
             </button>
           ))}
         </div>
-        <button
-          className="bottom-panel-close"
-          title="Close Panel"
-          onClick={() => setBottomPanelVisible(false)}
-        >
-          <X size={14} />
-        </button>
+        <div className="bottom-panel-actions">
+          <button
+            className="bottom-panel-maximize"
+            title={maximized ? 'Restore Panel (Cmd+Shift+J)' : 'Maximize Panel (Cmd+Shift+J)'}
+            onClick={() => toggleMaximized()}
+          >
+            {maximized ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
+          </button>
+          <button
+            className="bottom-panel-close"
+            title="Close Panel"
+            onClick={() => setBottomPanelVisible(false)}
+          >
+            <X size={14} />
+          </button>
+        </div>
       </div>
 
       <div className="bottom-panel-content">

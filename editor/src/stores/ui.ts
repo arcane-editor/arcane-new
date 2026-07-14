@@ -111,6 +111,10 @@ interface UiState {
   setBottomPanelVisible: (visible: boolean) => void;
   setActiveBottomTab: (tab: BottomPanelTab) => void;
 
+  bottomPanelMaximized: boolean;
+  toggleBottomPanelMaximized: () => void;
+  setBottomPanelMaximized: (v: boolean) => void;
+
   settingsOpen: boolean;
   setSettingsOpen: (open: boolean) => void;
 
@@ -195,9 +199,31 @@ export const useUiStore = create<UiState>((set, get) => ({
   // landing on Unity Console by default, same as before the Terminal tab
   // became available alongside it there.
   activeBottomTab: 'unity-console',
-  toggleBottomPanel: () => set((s) => ({ bottomPanelVisible: !s.bottomPanelVisible })),
-  setBottomPanelVisible: (visible) => set({ bottomPanelVisible: visible }),
+  toggleBottomPanel: () =>
+    set((s) => {
+      const next = !s.bottomPanelVisible;
+      // Hiding the panel always drops maximize state too, so a later reopen
+      // (mod+j, the close ✕, or the maximize toggle itself) starts at normal
+      // height rather than resuming full-screen.
+      return next ? { bottomPanelVisible: true } : { bottomPanelVisible: false, bottomPanelMaximized: false };
+    }),
+  setBottomPanelVisible: (visible) =>
+    set(visible ? { bottomPanelVisible: true } : { bottomPanelVisible: false, bottomPanelMaximized: false }),
   setActiveBottomTab: (tab) => set({ activeBottomTab: tab, bottomPanelVisible: true }),
+
+  bottomPanelMaximized: false,
+  toggleBottomPanelMaximized: () =>
+    set((s) => {
+      const next = !s.bottomPanelMaximized;
+      // Maximizing implicitly opens the panel (mirrors toggleAiPanelMaximized's
+      // show-on-enter behavior), so the shortcut works even if the bottom
+      // panel is currently hidden.
+      if (next) {
+        return { bottomPanelMaximized: true, bottomPanelVisible: true };
+      }
+      return { bottomPanelMaximized: false };
+    }),
+  setBottomPanelMaximized: (v) => set({ bottomPanelMaximized: v }),
 
   settingsOpen: false,
   setSettingsOpen: (open) => set({ settingsOpen: open }),

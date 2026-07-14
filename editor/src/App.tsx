@@ -511,6 +511,23 @@ function App() {
       },
     },
     {
+      id: 'view.toggleMaximizedPanel',
+      label: 'Toggle Maximized Panel',
+      category: 'View',
+      keybinding: 'mod+shift+j',
+      handler: () => {
+        useUiStore.getState().toggleBottomPanelMaximized();
+      },
+    },
+    {
+      id: 'view.restoreMaximizedPanel',
+      label: 'Restore Maximized Panel',
+      category: 'View',
+      handler: () => {
+        useUiStore.getState().setBottomPanelMaximized(false);
+      },
+    },
+    {
       id: 'view.toggleRightSidebar',
       label: 'Toggle Right Sidebar',
       category: 'View',
