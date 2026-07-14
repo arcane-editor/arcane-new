@@ -3851,6 +3851,124 @@ html, body, #root {
   color: var(--text-secondary);
 }
 
+/* ---- AI Panel: Question request (ask_user, inline Q&A card) ---- */
+.ai-question-block {
+  margin: 8px 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-input));
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--border));
+}
+
+.ai-question-block.is-cancelled {
+  opacity: 0.6;
+}
+
+.ai-question-block-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+  margin-bottom: 8px;
+}
+
+.ai-question-block-header svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.ai-question-block-text {
+  letter-spacing: 0.1px;
+}
+
+.ai-question-block-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ai-question-block-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+
+.ai-question-block-chip:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+  color: var(--accent);
+}
+
+.ai-question-block-chip.is-selected {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  color: var(--accent);
+}
+
+.ai-question-block-chip.is-locked {
+  cursor: not-allowed;
+}
+
+.ai-question-block-chip:disabled {
+  cursor: not-allowed;
+}
+
+.ai-question-block-actions {
+  margin-top: 6px;
+}
+
+.ai-question-block-answer-btn {
+  padding: 4px 12px;
+  background: color-mix(in srgb, var(--accent) 85%, var(--bg-primary));
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+  border-radius: 6px;
+  color: var(--bg-primary);
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    opacity 120ms ease,
+    background 120ms ease;
+}
+
+.ai-question-block-answer-btn:hover:not(:disabled) {
+  background: var(--accent);
+}
+
+.ai-question-block-answer-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ai-question-block-hint {
+  margin-top: 8px;
+  font-size: 11px;
+  font-style: italic;
+  color: var(--text-secondary);
+}
+
+.ai-question-block-footer {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
 /* ---- AI Panel: Checkpoint row (P5.2 restore timeline) ---- */
 .ai-checkpoint-row {
   display: flex;

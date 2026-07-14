@@ -9,6 +9,7 @@ import UserMessage from './UserMessage';
 import AssistantMessage from './AssistantMessage';
 import PlanActions from './PlanActions';
 import PermissionRequestBlock from './PermissionRequestBlock';
+import QuestionBlock from './QuestionBlock';
 import VerifiedCard from './VerifiedCard';
 import CheckpointRow from './CheckpointRow';
 import ErrorBlock from './ErrorBlock';
@@ -67,6 +68,8 @@ function MessageList() {
               );
             case 'permissionRequest':
               return <PermissionRequestBlock key={msg.id} message={msg} />;
+            case 'questionRequest':
+              return <QuestionBlock key={msg.id} message={msg} />;
             case 'verifiedPass':
               return <VerifiedCard key={msg.id} message={msg} />;
             case 'error':

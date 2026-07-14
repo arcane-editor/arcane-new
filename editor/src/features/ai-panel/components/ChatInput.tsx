@@ -15,10 +15,11 @@
 
 import { useRef, useState } from 'react';
 import { ArrowUp, Square } from 'lucide-react';
-import { useAiStore } from '../../../stores/ai';
+import { useAiStore, selectPendingQuestion } from '../../../stores/ai';
 import { useWorkspaceStore } from '../../../stores/workspace';
 import { getAgentService } from '../services/agent-service';
 import { planController } from '../services/plan-controller';
+import { shouldRouteToQuestion } from '../services/question-routing';
 import LexicalChatInput, { type LexicalChatInputHandle } from './LexicalChatInput';
 import ModeSelector from './ModeSelector';
 import EffortSelector from './EffortSelector';
@@ -32,11 +33,22 @@ function ChatInput() {
   const addUserMessage = useAiStore((s) => s.addUserMessage);
   const workspacePath = useWorkspaceStore((s) => s.workspacePath);
   const attachmentCount = useAiStore((s) => s.attachments.length);
+  const pendingQuestion = useAiStore(selectPendingQuestion);
 
   const editorRef = useRef<LexicalChatInputHandle>(null);
   const [hasText, setHasText] = useState(false);
 
   function handleSubmit(text: string) {
+    // Answer-mode routing FIRST: while a question is pending, typed text
+    // answers the question instead of sending a normal message — no
+    // `addUserMessage` (the answer shows in the locked QuestionBlock, not as
+    // a user bubble) and no `clearAttachments` (staged attachments are
+    // unrelated to the question and must survive to the next real send).
+    if (shouldRouteToQuestion({ pendingQuestion: !!pendingQuestion, text })) {
+      useAiStore.getState().resolveQuestionRequest(pendingQuestion!.toolCallId, { answer: text.trim() });
+      return;
+    }
+
     if (!workspacePath) return;
     const attachments = useAiStore.getState().attachments;
     addUserMessage(text, attachments);
@@ -60,10 +72,14 @@ function ChatInput() {
     getAgentService().abort();
   }
 
-  const canSend = !!workspacePath && hasText && !isAgentRunning;
+  // Extended so the pending-question path is send-able even though the agent
+  // (and its blocked ask_user tool call) is still running — normally sending
+  // is blocked mid-run, but answering the question is exactly what unblocks it.
+  const canSend = !!workspacePath && hasText && (!isAgentRunning || !!pendingQuestion);
 
-  const placeholder =
-    mode === 'ask'
+  const placeholder = pendingQuestion
+    ? "Answer the agent's question — or click an option above."
+    : mode === 'ask'
       ? 'Ask a question about your Unity project. @ for context, ⏎ to send.'
       : mode === 'plan'
         ? 'Describe what you want to build. @ for context, ⏎ to plan.'
@@ -93,7 +109,15 @@ function ChatInput() {
           </div>
           <div className="ai-panel-composer-toolbar-right">
             <ImageAttachButton />
-            {isAgentRunning ? (
+            {/*
+              Stop and Send are not strictly either/or while a question is
+              pending: the agent is still `isAgentRunning` (Stop must stay
+              reachable — abort cancels the pending question via the tool's
+              abort signal) but the composer is also send-able again (Send
+              answers the question). Outside answer mode this collapses back
+              to the original either/or (Stop while running, else Send).
+            */}
+            {isAgentRunning && (
               <button
                 type="button"
                 className="ai-panel-send is-stop"
@@ -103,7 +127,8 @@ function ChatInput() {
               >
                 <Square size={12} fill="currentColor" strokeWidth={0} />
               </button>
-            ) : (
+            )}
+            {(!isAgentRunning || !!pendingQuestion) && (
               <button
                 type="button"
                 className="ai-panel-send"
