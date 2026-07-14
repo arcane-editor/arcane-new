@@ -3073,13 +3073,57 @@ html, body, #root {
   cursor: not-allowed;
 }
 
+/* R2-T4: wraps the scrollable message list so the floating "Jump to bottom"
+   affordance can be absolutely positioned over it without scrolling away
+   with the content (see MessageList.tsx's gated-autoscroll rewrite, ported
+   from UnityConsolePanel's pinned/showJump pattern). */
+.ai-panel-messages-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .ai-panel-messages {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 12px;
+}
+
+/* R2-T4: the actual flex/gap row layout moved here from `.ai-panel-messages`
+   itself — messages now render inside an extra wrapper div (so a
+   ResizeObserver can watch it; see MessageList.tsx) rather than as direct
+   flex children of the scroll viewport, so the gap has to move with them or
+   every message would lose its 4px separation. */
+.ai-panel-messages-content {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+.ai-jump-to-bottom {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  background: var(--bg-sidebar);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-primary);
+  font-size: 12px;
+  cursor: pointer;
+  box-shadow: var(--modal-shadow);
+  z-index: 2;
+}
+
+.ai-jump-to-bottom:hover {
+  background: var(--hover);
 }
 
 /* ---- AI Messages ---- */

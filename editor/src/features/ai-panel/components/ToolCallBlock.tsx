@@ -22,7 +22,7 @@
  * (`findCheckpointTurnForToolCall`, T6) over the old path-only fallback.
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, memo } from 'react';
 import {
   ChevronRight,
   ChevronDown,
@@ -47,7 +47,6 @@ import DiffBlock from './DiffBlock';
 
 interface ToolCallBlockProps {
   toolCall: ToolCall;
-  status?: ToolCallStatus;
   /** The user message that started this turn — see `AssistantMessage`'s prop doc. */
   turnUserMessageId: string | null;
 }
@@ -220,7 +219,13 @@ function DiffWithActions({
   );
 }
 
-function ToolCallBlock({ toolCall, status, turnUserMessageId }: ToolCallBlockProps) {
+function ToolCallBlock({ toolCall, turnUserMessageId }: ToolCallBlockProps) {
+  // R2-T4: self-subscribe to just this tool call's status instead of taking
+  // the whole `toolCalls` Map as a prop — the ai store only ever replaces
+  // the touched Map entry's status object (see `tool_execution_*` handlers
+  // in `stores/ai.ts`), so this selector's Object.is bail means a tool
+  // event for a DIFFERENT id no longer re-renders this block at all.
+  const status = useAiStore((s) => s.toolCalls.get(toolCall.id));
   const hasDiffs = (status?.diffs?.length ?? 0) > 0;
   const [expanded, setExpanded] = useState(hasDiffs);
   const [showRaw, setShowRaw] = useState(false);
@@ -311,4 +316,4 @@ function ToolCallBlock({ toolCall, status, turnUserMessageId }: ToolCallBlockPro
   );
 }
 
-export default ToolCallBlock;
+export default memo(ToolCallBlock);

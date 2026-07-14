@@ -2,7 +2,7 @@
  * ThinkingBlock — collapsible block that displays the model's chain-of-thought reasoning.
  */
 
-import { useState } from 'react';
+import { useState, memo } from 'react';
 import { Brain, ChevronRight, ChevronDown } from 'lucide-react';
 
 interface ThinkingBlockProps {
@@ -30,4 +30,4 @@ function ThinkingBlock({ thinking }: ThinkingBlockProps) {
   );
 }
 
-export default ThinkingBlock;
+export default memo(ThinkingBlock);

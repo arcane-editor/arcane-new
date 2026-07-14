@@ -4,6 +4,7 @@
  * above the message text.
  */
 
+import { memo } from 'react';
 import type { AiMessage } from '../../../stores/ai';
 import AttachmentChip from './AttachmentChip';
 
@@ -31,4 +32,4 @@ function UserMessage({ message }: UserMessageProps) {
   );
 }
 
-export default UserMessage;
+export default memo(UserMessage);

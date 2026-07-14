@@ -3,19 +3,31 @@
  * thinking, and tool calls.
  */
 
+import { memo } from 'react';
 import { Sparkles } from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import type { AiMessage, ToolCallStatus } from '../../../stores/ai';
+import type { AiMessage } from '../../../stores/ai';
 import type { TextContent, ThinkingContent, ToolCall } from '../services/vendor/types';
 import { hasRenderableContent } from '../services/turn-errors';
 import ThinkingBlock from './ThinkingBlock';
 import ToolCallBlock from './ToolCallBlock';
 import StreamingIndicator from './StreamingIndicator';
 
+// R2-T4: module-level constant so the plugins array is referentially stable
+// across renders — react-markdown otherwise sees a "new" remarkPlugins array
+// every render, which its own internal memoization can't see through.
+const REMARK_PLUGINS = [remarkGfm];
+
+// R2-T4: isolate each text block's markdown parse behind its own memo so a
+// sibling block re-rendering (or the parent AssistantMessage re-rendering
+// for an unrelated reason) doesn't re-parse markdown that hasn't changed.
+const MarkdownBlock = memo(function MarkdownBlock({ text }: { text: string }) {
+  return <Markdown remarkPlugins={REMARK_PLUGINS}>{text}</Markdown>;
+});
+
 interface AssistantMessageProps {
   message: AiMessage;
-  toolCalls: Map<string, ToolCallStatus>;
   /**
    * The id of the user message that started this turn (P5.1) — threaded down
    * to `ToolCallBlock` so its per-file Revert button can find the matching
@@ -25,7 +37,7 @@ interface AssistantMessageProps {
   turnUserMessageId: string | null;
 }
 
-function AssistantMessage({ message, toolCalls, turnUserMessageId }: AssistantMessageProps) {
+function AssistantMessage({ message, turnUserMessageId }: AssistantMessageProps) {
   // T5/R2-T3: a turn with no renderable content (no text/thinking/tool call —
   // just the bare stopReason/errorMessage T4 preserves) would otherwise
   // render as an empty bubble. This covers both an error tail (the
@@ -50,11 +62,7 @@ function AssistantMessage({ message, toolCalls, turnUserMessageId }: AssistantMe
         {blocks.map((block, i) => {
           switch (block.type) {
             case 'text':
-              return (
-                <Markdown key={i} remarkPlugins={[remarkGfm]}>
-                  {(block as TextContent).text}
-                </Markdown>
-              );
+              return <MarkdownBlock key={i} text={(block as TextContent).text} />;
             case 'thinking':
               return (
                 <ThinkingBlock
@@ -68,7 +76,6 @@ function AssistantMessage({ message, toolCalls, turnUserMessageId }: AssistantMe
                 <ToolCallBlock
                   key={tc.id}
                   toolCall={tc}
-                  status={toolCalls.get(tc.id)}
                   turnUserMessageId={turnUserMessageId}
                 />
               );
@@ -83,4 +90,4 @@ function AssistantMessage({ message, toolCalls, turnUserMessageId }: AssistantMe
   );
 }
 
-export default AssistantMessage;
+export default memo(AssistantMessage);
