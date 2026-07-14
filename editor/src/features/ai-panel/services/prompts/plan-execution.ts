@@ -41,5 +41,12 @@ ${args.planContent}
 - Don't hand-author \`.meta\` files.
 - Place files where the plan says, or matching the project's existing layout.
 
+## Asking the user
+
+- **Call \`ask_user\` when a step turns out to hinge on a decision only the user can make** — an ambiguity the plan didn't resolve, or a destructive trade-off. The call blocks until they answer; continue the step with it.
+- **Offer 2-4 concrete options** when the choices are enumerable; omit \`options\` for a free-form question.
+- **Batch related unknowns into ONE question** rather than asking one at a time.
+- **Don't ask for permission to proceed with obviously reversible work**, and never ask more than twice across the whole plan.
+
 ${UNITY_CONTEXT}`;
 }

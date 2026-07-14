@@ -11,16 +11,18 @@
  *    `markQuestionCancelled`, so a cancelled turn never leaves a stale,
  *    still-clickable question behind.
  *
- * Bun-safety: `addQuestionRequest`/`markQuestionCancelled` reach the Task-2 ai
- * store via a dynamic import, mirroring `todo-tool.ts`'s `pushToArcaneStore`
- * seam — `stores/ai.ts` pulls in a chain (`stores/workspace.ts` →
- * `features/editor` → `@monaco-editor/react`, plus `stores/theme.ts`'s
- * `document.documentElement` side effect) that throws under Bun's DOM-less
- * runtime. The store actions themselves (`addQuestionRequest`/
- * `markQuestionCancelled`) don't exist on `AiStore` until Task 2 lands them —
- * accessed through a locally-declared shape (not imported from `stores/ai`)
- * and called with `?.()` so this file typechecks standalone today and picks
- * up the real actions the moment Task 2 adds them.
+ * Bun-safety: `addQuestionRequest`/`markQuestionCancelled` reach the ai store
+ * via a dynamic import, mirroring `todo-tool.ts`'s `pushToArcaneStore` seam —
+ * `stores/ai.ts` pulls in a chain (`stores/workspace.ts` → `features/editor`
+ * → `@monaco-editor/react`, plus `stores/theme.ts`'s `document.documentElement`
+ * side effect) that throws under Bun's DOM-less runtime. Since Task 2 landed
+ * the real `addQuestionRequest`/`markQuestionCancelled` actions on `AiState`,
+ * `useAiStore` is called directly with no cast: a dynamic `import()`
+ * expression's type is resolved by TypeScript from the real module (same as
+ * `import type` — this is purely a compile-time resolution, it does NOT
+ * create a module-scope/eager runtime import), so `useAiStore.getState()`
+ * already has full, non-optional typing for both actions. No `?.()` guard is
+ * needed either — both actions always exist once this file is loaded.
  *
  * `requestUserQuestion`/`resolvePendingQuestion`/`hasPendingQuestion` are the
  * exact, frozen call surface `ask-user-tool.ts` (Task 1) and the Task-2 UI
@@ -34,12 +36,6 @@
 
 import type { AskUserParams, QuestionAnswer } from './ask-user-tool';
 
-/** The Task-2 `AiStore` actions this gate depends on, declared locally (not imported from `stores/ai`, which doesn't have them yet) so this file typechecks standalone — see the module doc comment. */
-interface AiStoreQuestionActions {
-  addQuestionRequest?: (toolCallId: string, params: AskUserParams) => void;
-  markQuestionCancelled?: (toolCallId: string) => void;
-}
-
 export interface QuestionGateDeps {
   /** Pushes the questionRequest message the UI renders. */
   addQuestionRequest: (toolCallId: string, params: AskUserParams) => void | Promise<void>;
@@ -49,12 +45,12 @@ export interface QuestionGateDeps {
 
 async function defaultAddQuestionRequest(toolCallId: string, params: AskUserParams): Promise<void> {
   const { useAiStore } = await import('../../../stores/ai');
-  (useAiStore.getState() as AiStoreQuestionActions).addQuestionRequest?.(toolCallId, params);
+  useAiStore.getState().addQuestionRequest(toolCallId, params);
 }
 
 async function defaultMarkQuestionCancelled(toolCallId: string): Promise<void> {
   const { useAiStore } = await import('../../../stores/ai');
-  (useAiStore.getState() as AiStoreQuestionActions).markQuestionCancelled?.(toolCallId);
+  useAiStore.getState().markQuestionCancelled(toolCallId);
 }
 
 const DEFAULT_DEPS: QuestionGateDeps = {
@@ -96,7 +92,11 @@ export function requestUserQuestion(
   // pushed in this branch (nothing to render — the run is already dead) and
   // the pending map is never touched.
   if (signal?.aborted) {
-    void deps.markQuestionCancelled(toolCallId); // harmless no-op today; keeps T8 lock symmetry once Task 2 lands
+    // No questionRequest message exists yet in this branch (never pushed —
+    // see above), so this is a no-op lock in practice, but call it anyway for
+    // T8 symmetry: every path that resolves `cancelled` also calls the
+    // store-lock action, with no special-cased exception.
+    void deps.markQuestionCancelled(toolCallId);
     return Promise.resolve({ kind: 'cancelled' });
   }
 

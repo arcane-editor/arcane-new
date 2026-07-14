@@ -13,6 +13,8 @@ export type { SessionData, SessionSummary, SaveSessionInput } from './services/s
 export { restoreLatestSessionForWorkspace } from './services/session-restore';
 export { fixConsoleError } from './services/fix-console-error';
 export { resetWriteApprovalSession } from './services/write-approval-gate';
+export type { AskUserOption, AskUserParams } from './services/ask-user-tool';
+export { resolvePendingQuestion } from './services/question-gate';
 export type { VerifiedCardData } from './services/verified-pass';
 export type { TurnError, TurnErrorKind } from './services/turn-errors';
 export { summarizeSceneDiff } from './services/summarize-scene-diff';

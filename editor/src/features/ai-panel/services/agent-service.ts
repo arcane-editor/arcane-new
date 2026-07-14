@@ -17,6 +17,7 @@ import { createEditTool } from './vendor/tools/edit';
 import { createBashTool } from './vendor/tools/bash';
 import { createListTool } from './vendor/tools/list';
 import { createTodoTool } from './todo-tool';
+import { createAskUserTool } from './ask-user-tool';
 import {
   createGraphifyExplainTool,
   createGraphifyPathTool,
@@ -95,7 +96,10 @@ function restoreAgentMessages(messages: AiMessage[]): AgentMessage[] {
         timestamp: m.timestamp,
       });
     }
-    // system / permissionRequest / verifiedPass are not part of LLM history — skip.
+    // system / permissionRequest / questionRequest / verifiedPass are not part
+    // of LLM history — skip. (`ask_user`'s answer is already the tool call's
+    // own `toolResult`, which the branch above restores; the questionRequest
+    // message is UI-only, same as permissionRequest.)
   }
   return out;
 }
@@ -115,10 +119,18 @@ function getCurrentWorkspacePath(): string {
 }
 
 /**
- * ASK + PLAN-planning → read + list (no mutations).
+ * ASK → read + list only (no mutations, and no `ask_user` — plain chat is
+ * already Q&A, per the ask_user design spec's out-of-scope list).
+ * PLAN-planning → read + list, plus `ask_user` (in-loop question tool):
+ * still no mutations, but planning benefits from clarifying ambiguous
+ * requirements with the user before committing to a plan.
  * AGENT and PLAN-execution → all five (read, list, write, edit, bash), plus
- * `todo_update` (P3.5's in-loop todo tool — mutating modes only, since a
- * read-only conversation has no multi-step work to track).
+ * `todo_update` (P3.5's in-loop todo tool) and `ask_user` — mutating modes
+ * only, since a read-only conversation has no multi-step work to track and
+ * (for `ask_user`) plain chat already lets the user drive interactively.
+ * `ask_user` itself never mutates anything, so it's wrapped by
+ * `withRepeatCallGuard` only (no checkpoint/diffs/approval) in every mode
+ * that registers it.
  *
  * Graphify tools (query, explain, path) are read-only and join every mode
  * when a graph has been built for the workspace.
@@ -168,8 +180,12 @@ function createToolsForPromptMode(mode: PromptMode, workspacePath: string): Agen
   const lspGateOn = isUnity && settings.getSetting('unity.lspGate.enabled') !== false;
   const unityRead: AgentTool[] = isUnity ? createUnityReadTools() : [];
 
-  if (mode === 'ask' || mode === 'plan-planning') {
+  if (mode === 'ask') {
     return [...readOnly, ...graphTools, ...unityRead].map(withRepeatCallGuard);
+  }
+
+  if (mode === 'plan-planning') {
+    return [...readOnly, ...graphTools, ...unityRead, createAskUserTool()].map(withRepeatCallGuard);
   }
 
   // Verified-pass (P3.4) registers every file the send touches by composing
@@ -256,6 +272,7 @@ function createToolsForPromptMode(mode: PromptMode, workspacePath: string): Agen
       allowedRoot,
     }),
     createTodoTool(),
+    createAskUserTool(),
   ].map(withRepeatCallGuard);
 }
 

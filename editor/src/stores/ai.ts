@@ -9,6 +9,8 @@ import {
   saveSession,
   type AgentEvent,
   type AgentKind,
+  type AskUserOption,
+  type AskUserParams,
   type AssistantMessage,
   type Attachment,
   type ChatMode,
@@ -22,6 +24,7 @@ import {
   type TurnError,
   type VerifiedCardData,
   resetWriteApprovalSession,
+  resolvePendingQuestion,
 } from '../features/ai-panel';
 import { useWorkspaceStore } from './workspace';
 import { useCheckpointsStore } from './checkpoints';
@@ -36,6 +39,22 @@ export interface PermissionOption {
   kind: 'allow_once' | 'allow_always' | 'reject_once' | 'reject_always';
 }
 
+/**
+ * `ask_user` question-request fields (mirrors `PermissionOption`/
+ * `AiMessage.permissionRequest` above). Resolved when the user answers via
+ * `QuestionBlock`'s option chips or ChatInput's answer mode (`resolvedAnswer`
+ * set), or locked as `cancelled: true` if the turn aborts mid-question or a
+ * saved session restores with the question still pending.
+ */
+export interface QuestionRequestData {
+  toolCallId: string;
+  question: string;
+  options?: AskUserOption[];
+  allowMultiple?: boolean;
+  resolvedAnswer?: string;
+  cancelled?: boolean;
+}
+
 export interface AiMessage {
   id: string;
   role:
@@ -44,6 +63,7 @@ export interface AiMessage {
     | 'toolResult'
     | 'system'
     | 'permissionRequest'
+    | 'questionRequest'
     | 'verifiedPass'
     | 'error';
   /** User message text */
@@ -94,6 +114,11 @@ export interface AiMessage {
      */
     diff?: { path: string; oldText: string; newText: string };
   };
+  /**
+   * `ask_user` question-request fields (`role: 'questionRequest'` only) — see
+   * `QuestionRequestData` above.
+   */
+  questionRequest?: QuestionRequestData;
   /** Attachments shown above this message (user role only) */
   attachments?: Attachment[];
   /**
@@ -224,6 +249,27 @@ interface AiState {
     diff?: { path: string; oldText: string; newText: string },
   ) => string;
   resolvePermissionRequest: (toolCallId: string, optionId: string) => void;
+  /** Pushes a `questionRequest` message the UI renders (mirrors `addPermissionRequest`). Called by `question-gate.ts`'s `requestUserQuestion`. */
+  addQuestionRequest: (toolCallId: string, params: AskUserParams) => void;
+  /**
+   * The UI's SINGLE entry point for answering/cancelling a pending question
+   * (`QuestionBlock`'s chips, or ChatInput's answer mode): locks the matching
+   * message (`resolvedAnswer` or `cancelled: true`), schedules a save, and —
+   * for an answer — resolves the gate's pending promise
+   * (`resolvePendingQuestion`) so the blocked `ask_user` tool call can return.
+   */
+  resolveQuestionRequest: (
+    toolCallId: string,
+    outcome: { answer: string } | { cancelled: true },
+  ) => void;
+  /**
+   * Lock-only cancellation used by `question-gate.ts`'s own abort path — the
+   * gate has already resolved its pending promise by the time it calls this,
+   * so this must NOT call back into `resolvePendingQuestion` (that would be
+   * circular). Silent no-op if `toolCallId` doesn't match any message (e.g.
+   * the already-aborted-before-render branch in `requestUserQuestion`).
+   */
+  markQuestionCancelled: (toolCallId: string) => void;
   addAttachment: (attachment: Attachment) => void;
   removeAttachment: (id: string) => void;
   clearAttachments: () => void;
@@ -238,6 +284,24 @@ interface AiState {
 let messageCounter = 0;
 function nextId(): string {
   return `msg_${++messageCounter}_${Date.now()}`;
+}
+
+/**
+ * Restore-time sweep for `loadSessionIntoStore` — a saved session can contain
+ * a `questionRequest` message that was still pending when the app quit (the
+ * `ask_user` tool call, and the turn that asked it, is gone; there's no live
+ * gate promise left to answer into). Locks any such message as `cancelled`
+ * so a reloaded transcript never shows a stale, still-clickable question.
+ */
+function sweepUnresolvedQuestions(messages: AiMessage[]): AiMessage[] {
+  return messages.map((m) =>
+    m.role === 'questionRequest' &&
+    m.questionRequest &&
+    m.questionRequest.resolvedAnswer === undefined &&
+    !m.questionRequest.cancelled
+      ? { ...m, questionRequest: { ...m.questionRequest, cancelled: true } }
+      : m,
+  );
 }
 
 // ---- Incremental session persistence ----
@@ -590,7 +654,7 @@ export const useAiStore = create<AiState>((set, get) => ({
 
   loadSessionIntoStore: (session: SessionData) => {
     set(() => ({
-      messages: session.messages ?? [],
+      messages: sweepUnresolvedQuestions(session.messages ?? []),
       streamingMessageId: null,
       isAgentRunning: false,
       toolCalls: new Map(),
@@ -702,6 +766,69 @@ export const useAiStore = create<AiState>((set, get) => ({
     }));
   },
 
+  addQuestionRequest: (toolCallId: string, params: AskUserParams) => {
+    const msg: AiMessage = {
+      id: nextId(),
+      role: 'questionRequest',
+      questionRequest: {
+        toolCallId,
+        question: params.question,
+        options: params.options,
+        allowMultiple: params.allowMultiple,
+      },
+      timestamp: Date.now(),
+    };
+    set((s) => ({ messages: [...s.messages, msg] }));
+  },
+
+  resolveQuestionRequest: (
+    toolCallId: string,
+    outcome: { answer: string } | { cancelled: true },
+  ) => {
+    set((s) => ({
+      messages: s.messages.map((m) =>
+        m.role === 'questionRequest' &&
+        m.questionRequest &&
+        m.questionRequest.toolCallId === toolCallId
+          ? {
+              ...m,
+              questionRequest:
+                'answer' in outcome
+                  ? { ...m.questionRequest, resolvedAnswer: outcome.answer }
+                  : { ...m.questionRequest, cancelled: true },
+            }
+          : m,
+      ),
+    }));
+    // Unlike `resolvePermissionRequest` above, this schedules a save: an
+    // answered/cancelled question can be resolved well before the turn's own
+    // `agent_end` flush (the model may run several more tool calls first), so
+    // a crash/quit in that window shouldn't lose the resolution.
+    scheduleSave();
+    if ('answer' in outcome) {
+      // Reach the gate the same way ai.ts reaches other feature services
+      // (e.g. `resetWriteApprovalSession` above): a static import through the
+      // feature barrel. Safe here specifically because `ai.ts` itself is not
+      // Bun-tested (unlike `question-gate.ts`, which dynamic-imports this
+      // store to avoid pulling `stores/workspace.ts` → `@monaco-editor/react`
+      // into Bun's DOM-less runtime) — there's no reverse constraint forcing
+      // this particular import to be dynamic too.
+      resolvePendingQuestion(toolCallId, outcome.answer);
+    }
+  },
+
+  markQuestionCancelled: (toolCallId: string) => {
+    set((s) => ({
+      messages: s.messages.map((m) =>
+        m.role === 'questionRequest' &&
+        m.questionRequest &&
+        m.questionRequest.toolCallId === toolCallId
+          ? { ...m, questionRequest: { ...m.questionRequest, cancelled: true } }
+          : m,
+      ),
+    }));
+  },
+
   addAttachment: (attachment: Attachment) =>
     set((s) => ({ attachments: [...s.attachments, attachment] })),
 
@@ -724,3 +851,27 @@ export const useAiStore = create<AiState>((set, get) => ({
       },
     })),
 }));
+
+/**
+ * Selector (Zustand-hook style, e.g. `useAiStore(selectPendingQuestion)`):
+ * the newest unresolved `questionRequest` — no `resolvedAnswer`, not
+ * `cancelled` — while the agent is actually running. `null` once the turn
+ * ends (aborted/finished) or once the question is answered/cancelled, so
+ * `ChatInput`'s answer-mode routing never targets a question nobody can
+ * still resolve into a live gate promise.
+ */
+export function selectPendingQuestion(state: AiState): QuestionRequestData | null {
+  if (!state.isAgentRunning) return null;
+  for (let i = state.messages.length - 1; i >= 0; i--) {
+    const m = state.messages[i];
+    if (
+      m.role === 'questionRequest' &&
+      m.questionRequest &&
+      m.questionRequest.resolvedAnswer === undefined &&
+      !m.questionRequest.cancelled
+    ) {
+      return m.questionRequest;
+    }
+  }
+  return null;
+}

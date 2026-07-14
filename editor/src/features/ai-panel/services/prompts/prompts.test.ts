@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'bun:test';
 import { buildAskPrompt } from './ask';
 import { buildAgentPrompt } from './agent';
+import { buildPlanPlanningPrompt } from './plan-planning';
 import { buildPlanExecutionPrompt } from './plan-execution';
 
 describe('prompt personas (anti-terseness regression)', () => {
@@ -43,5 +44,25 @@ describe('todo_update instructions (T9)', () => {
   it('plan-execution prompt ties todo_update to plan steps', () => {
     expect(planExecution).toContain('todo_update');
     expect(planExecution).toContain('mirror the plan');
+  });
+});
+
+describe('ask_user instructions (Task 2 — agent/plan-planning/plan-execution only, not ask)', () => {
+  const agent = buildAgentPrompt('/proj');
+  const planPlanning = buildPlanPlanningPrompt('/proj');
+  const planExecution = buildPlanExecutionPrompt({
+    workspacePath: '/proj',
+    planPath: '/proj/.arcane/plans/plan.md',
+    planContent: '## Steps\n\n- [ ] Step 1: Add CoinPickup component',
+  });
+
+  it('agent, plan-planning, and plan-execution prompts all document ask_user', () => {
+    expect(agent).toContain('ask_user');
+    expect(planPlanning).toContain('ask_user');
+    expect(planExecution).toContain('ask_user');
+  });
+
+  it('plan-planning prompt prefers asking before writing the plan', () => {
+    expect(planPlanning).toContain('BEFORE writing the plan');
   });
 });

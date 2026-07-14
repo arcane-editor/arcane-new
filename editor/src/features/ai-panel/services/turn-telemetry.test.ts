@@ -155,6 +155,14 @@ describe('nudge counts (T9, Part 4 — local-only, never sent to the server)', (
     expect(getPreviousSendNudgeCounts()).toEqual({ mutatingCalls: 3, todoUpdateCalls: 1 });
   });
 
+  it('does not count ask_user tool_execution_end calls as mutating (P? — ask_user never mutates)', () => {
+    recordTelemetryEvent(toolEnd(false, 'ask_user'));
+    recordTelemetryEvent(toolEnd(false, 'ask_user'));
+
+    resetTurnTelemetry();
+    expect(getPreviousSendNudgeCounts()).toEqual({ mutatingCalls: 0, todoUpdateCalls: 0 });
+  });
+
   it('never leaks into the reported TurnTelemetry (metadata.telemetry) snapshot', () => {
     recordTelemetryEvent(toolEnd(false, 'write'));
     recordTelemetryEvent(toolEnd(false, 'write'));
