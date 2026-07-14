@@ -212,6 +212,22 @@ function SearchPanel() {
         )}
       </div>
 
+      {/* Always rendered (fixed height) so switching between searching /
+          results / no-results / error never displaces the list below it.
+          Lives OUTSIDE .search-results (a sibling, above it) so it can't
+          push the virtualizer spacer down inside the scroll container. */}
+      {searchError ? (
+        <div className="search-summary search-summary-error">{searchError}</div>
+      ) : (
+        <div className="search-summary">{summaryText}</div>
+      )}
+
+      {truncated && (
+        <div className="search-truncation-notice">
+          Results capped — showing first {totalMatches} match{plural(totalMatches)}.
+        </div>
+      )}
+
       <div className="search-results" ref={resultsRef}>
         {/* Zero-height sticky anchor: keeps the loading bar pinned to the
             visible top of the scroll area (not the top of the scrolled
@@ -220,20 +236,11 @@ function SearchPanel() {
           {showLoadingBar && <div className="search-progress-bar" />}
         </div>
 
-        {/* Always rendered (fixed height) so switching between searching /
-            results / no-results / error never displaces the list below it. */}
-        {searchError ? (
-          <div className="search-summary search-summary-error">{searchError}</div>
-        ) : (
-          <div className="search-summary">{summaryText}</div>
-        )}
-
-        {truncated && (
-          <div className="search-truncation-notice">
-            Results capped — showing first {totalMatches} match{plural(totalMatches)}.
-          </div>
-        )}
-
+        {/* Virtualizer spacer: only the zero-height anchor above precedes
+            this, matching PaletteModal's `.palette-list` (see
+            PaletteModal.tsx:325-348) — row offsets computed from origin 0
+            line up with the actual scroll position, so no scrollMargin
+            is needed here. */}
         <div
           style={{
             height: `${rowVirtualizer.getTotalSize()}px`,
