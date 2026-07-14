@@ -9,6 +9,8 @@ import { useThemeStore } from '../../../stores/theme';
 import { useSettingsStore } from '../../../stores/settings';
 import { registerTerminal, unregisterTerminal } from '../../theme';
 import { safeUnlisten, listenScoped } from '../../../utils/tauri-listener';
+import { isMac } from '../../../utils/platform';
+import { register, unregister } from '../terminal-registry';
 
 interface Props {
   id: number;
@@ -62,6 +64,40 @@ function TerminalInstance({ id }: Props) {
       termRef.current = term;
       fitAddonRef.current = fitAddon;
       registerTerminal(id, term);
+      // Lets command handlers (split, focus-next/previous-pane) and the
+      // tab-switch effect in RichTerminalPanel move REAL keyboard focus into
+      // this pane's xterm instance — plain store-state updates don't do
+      // that on their own, and a pane mounted in a `display:none` slot
+      // can't be focused by DOM lookup alone.
+      register(id, () => termRef.current?.focus());
+
+      // Three new pane commands (mod+\, mod+shift+[, mod+shift+]) are Ctrl-
+      // chords on non-mac platforms (mod=Ctrl there). xterm's default
+      // keydown handling would otherwise ALSO forward them to the PTY —
+      // Ctrl+\ as the literal SIGQUIT byte (0x1C), Ctrl+Shift+[ / Ctrl+
+      // Shift+] as escape sequences — double-firing alongside the app-level
+      // command and leaking into whatever's running in the shell (vim, a
+      // REPL, etc). Returning `false` tells xterm to ignore the keystroke
+      // entirely so only the document-level command handler
+      // (KeyboardShortcutManager) sees it. On macOS these are Cmd-chords
+      // instead (mod=Cmd there); xterm never forwards Cmd combinations to
+      // the PTY to begin with, so this guard is naturally dormant there —
+      // no separate mac-side handling is needed.
+      if (!isMac()) {
+        term.attachCustomKeyEventHandler((e) => {
+          if (e.type !== 'keydown') return true;
+          if (e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey && e.code === 'Backslash') {
+            return false;
+          }
+          if (
+            e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey &&
+            (e.code === 'BracketLeft' || e.code === 'BracketRight')
+          ) {
+            return false;
+          }
+          return true;
+        });
+      }
 
       // Without this, the xterm helper-textarea has no focus on mount and
       // first keystrokes go nowhere — common cause of "delete doesn't work"
@@ -76,7 +112,19 @@ function TerminalInstance({ id }: Props) {
       term.options.fontFamily = original;
 
       requestAnimationFrame(() => {
-        if (!fitAddon || !term) return;
+        if (!fitAddon || !term || !containerRef.current) return;
+        // Explicit width/height guard (mirrors the ResizeObserver's own
+        // `width>0 && height>0` check below) instead of relying on
+        // addon-fit's internal handling of a zero-size container, which is
+        // inconsistent about bailing on undefined/zero dimensions. A pane
+        // that mounts inside a `display:none` slot (inactive tab or split
+        // group) measures 0x0 here and gets its real fit once the
+        // ResizeObserver fires after the slot becomes visible. Cosmetic-only
+        // consequence: xterm's default 80-col buffer prewraps any output
+        // that arrives before that first real fit — accepted, since the
+        // pane isn't visible yet anyway.
+        const { width, height } = containerRef.current.getBoundingClientRect();
+        if (width === 0 || height === 0) return;
         fitAddon.fit();
         invoke('terminal_resize', {
           id,
@@ -133,6 +181,7 @@ function TerminalInstance({ id }: Props) {
     return () => {
       cancelled = true;
       unregisterTerminal(id);
+      unregister(id);
       dataDisposable?.dispose();
       safeUnlisten(unlistenOutputFn);
       safeUnlisten(unlistenExitFn);

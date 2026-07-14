@@ -1515,7 +1515,15 @@ html, body, #root {
 }
 
 .vsterm__tab-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   line-height: 1;
+}
+
+.vsterm__tab-badge {
+  opacity: 0.6;
+  font-size: 10px;
 }
 
 .vsterm__tab-close {
@@ -1599,10 +1607,29 @@ html, body, #root {
   overflow: hidden;
 }
 
-.vsterm__instance {
+/* One .vsterm__group per terminal TAB (group of split panes), kept mounted
+   and toggled via display:none/flex — same keep-alive approach as before
+   (each xterm instance below survives tab switches without remounting).
+   Allotment fills the box via its own height:100%/width:100% + this
+   ancestor's position:absolute; inset:0 giving it a definite size. */
+.vsterm__group {
   position: absolute;
   inset: 0;
   display: flex;
+}
+
+.vsterm__pane {
+  display: flex;
+  height: 100%;
+  min-width: 0;
+  position: relative;
+}
+
+/* Subtle affordance for which split has focus — only shown once a group
+   actually has more than one pane (a single-pane tab has nothing to
+   disambiguate). */
+.vsterm__pane.is-focused {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
 }
 
 .vsterm__empty {
