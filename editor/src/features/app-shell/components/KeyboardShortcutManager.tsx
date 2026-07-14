@@ -3,7 +3,14 @@ import { useHotkeys } from 'react-hotkeys-hook';
 import { useCommandsStore } from '../../../stores/commands';
 
 function HotkeyBinding({ keybinding, handler }: { keybinding: string; handler: () => void }) {
-  useHotkeys(keybinding, (e) => { e.preventDefault(); handler(); }, { enableOnFormTags: true });
+  useHotkeys(keybinding, (e) => {
+    // Carve-out: Monaco's find/replace widget (`.find-widget`) is a form element,
+    // so `enableOnFormTags: true` would otherwise let every app shortcut fire while
+    // typing in it (e.g. mod+g, mod+shift+f) and shadow the widget's own keymap.
+    if ((e.target as HTMLElement | null)?.closest('.find-widget')) return;
+    e.preventDefault();
+    handler();
+  }, { enableOnFormTags: true });
   return null;
 }
 
