@@ -37,6 +37,15 @@ Run `bun run tauri dev` in `editor/` with a Unity (or any) workspace open, signe
 - [ ] **Collapsible**: header shows "Plan (N/M done)", collapse/expand works.
 - [ ] **Plan mode**: run plan → execute → todos mirror the plan steps during execution.
 
+## C2. ask_user tool (added 2026-07-14, branch ask-user-tool)
+
+- [ ] **Chip answer**: in agent mode, prompt "Ask me which of two approaches I prefer before doing anything" → a question card with option chips appears mid-turn and the agent waits; click a chip → card locks showing `Answered: <choice>`, agent continues using it.
+- [ ] **Typed answer**: repeat; instead of clicking, type in the composer (placeholder should read "Answer the agent's question — or click an option above.") and press Enter → question resolves with your text, NO extra user bubble appears, agent continues.
+- [ ] **Attachments survive**: stage an attachment, answer a question by typing → attachment still staged for your next real message.
+- [ ] **Stop while pending**: press Stop while a question is open → card shows Cancelled, no error block, no hang.
+- [ ] **Restart with open question**: quit while a question pends, relaunch → restored card shows Cancelled.
+- [ ] **Plan mode**: give an ambiguous build request in plan mode → model asks a clarifying question BEFORE writing the plan.
+
 ## D. Server/gateway (Workstreams A/B — mostly verified live already)
 
 - [x] Migration 0011 applied to prod D1 (PRAGMA verified 2026-07-13).
