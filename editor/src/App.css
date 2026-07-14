@@ -1336,6 +1336,9 @@ html, body, #root {
   left: 0;
   right: 0;
   bottom: 24px; /* status bar height */
+  /* Without this, the base rule's height: 100% over-constrains the fixed box
+     (top+height win, `bottom` is ignored) and the panel overruns the status bar. */
+  height: auto;
   z-index: 900; /* below AI overlay (1000) */
   border-top: 1px solid var(--border);
 }
