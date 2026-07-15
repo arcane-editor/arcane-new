@@ -89,7 +89,7 @@ function BottomPanel() {
           className="bottom-panel-terminal-slot"
           style={{ display: effectiveTab === 'terminal' ? 'flex' : 'none' }}
         >
-          <RichTerminalPanel />
+          <RichTerminalPanel isVisible={effectiveTab === 'terminal'} />
         </div>
         {effectiveTab === 'unity-console' && <UnityConsolePanel />}
         {effectiveTab === 'problems' && <ProblemsPanel />}

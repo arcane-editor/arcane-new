@@ -42,13 +42,17 @@ function AssistantMessage({ message, turnUserMessageId }: AssistantMessageProps)
   // just the bare stopReason/errorMessage T4 preserves) would otherwise
   // render as an empty bubble. This covers both an error tail (the
   // ErrorBlock that follows it in the timeline, T5's outcome-detection choke
-  // point, carries the actual message) AND a 'stop' tail with nothing to
-  // show — e.g. R2-T3's empty-response outcome rule classifies THAT as an
-  // error too (surfaced via its own ErrorBlock), but even a legitimate
-  // "silence after acting" empty stop (tool calls happened, model just
-  // didn't add closing text) has nothing to render either way. A turn with
-  // SOME partial content before the error/stop still renders normally here.
-  if (!hasRenderableContent(message.content) && (message.stopReason === 'error' || message.stopReason === 'stop'))
+  // point, carries the actual message) AND a 'stop'/'length' tail with
+  // nothing to show — e.g. R2-T3's empty-response outcome rule classifies
+  // THAT as an error too (surfaced via its own ErrorBlock), but even a
+  // legitimate "silence after acting" empty stop (tool calls happened, model
+  // just didn't add closing text) has nothing to render either way. A turn
+  // with SOME partial content before the error/stop still renders normally
+  // here.
+  if (
+    !hasRenderableContent(message.content) &&
+    (message.stopReason === 'error' || message.stopReason === 'stop' || message.stopReason === 'length')
+  )
     return null;
 
   const blocks = message.content ?? [];

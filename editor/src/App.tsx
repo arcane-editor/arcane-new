@@ -442,10 +442,13 @@ function App() {
         const id = useTerminalStore.getState().activeTerminalId;
         if (id !== null) focusTerminalById(id);
       },
-      // Inert unless the bottom panel is visible AND the active group
-      // actually has more than one pane to cycle between.
+      // Inert unless the bottom panel is visible on the Terminal tab AND the
+      // active group actually has more than one pane to cycle between —
+      // otherwise (e.g. Unity Console active) this would silently mutate
+      // hidden pane focus.
       when: () => {
-        if (!useUiStore.getState().bottomPanelVisible) return false;
+        const ui = useUiStore.getState();
+        if (!ui.bottomPanelVisible || ui.activeBottomTab !== 'terminal') return false;
         const termStore = useTerminalStore.getState();
         const group = termStore.groups.find((g) => g.id === termStore.activeGroupId);
         return !!group && group.terminalIds.length > 1;
@@ -464,7 +467,8 @@ function App() {
         if (id !== null) focusTerminalById(id);
       },
       when: () => {
-        if (!useUiStore.getState().bottomPanelVisible) return false;
+        const ui = useUiStore.getState();
+        if (!ui.bottomPanelVisible || ui.activeBottomTab !== 'terminal') return false;
         const termStore = useTerminalStore.getState();
         const group = termStore.groups.find((g) => g.id === termStore.activeGroupId);
         return !!group && group.terminalIds.length > 1;

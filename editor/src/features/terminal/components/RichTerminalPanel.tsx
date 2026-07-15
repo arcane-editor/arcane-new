@@ -7,7 +7,20 @@ import { useWorkspaceStore } from '../../../stores/workspace';
 import { focusTerminalById } from '../terminal-registry';
 import TerminalInstance from './TerminalInstance';
 
-function RichTerminalPanel() {
+interface RichTerminalPanelProps {
+  /**
+   * Whether the terminal slot is actually revealed in the bottom panel.
+   * BottomPanel keeps this component mounted at all times (display-toggled,
+   * never unmounted) so xterm scrollback survives switching to
+   * Problems/Unity Console/Output and back — which means a plain
+   * mount-effect would auto-spawn an idle PTY any time the bottom panel
+   * opens on another tab. Gating on this prop instead spawns on first
+   * reveal of the terminal tab itself.
+   */
+  isVisible: boolean;
+}
+
+function RichTerminalPanel({ isVisible }: RichTerminalPanelProps) {
   const terminals = useTerminalStore((s) => s.terminals);
   const groups = useTerminalStore((s) => s.groups);
   const activeGroupId = useTerminalStore((s) => s.activeGroupId);
@@ -20,12 +33,13 @@ function RichTerminalPanel() {
   const splitTerminal = useTerminalStore((s) => s.splitTerminal);
   const workspacePath = useWorkspaceStore((s) => s.workspacePath);
 
-  // Auto-spawn the first session when the panel mounts with a workspace.
+  // Auto-spawn the first session on first reveal of the terminal tab (not on
+  // mount — see isVisible doc above).
   useEffect(() => {
-    if (groups.length === 0 && workspacePath) {
+    if (isVisible && groups.length === 0 && workspacePath) {
       createTerminal(workspacePath);
     }
-  }, [groups.length, workspacePath, createTerminal]);
+  }, [isVisible, groups.length, workspacePath, createTerminal]);
 
   // Tab switches (clicking a tab, closing the active tab/pane, splitting)
   // change `activeGroupId` — move REAL keyboard focus into the newly active
