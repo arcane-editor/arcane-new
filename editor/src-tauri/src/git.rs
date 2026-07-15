@@ -206,8 +206,94 @@ fn parse_status(stdout: &str, workspace_path: &str) -> GitStatusResult {
     }
 }
 
+/// A branch as surfaced to the frontend's branch picker: its name, plus the
+/// unix timestamp (seconds) of the most recent `git reflog`-recorded
+/// checkout onto it, when known. `None` covers both "no reflog entry exists
+/// for this branch yet" (e.g. it was created but never checked out) and "the
+/// reflog itself couldn't be read" (fresh repo, no commits yet) — both cases
+/// degrade to "no recency data", never an error.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct BranchInfo {
+    pub name: String,
+    pub last_checkout_ts: Option<i64>,
+}
+
+/// Parse `git reflog --date=unix` output into a map of branch name → unix
+/// timestamp of the most recent `checkout: moving from A to B` entry that
+/// named it as the TARGET (`B`). Every other reflog action (`commit`,
+/// `clone`, `branch`, `merge`, `pull`, ...) is skipped — those lines simply
+/// don't contain the `: checkout: moving from ` marker this function looks
+/// for. Malformed/garbage lines (missing `HEAD@{...}`, a non-numeric
+/// timestamp, no `to` separator) are likewise skipped rather than treated as
+/// an error, since a single unparseable reflog line must never take down the
+/// whole branch list.
+///
+/// `git reflog` prints newest-first, so the FIRST entry seen for a given
+/// target branch is its most recent checkout — `HashMap::entry().or_insert()`
+/// during straight forward iteration gives exactly that "newest wins" result
+/// for free, no explicit max/sort needed.
+///
+/// Branch (and ref) names can never contain a space, so splitting the
+/// `"<from> to <to>"` remainder on the literal `" to "` is unambiguous even
+/// for slashed names like `feature/x`.
+///
+/// A detached-HEAD checkout target is a raw (abbreviated or full) SHA rather
+/// than a branch name — e.g. `checkout: moving from main to
+/// f54bc437f72428517cd7d03ee59760aff5e4247c`. Such an entry is recorded under
+/// that SHA same as any other target; harmless, since `git_list_branches`
+/// only ever looks up real branch names when joining, so a SHA key simply
+/// never matches anything (cheaper than special-casing SHA-shaped targets
+/// here).
+///
+/// Verbatim fixtures used in this module's tests were generated in a scratch
+/// repo — see the task-8 report for the exact commands and full provenance.
+fn parse_checkout_timestamps(reflog_output: &str) -> HashMap<String, i64> {
+    const MARKER: &str = "HEAD@{";
+    const ACTION: &str = ": checkout: moving from ";
+
+    let mut result: HashMap<String, i64> = HashMap::new();
+
+    for line in reflog_output.lines() {
+        let Some(marker_pos) = line.find(MARKER) else {
+            continue;
+        };
+        let after_marker = &line[marker_pos + MARKER.len()..];
+        let Some(close_pos) = after_marker.find('}') else {
+            continue;
+        };
+        let Ok(ts) = after_marker[..close_pos].parse::<i64>() else {
+            continue;
+        };
+
+        let rest = &after_marker[close_pos + 1..];
+        let Some(action_rest) = rest.strip_prefix(ACTION) else {
+            continue;
+        };
+        let Some((_from, to)) = action_rest.split_once(" to ") else {
+            continue;
+        };
+        if to.is_empty() {
+            continue;
+        }
+
+        result.entry(to.to_string()).or_insert(ts);
+    }
+
+    result
+}
+
+/// List branches, each annotated with its last-checkout recency sourced from
+/// `git reflog` (true last-checkout time, including checkouts made outside
+/// this app via the CLI). Base ordering is alphabetical by name (matching
+/// the pre-recency behavior) — the frontend's `branch-results` layer is
+/// responsible for any recency-based re-sort.
+///
+/// The reflog read is best-effort: on failure (most commonly a brand-new
+/// repo with no commits yet, where `git reflog` errors with "does not have
+/// any commits yet") every branch simply gets `last_checkout_ts: None` —
+/// this command never fails because reflog data happens to be unavailable.
 #[tauri::command]
-pub fn git_list_branches(workspace_path: String) -> Result<Vec<String>, String> {
+pub fn git_list_branches(workspace_path: String) -> Result<Vec<BranchInfo>, String> {
     let output = Command::new("git")
         .args([
             "-C",
@@ -225,12 +311,31 @@ pub fn git_list_branches(workspace_path: String) -> Result<Vec<String>, String> 
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let mut branches: Vec<String> = stdout
+    let mut names: Vec<String> = stdout
         .lines()
         .filter(|l| !l.is_empty())
         .map(|l| l.to_string())
         .collect();
-    branches.sort();
+    names.sort();
+
+    let timestamps = Command::new("git")
+        .args(["-C", &workspace_path, "reflog", "--date=unix"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| parse_checkout_timestamps(&String::from_utf8_lossy(&o.stdout)))
+        .unwrap_or_default();
+
+    let branches = names
+        .into_iter()
+        .map(|name| {
+            let last_checkout_ts = timestamps.get(&name).copied();
+            BranchInfo {
+                name,
+                last_checkout_ts,
+            }
+        })
+        .collect();
 
     Ok(branches)
 }
@@ -1705,6 +1810,13 @@ mod branch_lifecycle_tests {
         );
     }
 
+    /// `git_list_branches` now returns `Vec<BranchInfo>` (name + recency)
+    /// instead of `Vec<String>`; these lifecycle tests only care about which
+    /// names are present, so this collapses back to bare names.
+    fn branch_names(branches: Vec<BranchInfo>) -> Vec<String> {
+        branches.into_iter().map(|b| b.name).collect()
+    }
+
     #[test]
     fn create_branch_from_head() {
         let tmp = init_repo();
@@ -1712,7 +1824,7 @@ mod branch_lifecycle_tests {
 
         git_create_branch(path.clone(), "feature-a".into(), None, false).unwrap();
 
-        let branches = git_list_branches(path).unwrap();
+        let branches = branch_names(git_list_branches(path).unwrap());
         assert!(branches.contains(&"feature-a".to_string()));
     }
 
@@ -1730,7 +1842,7 @@ mod branch_lifecycle_tests {
         )
         .unwrap();
 
-        let branches = git_list_branches(path).unwrap();
+        let branches = branch_names(git_list_branches(path).unwrap());
         assert!(branches.contains(&"feature-b".to_string()));
     }
 
@@ -1764,7 +1876,7 @@ mod branch_lifecycle_tests {
 
         git_rename_branch(path.clone(), "old-name".into(), "new-name".into()).unwrap();
 
-        let branches = git_list_branches(path).unwrap();
+        let branches = branch_names(git_list_branches(path).unwrap());
         assert!(!branches.contains(&"old-name".to_string()));
         assert!(branches.contains(&"new-name".to_string()));
     }
@@ -1777,7 +1889,7 @@ mod branch_lifecycle_tests {
 
         git_delete_branch(path.clone(), "merged-branch".into(), false).unwrap();
 
-        let branches = git_list_branches(path).unwrap();
+        let branches = branch_names(git_list_branches(path).unwrap());
         assert!(!branches.contains(&"merged-branch".to_string()));
     }
 
@@ -1812,7 +1924,7 @@ mod branch_lifecycle_tests {
 
         git_delete_branch(path.clone(), "unmerged-branch2".into(), true).unwrap();
 
-        let branches = git_list_branches(path).unwrap();
+        let branches = branch_names(git_list_branches(path).unwrap());
         assert!(!branches.contains(&"unmerged-branch2".to_string()));
     }
 
@@ -1829,7 +1941,7 @@ mod branch_lifecycle_tests {
             "expected 'invalid branch name' in error, got: {err}"
         );
         // Verify main still exists (wasn't force-deleted by the malicious input)
-        let branches = git_list_branches(path).unwrap();
+        let branches = branch_names(git_list_branches(path).unwrap());
         assert!(branches.contains(&"main".to_string()));
     }
 
@@ -1894,8 +2006,237 @@ mod branch_lifecycle_tests {
             "expected 'invalid branch name' in error, got: {err}"
         );
         // Verify main still exists
-        let branches = git_list_branches(path).unwrap();
+        let branches = branch_names(git_list_branches(path).unwrap());
         assert!(branches.contains(&"main".to_string()));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// R2-T8: Branch recency — parse_checkout_timestamps + git_list_branches join
+//
+// PROJECT LESSON (the porcelain-v2 status parser dropped every tracked-file
+// change twice before verbatim-line tests caught it): the fixtures below are
+// real `git reflog --date=unix` output captured from a scratch repo, not
+// hand-imagined lines. See the task-8 report for the exact commands used to
+// produce them.
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod branch_reflog_tests {
+    use super::*;
+
+    fn run_git(path: &str, args: &[&str]) {
+        let mut full: Vec<&str> = vec!["-C", path];
+        full.extend_from_slice(args);
+        let output = Command::new("git").args(&full).output().unwrap();
+        assert!(
+            output.status.success(),
+            "git {:?} failed: {}",
+            args,
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    /// Repo with one commit on `main` (deterministic initial branch, local
+    /// user identity) so HEAD is valid but — importantly — no explicit
+    /// checkout has ever been recorded for `main` itself (creating the repo
+    /// and committing writes a `commit (initial)` reflog line, not a
+    /// `checkout` one).
+    fn init_repo() -> tempfile::TempDir {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().to_str().unwrap();
+        run_git(path, &["init", "--initial-branch=main"]);
+        run_git(path, &["config", "user.email", "test@example.com"]);
+        run_git(path, &["config", "user.name", "Test User"]);
+        run_git(path, &["commit", "--allow-empty", "-m", "init"]);
+        tmp
+    }
+
+    // --- parse_checkout_timestamps: verbatim-line fixtures ------------------
+
+    #[test]
+    fn parses_normal_checkout_entry() {
+        // Verbatim line from `git reflog --date=unix`, scratch repo, after
+        // `git switch -c feature/x && git switch main`.
+        let reflog = "f54bc43 HEAD@{1784090195}: checkout: moving from feature/x to main\n";
+        let ts = parse_checkout_timestamps(reflog);
+        assert_eq!(ts.get("main"), Some(&1784090195));
+    }
+
+    #[test]
+    fn parses_slashed_branch_names_on_either_side() {
+        // Verbatim lines from the same scratch-repo reflog: a slashed name as
+        // the checkout TARGET, then as the checkout SOURCE.
+        let target_slashed =
+            "f54bc43 HEAD@{1784090195}: checkout: moving from main to feature/x\n";
+        let ts = parse_checkout_timestamps(target_slashed);
+        assert_eq!(ts.get("feature/x"), Some(&1784090195));
+
+        let source_slashed =
+            "f54bc43 HEAD@{1784090195}: checkout: moving from feature/x to another-branch\n";
+        let ts = parse_checkout_timestamps(source_slashed);
+        assert_eq!(ts.get("another-branch"), Some(&1784090195));
+    }
+
+    #[test]
+    fn newest_entry_per_branch_wins_and_non_checkout_lines_are_ignored() {
+        // Verbatim FULL `git reflog --date=unix` output from a scratch repo:
+        // init -> switch -c feature/x -> switch main -> switch feature/x ->
+        // switch -c another-branch -> switch main -> checkout <own-HEAD-sha>
+        // (detached) -> switch main. Newest first, as git prints it.
+        let reflog = "\
+f54bc43 HEAD@{1784090212}: checkout: moving from f54bc437f72428517cd7d03ee59760aff5e4247c to main
+f54bc43 HEAD@{1784090212}: checkout: moving from main to f54bc437f72428517cd7d03ee59760aff5e4247c
+f54bc43 HEAD@{1784090195}: checkout: moving from another-branch to main
+f54bc43 HEAD@{1784090195}: checkout: moving from feature/x to another-branch
+f54bc43 HEAD@{1784090195}: checkout: moving from main to feature/x
+f54bc43 HEAD@{1784090195}: checkout: moving from feature/x to main
+f54bc43 HEAD@{1784090195}: checkout: moving from main to feature/x
+f54bc43 HEAD@{1784090195}: commit (initial): init
+";
+        let ts = parse_checkout_timestamps(reflog);
+
+        // "main" is a checkout target three times; the newest (topmost, since
+        // reflog is newest-first) wins over the two older entries.
+        assert_eq!(ts.get("main"), Some(&1784090212));
+        assert_eq!(ts.get("feature/x"), Some(&1784090195));
+        assert_eq!(ts.get("another-branch"), Some(&1784090195));
+
+        // Detached-HEAD target (a raw SHA, not a branch name) is recorded
+        // like any other target — harmless dead entry, since the join step
+        // in `git_list_branches` only looks up real branch names.
+        assert_eq!(
+            ts.get("f54bc437f72428517cd7d03ee59760aff5e4247c"),
+            Some(&1784090212)
+        );
+
+        // The trailing `commit (initial): init` line is not a checkout entry
+        // and must not be misparsed into a bogus "init" branch.
+        assert!(!ts.contains_key("init"));
+        assert_eq!(ts.len(), 4, "expected exactly 4 distinct checkout targets");
+    }
+
+    #[test]
+    fn clone_line_is_ignored() {
+        // Verbatim `git reflog --date=unix` output from a repo produced by
+        // `git clone <scratch-repo>` (no checkouts have happened in the
+        // clone itself yet — only the implicit clone entry).
+        let reflog = "f54bc43 HEAD@{1784090212}: clone: from /private/tmp/claude-501/-Users-inno-Documents-experiments-arcane-editor-editor/8b311b96-3b71-416e-94a5-16e2ea64db4b/scratchpad/reflog-scratch\n";
+        let ts = parse_checkout_timestamps(reflog);
+        assert!(ts.is_empty());
+    }
+
+    #[test]
+    fn commit_only_reflog_yields_no_checkout_entries() {
+        // Verbatim `git reflog --date=unix` output from a freshly-committed
+        // repo that has never had an explicit checkout.
+        let reflog = "f77f23e HEAD@{1784090230}: commit (initial): init\n";
+        let ts = parse_checkout_timestamps(reflog);
+        assert!(ts.is_empty());
+    }
+
+    #[test]
+    fn garbage_lines_are_ignored() {
+        let reflog = "not a reflog line at all\n\n   \nHEAD@{not-a-number}: checkout: moving from a to b\nHEAD@{123} checkout: moving from a to b (no colon after brace)\n";
+        let ts = parse_checkout_timestamps(reflog);
+        assert!(ts.is_empty());
+    }
+
+    #[test]
+    fn empty_input_yields_empty_map() {
+        assert!(parse_checkout_timestamps("").is_empty());
+    }
+
+    // --- git_list_branches: real end-to-end reflog join ---------------------
+
+    #[test]
+    fn list_branches_reports_last_checkout_ts_from_real_reflog() {
+        let tmp = init_repo();
+        let path = tmp.path().to_str().unwrap().to_string();
+        run_git(&path, &["switch", "-c", "feature-a"]);
+        run_git(&path, &["switch", "main"]);
+
+        let branches = git_list_branches(path).unwrap();
+        let by_name: HashMap<String, Option<i64>> =
+            branches.into_iter().map(|b| (b.name, b.last_checkout_ts)).collect();
+
+        let feature_ts = by_name.get("feature-a").copied().flatten();
+        let main_ts = by_name.get("main").copied().flatten();
+        assert!(feature_ts.is_some(), "feature-a should have a checkout timestamp");
+        assert!(main_ts.is_some(), "main should have a checkout timestamp");
+        assert!(
+            main_ts.unwrap() >= feature_ts.unwrap(),
+            "main was checked out most recently and should sort at least as new"
+        );
+    }
+
+    #[test]
+    fn list_branches_on_repo_with_no_checkouts_yields_none_timestamp() {
+        // `init_repo()` commits on `main` but never explicitly checks it
+        // out — there is no `checkout` reflog entry for it at all.
+        let tmp = init_repo();
+        let path = tmp.path().to_str().unwrap().to_string();
+
+        let branches = git_list_branches(path).unwrap();
+        assert_eq!(branches.len(), 1);
+        assert_eq!(branches[0].name, "main");
+        assert_eq!(branches[0].last_checkout_ts, None);
+    }
+
+    #[test]
+    fn list_branches_on_completely_fresh_repo_does_not_error_despite_reflog_failure() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().to_str().unwrap().to_string();
+        run_git(&path, &["init", "--initial-branch=main"]);
+        // No commits at all yet: `git reflog --date=unix` exits non-zero
+        // here ("fatal: your current branch 'main' does not have any
+        // commits yet") and `git branch --list` has nothing to list either.
+        // `git_list_branches` must swallow the reflog failure and still
+        // return Ok, not propagate it as an error.
+        let branches = git_list_branches(path).unwrap();
+        assert!(branches.is_empty());
+    }
+
+    #[test]
+    fn list_branches_base_order_stays_alphabetical() {
+        let tmp = init_repo();
+        let path = tmp.path().to_str().unwrap().to_string();
+        run_git(&path, &["branch", "zeta"]);
+        run_git(&path, &["branch", "alpha"]);
+
+        let branches = git_list_branches(path).unwrap();
+        let names: Vec<String> = branches.into_iter().map(|b| b.name).collect();
+        assert_eq!(names, vec!["alpha", "main", "zeta"]);
+    }
+
+    // --- serde contract: BranchInfo field names -----------------------------
+
+    /// Pins the exact JSON field names the frontend's `BranchInfo` TypeScript
+    /// type consumes (see `src/stores/git.ts`). Same rationale as
+    /// `git_status_result_serde_field_names` below: the Tauri IPC boundary is
+    /// JSON, not shared types, so a silent field rename here would break the
+    /// frontend with no compiler error anywhere.
+    #[test]
+    fn branch_info_serde_field_names() {
+        let info = BranchInfo {
+            name: "main".to_string(),
+            last_checkout_ts: Some(1736831145),
+        };
+        let value = serde_json::to_value(&info).unwrap();
+        let obj = value.as_object().unwrap();
+        assert!(obj.contains_key("name"));
+        assert!(obj.contains_key("last_checkout_ts"));
+        assert_eq!(obj.len(), 2, "unexpected extra/missing field on BranchInfo");
+        assert_eq!(obj["name"], serde_json::json!("main"));
+        assert_eq!(obj["last_checkout_ts"], serde_json::json!(1736831145));
+
+        let info_none = BranchInfo {
+            name: "feature/x".to_string(),
+            last_checkout_ts: None,
+        };
+        let value_none = serde_json::to_value(&info_none).unwrap();
+        assert_eq!(value_none["name"], serde_json::json!("feature/x"));
+        assert_eq!(value_none["last_checkout_ts"], serde_json::Value::Null);
     }
 }
 
