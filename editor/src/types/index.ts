@@ -81,6 +81,12 @@ export interface Command {
   keybinding?: string;
   handler: () => void;
   when?: () => boolean;
+  // Opt out of bindGlobalShortcutsToMonaco's editor bridge. Use when the
+  // keybinding collides with a Monaco default that must stay reachable in
+  // the editor: an editor.addCommand keybinding consumes the keystroke
+  // unconditionally — `when()` only skips our handler, it cannot hand the
+  // key back to Monaco's own keymap.
+  skipMonacoBridge?: boolean;
 }
 
 export type NotificationType = 'info' | 'success' | 'warning' | 'error';

@@ -25,6 +25,12 @@ export function bindGlobalShortcutsToMonaco(
     const all = useCommandsStore.getState().commands;
     for (const cmd of all.values()) {
       if (!cmd.keybinding) continue;
+      // Commands can opt out of the editor bridge (see the Command type):
+      // an addCommand keybinding consumes the keystroke inside Monaco even
+      // when `when()` returns false, which would shadow Monaco defaults on
+      // the same chord (e.g. terminal.focusNext/PreviousPane vs. non-mac
+      // fold/unfold on mod+shift+bracketleft/right).
+      if (cmd.skipMonacoBridge) continue;
       const tag = `${cmd.id}|${cmd.keybinding}`;
       if (registered.has(tag)) continue;
       const bitfield = parseHotkeyToMonaco(cmd.keybinding, monaco);

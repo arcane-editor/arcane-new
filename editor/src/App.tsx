@@ -397,7 +397,12 @@ function App() {
       label: 'Split Terminal',
       category: 'Terminal',
       // VS Code parity; verified free (grep across App.tsx keybindings).
-      keybinding: 'mod+\\',
+      // NOTE: named physical-key token, not the literal character —
+      // react-hotkeys-hook v5 matches on `event.code` ("Backslash"
+      // normalizes to "backslash"; a literal `\` token can never match it),
+      // and parseHotkeyToMonaco's NAMED_KEYS maps the same word for the
+      // Monaco bridge. Same for the two bracket bindings below.
+      keybinding: 'mod+backslash',
       handler: () => {
         const ui = useUiStore.getState();
         ui.setBottomPanelVisible(true);
@@ -424,7 +429,14 @@ function App() {
       id: 'terminal.focusNextPane',
       label: 'Focus Next Terminal Pane',
       category: 'Terminal',
-      keybinding: 'mod+shift+]',
+      keybinding: 'mod+shift+bracketright',
+      // Not bridged into Monaco: on non-mac, mod+shift+[ / ] are Monaco's
+      // own fold/unfold defaults, and an editor.addCommand keybinding
+      // consumes the keystroke even when our `when()` returns false — the
+      // guard only skips the handler, it can't give the key back to Monaco.
+      // These commands are terminal-focused-only anyway; the document-level
+      // hotkey (KeyboardShortcutManager) covers that fully.
+      skipMonacoBridge: true,
       handler: () => {
         useTerminalStore.getState().focusSiblingPane(1);
         const id = useTerminalStore.getState().activeTerminalId;
@@ -443,7 +455,9 @@ function App() {
       id: 'terminal.focusPreviousPane',
       label: 'Focus Previous Terminal Pane',
       category: 'Terminal',
-      keybinding: 'mod+shift+[',
+      keybinding: 'mod+shift+bracketleft',
+      // See focusNextPane: keeps Monaco's non-mac fold default reachable.
+      skipMonacoBridge: true,
       handler: () => {
         useTerminalStore.getState().focusSiblingPane(-1);
         const id = useTerminalStore.getState().activeTerminalId;

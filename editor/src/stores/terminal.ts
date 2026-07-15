@@ -9,6 +9,7 @@ import {
   focusPane,
   focusGroup,
   focusSibling,
+  groupOf,
   type GroupsState,
 } from './terminal-groups';
 
@@ -106,6 +107,19 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       });
     } catch (err) {
       notify.error(`Failed to spawn terminal: ${err}`);
+      return null;
+    }
+
+    // RACE: the source pane (or its whole group) may have been killed while
+    // terminal_spawn was in flight — killTerminal/killGroup/the workspace-
+    // switch loop all run concurrently with this await. If the source is
+    // gone, `addPane` would no-op and the fresh terminal would join
+    // `terminals` with no group: never rendered, no UI path to kill it, a
+    // leaked PTY. Kill the just-spawned PTY and skip the state commit
+    // instead. (Safe from TOCTOU: everything between this check and the
+    // `set` below is synchronous.)
+    if (!groupOf(get(), sourceId)) {
+      invoke('terminal_kill', { id }).catch(() => {});
       return null;
     }
 

@@ -28,6 +28,16 @@ interface FuzzyFileResult {
   match_indices: number[];
 }
 
+// Named physical-key tokens (react-hotkeys-hook v5 matches on `event.code`,
+// so bindings use words like "backslash" instead of the literal character —
+// see the terminal.* commands in App.tsx). Render them as their symbol.
+const NAMED_KEY_LABELS: Record<string, string> = {
+  backslash: '\\',
+  bracketleft: '[',
+  bracketright: ']',
+  backquote: '`',
+};
+
 function formatKeybinding(kb: string): string {
   const isMac = platformIsMac();
   return kb
@@ -38,6 +48,7 @@ function formatKeybinding(kb: string): string {
       if (p === 'shift') return isMac ? '⇧' : 'Shift';
       if (p === 'alt') return isMac ? '⌥' : 'Alt';
       if (p === '`') return '`';
+      if (NAMED_KEY_LABELS[p]) return NAMED_KEY_LABELS[p];
       return p.charAt(0).toUpperCase() + p.slice(1);
     })
     .join(isMac ? '' : '+');
