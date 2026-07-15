@@ -69,7 +69,7 @@ function BranchPicker({ onClose, initialMode = 'switch' }: { onClose: () => void
     if (mode === 'create') {
       const trimmed = query.trim();
       if (trimmed === '') return [{ kind: 'hint', label: 'Type a branch name' }];
-      if (branches.some((name) => name === trimmed)) {
+      if (branches.some((b) => b.name === trimmed)) {
         return [{ kind: 'hint', label: `Branch '${trimmed}' already exists` }];
       }
       return [{ kind: 'action', label: `Create branch '${trimmed}'`, name: trimmed }];

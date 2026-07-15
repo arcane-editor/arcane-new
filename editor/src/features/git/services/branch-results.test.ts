@@ -1,22 +1,36 @@
 import { describe, it, expect } from 'bun:test';
 import { buildBranchResults, type BranchRow } from './branch-results';
+import type { BranchInfo } from '../../../stores/git';
+
+/** Build a `BranchInfo` with an optional last-checkout timestamp (defaults to
+ * `null`, i.e. "no recency data"), so test fixtures stay terse. */
+function b(name: string, lastCheckoutTs: number | null = null): BranchInfo {
+  return { name, last_checkout_ts: lastCheckoutTs };
+}
+
+/** Build a plain name-only `BranchInfo[]` fixture (no recency data on any
+ * branch) — the common case for tests that only care about alphabetical/
+ * fuzzy behavior, unaffected by this feature's recency sort. */
+function names(...ns: string[]): BranchInfo[] {
+  return ns.map((n) => b(n));
+}
 
 describe('buildBranchResults', () => {
   describe('empty query', () => {
     it('prepends a create row (name \'\') as the first row, before the pinned current branch', () => {
-      const rows = buildBranchResults(['feature/b', 'main', 'develop'], '', 'develop');
+      const rows = buildBranchResults(names('feature/b', 'main', 'develop'), '', 'develop');
       expect(rows[0]).toEqual({ kind: 'create', name: '' });
       expect(rows.map((r) => r.name)).toEqual(['', 'develop', 'feature/b', 'main']);
     });
 
     it('pins the current branch first among the branch rows, sorts the rest alphabetically', () => {
-      const rows = buildBranchResults(['feature/b', 'main', 'develop'], '', 'develop');
+      const rows = buildBranchResults(names('feature/b', 'main', 'develop'), '', 'develop');
       const branchRows = rows.filter((r): r is BranchRow => r.kind === 'branch');
       expect(branchRows.map((r) => r.name)).toEqual(['develop', 'feature/b', 'main']);
     });
 
     it('is a consistent total ordering (stable across repeated calls, no reshuffling)', () => {
-      const branches = ['zeta', 'alpha', 'mid', 'omega'];
+      const branches = names('zeta', 'alpha', 'mid', 'omega');
       const first = buildBranchResults(branches, '', 'mid').map((r) => r.name);
       const second = buildBranchResults([...branches], '', 'mid').map((r) => r.name);
       const third = buildBranchResults(branches.slice().reverse(), '', 'mid').map((r) => r.name);
@@ -30,55 +44,110 @@ describe('buildBranchResults', () => {
     });
 
     it('prepends the create row for a whitespace-only query (treated as empty)', () => {
-      const rows = buildBranchResults(['main'], '   ', 'main');
+      const rows = buildBranchResults(names('main'), '   ', 'main');
       expect(rows[0]).toEqual({ kind: 'create', name: '' });
       expect(rows.map((r) => r.name)).toEqual(['', 'main']);
     });
 
     it('handles no current branch (null) without throwing: still prepends the create row and does not pin', () => {
-      const rows = buildBranchResults(['b', 'a'], '', null);
+      const rows = buildBranchResults(names('b', 'a'), '', null);
       expect(rows[0]).toEqual({ kind: 'create', name: '' });
       const branchRows = rows.filter((r): r is BranchRow => r.kind === 'branch');
       expect(branchRows.map((r) => r.name)).toEqual(['a', 'b']);
+    });
+
+    describe('recency sort (last_checkout_ts)', () => {
+      it('sorts branches with a checkout timestamp before ones without, most-recent first', () => {
+        const branches = [b('old', 100), b('never-checked-out'), b('new', 300), b('mid', 200)];
+        const rows = buildBranchResults(branches, '', null);
+        const branchRows = rows.filter((r): r is BranchRow => r.kind === 'branch');
+        expect(branchRows.map((r) => r.name)).toEqual(['new', 'mid', 'old', 'never-checked-out']);
+      });
+
+      it('treats an undefined last_checkout_ts the same as null (defensive parse leniency)', () => {
+        const branches: BranchInfo[] = [{ name: 'has-ts', last_checkout_ts: 500 }, { name: 'no-ts' }];
+        const rows = buildBranchResults(branches, '', null);
+        const branchRows = rows.filter((r): r is BranchRow => r.kind === 'branch');
+        expect(branchRows.map((r) => r.name)).toEqual(['has-ts', 'no-ts']);
+      });
+
+      it('breaks a tie between two branches with the SAME timestamp alphabetically', () => {
+        const branches = [b('zebra', 100), b('apple', 100)];
+        const rows = buildBranchResults(branches, '', null);
+        const branchRows = rows.filter((r): r is BranchRow => r.kind === 'branch');
+        expect(branchRows.map((r) => r.name)).toEqual(['apple', 'zebra']);
+      });
+
+      it('breaks a tie between two branches with NO timestamp alphabetically', () => {
+        const branches = [b('zebra'), b('apple')];
+        const rows = buildBranchResults(branches, '', null);
+        const branchRows = rows.filter((r): r is BranchRow => r.kind === 'branch');
+        expect(branchRows.map((r) => r.name)).toEqual(['apple', 'zebra']);
+      });
+
+      it('pins the current branch first even when another branch has a newer timestamp', () => {
+        const branches = [b('current', 100), b('more-recent', 999)];
+        const rows = buildBranchResults(branches, '', 'current');
+        const branchRows = rows.filter((r): r is BranchRow => r.kind === 'branch');
+        expect(branchRows.map((r) => r.name)).toEqual(['current', 'more-recent']);
+      });
+
+      it('is a consistent total ordering with mixed recency data regardless of input order', () => {
+        const branches = [b('a', 50), b('b'), b('c', 50), b('d', 999)];
+        const first = buildBranchResults(branches, '', null).map((r) => r.name);
+        const second = buildBranchResults(branches.slice().reverse(), '', null).map((r) => r.name);
+        expect(first).toEqual(['', 'd', 'a', 'c', 'b']);
+        expect(second).toEqual(first);
+      });
     });
   });
 
   describe('non-empty query (fuzzy filtering)', () => {
     it('filters out branches that do not fuzzy-match and sorts by score', () => {
-      const rows = buildBranchResults(['feature/login', 'feature/logout', 'main'], 'login', 'main');
-      const names = rows.filter((r) => r.kind === 'branch').map((r) => r.name);
-      expect(names).toContain('feature/login');
-      expect(names).not.toContain('main');
+      const rows = buildBranchResults(names('feature/login', 'feature/logout', 'main'), 'login', 'main');
+      const branchNames = rows.filter((r) => r.kind === 'branch').map((r) => r.name);
+      expect(branchNames).toContain('feature/login');
+      expect(branchNames).not.toContain('main');
     });
 
     it('is unaffected by the create-row logic when there is no exact match (still fuzzy-sorted)', () => {
-      const rows = buildBranchResults(['feature/login', 'feature/logout'], 'logi', 'feature/login');
+      const rows = buildBranchResults(names('feature/login', 'feature/logout'), 'logi', 'feature/login');
       const branchRows = rows.filter((r): r is BranchRow => r.kind === 'branch');
       // feature/login should score at least as well as feature/logout for query "logi"
       expect(branchRows[0].name).toBe('feature/login');
     });
 
     it('does not prepend a create row for a non-empty query (only the trailing create row applies)', () => {
-      const rows = buildBranchResults(['feature/login'], 'feature/logi', 'main');
+      const rows = buildBranchResults(names('feature/login'), 'feature/logi', 'main');
       expect(rows[0].kind).toBe('branch');
+    });
+
+    it('ignores recency (last_checkout_ts) entirely — fuzzy score is the only ordering signal', () => {
+      // "older" has no timestamp but is a better fuzzy match than "newer"
+      // (which has a very recent timestamp) — recency must not override
+      // fuzzy score for a non-empty query.
+      const branches = [b('newer-xyz', 999), b('older')];
+      const rows = buildBranchResults(branches, 'older', null);
+      const branchRows = rows.filter((r): r is BranchRow => r.kind === 'branch');
+      expect(branchRows[0].name).toBe('older');
     });
   });
 
   describe('create row', () => {
     it('is absent when the trimmed query exactly matches an existing branch', () => {
-      const rows = buildBranchResults(['main', 'develop'], 'main', 'main');
+      const rows = buildBranchResults(names('main', 'develop'), 'main', 'main');
       expect(rows.some((r) => r.kind === 'create')).toBe(false);
     });
 
     it('is absent when the query exactly matches after trimming surrounding whitespace', () => {
-      const rows = buildBranchResults(['main', 'develop'], '  main  ', 'main');
+      const rows = buildBranchResults(names('main', 'develop'), '  main  ', 'main');
       expect(rows.some((r) => r.kind === 'create')).toBe(false);
       // Verify that the branch row IS present (not vacuously passing on empty array)
       expect(rows.map((r) => r.name)).toContain('main');
     });
 
     it('is present and appended last when the query matches no branch exactly', () => {
-      const rows = buildBranchResults(['main', 'develop'], 'feature/new-thing', 'main');
+      const rows = buildBranchResults(names('main', 'develop'), 'feature/new-thing', 'main');
       expect(rows.length).toBeGreaterThan(0);
       const last = rows[rows.length - 1];
       expect(last.kind).toBe('create');
@@ -86,13 +155,13 @@ describe('buildBranchResults', () => {
     });
 
     it('uses the trimmed query as the create-row name', () => {
-      const rows = buildBranchResults(['main'], '  new-branch  ', 'main');
+      const rows = buildBranchResults(names('main'), '  new-branch  ', 'main');
       const createRow = rows.find((r) => r.kind === 'create');
       expect(createRow?.name).toBe('new-branch');
     });
 
     it('is present even when a similarly-named branch fuzzy-matches (no exact match)', () => {
-      const rows = buildBranchResults(['feature/login'], 'feature/logi', 'main');
+      const rows = buildBranchResults(names('feature/login'), 'feature/logi', 'main');
       const kinds = rows.map((r) => r.kind);
       expect(kinds[kinds.length - 1]).toBe('create');
       // the fuzzy-matched branch row is still present ahead of the create row
@@ -100,13 +169,13 @@ describe('buildBranchResults', () => {
     });
 
     it('is case-sensitive for the exact-match check (branch names are case-sensitive in git)', () => {
-      const rows = buildBranchResults(['Main'], 'main', 'Main');
+      const rows = buildBranchResults(names('Main'), 'main', 'Main');
       // "main" !== "Main" exactly, so a create row for "main" is offered
       expect(rows.some((r) => r.kind === 'create' && r.name === 'main')).toBe(true);
     });
 
     it('appends the create row after all branch rows regardless of branch count', () => {
-      const rows = buildBranchResults(['feature-one', 'feature-two', 'main'], 'feat', 'main');
+      const rows = buildBranchResults(names('feature-one', 'feature-two', 'main'), 'feat', 'main');
       const branchRows = rows.filter((r) => r.kind === 'branch');
       const createRows = rows.filter((r) => r.kind === 'create');
       // Verify that several branches fuzzy-match the query

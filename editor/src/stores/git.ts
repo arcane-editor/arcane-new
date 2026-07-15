@@ -30,6 +30,19 @@ interface GitStatusResult {
 }
 
 /**
+ * A branch as returned by `git_list_branches`: its name, plus the unix
+ * timestamp (seconds) of its most recent reflog-recorded checkout, when
+ * known. `null` covers both "never explicitly checked out" and "the reflog
+ * itself couldn't be read" (e.g. a brand-new repo with no commits yet) —
+ * both degrade to "no recency data" rather than an error. Optional so a
+ * mismatched/old backend payload missing the field entirely still parses.
+ */
+export interface BranchInfo {
+  name: string;
+  last_checkout_ts?: number | null;
+}
+
+/**
  * Result of the `git_push` command. `set_upstream` is `true` only when the
  * plain push failed with "no upstream branch" and the backend transparently
  * retried as `push -u origin <branch>` — used to show a "pushed and set
@@ -42,7 +55,7 @@ interface GitPushResult {
 
 interface GitState {
   branch: string | null;
-  branches: string[];
+  branches: BranchInfo[];
   isBranchesLoading: boolean;
   stagedFiles: GitFileStatus[];
   unstagedFiles: GitFileStatus[];
@@ -230,6 +243,21 @@ async function doRefreshStatus(
 }
 
 /**
+ * Optimistically stamp `branch`'s `last_checkout_ts` to "now" (seconds,
+ * matching the backend's unix-seconds reflog timestamps) so the
+ * BranchPicker's recency sort reorders it to the top without waiting for
+ * the next `refreshBranches` round trip. If `branch` isn't in the current
+ * list yet (e.g. just created), it's appended — `refreshBranches` will
+ * replace this placeholder with the reflog-authoritative entry regardless.
+ */
+function stampCheckoutNow(branches: BranchInfo[], branch: string): BranchInfo[] {
+  const now = Date.now() / 1000;
+  const found = branches.some((b) => b.name === branch);
+  const stamped = branches.map((b) => (b.name === branch ? { ...b, last_checkout_ts: now } : b));
+  return found ? stamped : [...stamped, { name: branch, last_checkout_ts: now }];
+}
+
+/**
  * Body of `refreshBranches`, extracted so it can be wrapped in
  * `singleFlightWithRerun` below — same rationale as `doRefreshStatus`: the
  * `git-state-changed` watcher event calls `refreshStatus` AND
@@ -247,7 +275,7 @@ async function doRefreshBranches(
   // affordance on `branches.length === 0 && isBranchesLoading`.
   set({ isBranchesLoading: true });
   try {
-    const branches = await invoke<string[]>('git_list_branches', { workspacePath });
+    const branches = await invoke<BranchInfo[]>('git_list_branches', { workspacePath });
     set({ branches });
   } catch (err) {
     console.error('[git] refreshBranches failed:', err);
@@ -316,6 +344,12 @@ export const useGitStore = create<GitState>((set, get) => ({
   switchBranch: async (workspacePath: string, branch: string) => {
     try {
       await invoke('git_switch_branch', { workspacePath, branch });
+      // Optimistic recency stamp: `git reflog` is the authoritative source
+      // and will be picked up by the next `refreshBranches` (triggered
+      // separately by the `git-state-changed` watcher, or an explicit
+      // refresh) — stamp now so the BranchPicker reorders this branch to
+      // the top immediately instead of waiting on that round trip.
+      set({ branches: stampCheckoutNow(get().branches, branch) });
       await reloadAfterCheckout(get, workspacePath, branch);
     } catch (err) {
       notify.error(`Failed to switch branch: ${err}`);
@@ -333,6 +367,11 @@ export const useGitStore = create<GitState>((set, get) => ({
         checkout,
       });
       if (checkout) {
+        // Same optimistic stamp as `switchBranch` above — the freshly
+        // created branch may not even be in `branches` yet, so this also
+        // seeds a placeholder entry; the `refreshBranches` call below
+        // replaces it with the reflog-authoritative one either way.
+        set({ branches: stampCheckoutNow(get().branches, name) });
         await reloadAfterCheckout(get, workspacePath, name);
       }
       await get().refreshBranches(workspacePath);

@@ -20,9 +20,9 @@ function AddWorktreeDialog({ onClose }: { onClose: () => void }) {
 
   const [mode, setMode] = useState<'existing' | 'new'>('existing');
   const [path, setPath] = useState('');
-  const [branch, setBranch] = useState(branches[0] ?? '');
+  const [branch, setBranch] = useState(branches[0]?.name ?? '');
   const [newBranch, setNewBranch] = useState('');
-  const [from, setFrom] = useState(branches[0] ?? '');
+  const [from, setFrom] = useState(branches[0]?.name ?? '');
   const [force, setForce] = useState(false);
   const [busy, setBusy] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -33,8 +33,8 @@ function AddWorktreeDialog({ onClose }: { onClose: () => void }) {
   }, [workspacePath, refreshBranches]);
 
   useEffect(() => {
-    if (!branch && branches[0]) setBranch(branches[0]);
-    if (!from && branches[0]) setFrom(branches[0]);
+    if (!branch && branches[0]) setBranch(branches[0].name);
+    if (!from && branches[0]) setFrom(branches[0].name);
   }, [branches, branch, from]);
 
   useEffect(() => {
@@ -108,7 +108,7 @@ function AddWorktreeDialog({ onClose }: { onClose: () => void }) {
               <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Branch</span>
               <select value={branch} onChange={(e) => setBranch(e.target.value)}
                 style={{ padding: '8px 10px', background: 'var(--bg-input)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-primary)', fontSize: 13 }}>
-                {branches.map((b) => <option key={b} value={b}>{b}</option>)}
+                {branches.map((b) => <option key={b.name} value={b.name}>{b.name}</option>)}
               </select>
             </label>
           ) : (
@@ -124,7 +124,7 @@ function AddWorktreeDialog({ onClose }: { onClose: () => void }) {
                 <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>From</span>
                 <select value={from} onChange={(e) => setFrom(e.target.value)}
                   style={{ padding: '8px 10px', background: 'var(--bg-input)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-primary)', fontSize: 13 }}>
-                  {branches.map((b) => <option key={b} value={b}>{b}</option>)}
+                  {branches.map((b) => <option key={b.name} value={b.name}>{b.name}</option>)}
                 </select>
               </label>
             </>
