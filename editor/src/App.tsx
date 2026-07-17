@@ -22,7 +22,12 @@ import {
   setProjectWindowTitle,
 } from './features/project';
 import { AiChatPanel, MaximizedAiOverlay, restoreLatestSessionForWorkspace } from './features/ai-panel';
-import { focusTerminalById } from './features/terminal';
+import {
+  focusTerminalById,
+  handleTerminalDrop,
+  highlightTerminalDropTarget,
+  clearTerminalDropTarget,
+} from './features/terminal';
 import { useAiStore } from './stores/ai';
 import { useCheckpointsStore } from './stores/checkpoints';
 import { useEditReviewStore } from './stores/edit-review';
@@ -295,15 +300,33 @@ function App() {
     return () => window.removeEventListener('focus', handleFocus);
   }, []);
 
-  // Open files dragged from the OS file manager into the editor as tabs.
+  // Files dragged in from the OS file manager: dropped on a terminal they get
+  // typed in as a path (VS Code's behaviour, and the only way to hand an image
+  // to a TUI), anywhere else they open as editor tabs.
+  //
+  // This handler must hit-test by hand. Tauri intercepts OS file drops at the
+  // native layer (`dragDropEnabled` defaults to true), so HTML5 dragover/drop
+  // never fire in the webview and no element can own its own drop zone — this
+  // one window-level handler is the only place a drop is observable, and it
+  // gets a bare coordinate rather than a target.
   useEffect(() => {
     let unlisten: (() => void) | null = null;
     let cancelled = false;
     (async () => {
       const win = getCurrentWindow();
       const fn = await win.onDragDropEvent(async (event) => {
-        if (event.payload.type !== 'drop') return;
+        if (event.payload.type === 'enter' || event.payload.type === 'over') {
+          highlightTerminalDropTarget(event.payload.position);
+          return;
+        }
+        if (event.payload.type === 'leave') {
+          clearTerminalDropTarget();
+          return;
+        }
+
         const paths = event.payload.paths;
+        if (await handleTerminalDrop(event.payload.position, paths)) return;
+
         const ws = useWorkspaceStore.getState();
         for (const path of paths) {
           const name = path.split('/').pop() ?? path;
@@ -319,6 +342,7 @@ function App() {
     })();
     return () => {
       cancelled = true;
+      clearTerminalDropTarget();
       safeUnlisten(unlisten);
     };
   }, []);
@@ -1092,11 +1116,30 @@ function App() {
                           )}
                         </div>
                       </Allotment.Pane>
-                      {bottomPanelVisible && (
-                        <Allotment.Pane preferredSize={250} minSize={100} maxSize={600}>
-                          <BottomPanel />
-                        </Allotment.Pane>
-                      )}
+                      {/* `visible`, never a conditional render — load-bearing.
+                          Unmounting this pane disposes every xterm instance
+                          under it (TerminalInstance's cleanup calls
+                          term.dispose()) while the PTYs keep running, so
+                          reopening would attach a blank 80x24 buffer to a live
+                          shell. Re-fitting on reveal cannot rescue that: the
+                          kernel only raises SIGWINCH when the winsize actually
+                          changes (XNU tty.c guards TIOCSWINSZ on a bcmp; Linux
+                          tty_do_resize on a memcmp), so a same-size resize is a
+                          silent no-op and a full-screen TUI is never told to
+                          repaint. Allotment's `visible` drives the pane's size
+                          and caches the old one instead of unmounting children,
+                          which keeps the terminal — and its scrollback — alive.
+                          This is the same keep-alive intent BottomPanel and
+                          RichTerminalPanel already document for tab switches
+                          and splits. */}
+                      <Allotment.Pane
+                        visible={bottomPanelVisible}
+                        preferredSize={250}
+                        minSize={100}
+                        maxSize={600}
+                      >
+                        <BottomPanel />
+                      </Allotment.Pane>
                     </Allotment>
                   </div>
                 </Allotment.Pane>

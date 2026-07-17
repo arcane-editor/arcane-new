@@ -810,6 +810,17 @@ pub fn unity_setup_lsp(workspace_path: String) -> Result<Option<String>, String>
 mod tests {
     use super::*;
     use std::env;
+    use std::sync::Mutex;
+
+    /// Serialises the smoke tests below.
+    ///
+    /// They operate on a real workspace on disk and both regenerate
+    /// `.arcane.csproj` there, so run concurrently — which is cargo's default —
+    /// one can read the file while the other is rewriting it and see a partial
+    /// document. That made the suite intermittently fail with no connection to
+    /// whatever change was being tested. Sharing a real file is what makes them
+    /// smoke tests; taking a lock is cheaper than making them hermetic.
+    static SMOKE_WORKSPACE: Mutex<()> = Mutex::new(());
 
     /// Create a unique temp directory with the given suffix.
     fn make_temp_dir(suffix: &str) -> PathBuf {
@@ -906,6 +917,7 @@ mod tests {
 
     #[test]
     fn smoke_generate_arcane_csproj() {
+        let _guard = crate::sync_util::lock_recover(&SMOKE_WORKSPACE);
         let workspace = Path::new("/Users/inno/My project");
         if !workspace.join("Assets").is_dir() {
             return;
@@ -922,6 +934,7 @@ mod tests {
 
     #[test]
     fn smoke_generate_full_setup() {
+        let _guard = crate::sync_util::lock_recover(&SMOKE_WORKSPACE);
         let workspace_path = "/Users/inno/My project";
         if !Path::new(workspace_path).join("Assets").is_dir() {
             return;

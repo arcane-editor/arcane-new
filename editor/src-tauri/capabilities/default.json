@@ -28,6 +28,8 @@
     "window-state:default",
     "store:default",
     "shell:allow-execute",
+    "clipboard-manager:allow-read-text",
+    "clipboard-manager:allow-write-text",
     {
       "identifier": "shell:allow-spawn",
       "allow": [

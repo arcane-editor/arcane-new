@@ -1440,6 +1440,14 @@ html, body, #root {
   padding: 4px 0 0 8px;
 }
 
+/* Drop feedback while an OS file drag is over this pane. Inset outline rather
+   than a border so the xterm grid underneath doesn't reflow mid-drag. */
+.terminal-xterm--drop-over {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
 .terminal-xterm .xterm {
   height: 100%;
 }

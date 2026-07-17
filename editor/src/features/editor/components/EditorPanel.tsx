@@ -16,6 +16,7 @@ import { getMonacoLanguageId } from '../../../utils/language-detect';
 import { bindGlobalShortcutsToMonaco } from '../services/bind-shortcuts';
 import { registerBetterComments } from '../services/better-comments';
 import { registerImportLinkProvider } from '../services/import-link-provider';
+import { registerDotEnvLanguage } from '../services/dotenv-language';
 import { registerUsageHoverProvider } from '../services/usage-hover-provider';
 import { registerUnityDocsHover } from '../services/unity-docs-hover';
 import { registerBlameHoverProvider, attachGitGutter } from '../../git';
@@ -288,6 +289,7 @@ function EditorPanel() {
           // Register custom shader languages and theme BEFORE editor.create()
           // so first paint uses the correct theme (otherwise Monaco falls back to vs/light).
           registerShaderLanguages(monaco);
+          registerDotEnvLanguage(monaco);
           registerImportLinkProvider(monaco);
           registerUiToolkit(monaco);
           registerBlameHoverProvider(monaco);

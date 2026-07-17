@@ -10,6 +10,10 @@ function BottomPanel() {
   const activeTab = useUiStore((s) => s.activeBottomTab);
   const setActiveTab = useUiStore((s) => s.setActiveBottomTab);
   const setBottomPanelVisible = useUiStore((s) => s.setBottomPanelVisible);
+  // App.tsx keeps this component mounted even while the panel is closed (via
+  // Allotment's `visible`, so live terminals aren't disposed), so "the panel is
+  // open" is no longer implied by "we are rendering".
+  const panelVisible = useUiStore((s) => s.bottomPanelVisible);
   const maximized = useUiStore((s) => s.bottomPanelMaximized);
   const toggleMaximized = useUiStore((s) => s.toggleBottomPanelMaximized);
   const setMaximized = useUiStore((s) => s.setBottomPanelMaximized);
@@ -89,7 +93,12 @@ function BottomPanel() {
           className="bottom-panel-terminal-slot"
           style={{ display: effectiveTab === 'terminal' ? 'flex' : 'none' }}
         >
-          <RichTerminalPanel isVisible={effectiveTab === 'terminal'} />
+          {/* `isVisible` gates auto-spawn, so it must mean "revealed to the
+              user", not merely "mounted" — this component now stays mounted
+              while the panel is closed. Without the panelVisible term a PTY
+              would spawn at boot with the panel shut, which is exactly what
+              gating auto-spawn on tab reveal was added to prevent. */}
+          <RichTerminalPanel isVisible={panelVisible && effectiveTab === 'terminal'} />
         </div>
         {effectiveTab === 'unity-console' && <UnityConsolePanel />}
         {effectiveTab === 'problems' && <ProblemsPanel />}

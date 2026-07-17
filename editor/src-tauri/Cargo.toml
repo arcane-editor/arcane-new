@@ -1,6 +1,6 @@
 [package]
 name = "editor"
-version = "0.2.1"
+version = "0.2.2"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -41,6 +41,14 @@ globset = "0.4"
 notify = { version = "7", features = ["macos_fsevent"] }
 nucleo-matcher = "0.3"
 sha1 = "0.10"
+tauri-plugin-clipboard-manager = "2.3.2"
+# Terminal image paste. The clipboard hands back raw RGBA, not an encoded
+# image, and a terminal can only carry a file path — so the RGBA has to be
+# encoded to a PNG on disk somewhere. Doing it here rather than in the webview
+# keeps ~8MB of pixels (a full-screen screenshot) off the IPC. `png` was
+# already resolved transitively at this version, so this adds no new
+# resolution — same reasoning as the objc2 block below.
+png = "0.17"
 
 # macOS-only: objc2 shim for the dock right-click menu ("New Window"). tao's
 # NSApplication delegate does not implement `applicationDockMenu:`, and neither

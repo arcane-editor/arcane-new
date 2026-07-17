@@ -47,6 +47,27 @@ interface LangSpec extends LangInfo {
   extensions: readonly string[];
 }
 
+/**
+ * Languages matched on the BASENAME rather than an extension.
+ *
+ * Dotfiles don't really have extensions: `.env`'s last dot-segment is "env",
+ * and `.env.local`'s is "local" — neither is something you'd register as an
+ * extension without hijacking unrelated files. So they're matched by name.
+ *
+ * This is what makes Cmd+/ work in them, incidentally: Monaco's comment action
+ * silently does nothing unless the file's language declares a `lineComment`
+ * ("Mode does not support line comments"), and plaintext declares none.
+ */
+const BY_FILENAME: ReadonlyArray<{ test: (basename: string) => boolean; info: LangInfo }> = [
+  {
+    // `.env`, `.env.local`, `.env.production.local`, and the `env.example`
+    // convention — but NOT `.envrc` (that's direnv, a shell script) and not
+    // `env.json`/`environment.ts`, which have real extensions of their own.
+    test: (base) => /^\.env(\.[^.]+)*$/.test(base) || /^env\.(example|sample|template)$/.test(base),
+    info: { monacoId: 'dotenv', displayName: 'DotEnv' },
+  },
+];
+
 const SPECS: readonly LangSpec[] = [
   // ── Languages with LSP support ──────────────────────────────────
   {
@@ -144,9 +165,17 @@ function specToInfo(spec: LangSpec): LangInfo {
 }
 
 /**
- * Resolve a filename's language. Returns `plaintext` for unknown extensions.
+ * Resolve a filename's language. Accepts a bare name or a full path.
+ * Returns `plaintext` when nothing matches.
  */
 export function detectLanguage(filename: string): LangInfo {
+  // Basename first: dotfiles are identified by name, and an extension lookup on
+  // one would either miss (`.env` -> "env") or, worse, match the wrong spec.
+  const basename = filename.split('/').pop()?.toLowerCase() ?? '';
+  for (const entry of BY_FILENAME) {
+    if (entry.test(basename)) return entry.info;
+  }
+
   const ext = filename.split('.').pop()?.toLowerCase() ?? '';
   const spec = BY_EXT.get(ext);
   return spec ? specToInfo(spec) : PLAINTEXT;

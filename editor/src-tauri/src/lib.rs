@@ -641,6 +641,7 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .manage(lsp::LspState::new())
         .manage(terminal::TerminalState::new())
         .manage(file_scanner::FileWatcherState::new())
@@ -717,8 +718,11 @@ pub fn run() {
             terminal::terminal_reset_window,
             terminal::terminal_spawn,
             terminal::terminal_write,
+            terminal::terminal_attach,
+            terminal::terminal_ack,
             terminal::terminal_resize,
             terminal::terminal_kill,
+            terminal::terminal_clipboard_image_to_temp,
             file_scanner::scan_all_files_v2,
             file_scanner::fuzzy_search_files,
             file_scanner::start_file_watcher,
