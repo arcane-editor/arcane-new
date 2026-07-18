@@ -6,7 +6,9 @@ name: Deploy Landing
 # Both Pages projects use production branch "main" — always pass --branch main.
 # The load-bearing landing-page/.npmrc (entities hoist exclusion) is picked up
 # automatically because pnpm runs inside landing-page/.
-# Phase 2 adds PUBLIC_TURNSTILE_SITE_KEY next to PUBLIC_API_URL below.
+# PUBLIC_TURNSTILE_SITE_KEY comes from a repo Actions VARIABLE (not secret —
+# site keys are public). Unset => empty => the site renders no Turnstile
+# widget (graceful degradation). Owner sets it once the widget exists (B4.3).
 on:
   push:
     branches: ['dev']
@@ -48,6 +50,7 @@ jobs:
       - name: Build (dev API baked in)
         env:
           PUBLIC_API_URL: https://api-dev.arcaneai.org
+          PUBLIC_TURNSTILE_SITE_KEY: ${{ vars.PUBLIC_TURNSTILE_SITE_KEY }}
         run: pnpm build
       - name: Deploy to arcane-landing-dev
         run: npx wrangler@4 pages deploy dist --project-name arcane-landing-dev --branch main
@@ -73,6 +76,7 @@ jobs:
       - name: Build (prod API baked in)
         env:
           PUBLIC_API_URL: https://api.arcaneai.org
+          PUBLIC_TURNSTILE_SITE_KEY: ${{ vars.PUBLIC_TURNSTILE_SITE_KEY }}
         run: pnpm build
       - name: Deploy to arcane-landing (production)
         run: npx wrangler@4 pages deploy dist --project-name arcane-landing --branch main
