@@ -41,8 +41,6 @@ mock.module('../features/auth', () => ({
       return exchangeEditorCodeImpl(code, verifier);
     },
     loadFromDisk: () => loadFromDiskImpl(),
-    login: async () => ({ success: false }),
-    signup: async () => ({ success: false }),
     logout: async () => {},
   },
   beginBrowserLogin: async (handlers: BrowserLoginHandlers) => {
@@ -110,7 +108,6 @@ function resetStore(): void {
     email: null,
     plan: null,
     token: null,
-    loading: false,
     loginStatus: 'idle',
     error: null,
   });

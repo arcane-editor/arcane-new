@@ -264,6 +264,27 @@ function App() {
     };
   }, []);
 
+  // Cross-window auth sync (spec C3): any window that completes a login or
+  // logout emits 'auth-changed'; every window — emitter included, harmlessly —
+  // re-reads token state from disk. Closes the pre-existing "window B stale
+  // after login in window A" gap. listenScoped: receives global emit() plus
+  // emit_to(ownLabel) only (no cross-window crosstalk).
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    let cancelled = false;
+    (async () => {
+      const fn = await listenScoped('auth-changed', () => {
+        void useAuthStore.getState().loadFromDisk();
+      });
+      if (cancelled) safeUnlisten(fn);
+      else unlisten = fn;
+    })();
+    return () => {
+      cancelled = true;
+      safeUnlisten(unlisten);
+    };
+  }, []);
+
   // LSP error: brief, language-agnostic toast. The status-bar "LSP: Error"
   // badge is the persistent indicator; this toast just surfaces the action
   // once and fades. After dismissal, restart is reachable via the palette

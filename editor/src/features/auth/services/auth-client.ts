@@ -1,12 +1,10 @@
-// Auth API client — ported from arcane-auth-service-impl.ts
+// Auth API client. In-app credential login/signup was removed in Phase 3
+// (browser-based deep-link login, spec Part C); the device-code flow stays
+// as the fallback for environments without deep links (macOS `tauri dev`).
+// The old X-Refreshed-Token handling was dead code (the server never sends
+// that header) and was removed with it (spec C6 optional cleanup).
 import { invoke } from '@tauri-apps/api/core';
 import { ARCANE_API_URL } from '../../../config/api';
-
-interface AuthResult {
-  success: boolean;
-  error?: string;
-  user?: { email: string; plan: string; credits: number; price: number };
-}
 
 interface DeviceCodeResponse {
   device_code: string;
@@ -30,54 +28,6 @@ export interface ExchangeResult {
 
 export class AuthClient {
   private serverUrl: string = ARCANE_API_URL;
-
-  async login(email: string, password: string): Promise<AuthResult> {
-    try {
-      const res = await fetch(`${this.serverUrl}/v1/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
-      });
-
-      if (!res.ok) {
-        const data = await res.json() as { error?: string };
-        return { success: false, error: data.error ?? `Login failed (${res.status})` };
-      }
-
-      const data = await res.json() as { token: string; user: AuthResult['user'] };
-      await this.saveToken(data.token, data.user!.email);
-      this.handleRefreshToken(res, data.user!.email);
-
-      return { success: true, user: data.user };
-    } catch (err) {
-      return { success: false, error: err instanceof Error ? err.message : 'Network error' };
-    }
-  }
-
-  async signup(email: string, password: string, promoCode?: string): Promise<AuthResult> {
-    try {
-      const body: Record<string, string> = { email, password };
-      if (promoCode) body.promoCode = promoCode;
-
-      const res = await fetch(`${this.serverUrl}/v1/auth/signup`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-
-      if (!res.ok) {
-        const data = await res.json() as { error?: string };
-        return { success: false, error: data.error ?? `Signup failed (${res.status})` };
-      }
-
-      const data = await res.json() as { token: string; user: AuthResult['user'] };
-      await this.saveToken(data.token, data.user!.email);
-
-      return { success: true, user: data.user };
-    } catch (err) {
-      return { success: false, error: err instanceof Error ? err.message : 'Network error' };
-    }
-  }
 
   /**
    * Redeem the one-time grant code from the browser flow (deep link or
@@ -139,7 +89,7 @@ export class AuthClient {
       throw new Error(`Device token poll failed (${res.status})`);
     }
 
-    const data = await res.json() as DeviceTokenResult;
+    const data = (await res.json()) as DeviceTokenResult;
 
     if (data.status === 'authorized' && data.token && data.user) {
       await this.saveToken(data.token, data.user.email);
@@ -163,13 +113,6 @@ export class AuthClient {
 
   private async saveToken(token: string, email: string): Promise<void> {
     await invoke('auth_write_token', { token, email });
-  }
-
-  private async handleRefreshToken(res: Response, email: string): Promise<void> {
-    const refreshedToken = res.headers.get('X-Refreshed-Token');
-    if (refreshedToken) {
-      await this.saveToken(refreshedToken, email);
-    }
   }
 }
 

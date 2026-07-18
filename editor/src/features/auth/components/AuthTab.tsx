@@ -1,33 +1,40 @@
 import { useState } from 'react';
-import { LogIn, UserPlus, LogOut, Loader2, Smartphone } from 'lucide-react';
+import { Globe, KeyRound, Loader2, LogOut, RotateCw, Smartphone, X } from 'lucide-react';
+import { emit } from '@tauri-apps/api/event';
 import { useAuthStore } from '../../../stores/auth';
 import { authClient } from '../services/auth-client';
+import { isBrowserLoginSupported, reopenBrowser } from '../services/browser-login';
 
 function AuthTab() {
-  const { loggedIn, email, plan, loading, error, login, signup, logout } = useAuthStore();
-  const [mode, setMode] = useState<'login' | 'signup' | 'device'>('login');
-  const [formEmail, setFormEmail] = useState('');
-  const [formPassword, setFormPassword] = useState('');
-  const [formConfirmPassword, setFormConfirmPassword] = useState('');
-  const [promoCode, setPromoCode] = useState('');
+  const {
+    loggedIn,
+    email,
+    plan,
+    loginStatus,
+    error,
+    beginBrowserLogin,
+    cancelBrowserLogin,
+    submitManualCode,
+    logout,
+  } = useAuthStore();
+  // Device flow is the DEFAULT where deep links cannot work — macOS `tauri dev`
+  // (spec C3). Everywhere else the browser flow is primary.
+  const [mode, setMode] = useState<'browser' | 'device'>(
+    isBrowserLoginSupported() ? 'browser' : 'device',
+  );
+  const [showPaste, setShowPaste] = useState(false);
+  const [pasteCode, setPasteCode] = useState('');
 
-  // Device flow state
+  // Device flow state (kept as fallback; endpoints unchanged)
   const [deviceCode, setDeviceCode] = useState<string | null>(null);
   const [userCode, setUserCode] = useState<string | null>(null);
   const [verificationUri, setVerificationUri] = useState<string | null>(null);
   const [polling, setPolling] = useState(false);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (mode === 'login') {
-      await login(formEmail, formPassword);
-    } else if (mode === 'signup') {
-      if (formPassword !== formConfirmPassword) {
-        useAuthStore.setState({ error: 'Passwords do not match' });
-        return;
-      }
-      await signup(formEmail, formPassword, promoCode || undefined);
-    }
+  const startBrowserLogin = () => {
+    setShowPaste(false);
+    setPasteCode('');
+    void beginBrowserLogin();
   };
 
   const handleDeviceFlow = async () => {
@@ -45,13 +52,15 @@ function AuthTab() {
           if (result.status === 'authorized') {
             clearInterval(interval);
             setPolling(false);
+            setDeviceCode(null);
+            // pollDeviceToken saved the token to disk — pull it into the
+            // store (fixes the pre-existing "store token stays null until
+            // restart" gap), then broadcast to the other windows.
+            await useAuthStore.getState().loadFromDisk();
             if (result.user) {
-              useAuthStore.setState({
-                loggedIn: true,
-                email: result.user.email,
-                plan: result.user.plan,
-              });
+              useAuthStore.setState({ plan: result.user.plan ?? null });
             }
+            void emit('auth-changed');
           } else if (result.status === 'expired') {
             clearInterval(interval);
             setPolling(false);
@@ -83,10 +92,23 @@ function AuthTab() {
               <div style={{ fontSize: 14, textTransform: 'capitalize' }}>{plan}</div>
             </div>
           )}
-          <button onClick={logout} style={dangerBtnStyle}>
+          <button onClick={() => void logout()} style={dangerBtnStyle}>
             <LogOut size={14} />
             Sign Out
           </button>
+          {isBrowserLoginSupported() && (
+            <button
+              onClick={() => {
+                void (async () => {
+                  await logout();
+                  startBrowserLogin();
+                })();
+              }}
+              style={{ ...linkBtnStyle, marginTop: 12, display: 'block' }}
+            >
+              Switch account…
+            </button>
+          )}
         </div>
       </div>
     );
@@ -96,81 +118,96 @@ function AuthTab() {
     <div style={containerStyle}>
       <div style={cardStyle}>
         <h2 style={{ margin: '0 0 4px', fontSize: 18, fontWeight: 600 }}>
-          {mode === 'login' ? 'Sign In' : mode === 'signup' ? 'Create Account' : 'Device Sign In'}
+          {mode === 'browser' ? 'Sign In' : 'Device Sign In'}
         </h2>
         <p style={{ margin: '0 0 16px', fontSize: 12, color: 'var(--text-secondary)' }}>
           Sign in to access AI features and sync settings
         </p>
 
         {error && (
-          <div style={{
-            padding: '8px 12px',
-            marginBottom: 12,
-            background: 'var(--error-bg)',
-            border: '1px solid var(--error-border)',
-            borderRadius: 4,
-            fontSize: 12,
-            color: 'var(--error-text)',
-          }}>
+          <div
+            style={{
+              padding: '8px 12px',
+              marginBottom: 12,
+              background: 'var(--error-bg)',
+              border: '1px solid var(--error-border)',
+              borderRadius: 4,
+              fontSize: 12,
+              color: 'var(--error-text)',
+            }}
+          >
             {error}
           </div>
         )}
 
-        {mode !== 'device' ? (
-          <form onSubmit={handleSubmit}>
-            <div style={{ marginBottom: 12 }}>
-              <label style={labelStyle}>Email</label>
-              <input
-                type="email"
-                value={formEmail}
-                onChange={(e) => setFormEmail(e.target.value)}
-                required
-                style={inputStyle}
-                placeholder="you@example.com"
-              />
-            </div>
-            <div style={{ marginBottom: 12 }}>
-              <label style={labelStyle}>Password</label>
-              <input
-                type="password"
-                value={formPassword}
-                onChange={(e) => setFormPassword(e.target.value)}
-                required
-                style={inputStyle}
-                placeholder="Password"
-              />
-            </div>
-            {mode === 'signup' && (
-              <>
-                <div style={{ marginBottom: 12 }}>
-                  <label style={labelStyle}>Confirm Password</label>
-                  <input
-                    type="password"
-                    value={formConfirmPassword}
-                    onChange={(e) => setFormConfirmPassword(e.target.value)}
-                    required
-                    style={inputStyle}
-                    placeholder="Confirm password"
-                  />
-                </div>
-                <div style={{ marginBottom: 12 }}>
-                  <label style={labelStyle}>Promo Code (optional)</label>
-                  <input
-                    type="text"
-                    value={promoCode}
-                    onChange={(e) => setPromoCode(e.target.value)}
-                    style={inputStyle}
-                    placeholder="Enter promo code"
-                    autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}
-                  />
-                </div>
-              </>
+        {mode === 'browser' ? (
+          <div>
+            {(loginStatus === 'idle' || loginStatus === 'error') && (
+              <button onClick={startBrowserLogin} style={primaryBtnStyle}>
+                <Globe size={14} />
+                Continue in browser
+              </button>
             )}
-            <button type="submit" disabled={loading} style={primaryBtnStyle}>
-              {loading ? <Loader2 size={14} className="animate-spin" /> : mode === 'login' ? <LogIn size={14} /> : <UserPlus size={14} />}
-              {mode === 'login' ? 'Sign In' : 'Create Account'}
-            </button>
-          </form>
+
+            {loginStatus === 'waiting-browser' && (
+              <div>
+                <div style={spinnerRowStyle}>
+                  <Loader2 size={12} className="animate-spin" />
+                  Complete sign-in in your browser…
+                </div>
+                <button onClick={() => void reopenBrowser()} style={secondaryBtnStyle}>
+                  <RotateCw size={14} />
+                  Open browser again
+                </button>
+                <button
+                  onClick={cancelBrowserLogin}
+                  style={{ ...secondaryBtnStyle, marginTop: 8 }}
+                >
+                  <X size={14} />
+                  Cancel
+                </button>
+                <button
+                  onClick={() => setShowPaste((v) => !v)}
+                  style={{ ...linkBtnStyle, marginTop: 12, display: 'block' }}
+                >
+                  <KeyRound size={12} style={{ verticalAlign: 'text-bottom', marginRight: 4 }} />
+                  Browser didn't open? Paste the code
+                </button>
+                {showPaste && (
+                  <div style={{ marginTop: 8 }}>
+                    <input
+                      type="text"
+                      value={pasteCode}
+                      onChange={(e) => setPasteCode(e.target.value)}
+                      placeholder="Code from the success page"
+                      style={{ ...inputStyle, marginBottom: 8 }}
+                      autoComplete="off"
+                      autoCorrect="off"
+                      autoCapitalize="off"
+                      spellCheck={false}
+                    />
+                    <button
+                      disabled={!pasteCode.trim()}
+                      onClick={() => {
+                        submitManualCode(pasteCode);
+                        setPasteCode('');
+                      }}
+                      style={primaryBtnStyle}
+                    >
+                      Submit code
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {loginStatus === 'exchanging' && (
+              <div style={spinnerRowStyle}>
+                <Loader2 size={12} className="animate-spin" />
+                Signing you in…
+              </div>
+            )}
+          </div>
         ) : (
           <div>
             {!deviceCode ? (
@@ -186,20 +223,22 @@ function AuthTab() {
                 <div style={{ fontSize: 12, color: 'var(--info)', marginBottom: 12 }}>
                   {verificationUri}
                 </div>
-                <div style={{
-                  fontSize: 24,
-                  fontWeight: 700,
-                  fontFamily: 'var(--font-mono)',
-                  letterSpacing: 4,
-                  padding: '12px 0',
-                  background: 'var(--bg-input)',
-                  borderRadius: 6,
-                  marginBottom: 12,
-                }}>
+                <div
+                  style={{
+                    fontSize: 24,
+                    fontWeight: 700,
+                    fontFamily: 'var(--font-mono)',
+                    letterSpacing: 4,
+                    padding: '12px 0',
+                    background: 'var(--bg-input)',
+                    borderRadius: 6,
+                    marginBottom: 12,
+                  }}
+                >
                   {userCode}
                 </div>
                 {polling && (
-                  <div style={{ fontSize: 12, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                  <div style={spinnerRowStyle}>
                     <Loader2 size={12} className="animate-spin" />
                     Waiting for authorization...
                   </div>
@@ -210,19 +249,27 @@ function AuthTab() {
         )}
 
         <div style={{ marginTop: 16, display: 'flex', gap: 12, fontSize: 12 }}>
-          {mode !== 'login' && (
-            <button onClick={() => { setMode('login'); useAuthStore.setState({ error: null }); }} style={linkBtnStyle}>
-              Sign In
+          {mode === 'browser' && (
+            <button
+              onClick={() => {
+                cancelBrowserLogin();
+                setShowPaste(false);
+                setMode('device');
+              }}
+              style={linkBtnStyle}
+            >
+              Use a device code instead
             </button>
           )}
-          {mode !== 'signup' && (
-            <button onClick={() => { setMode('signup'); useAuthStore.setState({ error: null }); }} style={linkBtnStyle}>
-              Create Account
-            </button>
-          )}
-          {mode !== 'device' && (
-            <button onClick={() => { setMode('device'); useAuthStore.setState({ error: null }); }} style={linkBtnStyle}>
-              Device Sign In
+          {mode === 'device' && isBrowserLoginSupported() && (
+            <button
+              onClick={() => {
+                useAuthStore.setState({ error: null });
+                setMode('browser');
+              }}
+              style={linkBtnStyle}
+            >
+              Sign in with browser
             </button>
           )}
         </div>
@@ -247,13 +294,6 @@ const cardStyle: React.CSSProperties = {
   border: '1px solid var(--border)',
   borderRadius: 8,
   padding: 24,
-};
-
-const labelStyle: React.CSSProperties = {
-  display: 'block',
-  fontSize: 12,
-  color: 'var(--text-secondary)',
-  marginBottom: 4,
 };
 
 const inputStyle: React.CSSProperties = {
@@ -284,6 +324,14 @@ const primaryBtnStyle: React.CSSProperties = {
   gap: 6,
 };
 
+const secondaryBtnStyle: React.CSSProperties = {
+  ...primaryBtnStyle,
+  background: 'var(--bg-input)',
+  color: 'var(--text-primary)',
+  border: '1px solid var(--border)',
+  fontWeight: 500,
+};
+
 const dangerBtnStyle: React.CSSProperties = {
   ...primaryBtnStyle,
   background: 'var(--button-danger-bg)',
@@ -297,6 +345,16 @@ const linkBtnStyle: React.CSSProperties = {
   cursor: 'pointer',
   padding: 0,
   textDecoration: 'underline',
+};
+
+const spinnerRowStyle: React.CSSProperties = {
+  fontSize: 12,
+  color: 'var(--text-secondary)',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  gap: 6,
+  marginBottom: 12,
 };
 
 export default AuthTab;

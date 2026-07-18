@@ -14,15 +14,9 @@ interface AuthState {
   email: string | null;
   plan: string | null;
   token: string | null;
-  /** @deprecated superseded by loginStatus — deleted with the AuthTab rework (Task 4). */
-  loading: boolean;
   loginStatus: LoginStatus;
   error: string | null;
 
-  /** @deprecated in-app credential login — deleted with the AuthTab rework (Task 4). */
-  login: (email: string, password: string) => Promise<boolean>;
-  /** @deprecated in-app signup — deleted with the AuthTab rework (Task 4). */
-  signup: (email: string, password: string, promoCode?: string) => Promise<boolean>;
   /** Open the website auth page in the browser; completes via deep link,
    * manual code paste, or the 10-minute timeout. */
   beginBrowserLogin: () => Promise<void>;
@@ -56,49 +50,8 @@ export const useAuthStore = create<AuthState>((set) => ({
   email: null,
   plan: null,
   token: null,
-  loading: false,
   loginStatus: 'idle',
   error: null,
-
-  login: async (email: string, password: string) => {
-    set({ loading: true, error: null });
-    const result = await authClient.login(email, password);
-    if (result.success && result.user) {
-      const stored = await authClient.loadFromDisk().catch(() => null);
-      set({
-        loggedIn: true,
-        email: result.user.email,
-        plan: result.user.plan,
-        token: stored?.token ?? null,
-        loading: false,
-        error: null,
-      });
-      return true;
-    } else {
-      set({ loading: false, error: result.error ?? 'Login failed' });
-      return false;
-    }
-  },
-
-  signup: async (email: string, password: string, promoCode?: string) => {
-    set({ loading: true, error: null });
-    const result = await authClient.signup(email, password, promoCode);
-    if (result.success && result.user) {
-      const stored = await authClient.loadFromDisk().catch(() => null);
-      set({
-        loggedIn: true,
-        email: result.user.email,
-        plan: result.user.plan,
-        token: stored?.token ?? null,
-        loading: false,
-        error: null,
-      });
-      return true;
-    } else {
-      set({ loading: false, error: result.error ?? 'Signup failed' });
-      return false;
-    }
-  },
 
   beginBrowserLogin: async () => {
     set({ loginStatus: 'waiting-browser', error: null });
