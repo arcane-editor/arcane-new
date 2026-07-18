@@ -7,9 +7,15 @@ The Cursor-style browser-login loop, app side. Code complete on `dev` (editor co
 - `bunx tsc --noEmit` clean; `bun run check:modules` clean.
 - `cargo test --lib` → 299 pass.
 
-## Build (`Arcane Dev.app`)
+## Build (`Arcane Dev.app`) — PASS (2026-07-18)
 `cd editor && VITE_ARCANE_API_URL=https://api-dev.arcaneai.org VITE_ARCANE_WEB_URL=https://dev.arcaneai.org bunx tauri build --config src-tauri/tauri.dev.conf.json`
-→ `src-tauri/target/release/bundle/macos/Arcane Dev.app` (+ dmg). Scheme registration verified: `CFBundleURLSchemes` = `arcane-dev` (see build-verification section once complete).
+→ built `src-tauri/target/release/bundle/macos/Arcane Dev.app` + `Arcane Dev_0.2.2_aarch64.dmg`. **Scheme registration verified from the built Info.plist:**
+- `CFBundleIdentifier` = `com.inno.editor.dev` (side-by-side dev identity → `~/.arcane-dev`).
+- `CFBundleName` = `Arcane Dev`.
+- `CFBundleURLTypes[0].CFBundleURLSchemes` = `["arcane-dev"]` — the OS will route `arcane-dev://` back to this app.
+- `deep-link:allow-get-current` present in the generated desktop schema (capability sufficient, no addition needed).
+
+(Note: a first local build hit a stale build-cache path from a pre-rename checkout (`experiments/editor`); a `cargo clean --release` + rebuild fixed it. Not a code issue — CI builds on clean runners. Verify with: `plutil -p "…/Arcane Dev.app/Contents/Info.plist" | grep -A8 CFBundleURLTypes`.)
 
 ## OWNER-MANUAL checklist (GUI + OS deep-link dispatch — needs a human at the machine)
 
