@@ -4,15 +4,22 @@ import {
     findCurrentUsagePeriod, getCurrentPeriodStart,
     createDeviceCode, findDeviceCodeByDeviceCode,
     authorizeDeviceCode, deleteDeviceCode, cleanExpiredDeviceCodes,
+    createAuthToken,
 } from '../lib/db.ts';
 import { hashPassword, verifyPassword } from '../lib/crypto.ts';
-import { signJwt, authMiddleware } from '../middleware/auth.ts';
+import { authMiddleware, mintAuthResponse, makeUserResponse } from '../middleware/auth.ts';
 import type { AuthPayload } from '../middleware/auth.ts';
+import { generateToken, sha256Hex, TOKEN_TTL_SECONDS } from '../lib/tokens.ts';
+import { sendVerificationEmail } from '../lib/email.ts';
+import { verifyTurnstile } from '../lib/turnstile.ts';
+import { logAuthEvent } from '../lib/log.ts';
 import type { AppEnv } from '../types.ts';
 
 export const authRouter = new Hono<AppEnv>();
 
 // ─── Helpers ────────────────────────────────────────────────
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function generateUserCode(): string {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -25,50 +32,69 @@ function generateUserCode(): string {
     return code;
 }
 
-function makeJwtPayload(user: { id: number; email: string; role: string }): AuthPayload {
-    return { sub: String(user.id), email: user.email, role: user.role };
-}
-
-function makeUserResponse(user: { id: number; email: string; role: string }) {
-    return {
-        id: user.id,
-        email: user.email,
-        role: user.role,
-    };
-}
-
 // ─── Signup / Login ─────────────────────────────────────────
 
 authRouter.post('/v1/auth/signup', async (c) => {
-    const { email, password } = await c.req.json();
+    const body = await c.req.json<Record<string, unknown>>();
+    const { email, password } = body;
 
     if (!email || !password) {
         return c.json({ error: 'Email and password required' }, 400);
+    }
+    if (typeof email !== 'string' || !EMAIL_RE.test(email)) {
+        return c.json({ error: 'invalid_email' }, 400);
+    }
+    if (typeof password !== 'string' || password.length < 8) {
+        return c.json({ error: 'weak_password' }, 400);
+    }
+    const turnstileOk = await verifyTurnstile(
+        c.env.TURNSTILE_SECRET,
+        (body['cf-turnstile-response'] ?? body.turnstileToken) as string | undefined,
+        c.req.header('CF-Connecting-IP'),
+    );
+    if (!turnstileOk) {
+        return c.json({ error: 'turnstile_failed' }, 400);
     }
 
     const db = c.env.arcane_db;
 
     const existing = await findUserByEmail(db, email);
     if (existing) {
+        if (existing.password_hash === '') {
+            // Accepted enumeration trade-off: tell them to use Google.
+            return c.json({ error: 'google_account' }, 409);
+        }
         return c.json({ error: 'Email already registered' }, 409);
     }
 
     const { hash, salt } = await hashPassword(password);
     const user = await createUser(db, { email, passwordHash: hash, salt });
 
-    const token = await signJwt(makeJwtPayload(user), c.env.JWT_SECRET);
-
-    return c.json({
-        token,
-        user: makeUserResponse(user),
+    const rawToken = generateToken();
+    await createAuthToken(db, {
+        userId: user.id, purpose: 'verify_email',
+        tokenHash: await sha256Hex(rawToken), ttlSeconds: TOKEN_TTL_SECONDS.verify_email,
     });
+    c.executionCtx.waitUntil(sendVerificationEmail(c.env, user.email, rawToken));
+    logAuthEvent('signup', { userId: user.id });
+
+    return c.json(await mintAuthResponse(user, c.env.JWT_SECRET));
 });
 
 authRouter.post('/v1/auth/login', async (c) => {
-    const { email, password } = await c.req.json();
+    const body = await c.req.json<Record<string, unknown>>();
+    const { email, password } = body;
 
-    if (!email || !password) {
+    if (!email || !password || typeof email !== 'string' || typeof password !== 'string') {
         return c.json({ error: 'Email and password required' }, 400);
+    }
+    const turnstileOk = await verifyTurnstile(
+        c.env.TURNSTILE_SECRET,
+        (body['cf-turnstile-response'] ?? body.turnstileToken) as string | undefined,
+        c.req.header('CF-Connecting-IP'),
+    );
+    if (!turnstileOk) {
+        return c.json({ error: 'turnstile_failed' }, 400);
     }
 
     const db = c.env.arcane_db;
@@ -77,18 +103,18 @@ authRouter.post('/v1/auth/login', async (c) => {
     if (!user) {
         return c.json({ error: 'Invalid credentials' }, 401);
     }
+    if (user.password_hash === '') {
+        // Accepted enumeration trade-off: Google-only account.
+        return c.json({ error: 'use_google' }, 401);
+    }
 
     const valid = await verifyPassword(password, user.password_hash, user.salt);
     if (!valid) {
         return c.json({ error: 'Invalid credentials' }, 401);
     }
 
-    const token = await signJwt(makeJwtPayload(user), c.env.JWT_SECRET);
-
-    return c.json({
-        token,
-        user: makeUserResponse(user),
-    });
+    logAuthEvent('login', { userId: user.id });
+    return c.json(await mintAuthResponse(user, c.env.JWT_SECRET));
 });
 
 authRouter.get('/v1/auth/me', authMiddleware(), async (c) => {
@@ -105,6 +131,8 @@ authRouter.get('/v1/auth/me', authMiddleware(), async (c) => {
 
     return c.json({
         user: makeUserResponse(user),
+        hasPassword: user.password_hash !== '',
+        googleLinked: user.google_sub !== null,
         usage: {
             totalRequests: usage?.total_requests ?? 0,
             totalInputTokens: usage?.total_input_tokens ?? 0,
@@ -131,7 +159,7 @@ authRouter.post('/v1/auth/device/code', async (c) => {
     return c.json({
         device_code: deviceCode,
         user_code: userCode,
-        verification_uri: 'https://arcaneai.org/auth/device',
+        verification_uri: `${c.env.WEB_BASE_URL}/auth/device`,
         expires_in: 900,
         interval: 5,
     });
@@ -139,7 +167,7 @@ authRouter.post('/v1/auth/device/code', async (c) => {
 
 // Step 2: Logged-in user on web authorizes the device code
 authRouter.post('/v1/auth/device/authorize', authMiddleware(), async (c) => {
-    const { user_code } = await c.req.json();
+    const { user_code } = await c.req.json<{ user_code?: string }>();
     if (!user_code) {
         return c.json({ error: 'user_code is required' }, 400);
     }
@@ -157,7 +185,7 @@ authRouter.post('/v1/auth/device/authorize', authMiddleware(), async (c) => {
 
 // Step 3: IDE polls for the token
 authRouter.post('/v1/auth/device/token', async (c) => {
-    const { device_code } = await c.req.json();
+    const { device_code } = await c.req.json<{ device_code?: string }>();
     if (!device_code) {
         return c.json({ error: 'device_code is required' }, 400);
     }
@@ -182,15 +210,11 @@ authRouter.post('/v1/auth/device/token', async (c) => {
         const user = await findUserById(db, record.user_id);
         if (!user) { return c.json({ error: 'user_not_found' }, 404); }
 
-        const token = await signJwt(makeJwtPayload(user), c.env.JWT_SECRET);
-
         // Clean up used device code
         await deleteDeviceCode(db, record.id);
 
-        return c.json({
-            token,
-            user: makeUserResponse(user),
-        });
+        logAuthEvent('device_login', { userId: user.id });
+        return c.json(await mintAuthResponse(user, c.env.JWT_SECRET));
     }
 
     return c.json({ error: 'unknown_status' }, 500);

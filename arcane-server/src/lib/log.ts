@@ -11,3 +11,10 @@ export interface ChatErrorContext {
 export function logChatError(ctx: ChatErrorContext, where: string, message: string): void {
     console.error(JSON.stringify({ event: 'chat_error', where, ...ctx, message }));
 }
+
+// Auth-flow audit events (single-line JSON, filterable on `event`).
+// NEVER pass raw tokens, one-time codes, or passwords in ctx — log user ids
+// and reason strings only.
+export function logAuthEvent(event: string, ctx: Record<string, unknown> = {}): void {
+    console.log(JSON.stringify({ event: `auth_${event}`, ...ctx }));
+}
