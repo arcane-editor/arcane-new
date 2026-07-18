@@ -52,6 +52,10 @@ function AuthTab() {
   };
 
   const handleDeviceFlow = async () => {
+    // Guard against a double-click before `polling` flips (requestDeviceCode is
+    // async): a second interval would orphan the first, whose cleanup then
+    // clears the active poll — hanging "Waiting for authorization…".
+    if (pollIntervalRef.current !== null || polling) return;
     try {
       const response = await authClient.requestDeviceCode();
       setDeviceCode(response.device_code);
