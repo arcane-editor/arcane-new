@@ -6,6 +6,7 @@ import {
     authMiddleware, requireVerifiedEmail, makeJwtPayloadFromUser, makeUserResponse,
 } from '../src/middleware/auth.ts';
 import { rateLimit } from '../src/middleware/rate-limit.ts';
+import app from '../index.ts';
 import { bumpTokenVersion, deleteUser } from '../src/lib/db.ts';
 import type { AppEnv } from '../src/types.ts';
 import type { AuthPayload } from '../src/middleware/auth.ts';
@@ -124,6 +125,33 @@ describe('rateLimit middleware', () => {
     it('fails open when the binding is missing (local dev/tests)', async () => {
         const res = await rlApp().request('/x', {}, {});
         expect(res.status).toBe(200);
+    });
+});
+
+// Wiring tests: unlike the isolated-app tests above, these hit the REAL
+// index.ts app (imported directly) to confirm specific paths are actually
+// registered behind a limiter — the app.use(path, limiter) placement, not
+// just the middleware function in isolation. Same fake-limiter-injection
+// pattern via Hono's app.request(path, init, env) third argument.
+describe('index.ts rate-limit wiring', () => {
+    it('GET /v1/auth/google/start is behind RL_AUTH_STRICT', async () => {
+        const res = await app.request('/v1/auth/google/start',
+            { headers: { 'CF-Connecting-IP': '1.2.3.4' } },
+            { RL_AUTH_STRICT: { limit: async () => ({ success: false }) } });
+        expect(res.status).toBe(429);
+        expect(await res.json()).toEqual({ error: 'rate_limited' });
+    });
+
+    it('POST /v1/auth/device/code is behind RL_AUTH_POLL', async () => {
+        const res = await app.request('/v1/auth/device/code',
+            {
+                method: 'POST',
+                headers: { 'CF-Connecting-IP': '1.2.3.4', 'Content-Type': 'application/json' },
+                body: '{}',
+            },
+            { RL_AUTH_POLL: { limit: async () => ({ success: false }) } });
+        expect(res.status).toBe(429);
+        expect(await res.json()).toEqual({ error: 'rate_limited' });
     });
 });
 
