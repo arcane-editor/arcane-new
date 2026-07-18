@@ -32,20 +32,19 @@ pub struct GraphifyBuildResult {
 /// Resolve the on-disk graph location for a given workspace path. We hash
 /// the absolute workspace path so two different folders never collide and
 /// the same folder is stable across IDE restarts.
-fn graph_dir_for(workspace_path: &str) -> Result<PathBuf, String> {
-    let home = dirs::home_dir().ok_or_else(|| "Could not resolve home directory".to_string())?;
+fn graph_dir_for(app: &AppHandle, workspace_path: &str) -> Result<PathBuf, String> {
     let mut hasher = Sha1::new();
     hasher.update(workspace_path.as_bytes());
     let hash = hex::encode_short(&hasher.finalize());
-    Ok(home.join(".arcane").join("graphs").join(hash))
+    Ok(crate::auth::arcane_home_dir(app)?.join("graphs").join(hash))
 }
 
-fn graph_json_path(workspace_path: &str) -> Result<PathBuf, String> {
-    Ok(graph_dir_for(workspace_path)?.join("graph.json"))
+fn graph_json_path(app: &AppHandle, workspace_path: &str) -> Result<PathBuf, String> {
+    Ok(graph_dir_for(app, workspace_path)?.join("graph.json"))
 }
 
-fn summary_json_path(workspace_path: &str) -> Result<PathBuf, String> {
-    Ok(graph_dir_for(workspace_path)?.join("graph.summary.json"))
+fn summary_json_path(app: &AppHandle, workspace_path: &str) -> Result<PathBuf, String> {
+    Ok(graph_dir_for(app, workspace_path)?.join("graph.summary.json"))
 }
 
 mod hex {
@@ -121,7 +120,7 @@ pub async fn graphify_build(
     root: Option<String>,
     include_ext: Option<Vec<String>>,
 ) -> Result<GraphifyBuildResult, String> {
-    let out_path = graph_json_path(&workspace_path)?;
+    let out_path = graph_json_path(&app, &workspace_path)?;
     if let Some(parent) = out_path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("create cache dir: {}", e))?;
     }
@@ -204,7 +203,7 @@ pub async fn graphify_build(
         edges,
         communities,
         graph_path: out_str,
-        summary_path: summary_json_path(&workspace_path)?
+        summary_path: summary_json_path(&app, &workspace_path)?
             .to_string_lossy()
             .to_string(),
     })
@@ -220,7 +219,7 @@ pub async fn graphify_query(
     budget: Option<u32>,
     dfs: Option<bool>,
 ) -> Result<String, String> {
-    let graph_path = graph_json_path(&workspace_path)?;
+    let graph_path = graph_json_path(&app, &workspace_path)?;
     if !graph_path.exists() {
         return Err("no graph available — build it first".to_string());
     }
@@ -277,7 +276,7 @@ pub async fn graphify_explain(
     workspace_path: String,
     node: String,
 ) -> Result<String, String> {
-    let graph_path = graph_json_path(&workspace_path)?;
+    let graph_path = graph_json_path(&app, &workspace_path)?;
     if !graph_path.exists() {
         return Err("no graph available — build it first".to_string());
     }
@@ -313,7 +312,7 @@ pub async fn graphify_path(
     a: String,
     b: String,
 ) -> Result<String, String> {
-    let graph_path = graph_json_path(&workspace_path)?;
+    let graph_path = graph_json_path(&app, &workspace_path)?;
     if !graph_path.exists() {
         return Err("no graph available — build it first".to_string());
     }
@@ -355,11 +354,11 @@ pub struct GraphifyLoadSummaryResult {
 
 #[tauri::command]
 pub async fn graphify_load_summary(
-    _app: AppHandle,
+    app: AppHandle,
     workspace_path: String,
 ) -> Result<GraphifyLoadSummaryResult, String> {
-    let graph_path = graph_json_path(&workspace_path)?;
-    let summary_path = summary_json_path(&workspace_path)?;
+    let graph_path = graph_json_path(&app, &workspace_path)?;
+    let summary_path = summary_json_path(&app, &workspace_path)?;
     if !graph_path.exists() {
         return Ok(GraphifyLoadSummaryResult {
             available: false,
@@ -397,7 +396,7 @@ pub async fn graphify_load_summary(
 /// expects (`GraphEnrichRequest`).
 #[tauri::command]
 pub async fn graphify_enrich_payload(
-    _app: AppHandle,
+    app: AppHandle,
     workspace_path: String,
 ) -> Result<serde_json::Value, String> {
     use std::collections::{BTreeMap, BTreeSet};
@@ -406,7 +405,7 @@ pub async fn graphify_enrich_payload(
     const MAX_LABELS_PER_COMMUNITY: usize = 12;
     const MAX_FILES_PER_COMMUNITY: usize = 8;
 
-    let graph_path = graph_json_path(&workspace_path)?;
+    let graph_path = graph_json_path(&app, &workspace_path)?;
     if !graph_path.exists() {
         return Err("no graph available — build it first".to_string());
     }
@@ -465,7 +464,7 @@ pub async fn graphify_enrich_payload(
         .collect();
 
     // God nodes already have the {label, source_file} shape in the summary.
-    let summary_path = summary_json_path(&workspace_path)?;
+    let summary_path = summary_json_path(&app, &workspace_path)?;
     let god_nodes = if summary_path.exists() {
         let text = std::fs::read_to_string(&summary_path).map_err(|e| e.to_string())?;
         let summary: serde_json::Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;

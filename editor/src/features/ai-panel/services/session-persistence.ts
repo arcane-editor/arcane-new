@@ -10,7 +10,7 @@
  */
 
 import { invoke } from '@tauri-apps/api/core';
-import { homeDir, join } from '@tauri-apps/api/path';
+import { join } from '@tauri-apps/api/path';
 import type { AiMessage, ArcanePlanEntry } from '../../../stores/ai';
 import { deleteCheckpointsFile } from './checkpoints/checkpoint-store-io';
 import { deleteReviewsFile } from './edit-review/review-store-io';
@@ -68,8 +68,10 @@ async function ensureSessionsDirExists(path: string): Promise<void> {
 
 async function getSessionsDir(): Promise<string> {
   if (!sessionsDir) {
-    const home = await homeDir();
-    sessionsDir = await join(home, '.arcane', 'sessions');
+    // Per-app dir (~/.arcane or ~/.arcane-dev) so the side-by-side dev
+    // build never shares/corrupts the prod app's session files.
+    const arcaneHome = await invoke<string>('get_arcane_home_dir');
+    sessionsDir = await join(arcaneHome, 'sessions');
     try {
       await ensureSessionsDirExists(sessionsDir);
     } catch (error) {
