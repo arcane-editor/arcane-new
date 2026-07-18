@@ -1,5 +1,23 @@
 import type { AuthPayload } from './middleware/auth.ts';
 
+// Cloudflare Email Service send binding (send_email in wrangler.toml).
+// Contract verified against current docs: send() resolves {messageId} and
+// throws errors carrying `.code` (e.g. E_SENDER_NOT_VERIFIED).
+export interface EmailSender {
+    send(message: {
+        to: string | { email: string; name?: string };
+        from: { email: string; name?: string };
+        subject: string;
+        html?: string;
+        text?: string;
+    }): Promise<{ messageId: string }>;
+}
+
+// Cloudflare Workers rate limiting binding ([[unsafe.bindings]] type "ratelimit").
+export interface RateLimiter {
+    limit(options: { key: string }): Promise<{ success: boolean }>;
+}
+
 // Hono environment type — declares context bindings and variables
 export type AppEnv = {
     Bindings: {
@@ -10,6 +28,14 @@ export type AppEnv = {
         JWT_SECRET: string;
         ENVIRONMENT: string;
         WEB_BASE_URL: string;        // user-facing website base (auth pages, email links)
+        API_BASE_URL: string;        // this worker's public base (Google redirect_uri)
+        EMAIL_FROM: string;          // verified sender (no-reply@arcaneai.org)
+        EMAIL?: EmailSender;         // Email Service send binding (absent in tests)
+        RL_AUTH_STRICT?: RateLimiter;   // 10/60s/IP (absent in tests → fail open)
+        RL_AUTH_POLL?: RateLimiter;     // 60/60s/IP (absent in tests → fail open)
+        GOOGLE_CLIENT_ID?: string;      // secret — unset until owner provisions OAuth client
+        GOOGLE_CLIENT_SECRET?: string;  // secret
+        TURNSTILE_SECRET?: string;      // secret — unset = Turnstile verification skipped
     };
     Variables: {
         user: AuthPayload;
