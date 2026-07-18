@@ -9,6 +9,7 @@ export type AppEnv = {
         CF_AI_GATEWAY_ID: string;    // AI Gateway id (caching/logging/rate-limits)
         JWT_SECRET: string;
         ENVIRONMENT: string;
+        WEB_BASE_URL: string;        // user-facing website base (auth pages, email links)
     };
     Variables: {
         user: AuthPayload;
