@@ -1,0 +1,12 @@
+---
+import LandingLayout from '../layouts/LandingLayout.astro';
+import Navbar from '../components/Navbar.tsx';
+import Footer from '../components/Footer.astro';
+import AccountPanel from '../components/auth/AccountPanel.tsx';
+---
+
+<LandingLayout>
+  <Navbar client:load />
+  <AccountPanel client:load />
+  <Footer />
+</LandingLayout>

@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Menu, X } from "lucide-react";
+import { getStoredToken } from "@/lib/auth";
 
 const links = [
   { label: "Features", href: "/features" },
@@ -12,6 +13,12 @@ const Navbar = () => {
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState("");
   const [scrolled, setScrolled] = useState(false);
+  const [authed, setAuthed] = useState(false);
+
+  useEffect(() => {
+    // localStorage only after hydration — the island is pre-rendered at build time.
+    setAuthed(!!getStoredToken());
+  }, []);
 
   useEffect(() => {
     const onScroll = () => {
@@ -70,6 +77,13 @@ const Navbar = () => {
             );
           })}
 
+          <a
+            href={authed ? "/account" : "/auth"}
+            className="relative rounded-lg px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+          >
+            {authed ? "Account" : "Sign in"}
+          </a>
+
           <Button variant="hero" size="sm" className="ml-4" asChild>
             <a href="#download">Download</a>
           </Button>
@@ -93,6 +107,13 @@ const Navbar = () => {
                 {l.label}
               </a>
             ))}
+            <a
+              href={authed ? "/account" : "/auth"}
+              onClick={() => setOpen(false)}
+              className="rounded-md px-3 py-2 text-sm font-medium text-muted-foreground hover:text-primary"
+            >
+              {authed ? "Account" : "Sign in"}
+            </a>
             <Button variant="hero" size="sm" className="mt-2" asChild>
               <a href="#download">Download</a>
             </Button>
