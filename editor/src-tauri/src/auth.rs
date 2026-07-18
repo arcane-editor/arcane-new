@@ -60,7 +60,7 @@ pub fn auth_write_token(app: tauri::AppHandle, token: String, email: String) -> 
     fs::write(&path, &content).map_err(|e| e.to_string())?;
 
     // Restrict the token file to the owner. On Unix that's an explicit 0600
-    // chmod; on Windows it lives under the user profile (%USERPROFILE%\.arcane)
+    // chmod; on Windows it lives under the user profile's per-app config dir
     // and inherits the user's ACLs, so no extra step is needed.
     #[cfg(unix)]
     {

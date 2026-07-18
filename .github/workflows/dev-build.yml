@@ -12,6 +12,12 @@ on:
     paths: ['editor/**', '.github/workflows/dev-build.yml']
   workflow_dispatch:
 
+# One build per ref at a time; a newer push cancels the older in-flight build
+# so a stale run can never overwrite dev/latest/ last (and saves runner time).
+concurrency:
+  group: dev-build-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     strategy:

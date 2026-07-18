@@ -3,9 +3,11 @@
 //! traversal; this module shells out to it and streams progress events
 //! back to the frontend.
 //!
-//! Graph artifacts live at `~/.arcane/graphs/<sha1(workspace)>/graph.json`
-//! — outside the user's project tree so we never pollute their working
-//! directory or .gitignore.
+//! Graph artifacts live under the per-app config dir (see `auth::arcane_home_dir`)
+//! at `<arcane-home>/graphs/<sha1(workspace)>/graph.json` — i.e.
+//! `~/.arcane/graphs/<sha1>/` for prod builds and `~/.arcane-dev/graphs/<sha1>/`
+//! for dev builds — outside the user's project tree so we never pollute their
+//! working directory or .gitignore.
 
 use serde::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};

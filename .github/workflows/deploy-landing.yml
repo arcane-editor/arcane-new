@@ -19,6 +19,13 @@ on:
         options: [dev, production]
         default: dev
 
+# Serialize deploys per ref WITHOUT cancelling in-flight runs: a mid-flight
+# kill during D1 migrations/deploy is worse than waiting, and GitHub keeps
+# only the newest pending run in the group, so the final state is newest-wins.
+concurrency:
+  group: deploy-landing-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   deploy-dev:
     if: github.event_name == 'push' || inputs.environment == 'dev'
@@ -43,10 +50,10 @@ jobs:
           PUBLIC_API_URL: https://api-dev.arcaneai.org
         run: pnpm build
       - name: Deploy to arcane-landing-dev
-        run: npx wrangler pages deploy dist --project-name arcane-landing-dev --branch main
+        run: npx wrangler@4 pages deploy dist --project-name arcane-landing-dev --branch main
 
   deploy-prod:
-    if: github.event_name == 'workflow_dispatch' && inputs.environment == 'production'
+    if: github.event_name == 'workflow_dispatch' && inputs.environment == 'production' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -68,4 +75,4 @@ jobs:
           PUBLIC_API_URL: https://api.arcaneai.org
         run: pnpm build
       - name: Deploy to arcane-landing (production)
-        run: npx wrangler pages deploy dist --project-name arcane-landing --branch main
+        run: npx wrangler@4 pages deploy dist --project-name arcane-landing --branch main

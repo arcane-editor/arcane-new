@@ -1,6 +1,7 @@
 /**
  * Session persistence — saves/loads AI chat sessions as JSON files.
- * Location: ~/.arcane/sessions/<sessionId>.json
+ * Location: <per-app config dir>/sessions/<sessionId>.json — i.e. ~/.arcane/sessions
+ * for prod builds, ~/.arcane-dev/sessions for dev builds (see `getSessionsDir`).
  *
  * Each record carries the agent kind, workspace path, a human title, and the
  * transcript. Older records on disk may still carry a now-removed agent kind
@@ -214,9 +215,10 @@ export async function renameSession(sessionId: string, title: string): Promise<v
 
 /**
  * List saved sessions as summaries, newest first. Optionally scoped to a
- * workspace. Enumerates `~/.arcane/sessions` via the custom `read_directory`
- * Rust command (scope-exempt, unlike plugin-fs `readDir` which is blocked by the
- * empty fs scope). Session files are named `session_*.json` — not hidden — so the
+ * workspace. Enumerates the per-app config dir's `sessions` folder (`~/.arcane/sessions`
+ * or `~/.arcane-dev/sessions`) via the custom `read_directory` Rust command
+ * (scope-exempt, unlike plugin-fs `readDir` which is blocked by the empty fs
+ * scope). Session files are named `session_*.json` — not hidden — so the
  * command's hidden-name skip doesn't drop them.
  */
 export async function listSessions(workspacePath?: string | null): Promise<SessionSummary[]> {
