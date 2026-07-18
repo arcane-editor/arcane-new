@@ -1,12 +1,17 @@
+import type { TokenPurpose } from './tokens.ts';
+
 // --- Row types (match D1/SQLite column names) ---
 
 export interface UserRow {
     id: number;
     email: string;
-    password_hash: string;
-    salt: string;
+    password_hash: string;   // '' = OAuth-only user, no password set
+    salt: string;            // '' for OAuth-only users
     role: string;
     created_at: string;
+    google_sub: string | null;
+    email_verified: number;  // 0 | 1
+    token_version: number;   // session revocation epoch (JWT claim must match)
 }
 
 export interface UsagePeriodRow {
@@ -80,12 +85,12 @@ export async function findUserById(db: D1Database, id: number): Promise<UserRow 
 }
 
 export async function createUser(db: D1Database, data: {
-    email: string; passwordHash: string; salt: string;
+    email: string; passwordHash: string; salt: string; emailVerified?: boolean;
 }): Promise<UserRow> {
     const result = await db.prepare(
-        'INSERT INTO users (email, password_hash, salt) VALUES (?, ?, ?) RETURNING *'
+        'INSERT INTO users (email, password_hash, salt, email_verified) VALUES (?, ?, ?, ?) RETURNING *'
     ).bind(
-        data.email.toLowerCase(), data.passwordHash, data.salt,
+        data.email.toLowerCase(), data.passwordHash, data.salt, data.emailVerified ? 1 : 0,
     ).first<UserRow>();
     return result!;
 }
@@ -378,4 +383,101 @@ export async function deleteDeviceCode(db: D1Database, id: number): Promise<void
 
 export async function cleanExpiredDeviceCodes(db: D1Database): Promise<void> {
     await db.prepare("DELETE FROM device_codes WHERE expires_at < datetime('now')").run();
+}
+
+// --- OAuth / verification user helpers ---
+
+export async function findUserByGoogleSub(db: D1Database, googleSub: string): Promise<UserRow | null> {
+    return db.prepare('SELECT * FROM users WHERE google_sub = ?').bind(googleSub).first<UserRow>();
+}
+
+/** Links a Google subject to an existing account. Google verified the email
+ *  ownership, so this also marks the account verified. */
+export async function linkGoogleSub(db: D1Database, userId: number, googleSub: string): Promise<UserRow | null> {
+    return db.prepare(
+        'UPDATE users SET google_sub = ?, email_verified = 1 WHERE id = ? RETURNING *'
+    ).bind(googleSub, userId).first<UserRow>();
+}
+
+/** Google-only signup: '' password sentinel (column is NOT NULL), pre-verified. */
+export async function createOAuthUser(db: D1Database, data: { email: string; googleSub: string }): Promise<UserRow> {
+    const result = await db.prepare(
+        "INSERT INTO users (email, password_hash, salt, email_verified, google_sub) VALUES (?, '', '', 1, ?) RETURNING *"
+    ).bind(data.email.toLowerCase(), data.googleSub).first<UserRow>();
+    return result!;
+}
+
+export async function setEmailVerified(db: D1Database, userId: number): Promise<UserRow | null> {
+    return db.prepare('UPDATE users SET email_verified = 1 WHERE id = ? RETURNING *')
+        .bind(userId).first<UserRow>();
+}
+
+/** Sets a new password AND bumps token_version — revokes every session. */
+export async function updatePasswordBumpVersion(
+    db: D1Database, userId: number, passwordHash: string, salt: string,
+): Promise<UserRow | null> {
+    return db.prepare(
+        'UPDATE users SET password_hash = ?, salt = ?, token_version = token_version + 1 WHERE id = ? RETURNING *'
+    ).bind(passwordHash, salt, userId).first<UserRow>();
+}
+
+export async function bumpTokenVersion(db: D1Database, userId: number): Promise<UserRow | null> {
+    return db.prepare('UPDATE users SET token_version = token_version + 1 WHERE id = ? RETURNING *')
+        .bind(userId).first<UserRow>();
+}
+
+// --- One-time auth token queries (auth_tokens, migration 0012) ---
+
+export interface AuthTokenRow {
+    id: number;
+    user_id: number;
+    purpose: string;
+    token_hash: string;
+    meta: string | null;
+    expires_at: string;
+    consumed_at: string | null;
+    created_at: string;
+}
+
+/** expires_at is computed SQL-side (datetime('now', '+N seconds')) so the
+ *  format always matches the datetime('now') comparisons in consume/clean. */
+export async function createAuthToken(db: D1Database, data: {
+    userId: number; purpose: TokenPurpose; tokenHash: string; ttlSeconds: number; meta?: string;
+}): Promise<AuthTokenRow> {
+    const result = await db.prepare(
+        `INSERT INTO auth_tokens (user_id, purpose, token_hash, meta, expires_at)
+         VALUES (?, ?, ?, ?, datetime('now', ?)) RETURNING *`
+    ).bind(
+        data.userId, data.purpose, data.tokenHash, data.meta ?? null, `+${data.ttlSeconds} seconds`,
+    ).first<AuthTokenRow>();
+    return result!;
+}
+
+/** Atomic single-use consume: only one caller can ever win the UPDATE, even
+ *  when two requests race — D1 serializes writes and the consumed_at IS NULL
+ *  predicate makes the second UPDATE match zero rows. */
+export async function consumeAuthToken(
+    db: D1Database, purpose: TokenPurpose, tokenHash: string,
+): Promise<AuthTokenRow | null> {
+    return db.prepare(
+        `UPDATE auth_tokens SET consumed_at = datetime('now')
+         WHERE purpose = ? AND token_hash = ? AND consumed_at IS NULL AND expires_at > datetime('now')
+         RETURNING *`
+    ).bind(purpose, tokenHash).first<AuthTokenRow>();
+}
+
+/** Resend/abuse throttle: tokens minted in the last hour (consumed or not). */
+export async function countRecentAuthTokens(
+    db: D1Database, userId: number, purpose: TokenPurpose,
+): Promise<number> {
+    const row = await db.prepare(
+        `SELECT COUNT(*) AS n FROM auth_tokens
+         WHERE user_id = ? AND purpose = ? AND created_at > datetime('now', '-1 hour')`
+    ).bind(userId, purpose).first<{ n: number }>();
+    return row?.n ?? 0;
+}
+
+/** Opportunistic cleanup — mirrors cleanExpiredDeviceCodes. */
+export async function cleanExpiredAuthTokens(db: D1Database): Promise<void> {
+    await db.prepare("DELETE FROM auth_tokens WHERE expires_at < datetime('now')").run();
 }
