@@ -44,7 +44,7 @@ async function signOAuthCookie(payload: OAuthCookiePayload, jwtSecret: string): 
 async function verifyOAuthCookie(token: string, jwtSecret: string): Promise<OAuthCookiePayload | null> {
     try {
         const secret = new TextEncoder().encode(jwtSecret);
-        const { payload } = await jwtVerify(token, secret, { issuer: OAUTH_COOKIE_ISSUER });
+        const { payload } = await jwtVerify(token, secret, { issuer: OAUTH_COOKIE_ISSUER, algorithms: ['HS256'] });
         return payload as unknown as OAuthCookiePayload;
     } catch {
         return null;
@@ -152,6 +152,7 @@ authGoogleRouter.get('/v1/auth/google/callback', async (c) => {
         const { payload } = await jwtVerify(id_token, GOOGLE_JWKS, {
             issuer: ['https://accounts.google.com', 'accounts.google.com'],
             audience: c.env.GOOGLE_CLIENT_ID!,
+            algorithms: ['RS256'],
         });
         claims = payload as unknown as typeof claims;
     } catch {

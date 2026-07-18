@@ -55,7 +55,7 @@ export function authMiddleware(): MiddlewareHandler<AppEnv> {
         const secret = new TextEncoder().encode(c.env.JWT_SECRET);
         let payload: AuthPayload;
         try {
-            const result = await jwtVerify(token, secret, { issuer: JWT_ISSUER });
+            const result = await jwtVerify(token, secret, { issuer: JWT_ISSUER, algorithms: ['HS256'] });
             payload = result.payload as unknown as AuthPayload;
         } catch {
             return c.json({ error: 'Invalid or expired token' }, 401);
