@@ -1,0 +1,71 @@
+name: Deploy Landing
+
+# landing-page (Astro, Cloudflare Pages) deploys.
+#  - push to dev touching landing-page/ -> arcane-landing-dev (dev.arcaneai.org)
+#  - manual dispatch with environment=production -> arcane-landing (arcaneai.org)
+# Both Pages projects use production branch "main" — always pass --branch main.
+# The load-bearing landing-page/.npmrc (entities hoist exclusion) is picked up
+# automatically because pnpm runs inside landing-page/.
+# Phase 2 adds PUBLIC_TURNSTILE_SITE_KEY next to PUBLIC_API_URL below.
+on:
+  push:
+    branches: ['dev']
+    paths: ['landing-page/**', '.github/workflows/deploy-landing.yml']
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        type: choice
+        options: [dev, production]
+        default: dev
+
+jobs:
+  deploy-dev:
+    if: github.event_name == 'push' || inputs.environment == 'dev'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: landing-page
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: pnpm install --frozen-lockfile
+      - name: Build (dev API baked in)
+        env:
+          PUBLIC_API_URL: https://api-dev.arcaneai.org
+        run: pnpm build
+      - name: Deploy to arcane-landing-dev
+        run: npx wrangler pages deploy dist --project-name arcane-landing-dev --branch main
+
+  deploy-prod:
+    if: github.event_name == 'workflow_dispatch' && inputs.environment == 'production'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: landing-page
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: pnpm install --frozen-lockfile
+      - name: Build (prod API baked in)
+        env:
+          PUBLIC_API_URL: https://api.arcaneai.org
+        run: pnpm build
+      - name: Deploy to arcane-landing (production)
+        run: npx wrangler pages deploy dist --project-name arcane-landing --branch main
