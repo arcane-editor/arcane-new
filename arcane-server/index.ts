@@ -8,6 +8,7 @@ import { graphRouter } from './src/routes/graph.ts';
 import { unityApiRouter } from './src/routes/unity-api.ts';
 import { authRouter } from './src/routes/auth.ts';
 import { authEmailRouter } from './src/routes/auth-email.ts';
+import { authGoogleRouter } from './src/routes/auth-google.ts';
 import { usageRouter } from './src/routes/usage.ts';
 import { adminRouter } from './src/routes/admin.ts';
 import { feedbackRouter } from './src/routes/feedback.ts';
@@ -20,6 +21,7 @@ app.use('*', cors());
 app.get('/health', (c) => c.json({ status: 'ok' }));
 app.route('/', authRouter);
 app.route('/', authEmailRouter);
+app.route('/', authGoogleRouter);
 app.route('/', feedbackRouter);
 
 // Protected routes (auth only — no budget/credit checks)
