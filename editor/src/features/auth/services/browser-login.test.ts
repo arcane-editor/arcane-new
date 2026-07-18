@@ -182,6 +182,44 @@ describe('beginBrowserLogin', () => {
     expect(calls[0].code).toBe('NEW');
   });
 
+  it('two rapid begins: the loser (superseded mid-await, before `pending` used to exist) tears down its OWN timer — it never fires later', async () => {
+    const first = makeHandlers();
+    const second = makeHandlers();
+
+    // Fired without awaiting the first — lands the second call's synchronous
+    // `teardown()` while the first is still suspended awaiting challengeS256,
+    // i.e. exactly the pre-`pending` window the orphaned-timer bug lived in.
+    const p1 = bl.beginBrowserLogin(first.handlers, 20);
+    const p2 = bl.beginBrowserLogin(second.handlers, 20);
+    await Promise.all([p1, p2]);
+
+    // Only the second (winning) attempt ever reaches onOpenUrl/openUrl.
+    expect(openedUrls).toHaveLength(1);
+
+    // Wait past the (short) timeout: the second attempt legitimately times
+    // out (nothing consumed or cancelled it) and reports its own onError —
+    // but the first attempt was superseded long before that point, so its
+    // timer must have torn itself down instead of ALSO firing here against
+    // an attempt it has nothing to do with (the orphaned-timer bug).
+    await new Promise((r) => setTimeout(r, 60));
+    expect(first.errors).toHaveLength(0);
+    expect(first.calls).toHaveLength(0);
+    expect(second.errors).toHaveLength(1);
+  });
+
+  it('cancelBrowserLogin landing mid-await (before `pending` used to exist) leaves no orphaned timer', async () => {
+    const { calls, errors, handlers } = makeHandlers();
+
+    const p = bl.beginBrowserLogin(handlers, 20);
+    bl.cancelBrowserLogin(); // synchronous — races the still-suspended begin
+    await p;
+
+    expect(openedUrls).toHaveLength(0); // never got far enough to open a browser
+    await new Promise((r) => setTimeout(r, 60));
+    expect(errors).toHaveLength(0); // timer torn down, not left to fire later
+    expect(calls).toHaveLength(0);
+  });
+
   it('times out, reports an error, and clears the attempt', async () => {
     const { calls, errors, handlers } = makeHandlers();
     await bl.beginBrowserLogin(handlers, 20);

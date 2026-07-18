@@ -102,6 +102,18 @@ async function waitFor(predicate: () => boolean, maxMs = 500): Promise<void> {
   }
 }
 
+/** Builds a minimal unsigned JWT-shaped string whose payload has the given
+ * `exp` (unix seconds) — enough for the store's own `isJwtExpired` parsing,
+ * which only ever reads `parts[1]` as base64url JSON. */
+function base64UrlEncode(json: string): string {
+  return btoa(json).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+function makeToken(expEpochSeconds: number): string {
+  const header = base64UrlEncode(JSON.stringify({ alg: 'none' }));
+  const payload = base64UrlEncode(JSON.stringify({ exp: expEpochSeconds }));
+  return `${header}.${payload}.sig`;
+}
+
 function resetStore(): void {
   useAuthStore.setState({
     loggedIn: false,
@@ -250,5 +262,65 @@ describe('useAuthStore.submitManualCode', () => {
     expect(state.loginStatus).toBe('error');
     expect(state.error).toBe('No sign-in attempt in progress — click "Continue in browser" first.');
     expect(exchangeEditorCodeCalls).toEqual([]);
+  });
+});
+
+describe('useAuthStore.loadFromDisk', () => {
+  it('resolves a valid token -> signed-in state set, and a dangling browser-login attempt in THIS window is torn down (Fix 5)', async () => {
+    // Simulate: this window had its own attempt in flight when a login
+    // completed in ANOTHER window and wrote a fresh token to disk.
+    useAuthStore.setState({ loginStatus: 'waiting-browser', error: 'stale' });
+    const validToken = makeToken(Math.floor(Date.now() / 1000) + 3600);
+    loadFromDiskImpl = async () => ({ token: validToken, email: 'disk@example.com' });
+
+    await useAuthStore.getState().loadFromDisk();
+
+    const state = useAuthStore.getState();
+    expect(state.loggedIn).toBe(true);
+    expect(state.email).toBe('disk@example.com');
+    expect(state.token).toBe(validToken);
+    expect(state.loginStatus).toBe('idle');
+    expect(state.error).toBeNull();
+    // The service's own pending attempt (listener + 10-min timer) must be
+    // torn down here, or it later fires a spurious "timed out" error against
+    // a window that's already signed in.
+    expect(cancelBrowserLoginCalls).toBe(1);
+  });
+
+  it('resolves null (token file genuinely missing, e.g. logout in another window) -> resets to signed-out', async () => {
+    useAuthStore.setState({ loggedIn: true, email: 'was@example.com', token: 'tok', plan: 'pro' });
+    loadFromDiskImpl = async () => null;
+
+    await useAuthStore.getState().loadFromDisk();
+
+    const state = useAuthStore.getState();
+    expect(state.loggedIn).toBe(false);
+    expect(state.email).toBeNull();
+    expect(state.token).toBeNull();
+    expect(state.plan).toBeNull();
+    expect(state.error).toBeNull();
+  });
+
+  it('REJECTS (transient read/parse error, distinct from "no token") -> current session left unchanged (Fix 1 regression guard)', async () => {
+    useAuthStore.setState({
+      loggedIn: true,
+      email: 'still@example.com',
+      token: 'still-tok',
+      plan: 'pro',
+      loginStatus: 'idle',
+      error: null,
+    });
+    loadFromDiskImpl = async () => {
+      throw new Error('disk read failed');
+    };
+
+    await useAuthStore.getState().loadFromDisk();
+
+    const state = useAuthStore.getState();
+    expect(state.loggedIn).toBe(true);
+    expect(state.email).toBe('still@example.com');
+    expect(state.token).toBe('still-tok');
+    expect(state.plan).toBe('pro');
+    expect(state.loginStatus).toBe('idle');
   });
 });

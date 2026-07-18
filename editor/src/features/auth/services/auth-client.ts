@@ -34,13 +34,25 @@ export class AuthClient {
    * manual paste — same code either way) for a full session token.
    * The server returns a single opaque `invalid_code` for every failure
    * mode (expired, replayed, verifier mismatch) by design.
+   *
+   * `timeoutMs` bounds a hung connection (no AbortController previously —
+   * a stalled request left AuthTab stuck on the 'exchanging' spinner
+   * forever); overridable for tests, same pattern as browser-login's
+   * `beginBrowserLogin(handlers, timeoutMs)`.
    */
-  async exchangeEditorCode(code: string, verifier: string): Promise<ExchangeResult> {
+  async exchangeEditorCode(
+    code: string,
+    verifier: string,
+    timeoutMs: number = 30_000,
+  ): Promise<ExchangeResult> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const res = await fetch(`${this.serverUrl}/v1/auth/editor/exchange`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code, verifier }),
+        signal: controller.signal,
       });
 
       if (!res.ok) {
@@ -61,7 +73,15 @@ export class AuthClient {
       await this.saveToken(data.token, data.user.email);
       return { success: true, user: data.user };
     } catch (err) {
+      // Same opaque failure shape whether the connection was aborted (hung
+      // past `timeoutMs`) or failed outright — the store treats every catch
+      // here as a retryable 'error' state, not a stuck spinner.
+      if (err instanceof Error && err.name === 'AbortError') {
+        return { success: false, error: 'Sign-in timed out. Check your connection and try again.' };
+      }
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
+    } finally {
+      clearTimeout(timer);
     }
   }
 
@@ -98,13 +118,18 @@ export class AuthClient {
     return data;
   }
 
+  /**
+   * `auth_read_token` (Rust) distinguishes "no token file" — resolves
+   * `Ok(None)`, i.e. this promise resolves `null` — from a genuine
+   * read/parse error, which the invoke call REJECTS. Only the former is a
+   * legitimate "signed out" signal, so this method must NOT swallow a
+   * rejection into `null`: doing so would make a transient disk hiccup
+   * indistinguishable from a real logout and let the caller wipe a live
+   * session on it. Let rejections propagate — the auth store's
+   * `loadFromDisk` action is what decides how to react to each case.
+   */
   async loadFromDisk(): Promise<{ token: string; email: string } | null> {
-    try {
-      const result = await invoke<{ token: string; email: string } | null>('auth_read_token');
-      return result;
-    } catch {
-      return null;
-    }
+    return invoke<{ token: string; email: string } | null>('auth_read_token');
   }
 
   async logout(): Promise<void> {

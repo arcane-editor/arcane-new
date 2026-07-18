@@ -120,7 +120,19 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   loadFromDisk: async () => {
-    const stored = await authClient.loadFromDisk();
+    let stored: { token: string; email: string } | null;
+    try {
+      stored = await authClient.loadFromDisk();
+    } catch (err) {
+      // authClient.loadFromDisk REJECTS only on a genuine read/parse error
+      // (missing file resolves null, see auth-client.ts) — a transient disk
+      // hiccup, not a real logout. Leave whatever session state is already
+      // in memory alone; resetting here is the regression this guards
+      // against (a live session getting wiped by a one-off read error).
+      console.warn('[auth] loadFromDisk: transient token-read error, keeping current session', err);
+      return;
+    }
+
     if (!stored) {
       // Token file missing — e.g. logout happened in ANOTHER window (spec C3)
       // or a fresh install. Reset instead of silently keeping stale state.
@@ -134,10 +146,18 @@ export const useAuthStore = create<AuthState>((set) => ({
       return;
     }
 
+    // A valid token landed here while THIS window may have had its own
+    // browser-login attempt in flight (cross-window login completed
+    // elsewhere — spec C5/multi-window). Tear that attempt down so its
+    // listener/10-min timer doesn't fire a spurious "timed out" error later
+    // against a window that's already signed in. No-op if nothing pending.
+    serviceCancelBrowserLogin();
     set({
       loggedIn: true,
       email: stored.email,
       token: stored.token,
+      loginStatus: 'idle',
+      error: null,
     });
   },
 }));

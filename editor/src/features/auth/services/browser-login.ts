@@ -95,6 +95,10 @@ export interface BrowserLoginHandlers {
 }
 
 interface PendingAttempt {
+  /** Monotonic id of this attempt (see `attemptSeq`). Lets an attempt that's
+   * still awaiting something tell — when it resumes — whether it's still the
+   * live one or was superseded by a cancel/restart while it was suspended. */
+  epoch: number;
   state: string;
   verifier: string;
   scheme: string;
@@ -108,6 +112,7 @@ interface PendingAttempt {
 const LOGIN_TIMEOUT_MS = 10 * 60 * 1000;
 
 let pending: PendingAttempt | null = null;
+let attemptSeq = 0;
 
 function teardown(): void {
   const p = pending;
@@ -131,12 +136,19 @@ function consumeAndDeliver(code: string): void {
   void p.handlers.onCode(code, p.verifier);
 }
 
+/** scheme+path only, no query string — a callback URL's query carries the
+ * single-use grant code (and CSRF state), so it must never land in a log. */
+function redactUrlForLog(url: string): string {
+  const qIndex = url.indexOf('?');
+  return qIndex === -1 ? url : url.slice(0, qIndex);
+}
+
 function handleDeepLinkUrls(urls: string[]): void {
   for (const url of urls) {
     if (!pending) return; // consumed/cancelled — ignore the rest
     const parsed = parseCallback(url, pending.scheme);
     if (!parsed) {
-      console.warn('[browser-login] ignoring non-callback deep link:', url);
+      console.warn('[browser-login] ignoring non-callback deep link:', redactUrlForLog(url));
       continue;
     }
     if (parsed.state !== pending.state) {
@@ -152,6 +164,17 @@ function handleDeepLinkUrls(urls: string[]): void {
  * Start (or restart — any pending attempt is torn down first, spec C5) a
  * browser login. Registers the deep-link listener BEFORE opening the browser
  * so a fast callback cannot be missed. `timeoutMs` is overridable for tests.
+ *
+ * A placeholder `pending` (with this attempt's `epoch`) is published BEFORE
+ * the first await, and re-checked after each subsequent one. This closes a
+ * race where a cancel or a second `beginBrowserLogin` landed in the window
+ * before `pending` existed yet: it used to be a no-op against THIS attempt,
+ * whose own timer then kept running unreferenced and fired its "timed out"
+ * error ~10 minutes later against whatever attempt (if any) was live by
+ * then. Now every later call's `teardown()` finds a real entry to clear
+ * (including this timer) the moment it starts, and if this attempt is
+ * already past that point when superseded, the epoch check below catches it
+ * and tears down its own timer/listener instead of proceeding.
  */
 export async function beginBrowserLogin(
   handlers: BrowserLoginHandlers,
@@ -159,29 +182,47 @@ export async function beginBrowserLogin(
 ): Promise<void> {
   teardown();
 
+  const epoch = ++attemptSeq;
   const state = generateState();
   const verifier = generateVerifier();
-  const challenge = await challengeS256(verifier);
-  const scheme = await invoke<string>('auth_deep_link_scheme');
-
-  const params = new URLSearchParams({ flow: 'editor', state, challenge, scheme });
-  const url = `${ARCANE_WEB_URL}/auth?${params.toString()}`;
 
   const timer = setTimeout(() => {
+    if (pending?.epoch !== epoch) return; // zombie timer from a superseded attempt
     teardown();
     handlers.onError('Sign-in timed out. Click "Continue in browser" to try again.');
   }, timeoutMs);
 
-  pending = { state, verifier, scheme, url, handlers, unlisten: null, timer };
+  pending = { epoch, state, verifier, scheme: '', url: '', handlers, unlisten: null, timer };
+
+  const challenge = await challengeS256(verifier);
+  if (pending?.epoch !== epoch) {
+    // Superseded (cancel or restart) while awaiting the challenge hash.
+    // `pending` now belongs to a different attempt (or is null) — clear only
+    // THIS attempt's own timer, never whatever is current.
+    clearTimeout(timer);
+    return;
+  }
+
+  const scheme = await invoke<string>('auth_deep_link_scheme');
+  if (pending?.epoch !== epoch) {
+    clearTimeout(timer);
+    return;
+  }
+
+  const params = new URLSearchParams({ flow: 'editor', state, challenge, scheme });
+  const url = `${ARCANE_WEB_URL}/auth?${params.toString()}`;
+  pending.scheme = scheme;
+  pending.url = url;
 
   // Register BEFORE openUrl. onOpenUrl is just `listen('deep-link://new-url',
   // …)` — it does NOT replay startup/current URLs on registration; those come
   // only from the plugin's separate `getCurrent()`, which this flow doesn't
   // call. So a cold-start deep link simply finds no pending attempt here.
   const unlisten = await onOpenUrl(handleDeepLinkUrls);
-  if (!pending || pending.state !== state) {
-    // Cancelled or restarted while awaiting registration.
+  if (pending?.epoch !== epoch) {
+    // Cancelled or superseded while awaiting registration.
     unlisten();
+    clearTimeout(timer);
     return;
   }
   pending.unlisten = unlisten;

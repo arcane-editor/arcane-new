@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Globe, KeyRound, Loader2, LogOut, RotateCw, Smartphone, X } from 'lucide-react';
 import { emit } from '@tauri-apps/api/event';
 import { useAuthStore } from '../../../stores/auth';
@@ -30,6 +30,20 @@ function AuthTab() {
   const [userCode, setUserCode] = useState<string | null>(null);
   const [verificationUri, setVerificationUri] = useState<string | null>(null);
   const [polling, setPolling] = useState(false);
+  // Ref (not local-var) so the unmount cleanup below can reach the SAME
+  // interval the in-flight handleDeviceFlow call created — closing a tab
+  // mid-poll used to leave this 5s interval running forever (it was only
+  // ever cleared from inside itself, on authorized/expired/error).
+  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (pollIntervalRef.current !== null) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
+    };
+  }, []);
 
   const startBrowserLogin = () => {
     setShowPaste(false);
@@ -46,11 +60,12 @@ function AuthTab() {
       setPolling(true);
 
       // Poll for authorization
-      const interval = setInterval(async () => {
+      pollIntervalRef.current = setInterval(async () => {
         try {
           const result = await authClient.pollDeviceToken(response.device_code);
           if (result.status === 'authorized') {
-            clearInterval(interval);
+            clearInterval(pollIntervalRef.current!);
+            pollIntervalRef.current = null;
             setPolling(false);
             setDeviceCode(null);
             // pollDeviceToken saved the token to disk — pull it into the
@@ -62,13 +77,15 @@ function AuthTab() {
             }
             void emit('auth-changed');
           } else if (result.status === 'expired') {
-            clearInterval(interval);
+            clearInterval(pollIntervalRef.current!);
+            pollIntervalRef.current = null;
             setPolling(false);
             setDeviceCode(null);
             useAuthStore.setState({ error: 'Device code expired. Try again.' });
           }
         } catch {
-          clearInterval(interval);
+          clearInterval(pollIntervalRef.current!);
+          pollIntervalRef.current = null;
           setPolling(false);
         }
       }, 5000);
