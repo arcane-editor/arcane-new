@@ -5,7 +5,7 @@ import Footer from '../components/Footer.astro';
 import AccountPanel from '../components/auth/AccountPanel.tsx';
 ---
 
-<LandingLayout>
+<LandingLayout analytics={false}>
   <Navbar client:load />
   <AccountPanel client:load />
   <Footer />

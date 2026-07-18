@@ -78,6 +78,9 @@ export default function AuthSuccess() {
                         {copied ? "Copied!" : "Copy"}
                     </button>
                 </div>
+                <p className="text-muted-foreground text-xs mt-2">
+                    Only paste this code into Arcane. Never share it with anyone.
+                </p>
             </div>
 
             <a href="/account" className="block mt-5 text-center text-muted-foreground text-xs hover:text-foreground">

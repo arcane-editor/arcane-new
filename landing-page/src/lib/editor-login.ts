@@ -49,9 +49,13 @@ export function parseEditorLoginParams(params: URLSearchParams): EditorLoginPars
     const challenge = params.get('challenge') ?? '';
     const scheme = params.get('scheme') ?? '';
     if (!isAllowedScheme(scheme)) {
+        // scheme is attacker-controllable (a raw query param) and gets echoed into
+        // this hard-error banner — truncate so it can't carry a paragraph of
+        // spoofed content into a trusted-looking message.
+        const shown = scheme.length > 20 ? `${scheme.slice(0, 20)}…` : scheme;
         return {
             ok: false,
-            error: `This sign-in link asked to open an app link ("${scheme || 'none'}://") this site doesn't recognize, so we stopped for your safety. Update Arcane, then click Sign in again from the editor.`,
+            error: `This sign-in link asked to open an app link ("${shown || 'none'}://") this site doesn't recognize, so we stopped for your safety. Update Arcane, then click Sign in again from the editor.`,
         };
     }
     if (!isValidChallenge(challenge)) {

@@ -3,6 +3,6 @@ import LandingLayout from '../../layouts/LandingLayout.astro';
 import AuthSuccess from '../../components/auth/AuthSuccess.tsx';
 ---
 
-<LandingLayout>
+<LandingLayout analytics={false}>
   <AuthSuccess client:load />
 </LandingLayout>

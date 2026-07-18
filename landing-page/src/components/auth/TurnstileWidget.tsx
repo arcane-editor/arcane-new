@@ -38,28 +38,42 @@ function loadScript(): Promise<void> {
     });
 }
 
-export default function TurnstileWidget({ onToken }: { onToken: (token: string) => void }) {
+// Turnstile tokens are single-use: a failed submit must reset the widget so
+// the next attempt gets a fresh one. `onReady` hands the parent a reset
+// function once the widget has rendered — a callback prop (not a ref) so the
+// component stays a plain function component like the rest of this file.
+export default function TurnstileWidget({
+    onToken,
+    onReady,
+}: {
+    onToken: (token: string) => void;
+    onReady?: (reset: () => void) => void;
+}) {
     const container = useRef<HTMLDivElement>(null);
+    const widgetId = useRef<string | null>(null);
 
     useEffect(() => {
         if (!turnstileEnabled()) return;
-        let widgetId: string | null = null;
         let cancelled = false;
         void loadScript()
             .then(() => {
                 if (cancelled || !container.current || !window.turnstile) return;
-                widgetId = window.turnstile.render(container.current, {
+                widgetId.current = window.turnstile.render(container.current, {
                     sitekey: SITE_KEY,
                     theme: "dark",
                     callback: (token: string) => onToken(token),
                     "expired-callback": () => onToken(""),
                     "error-callback": () => onToken(""),
                 });
+                onReady?.(() => {
+                    if (widgetId.current && window.turnstile) window.turnstile.reset(widgetId.current);
+                });
             })
             .catch(() => { /* script blocked/offline: degrade, server decides */ });
         return () => {
             cancelled = true;
-            if (widgetId && window.turnstile) window.turnstile.remove(widgetId);
+            if (widgetId.current && window.turnstile) window.turnstile.remove(widgetId.current);
+            widgetId.current = null;
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);

@@ -3,6 +3,6 @@ import LandingLayout from '../../layouts/LandingLayout.astro';
 import AuthHub from '../../components/auth/AuthHub.tsx';
 ---
 
-<LandingLayout>
+<LandingLayout analytics={false}>
   <AuthHub client:load />
 </LandingLayout>

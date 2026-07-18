@@ -3,7 +3,10 @@ import { apiReset, setStoredToken, authErrorMessage } from "@/lib/auth";
 import { AuthShell, authInputClass, authPrimaryBtnClass, authErrorBannerClass } from "./AuthShell";
 
 export default function ResetPassword() {
-    const [resetToken, setResetToken] = useState<string | null>(null);
+    // "loading": not yet read from the URL — the SSG-rendered HTML freezes on
+    // this state, so it must never say "Invalid link" before hydration runs.
+    // null: read, and genuinely missing. Otherwise: the token string.
+    const [resetToken, setResetToken] = useState<string | null | "loading">("loading");
     const [password, setPassword] = useState("");
     const [confirm, setConfirm] = useState("");
     const [error, setError] = useState("");
@@ -17,7 +20,7 @@ export default function ResetPassword() {
     }, []);
 
     const handleSubmit = async () => {
-        if (!resetToken) return;
+        if (!resetToken || resetToken === "loading") return;
         if (password.length < 8) { setError(authErrorMessage("weak_password")); return; }
         if (password !== confirm) { setError("Passwords don't match."); return; }
         setSubmitting(true);
@@ -42,6 +45,14 @@ export default function ResetPassword() {
                     You're signed in here. All other sessions have been signed out.
                 </p>
                 <a href="/account" className="block mt-4 text-center text-primary text-sm hover:underline">Go to your account</a>
+            </AuthShell>
+        );
+    }
+
+    if (resetToken === "loading") {
+        return (
+            <AuthShell>
+                <p className="text-muted-foreground text-sm text-center">Loading…</p>
             </AuthShell>
         );
     }

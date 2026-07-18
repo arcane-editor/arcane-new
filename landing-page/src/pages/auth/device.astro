@@ -3,6 +3,6 @@ import LandingLayout from '../../layouts/LandingLayout.astro';
 import DeviceAuthorize from '../../components/auth/DeviceAuthorize.tsx';
 ---
 
-<LandingLayout>
+<LandingLayout analytics={false}>
   <DeviceAuthorize client:load />
 </LandingLayout>

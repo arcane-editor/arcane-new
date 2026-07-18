@@ -3,6 +3,6 @@ import LandingLayout from '../layouts/LandingLayout.astro';
 import ResetPassword from '../components/auth/ResetPassword.tsx';
 ---
 
-<LandingLayout>
+<LandingLayout analytics={false}>
   <ResetPassword client:load />
 </LandingLayout>

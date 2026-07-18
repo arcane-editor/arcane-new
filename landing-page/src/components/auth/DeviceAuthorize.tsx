@@ -37,13 +37,13 @@ export default function DeviceAuthorize() {
             await apiAuthorizeDevice(token, code);
             setState("done");
         } catch (err) {
-            const msg = (err as Error).message;
-            if (msg === "Not authenticated" || msg.toLowerCase().includes("unauthorized")) {
+            const status = (err as { status?: number }).status;
+            if (status === 401 || status === 403) {
                 clearStoredToken();
                 setState("signin");
                 setError("Your session expired — sign in again.");
             } else {
-                setError(authErrorMessage(msg));
+                setError(authErrorMessage((err as Error).message));
             }
         }
         setSubmitting(false);

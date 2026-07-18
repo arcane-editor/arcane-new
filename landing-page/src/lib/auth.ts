@@ -51,6 +51,14 @@ export function authErrorMessage(codeOrMessage: string | undefined | null): stri
     return ERROR_MESSAGES[codeOrMessage] ?? codeOrMessage;
 }
 
+/** True only for codes in the known map. Callers that render attacker-controllable
+ *  strings (e.g. the `?error=` query param) must gate on this instead of relying
+ *  on authErrorMessage's fallback, which deliberately echoes unknown input verbatim
+ *  for API-returned error messages. */
+export function isKnownAuthErrorCode(code: string): boolean {
+    return code in ERROR_MESSAGES;
+}
+
 // ─── Token Storage ──────────────────────────────────────────
 
 export function getStoredToken(): string | null {
@@ -81,6 +89,18 @@ export function decodeToken(token: string): { sub: string; email: string; role: 
 
 // ─── API Calls ──────────────────────────────────────────────
 
+/** Read an error response body defensively: a non-JSON body (e.g. a Cloudflare
+ *  edge 5xx HTML page) must not surface "Unexpected token <" to users — fall
+ *  back to a generic message instead of letting res.json() throw. */
+async function readErrorMessage(res: Response, fallback: string): Promise<string> {
+    try {
+        const data = await res.json();
+        return data.error || fallback;
+    } catch {
+        return fallback;
+    }
+}
+
 export async function apiLogin(email: string, password: string, turnstileToken?: string): Promise<AuthResponse> {
     const body: Record<string, string> = { email, password };
     if (turnstileToken) body['cf-turnstile-response'] = turnstileToken;
@@ -90,8 +110,7 @@ export async function apiLogin(email: string, password: string, turnstileToken?:
         body: JSON.stringify(body),
     });
     if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || 'Login failed');
+        throw new Error(await readErrorMessage(res, 'Login failed'));
     }
     return res.json();
 }
@@ -105,8 +124,7 @@ export async function apiSignup(email: string, password: string, turnstileToken?
         body: JSON.stringify(body),
     });
     if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || 'Signup failed');
+        throw new Error(await readErrorMessage(res, 'Signup failed'));
     }
     return res.json();
 }
@@ -136,8 +154,13 @@ export async function apiAuthorizeDevice(token: string, userCode: string): Promi
         body: JSON.stringify({ user_code: userCode }),
     });
     if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || 'Authorization failed');
+        // Carry the HTTP status so callers can detect an expired/invalid
+        // session (401/403) — the server's real 401 bodies ('Invalid or
+        // expired token', 'Missing or invalid Authorization header') don't
+        // match any string check, so the status is the only reliable signal.
+        const e = new Error(await readErrorMessage(res, 'Authorization failed')) as Error & { status?: number };
+        e.status = res.status;
+        throw e;
     }
 }
 
@@ -156,8 +179,7 @@ export async function apiWebExchange(code: string): Promise<AuthResponse> {
         body: JSON.stringify({ code }),
     });
     if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || 'invalid_code');
+        throw new Error(await readErrorMessage(res, 'invalid_code'));
     }
     return res.json();
 }
@@ -172,8 +194,7 @@ export async function apiEditorGrant(token: string, challenge: string): Promise<
         body: JSON.stringify({ challenge }),
     });
     if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || 'invalid_challenge');
+        throw new Error(await readErrorMessage(res, 'invalid_challenge'));
     }
     return res.json();
 }
@@ -185,8 +206,7 @@ export async function apiVerifyEmail(verifyToken: string): Promise<AuthResponse>
         body: JSON.stringify({ token: verifyToken }),
     });
     if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || 'invalid_token');
+        throw new Error(await readErrorMessage(res, 'invalid_token'));
     }
     return res.json();
 }
@@ -197,8 +217,7 @@ export async function apiResendVerification(token: string): Promise<void> {
         headers: { 'Authorization': `Bearer ${token}` },
     });
     if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || 'Resend failed');
+        throw new Error(await readErrorMessage(res, 'Resend failed'));
     }
 }
 
@@ -220,8 +239,7 @@ export async function apiReset(resetToken: string, newPassword: string): Promise
         body: JSON.stringify({ token: resetToken, newPassword }),
     });
     if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || 'invalid_token');
+        throw new Error(await readErrorMessage(res, 'invalid_token'));
     }
     return res.json();
 }
@@ -236,8 +254,7 @@ export async function apiChangePassword(token: string, currentPassword: string, 
         body: JSON.stringify({ currentPassword, newPassword }),
     });
     if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || 'invalid_credentials');
+        throw new Error(await readErrorMessage(res, 'invalid_credentials'));
     }
     return res.json();
 }
@@ -264,8 +281,7 @@ export async function adminCreateUser(token: string, data: { email: string; pass
         body: JSON.stringify(data),
     });
     if (!res.ok) {
-        const d = await res.json();
-        throw new Error(d.error || 'Failed to create user');
+        throw new Error(await readErrorMessage(res, 'Failed to create user'));
     }
     return res.json();
 }

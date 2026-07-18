@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import {
     getStoredToken, setStoredToken, clearStoredToken,
     apiLogin, apiSignup, apiGetMe, apiWebExchange, apiEditorGrant,
-    googleStartUrl, authErrorMessage,
+    googleStartUrl, authErrorMessage, isKnownAuthErrorCode,
 } from "@/lib/auth";
 import {
     parseEditorLoginParams, saveEditorLoginRequest, loadEditorLoginRequest,
@@ -29,6 +29,8 @@ export default function AuthHub() {
     // Ref, not state: the Turnstile callback fires outside React's render cycle
     // and the token is only read on submit.
     const turnstileToken = useRef("");
+    // Populated by TurnstileWidget's onReady once the widget has rendered.
+    const turnstileReset = useRef<(() => void) | null>(null);
 
     /** Post-login continuation: editor grant → /auth/success; else internal return → /account. */
     const afterAuthenticated = async (token: string): Promise<void> => {
@@ -99,8 +101,11 @@ export default function AuthHub() {
             }
 
             // (4) Redirect errors (e.g. google_not_configured, google_oauth_failed).
+            // errorParam is attacker-controllable (it's a raw query param), so unlike
+            // API-returned errors we do NOT fall back to echoing it verbatim — only
+            // known codes get their mapped copy; anything else gets a generic banner.
             if (errorParam) {
-                setBanner(authErrorMessage(errorParam));
+                setBanner(isKnownAuthErrorCode(errorParam) ? authErrorMessage(errorParam) : "Something went wrong signing in.");
                 setState("forms");
                 return;
             }
@@ -145,6 +150,10 @@ export default function AuthHub() {
             setStoredToken(data.token);
             await afterAuthenticated(data.token);
         } catch (err) {
+            // Turnstile tokens are single-use — the consumed token must not be
+            // resent on retry, or every subsequent attempt fails at the server.
+            turnstileReset.current?.();
+            turnstileToken.current = "";
             setFormError(authErrorMessage((err as Error).message));
             setSubmitting(false);
         }
@@ -221,7 +230,10 @@ export default function AuthHub() {
                 />
 
                 {turnstileEnabled() && (
-                    <TurnstileWidget onToken={t => { turnstileToken.current = t; }} />
+                    <TurnstileWidget
+                        onToken={t => { turnstileToken.current = t; }}
+                        onReady={reset => { turnstileReset.current = reset; }}
+                    />
                 )}
 
                 <button className={authPrimaryBtnClass} onClick={handleSubmit} disabled={submitting}>
