@@ -28,8 +28,9 @@ import { AssistantMessageEventStream } from './vendor/event-stream';
 import { nextTurnTelemetry, recordTurnLatency } from './turn-telemetry';
 import { convertToOpenAI } from './openai-format';
 import { combineSignals, computeBackoffMs, isTransient, raceWithTimeout, sleep, TimeoutRaceError } from './stream-retry';
+import { ARCANE_API_URL } from '../../../config/api';
 
-const ARCANE_SERVER_URL = 'https://api.arcaneai.org';
+const ARCANE_SERVER_URL = ARCANE_API_URL;
 
 /**
  * First-token watchdog default: abort if no SSE chunk arrives at all within

@@ -14,9 +14,10 @@
 import { useAuthStore } from '../../../../stores/auth';
 import { unityMajorMinor } from '../../../../data/unity-docs-index';
 import { getUnityGroundingContext } from '../prompts/unity-facts';
+import { ARCANE_API_URL } from '../../../../config/api';
 
 // Same host as the AI chat path (see arcane-stream.ts / graphify-enrich.ts).
-const ARCANE_SERVER_URL = 'https://api.arcaneai.org';
+const ARCANE_SERVER_URL = ARCANE_API_URL;
 
 /**
  * Discriminated result for the two version-accurate grounding calls

@@ -1,7 +1,6 @@
 // Auth API client — ported from arcane-auth-service-impl.ts
 import { invoke } from '@tauri-apps/api/core';
-
-const DEFAULT_SERVER_URL = 'https://api.arcaneai.org';
+import { ARCANE_API_URL } from '../../../config/api';
 
 interface AuthResult {
   success: boolean;
@@ -24,7 +23,7 @@ interface DeviceTokenResult {
 }
 
 export class AuthClient {
-  private serverUrl: string = DEFAULT_SERVER_URL;
+  private serverUrl: string = ARCANE_API_URL;
 
   async login(email: string, password: string): Promise<AuthResult> {
     try {

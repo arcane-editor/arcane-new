@@ -24,6 +24,9 @@
 !.env.sample
 !.dev.vars.example
 !.env.vars.example
+# …and DO keep the editor's committed env files (public URLs only, no secrets)
+!.env.development
+!.env.production
 
 # ── Dependencies ─────────────────────────────────────────────────────────────
 node_modules/

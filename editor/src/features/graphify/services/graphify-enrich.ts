@@ -12,9 +12,10 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { useAuthStore } from '../../../stores/auth';
+import { ARCANE_API_URL } from '../../../config/api';
 
 // Same host as the AI chat path (see ai-panel/services/arcane-stream.ts).
-const ARCANE_SERVER_URL = 'https://api.arcaneai.org';
+const ARCANE_SERVER_URL = ARCANE_API_URL;
 
 export interface GraphEnrichment {
   architectureSummary: string;
