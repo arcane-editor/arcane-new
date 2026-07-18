@@ -3,7 +3,8 @@ import type { AppEnv } from '../types.ts';
 import { authMiddleware } from '../middleware/auth.ts';
 import { adminMiddleware } from '../middleware/admin.ts';
 import {
-    findAllUsersWithUsage, createUser, updateUser, deleteUser,
+    findAllUsersWithUsage, createUser, deleteUser, findUserById,
+    updatePasswordBumpVersion,
     getCurrentPeriodStart,
     findAllFeedback,
 } from '../lib/db.ts';
@@ -37,20 +38,23 @@ adminRouter.post('/v1/admin/users', async (c) => {
         return c.json({ error: 'email and password are required' }, 400);
     }
     const { hash, salt } = await hashPassword(password);
-    const user = await createUser(c.env.arcane_db, { email, passwordHash: hash, salt });
+    const user = await createUser(c.env.arcane_db, {
+        email, passwordHash: hash, salt, emailVerified: true,
+    });
     return c.json({ id: user.id, email: user.email, role: user.role }, 201);
 });
 
 adminRouter.put('/v1/admin/users/:id', async (c) => {
     const { id } = c.req.param();
-    const updates = await c.req.json();
-    const allowed: { passwordHash?: string; salt?: string } = {};
-    if (updates.password) {
-        const { hash, salt } = await hashPassword(updates.password);
-        allowed.passwordHash = hash;
-        allowed.salt = salt;
+    const updates = await c.req.json<{ password?: string }>();
+    if (!updates.password) {
+        const user = await findUserById(c.env.arcane_db, parseInt(id));
+        if (!user) return c.json({ error: 'User not found' }, 404);
+        return c.json({ id: user.id, email: user.email, role: user.role });
     }
-    const user = await updateUser(c.env.arcane_db, parseInt(id), allowed);
+    const { hash, salt } = await hashPassword(updates.password);
+    // token_version bump — an admin password set revokes the user's sessions.
+    const user = await updatePasswordBumpVersion(c.env.arcane_db, parseInt(id), hash, salt);
     if (!user) return c.json({ error: 'User not found' }, 404);
     return c.json({ id: user.id, email: user.email, role: user.role });
 });

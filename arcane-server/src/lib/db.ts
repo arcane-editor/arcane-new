@@ -95,18 +95,6 @@ export async function createUser(db: D1Database, data: {
     return result!;
 }
 
-export async function updateUser(db: D1Database, id: number, updates: { passwordHash?: string; salt?: string }): Promise<UserRow | null> {
-    const setClauses: string[] = [];
-    const values: unknown[] = [];
-    if (updates.passwordHash !== undefined && updates.salt !== undefined) {
-        setClauses.push('password_hash = ?'); values.push(updates.passwordHash);
-        setClauses.push('salt = ?'); values.push(updates.salt);
-    }
-    if (setClauses.length === 0) return findUserById(db, id);
-    values.push(id);
-    return db.prepare(`UPDATE users SET ${setClauses.join(', ')} WHERE id = ? RETURNING *`).bind(...values).first<UserRow>();
-}
-
 export async function deleteUser(db: D1Database, id: number): Promise<boolean> {
     const result = await db.prepare('DELETE FROM users WHERE id = ?').bind(id).run();
     return result.meta.changes > 0;

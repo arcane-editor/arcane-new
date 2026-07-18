@@ -1,7 +1,8 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import type { AppEnv } from './src/types.ts';
-import { authMiddleware } from './src/middleware/auth.ts';
+import { authMiddleware, requireVerifiedEmail } from './src/middleware/auth.ts';
+import { rateLimit } from './src/middleware/rate-limit.ts';
 import { chatRouter } from './src/routes/chat.ts';
 import { embeddingsRouter } from './src/routes/embeddings.ts';
 import { graphRouter } from './src/routes/graph.ts';
@@ -16,7 +17,35 @@ import { feedbackRouter } from './src/routes/feedback.ts';
 
 const app = new Hono<AppEnv>();
 
-app.use('*', cors());
+// Browser origins that may call this API. Requests WITHOUT an Origin header
+// (editor native fetch, curl, Google OAuth redirects) bypass CORS entirely —
+// this list only governs what browsers may read cross-origin.
+const ALLOWED_ORIGINS = [
+    'https://arcaneai.org',
+    'https://www.arcaneai.org',
+    'https://dev.arcaneai.org',
+    'http://localhost:4321',    // astro dev server
+    'http://localhost:1420',    // tauri dev server
+    'tauri://localhost',        // packaged app (macOS/Linux)
+    'http://tauri.localhost',   // packaged app (Windows)
+    'https://tauri.localhost',
+];
+
+app.use('*', cors({
+    origin: (origin) => (ALLOWED_ORIGINS.includes(origin) ? origin : null),
+    allowHeaders: ['Authorization', 'Content-Type'],
+}));
+
+// Auth rate limits (Cloudflare ratelimit bindings; fail open when absent).
+const strict = rateLimit('RL_AUTH_STRICT');
+for (const path of [
+    '/v1/auth/signup', '/v1/auth/login', '/v1/auth/forgot', '/v1/auth/reset',
+    '/v1/auth/verify', '/v1/auth/resend-verification', '/v1/auth/change-password',
+    '/v1/auth/web/exchange', '/v1/auth/editor/exchange',
+]) {
+    app.use(path, strict);
+}
+app.use('/v1/auth/device/token', rateLimit('RL_AUTH_POLL'));
 
 // Public routes
 app.get('/health', (c) => c.json({ status: 'ok' }));
@@ -26,12 +55,12 @@ app.route('/', authGoogleRouter);
 app.route('/', authEditorRouter);
 app.route('/', feedbackRouter);
 
-// Protected routes (auth only — no budget/credit checks)
-app.use('/v1/chat/*', authMiddleware());
-app.use('/v1/embeddings', authMiddleware());
-app.use('/v1/graph/*', authMiddleware());
+// Protected routes (auth + verified email — AI endpoints only)
+app.use('/v1/chat/*', authMiddleware(), requireVerifiedEmail());
+app.use('/v1/embeddings', authMiddleware(), requireVerifiedEmail());
+app.use('/v1/graph/*', authMiddleware(), requireVerifiedEmail());
 // /v1/unity/* needs auth; /v1/admin/unity-api/* is guarded inside its router.
-app.use('/v1/unity/*', authMiddleware());
+app.use('/v1/unity/*', authMiddleware(), requireVerifiedEmail());
 app.route('/', chatRouter);
 app.route('/', embeddingsRouter);
 app.route('/', graphRouter);
