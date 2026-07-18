@@ -90,9 +90,39 @@ pub fn get_arcane_home_dir(app: tauri::AppHandle) -> Result<String, String> {
     arcane_home_dir(&app).map(|p| p.to_string_lossy().to_string())
 }
 
+/// First deep-link scheme from the MERGED tauri config
+/// (`plugins.deep-link.desktop.schemes[0]`). Reading the runtime config —
+/// rather than hardcoding — makes the dev overlay (`tauri.dev.conf.json`,
+/// schemes ["arcane-dev"]) the single source of truth: a dev build
+/// automatically reports "arcane-dev" with zero extra plumbing.
+fn scheme_from_plugin_config(deep_link: Option<&serde_json::Value>) -> String {
+    deep_link
+        .and_then(|v| v.get("desktop"))
+        .and_then(|d| d.get("schemes"))
+        .and_then(|s| s.get(0))
+        .and_then(|s| s.as_str())
+        .unwrap_or("arcane")
+        .to_string()
+}
+
+/// Deep-link scheme of the running app: "arcane" (prod) or "arcane-dev"
+/// (dev overlay build). Also used by the single-instance callback in lib.rs
+/// to tell "re-launch with a deep link" from "plain re-launch".
+pub fn deep_link_scheme(app: &tauri::AppHandle) -> String {
+    scheme_from_plugin_config(app.config().plugins.0.get("deep-link"))
+}
+
+/// The scheme the frontend passes to the website's /auth page (`scheme=` param)
+/// so the browser redirects back to THIS build of the app.
+#[tauri::command]
+pub fn auth_deep_link_scheme(app: tauri::AppHandle) -> String {
+    deep_link_scheme(&app)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::arcane_dir_name;
+    use super::{arcane_dir_name, scheme_from_plugin_config};
+    use serde_json::json;
 
     #[test]
     fn prod_identifier_uses_arcane() {
@@ -102,5 +132,18 @@ mod tests {
     #[test]
     fn dev_identifier_uses_arcane_dev() {
         assert_eq!(arcane_dir_name("com.inno.editor.dev"), ".arcane-dev");
+    }
+
+    #[test]
+    fn scheme_read_from_merged_plugin_config() {
+        let v = json!({ "desktop": { "schemes": ["arcane-dev"] } });
+        assert_eq!(scheme_from_plugin_config(Some(&v)), "arcane-dev");
+    }
+
+    #[test]
+    fn scheme_falls_back_to_arcane() {
+        assert_eq!(scheme_from_plugin_config(None), "arcane");
+        let empty = json!({ "desktop": { "schemes": [] } });
+        assert_eq!(scheme_from_plugin_config(Some(&empty)), "arcane");
     }
 }

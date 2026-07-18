@@ -586,15 +586,12 @@ async fn debug_panic_async() {
 }
 
 /// Show/focus the existing "welcome" (project-manager) window, or create it if
-/// none exists. Shared by the macOS dock-icon `RunEvent::Reopen` handler and by
-/// the dock right-click menu's "New Window" action (`dock::install_dock_menu`).
-///
-/// macOS-only: `RunEvent::Reopen` and the dock menu are both macOS-only
-/// surfaces, so gating this here keeps it out of other platforms' builds
-/// (no dead-code warnings) while sharing one implementation.
-#[cfg(target_os = "macos")]
+/// none exists. Callers: the macOS dock-icon `RunEvent::Reopen` handler, the
+/// dock right-click menu's "New Window" action (`dock::install_dock_menu`),
+/// and — on every desktop platform — the single-instance callback in `run()`,
+/// so a plain app re-launch opens a window in the running process instead of
+/// spawning a second process. (`tauri::Manager` is imported at module level.)
 pub(crate) fn open_or_focus_welcome(app: &tauri::AppHandle) {
-    use tauri::Manager;
     if let Some(w) = app.webview_windows().get("welcome") {
         let _ = w.show();
         let _ = w.set_focus();
@@ -634,7 +631,29 @@ pub fn run() {
     // so a crash leaves a paper trail. Revisit process-per-window isolation
     // if sync-command panics remain a recurring source of whole-app crashes
     // after this pass.
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+
+    // Single-instance MUST be the FIRST plugin registered (its docs require
+    // it) so a second launch is intercepted before any other plugin runs.
+    // Owner-approved Windows behavior change (spec C6): N launches used to
+    // mean N processes; now one process — a plain re-launch (no deep-link
+    // URL in argv) opens/focuses the welcome window instead, preserving the
+    // visible "launch again = another window" UX (VS Code/Cursor pattern).
+    // The `deep-link` cargo feature forwards any `arcane://`/`arcane-dev://`
+    // URL in the second instance's argv to the deep-link plugin — this is
+    // how Windows/Linux deliver deep links to a running app.
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+        let scheme_prefix = format!("{}://", auth::deep_link_scheme(app));
+        let has_deep_link = argv.iter().skip(1).any(|a| a.starts_with(&scheme_prefix));
+        if !has_deep_link {
+            open_or_focus_welcome(app);
+        }
+    }));
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_deep_link::init());
+
+    builder
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
@@ -752,6 +771,7 @@ pub fn run() {
             auth::auth_write_token,
             auth::auth_delete_token,
             auth::get_arcane_home_dir,
+            auth::auth_deep_link_scheme,
             unity_ipc::unity_ipc_start,
             unity_ipc::unity_ipc_stop,
             unity_ipc::unity_ipc_send,
@@ -772,6 +792,21 @@ pub fn run() {
             execute_command,
         ])
         .setup(|_app| {
+            // Runtime deep-link registration for unbundled runs (`tauri dev`,
+            // portable exe) — writes the registry/desktop-file entries the
+            // installer would otherwise create. No macOS arm: LaunchServices
+            // has no runtime-registration API, so `tauri dev` on macOS cannot
+            // receive deep links — the frontend detects this
+            // (isBrowserLoginSupported() === false) and defaults to the
+            // device-code flow there.
+            #[cfg(any(windows, target_os = "linux"))]
+            {
+                use tauri_plugin_deep_link::DeepLinkExt;
+                if let Err(e) = _app.deep_link().register_all() {
+                    eprintln!("[deep-link] register_all failed: {e}");
+                }
+            }
+
             #[cfg(target_os = "macos")]
             {
                 let handle = _app.handle();
@@ -788,9 +823,11 @@ pub fn run() {
                 //
                 // Windows note: a Windows taskbar jumplist "New Window" entry is
                 // NOT implemented — Tauri v2 exposes no jumplist API without a
-                // custom plugin. Launching the .exe again already opens an
-                // independent window (this app registers no single-instance
-                // plugin), which is the intended multi-window behavior there.
+                // custom plugin. The single-instance plugin (registered first in
+                // the builder; owner-approved, spec C6) now intercepts re-launches:
+                // the callback opens/focuses the welcome window in the running
+                // process, so "launch the .exe again = another window" still holds
+                // — one process instead of N, which deep links require.
                 dock::install_dock_menu(handle);
             }
             Ok(())
