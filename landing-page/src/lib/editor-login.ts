@@ -68,11 +68,33 @@ export function buildDeepLink(scheme: EditorScheme, code: string, state: string)
 }
 
 /** Internal post-login redirect target: must start with '/' but not '//'
- *  (blocks external and protocol-relative redirects). Null when rejected. */
+ *  (blocks external and protocol-relative redirects). Null when rejected.
+ *
+ *  Origin-based validation: resolving `raw` against a fixed same-origin base
+ *  and checking the result stayed on that origin defeats normalization
+ *  tricks (e.g. backslash-as-slash: browsers treat `/\evil.com` as
+ *  `//evil.com`, a protocol-relative URL to `evil.com`) in one shot, rather
+ *  than trying to enumerate every bypass string pattern. */
 export function sanitizeInternalReturn(raw: string | null): string | null {
-    if (!raw) return null;
+    if (typeof raw !== 'string' || raw.length === 0) return null;
+    // Belt-and-suspenders: reject any backslash outright. Browsers normalize
+    // `\` to `/` in URLs, which is exactly how `/\evil.com` (URL-encoded
+    // `%2F%5Cevil.com`) becomes the protocol-relative `//evil.com`.
+    if (raw.includes('\\')) return null;
     if (!raw.startsWith('/') || raw.startsWith('//')) return null;
-    return raw;
+    const BASE = 'https://arcaneai.org';
+    let u: URL;
+    try {
+        u = new URL(raw, BASE);
+    } catch {
+        return null;
+    }
+    // The resolved URL must have stayed on the base origin — this is what
+    // actually defeats normalization-based bypasses, independent of the
+    // backslash check above.
+    if (u.origin !== BASE) return null;
+    if (!u.pathname.startsWith('/')) return null;
+    return u.pathname + u.search + u.hash;
 }
 
 // ─── sessionStorage plumbing (SSR-safe) ─────────────────────

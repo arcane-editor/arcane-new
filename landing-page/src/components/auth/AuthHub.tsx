@@ -112,8 +112,17 @@ export default function AuthHub() {
                     await apiGetMe(token); // server-side validation (catches expiry/version bump)
                     await afterAuthenticated(token);
                     return;
-                } catch {
-                    clearStoredToken();
+                } catch (err) {
+                    const status = (err as { status?: number }).status;
+                    if (status === 401 || status === 403) {
+                        // Server has confirmed the token is invalid — actually log out.
+                        clearStoredToken();
+                    } else {
+                        // Transient network/5xx failure: don't destroy a possibly-valid
+                        // session over it. Keep the token, fall through to the
+                        // signed-out forms with a non-destructive banner.
+                        setBanner("Couldn't reach the server. Please try again.");
+                    }
                 }
             }
 
@@ -124,6 +133,7 @@ export default function AuthHub() {
     }, []);
 
     const handleSubmit = async () => {
+        if (submitting) return;
         if (!email || !password) { setFormError("Email and password are required."); return; }
         if (tab === "signup" && password.length < 8) { setFormError(authErrorMessage("weak_password")); return; }
         setSubmitting(true);

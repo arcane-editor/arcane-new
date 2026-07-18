@@ -115,7 +115,14 @@ export async function apiGetMe(token: string): Promise<MeResponse> {
     const res = await fetch(`${API_URL}/v1/auth/me`, {
         headers: { 'Authorization': `Bearer ${token}` },
     });
-    if (!res.ok) throw new Error('Not authenticated');
+    if (!res.ok) {
+        // Carry the HTTP status so callers can tell "definitely logged out"
+        // (401/403) apart from transient network/5xx failures — the latter
+        // must not trigger a spurious client-side logout.
+        const e = new Error('Not authenticated') as Error & { status?: number };
+        e.status = res.status;
+        throw e;
+    }
     return res.json();
 }
 
