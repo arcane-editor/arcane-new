@@ -1,0 +1,23 @@
+# Test-only worker config for @cloudflare/vitest-pool-workers. Mirrors
+# wrangler.toml minus the bindings the pool cannot simulate locally
+# (AI, Vectorize, send_email, ratelimit) — server code guards all four:
+# AI/Vectorize are only touched inside route handlers the tests gate before,
+# the email lib no-ops without EMAIL, and rate limiting fails open.
+# JWT_SECRET is a plain var HERE ONLY (it is a secret in real envs).
+name = "arcane-server-test"
+main = "index.ts"
+compatibility_date = "2025-12-01"
+compatibility_flags = ["nodejs_compat"]
+
+[[d1_databases]]
+binding = "arcane_db"
+database_name = "arcane-db-test"
+database_id = "arcane-db-test"
+
+[vars]
+ENVIRONMENT = "test"
+CF_AI_GATEWAY_ID = ""
+WEB_BASE_URL = "https://dev.arcaneai.org"
+API_BASE_URL = "http://localhost:8787"
+EMAIL_FROM = "no-reply@arcaneai.org"
+JWT_SECRET = "test-secret"

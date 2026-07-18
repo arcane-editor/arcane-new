@@ -5,6 +5,8 @@
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "deploy:dev": "wrangler deploy --env dev",
+    "test": "vitest run",
+    "check:types": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p test/tsconfig.json",
     "db:migrate:local": "wrangler d1 migrations apply arcane-db --local",
     "db:migrate:remote": "wrangler d1 migrations apply arcane-db --remote",
     "db:migrate:dev:remote": "wrangler d1 migrations apply arcane-db-dev --env dev --remote",
@@ -12,7 +14,9 @@
     "db:seed:remote": "wrangler d1 execute arcane-db --remote --file=migrations/0002_seed.sql"
   },
   "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.18.6",
     "@cloudflare/workers-types": "^4",
+    "vitest": "~4.1.10",
     "wrangler": "^4.69.0"
   },
   "peerDependencies": {
