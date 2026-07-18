@@ -8,6 +8,7 @@ import '@xterm/xterm/css/xterm.css';
 import { invoke } from '@tauri-apps/api/core';
 import { readText, writeText } from '@tauri-apps/plugin-clipboard-manager';
 import { escapePathForShell } from '../shell-escape';
+import { overrideKeySequence } from '../key-sequences';
 import { useTerminalStore } from '../../../stores/terminal';
 import { useThemeStore } from '../../../stores/theme';
 import { useSettingsStore } from '../../../stores/settings';
@@ -148,6 +149,17 @@ function TerminalInstance({ id }: Props) {
       const mac = isMac();
       term.attachCustomKeyEventHandler((e) => {
         if (e.type !== 'keydown') return true;
+
+        // Shift+Enter -> Meta+Enter, so a TUI can distinguish it from Enter.
+        // This is what Claude Code's `/terminal-setup` would install for us if
+        // it knew what Arcane was; it only knows how to edit the config files
+        // of terminals it recognises, so it refuses. Doing it here means the
+        // command is never needed. See key-sequences.ts for the full why.
+        const override = overrideKeySequence(e);
+        if (override !== null) {
+          invoke('terminal_write', { id, data: override }).catch(() => {});
+          return false;
+        }
 
         // Three pane commands (mod+\, mod+shift+[, mod+shift+]) are Ctrl-
         // chords on non-mac platforms (mod=Ctrl there). xterm's default

@@ -1,0 +1,44 @@
+import { describe, expect, it } from 'bun:test';
+import { overrideKeySequence } from './key-sequences';
+
+function key(k: string, mods: Partial<Record<'shiftKey' | 'ctrlKey' | 'altKey' | 'metaKey', boolean>> = {}) {
+  return {
+    key: k,
+    shiftKey: false,
+    ctrlKey: false,
+    altKey: false,
+    metaKey: false,
+    ...mods,
+  };
+}
+
+describe('overrideKeySequence', () => {
+  // ESC+CR is Meta+Enter — exactly what /terminal-setup binds Shift+Enter to
+  // for VS Code, and what Option+Enter produces on an Option-as-Meta terminal.
+  // Claude Code already treats that as "insert newline".
+  it('encodes Shift+Enter as Meta+Enter so a TUI can tell it from Enter', () => {
+    expect(overrideKeySequence(key('Enter', { shiftKey: true }))).toBe('\x1b\r');
+  });
+
+  it('leaves plain Enter alone — it must still submit', () => {
+    expect(overrideKeySequence(key('Enter'))).toBeNull();
+  });
+
+  // Ctrl+J is Claude Code's universal newline and must reach the PTY as 0x0A
+  // via xterm's own encoding; Ctrl/Alt/Cmd+Enter have their own meanings too.
+  it('leaves other Enter chords to xterm', () => {
+    expect(overrideKeySequence(key('Enter', { ctrlKey: true }))).toBeNull();
+    expect(overrideKeySequence(key('Enter', { altKey: true }))).toBeNull();
+    expect(overrideKeySequence(key('Enter', { metaKey: true }))).toBeNull();
+    // Shift+Ctrl+Enter is not bare Shift+Enter.
+    expect(overrideKeySequence(key('Enter', { shiftKey: true, ctrlKey: true }))).toBeNull();
+    expect(overrideKeySequence(key('Enter', { shiftKey: true, altKey: true }))).toBeNull();
+  });
+
+  it('does not touch any other key', () => {
+    for (const k of ['a', 'Tab', 'Escape', 'Backspace', 'ArrowUp', ' ']) {
+      expect(overrideKeySequence(key(k))).toBeNull();
+      expect(overrideKeySequence(key(k, { shiftKey: true }))).toBeNull();
+    }
+  });
+});
