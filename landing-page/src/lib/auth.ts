@@ -48,7 +48,11 @@ const ERROR_MESSAGES: Record<string, string> = {
 
 export function authErrorMessage(codeOrMessage: string | undefined | null): string {
     if (!codeOrMessage) return 'Something went wrong. Please try again.';
-    return ERROR_MESSAGES[codeOrMessage] ?? codeOrMessage;
+    // Object.hasOwn so inherited props (toString, constructor, __proto__…) never
+    // resolve to a function and crash the caller (React "Functions are not valid
+    // as a React child") when codeOrMessage is attacker-controlled.
+    const mapped = Object.hasOwn(ERROR_MESSAGES, codeOrMessage) ? ERROR_MESSAGES[codeOrMessage] : undefined;
+    return mapped ?? codeOrMessage;
 }
 
 /** True only for codes in the known map. Callers that render attacker-controllable
@@ -56,7 +60,7 @@ export function authErrorMessage(codeOrMessage: string | undefined | null): stri
  *  on authErrorMessage's fallback, which deliberately echoes unknown input verbatim
  *  for API-returned error messages. */
 export function isKnownAuthErrorCode(code: string): boolean {
-    return code in ERROR_MESSAGES;
+    return Object.hasOwn(ERROR_MESSAGES, code) && typeof ERROR_MESSAGES[code] === 'string';
 }
 
 // ─── Token Storage ──────────────────────────────────────────
