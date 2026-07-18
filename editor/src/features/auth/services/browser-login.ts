@@ -5,9 +5,12 @@
 // module memory. Invariants (spec C2/C5):
 //   - the PKCE verifier is MEMORY-ONLY — never persisted; a cold-start deep
 //     link therefore cannot complete a login, by design
-//   - the deep-link listener exists only while an attempt is pending; stale
-//     URLs replayed by the plugin's getCurrent() on registration fail the
-//     state check and are ignored
+//   - the deep-link listener exists only while an attempt is pending; it is
+//     just `listen('deep-link://new-url', …)` under the hood, so registering
+//     it does NOT replay anything. Cold-start/startup URLs are delivered
+//     separately via the plugin's `getCurrent()`, which this flow never
+//     calls — a cold-start deep link therefore simply finds no pending
+//     attempt to match against (nothing to replay, nothing to guard)
 //   - the pending attempt is CONSUMED (pending = null, listener + timer torn
 //     down) BEFORE code+verifier are handed to `onCode` — a replayed callback
 //     URL finds no pending attempt (replay guard)
@@ -171,8 +174,10 @@ export async function beginBrowserLogin(
 
   pending = { state, verifier, scheme, url, handlers, unlisten: null, timer };
 
-  // Register BEFORE openUrl. onOpenUrl also replays any startup/current URLs
-  // on registration — those carry a stale (or no) state and are ignored above.
+  // Register BEFORE openUrl. onOpenUrl is just `listen('deep-link://new-url',
+  // …)` — it does NOT replay startup/current URLs on registration; those come
+  // only from the plugin's separate `getCurrent()`, which this flow doesn't
+  // call. So a cold-start deep link simply finds no pending attempt here.
   const unlisten = await onOpenUrl(handleDeepLinkUrls);
   if (!pending || pending.state !== state) {
     // Cancelled or restarted while awaiting registration.

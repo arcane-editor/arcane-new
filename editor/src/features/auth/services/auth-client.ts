@@ -22,6 +22,12 @@ interface DeviceTokenResult {
   user?: { email: string; plan: string };
 }
 
+export interface ExchangeResult {
+  success: boolean;
+  error?: string;
+  user?: { id: string; email: string; role: string; emailVerified: boolean };
+}
+
 export class AuthClient {
   private serverUrl: string = ARCANE_API_URL;
 
@@ -67,6 +73,42 @@ export class AuthClient {
       const data = await res.json() as { token: string; user: AuthResult['user'] };
       await this.saveToken(data.token, data.user!.email);
 
+      return { success: true, user: data.user };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Network error' };
+    }
+  }
+
+  /**
+   * Redeem the one-time grant code from the browser flow (deep link or
+   * manual paste — same code either way) for a full session token.
+   * The server returns a single opaque `invalid_code` for every failure
+   * mode (expired, replayed, verifier mismatch) by design.
+   */
+  async exchangeEditorCode(code: string, verifier: string): Promise<ExchangeResult> {
+    try {
+      const res = await fetch(`${this.serverUrl}/v1/auth/editor/exchange`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code, verifier }),
+      });
+
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        return {
+          success: false,
+          error:
+            data.error === 'invalid_code'
+              ? 'Invalid or expired code. Start the sign-in again.'
+              : `Sign-in failed (${res.status})`,
+        };
+      }
+
+      const data = (await res.json()) as {
+        token: string;
+        user: { id: string; email: string; role: string; emailVerified: boolean };
+      };
+      await this.saveToken(data.token, data.user.email);
       return { success: true, user: data.user };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
