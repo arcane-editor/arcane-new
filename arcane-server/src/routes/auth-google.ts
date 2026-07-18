@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import { jwtVerify, SignJWT, createRemoteJWKSet } from 'jose';
 import {
-    findUserByGoogleSub, findUserByEmail, linkGoogleSub, createOAuthUser,
+    findUserByGoogleSub, findUserByEmail, linkGoogleSub, linkGoogleSubClearingCredentials, createOAuthUser,
     findUserById, createAuthToken, consumeAuthToken, cleanExpiredAuthTokens,
 } from '../lib/db.ts';
 import type { UserRow } from '../lib/db.ts';
@@ -64,7 +64,13 @@ export async function resolveGoogleAccount(
         if (byEmail.google_sub && byEmail.google_sub !== googleSub) {
             return null;
         }
-        return linkGoogleSub(db, byEmail.id, googleSub);
+        // An unverified row's password can't be trusted (anyone could have
+        // pre-registered the victim's email before they arrived via Google),
+        // so linking onto it clears the credential and revokes any sessions
+        // that password minted. Verified rows keep their password as-is.
+        return byEmail.email_verified === 1
+            ? linkGoogleSub(db, byEmail.id, googleSub)
+            : linkGoogleSubClearingCredentials(db, byEmail.id, googleSub);
     }
     return createOAuthUser(db, { email, googleSub });
 }

@@ -399,6 +399,21 @@ export async function linkGoogleSub(db: D1Database, userId: number, googleSub: s
     ).bind(googleSub, userId).first<UserRow>();
 }
 
+/**
+ * Link a Google identity onto a row that was NEVER email-verified. The
+ * pre-existing password cannot be trusted (anyone could have set it before
+ * the real mailbox owner arrived via Google), so it is cleared to the
+ * OAuth-only sentinel and token_version is bumped to revoke any pre-link
+ * sessions. Verified rows use linkGoogleSub instead — verification proved
+ * mailbox ownership, so their password is legitimate.
+ */
+export async function linkGoogleSubClearingCredentials(db: D1Database, userId: number, googleSub: string): Promise<UserRow | null> {
+    const row = await db.prepare(
+        "UPDATE users SET google_sub = ?, email_verified = 1, password_hash = '', salt = '', token_version = token_version + 1 WHERE id = ? RETURNING *"
+    ).bind(googleSub, userId).first<UserRow>();
+    return row ?? null;
+}
+
 /** Google-only signup: '' password sentinel (column is NOT NULL), pre-verified. */
 export async function createOAuthUser(db: D1Database, data: { email: string; googleSub: string }): Promise<UserRow> {
     const result = await db.prepare(

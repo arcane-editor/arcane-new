@@ -3,7 +3,7 @@ import { env } from 'cloudflare:test';
 import { resolveGoogleAccount, authGoogleRouter } from '../src/routes/auth-google.ts';
 import { createAuthToken, findUserByEmail } from '../src/lib/db.ts';
 import { generateToken, sha256Hex, TOKEN_TTL_SECONDS } from '../src/lib/tokens.ts';
-import { seedPasswordUser, seedGoogleOnlyUser, jsonPost } from './helpers.ts';
+import { seedPasswordUser, seedGoogleOnlyUser, tokenFor, jsonPost } from './helpers.ts';
 
 const googleEnv = () => ({
     arcane_db: env.arcane_db,
@@ -40,6 +40,39 @@ describe('resolveGoogleAccount', () => {
         await seedGoogleOnlyUser('conflict@test.dev', 'sub-d');
         const user = await resolveGoogleAccount(env.arcane_db, 'sub-OTHER', 'conflict@test.dev');
         expect(user).toBeNull();
+    });
+
+    it('clears the password and revokes sessions when linking onto an UNVERIFIED row (pre-account-takeover)', async () => {
+        const attacker = await seedPasswordUser('takeover@test.dev', 'attackerpass1', { verified: false });
+        const preLinkJwt = await tokenFor(attacker);
+
+        const user = await resolveGoogleAccount(env.arcane_db, 'sub-victim', 'takeover@test.dev');
+        expect(user?.id).toBe(attacker.id);
+        expect(user?.google_sub).toBe('sub-victim');
+        expect(user?.email_verified).toBe(1);
+        expect(user?.password_hash).toBe('');
+        expect(user?.salt).toBe('');
+        expect(user?.token_version).toBe(attacker.token_version + 1);
+
+        // The attacker's pre-link session must not survive the link.
+        const stale = await jsonPost('/v1/auth/resend-verification', {}, preLinkJwt);
+        expect(stale.status).toBe(401);
+    });
+
+    it('keeps the password and session live when linking onto an ALREADY-VERIFIED row', async () => {
+        const existing = await seedPasswordUser('verifiedlink@test.dev', 'password123', { verified: true });
+        const preLinkJwt = await tokenFor(existing);
+
+        const user = await resolveGoogleAccount(env.arcane_db, 'sub-e', 'verifiedlink@test.dev');
+        expect(user?.id).toBe(existing.id);
+        expect(user?.google_sub).toBe('sub-e');
+        expect(user?.password_hash).toBe(existing.password_hash);
+        expect(user?.salt).toBe(existing.salt);
+        expect(user?.token_version).toBe(existing.token_version);
+
+        // The existing session must keep working.
+        const live = await jsonPost('/v1/auth/resend-verification', {}, preLinkJwt);
+        expect(live.status).toBe(200);
     });
 });
 
