@@ -1,0 +1,12 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Arcane Dev",
+  "identifier": "com.inno.editor.dev",
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["arcane-dev"]
+      }
+    }
+  }
+}
