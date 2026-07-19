@@ -7,7 +7,7 @@ import {
 import {
     parseEditorLoginParams, saveEditorLoginRequest, loadEditorLoginRequest,
     clearEditorLoginRequest, saveEditorHandoff, buildDeepLink,
-    sanitizeInternalReturn, savePostAuthReturn, takePostAuthReturn,
+    sanitizeInternalReturn, savePostAuthReturn, takePostAuthReturn, clearPostAuthReturn,
 } from "@/lib/editor-login";
 import TurnstileWidget, { turnstileEnabled } from "./TurnstileWidget";
 import { AuthShell, authInputClass, authPrimaryBtnClass, authErrorBannerClass } from "./AuthShell";
@@ -36,6 +36,9 @@ export default function AuthHub() {
     const afterAuthenticated = async (token: string): Promise<void> => {
         const pending = loadEditorLoginRequest();
         if (pending) {
+            // The editor grant supersedes any previously-saved internal return —
+            // discard it now so it can't linger into a later, unrelated login.
+            clearPostAuthReturn();
             setState("boot");
             setBootMessage("Connecting to Arcane…");
             try {

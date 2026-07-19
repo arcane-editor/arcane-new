@@ -12,6 +12,7 @@ export default function ResetPassword() {
     const [error, setError] = useState("");
     const [submitting, setSubmitting] = useState(false);
     const [done, setDone] = useState(false);
+    const [signedInEmail, setSignedInEmail] = useState("");
 
     useEffect(() => {
         const params = new URLSearchParams(window.location.search);
@@ -30,6 +31,7 @@ export default function ResetPassword() {
             // Fresh JWT: the reset bumped token_version, so every OTHER session
             // is now signed out. Store the new one — this browser stays in.
             setStoredToken(data.token);
+            setSignedInEmail(data.user.email);
             setDone(true);
         } catch (err) {
             setError(authErrorMessage((err as Error).message));
@@ -44,6 +46,11 @@ export default function ResetPassword() {
                 <p className="text-muted-foreground text-sm text-center">
                     You're signed in here. All other sessions have been signed out.
                 </p>
+                {signedInEmail && (
+                    <p className="text-muted-foreground text-xs text-center mt-2">
+                        You're now signed in as {signedInEmail}.
+                    </p>
+                )}
                 <a href="/account" className="block mt-4 text-center text-primary text-sm hover:underline">Go to your account</a>
             </AuthShell>
         );

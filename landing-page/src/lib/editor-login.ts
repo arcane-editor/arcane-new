@@ -22,7 +22,9 @@ const HANDOFF_KEY = 'arcane_editor_login_handoff';
 const RETURN_KEY = 'arcane_post_auth_return';
 
 const CHALLENGE_RE = /^[A-Za-z0-9_-]{43,128}$/;
-const DEEP_LINK_RE = /^(arcane|arcane-dev):\/\/auth\/callback\?/;
+// Derived from SCHEME_ALLOWLIST so the two can't drift apart — schemes are
+// always `[a-z-]`, so no escaping is needed in the alternation.
+const DEEP_LINK_RE = new RegExp(`^(${SCHEME_ALLOWLIST.join('|')}):\\/\\/auth\\/callback\\?`);
 
 // ─── Pure validators ────────────────────────────────────────
 
@@ -172,4 +174,10 @@ export function takePostAuthReturn(): string | null {
     const raw = sessionStorage.getItem(RETURN_KEY);
     sessionStorage.removeItem(RETURN_KEY);
     return sanitizeInternalReturn(raw);
+}
+
+/** Discard a stashed internal return path without honoring it — used when a
+ *  superseding flow (e.g. editor sign-in) takes over instead. */
+export function clearPostAuthReturn(): void {
+    if (storageAvailable()) sessionStorage.removeItem(RETURN_KEY);
 }

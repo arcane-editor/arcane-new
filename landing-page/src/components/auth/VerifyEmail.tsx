@@ -8,6 +8,7 @@ type Status = "working" | "done" | "error";
 export default function VerifyEmail() {
     const [status, setStatus] = useState<Status>("working");
     const [message, setMessage] = useState("");
+    const [signedInEmail, setSignedInEmail] = useState("");
 
     useEffect(() => {
         void (async () => {
@@ -24,6 +25,7 @@ export default function VerifyEmail() {
                 // Swap any stored session for the fresh JWT (it carries the
                 // verified claim; the old token may now fail version checks).
                 setStoredToken(data.token);
+                setSignedInEmail(data.user.email);
                 if (loadEditorLoginRequest()) {
                     // An editor sign-in was mid-flight — resume it through the hub.
                     window.location.href = "/auth";
@@ -64,6 +66,11 @@ export default function VerifyEmail() {
             <p className="text-muted-foreground text-sm text-center">
                 You're all set — AI features are now unlocked.
             </p>
+            {signedInEmail && (
+                <p className="text-muted-foreground text-xs text-center mt-2">
+                    You're now signed in as {signedInEmail}.
+                </p>
+            )}
             <a href="/account" className="block mt-4 text-center text-primary text-sm hover:underline">Go to your account</a>
         </AuthShell>
     );
