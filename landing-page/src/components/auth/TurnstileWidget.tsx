@@ -26,18 +26,19 @@ function loadScript(): Promise<void> {
         if (window.turnstile) { resolve(); return; }
         const existing = document.querySelector(`script[src="${SCRIPT_SRC}"]`);
         if (existing) {
-            // The script tag exists, but on a remount its `load` event may already
-            // have fired — that listener would then never run. Poll for the API
-            // as a fallback so the widget still renders in that case.
-            if (window.turnstile) { resolve(); return; }
-            existing.addEventListener("load", () => resolve());
+            // The script tag exists but `window.turnstile` isn't ready yet (checked
+            // above). On a remount its one-time `load` event may already have fired,
+            // so a `load` listener alone could never run — poll for the API as the
+            // reliable fallback, and clear the poll from whichever path resolves.
             const poll = setInterval(() => {
-                if (window.turnstile) {
-                    clearInterval(poll);
-                    resolve();
-                }
+                if (window.turnstile) { clearInterval(poll); resolve(); }
             }, 50);
-            setTimeout(() => clearInterval(poll), 10_000);
+            const stop = setTimeout(() => clearInterval(poll), 10_000);
+            existing.addEventListener("load", () => {
+                clearInterval(poll);
+                clearTimeout(stop);
+                resolve();
+            });
             return;
         }
         const s = document.createElement("script");
