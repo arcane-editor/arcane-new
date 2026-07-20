@@ -21,3 +21,6 @@ WEB_BASE_URL = "https://dev.arcaneai.org"
 API_BASE_URL = "http://localhost:8787"
 EMAIL_FROM = "no-reply@arcaneai.org"
 JWT_SECRET = "test-secret"
+# Base64 signing key (secret in real envs) so webhook tests exercise the real
+# Standard-Webhooks HMAC path. DODO_API_KEY stays unset → checkout routes 503.
+DODO_WEBHOOK_SECRET = "c2VjcmV0LXRlc3Qtc2lnbmluZy1rZXk="

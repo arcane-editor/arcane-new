@@ -14,6 +14,8 @@ import { authEditorRouter } from './src/routes/auth-editor.ts';
 import { usageRouter } from './src/routes/usage.ts';
 import { adminRouter } from './src/routes/admin.ts';
 import { feedbackRouter } from './src/routes/feedback.ts';
+import { billingRouter } from './src/routes/billing.ts';
+import { billingWebhookRouter } from './src/routes/billing-webhook.ts';
 
 const app = new Hono<AppEnv>();
 
@@ -56,6 +58,11 @@ app.route('/', authEmailRouter);
 app.route('/', authGoogleRouter);
 app.route('/', authEditorRouter);
 app.route('/', feedbackRouter);
+// Billing: the webhook is PUBLIC (Dodo signs it, no user JWT) — mount it with
+// the other public routers, before the AI auth gates. The billingRouter's own
+// routes self-apply authMiddleware (except the public /v1/billing/plans).
+app.route('/', billingWebhookRouter);
+app.route('/', billingRouter);
 
 // Protected routes (auth + verified email — AI endpoints only)
 app.use('/v1/chat/*', authMiddleware(), requireVerifiedEmail());

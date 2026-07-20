@@ -50,6 +50,14 @@ WEB_BASE_URL = "https://arcaneai.org"
 API_BASE_URL = "https://api.arcaneai.org"
 # Verified sender on the onboarded arcaneai.org Email Service domain.
 EMAIL_FROM = "no-reply@arcaneai.org"
+# Dodo Payments product ids (per tier / top-up pack). Empty until the owner
+# creates the LIVE products; billing routes 503 while unset. Secrets
+# DODO_API_KEY + DODO_WEBHOOK_SECRET are set via `wrangler secret put`.
+DODO_PRODUCT_PRO = ""
+DODO_PRODUCT_PROPLUS = ""
+DODO_PRODUCT_ULTRA = ""
+DODO_PRODUCT_TOPUP_1000 = ""
+DODO_PRODUCT_TOPUP_5000 = ""
 
 [observability]
 enabled = true
@@ -105,6 +113,12 @@ CF_AI_GATEWAY_ID = "arcane-ai-gateway-dev"
 WEB_BASE_URL = "https://dev.arcaneai.org"
 API_BASE_URL = "https://api-dev.arcaneai.org"
 EMAIL_FROM = "no-reply@arcaneai.org"
+# Dodo TEST-mode product ids (empty until owner creates them).
+DODO_PRODUCT_PRO = ""
+DODO_PRODUCT_PROPLUS = ""
+DODO_PRODUCT_ULTRA = ""
+DODO_PRODUCT_TOPUP_1000 = ""
+DODO_PRODUCT_TOPUP_5000 = ""
 
 [env.dev.observability]
 enabled = true

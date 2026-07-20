@@ -36,6 +36,17 @@ export type AppEnv = {
         GOOGLE_CLIENT_ID?: string;      // secret — unset until owner provisions OAuth client
         GOOGLE_CLIENT_SECRET?: string;  // secret
         TURNSTILE_SECRET?: string;      // secret — unset = Turnstile verification skipped
+        // Dodo Payments (billing). Secrets unset until owner provisions the
+        // account; when absent the billing routes degrade to 503 and the
+        // webhook rejects (never silently trusts an unsigned payload).
+        DODO_API_KEY?: string;          // secret — Bearer for the Dodo REST API
+        DODO_WEBHOOK_SECRET?: string;   // secret — Standard-Webhooks signing key
+        // Dodo product ids per tier / top-up pack (vars; empty until created).
+        DODO_PRODUCT_PRO?: string;
+        DODO_PRODUCT_PROPLUS?: string;
+        DODO_PRODUCT_ULTRA?: string;
+        DODO_PRODUCT_TOPUP_1000?: string;
+        DODO_PRODUCT_TOPUP_5000?: string;
     };
     Variables: {
         user: AuthPayload;

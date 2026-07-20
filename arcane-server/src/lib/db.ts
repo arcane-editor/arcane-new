@@ -260,6 +260,60 @@ export async function addTopupCredits(db: D1Database, userId: number, micro: num
     ).bind(micro, userId).run();
 }
 
+export async function setDodoCustomerId(db: D1Database, userId: number, customerId: string): Promise<void> {
+    await db.prepare('UPDATE users SET dodo_customer_id = ? WHERE id = ?').bind(customerId, userId).run();
+}
+
+// --- Subscriptions + webhook idempotency (migration 0013) ---
+
+export interface SubscriptionRow {
+    dodo_subscription_id: string;
+    user_id: number;
+    product_id: string | null;
+    plan: string;
+    status: string;
+    current_period_end: string | null;
+    created_at: string;
+    updated_at: string;
+}
+
+/** Insert-or-update a subscription by its Dodo id (upsert on the PK). */
+export async function upsertSubscription(db: D1Database, data: {
+    subscriptionId: string; userId: number; productId: string | null;
+    plan: string; status: string; currentPeriodEnd: string | null;
+}): Promise<void> {
+    await db.prepare(`
+        INSERT INTO subscriptions (dodo_subscription_id, user_id, product_id, plan, status, current_period_end)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(dodo_subscription_id) DO UPDATE SET
+            product_id         = excluded.product_id,
+            plan               = excluded.plan,
+            status             = excluded.status,
+            current_period_end = excluded.current_period_end,
+            updated_at         = datetime('now')
+    `).bind(data.subscriptionId, data.userId, data.productId, data.plan, data.status, data.currentPeriodEnd).run();
+}
+
+export async function findSubscriptionByUser(db: D1Database, userId: number): Promise<SubscriptionRow | null> {
+    return db.prepare(
+        'SELECT * FROM subscriptions WHERE user_id = ? ORDER BY updated_at DESC LIMIT 1'
+    ).bind(userId).first<SubscriptionRow>();
+}
+
+/**
+ * Record a webhook delivery for idempotency. Returns TRUE only the FIRST time a
+ * given webhook_id is seen (INSERT OR IGNORE → meta.changes === 1); a duplicate
+ * returns FALSE so the caller can skip re-applying the effect. Record-first =
+ * at-most-once: a crash between recording and applying loses that delivery,
+ * which is safer than double-granting credits (Dodo retries are then deduped).
+ */
+export async function recordBillingEvent(db: D1Database, webhookId: string, type: string): Promise<boolean> {
+    const res = await db.prepare(
+        'INSERT OR IGNORE INTO billing_events (webhook_id, type) VALUES (?, ?)'
+    ).bind(webhookId, type).run();
+    return res.meta.changes === 1;
+}
+
 // --- Feedback types & queries ---
 
 export interface FeedbackRow {
