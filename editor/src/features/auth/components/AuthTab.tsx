@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Globe, KeyRound, Loader2, LogOut, RotateCw, Smartphone, X } from 'lucide-react';
+import { CreditCard, Globe, KeyRound, Loader2, LogOut, RotateCw, Smartphone, X } from 'lucide-react';
 import { emit } from '@tauri-apps/api/event';
 import { useAuthStore } from '../../../stores/auth';
 import { authClient } from '../services/auth-client';
@@ -10,12 +10,15 @@ function AuthTab() {
     loggedIn,
     email,
     plan,
+    credits,
     loginStatus,
     error,
     beginBrowserLogin,
     cancelBrowserLogin,
     submitManualCode,
     logout,
+    refreshUsage,
+    openBilling,
   } = useAuthStore();
   // Device flow is the DEFAULT where deep links cannot work — macOS `tauri dev`
   // (spec C3). Everywhere else the browser flow is primary.
@@ -44,6 +47,12 @@ function AuthTab() {
       }
     };
   }, []);
+
+  // Pull the latest plan + credit balance whenever the account view is shown
+  // signed-in (also refreshed after login and on 402 from the AI stream).
+  useEffect(() => {
+    if (loggedIn) void refreshUsage();
+  }, [loggedIn, refreshUsage]);
 
   const startBrowserLogin = () => {
     setShowPaste(false);
@@ -107,12 +116,25 @@ function AuthTab() {
             <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>Email</div>
             <div style={{ fontSize: 14 }}>{email}</div>
           </div>
-          {plan && (
-            <div style={{ marginBottom: 16 }}>
+          <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
+            <div style={{ flex: 1 }}>
               <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>Plan</div>
-              <div style={{ fontSize: 14, textTransform: 'capitalize' }}>{plan}</div>
+              <div style={{ fontSize: 14, textTransform: 'capitalize' }}>{plan ?? 'Free'}</div>
             </div>
-          )}
+            <div style={{ flex: 1 }}>
+              <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>Credits left</div>
+              <div style={{ fontSize: 14, fontFamily: 'var(--font-mono)' }}>
+                {credits === null ? '—' : Math.round(credits).toLocaleString()}
+              </div>
+            </div>
+          </div>
+          <button
+            onClick={() => void openBilling()}
+            style={{ ...primaryBtnStyle, marginBottom: 8 }}
+          >
+            <CreditCard size={14} />
+            Manage plan &amp; credits
+          </button>
           <button onClick={() => void logout()} style={dangerBtnStyle}>
             <LogOut size={14} />
             Sign Out

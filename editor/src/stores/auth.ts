@@ -1,11 +1,13 @@
 import { create } from 'zustand';
 import { emit } from '@tauri-apps/api/event';
+import { openUrl } from '@tauri-apps/plugin-opener';
 import {
   authClient,
   beginBrowserLogin as serviceBeginBrowserLogin,
   cancelBrowserLogin as serviceCancelBrowserLogin,
   submitManualCode as serviceSubmitManualCode,
 } from '../features/auth';
+import { ARCANE_WEB_URL } from '../config/api';
 
 export type LoginStatus = 'idle' | 'waiting-browser' | 'exchanging' | 'error';
 
@@ -13,6 +15,8 @@ interface AuthState {
   loggedIn: boolean;
   email: string | null;
   plan: string | null;
+  /** Spendable credit balance (plan + top-up), in user-facing credits. */
+  credits: number | null;
   token: string | null;
   loginStatus: LoginStatus;
   error: string | null;
@@ -25,6 +29,11 @@ interface AuthState {
   submitManualCode: (code: string) => void;
   logout: () => Promise<void>;
   loadFromDisk: () => Promise<void>;
+  /** Pull plan + credit balance from /v1/usage (best-effort). */
+  refreshUsage: () => Promise<void>;
+  /** Open the website billing/account page in the default browser — billing is
+   * managed on the website (Cursor-style), not in the app. */
+  openBilling: () => Promise<void>;
 }
 
 function isJwtExpired(token: string): boolean {
@@ -49,6 +58,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   loggedIn: false,
   email: null,
   plan: null,
+  credits: null,
   token: null,
   loginStatus: 'idle',
   error: null,
@@ -77,6 +87,7 @@ export const useAuthStore = create<AuthState>((set) => ({
               error: null,
             });
             void emit('auth-changed');
+            void useAuthStore.getState().refreshUsage();
           } else {
             set({ loginStatus: 'error', error: result.error ?? 'Sign-in failed' });
           }
@@ -115,7 +126,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   logout: async () => {
     serviceCancelBrowserLogin();
     await authClient.logout();
-    set({ loggedIn: false, email: null, plan: null, token: null, loginStatus: 'idle', error: null });
+    set({ loggedIn: false, email: null, plan: null, credits: null, token: null, loginStatus: 'idle', error: null });
     void emit('auth-changed');
   },
 
@@ -136,13 +147,13 @@ export const useAuthStore = create<AuthState>((set) => ({
     if (!stored) {
       // Token file missing — e.g. logout happened in ANOTHER window (spec C3)
       // or a fresh install. Reset instead of silently keeping stale state.
-      set({ loggedIn: false, email: null, plan: null, token: null, error: null });
+      set({ loggedIn: false, email: null, plan: null, credits: null, token: null, error: null });
       return;
     }
 
     if (isJwtExpired(stored.token)) {
       await authClient.logout().catch(() => {});
-      set({ loggedIn: false, email: null, plan: null, token: null, error: null });
+      set({ loggedIn: false, email: null, plan: null, credits: null, token: null, error: null });
       return;
     }
 
@@ -159,5 +170,21 @@ export const useAuthStore = create<AuthState>((set) => ({
       loginStatus: 'idle',
       error: null,
     });
+    void useAuthStore.getState().refreshUsage();
+  },
+
+  refreshUsage: async () => {
+    const token = useAuthStore.getState().token;
+    if (!token) return;
+    try {
+      const u = await authClient.fetchUsage(token);
+      set({ plan: u.plan, credits: u.credits.balance });
+    } catch {
+      // Best-effort — a transient failure must not clear a known balance.
+    }
+  },
+
+  openBilling: async () => {
+    await openUrl(`${ARCANE_WEB_URL}/account`).catch(() => {});
   },
 }));

@@ -26,6 +26,12 @@ export interface ExchangeResult {
   user?: { id: string; email: string; role: string; emailVerified: boolean };
 }
 
+export interface UsageSummary {
+  plan: string;
+  credits: { balance: number; plan: number; topup: number };
+  planPeriodEnd: string | null;
+}
+
 export class AuthClient {
   private serverUrl: string = ARCANE_API_URL;
 
@@ -130,6 +136,16 @@ export class AuthClient {
    */
   async loadFromDisk(): Promise<{ token: string; email: string } | null> {
     return invoke<{ token: string; email: string } | null>('auth_read_token');
+  }
+
+  /** Plan + credit balance for the signed-in user. Read-only; used by the
+   *  Account tab and the out-of-credits path. Throws on any non-2xx. */
+  async fetchUsage(token: string): Promise<UsageSummary> {
+    const res = await fetch(`${this.serverUrl}/v1/usage`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) throw new Error(`Usage fetch failed (${res.status})`);
+    return res.json() as Promise<UsageSummary>;
   }
 
   async logout(): Promise<void> {

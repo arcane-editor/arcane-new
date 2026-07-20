@@ -294,6 +294,15 @@ async function doStream(
         throw new Error('Authentication expired. Please log in again.');
       }
 
+      if (attemptResponse.status === 402) {
+        // Out of credits — never retried (a retry can't change the balance).
+        // Refresh the store so the Account tab reflects the empty balance,
+        // then surface the server's actionable message (upgrade / top up).
+        void useAuthStore.getState().refreshUsage();
+        const body = (await attemptResponse.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? 'You are out of AI credits. Open Account to upgrade or buy credits.');
+      }
+
       if (isTransient(attemptResponse.status) && attempt < cfg.maxAttempts) {
         const delay = computeBackoffMs(attempt, cfg.retryBaseDelayMs);
         try {
