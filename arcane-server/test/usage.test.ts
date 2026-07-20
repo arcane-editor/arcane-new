@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { env } from 'cloudflare:test';
 import { recordUsage } from '../src/lib/usage.ts';
 import { estimateCost } from '../src/lib/costs.ts';
-import { getCurrentPeriodStart } from '../src/lib/db.ts';
+import { getCurrentPeriodStart, getUserBillingRow } from '../src/lib/db.ts';
+import { usdToMicro } from '../src/config/tiers.ts';
 import { seedPasswordUser } from './helpers.ts';
 
 // recordUsage is the shared metering path for ALL four AI routes. The test env
@@ -56,5 +57,19 @@ describe('recordUsage', () => {
         expect(period!.total_requests).toBe(2);
         const expected = estimateCost(model, 1_000, 200) + estimateCost(model, 3_000, 400);
         expect(period!.total_cost_usd).toBeCloseTo(expected, 9);
+    });
+
+    it('debits the request cost from the credit balance', async () => {
+        const user = await seedPasswordUser('usage-debit@test.dev', 'password123');
+        await env.arcane_db.prepare(
+            "UPDATE users SET plan = 'pro', plan_credits_micro = ?, plan_period_end = '2099-01-01T00:00:00.000Z' WHERE id = ?"
+        ).bind(5_000_000, user.id).run();
+
+        const model = '@cf/moonshotai/kimi-k2.7-code';
+        const inTok = 20_000, outTok = 1_000;
+        await recordUsage(env.arcane_db, user.id, model, inTok, outTok, 10);
+
+        const r = await getUserBillingRow(env.arcane_db, user.id);
+        expect(r!.plan_credits_micro).toBe(5_000_000 - usdToMicro(estimateCost(model, inTok, outTok)));
     });
 });

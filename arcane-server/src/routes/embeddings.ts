@@ -2,13 +2,11 @@ import { Hono } from 'hono';
 import { embedMany } from 'ai';
 import type { AppEnv } from '../types.ts';
 import type { AuthPayload } from '../middleware/auth.ts';
-import { getHourlyCost } from '../lib/db.ts';
+import { checkAiBudget } from '../lib/credits.ts';
 import { recordUsage } from '../lib/usage.ts';
 import { workersAiProvider } from '../services/llm-router.ts';
 
 export const embeddingsRouter = new Hono<AppEnv>();
-
-const HOURLY_LIMIT_USD = 1.00;
 
 // Cost-effective Workers AI embedding model (384-dim). Was OpenAI
 // text-embedding-3-small @ 256-dim — note the dimension change for any
@@ -23,24 +21,8 @@ interface EmbeddingRequest {
 embeddingsRouter.post('/v1/embeddings', async (c) => {
     const user = c.get('user') as AuthPayload;
 
-    // Check hourly spending limit
-    const { totalCost, oldestTimestamp } = await getHourlyCost(c.env.arcane_db, parseInt(user.sub));
-    if (totalCost >= HOURLY_LIMIT_USD) {
-        let resetsAt: string;
-        let resetsInSeconds: number;
-        if (oldestTimestamp) {
-            const resetTime = new Date(new Date(oldestTimestamp).getTime() + 60 * 60 * 1000);
-            resetsAt = resetTime.toISOString();
-            resetsInSeconds = Math.max(0, Math.ceil((resetTime.getTime() - Date.now()) / 1000));
-        } else {
-            resetsAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
-            resetsInSeconds = 3600;
-        }
-
-        return c.json({
-            error: `You've used all your credits. Resets in ~${Math.ceil(resetsInSeconds / 60)} minutes (${new Date(resetsAt).toLocaleTimeString()}).`,
-        }, 429);
-    }
+    const budget = await checkAiBudget(c.env.arcane_db, parseInt(user.sub));
+    if (!budget.ok) return c.json({ error: budget.error, code: budget.code }, budget.status);
 
     const body = await c.req.json<EmbeddingRequest>();
 

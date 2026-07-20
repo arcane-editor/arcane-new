@@ -3,18 +3,32 @@ import { findCurrentUsagePeriod, findRecentRequestLogs, getCurrentPeriodStart } 
 import { authMiddleware } from '../middleware/auth.ts';
 import type { AuthPayload } from '../middleware/auth.ts';
 import type { AppEnv } from '../types.ts';
+import { refreshAndGetBalance } from '../lib/credits.ts';
+import { microToCredits } from '../config/tiers.ts';
 
 export const usageRouter = new Hono<AppEnv>();
 
 usageRouter.get('/v1/usage', authMiddleware(), async (c) => {
     const user = c.get('user') as AuthPayload;
     const db = c.env.arcane_db;
+    const userId = parseInt(user.sub);
+
+    // Refresh the free monthly grant if it rolled over, so the balance shown
+    // here matches what the AI gate would enforce on the next request.
+    const { plan, planMicro, topupMicro, planPeriodEnd } = await refreshAndGetBalance(db, userId);
 
     const periodStart = getCurrentPeriodStart();
-    const currentPeriod = await findCurrentUsagePeriod(db, parseInt(user.sub), periodStart);
-    const recentRequests = await findRecentRequestLogs(db, parseInt(user.sub), 50);
+    const currentPeriod = await findCurrentUsagePeriod(db, userId, periodStart);
+    const recentRequests = await findRecentRequestLogs(db, userId, 50);
 
     return c.json({
+        plan,
+        credits: {
+            balance: microToCredits(planMicro + topupMicro),
+            plan: microToCredits(planMicro),
+            topup: microToCredits(topupMicro),
+        },
+        planPeriodEnd,
         currentPeriod: {
             start: periodStart,
             totalRequests: currentPeriod?.total_requests ?? 0,

@@ -2,6 +2,7 @@ import type { MiddlewareHandler } from 'hono';
 import { jwtVerify, SignJWT } from 'jose';
 import type { AppEnv } from '../types.ts';
 import type { UserRow } from '../lib/db.ts';
+import { microToCredits } from '../config/tiers.ts';
 
 const JWT_ISSUER = 'arcane-server';
 const JWT_EXPIRY = '30d';
@@ -28,13 +29,19 @@ export function makeJwtPayloadFromUser(user: UserRow): AuthPayload {
     };
 }
 
-/** Public user shape returned by every auth endpoint. */
+/** Public user shape returned by every auth endpoint. `credits` is the whole
+ *  spendable balance (plan + top-up) in user-facing credits; the editor and
+ *  website read `plan`/`credits` to render the account + AI-gate state. A
+ *  freshly-created user shows 0 until their first AI call anchors the free
+ *  cycle (the /v1/usage route refreshes it explicitly). */
 export function makeUserResponse(user: UserRow) {
     return {
         id: user.id,
         email: user.email,
         role: user.role,
         emailVerified: user.email_verified === 1,
+        plan: user.plan,
+        credits: microToCredits(user.plan_credits_micro + user.topup_credits_micro),
     };
 }
 

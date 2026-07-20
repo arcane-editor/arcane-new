@@ -162,8 +162,11 @@ describe('claim/response builders', () => {
             sub: String(user.id), email: 'shape@test.dev', role: 'user',
             email_verified: true, token_version: 0,
         });
+        // Freshly-seeded user: free tier, 0 credits until the first AI call
+        // anchors the cycle (migration grandfather only touched pre-existing rows).
         expect(makeUserResponse(user)).toEqual({
             id: user.id, email: 'shape@test.dev', role: 'user', emailVerified: true,
+            plan: 'free', credits: 0,
         });
     });
 });

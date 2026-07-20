@@ -12,6 +12,20 @@ export interface UserRow {
     google_sub: string | null;
     email_verified: number;  // 0 | 1
     token_version: number;   // session revocation epoch (JWT claim must match)
+    // Billing (migration 0013). Balances are integer micro-USD of model cost.
+    plan: string;            // free | pro | proplus | ultra
+    plan_credits_micro: number;   // resets each billing period
+    topup_credits_micro: number;  // persists until spent
+    plan_period_end: string | null;  // ISO-8601 UTC; NULL = free cycle not yet anchored
+    dodo_customer_id: string | null;
+}
+
+/** Billing-only projection — the columns the credit gate + usage route read. */
+export interface UserBillingRow {
+    plan: string;
+    plan_credits_micro: number;
+    topup_credits_micro: number;
+    plan_period_end: string | null;
 }
 
 export interface UsagePeriodRow {
@@ -192,6 +206,58 @@ export async function findRecentRequestLogs(db: D1Database, userId: number, limi
         'SELECT * FROM request_logs WHERE user_id = ? ORDER BY created_at DESC LIMIT ?'
     ).bind(userId, limit).all<RequestLogRow>();
     return result.results;
+}
+
+// --- Credit ledger (migration 0013) ---
+
+export async function getUserBillingRow(db: D1Database, userId: number): Promise<UserBillingRow | null> {
+    return db.prepare(
+        'SELECT plan, plan_credits_micro, topup_credits_micro, plan_period_end FROM users WHERE id = ?'
+    ).bind(userId).first<UserBillingRow>();
+}
+
+/**
+ * Debit `micro` from a user's balance, plan bucket first then top-up. SQLite
+ * evaluates every SET expression against the row's ORIGINAL values, so both
+ * assignments below reference the pre-debit plan_credits_micro — giving exact
+ * plan-then-topup ordering in ONE atomic statement (D1 serializes writes, so
+ * concurrent debits can't interleave). Overspend beyond both buckets on a
+ * final request lands top-up slightly negative — accepted (we can't know a
+ * streamed request's cost until it finishes).
+ */
+export async function debitCredits(db: D1Database, userId: number, micro: number): Promise<void> {
+    await db.prepare(`
+        UPDATE users SET
+            plan_credits_micro  = MAX(0, plan_credits_micro - ?1),
+            topup_credits_micro = topup_credits_micro - MAX(0, ?1 - plan_credits_micro)
+        WHERE id = ?2
+    `).bind(micro, userId).run();
+}
+
+/** Free-tier monthly reset: SET (never add) the plan bucket to the grant and
+ *  re-anchor the period. Idempotent under races (same grant, same anchor). */
+export async function resetFreePlanCredits(
+    db: D1Database, userId: number, grantMicro: number, periodEnd: string,
+): Promise<void> {
+    await db.prepare(
+        'UPDATE users SET plan_credits_micro = ?, plan_period_end = ? WHERE id = ?'
+    ).bind(grantMicro, periodEnd, userId).run();
+}
+
+/** Grant a plan's credits and switch the user's plan (webhook-driven, B3). */
+export async function grantPlanCredits(
+    db: D1Database, userId: number, plan: string, grantMicro: number, periodEnd: string | null,
+): Promise<void> {
+    await db.prepare(
+        'UPDATE users SET plan = ?, plan_credits_micro = ?, plan_period_end = ? WHERE id = ?'
+    ).bind(plan, grantMicro, periodEnd, userId).run();
+}
+
+/** Add one-time top-up credits (webhook-driven, B3). */
+export async function addTopupCredits(db: D1Database, userId: number, micro: number): Promise<void> {
+    await db.prepare(
+        'UPDATE users SET topup_credits_micro = topup_credits_micro + ? WHERE id = ?'
+    ).bind(micro, userId).run();
 }
 
 // --- Feedback types & queries ---

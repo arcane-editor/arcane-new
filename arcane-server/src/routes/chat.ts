@@ -3,14 +3,12 @@ import { streamSSE } from 'hono/streaming';
 import type { ChatCompletionRequest, AppEnv } from '../types.ts';
 import { streamCompletion } from '../services/llm-router.ts';
 import { getIntensityConfig } from '../config/plans.ts';
-import { getHourlyCost } from '../lib/db.ts';
+import { checkAiBudget } from '../lib/credits.ts';
 import { recordUsage } from '../lib/usage.ts';
 import { logChatError } from '../lib/log.ts';
 import type { AuthPayload } from '../middleware/auth.ts';
 
 export const chatRouter = new Hono<AppEnv>();
-
-const HOURLY_LIMIT_USD = 1.00;
 
 function resolveModelFromRequest(body: ChatCompletionRequest): string {
     // Model choice is 100% backend: the editor sends an abstract reasoningLevel
@@ -28,29 +26,6 @@ function resolveModelFromRequest(body: ChatCompletionRequest): string {
     return getIntensityConfig('mid')!.model;
 }
 
-async function checkHourlyLimit(db: D1Database, userId: number): Promise<{ allowed: true } | { allowed: false; costUsd: number; resetsAt: string; resetsInSeconds: number }> {
-    const { totalCost, oldestTimestamp } = await getHourlyCost(db, userId);
-
-    if (totalCost < HOURLY_LIMIT_USD) {
-        return { allowed: true };
-    }
-
-    // Calculate when the oldest request in the window ages out (oldest_ts + 1 hour)
-    let resetsAt: string;
-    let resetsInSeconds: number;
-    if (oldestTimestamp) {
-        const resetTime = new Date(new Date(oldestTimestamp).getTime() + 60 * 60 * 1000);
-        resetsAt = resetTime.toISOString();
-        resetsInSeconds = Math.max(0, Math.ceil((resetTime.getTime() - Date.now()) / 1000));
-    } else {
-        // Fallback: reset in 1 hour from now
-        resetsAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
-        resetsInSeconds = 3600;
-    }
-
-    return { allowed: false, costUsd: totalCost, resetsAt, resetsInSeconds };
-}
-
 // Chat metering keeps its own thin wrapper so the two call sites below stay
 // readable; the shared orchestration (period rollup + request log + cost) lives
 // in recordUsage (src/lib/usage.ts), reused by embeddings/graph/unity.
@@ -66,13 +41,10 @@ chatRouter.post('/v1/chat/completions', async (c) => {
     const body = await c.req.json<ChatCompletionRequest>();
     const user = c.get('user') as AuthPayload;
 
-    // Check hourly spending limit
-    const budgetCheck = await checkHourlyLimit(c.env.arcane_db, parseInt(user.sub));
-    if (!budgetCheck.allowed) {
-        return c.json({
-            error: `You've used all your credits. Resets in ~${Math.ceil(budgetCheck.resetsInSeconds / 60)} minutes (${new Date(budgetCheck.resetsAt).toLocaleTimeString()}).`,
-        }, 429);
-    }
+    // Credit balance + anti-abuse hourly cap. 402 = out of credits (upgrade /
+    // top up); 429 = short-window rate limit.
+    const budget = await checkAiBudget(c.env.arcane_db, parseInt(user.sub));
+    if (!budget.ok) return c.json({ error: budget.error, code: budget.code }, budget.status);
 
     // Resolve model
     const model = resolveModelFromRequest(body);

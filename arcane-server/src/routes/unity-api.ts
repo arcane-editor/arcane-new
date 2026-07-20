@@ -2,19 +2,17 @@ import { Hono } from 'hono';
 import { embed } from 'ai';
 import type { AppEnv } from '../types.ts';
 import type { AuthPayload } from '../middleware/auth.ts';
-import { getHourlyCost } from '../lib/db.ts';
 import {
     lookupUnitySignatures,
     searchUnitySignaturesByName,
     listDeprecatedUnityApis,
     type UnityApiSignatureRow,
 } from '../lib/db.ts';
+import { checkAiBudget } from '../lib/credits.ts';
 import { recordUsage } from '../lib/usage.ts';
 import { workersAiProvider } from '../services/llm-router.ts';
 
 export const unityApiRouter = new Hono<AppEnv>();
-
-const HOURLY_LIMIT_USD = 1.0;
 
 // 384-dim — MUST match the index dimensions and the embeddings route.
 const EMBED_MODEL = '@cf/baai/bge-small-en-v1.5';
@@ -86,10 +84,8 @@ unityApiRouter.post('/v1/unity/api/deprecated', async (c) => {
 
 unityApiRouter.post('/v1/unity/api/search', async (c) => {
     const user = c.get('user') as AuthPayload;
-    const { totalCost } = await getHourlyCost(c.env.arcane_db, parseInt(user.sub));
-    if (totalCost >= HOURLY_LIMIT_USD) {
-        return c.json({ error: "You've used all your credits. Try again later." }, 429);
-    }
+    const budget = await checkAiBudget(c.env.arcane_db, parseInt(user.sub));
+    if (!budget.ok) return c.json({ error: budget.error, code: budget.code }, budget.status);
 
     const body = await c.req.json<{
         query?: string;

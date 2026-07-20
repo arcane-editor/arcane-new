@@ -2,14 +2,12 @@ import { Hono } from 'hono';
 import { generateText } from 'ai';
 import type { AppEnv } from '../types.ts';
 import type { AuthPayload } from '../middleware/auth.ts';
-import { getHourlyCost } from '../lib/db.ts';
+import { checkAiBudget } from '../lib/credits.ts';
 import { recordUsage } from '../lib/usage.ts';
 import { INTENSITY_CONFIG } from '../config/plans.ts';
 import { workersAiProvider } from '../services/llm-router.ts';
 
 export const graphRouter = new Hono<AppEnv>();
-
-const HOURLY_LIMIT_USD = 1.00;
 
 // One-shot summarization — reuse the mid-tier model so it tracks the single
 // model config object instead of hardcoding an id here.
@@ -84,11 +82,8 @@ function parseEnrichment(text: string): Omit<GraphEnrichResponse, 'model'> {
 graphRouter.post('/v1/graph/enrich', async (c) => {
     const user = c.get('user') as AuthPayload;
 
-    // Hourly spend cap (same soft limit as chat/embeddings)
-    const { totalCost } = await getHourlyCost(c.env.arcane_db, parseInt(user.sub));
-    if (totalCost >= HOURLY_LIMIT_USD) {
-        return c.json({ error: "You've used all your credits. Try again later." }, 429);
-    }
+    const budget = await checkAiBudget(c.env.arcane_db, parseInt(user.sub));
+    if (!budget.ok) return c.json({ error: budget.error, code: budget.code }, budget.status);
 
     const body = await c.req.json<GraphEnrichRequest>();
     if (!body?.stats || !Array.isArray(body.communities)) {

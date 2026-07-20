@@ -5,7 +5,8 @@
 // only chat.ts wrote usage; embeddings/graph/unity burned neurons but recorded
 // $0, under-counting real cost and (later) credit consumption.
 import { estimateCost } from './costs.ts';
-import { upsertUsagePeriod, createRequestLog, getCurrentPeriodStart, getNextPeriodStart } from './db.ts';
+import { upsertUsagePeriod, createRequestLog, getCurrentPeriodStart, getNextPeriodStart, debitCredits } from './db.ts';
+import { usdToMicro } from '../config/tiers.ts';
 
 // Optional per-request telemetry (chat harness counters — see migration 0011).
 // Non-chat routes pass at most `taskType`.
@@ -25,10 +26,13 @@ export interface UsageExtras {
 
 /**
  * Record one AI request's usage: upserts the user's monthly `usage_periods`
- * rollup AND appends a `request_logs` audit row. Both writes are best-effort
- * (errors are logged, never thrown) so a metering failure can't break the AI
- * response the user already received. Cost is `estimateCost(model, in, out)`;
- * a model missing from the catalog costs $0 (and is logged upstream as a bug).
+ * rollup, appends a `request_logs` audit row, AND debits the request's cost
+ * from the user's credit balance. All three writes are best-effort (errors are
+ * logged, never thrown) so a metering/debit failure can't break the AI response
+ * the user already received. Cost is `estimateCost(model, in, out)`; a model
+ * missing from the catalog costs $0 (logged upstream as a bug) and is not
+ * debited. Debit uses the RAW estimate — the SAFETY_BUFFER lives in tier-grant
+ * sizing, not here, so per-request spend stays intuitive.
  */
 export async function recordUsage(
     db: D1Database,
@@ -40,6 +44,7 @@ export async function recordUsage(
     extras: UsageExtras = {},
 ): Promise<void> {
     const cost = estimateCost(model, inputTokens, outputTokens);
+    const micro = usdToMicro(cost);
     const periodStart = getCurrentPeriodStart();
     await Promise.all([
         upsertUsagePeriod(db, userId, periodStart, getNextPeriodStart(), inputTokens, outputTokens, cost)
@@ -48,5 +53,8 @@ export async function recordUsage(
             userId, model, inputTokens, outputTokens,
             costUsd: cost, durationMs, ...extras,
         }).catch(err => console.error('Failed to log request:', err)),
+        micro > 0
+            ? debitCredits(db, userId, micro).catch(err => console.error('Failed to debit credits:', err))
+            : Promise.resolve(),
     ]);
 }
