@@ -300,6 +300,14 @@ export async function findSubscriptionByUser(db: D1Database, userId: number): Pr
     ).bind(userId).first<SubscriptionRow>();
 }
 
+/** Look up a subscription by its Dodo id — the fallback source of truth for
+ *  renewal events, whose payloads may not echo the checkout metadata. */
+export async function findSubscriptionById(db: D1Database, subscriptionId: string): Promise<SubscriptionRow | null> {
+    return db.prepare(
+        'SELECT * FROM subscriptions WHERE dodo_subscription_id = ?'
+    ).bind(subscriptionId).first<SubscriptionRow>();
+}
+
 /**
  * Record a webhook delivery for idempotency. Returns TRUE only the FIRST time a
  * given webhook_id is seen (INSERT OR IGNORE → meta.changes === 1); a duplicate

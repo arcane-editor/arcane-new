@@ -3,9 +3,9 @@ import type { AppEnv } from '../types.ts';
 import { verifyDodoWebhook } from '../lib/dodo.ts';
 import {
     recordBillingEvent, grantPlanCredits, addTopupCredits, setDodoCustomerId,
-    upsertSubscription, getNextPeriodStart,
+    upsertSubscription, findSubscriptionById, getNextPeriodStart,
 } from '../lib/db.ts';
-import { tierGrantMicro, isTierId, creditsToMicro, TOPUP_PACKS } from '../config/tiers.ts';
+import { tierGrantMicro, isTierId, creditsToMicro, TOPUP_PACKS, TIERS, type Tier } from '../config/tiers.ts';
 
 export const billingWebhookRouter = new Hono<AppEnv>();
 
@@ -22,38 +22,68 @@ interface DodoEventData {
     next_billing_date?: string;
 }
 
+/** Reverse-map a Dodo product id back to a tier via the configured product
+ *  vars — a last-resort tier source when neither metadata nor a stored
+ *  subscription resolves it. */
+function tierFromProductId(env: AppEnv['Bindings'], productId: string | undefined): string | undefined {
+    if (!productId) return undefined;
+    const bindings = env as unknown as Record<string, string | undefined>;
+    for (const tier of Object.values(TIERS) as Tier[]) {
+        if (tier.dodoProductVar && bindings[tier.dodoProductVar] === productId) return tier.id;
+    }
+    return undefined;
+}
+
 /**
  * Apply one already-verified, already-deduped webhook event. Exported so tests
- * can drive the business logic with synthetic payloads. `metadata.arcane_*` is
- * the source of truth for who (user) and what (subscription tier / top-up pack).
+ * can drive the business logic with synthetic payloads.
+ *
+ * Renewal payloads may NOT echo the original checkout metadata, so the user and
+ * tier are resolved with fallbacks: metadata first, then the stored
+ * subscription row (recorded at subscription.active), then the product id. A
+ * paid renewal we can't resolve is SKIPPED — never silently downgraded to free.
  */
 export async function handleBillingEvent(
     env: AppEnv['Bindings'], type: string, data: DodoEventData,
 ): Promise<void> {
     const md = data.metadata ?? {};
-    const userId = md.arcane_user_id ? parseInt(md.arcane_user_id) : NaN;
-    if (!Number.isInteger(userId)) {
-        console.error('billing_event_no_user', JSON.stringify({ type, metadata: md }));
-        return;
-    }
     const ref = md.arcane_ref ?? '';
     const kind = md.arcane_kind;
     const subscriptionId = data.subscription_id ?? data.id ?? '';
     const periodEnd = data.current_period_end ?? data.next_billing_date ?? null;
 
+    // Stored subscription is the fallback for renewals with no metadata.
+    const stored = subscriptionId ? await findSubscriptionById(env.arcane_db, subscriptionId) : null;
+
+    const userId = md.arcane_user_id ? parseInt(md.arcane_user_id) : (stored?.user_id ?? NaN);
+    if (!Number.isInteger(userId)) {
+        console.error('billing_event_no_user', JSON.stringify({ type, subscriptionId, metadata: md }));
+        return;
+    }
+
     if (data.customer?.customer_id) {
         await setDodoCustomerId(env.arcane_db, userId, data.customer.customer_id).catch(() => {});
     }
 
+    // Tier for subscription events: metadata → stored plan → product-id map.
+    const resolvedTier = isTierId(ref) ? ref
+        : (stored && isTierId(stored.plan)) ? stored.plan
+        : tierFromProductId(env, data.product_id);
+
     switch (type) {
         case 'subscription.active':
         case 'subscription.renewed': {
-            const tier = isTierId(ref) ? ref : 'free';
-            await grantPlanCredits(env.arcane_db, userId, tier, tierGrantMicro(tier), periodEnd);
+            if (!resolvedTier) {
+                // Can't tell which paid plan this is — do NOT grant free credits
+                // to a paying customer. Log for manual reconciliation.
+                console.error('billing_event_unresolved_tier', JSON.stringify({ type, userId, subscriptionId, productId: data.product_id }));
+                return;
+            }
+            await grantPlanCredits(env.arcane_db, userId, resolvedTier, tierGrantMicro(resolvedTier), periodEnd);
             if (subscriptionId) {
                 await upsertSubscription(env.arcane_db, {
                     subscriptionId, userId, productId: data.product_id ?? null,
-                    plan: tier, status: 'active', currentPeriodEnd: periodEnd,
+                    plan: resolvedTier, status: 'active', currentPeriodEnd: periodEnd,
                 });
             }
             break;
@@ -65,7 +95,7 @@ export async function handleBillingEvent(
             if (subscriptionId) {
                 await upsertSubscription(env.arcane_db, {
                     subscriptionId, userId, productId: data.product_id ?? null,
-                    plan: isTierId(ref) ? ref : 'free', status: 'on_hold', currentPeriodEnd: periodEnd,
+                    plan: resolvedTier ?? stored?.plan ?? 'free', status: 'on_hold', currentPeriodEnd: periodEnd,
                 });
             }
             break;
