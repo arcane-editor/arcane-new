@@ -9,6 +9,7 @@ import {
     listDeprecatedUnityApis,
     type UnityApiSignatureRow,
 } from '../lib/db.ts';
+import { recordUsage } from '../lib/usage.ts';
 import { workersAiProvider } from '../services/llm-router.ts';
 
 export const unityApiRouter = new Hono<AppEnv>();
@@ -105,11 +106,15 @@ unityApiRouter.post('/v1/unity/api/search', async (c) => {
     const version = majorMinor(body.unityVersion);
     const topK = Math.min(Math.max(body.topK ?? SEARCH_DEFAULT_TOPK, 1), SEARCH_MAX_TOPK);
 
+    const startTime = Date.now();
     try {
-        const { embedding } = await embed({
+        const { embedding, usage } = await embed({
             model: workersAiProvider(c.env).textEmbedding(EMBED_MODEL),
             value: QUERY_PREFIX + body.query,
         });
+        // Meter the embed as soon as it succeeds — the neuron cost is incurred
+        // regardless of whether the Vectorize query below hits or falls back.
+        await recordUsage(c.env.arcane_db, parseInt(user.sub), EMBED_MODEL, usage?.tokens ?? 0, 0, Date.now() - startTime, { taskType: 'unity_search' });
 
         const filter: Record<string, unknown> = { unityVersion: { $eq: version } };
         if (body.renderPipeline) filter.renderPipeline = { $in: [body.renderPipeline, 'any'] };

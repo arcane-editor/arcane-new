@@ -3,6 +3,7 @@ import { embedMany } from 'ai';
 import type { AppEnv } from '../types.ts';
 import type { AuthPayload } from '../middleware/auth.ts';
 import { getHourlyCost } from '../lib/db.ts';
+import { recordUsage } from '../lib/usage.ts';
 import { workersAiProvider } from '../services/llm-router.ts';
 
 export const embeddingsRouter = new Hono<AppEnv>();
@@ -46,8 +47,12 @@ embeddingsRouter.post('/v1/embeddings', async (c) => {
     const inputs = Array.isArray(body.input) ? body.input : [body.input];
     const modelId = body.model ?? DEFAULT_EMBEDDING_MODEL;
 
+    const startTime = Date.now();
     const model = workersAiProvider(c.env).textEmbedding(modelId);
     const { embeddings, usage } = await embedMany({ model, values: inputs });
+
+    // Meter neuron spend (input-only; embeddings produce no output tokens).
+    await recordUsage(c.env.arcane_db, parseInt(user.sub), modelId, usage?.tokens ?? 0, 0, Date.now() - startTime, { taskType: 'embeddings' });
 
     return c.json({
         object: 'list',

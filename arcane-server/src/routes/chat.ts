@@ -2,9 +2,9 @@ import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import type { ChatCompletionRequest, AppEnv } from '../types.ts';
 import { streamCompletion } from '../services/llm-router.ts';
-import { estimateCost } from '../lib/costs.ts';
 import { getIntensityConfig } from '../config/plans.ts';
-import { upsertUsagePeriod, createRequestLog, getCurrentPeriodStart, getNextPeriodStart, getHourlyCost } from '../lib/db.ts';
+import { getHourlyCost } from '../lib/db.ts';
+import { recordUsage } from '../lib/usage.ts';
 import { logChatError } from '../lib/log.ts';
 import type { AuthPayload } from '../middleware/auth.ts';
 
@@ -51,25 +51,15 @@ async function checkHourlyLimit(db: D1Database, userId: number): Promise<{ allow
     return { allowed: false, costUsd: totalCost, resetsAt, resetsInSeconds };
 }
 
-async function logUsage(
+// Chat metering keeps its own thin wrapper so the two call sites below stay
+// readable; the shared orchestration (period rollup + request log + cost) lives
+// in recordUsage (src/lib/usage.ts), reused by embeddings/graph/unity.
+function logUsage(
     db: D1Database, user: AuthPayload, model: string,
     inputTokens: number, outputTokens: number, durationMs: number,
-    extras: {
-        taskType?: string; turnIndex?: number; toolErrorCount?: number; repairCount?: number; cachedInputTokens?: number;
-        groundingLintHits?: number; loopGuardHits?: number; escalated?: boolean;
-        groundingToolCalls?: number; groundingUnavailable?: number; lastTurnLatencyMs?: number | null;
-    },
+    extras: import('../lib/usage.ts').UsageExtras,
 ): Promise<void> {
-    const cost = estimateCost(model, inputTokens, outputTokens);
-    const periodStart = getCurrentPeriodStart();
-    await Promise.all([
-        upsertUsagePeriod(db, parseInt(user.sub), periodStart, getNextPeriodStart(), inputTokens, outputTokens, cost)
-            .catch(err => console.error('Failed to log usage period:', err)),
-        createRequestLog(db, {
-            userId: parseInt(user.sub), model, inputTokens, outputTokens,
-            costUsd: cost, durationMs, ...extras,
-        }).catch(err => console.error('Failed to log request:', err)),
-    ]);
+    return recordUsage(db, parseInt(user.sub), model, inputTokens, outputTokens, durationMs, extras);
 }
 
 chatRouter.post('/v1/chat/completions', async (c) => {

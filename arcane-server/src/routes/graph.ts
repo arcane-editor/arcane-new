@@ -3,6 +3,7 @@ import { generateText } from 'ai';
 import type { AppEnv } from '../types.ts';
 import type { AuthPayload } from '../middleware/auth.ts';
 import { getHourlyCost } from '../lib/db.ts';
+import { recordUsage } from '../lib/usage.ts';
 import { INTENSITY_CONFIG } from '../config/plans.ts';
 import { workersAiProvider } from '../services/llm-router.ts';
 
@@ -109,14 +110,16 @@ graphRouter.post('/v1/graph/enrich', async (c) => {
         'Reference the actual symbol/file names. Be concrete and concise.',
     ].join(' ');
 
+    const startTime = Date.now();
     try {
-        const { text } = await generateText({
+        const { text, usage } = await generateText({
             model,
             system,
             prompt: buildPrompt(body),
             maxOutputTokens: 1500,
             temperature: 0.2,
         });
+        await recordUsage(c.env.arcane_db, parseInt(user.sub), ENRICH_MODEL, usage.inputTokens ?? 0, usage.outputTokens ?? 0, Date.now() - startTime, { taskType: 'graph_enrich' });
         const parsed = parseEnrichment(text);
         return c.json<GraphEnrichResponse>({ ...parsed, model: ENRICH_MODEL });
     } catch (err) {
