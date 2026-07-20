@@ -1,0 +1,12 @@
+---
+import LandingLayout from '../layouts/LandingLayout.astro';
+import Navbar from '../components/Navbar.tsx';
+import Footer from '../components/Footer.astro';
+import PricingTable from '../components/billing/PricingTable.tsx';
+---
+
+<LandingLayout>
+  <Navbar client:load />
+  <PricingTable client:load />
+  <Footer />
+</LandingLayout>

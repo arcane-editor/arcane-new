@@ -6,6 +6,10 @@ export interface AuthUser {
     email: string;
     role: string;
     emailVerified: boolean;
+    // Billing (added server-side in makeUserResponse). Optional so legacy
+    // callers and pre-billing responses stay valid.
+    plan?: string;
+    credits?: number;
 }
 
 export interface AuthResponse {

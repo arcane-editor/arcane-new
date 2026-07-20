@@ -1,0 +1,138 @@
+import { useState, useEffect } from "react";
+import { getStoredToken } from "@/lib/auth";
+import { apiGetPlans, apiStartCheckout, BillingError, type PlanTier } from "@/lib/billing";
+
+// Marketing blurb per tier (the credit numbers + prices come from the API so
+// they stay in sync with the server's src/config/tiers.ts).
+const TAGLINES: Record<string, string> = {
+    free: "Try the AI on us — no card required.",
+    pro: "For everyday Unity work with Arcane's AI.",
+    proplus: "More headroom for heavy agentic sessions.",
+    ultra: "Maximum monthly credits for power users.",
+};
+
+function fmtPrice(usd: number): string {
+    return usd === 0 ? "Free" : `$${usd}`;
+}
+
+export default function PricingTable() {
+    const [tiers, setTiers] = useState<PlanTier[] | null>(null);
+    const [authed, setAuthed] = useState(false);
+    const [loadError, setLoadError] = useState("");
+    const [busy, setBusy] = useState<string | null>(null);
+    const [notice, setNotice] = useState("");
+
+    useEffect(() => {
+        setAuthed(!!getStoredToken());
+        apiGetPlans()
+            .then(p => setTiers([...p.tiers].sort((a, b) => a.order - b.order)))
+            .catch(() => setLoadError("Couldn't load plans. Please refresh."));
+    }, []);
+
+    const subscribe = async (tierId: string) => {
+        setNotice("");
+        const token = getStoredToken();
+        if (!token) {
+            // Send them to sign in, then straight back to pricing.
+            window.location.href = "/auth?return=/pricing";
+            return;
+        }
+        setBusy(tierId);
+        try {
+            const { checkoutUrl } = await apiStartCheckout(token, { tier: tierId });
+            window.location.href = checkoutUrl;
+        } catch (err) {
+            if (err instanceof BillingError && (err.code === "billing_unconfigured" || err.code === "product_unconfigured")) {
+                setNotice("Paid plans are launching soon — check back shortly.");
+            } else if (err instanceof BillingError && (err.status === 401 || err.status === 403)) {
+                window.location.href = "/auth?return=/pricing";
+                return;
+            } else {
+                setNotice(err instanceof Error ? err.message : "Could not start checkout.");
+            }
+            setBusy(null);
+        }
+    };
+
+    return (
+        <section className="container mx-auto px-4 pt-32 pb-24 max-w-6xl">
+            <div className="text-center mb-4">
+                <h1 className="font-display text-3xl md:text-4xl font-bold">Simple, usage-based pricing</h1>
+                <p className="text-muted-foreground text-sm mt-3 max-w-xl mx-auto">
+                    Every plan includes a monthly pool of AI credits. Each request spends credits based on the
+                    model it uses — bigger models cost more. Run out? Top up anytime.
+                </p>
+            </div>
+
+            {notice && (
+                <div className="mx-auto max-w-md text-center rounded-lg border border-primary/30 bg-primary/10 px-4 py-2 text-sm text-primary mb-6">
+                    {notice}
+                </div>
+            )}
+
+            {loadError ? (
+                <p className="text-center text-muted-foreground text-sm py-16">{loadError}</p>
+            ) : !tiers ? (
+                <p className="text-center text-muted-foreground text-sm py-16">Loading plans…</p>
+            ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5 mt-10">
+                    {tiers.map(t => {
+                        const highlight = t.id === "pro";
+                        const isFree = t.id === "free";
+                        return (
+                            <div
+                                key={t.id}
+                                className={`glass rounded-2xl p-6 flex flex-col ${highlight ? "border-primary/40 ring-1 ring-primary/30" : ""}`}
+                            >
+                                {highlight && (
+                                    <span className="self-start mb-3 rounded-full bg-primary/15 border border-primary/30 px-2 py-0.5 text-[11px] font-bold uppercase tracking-wider text-primary">
+                                        Most popular
+                                    </span>
+                                )}
+                                <h3 className="font-display text-lg font-bold">{t.name}</h3>
+                                <div className="mt-2 mb-1 flex items-baseline gap-1">
+                                    <span className="font-display text-3xl font-bold">{fmtPrice(t.priceUsd)}</span>
+                                    {t.priceUsd > 0 && <span className="text-muted-foreground text-sm">/mo</span>}
+                                </div>
+                                <p className="text-sm text-foreground/80 font-mono">
+                                    {t.monthlyCredits.toLocaleString()} credits/mo
+                                </p>
+                                <p className="text-muted-foreground text-xs mt-3 min-h-[2.5rem]">
+                                    {TAGLINES[t.id] ?? ""}
+                                </p>
+
+                                <div className="mt-6 pt-4 border-t border-border/30">
+                                    {isFree ? (
+                                        <a
+                                            href="/#download"
+                                            className="block text-center h-10 leading-10 rounded-md px-4 bg-secondary text-secondary-foreground text-sm font-semibold hover:bg-secondary/80 transition-all"
+                                        >
+                                            Download Arcane
+                                        </a>
+                                    ) : (
+                                        <button
+                                            onClick={() => subscribe(t.id)}
+                                            disabled={busy === t.id}
+                                            className={`w-full h-10 rounded-md px-4 text-sm font-semibold transition-all disabled:opacity-50 ${
+                                                highlight
+                                                    ? "bg-primary text-primary-foreground hover:bg-primary/90"
+                                                    : "bg-secondary text-secondary-foreground hover:bg-secondary/80"
+                                            }`}
+                                        >
+                                            {busy === t.id ? "Starting…" : authed ? "Choose plan" : "Sign in to subscribe"}
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+            )}
+
+            <p className="text-center text-muted-foreground text-xs mt-10">
+                Prices in USD. Billing is handled securely by Dodo Payments. Manage or cancel anytime from your{" "}
+                <a href="/account" className="text-primary hover:underline">account</a>.
+            </p>
+        </section>
+    );
+}

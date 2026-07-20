@@ -5,6 +5,7 @@ import { getStoredToken } from "@/lib/auth";
 
 const links = [
   { label: "Features", href: "/features" },
+  { label: "Pricing", href: "/pricing" },
   { label: "Download", href: "#download" },
   { label: "Docs", href: "/docs/" },
 ];
