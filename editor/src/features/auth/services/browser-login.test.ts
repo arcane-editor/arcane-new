@@ -33,6 +33,15 @@ mock.module('@tauri-apps/plugin-deep-link', () => ({
   },
 }));
 
+// login-transport.ts (imported transitively via browser-login.ts) statically
+// imports `listen` from here. It's never invoked by anything browser-login.ts
+// exercises, but the real @tauri-apps/api/event module needs `transformCallback`
+// from the (partially mocked) @tauri-apps/api/core above, so it must be
+// mocked too or the static import resolution fails under `bun test`.
+mock.module('@tauri-apps/api/event', () => ({
+  listen: async () => () => {},
+}));
+
 const bl = await import('./browser-login');
 
 function makeHandlers() {
