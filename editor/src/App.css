@@ -250,6 +250,35 @@ html, body, #root {
   transform: translateY(-0.5px);
 }
 
+/* Signed-out counterpart to .title-bar-avatar. A bare glyph doesn't read as
+   "authenticate here", so this state is labelled. */
+.title-bar-signin {
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 13px;
+  background: none;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+  margin-left: 4px;
+  flex-shrink: 0;
+  white-space: nowrap;
+  transition: background 150ms ease, border-color 150ms ease;
+}
+
+.title-bar-signin:hover {
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  border-color: var(--accent);
+}
+
+/* In Arcane Light the titlebar is dark — match the other titlebar controls. */
+:root[data-theme="arcane-light"] .title-bar-signin {
+  color: var(--text-on-dark);
+}
+
 .title-bar-connection {
   display: flex;
   align-items: center;

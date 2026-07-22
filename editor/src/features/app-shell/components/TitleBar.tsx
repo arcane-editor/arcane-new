@@ -11,8 +11,6 @@ function TitleBar() {
   const unityConnected = useUnityStore((s) => s.connected);
   const isUnityProject = useProjectContextStore((s) => s.isUnityProject);
 
-  const initial = authLoggedIn && authEmail ? authEmail.charAt(0).toUpperCase() : '?';
-
   return (
     <div className="title-bar" data-tauri-drag-region>
       <div className="title-bar-left" data-tauri-drag-region>
@@ -44,13 +42,23 @@ function TitleBar() {
         >
           <Settings size={16} />
         </button>
-        <button
-          className="title-bar-avatar"
-          title={authLoggedIn ? `Signed in as ${authEmail}` : 'Sign In'}
-          onClick={() => useCommandsStore.getState().executeCommand('auth.account')}
-        >
-          {initial}
-        </button>
+        {authLoggedIn ? (
+          <button
+            className="title-bar-avatar"
+            title={`Signed in as ${authEmail}`}
+            onClick={() => useCommandsStore.getState().executeCommand('auth.account')}
+          >
+            {authEmail ? authEmail.charAt(0).toUpperCase() : ''}
+          </button>
+        ) : (
+          <button
+            className="title-bar-signin"
+            title="Sign in to Arcane"
+            onClick={() => useCommandsStore.getState().executeCommand('auth.account')}
+          >
+            Sign in
+          </button>
+        )}
       </div>
     </div>
   );
