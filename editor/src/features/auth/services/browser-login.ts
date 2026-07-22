@@ -27,7 +27,6 @@ import type { UnlistenFn } from '@tauri-apps/api/event';
 import { ARCANE_WEB_URL } from '../../../config/api';
 import {
   parseCallback,
-  isDeepLinkSupported,
   selectTransport,
   type ArmedTransport,
   type LoginTransport,
@@ -223,10 +222,3 @@ export function submitManualCode(code: string): boolean {
   consumeAndDeliver(trimmed);
   return true;
 }
-
-/**
- * @deprecated Renamed to `isDeepLinkSupported` — it tests scheme registration,
- * not whether browser login works (which is now every platform). Removed in
- * the task that un-gates AuthTab; do not add new callers.
- */
-export const isBrowserLoginSupported = isDeepLinkSupported;

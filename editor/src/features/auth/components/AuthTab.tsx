@@ -3,7 +3,7 @@ import { CreditCard, Globe, KeyRound, Loader2, LogOut, RotateCw, Smartphone, X }
 import { emit } from '@tauri-apps/api/event';
 import { useAuthStore } from '../../../stores/auth';
 import { authClient } from '../services/auth-client';
-import { isBrowserLoginSupported, reopenBrowser } from '../services/browser-login';
+import { reopenBrowser } from '../services/browser-login';
 
 function AuthTab() {
   const {
@@ -20,11 +20,10 @@ function AuthTab() {
     refreshUsage,
     openBilling,
   } = useAuthStore();
-  // Device flow is the DEFAULT where deep links cannot work — macOS `tauri dev`
-  // (spec C3). Everywhere else the browser flow is primary.
-  const [mode, setMode] = useState<'browser' | 'device'>(
-    isBrowserLoginSupported() ? 'browser' : 'device',
-  );
+  // Browser sign-in works on every platform: where the OS won't route the
+  // custom scheme (macOS `tauri dev`), the loopback transport covers it.
+  // Device code is a manual fallback, never a default.
+  const [mode, setMode] = useState<'browser' | 'device'>('browser');
   const [showPaste, setShowPaste] = useState(false);
   const [pasteCode, setPasteCode] = useState('');
 
@@ -139,19 +138,17 @@ function AuthTab() {
             <LogOut size={14} />
             Sign Out
           </button>
-          {isBrowserLoginSupported() && (
-            <button
-              onClick={() => {
-                void (async () => {
-                  await logout();
-                  startBrowserLogin();
-                })();
-              }}
-              style={{ ...linkBtnStyle, marginTop: 12, display: 'block' }}
-            >
-              Switch account…
-            </button>
-          )}
+          <button
+            onClick={() => {
+              void (async () => {
+                await logout();
+                startBrowserLogin();
+              })();
+            }}
+            style={{ ...linkBtnStyle, marginTop: 12, display: 'block' }}
+          >
+            Switch account…
+          </button>
         </div>
       </div>
     );
@@ -304,7 +301,7 @@ function AuthTab() {
               Use a device code instead
             </button>
           )}
-          {mode === 'device' && isBrowserLoginSupported() && (
+          {mode === 'device' && (
             <button
               onClick={() => {
                 useAuthStore.setState({ error: null });
