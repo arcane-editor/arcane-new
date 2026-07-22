@@ -45,10 +45,10 @@ function TitleBar() {
         {authLoggedIn ? (
           <button
             className="title-bar-avatar"
-            title={`Signed in as ${authEmail}`}
+            title={authEmail ? `Signed in as ${authEmail}` : 'Signed in'}
             onClick={() => useCommandsStore.getState().executeCommand('auth.account')}
           >
-            {authEmail ? authEmail.charAt(0).toUpperCase() : ''}
+            {authEmail ? authEmail.charAt(0).toUpperCase() : '·'}
           </button>
         ) : (
           <button
