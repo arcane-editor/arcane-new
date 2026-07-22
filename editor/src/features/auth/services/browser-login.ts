@@ -27,6 +27,11 @@ import { openUrl } from '@tauri-apps/plugin-opener';
 import { onOpenUrl } from '@tauri-apps/plugin-deep-link';
 import type { UnlistenFn } from '@tauri-apps/api/event';
 import { ARCANE_WEB_URL } from '../../../config/api';
+import { parseCallback, redactUrlForLog, type ParsedCallback } from './login-transport';
+
+// Re-exported for back-compat: browser-login.test.ts and the feature barrel
+// have imported these from here since Phase 3.
+export { parseCallback, type ParsedCallback };
 
 // ── Pure helpers ────────────────────────────────────────────────────────────
 
@@ -54,31 +59,6 @@ export function generateVerifier(): string {
 export async function challengeS256(verifier: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
   return toBase64Url(new Uint8Array(digest));
-}
-
-export interface ParsedCallback {
-  code: string;
-  state: string;
-}
-
-/**
- * Strict parse of `${scheme}://auth/callback?code=…&state=…`. Returns null
- * for anything else (wrong scheme, wrong host/path, missing params).
- * Deliberately string-prefix based instead of `new URL()`: WHATWG parsers
- * disagree across webviews about non-special (custom) schemes, and a prefix
- * check is exact and portable.
- */
-export function parseCallback(rawUrl: string, scheme: string): ParsedCallback | null {
-  const prefix = `${scheme}://auth/callback`;
-  if (!rawUrl.startsWith(prefix)) return null;
-  const rest = rawUrl.slice(prefix.length);
-  // Allow exactly "" or "?…" — rejects e.g. `arcane://auth/callback-evil`.
-  if (rest !== '' && !rest.startsWith('?')) return null;
-  const params = new URLSearchParams(rest.startsWith('?') ? rest.slice(1) : '');
-  const code = params.get('code');
-  const state = params.get('state');
-  if (!code || !state) return null;
-  return { code, state };
 }
 
 // ── Stateful flow ───────────────────────────────────────────────────────────
@@ -134,13 +114,6 @@ function consumeAndDeliver(code: string): void {
   if (!p) return;
   teardown(); // pending = null BEFORE onCode runs — replayed URLs find nothing
   void p.handlers.onCode(code, p.verifier);
-}
-
-/** scheme+path only, no query string — a callback URL's query carries the
- * single-use grant code (and CSRF state), so it must never land in a log. */
-function redactUrlForLog(url: string): string {
-  const qIndex = url.indexOf('?');
-  return qIndex === -1 ? url : url.slice(0, qIndex);
 }
 
 function handleDeepLinkUrls(urls: string[]): void {
