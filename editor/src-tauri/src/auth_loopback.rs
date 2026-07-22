@@ -23,6 +23,26 @@ pub const LOOPBACK_EVENT: &str = "auth-loopback-callback";
 /// cannot leak a bound socket indefinitely.
 const LISTENER_TTL: Duration = Duration::from_secs(600);
 
+/// Per-connection read timeout. A connection that accepts but never sends
+/// bytes (port scanner, security tool probe, browser preconnect) must not
+/// block `serve_once` from calling `accept()` again — otherwise it starves
+/// the listener until `LISTENER_TTL` fires and drops a legitimate callback
+/// that arrives in the meantime.
+///
+/// Shortened under `cfg(test)` so the regression test proving this doesn't
+/// have to burn 5 real seconds of wall-clock (tokio's virtual-time test
+/// utilities aren't in this crate's feature set) — production always uses
+/// the 5s value.
+#[cfg(not(test))]
+const READ_TIMEOUT: Duration = Duration::from_secs(5);
+#[cfg(test)]
+const READ_TIMEOUT: Duration = Duration::from_millis(200);
+
+/// Backoff after a transient `accept()` error (e.g. EMFILE), so a persistent
+/// error retries instead of busy-spinning the CPU for the remainder of
+/// `LISTENER_TTL`.
+const ACCEPT_ERROR_BACKOFF: Duration = Duration::from_millis(100);
+
 const RESPONSE_BODY: &str = concat!(
     "<!doctype html><meta charset=\"utf-8\"><title>Signed in</title>",
     "<body style=\"font-family:system-ui;text-align:center;padding-top:4rem\">",
@@ -94,9 +114,21 @@ pub fn parse_request_line(line: &str) -> Option<LoopbackCallback> {
 /// prefetching `/favicon.ico` must not burn the single shot.
 async fn serve_once(listener: TcpListener) -> Option<LoopbackCallback> {
     loop {
-        let (mut stream, _) = listener.accept().await.ok()?;
+        let (mut stream, _) = match listener.accept().await {
+            Ok(pair) => pair,
+            Err(_) => {
+                // A transient accept error (e.g. EMFILE) must not end the
+                // sign-in attempt outright, but retrying with no backoff
+                // could busy-spin the CPU for the whole LISTENER_TTL if the
+                // error is persistent — so back off briefly before retrying.
+                tokio::time::sleep(ACCEPT_ERROR_BACKOFF).await;
+                continue;
+            }
+        };
         let mut buf = [0u8; 8192];
-        let Ok(n) = stream.read(&mut buf).await else { continue };
+        let Ok(Ok(n)) = tokio::time::timeout(READ_TIMEOUT, stream.read(&mut buf)).await else {
+            continue;
+        };
         let text = String::from_utf8_lossy(&buf[..n]);
         let parsed = parse_request_line(text.lines().next().unwrap_or(""));
 
@@ -271,5 +303,36 @@ mod tests {
             server.await.unwrap(),
             Some(LoopbackCallback { code: "real".into(), state: "s".into() })
         );
+    }
+
+    #[tokio::test]
+    async fn stalled_connection_does_not_block_a_later_legitimate_callback() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = tokio::spawn(serve_once(listener));
+
+        // Connect but never send a byte — a port scanner, security probe, or
+        // browser preconnect that opens the socket and goes silent. Held
+        // alive for the whole test so `serve_once` must move past it on its
+        // own (via the read timeout) rather than the peer disconnecting.
+        let stalled = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+
+        // The real callback, from a second connection made while the first
+        // is still open and silent.
+        let mut client = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+        client
+            .write_all(b"GET /callback?code=real&state=s HTTP/1.1\r\n\r\n")
+            .await
+            .unwrap();
+        let mut response = String::new();
+        client.read_to_string(&mut response).await.unwrap();
+
+        assert!(response.starts_with("HTTP/1.1 200 OK"), "got: {response}");
+        assert_eq!(
+            server.await.unwrap(),
+            Some(LoopbackCallback { code: "real".into(), state: "s".into() })
+        );
+
+        drop(stalled);
     }
 }
