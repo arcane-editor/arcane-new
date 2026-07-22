@@ -64,9 +64,17 @@ export interface ArmedTransport {
  * Arms a listener and reports how the website should call back. The listener
  * MUST be live before this resolves — browser-login.ts opens the browser
  * immediately afterwards and a fast callback must not be missed.
+ *
+ * `onCallback` returns whether IT consumed the parsed callback: `true` means
+ * this was the awaited attempt (state matched) and the transport should stop
+ * looking; `false` means it was noise (state mismatch — a stale listener or a
+ * replayed URL) and, if there are more URLs in this delivery, the transport
+ * must keep scanning them. The state comparison itself lives in
+ * browser-login.ts, not here — this module only needs to know whether to
+ * keep going.
  */
 export type LoginTransport = (
-  onCallback: (parsed: ParsedCallback) => void,
+  onCallback: (parsed: ParsedCallback) => boolean,
 ) => Promise<ArmedTransport>;
 
 export const deepLinkTransport: LoginTransport = async (onCallback) => {
@@ -75,8 +83,8 @@ export const deepLinkTransport: LoginTransport = async (onCallback) => {
     for (const url of urls) {
       const parsed = parseCallback(url, scheme);
       if (parsed) {
-        onCallback(parsed);
-        return;
+        if (onCallback(parsed)) return;
+        continue; // not the awaited attempt (state mismatch) — keep scanning the batch
       }
       console.warn('[browser-login] ignoring non-callback deep link:', redactUrlForLog(url));
     }
@@ -94,6 +102,8 @@ export const loopbackTransport: LoginTransport = async (onCallback) => {
       console.warn('[browser-login] ignoring malformed loopback payload');
       return;
     }
+    // A loopback delivery is a single HTTP request, not a batch — there is
+    // nothing else to scan, so the consumed/not-consumed return is ignored.
     onCallback({ code: p.code, state: p.state });
   });
   return { params: { redirect_uri: `http://127.0.0.1:${port}/callback` }, unlisten };

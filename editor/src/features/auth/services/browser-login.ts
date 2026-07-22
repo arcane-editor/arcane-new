@@ -166,15 +166,20 @@ export async function beginBrowserLogin(
 
   // Arm the transport BEFORE opening the browser so a fast callback cannot be
   // missed. The state comparison lives HERE — one place, both transports.
+  // Return value tells the transport whether THIS callback was consumed:
+  // deepLinkTransport keeps scanning the rest of an onOpenUrl batch when we
+  // return false, instead of stopping at the first parseable-but-mismatched
+  // URL (a real match may be later in the same delivery).
   const armed: ArmedTransport = await transport(({ code, state: callbackState }) => {
-    if (!pending || pending.epoch !== epoch) return;
+    if (!pending || pending.epoch !== epoch) return false;
     if (callbackState !== pending.state) {
       // Not a teardown: a mismatched callback is noise (a stale listener, a
       // replayed URL). The real one may still be coming.
       console.warn('[browser-login] callback state mismatch — ignoring');
-      return;
+      return false;
     }
     consumeAndDeliver(code);
+    return true;
   });
   if (pending?.epoch !== epoch) {
     // Cancelled or superseded while arming.

@@ -168,6 +168,32 @@ describe('beginBrowserLogin', () => {
     expect(calls[0].code).toBe('C2');
   });
 
+  it('batch scan: a mismatched-state callback followed by a matching one in the SAME delivery is still consumed', async () => {
+    // Regression for the batch-scan regression: onOpenUrl delivers an array;
+    // a mismatched-state URL earlier in the batch must not stop the scan
+    // before it reaches a later, genuinely matching URL.
+    const { calls, handlers } = makeHandlers();
+    await bl.beginBrowserLogin(handlers);
+    const h = deepLinkHandler!;
+    const state = sentState();
+    h([
+      `arcane-dev://auth/callback?code=EVIL&state=WRONG`,
+      `arcane-dev://auth/callback?code=GOOD&state=${state}`,
+    ]);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].code).toBe('GOOD');
+  });
+
+  it('batch scan: a non-parseable URL followed by a valid matching one in the SAME delivery still works', async () => {
+    const { calls, handlers } = makeHandlers();
+    await bl.beginBrowserLogin(handlers);
+    const h = deepLinkHandler!;
+    const state = sentState();
+    h(['not-a-callback-url', `arcane-dev://auth/callback?code=GOOD2&state=${state}`]);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].code).toBe('GOOD2');
+  });
+
   it('cancel-then-callback is ignored', async () => {
     const { calls, handlers } = makeHandlers();
     await bl.beginBrowserLogin(handlers);

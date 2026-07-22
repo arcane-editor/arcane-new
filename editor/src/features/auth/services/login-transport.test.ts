@@ -55,7 +55,10 @@ beforeEach(() => {
 describe('deepLinkTransport', () => {
   it('sends the scheme param and delivers a matching callback', async () => {
     const seen: Array<{ code: string; state: string }> = [];
-    const armed = await t.deepLinkTransport((p) => seen.push(p));
+    const armed = await t.deepLinkTransport((p) => {
+      seen.push(p);
+      return true;
+    });
 
     expect(armed.params).toEqual({ scheme: 'arcane-dev' });
     expect(invokeCalls).toEqual(['auth_deep_link_scheme']);
@@ -66,14 +69,35 @@ describe('deepLinkTransport', () => {
 
   it('ignores URLs that are not callbacks', async () => {
     const seen: Array<{ code: string; state: string }> = [];
-    await t.deepLinkTransport((p) => seen.push(p));
+    await t.deepLinkTransport((p) => {
+      seen.push(p);
+      return true;
+    });
 
     deepLinkHandler!(['arcane-dev://something-else', 'https://example.com/x']);
     expect(seen).toEqual([]);
   });
 
+  it('keeps scanning the batch when onCallback returns false (not consumed), stops at the first true', async () => {
+    const seen: Array<{ code: string; state: string }> = [];
+    await t.deepLinkTransport((p) => {
+      seen.push(p);
+      return p.state === 'match'; // only the second URL below "matches"
+    });
+
+    deepLinkHandler!([
+      'arcane-dev://auth/callback?code=a&state=no-match',
+      'arcane-dev://auth/callback?code=b&state=match',
+      'arcane-dev://auth/callback?code=c&state=match', // must NOT be inspected — scan stopped at b
+    ]);
+    expect(seen).toEqual([
+      { code: 'a', state: 'no-match' },
+      { code: 'b', state: 'match' },
+    ]);
+  });
+
   it('unlisten tears down the listener', async () => {
-    const armed = await t.deepLinkTransport(() => {});
+    const armed = await t.deepLinkTransport(() => true);
     armed.unlisten();
     expect(deepLinkUnlistened).toBe(true);
   });
@@ -82,7 +106,7 @@ describe('deepLinkTransport', () => {
 describe('loopbackTransport', () => {
   it('binds a port and sends it as redirect_uri', async () => {
     loopbackPort = 61234;
-    const armed = await t.loopbackTransport(() => {});
+    const armed = await t.loopbackTransport(() => true);
 
     expect(armed.params).toEqual({ redirect_uri: 'http://127.0.0.1:61234/callback' });
     expect(invokeCalls).toEqual(['auth_loopback_start']);
@@ -91,7 +115,10 @@ describe('loopbackTransport', () => {
 
   it('delivers the callback from the Rust event', async () => {
     const seen: Array<{ code: string; state: string }> = [];
-    await t.loopbackTransport((p) => seen.push(p));
+    await t.loopbackTransport((p) => {
+      seen.push(p);
+      return true;
+    });
 
     eventHandler!({ payload: { code: 'abc', state: 'xyz' } });
     expect(seen).toEqual([{ code: 'abc', state: 'xyz' }]);
@@ -99,7 +126,10 @@ describe('loopbackTransport', () => {
 
   it('ignores a malformed payload rather than delivering a partial callback', async () => {
     const seen: Array<{ code: string; state: string }> = [];
-    await t.loopbackTransport((p) => seen.push(p));
+    await t.loopbackTransport((p) => {
+      seen.push(p);
+      return true;
+    });
 
     eventHandler!({ payload: { code: 'abc' } });
     eventHandler!({ payload: null });
@@ -108,7 +138,7 @@ describe('loopbackTransport', () => {
   });
 
   it('unlisten tears down the listener', async () => {
-    const armed = await t.loopbackTransport(() => {});
+    const armed = await t.loopbackTransport(() => true);
     armed.unlisten();
     expect(eventUnlistened).toBe(true);
   });
