@@ -119,9 +119,66 @@ describe('selectTransport', () => {
     expect(typeof t.selectTransport()).toBe('function');
   });
 
-  it('picks loopback exactly when deep links are unsupported', () => {
-    expect(t.selectTransport()).toBe(
-      t.isDeepLinkSupported() ? t.deepLinkTransport : t.loopbackTransport,
-    );
+  it('ambient (non-macOS) test-runner UA -> wires through to deepLinkTransport', () => {
+    // No mocking here on purpose: `bun test` reports a `Bun/…` user agent,
+    // never `Macintosh`, so this exercises the REAL navigator.userAgent /
+    // import.meta.env.DEV read path for the "supported" branch end-to-end.
+    expect(t.selectTransport()).toBe(t.deepLinkTransport);
+  });
+
+  it('macOS + dev (mocked globals) -> wires through to loopbackTransport', () => {
+    // Forces the one branch the ambient test UA can never reach, so this
+    // pins selectTransport()'s actual wiring of
+    // pickTransport(isDeepLinkSupported()) end-to-end, not just its parts.
+    const originalUA = navigator.userAgent;
+    const originalDev = process.env.DEV;
+    Object.defineProperty(navigator, 'userAgent', {
+      value: MACOS_UA,
+      configurable: true,
+    });
+    process.env.DEV = 'true';
+    try {
+      expect(t.selectTransport()).toBe(t.loopbackTransport);
+    } finally {
+      Object.defineProperty(navigator, 'userAgent', {
+        value: originalUA,
+        configurable: true,
+      });
+      if (originalDev === undefined) delete process.env.DEV;
+      else process.env.DEV = originalDev;
+    }
+  });
+});
+
+const MACOS_UA =
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15';
+const WINDOWS_UA =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+
+describe('deepLinkSupportedFor', () => {
+  it('macOS + dev (raw tauri dev binary, unregistered bundle) → NOT supported', () => {
+    expect(t.deepLinkSupportedFor(MACOS_UA, true)).toBe(false);
+  });
+
+  it('macOS + production build (installed .app bundle) → supported', () => {
+    expect(t.deepLinkSupportedFor(MACOS_UA, false)).toBe(true);
+  });
+
+  it('Windows/Linux + dev (self-registers at runtime) → supported', () => {
+    expect(t.deepLinkSupportedFor(WINDOWS_UA, true)).toBe(true);
+  });
+
+  it('Windows/Linux + production → supported', () => {
+    expect(t.deepLinkSupportedFor(WINDOWS_UA, false)).toBe(true);
+  });
+});
+
+describe('pickTransport', () => {
+  it('unsupported → loopbackTransport', () => {
+    expect(t.pickTransport(false)).toBe(t.loopbackTransport);
+  });
+
+  it('supported → deepLinkTransport', () => {
+    expect(t.pickTransport(true)).toBe(t.deepLinkTransport);
   });
 });

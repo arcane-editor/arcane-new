@@ -110,12 +110,27 @@ export const loopbackTransport: LoginTransport = async (onCallback) => {
  *
  * This picks a TRANSPORT. It must never gate what the user is allowed to see:
  * browser sign-in works on every platform.
+ *
+ * Pulled out as a pure function of its inputs (`userAgent`, `isDev`) so tests
+ * can pin both the macOS-dev and every other case with fixed strings/bools,
+ * instead of depending on whatever `navigator.userAgent` happens to be under
+ * the test runner (e.g. `bun test` reports `Bun/…`, never `Macintosh`).
  */
+export function deepLinkSupportedFor(userAgent: string, isDev: boolean): boolean {
+  const isMac = userAgent.includes('Macintosh');
+  return !(isMac && isDev);
+}
+
 export function isDeepLinkSupported(): boolean {
-  const isMac = navigator.userAgent.includes('Macintosh');
-  return !(isMac && import.meta.env.DEV);
+  return deepLinkSupportedFor(navigator.userAgent, import.meta.env.DEV);
+}
+
+/** Pure mapping from the platform decision to a transport — kept separate so
+ * tests can pin both branches without touching `navigator`/`import.meta.env`. */
+export function pickTransport(deepLinkSupported: boolean): LoginTransport {
+  return deepLinkSupported ? deepLinkTransport : loopbackTransport;
 }
 
 export function selectTransport(): LoginTransport {
-  return isDeepLinkSupported() ? deepLinkTransport : loopbackTransport;
+  return pickTransport(isDeepLinkSupported());
 }
