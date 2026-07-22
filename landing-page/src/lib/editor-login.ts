@@ -50,28 +50,50 @@ export function isValidState(state: string): boolean {
 // through DNS and is therefore rebindable, whereas an IP literal is not.
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', '[::1]']);
 
-/** Strict shape check for the app's loopback callback. Anything that is not
- *  EXACTLY `http://127.0.0.1:<port>/callback` (or the IPv6 literal) is
- *  rejected — no query, no fragment, no credentials, no privileged port. */
-export function isValidLoopbackRedirect(raw: string): boolean {
-    if (typeof raw !== 'string' || raw.length === 0) return false;
+/** Validate `raw` as the app's loopback callback and return the CANONICAL
+ *  form — never the raw input — or `null` if it doesn't qualify.
+ *
+ *  `URL` itself normalizes alternate loopback spellings (decimal/octal/hex
+ *  IPv4, the `127.1` short form, expanded IPv6, fullwidth Unicode digits,
+ *  a trailing dot, an uppercase scheme, spliced tab/newline in the port)
+ *  down to `u.hostname` — they all genuinely resolve to loopback, so they
+ *  are accepted, but ONLY the reconstructed `http://${u.hostname}:${port}/callback`
+ *  is ever handed back. Building the result from those already-normalized
+ *  fields — rather than returning `raw` — is what makes the validated value
+ *  and the used value the same string: callers can no longer smuggle an
+ *  alternate encoding through validation and then act on the raw text.
+ *
+ *  Rejects anything that isn't exactly this shape once normalized — no
+ *  query, no fragment, no credentials, no privileged port. */
+export function canonicalLoopbackRedirect(raw: string): string | null {
+    if (typeof raw !== 'string' || raw.length === 0) return null;
     // Browsers normalize `\` to `/`, which is how `/\evil.com` becomes a
     // protocol-relative URL. Reject outright rather than enumerate bypasses.
-    if (raw.includes('\\')) return false;
+    if (raw.includes('\\')) return null;
     let u: URL;
     try {
         u = new URL(raw);
     } catch {
-        return false;
+        return null;
     }
-    if (u.protocol !== 'http:') return false;
-    if (!LOOPBACK_HOSTS.has(u.hostname)) return false;
-    if (u.username !== '' || u.password !== '') return false;
-    if (u.pathname !== '/callback') return false;
-    if (u.search !== '' || u.hash !== '') return false;
-    // An absent port yields '' -> NaN -> rejected: the port must be explicit.
+    if (u.protocol !== 'http:') return null;
+    if (!LOOPBACK_HOSTS.has(u.hostname)) return null;
+    if (u.username !== '' || u.password !== '') return null;
+    if (u.pathname !== '/callback') return null;
+    if (u.search !== '' || u.hash !== '') return null;
+    // An absent port makes u.port the empty string, and Number('') is 0 (not
+    // NaN) — it's the `port >= 1024` bound below, not a NaN check, that
+    // rejects the missing/default-port case.
     const port = Number(u.port);
-    return Number.isInteger(port) && port >= 1024 && port <= 65535;
+    if (!Number.isInteger(port) || port < 1024 || port > 65535) return null;
+    return `http://${u.hostname}:${port}/callback`;
+}
+
+/** Strict shape check for the app's loopback callback — the boolean
+ *  projection of `canonicalLoopbackRedirect`. Prefer that function when the
+ *  canonical string is actually going to be stored or used. */
+export function isValidLoopbackRedirect(raw: string): boolean {
+    return canonicalLoopbackRedirect(raw) !== null;
 }
 
 export type EditorLoginParseResult =
@@ -95,13 +117,18 @@ export function parseEditorLoginParams(params: URLSearchParams): EditorLoginPars
 
     let target: EditorCallbackTarget;
     if (redirectUri !== null) {
-        if (!isValidLoopbackRedirect(redirectUri)) {
+        // Store the CANONICAL string, not the raw query param: this is the
+        // value that gets persisted and later interpolated into the
+        // browser-facing callback URL, so it must be the same string that
+        // was actually validated (see canonicalLoopbackRedirect above).
+        const canonical = canonicalLoopbackRedirect(redirectUri);
+        if (canonical === null) {
             return {
                 ok: false,
                 error: "This sign-in link asked to return to an address this site doesn't recognize, so we stopped for your safety. Update Arcane, then click Sign in again from the editor.",
             };
         }
-        target = { kind: 'loopback', redirectUri };
+        target = { kind: 'loopback', redirectUri: canonical };
     } else {
         // scheme is attacker-controllable (a raw query param) and gets echoed into
         // this hard-error banner — truncate so it can't carry a paragraph of
@@ -185,16 +212,24 @@ export function loadEditorLoginRequest(): EditorLoginRequest | null {
     try {
         const parsed = JSON.parse(raw) as EditorLoginRequest;
         const t = parsed.target;
-        const targetOk = t && (
-            (t.kind === 'scheme' && isAllowedScheme(t.scheme)) ||
-            (t.kind === 'loopback' && isValidLoopbackRedirect(t.redirectUri))
-        );
-        // Re-validate on load — sessionStorage is same-origin writable; never trust it blindly.
-        if (!targetOk || !isValidChallenge(parsed.challenge) || !isValidState(parsed.state)) {
+        // Re-validate on load — sessionStorage is same-origin writable; never
+        // trust it blindly. For the loopback case this must re-derive the
+        // canonical string (not just check a boolean): a same-origin write
+        // could plant an alternate-encoded redirectUri directly in storage,
+        // and returning it unchanged would smuggle raw, unvalidated text
+        // back out — the exact bug this file exists to prevent.
+        let target: EditorCallbackTarget | null = null;
+        if (t && t.kind === 'scheme' && isAllowedScheme(t.scheme)) {
+            target = t;
+        } else if (t && t.kind === 'loopback') {
+            const canonical = canonicalLoopbackRedirect(t.redirectUri);
+            if (canonical !== null) target = { kind: 'loopback', redirectUri: canonical };
+        }
+        if (!target || !isValidChallenge(parsed.challenge) || !isValidState(parsed.state)) {
             sessionStorage.removeItem(REQUEST_KEY);
             return null;
         }
-        return parsed;
+        return { ...parsed, target };
     } catch {
         sessionStorage.removeItem(REQUEST_KEY);
         return null;
