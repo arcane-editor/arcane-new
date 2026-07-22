@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- Branch: `fix/auth-loopback-and-signin`, already created off `dev`. Do not merge to `dev` until the manual checklist in Task 9 passes.
+- Branch: `fix/auth-loopback-and-signin`, already created off `dev`. Do not merge to `dev` until the manual checklist in Task 8 passes.
 - **No server changes.** `arcane-server/` is not touched by any task. `/v1/auth/editor/grant` and `/v1/auth/editor/exchange` keep their exact current contracts.
 - **No new Rust crate.** `tokio` is already declared with `features = ["process","io-util","sync","rt","macros","time","net"]`.
 - The Rust side **never validates `state`**. It transports only. The CSRF comparison lives in one place in TypeScript, shared by both transports.
@@ -18,7 +18,7 @@
 - Deep link stays the primary transport wherever the scheme is registered. Loopback is not a replacement.
 - Device-code flow is kept as a last-resort fallback and must remain reachable via the existing "Use a device code instead" link.
 - `astro build` does **not** typecheck `.tsx`. Landing typechecking must invoke `tsc` directly.
-- Commands: editor tests `bun test src` (from `editor/`), Rust tests `cargo test` (from `editor/src-tauri/`), landing tests `pnpm test` (from `landing-page/`, harness added in Task 4).
+- Commands: editor tests `bun test src` (from `editor/`), Rust tests `cargo test` (from `editor/src-tauri/`), landing tests `pnpm test` (from `landing-page/`, harness added in Task 5).
 
 ## File Structure
 
@@ -28,7 +28,7 @@
 - `editor/src/features/auth/services/login-transport.test.ts` — transport-level tests.
 - `landing-page/src/lib/editor-login.test.ts` — validator vectors.
 - `landing-page/vitest.config.ts` — test harness config.
-- `docs/superpowers/plans/2026-07-22-signin-manual-verification.md` — the merge gate (Task 9).
+- `docs/superpowers/plans/2026-07-22-signin-manual-verification.md` — the merge gate (Task 8).
 
 **Modify:**
 - `editor/src-tauri/src/lib.rs` — declare `mod auth_loopback` (after line 16), register `auth_loopback_start` in the invoke handler (near line 774).
@@ -42,7 +42,7 @@
 - `landing-page/src/components/auth/AuthHub.tsx:8-11,45-48` — use `buildCallbackUrl`.
 - `landing-page/package.json` — vitest devDependency + `test` script.
 
-**Dependency order:** Task 1 (Rust) → Task 3 (transports). Task 4 (landing validator) → Task 5 (landing wiring). Tasks 6, 7 are independent. Task 8 is owner-executed. Task 9 gates the merge.
+**Dependency order:** Task 1 (Rust) → Tasks 2-4 (transports + wiring). Task 5 (landing) is independent of the editor tasks. Tasks 6, 7 (UI) are independent. Task 8 is owner-executed and gates the merge.
 
 ---
 
@@ -912,9 +912,28 @@ export async function beginBrowserLogin(
 Run: `cd editor && bun test src/features/auth`
 Expected: PASS — the three new tests plus every pre-existing `browser-login.test.ts` test. The deep-link tests passing untouched is the regression signal.
 
-- [ ] **Step 5: Update the feature barrel**
+- [ ] **Step 5: Update the feature barrel, keeping a deprecated alias**
 
-In `editor/src/features/auth/index.ts`, replace the `isBrowserLoginSupported` export:
+`AuthTab.tsx` imports `isBrowserLoginSupported` from `./services/browser-login` directly (not via the barrel), and Task 6 is what updates it. Keep the old name working so this commit compiles on its own — same back-compat pattern Task 2 used for `parseCallback`.
+
+Add to `editor/src/features/auth/services/browser-login.ts`, below the existing re-export:
+
+```typescript
+/**
+ * @deprecated Renamed to `isDeepLinkSupported` — it tests scheme registration,
+ * not whether browser login works (which is now every platform). Removed in
+ * the task that un-gates AuthTab; do not add new callers.
+ */
+export const isBrowserLoginSupported = isDeepLinkSupported;
+```
+
+and extend the `./login-transport` import to bring in the new name:
+
+```typescript
+import { parseCallback, isDeepLinkSupported, type ParsedCallback } from './login-transport';
+```
+
+In `editor/src/features/auth/index.ts`, export the new name:
 
 ```typescript
 export { default as AuthTab } from './components/AuthTab';
@@ -932,7 +951,7 @@ export { isDeepLinkSupported } from './services/login-transport';
 - [ ] **Step 6: Typecheck**
 
 Run: `cd editor && bunx tsc --noEmit`
-Expected: FAIL — `AuthTab.tsx` still imports `isBrowserLoginSupported`. This is expected and is fixed in Task 6; do not fix it here.
+Expected: PASS — no errors. The deprecated alias keeps `AuthTab.tsx` compiling until Task 6 removes both.
 
 - [ ] **Step 7: Commit**
 
@@ -943,10 +962,11 @@ git commit -m "feat(auth): select callback transport per platform in beginBrowse
 
 ---
 
-### Task 5: Landing — redirect_uri validation and buildCallbackUrl
+### Task 5: Landing — redirect_uri validation, buildCallbackUrl, and AuthHub wiring
 
 **Files:**
 - Modify: `landing-page/src/lib/editor-login.ts`
+- Modify: `landing-page/src/components/auth/AuthHub.tsx:8-11,45-48`
 - Modify: `landing-page/package.json`
 - Create: `landing-page/vitest.config.ts`
 - Test: `landing-page/src/lib/editor-login.test.ts`
@@ -1311,30 +1331,9 @@ In `loadEditorHandoff`, rename the field and swap the regex:
 Run: `cd landing-page && pnpm test`
 Expected: PASS — 15 passed.
 
-- [ ] **Step 6: Typecheck**
+- [ ] **Step 6: Wire the new target through AuthHub**
 
-Run: `cd landing-page && pnpm exec tsc --noEmit`
-Expected: FAIL — `AuthHub.tsx` still imports `buildDeepLink` and reads `pending.scheme`. Expected; fixed in Task 6.
-
-- [ ] **Step 7: Commit**
-
-```bash
-git add landing-page/src/lib/editor-login.ts landing-page/src/lib/editor-login.test.ts landing-page/vitest.config.ts landing-page/package.json landing-page/pnpm-lock.yaml
-git commit -m "feat(landing): validate loopback redirect_uri as an editor callback target"
-```
-
----
-
-### Task 6: Landing — wire the callback target through AuthHub
-
-**Files:**
-- Modify: `landing-page/src/components/auth/AuthHub.tsx:8-11,45-48`
-
-**Interfaces:**
-- Consumes: Task 5's `buildCallbackUrl`, `EditorCallbackTarget`.
-- Produces: nothing new. `AuthSuccess.tsx` is unchanged — it reads `handoff.deepLink`, which now simply holds either URL form.
-
-- [ ] **Step 1: Update the import**
+The rename of `buildDeepLink` is what breaks `AuthHub.tsx`, so it is fixed in this same task — splitting them would leave a commit that does not compile.
 
 In `landing-page/src/components/auth/AuthHub.tsx`, change the `@/lib/editor-login` import block (lines 8-11) to use the new name:
 
@@ -1343,9 +1342,7 @@ In `landing-page/src/components/auth/AuthHub.tsx`, change the `@/lib/editor-logi
     clearEditorLoginRequest, saveEditorHandoff, buildCallbackUrl,
 ```
 
-- [ ] **Step 2: Use the target when building the handoff**
-
-Replace the `saveEditorHandoff` call (lines 46-49):
+Then replace the `saveEditorHandoff` call (lines 46-49):
 
 ```typescript
                 saveEditorHandoff({
@@ -1354,31 +1351,28 @@ Replace the `saveEditorHandoff` call (lines 46-49):
                 });
 ```
 
-- [ ] **Step 3: Typecheck**
+`AuthSuccess.tsx` needs no change — it reads `handoff.deepLink`, which now simply holds either URL form.
+
+- [ ] **Step 7: Typecheck**
 
 Run: `cd landing-page && pnpm exec tsc --noEmit`
 Expected: PASS — no errors. (`astro build` does not typecheck `.tsx`, so this direct `tsc` run is the only signal.)
 
-- [ ] **Step 4: Build**
+- [ ] **Step 8: Build**
 
 Run: `cd landing-page && pnpm build`
 Expected: build succeeds.
 
-- [ ] **Step 5: Run landing tests**
-
-Run: `cd landing-page && pnpm test`
-Expected: PASS — 15 passed.
-
-- [ ] **Step 6: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
-git add landing-page/src/components/auth/AuthHub.tsx
-git commit -m "feat(landing): route the editor handoff through buildCallbackUrl"
+git add landing-page/src/lib/editor-login.ts landing-page/src/lib/editor-login.test.ts landing-page/vitest.config.ts landing-page/package.json landing-page/pnpm-lock.yaml landing-page/src/components/auth/AuthHub.tsx
+git commit -m "feat(landing): validate loopback redirect_uri as an editor callback target"
 ```
 
 ---
 
-### Task 7: Un-gate the AuthTab sign-in UI
+### Task 6: Un-gate the AuthTab sign-in UI
 
 **Files:**
 - Modify: `editor/src/features/auth/components/AuthTab.tsx:25-26,142,307`
@@ -1389,13 +1383,32 @@ git commit -m "feat(landing): route the editor handoff through buildCallbackUrl"
 
 Browser sign-in now works everywhere, so the predicate must stop deciding what the user can see. All three call sites become unconditional.
 
-- [ ] **Step 1: Drop the import**
+- [ ] **Step 1: Drop the import and retire the deprecated alias**
 
 Remove `isBrowserLoginSupported` from the `../services/browser-login` import in `AuthTab.tsx`, leaving:
 
 ```typescript
 import { reopenBrowser } from '../services/browser-login';
 ```
+
+`AuthTab` was the only caller, so delete the deprecated alias added in Task 4 from `editor/src/features/auth/services/browser-login.ts`:
+
+```typescript
+/**
+ * @deprecated Renamed to `isDeepLinkSupported` — it tests scheme registration,
+ * not whether browser login works (which is now every platform). Removed in
+ * the task that un-gates AuthTab; do not add new callers.
+ */
+export const isBrowserLoginSupported = isDeepLinkSupported;
+```
+
+and narrow the `./login-transport` import back to what the re-export still needs:
+
+```typescript
+import { parseCallback, type ParsedCallback } from './login-transport';
+```
+
+Confirm no callers remain before deleting: `grep -rn "isBrowserLoginSupported" editor/src` must return nothing after this step.
 
 - [ ] **Step 2: Default to the browser flow on every platform**
 
@@ -1455,7 +1468,7 @@ Replace the gate at line 307:
 - [ ] **Step 5: Typecheck**
 
 Run: `cd editor && bunx tsc --noEmit`
-Expected: PASS — no errors. This also clears the failure deliberately left at the end of Task 4.
+Expected: PASS — no errors.
 
 - [ ] **Step 6: Run the full editor suite**
 
@@ -1471,7 +1484,7 @@ git commit -m "fix(auth): browser sign-in is reachable on every platform"
 
 ---
 
-### Task 8: Title-bar Sign In button
+### Task 7: Title-bar Sign In button
 
 **Files:**
 - Modify: `editor/src/features/app-shell/components/TitleBar.tsx:14,48-53`
@@ -1559,7 +1572,7 @@ git commit -m "fix(ui): labelled Sign in button replaces the '?' avatar when sig
 
 ---
 
-### Task 9: Google OAuth configuration + manual verification gate
+### Task 8: Google OAuth configuration + manual verification gate
 
 **Files:**
 - Create: `docs/superpowers/plans/2026-07-22-signin-manual-verification.md`
