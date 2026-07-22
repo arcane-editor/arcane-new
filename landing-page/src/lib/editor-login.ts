@@ -1,19 +1,23 @@
-// Editor deep-link login flow: pure validators + sessionStorage plumbing.
-// Framework-free on purpose — a lightweight vitest could cover the pure
-// functions later (documented option; no test harness exists in landing-page
-// today and this module must not require one).
+// Editor login flow: pure validators + sessionStorage plumbing.
+// Framework-free on purpose — covered by src/lib/editor-login.test.ts (vitest).
 
 export const SCHEME_ALLOWLIST = ['arcane', 'arcane-dev'] as const;
 export type EditorScheme = (typeof SCHEME_ALLOWLIST)[number];
 
+/** Where the website sends the browser once it holds the grant code.
+ *  Exactly one form per request — the union makes "both" unrepresentable. */
+export type EditorCallbackTarget =
+    | { kind: 'scheme'; scheme: EditorScheme }
+    | { kind: 'loopback'; redirectUri: string };
+
 export interface EditorLoginRequest {
-    state: string;      // app-generated CSRF token, echoed verbatim in the deep link (1-256 chars)
+    state: string;      // app-generated CSRF token, echoed verbatim in the callback (1-256 chars)
     challenge: string;  // PKCE S256 challenge, base64url 43-128 chars
-    scheme: EditorScheme;
+    target: EditorCallbackTarget;
 }
 
 export interface EditorHandoff {
-    deepLink: string;   // `${scheme}://auth/callback?code=...&state=...`
+    deepLink: string;   // scheme callback (`${scheme}://auth/callback?...`) or loopback callback (`http://127.0.0.1:<port>/callback?...`)
     code: string;       // one-time grant code (~60s TTL) for the manual-paste fallback
 }
 
@@ -24,7 +28,9 @@ const RETURN_KEY = 'arcane_post_auth_return';
 const CHALLENGE_RE = /^[A-Za-z0-9_-]{43,128}$/;
 // Derived from SCHEME_ALLOWLIST so the two can't drift apart — schemes are
 // always `[a-z-]`, so no escaping is needed in the alternation.
-const DEEP_LINK_RE = new RegExp(`^(${SCHEME_ALLOWLIST.join('|')}):\\/\\/auth\\/callback\\?`);
+const CALLBACK_RE = new RegExp(
+    `^((${SCHEME_ALLOWLIST.join('|')})://auth/callback\\?|http://(127\\.0\\.0\\.1|\\[::1\\]):\\d{4,5}/callback\\?)`,
+);
 
 // ─── Pure validators ────────────────────────────────────────
 
@@ -40,37 +46,95 @@ export function isValidState(state: string): boolean {
     return state.length >= 1 && state.length <= 256;
 }
 
+// Loopback IP literals only. `localhost` is deliberately excluded: it resolves
+// through DNS and is therefore rebindable, whereas an IP literal is not.
+const LOOPBACK_HOSTS = new Set(['127.0.0.1', '[::1]']);
+
+/** Strict shape check for the app's loopback callback. Anything that is not
+ *  EXACTLY `http://127.0.0.1:<port>/callback` (or the IPv6 literal) is
+ *  rejected — no query, no fragment, no credentials, no privileged port. */
+export function isValidLoopbackRedirect(raw: string): boolean {
+    if (typeof raw !== 'string' || raw.length === 0) return false;
+    // Browsers normalize `\` to `/`, which is how `/\evil.com` becomes a
+    // protocol-relative URL. Reject outright rather than enumerate bypasses.
+    if (raw.includes('\\')) return false;
+    let u: URL;
+    try {
+        u = new URL(raw);
+    } catch {
+        return false;
+    }
+    if (u.protocol !== 'http:') return false;
+    if (!LOOPBACK_HOSTS.has(u.hostname)) return false;
+    if (u.username !== '' || u.password !== '') return false;
+    if (u.pathname !== '/callback') return false;
+    if (u.search !== '' || u.hash !== '') return false;
+    // An absent port yields '' -> NaN -> rejected: the port must be explicit.
+    const port = Number(u.port);
+    return Number.isInteger(port) && port >= 1024 && port <= 65535;
+}
+
 export type EditorLoginParseResult =
     | { ok: true; request: EditorLoginRequest }
     | { ok: false; error: string };
 
-/** Parse `?flow=editor&state=&challenge=&scheme=` params. Caller has already
- *  checked `flow === 'editor'`. Never builds a deep link on failure. */
+/** Parse `?flow=editor&state=&challenge=&scheme=|redirect_uri=` params. Caller
+ *  has already checked `flow === 'editor'`. Never builds a callback URL on failure. */
 export function parseEditorLoginParams(params: URLSearchParams): EditorLoginParseResult {
     const state = params.get('state') ?? '';
     const challenge = params.get('challenge') ?? '';
-    const scheme = params.get('scheme') ?? '';
-    if (!isAllowedScheme(scheme)) {
+    const scheme = params.get('scheme');
+    const redirectUri = params.get('redirect_uri');
+
+    if (scheme !== null && redirectUri !== null) {
+        return {
+            ok: false,
+            error: 'The sign-in link from the editor is malformed (it names two different ways to return). Return to Arcane and click Sign in again.',
+        };
+    }
+
+    let target: EditorCallbackTarget;
+    if (redirectUri !== null) {
+        if (!isValidLoopbackRedirect(redirectUri)) {
+            return {
+                ok: false,
+                error: "This sign-in link asked to return to an address this site doesn't recognize, so we stopped for your safety. Update Arcane, then click Sign in again from the editor.",
+            };
+        }
+        target = { kind: 'loopback', redirectUri };
+    } else {
         // scheme is attacker-controllable (a raw query param) and gets echoed into
         // this hard-error banner — truncate so it can't carry a paragraph of
         // spoofed content into a trusted-looking message.
-        const shown = scheme.length > 20 ? `${scheme.slice(0, 20)}…` : scheme;
-        return {
-            ok: false,
-            error: `This sign-in link asked to open an app link ("${shown || 'none'}://") this site doesn't recognize, so we stopped for your safety. Update Arcane, then click Sign in again from the editor.`,
-        };
+        if (!isAllowedScheme(scheme ?? '')) {
+            const raw = scheme ?? '';
+            const shown = raw.length > 20 ? `${raw.slice(0, 20)}…` : raw;
+            return {
+                ok: false,
+                error: `This sign-in link asked to open an app link ("${shown || 'none'}://") this site doesn't recognize, so we stopped for your safety. Update Arcane, then click Sign in again from the editor.`,
+            };
+        }
+        target = { kind: 'scheme', scheme: scheme as EditorScheme };
     }
+
     if (!isValidChallenge(challenge)) {
         return { ok: false, error: 'The sign-in link from the editor is malformed (bad challenge). Return to Arcane and click Sign in again.' };
     }
     if (!isValidState(state)) {
         return { ok: false, error: 'The sign-in link from the editor is malformed (bad state). Return to Arcane and click Sign in again.' };
     }
-    return { ok: true, request: { state, challenge, scheme } };
+    return { ok: true, request: { state, challenge, target } };
 }
 
-export function buildDeepLink(scheme: EditorScheme, code: string, state: string): string {
-    return `${scheme}://auth/callback?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`;
+export function buildCallbackUrl(
+    target: EditorCallbackTarget,
+    code: string,
+    state: string,
+): string {
+    const query = `code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`;
+    return target.kind === 'scheme'
+        ? `${target.scheme}://auth/callback?${query}`
+        : `${target.redirectUri}?${query}`;
 }
 
 /** Internal post-login redirect target: must start with '/' but not '//'
@@ -120,8 +184,13 @@ export function loadEditorLoginRequest(): EditorLoginRequest | null {
     if (!raw) return null;
     try {
         const parsed = JSON.parse(raw) as EditorLoginRequest;
+        const t = parsed.target;
+        const targetOk = t && (
+            (t.kind === 'scheme' && isAllowedScheme(t.scheme)) ||
+            (t.kind === 'loopback' && isValidLoopbackRedirect(t.redirectUri))
+        );
         // Re-validate on load — sessionStorage is same-origin writable; never trust it blindly.
-        if (!isAllowedScheme(parsed.scheme) || !isValidChallenge(parsed.challenge) || !isValidState(parsed.state)) {
+        if (!targetOk || !isValidChallenge(parsed.challenge) || !isValidState(parsed.state)) {
             sessionStorage.removeItem(REQUEST_KEY);
             return null;
         }
@@ -148,7 +217,7 @@ export function loadEditorHandoff(): EditorHandoff | null {
     try {
         const parsed = JSON.parse(raw) as EditorHandoff;
         if (typeof parsed.deepLink !== 'string' || typeof parsed.code !== 'string'
-            || parsed.code.length === 0 || !DEEP_LINK_RE.test(parsed.deepLink)) {
+            || parsed.code.length === 0 || !CALLBACK_RE.test(parsed.deepLink)) {
             sessionStorage.removeItem(HANDOFF_KEY);
             return null;
         }

@@ -6,7 +6,7 @@ import {
 } from "@/lib/auth";
 import {
     parseEditorLoginParams, saveEditorLoginRequest, loadEditorLoginRequest,
-    clearEditorLoginRequest, saveEditorHandoff, buildDeepLink,
+    clearEditorLoginRequest, saveEditorHandoff, buildCallbackUrl,
     sanitizeInternalReturn, savePostAuthReturn, takePostAuthReturn, clearPostAuthReturn,
 } from "@/lib/editor-login";
 import TurnstileWidget, { turnstileEnabled } from "./TurnstileWidget";
@@ -44,7 +44,7 @@ export default function AuthHub() {
             try {
                 const grant = await apiEditorGrant(token, pending.challenge);
                 saveEditorHandoff({
-                    deepLink: buildDeepLink(pending.scheme, grant.code, pending.state),
+                    deepLink: buildCallbackUrl(pending.target, grant.code, pending.state),
                     code: grant.code,
                 });
                 clearEditorLoginRequest();
