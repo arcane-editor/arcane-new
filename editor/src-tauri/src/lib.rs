@@ -14,6 +14,7 @@ mod unity_tests;
 mod unity_ipc;
 mod dap;
 mod auth;
+mod auth_loopback;
 mod graphify;
 mod sync_util;
 mod walk_policy;
@@ -772,6 +773,7 @@ pub fn run() {
             auth::auth_delete_token,
             auth::get_arcane_home_dir,
             auth::auth_deep_link_scheme,
+            auth_loopback::auth_loopback_start,
             unity_ipc::unity_ipc_start,
             unity_ipc::unity_ipc_stop,
             unity_ipc::unity_ipc_send,
