@@ -22,12 +22,17 @@
 // auth store's beginBrowserLogin action supplies `onCode` and owns exchange +
 // UI state transitions. That keeps this module free of auth-client/store
 // dependencies and fully testable under bun with only Tauri API mocks.
-import { invoke } from '@tauri-apps/api/core';
 import { openUrl } from '@tauri-apps/plugin-opener';
-import { onOpenUrl } from '@tauri-apps/plugin-deep-link';
 import type { UnlistenFn } from '@tauri-apps/api/event';
 import { ARCANE_WEB_URL } from '../../../config/api';
-import { parseCallback, redactUrlForLog, type ParsedCallback } from './login-transport';
+import {
+  parseCallback,
+  isDeepLinkSupported,
+  selectTransport,
+  type ArmedTransport,
+  type LoginTransport,
+  type ParsedCallback,
+} from './login-transport';
 
 // Re-exported for back-compat: browser-login.test.ts and the feature barrel
 // have imported these from here since Phase 3.
@@ -81,7 +86,6 @@ interface PendingAttempt {
   epoch: number;
   state: string;
   verifier: string;
-  scheme: string;
   /** Full `${ARCANE_WEB_URL}/auth?…` URL, kept for "Open browser again". */
   url: string;
   handlers: BrowserLoginHandlers;
@@ -116,23 +120,6 @@ function consumeAndDeliver(code: string): void {
   void p.handlers.onCode(code, p.verifier);
 }
 
-function handleDeepLinkUrls(urls: string[]): void {
-  for (const url of urls) {
-    if (!pending) return; // consumed/cancelled — ignore the rest
-    const parsed = parseCallback(url, pending.scheme);
-    if (!parsed) {
-      console.warn('[browser-login] ignoring non-callback deep link:', redactUrlForLog(url));
-      continue;
-    }
-    if (parsed.state !== pending.state) {
-      console.warn('[browser-login] deep link state mismatch — ignoring');
-      continue;
-    }
-    consumeAndDeliver(parsed.code);
-    return;
-  }
-}
-
 /**
  * Start (or restart — any pending attempt is torn down first, spec C5) a
  * browser login. Registers the deep-link listener BEFORE opening the browser
@@ -152,6 +139,7 @@ function handleDeepLinkUrls(urls: string[]): void {
 export async function beginBrowserLogin(
   handlers: BrowserLoginHandlers,
   timeoutMs: number = LOGIN_TIMEOUT_MS,
+  transport: LoginTransport = selectTransport(),
 ): Promise<void> {
   teardown();
 
@@ -165,7 +153,7 @@ export async function beginBrowserLogin(
     handlers.onError('Sign-in timed out. Click "Continue in browser" to try again.');
   }, timeoutMs);
 
-  pending = { epoch, state, verifier, scheme: '', url: '', handlers, unlisten: null, timer };
+  pending = { epoch, state, verifier, url: '', handlers, unlisten: null, timer };
 
   const challenge = await challengeS256(verifier);
   if (pending?.epoch !== epoch) {
@@ -176,29 +164,29 @@ export async function beginBrowserLogin(
     return;
   }
 
-  const scheme = await invoke<string>('auth_deep_link_scheme');
+  // Arm the transport BEFORE opening the browser so a fast callback cannot be
+  // missed. The state comparison lives HERE — one place, both transports.
+  const armed: ArmedTransport = await transport(({ code, state: callbackState }) => {
+    if (!pending || pending.epoch !== epoch) return;
+    if (callbackState !== pending.state) {
+      // Not a teardown: a mismatched callback is noise (a stale listener, a
+      // replayed URL). The real one may still be coming.
+      console.warn('[browser-login] callback state mismatch — ignoring');
+      return;
+    }
+    consumeAndDeliver(code);
+  });
   if (pending?.epoch !== epoch) {
+    // Cancelled or superseded while arming.
+    armed.unlisten();
     clearTimeout(timer);
     return;
   }
+  pending.unlisten = armed.unlisten;
 
-  const params = new URLSearchParams({ flow: 'editor', state, challenge, scheme });
+  const params = new URLSearchParams({ flow: 'editor', state, challenge, ...armed.params });
   const url = `${ARCANE_WEB_URL}/auth?${params.toString()}`;
-  pending.scheme = scheme;
   pending.url = url;
-
-  // Register BEFORE openUrl. onOpenUrl is just `listen('deep-link://new-url',
-  // …)` — it does NOT replay startup/current URLs on registration; those come
-  // only from the plugin's separate `getCurrent()`, which this flow doesn't
-  // call. So a cold-start deep link simply finds no pending attempt here.
-  const unlisten = await onOpenUrl(handleDeepLinkUrls);
-  if (pending?.epoch !== epoch) {
-    // Cancelled or superseded while awaiting registration.
-    unlisten();
-    clearTimeout(timer);
-    return;
-  }
-  pending.unlisten = unlisten;
 
   await openUrl(url);
 }
@@ -232,12 +220,8 @@ export function submitManualCode(code: string): boolean {
 }
 
 /**
- * Deep links need OS-level scheme registration. Windows/Linux self-register at
- * runtime (`register_all()` in Rust setup), so even `tauri dev` works there.
- * macOS registers only via an installed .app bundle — under `tauri dev` on
- * macOS the device-code flow is the default sign-in path instead (spec C3).
+ * @deprecated Renamed to `isDeepLinkSupported` — it tests scheme registration,
+ * not whether browser login works (which is now every platform). Removed in
+ * the task that un-gates AuthTab; do not add new callers.
  */
-export function isBrowserLoginSupported(): boolean {
-  const isMac = navigator.userAgent.includes('Macintosh');
-  return !(isMac && import.meta.env.DEV);
-}
+export const isBrowserLoginSupported = isDeepLinkSupported;

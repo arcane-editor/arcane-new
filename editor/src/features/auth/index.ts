@@ -5,6 +5,6 @@ export {
   cancelBrowserLogin,
   submitManualCode,
   reopenBrowser,
-  isBrowserLoginSupported,
   type BrowserLoginHandlers,
 } from './services/browser-login';
+export { isDeepLinkSupported } from './services/login-transport';

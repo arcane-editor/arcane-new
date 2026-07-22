@@ -237,6 +237,54 @@ describe('beginBrowserLogin', () => {
     expect(calls).toHaveLength(0);
     expect(bl.submitManualCode('LATE')).toBe(false);
   });
+
+  it('uses the loopback transport params when deep links are unsupported', async () => {
+    // The transport is the seam; inject it directly rather than faking
+    // navigator/import.meta.env, which bun:test cannot rewrite per-test.
+    const { handlers } = makeHandlers();
+    await bl.beginBrowserLogin(handlers, 60_000, async () => ({
+      params: { redirect_uri: 'http://127.0.0.1:53411/callback' },
+      unlisten: () => {},
+    }));
+
+    const url = new URL(openedUrls[0]!);
+    expect(url.searchParams.get('redirect_uri')).toBe('http://127.0.0.1:53411/callback');
+    expect(url.searchParams.get('scheme')).toBeNull();
+    expect(url.searchParams.get('flow')).toBe('editor');
+    expect(url.searchParams.get('state')).toBeTruthy();
+    expect(url.searchParams.get('challenge')).toBeTruthy();
+  });
+
+  it('delivers a loopback callback whose state matches', async () => {
+    const { handlers, calls } = makeHandlers();
+    let deliver: ((p: { code: string; state: string }) => void) | null = null;
+    await bl.beginBrowserLogin(handlers, 60_000, async (onCallback) => {
+      deliver = onCallback;
+      return { params: { redirect_uri: 'http://127.0.0.1:53411/callback' }, unlisten: () => {} };
+    });
+
+    // Read the state off the URL only AFTER beginBrowserLogin resolved — it is
+    // generated inside the flow and openUrl happens last.
+    const state = new URL(openedUrls[0]!).searchParams.get('state')!;
+    deliver!({ code: 'lb-code', state });
+
+    expect(calls.map((c) => c.code)).toEqual(['lb-code']);
+  });
+
+  it('ignores a callback whose state does not match', async () => {
+    const { handlers, calls } = makeHandlers();
+    let deliver: ((p: { code: string; state: string }) => void) | null = null;
+    await bl.beginBrowserLogin(handlers, 60_000, async (onCallback) => {
+      deliver = onCallback;
+      return { params: { redirect_uri: 'http://127.0.0.1:1/callback' }, unlisten: () => {} };
+    });
+
+    deliver!({ code: 'evil', state: 'not-the-state' });
+
+    expect(calls).toEqual([]);
+    // The attempt must stay live — a mismatched callback is not a teardown.
+    expect(bl.submitManualCode('pasted')).toBe(true);
+  });
 });
 
 describe('submitManualCode', () => {
