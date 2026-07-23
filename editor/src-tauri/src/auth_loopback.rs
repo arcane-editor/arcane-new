@@ -20,12 +20,19 @@
 
 use serde::Serialize;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
+
+/// Process-wide monotonic id, one per `auth_loopback_start` attempt. Lets a
+/// spawned task tell whether the map entry under its port still belongs to
+/// it before self-removing — ephemeral ports get reused, so the port alone
+/// is not a reliable ownership check (see `LoopbackState` doc).
+static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 
 /// Event carrying the callback params to the frontend.
 pub const LOOPBACK_EVENT: &str = "auth-loopback-callback";
@@ -71,8 +78,14 @@ pub struct LoopbackCallback {
 /// spawned serve task removes its own entry when it exits (stop signal, TTL,
 /// or bind teardown). Keyed by port because that is the only handle the
 /// frontend has to identify which listener to close.
+///
+/// The value also carries the attempt's unique `id` (see `NEXT_ID`). Ports
+/// are ephemeral and get reused: if attempt A's task is still unwinding when
+/// attempt B binds the very port A just freed, A's task must NOT delete B's
+/// freshly-inserted entry out from under it. Each task therefore only
+/// self-removes the map entry if it still holds ITS OWN id.
 pub struct LoopbackState {
-    stoppers: Mutex<HashMap<u16, oneshot::Sender<()>>>,
+    stoppers: Mutex<HashMap<u16, (u64, oneshot::Sender<()>)>>,
 }
 
 impl LoopbackState {
@@ -219,11 +232,14 @@ pub async fn auth_loopback_start(
         .port();
 
     // Register the stopper BEFORE spawning, so a stop that races immediately
-    // after this returns still finds the entry.
+    // after this returns still finds the entry. The id identifies THIS
+    // attempt so the spawned task can tell, on exit, whether the entry under
+    // `port` is still its own (see `LoopbackState` doc re: port reuse).
+    let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
     let (tx, rx) = oneshot::channel::<()>();
     {
         let mut stoppers = state.stoppers.lock().unwrap();
-        stoppers.insert(port, tx);
+        stoppers.insert(port, (id, tx));
     }
 
     let app_task = app.clone();
@@ -236,10 +252,19 @@ pub async fn auth_loopback_start(
             _ = tokio::time::sleep(LISTENER_TTL) => {}
             _ = rx => {}
         }
-        // On any exit, drop our own entry. (A `stop` already removed it before
-        // firing the sender; this remove is then a harmless no-op.)
+        // On any exit, drop our own entry — but ONLY if it's still ours. The
+        // port this task bound may already have been rebound by a newer
+        // attempt (its TcpListener dropped, freeing the port, and a fresh
+        // `auth_loopback_start` grabbed it before this remove ran); in that
+        // case the map holds a different id and must be left alone, or we'd
+        // delete the new attempt's stopper and spuriously tear it down.
+        // (A `stop` already removed our entry before firing the sender; this
+        // remove is then a harmless no-op either way.)
         if let Some(state) = app_task.try_state::<LoopbackState>() {
-            state.stoppers.lock().unwrap().remove(&port);
+            let mut map = state.stoppers.lock().unwrap();
+            if map.get(&port).map(|(entry_id, _)| *entry_id) == Some(id) {
+                map.remove(&port);
+            }
         }
     });
 
@@ -252,8 +277,8 @@ pub async fn auth_loopback_start(
 /// exited (TTL), leaving no receiver to signal.
 #[tauri::command]
 pub fn auth_loopback_stop(port: u16, state: State<'_, LoopbackState>) {
-    let sender = state.stoppers.lock().unwrap().remove(&port);
-    if let Some(tx) = sender {
+    let entry = state.stoppers.lock().unwrap().remove(&port);
+    if let Some((_id, tx)) = entry {
         let _ = tx.send(());
     }
 }
@@ -324,6 +349,48 @@ mod tests {
     fn rejects_malformed_percent_escape() {
         assert_eq!(parse_request_line("GET /callback?code=a%ZZ&state=b HTTP/1.1"), None);
         assert_eq!(parse_request_line("GET /callback?code=a%2&state=b HTTP/1.1"), None);
+    }
+
+    /// Reproduces the port-reuse race directly on the map-mutation logic (no
+    /// sockets needed): attempt A (id1) exits and its trailing self-remove
+    /// runs AFTER attempt B (id2) has already rebound the same now-freed port
+    /// and inserted its own stopper. A's guarded remove — the fix in
+    /// `auth_loopback_start`'s spawned task — must see B's newer id under the
+    /// port and leave the entry alone, instead of blindly deleting by port
+    /// and dropping B's sender (which would spuriously tear B's listener
+    /// down seconds after it started).
+    #[test]
+    fn guarded_remove_does_not_delete_a_newer_attempts_stopper() {
+        let state = LoopbackState::new();
+        let port = 54321u16;
+        let id1 = 1u64;
+        let id2 = 2u64;
+        let (tx2, _rx2) = oneshot::channel::<()>();
+
+        // B has already inserted its (newer) stopper under the same port
+        // that A previously bound.
+        {
+            let mut map = state.stoppers.lock().unwrap();
+            map.insert(port, (id2, tx2));
+        }
+
+        // A's trailing self-remove, guarded by ITS OWN (now-stale) id — this
+        // mirrors the `if map.get(&port).map(...) == Some(id)` guard.
+        {
+            let mut map = state.stoppers.lock().unwrap();
+            if map.get(&port).map(|(entry_id, _)| *entry_id) == Some(id1) {
+                map.remove(&port);
+            }
+        }
+
+        // B's entry must still be present — A must not have deleted it, and
+        // B's sender (tx2) must not have been dropped.
+        let map = state.stoppers.lock().unwrap();
+        assert!(
+            map.contains_key(&port),
+            "a newer attempt's stopper must survive an older attempt's self-remove"
+        );
+        assert_eq!(map.get(&port).unwrap().0, id2);
     }
 
     use std::sync::Arc;
