@@ -47,6 +47,10 @@ jobs:
         with:
           node-version: 22
       - run: pnpm install --frozen-lockfile
+      - name: Typecheck (astro build does NOT typecheck .tsx)
+        run: pnpm exec tsc --noEmit
+      - name: Test
+        run: pnpm test
       - name: Build (dev API baked in)
         env:
           PUBLIC_API_URL: https://api-dev.arcaneai.org
@@ -73,6 +77,10 @@ jobs:
         with:
           node-version: 22
       - run: pnpm install --frozen-lockfile
+      - name: Typecheck (astro build does NOT typecheck .tsx)
+        run: pnpm exec tsc --noEmit
+      - name: Test
+        run: pnpm test
       - name: Build (prod API baked in)
         env:
           PUBLIC_API_URL: https://api.arcaneai.org
