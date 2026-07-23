@@ -188,7 +188,11 @@ export async function beginBrowserLogin(
   }
   pending.unlisten = armed.unlisten;
 
-  const params = new URLSearchParams({ flow: 'editor', state, challenge, ...armed.params });
+  // Spread transport params FIRST so the reserved auth keys (flow/state/
+  // challenge) always win — a transport can add its own params (e.g. the
+  // loopback redirect_uri) but must never be able to overwrite the CSRF
+  // state or the PKCE challenge, which are the entire security of the flow.
+  const params = new URLSearchParams({ ...armed.params, flow: 'editor', state, challenge });
   const url = `${ARCANE_WEB_URL}/auth?${params.toString()}`;
   pending.url = url;
 

@@ -281,6 +281,31 @@ describe('beginBrowserLogin', () => {
     expect(url.searchParams.get('challenge')).toBeTruthy();
   });
 
+  it('reserved auth params (state/challenge/flow) cannot be clobbered by a transport', async () => {
+    // A transport whose params happened to include the reserved keys must NOT
+    // be able to overwrite the real CSRF state or PKCE challenge — doing so
+    // would disable the only CSRF check in the system.
+    const { handlers } = makeHandlers();
+    await bl.beginBrowserLogin(handlers, 60_000, async () => ({
+      params: {
+        state: 'attacker',
+        challenge: 'attacker-challenge',
+        flow: 'evil',
+        redirect_uri: 'http://127.0.0.1:53411/callback',
+      },
+      unlisten: () => {},
+    }));
+
+    const url = new URL(openedUrls[0]!);
+    expect(url.searchParams.get('flow')).toBe('editor');
+    expect(url.searchParams.get('state')).toMatch(/^[A-Za-z0-9_-]{22}$/);
+    expect(url.searchParams.get('state')).not.toBe('attacker');
+    expect(url.searchParams.get('challenge')).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(url.searchParams.get('challenge')).not.toBe('attacker-challenge');
+    // The transport's own (benign) param still comes through.
+    expect(url.searchParams.get('redirect_uri')).toBe('http://127.0.0.1:53411/callback');
+  });
+
   it('delivers a loopback callback whose state matches', async () => {
     const { handlers, calls } = makeHandlers();
     let deliver: ((p: { code: string; state: string }) => void) | null = null;
