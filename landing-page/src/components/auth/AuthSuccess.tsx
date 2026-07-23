@@ -9,9 +9,19 @@ export default function AuthSuccess() {
     useEffect(() => {
         const h = loadEditorHandoff();
         setHandoff(h);
-        // One-shot: clear immediately so a refresh (or another tab) can't replay
-        // the code. The React state keeps this render working.
-        clearEditorHandoff();
+        // Custom-scheme path: navigating hands off to the OS and THIS page
+        // stays, so clear immediately — the visible page can't be replayed and
+        // clearing stops a refresh from re-triggering.
+        //
+        // Loopback path (`http://127.0.0.1:<port>/…`): navigating is a real
+        // top-level http: navigation that UNLOADS this page. If the listener is
+        // unreachable (corporate/VPN filtering the loopback socket) the browser
+        // shows a connection error, and pressing Back must still re-render this
+        // page with the paste-the-code fallback intact — so DEFER the clear on
+        // loopback. Server-side single-use is the real replay guard, so leaving
+        // the (already-consumed-on-success) handoff for one Back nav is safe.
+        const isLoopback = !!h && h.deepLink.startsWith("http://127.0.0.1:");
+        if (!isLoopback) clearEditorHandoff();
         // Auto-attempt the deep link; most browsers require a user gesture for
         // custom schemes, so the button below is the reliable path.
         if (h) window.location.href = h.deepLink;
