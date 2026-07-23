@@ -274,11 +274,6 @@ html, body, #root {
   border-color: var(--accent);
 }
 
-/* In Arcane Light the titlebar is dark — match the other titlebar controls. */
-:root[data-theme="arcane-light"] .title-bar-signin {
-  color: var(--text-on-dark);
-}
-
 .title-bar-connection {
   display: flex;
   align-items: center;

@@ -86,7 +86,7 @@ export const deepLinkTransport: LoginTransport = async (onCallback) => {
         if (onCallback(parsed)) return;
         continue; // not the awaited attempt (state mismatch) — keep scanning the batch
       }
-      console.warn('[browser-login] ignoring non-callback deep link:', redactUrlForLog(url));
+      console.warn('[login-transport] ignoring non-callback deep link:', redactUrlForLog(url));
     }
   });
   return { params: { scheme }, unlisten };

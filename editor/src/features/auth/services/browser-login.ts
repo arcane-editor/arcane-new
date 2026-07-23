@@ -1,7 +1,8 @@
 // Browser-based login via deep link + PKCE (spec Part C2).
 //
-// Pure helpers (generateState/generateVerifier/challengeS256/parseCallback)
-// are exported for unit tests. The stateful flow holds ONE pending attempt in
+// Pure helpers (generateState/generateVerifier/challengeS256) are exported for
+// unit tests; parseCallback is re-exported from login-transport, where it now
+// lives. The stateful flow holds ONE pending attempt in
 // module memory. Invariants (spec C2/C5):
 //   - the PKCE verifier is MEMORY-ONLY — never persisted; a cold-start deep
 //     link therefore cannot complete a login, by design
@@ -33,8 +34,8 @@ import {
   type ParsedCallback,
 } from './login-transport';
 
-// Re-exported for back-compat: browser-login.test.ts and the feature barrel
-// have imported these from here since Phase 3.
+// Re-exported for back-compat: browser-login.test.ts imports parseCallback
+// (and the ParsedCallback type) from here.
 export { parseCallback, type ParsedCallback };
 
 // ── Pure helpers ────────────────────────────────────────────────────────────
@@ -181,8 +182,14 @@ export async function beginBrowserLogin(
     return true;
   });
   if (pending?.epoch !== epoch) {
-    // Cancelled or superseded while arming.
-    armed.unlisten();
+    // Cancelled or superseded while arming. Guard the unlisten exactly as
+    // teardown() does: a throwing unlisten here would reject beginBrowserLogin,
+    // and the store's catch would then tear down the SUPERSEDING attempt.
+    try {
+      armed.unlisten();
+    } catch {
+      // Listener already gone (window teardown race) — nothing to do.
+    }
     clearTimeout(timer);
     return;
   }

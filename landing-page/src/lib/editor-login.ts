@@ -58,11 +58,11 @@ const LOOPBACK_HOSTS = new Set(['127.0.0.1']);
  *
  *  `URL` itself normalizes alternate loopback spellings (decimal/octal/hex
  *  IPv4, the `127.1` short form, fullwidth Unicode digits, a trailing dot,
- *  an uppercase scheme, spliced tab/newline in the port) down to
- *  `u.hostname` — the ones that resolve to `127.0.0.1` are accepted (IPv6
- *  loopback spellings like `[::1]`/`[0:...:1]` are NOT: the editor's
- *  listener is IPv4-only), but ONLY the reconstructed
- *  `http://${u.hostname}:${port}/callback`
+ *  an uppercase scheme) down to `u.hostname`, and WHATWG additionally strips
+ *  ASCII tab/newline from the whole URL string before parsing — the ones that
+ *  resolve to `127.0.0.1` are accepted (IPv6 loopback spellings like
+ *  `[::1]`/`[0:...:1]` are NOT: the editor's listener is IPv4-only), but ONLY
+ *  the reconstructed `http://${u.hostname}:${port}/callback`
  *  is ever handed back. Building the result from those already-normalized
  *  fields — rather than returning `raw` — is what makes the validated value
  *  and the used value the same string: callers can no longer smuggle an

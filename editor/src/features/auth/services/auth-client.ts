@@ -1,6 +1,8 @@
 // Auth API client. In-app credential login/signup was removed in Phase 3
-// (browser-based deep-link login, spec Part C); the device-code flow stays
-// as the fallback for environments without deep links (macOS `tauri dev`).
+// (browser-based login, spec Part C). Browser sign-in now works on every
+// platform (deep link where the scheme is registered, loopback otherwise —
+// including macOS `tauri dev`), so the device-code flow below is just a
+// manual fallback, not something tied to a platform gap.
 // The old X-Refreshed-Token handling was dead code (the server never sends
 // that header) and was removed with it (spec C6 optional cleanup).
 import { invoke } from '@tauri-apps/api/core';
