@@ -82,6 +82,9 @@ never worked end-to-end, so a green unit suite is not evidence that it does.
       → hard-error banner, no redirect.
 - [ ] Same with `redirect_uri=http://localhost:53411/callback` → hard-error.
 - [ ] Same with `redirect_uri=http://127.0.0.1:80/callback` → hard-error.
+- [ ] Same with `redirect_uri=http://[0:0:0:0:0:0:0:1]:<port>/callback` (expanded
+      IPv6 loopback) → hard-error. The editor's listener binds 127.0.0.1
+      (IPv4) only and never emits `[::1]`, so IPv6 loopback is rejected.
 - [ ] Same with both `scheme=` and `redirect_uri=` present → hard-error.
 - [ ] Alternate-encoding vectors — these are all equivalent to
       `http://127.0.0.1:<port>/callback` and, after the canonicalization fix,
@@ -89,7 +92,6 @@ never worked end-to-end, so a green unit suite is not evidence that it does.
       each by hand-editing `redirect_uri` in the `/auth` URL:
       - `http://2130706433:<port>/callback` (decimal IPv4)
       - `http://127.1:<port>/callback` (short form)
-      - `http://[0:0:0:0:0:0:0:1]:<port>/callback` (expanded IPv6)
 
 ## F. Suites
 

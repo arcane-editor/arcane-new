@@ -8,13 +8,13 @@ import {
 
 // Mirrors the private CALLBACK_RE in editor-login.ts: any string that leaves
 // the loopback validator (and everything built from it) must satisfy this —
-// literal ASCII 127.0.0.1/[::1], nothing else.
-const CALLBACK_RE = /^((arcane|arcane-dev):\/\/auth\/callback\?|http:\/\/(127\.0\.0\.1|\[::1\]):\d{4,5}\/callback\?)/;
+// the literal ASCII 127.0.0.1 IPv4 form, nothing else (the listener is
+// IPv4-only, so [::1] is not accepted).
+const CALLBACK_RE = /^((arcane|arcane-dev):\/\/auth\/callback\?|http:\/\/127\.0\.0\.1:\d{4,5}\/callback\?)/;
 
 describe('isValidLoopbackRedirect', () => {
     it('accepts the exact loopback callback shape', () => {
         expect(isValidLoopbackRedirect('http://127.0.0.1:53411/callback')).toBe(true);
-        expect(isValidLoopbackRedirect('http://[::1]:53411/callback')).toBe(true);
         expect(isValidLoopbackRedirect('http://127.0.0.1:1024/callback')).toBe(true);
         expect(isValidLoopbackRedirect('http://127.0.0.1:65535/callback')).toBe(true);
     });
@@ -27,6 +27,11 @@ describe('isValidLoopbackRedirect', () => {
             'http://127.0.0.2:53411/callback',
             'http://127.0.0.1.evil.com:53411/callback',
             'http://[::2]:53411/callback',
+            // IPv6 loopback is rejected: the editor's listener binds 127.0.0.1
+            // (AF_INET) only and never emits these, so a browser sent to them
+            // would get connection-refused. Validate only what the app produces.
+            'http://[::1]:53411/callback',
+            'http://[0:0:0:0:0:0:0:1]:53411/callback',
         ]) {
             expect(isValidLoopbackRedirect(raw), raw).toBe(false);
         }
@@ -82,18 +87,19 @@ describe('isValidLoopbackRedirect', () => {
         }
     });
 
-    // These all genuinely resolve to loopback — `new URL()` itself collapses
-    // every one of them down to hostname `127.0.0.1` or `[::1]` before this
-    // validator ever inspects the host. Accepting them isn't wrong; the bug
-    // (fixed here) was returning the RAW text instead of that canonical form.
-    it('accepts alternate loopback encodings (WHATWG-normalized) as true', () => {
+    // These all genuinely resolve to the 127.0.0.1 IPv4 loopback — `new URL()`
+    // itself collapses every one of them down to hostname `127.0.0.1` before
+    // this validator ever inspects the host. Accepting them isn't wrong; the
+    // bug (fixed earlier) was returning the RAW text instead of that canonical
+    // form. IPv6 loopback spellings are deliberately NOT here — they're
+    // rejected above, since the editor's listener is IPv4-only.
+    it('accepts alternate IPv4 loopback encodings (WHATWG-normalized) as true', () => {
         for (const raw of [
             'http://2130706433:53411/callback',          // decimal IPv4
             'http://0177.0.0.1:53411/callback',          // octal
             'http://0x7f.0.0.1:53411/callback',          // hex, dotted
             'http://0x7f000001:53411/callback',          // hex, flat
             'http://127.1:53411/callback',               // short form
-            'http://[0:0:0:0:0:0:0:1]:53411/callback',   // expanded IPv6 loopback
             'http://１２７.0.0.1:53411/callback', // fullwidth Unicode digits ("127")
             'http://127.0.0.1.:53411/callback',          // trailing dot
             'HTTP://127.0.0.1:53411/callback',           // uppercase scheme
@@ -109,14 +115,12 @@ describe('canonicalLoopbackRedirect', () => {
     it('returns the literal string unchanged when it is already canonical', () => {
         expect(canonicalLoopbackRedirect('http://127.0.0.1:53411/callback'))
             .toBe('http://127.0.0.1:53411/callback');
-        expect(canonicalLoopbackRedirect('http://[::1]:53411/callback'))
-            .toBe('http://[::1]:53411/callback');
     });
 
     // The core of the fix: whatever alternate spelling comes in, what comes
     // out is always built from the parsed URL's own normalized fields
     // (`http://${u.hostname}:${port}/callback`), never the raw input.
-    it('canonicalizes every alternate loopback encoding to the literal ASCII form', () => {
+    it('canonicalizes every alternate IPv4 loopback encoding to the literal ASCII form', () => {
         const IPV4_VECTORS = [
             'http://2130706433:53411/callback',
             'http://0177.0.0.1:53411/callback',
@@ -132,13 +136,15 @@ describe('canonicalLoopbackRedirect', () => {
         for (const raw of IPV4_VECTORS) {
             expect(canonicalLoopbackRedirect(raw), raw).toBe('http://127.0.0.1:53411/callback');
         }
-        expect(canonicalLoopbackRedirect('http://[0:0:0:0:0:0:0:1]:53411/callback'))
-            .toBe('http://[::1]:53411/callback');
     });
 
     it('returns null for everything isValidLoopbackRedirect rejects', () => {
         expect(canonicalLoopbackRedirect('http://evil.com/callback')).toBeNull();
         expect(canonicalLoopbackRedirect('http://3232235521:53411/callback')).toBeNull(); // decimal 192.168.0.1 — NOT loopback
+        // IPv6 loopback spellings are rejected — the listener is IPv4-only and
+        // never emits them, so they must not canonicalize to anything.
+        expect(canonicalLoopbackRedirect('http://[::1]:53411/callback')).toBeNull();
+        expect(canonicalLoopbackRedirect('http://[0:0:0:0:0:0:0:1]:53411/callback')).toBeNull();
         expect(canonicalLoopbackRedirect('')).toBeNull();
     });
 
@@ -149,11 +155,9 @@ describe('canonicalLoopbackRedirect', () => {
     it('invariant: every accepted value, and every deep link built from it, matches CALLBACK_RE', () => {
         const ACCEPTED_RAW = [
             'http://127.0.0.1:53411/callback',
-            'http://[::1]:53411/callback',
             'http://2130706433:53411/callback',
             'http://0x7f000001:53411/callback',
             'http://127.1:53411/callback',
-            'http://[0:0:0:0:0:0:0:1]:53411/callback',
             'HTTP://127.0.0.1:53411/callback',
         ];
         for (const raw of ACCEPTED_RAW) {

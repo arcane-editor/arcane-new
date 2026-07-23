@@ -29,7 +29,7 @@ const CHALLENGE_RE = /^[A-Za-z0-9_-]{43,128}$/;
 // Derived from SCHEME_ALLOWLIST so the two can't drift apart — schemes are
 // always `[a-z-]`, so no escaping is needed in the alternation.
 const CALLBACK_RE = new RegExp(
-    `^((${SCHEME_ALLOWLIST.join('|')})://auth/callback\\?|http://(127\\.0\\.0\\.1|\\[::1\\]):\\d{4,5}/callback\\?)`,
+    `^((${SCHEME_ALLOWLIST.join('|')})://auth/callback\\?|http://127\\.0\\.0\\.1:\\d{4,5}/callback\\?)`,
 );
 
 // ─── Pure validators ────────────────────────────────────────
@@ -46,18 +46,23 @@ export function isValidState(state: string): boolean {
     return state.length >= 1 && state.length <= 256;
 }
 
-// Loopback IP literals only. `localhost` is deliberately excluded: it resolves
-// through DNS and is therefore rebindable, whereas an IP literal is not.
-const LOOPBACK_HOSTS = new Set(['127.0.0.1', '[::1]']);
+// The 127.0.0.1 IPv4 literal only. `localhost` is deliberately excluded: it
+// resolves through DNS and is therefore rebindable, whereas an IP literal is
+// not. `[::1]` is excluded too: the editor's Rust listener binds 127.0.0.1
+// (AF_INET) only and never emits `[::1]`, so a browser sent to `[::1]:port`
+// would get connection-refused — validate only what the app actually produces.
+const LOOPBACK_HOSTS = new Set(['127.0.0.1']);
 
 /** Validate `raw` as the app's loopback callback and return the CANONICAL
  *  form — never the raw input — or `null` if it doesn't qualify.
  *
  *  `URL` itself normalizes alternate loopback spellings (decimal/octal/hex
- *  IPv4, the `127.1` short form, expanded IPv6, fullwidth Unicode digits,
- *  a trailing dot, an uppercase scheme, spliced tab/newline in the port)
- *  down to `u.hostname` — they all genuinely resolve to loopback, so they
- *  are accepted, but ONLY the reconstructed `http://${u.hostname}:${port}/callback`
+ *  IPv4, the `127.1` short form, fullwidth Unicode digits, a trailing dot,
+ *  an uppercase scheme, spliced tab/newline in the port) down to
+ *  `u.hostname` — the ones that resolve to `127.0.0.1` are accepted (IPv6
+ *  loopback spellings like `[::1]`/`[0:...:1]` are NOT: the editor's
+ *  listener is IPv4-only), but ONLY the reconstructed
+ *  `http://${u.hostname}:${port}/callback`
  *  is ever handed back. Building the result from those already-normalized
  *  fields — rather than returning `raw` — is what makes the validated value
  *  and the used value the same string: callers can no longer smuggle an
