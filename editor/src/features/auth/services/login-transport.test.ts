@@ -10,6 +10,7 @@ mock.module('@tauri-apps/api/core', () => ({
     invokeCalls.push(cmd);
     if (cmd === 'auth_deep_link_scheme') return 'arcane-dev';
     if (cmd === 'auth_loopback_start') return loopbackPort;
+    if (cmd === 'auth_loopback_stop') return undefined;
     throw new Error(`unexpected invoke: ${cmd}`);
   },
 }));
@@ -137,10 +138,14 @@ describe('loopbackTransport', () => {
     expect(seen).toEqual([]);
   });
 
-  it('unlisten tears down the listener', async () => {
+  it('unlisten tears down the event listener AND closes the Rust listener', async () => {
+    loopbackPort = 61234;
     const armed = await t.loopbackTransport(() => true);
+    invokeCalls = []; // ignore the start-time invoke; watch only teardown
     armed.unlisten();
     expect(eventUnlistened).toBe(true);
+    // The Rust socket is closed via auth_loopback_stop for the bound port.
+    expect(invokeCalls).toEqual(['auth_loopback_stop']);
   });
 });
 

@@ -95,17 +95,33 @@ export const deepLinkTransport: LoginTransport = async (onCallback) => {
 export const loopbackTransport: LoginTransport = async (onCallback) => {
   // Binds before returning, so the port in the URL is always live.
   const port = await invoke<number>('auth_loopback_start');
-  const unlisten = await listen<unknown>(LOOPBACK_EVENT, (event) => {
+  const unlistenEvent = await listen<unknown>(LOOPBACK_EVENT, (event) => {
     const p = event.payload as Partial<ParsedCallback> | null;
     // The payload crosses an IPC boundary; treat it as untrusted shape.
     if (!p || typeof p.code !== 'string' || typeof p.state !== 'string') {
-      console.warn('[browser-login] ignoring malformed loopback payload');
+      console.warn('[login-transport] ignoring malformed loopback payload');
       return;
     }
-    // A loopback delivery is a single HTTP request, not a batch — there is
-    // nothing else to scan, so the consumed/not-consumed return is ignored.
+    // The Rust listener now keeps serving and emits every parsed callback,
+    // including forged/mismatched ones — the state check in browser-login.ts
+    // decides which is real, so a `false` (not-consumed) return is expected
+    // and simply means "keep waiting for the genuine one".
     onCallback({ code: p.code, state: p.state });
   });
+  // Tearing down the TS flow (consume, cancel, timeout, supersede) must also
+  // close the Rust listener — the socket's lifetime is owned here. Guard the
+  // invoke so a failure during window teardown (IPC already gone, or the
+  // listener already reaped by its TTL) can't throw out of `unlisten`.
+  const unlisten: UnlistenFn = () => {
+    unlistenEvent();
+    try {
+      void invoke('auth_loopback_stop', { port }).catch(() => {
+        /* listener already gone (TTL) or IPC unavailable during teardown */
+      });
+    } catch {
+      /* invoke threw synchronously during teardown — nothing to do */
+    }
+  };
   return { params: { redirect_uri: `http://127.0.0.1:${port}/callback` }, unlisten };
 };
 

@@ -1,20 +1,31 @@
-//! One-shot loopback HTTP listener for browser sign-in (RFC 8252 §7.3).
+//! Loopback HTTP listener for browser sign-in (RFC 8252 §7.3).
 //!
 //! Deep links need OS-level scheme registration, which macOS grants only to an
 //! installed .app bundle — so under `tauri dev` on macOS a deep link launches
 //! the (stale) bundled build rather than the dev process. This listener is the
 //! transport used wherever the scheme is not registered: the website redirects
 //! the browser to `http://127.0.0.1:<port>/callback?code=…&state=…`, we read
-//! the query once, hand it to the frontend as an event, and shut down.
+//! the query and EMIT it to the frontend as an event.
 //!
-//! This module TRANSPORTS ONLY. It never validates `state` — that comparison
-//! lives in browser-login.ts, in one place, shared with the deep-link path.
+//! The listener KEEPS serving after each callback — it does not shut down on
+//! the first one. Rust deliberately does not know the correct `state` (that
+//! comparison lives in browser-login.ts, in one place, shared with the
+//! deep-link path), so a forged/mismatched `GET /callback?code=x&state=WRONG`
+//! must NOT tear the listener down: the frontend's state check ignores the
+//! forged callback and the genuine one still lands. The listener is closed
+//! explicitly — via `auth_loopback_stop`, driven by the frontend's teardown
+//! (consume, cancel, timeout, supersede) — or reaped by `LISTENER_TTL`.
+//!
+//! This module TRANSPORTS ONLY. It never validates `state`.
 
 use serde::Serialize;
+use std::collections::HashMap;
+use std::sync::Mutex;
 use std::time::Duration;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
+use tokio::sync::oneshot;
 
 /// Event carrying the callback params to the frontend.
 pub const LOOPBACK_EVENT: &str = "auth-loopback-callback";
@@ -25,7 +36,7 @@ const LISTENER_TTL: Duration = Duration::from_secs(600);
 
 /// Per-connection read timeout. A connection that accepts but never sends
 /// bytes (port scanner, security tool probe, browser preconnect) must not
-/// block `serve_once` from calling `accept()` again — otherwise it starves
+/// block the serve loop from calling `accept()` again — otherwise it starves
 /// the listener until `LISTENER_TTL` fires and drops a legitimate callback
 /// that arrives in the meantime.
 ///
@@ -53,6 +64,27 @@ const RESPONSE_BODY: &str = concat!(
 pub struct LoopbackCallback {
     pub code: String,
     pub state: String,
+}
+
+/// Managed state: maps each live loopback listener's port to a stopper that
+/// closes it. `auth_loopback_stop` takes the port's sender and fires it; the
+/// spawned serve task removes its own entry when it exits (stop signal, TTL,
+/// or bind teardown). Keyed by port because that is the only handle the
+/// frontend has to identify which listener to close.
+pub struct LoopbackState {
+    stoppers: Mutex<HashMap<u16, oneshot::Sender<()>>>,
+}
+
+impl LoopbackState {
+    pub fn new() -> Self {
+        Self { stoppers: Mutex::new(HashMap::new()) }
+    }
+}
+
+impl Default for LoopbackState {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// Minimal percent-decoder for query values. `+` is deliberately NOT decoded
@@ -83,7 +115,7 @@ fn percent_decode(s: &str) -> Option<String> {
 /// `GET /callback?code=abc&state=xyz HTTP/1.1`. Returns None unless the method
 /// is GET, the path is exactly `/callback`, and BOTH params are present and
 /// non-empty. Anything else is somebody else's request (favicon prefetch, a
-/// port scanner) and must not consume the listener's single shot.
+/// port scanner) and gets a 404 — it must not be emitted as a callback.
 pub fn parse_request_line(line: &str) -> Option<LoopbackCallback> {
     let mut parts = line.split_whitespace();
     if parts.next()? != "GET" {
@@ -109,10 +141,20 @@ pub fn parse_request_line(line: &str) -> Option<LoopbackCallback> {
     })
 }
 
-/// Accept until one request parses as a callback, then return it and drop the
-/// listener. Requests that don't parse get a 404 and are ignored — a browser
-/// prefetching `/favicon.ico` must not burn the single shot.
-async fn serve_once(listener: TcpListener) -> Option<LoopbackCallback> {
+/// Accept connections and hand each parsed callback to `on_callback`, then KEEP
+/// serving. Never returns on its own — the caller's `tokio::select!` stops it
+/// via the stop signal or `LISTENER_TTL`.
+///
+/// A request that doesn't parse as a callback gets a 404 and is ignored (a
+/// browser prefetching `/favicon.ico` must not disturb the listener). A parsed
+/// callback — INCLUDING a forged/mismatched one, which this layer cannot tell
+/// apart because it never sees the correct `state` — is emitted and the loop
+/// continues, so the genuine callback still lands after any decoys. The HTTP
+/// response body never echoes `code` or `state`.
+async fn serve_loop<F>(listener: TcpListener, on_callback: F)
+where
+    F: Fn(LoopbackCallback) + Send,
+{
     loop {
         let (mut stream, _) = match listener.accept().await {
             Ok(pair) => pair,
@@ -145,20 +187,27 @@ async fn serve_once(listener: TcpListener) -> Option<LoopbackCallback> {
         let _ = stream.write_all(response.as_bytes()).await;
         let _ = stream.shutdown().await;
 
-        if parsed.is_some() {
-            return parsed; // listener drops here — single-use
+        if let Some(cb) = parsed {
+            // Emit and keep serving. A mismatched/forged callback is ignored by
+            // the state check in browser-login.ts; tearing the listener down
+            // here would let a forged callback strand the genuine sign-in.
+            on_callback(cb);
         }
     }
 }
 
-/// Bind a one-shot loopback listener and return its port. The socket is live
-/// BEFORE this returns, so the port embedded in the auth URL is always real.
+/// Bind a loopback listener and return its port. The socket is live BEFORE this
+/// returns, so the port embedded in the auth URL is always real.
 ///
-/// A cancelled attempt does not close this eagerly and does not need to: the
-/// frontend has already discarded its pending attempt, so a late callback
-/// fails the state check and is ignored. The TTL reaps the socket regardless.
+/// The listener is registered in `LoopbackState` keyed by port so the frontend
+/// can close it via `auth_loopback_stop` (called on consume, cancel, timeout,
+/// and supersede). It also self-reaps after `LISTENER_TTL`. Either way the
+/// spawned task removes its own map entry on exit.
 #[tauri::command]
-pub async fn auth_loopback_start(app: AppHandle) -> Result<u16, String> {
+pub async fn auth_loopback_start(
+    app: AppHandle,
+    state: State<'_, LoopbackState>,
+) -> Result<u16, String> {
     // 127.0.0.1 explicitly — never 0.0.0.0, which would expose the callback to
     // the local network. Port 0 lets the OS pick a free ephemeral port.
     let listener = TcpListener::bind("127.0.0.1:0")
@@ -169,13 +218,44 @@ pub async fn auth_loopback_start(app: AppHandle) -> Result<u16, String> {
         .map_err(|e| format!("Could not read loopback port: {e}"))?
         .port();
 
+    // Register the stopper BEFORE spawning, so a stop that races immediately
+    // after this returns still finds the entry.
+    let (tx, rx) = oneshot::channel::<()>();
+    {
+        let mut stoppers = state.stoppers.lock().unwrap();
+        stoppers.insert(port, tx);
+    }
+
+    let app_task = app.clone();
     tauri::async_runtime::spawn(async move {
-        if let Ok(Some(cb)) = tokio::time::timeout(LISTENER_TTL, serve_once(listener)).await {
-            let _ = app.emit(LOOPBACK_EVENT, cb);
+        let app_emit = app_task.clone();
+        // serve_loop never completes on its own; whichever of the stop signal
+        // or the TTL fires first drops the serve future (and thus the socket).
+        tokio::select! {
+            _ = serve_loop(listener, move |cb| { let _ = app_emit.emit(LOOPBACK_EVENT, cb); }) => {}
+            _ = tokio::time::sleep(LISTENER_TTL) => {}
+            _ = rx => {}
+        }
+        // On any exit, drop our own entry. (A `stop` already removed it before
+        // firing the sender; this remove is then a harmless no-op.)
+        if let Some(state) = app_task.try_state::<LoopbackState>() {
+            state.stoppers.lock().unwrap().remove(&port);
         }
     });
 
     Ok(port)
+}
+
+/// Close the loopback listener bound to `port`, if one is live. Idempotent: a
+/// port that isn't in the map (already stopped, TTL-reaped, or never started)
+/// is a no-op. Send errors are ignored — the serve task may have already
+/// exited (TTL), leaving no receiver to signal.
+#[tauri::command]
+pub fn auth_loopback_stop(port: u16, state: State<'_, LoopbackState>) {
+    let sender = state.stoppers.lock().unwrap().remove(&port);
+    if let Some(tx) = sender {
+        let _ = tx.send(());
+    }
 }
 
 #[cfg(test)]
@@ -246,42 +326,105 @@ mod tests {
         assert_eq!(parse_request_line("GET /callback?code=a%2&state=b HTTP/1.1"), None);
     }
 
+    use std::sync::Arc;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::{TcpListener, TcpStream};
 
-    #[tokio::test]
-    async fn serves_one_callback_then_stops() {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = listener.local_addr().unwrap().port();
-        assert!(port >= 1024, "OS must assign a non-privileged ephemeral port");
+    /// Spawn `serve_loop` under a stop channel, collecting emitted callbacks
+    /// into a shared Vec. Mirrors the production `tokio::select!` in
+    /// `auth_loopback_start`, minus the (AppHandle-bound) TTL arm and map
+    /// bookkeeping — this is the "test at the function level" the command
+    /// wrapper can't reach because it needs an `AppHandle`/`State`.
+    #[allow(clippy::type_complexity)]
+    fn spawn_serve(
+        listener: TcpListener,
+    ) -> (
+        Arc<Mutex<Vec<LoopbackCallback>>>,
+        oneshot::Sender<()>,
+        tokio::task::JoinHandle<()>,
+    ) {
+        let received = Arc::new(Mutex::new(Vec::new()));
+        let recv = received.clone();
+        let (tx, rx) = oneshot::channel::<()>();
+        let handle = tokio::spawn(async move {
+            tokio::select! {
+                _ = serve_loop(listener, move |c| recv.lock().unwrap().push(c)) => {}
+                _ = rx => {}
+            }
+        });
+        (received, tx, handle)
+    }
 
-        let server = tokio::spawn(serve_once(listener));
-
+    /// Send one `GET /callback?...` request and return the full HTTP response.
+    async fn send_callback(port: u16, code: &str, state: &str) -> String {
         let mut client = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
-        client
-            .write_all(b"GET /callback?code=abc&state=xyz HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
-            .await
-            .unwrap();
+        let req = format!(
+            "GET /callback?code={code}&state={state} HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"
+        );
+        client.write_all(req.as_bytes()).await.unwrap();
         let mut response = String::new();
         client.read_to_string(&mut response).await.unwrap();
+        response
+    }
 
-        assert!(response.starts_with("HTTP/1.1 200 OK"), "got: {response}");
-        assert!(!response.contains("abc"), "response must not echo the code");
-        assert!(!response.contains("xyz"), "response must not echo the state");
-        assert_eq!(
-            server.await.unwrap(),
-            Some(LoopbackCallback { code: "abc".into(), state: "xyz".into() })
+    /// `on_callback` runs just after the client's read completes, so poll
+    /// briefly for the emitted callbacks rather than reading synchronously.
+    async fn wait_for_len(received: &Arc<Mutex<Vec<LoopbackCallback>>>, n: usize) {
+        for _ in 0..200 {
+            if received.lock().unwrap().len() >= n {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!(
+            "timed out waiting for {n} callbacks, got {}",
+            received.lock().unwrap().len()
         );
-
-        // Single-use: the listener is dropped, so the port no longer accepts.
-        assert!(TcpStream::connect(("127.0.0.1", port)).await.is_err());
     }
 
     #[tokio::test]
-    async fn non_callback_request_does_not_consume_the_single_shot() {
+    async fn keeps_serving_after_a_callback_and_stops_only_on_signal() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
-        let server = tokio::spawn(serve_once(listener));
+        assert!(port >= 1024, "OS must assign a non-privileged ephemeral port");
+        let (received, stop, handle) = spawn_serve(listener);
+
+        // First callback: served with 200, never echoing code/state.
+        let resp = send_callback(port, "abc", "xyz").await;
+        assert!(resp.starts_with("HTTP/1.1 200 OK"), "got: {resp}");
+        assert!(!resp.contains("abc"), "response must not echo the code");
+        assert!(!resp.contains("xyz"), "response must not echo the state");
+
+        // The KEY behavior of this fix: a first callback (which, from Rust's
+        // blind vantage, could be the forged `state=WRONG` one) does NOT tear
+        // the listener down — a SECOND connection still gets served, so the
+        // genuine callback that follows a forged decoy still lands.
+        let resp2 = send_callback(port, "real", "s").await;
+        assert!(resp2.starts_with("HTTP/1.1 200 OK"), "got: {resp2}");
+
+        wait_for_len(&received, 2).await;
+        assert_eq!(
+            *received.lock().unwrap(),
+            vec![
+                LoopbackCallback { code: "abc".into(), state: "xyz".into() },
+                LoopbackCallback { code: "real".into(), state: "s".into() },
+            ]
+        );
+
+        // Only the explicit stop signal closes the listener.
+        stop.send(()).unwrap();
+        handle.await.unwrap();
+        assert!(
+            TcpStream::connect(("127.0.0.1", port)).await.is_err(),
+            "port must refuse connections after stop"
+        );
+    }
+
+    #[tokio::test]
+    async fn non_callback_request_gets_404_and_does_not_stop_the_listener() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let (received, stop, handle) = spawn_serve(listener);
 
         // A browser prefetching /favicon.ico must get a 404 and be ignored.
         let mut junk = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
@@ -290,49 +433,57 @@ mod tests {
         junk.read_to_string(&mut junk_response).await.unwrap();
         assert!(junk_response.starts_with("HTTP/1.1 404"), "got: {junk_response}");
 
-        // The real callback still lands.
-        let mut client = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
-        client
-            .write_all(b"GET /callback?code=real&state=s HTTP/1.1\r\n\r\n")
-            .await
-            .unwrap();
-        let mut ok = String::new();
-        client.read_to_string(&mut ok).await.unwrap();
-
+        // The real callback still lands afterwards.
+        let resp = send_callback(port, "real", "s").await;
+        assert!(resp.starts_with("HTTP/1.1 200 OK"), "got: {resp}");
+        wait_for_len(&received, 1).await;
         assert_eq!(
-            server.await.unwrap(),
-            Some(LoopbackCallback { code: "real".into(), state: "s".into() })
+            *received.lock().unwrap(),
+            vec![LoopbackCallback { code: "real".into(), state: "s".into() }]
         );
+
+        stop.send(()).unwrap();
+        handle.await.unwrap();
     }
 
     #[tokio::test]
     async fn stalled_connection_does_not_block_a_later_legitimate_callback() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
-        let server = tokio::spawn(serve_once(listener));
+        let (received, stop, handle) = spawn_serve(listener);
 
         // Connect but never send a byte — a port scanner, security probe, or
-        // browser preconnect that opens the socket and goes silent. Held
-        // alive for the whole test so `serve_once` must move past it on its
-        // own (via the read timeout) rather than the peer disconnecting.
+        // browser preconnect that opens the socket and goes silent. Held alive
+        // for the whole test so the serve loop must move past it on its own
+        // (via the read timeout) rather than the peer disconnecting.
         let stalled = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
 
-        // The real callback, from a second connection made while the first
-        // is still open and silent.
-        let mut client = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
-        client
-            .write_all(b"GET /callback?code=real&state=s HTTP/1.1\r\n\r\n")
-            .await
-            .unwrap();
-        let mut response = String::new();
-        client.read_to_string(&mut response).await.unwrap();
-
-        assert!(response.starts_with("HTTP/1.1 200 OK"), "got: {response}");
+        // The real callback, from a second connection made while the first is
+        // still open and silent.
+        let resp = send_callback(port, "real", "s").await;
+        assert!(resp.starts_with("HTTP/1.1 200 OK"), "got: {resp}");
+        wait_for_len(&received, 1).await;
         assert_eq!(
-            server.await.unwrap(),
-            Some(LoopbackCallback { code: "real".into(), state: "s".into() })
+            *received.lock().unwrap(),
+            vec![LoopbackCallback { code: "real".into(), state: "s".into() }]
         );
 
         drop(stalled);
+        stop.send(()).unwrap();
+        handle.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn stop_before_any_callback_closes_the_listener() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let (_received, stop, handle) = spawn_serve(listener);
+
+        stop.send(()).unwrap();
+        handle.await.unwrap();
+        assert!(
+            TcpStream::connect(("127.0.0.1", port)).await.is_err(),
+            "port must refuse connections after stop"
+        );
     }
 }

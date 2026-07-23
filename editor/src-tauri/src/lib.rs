@@ -669,6 +669,7 @@ pub fn run() {
         .manage(unity_ipc::UnityIpcState::new())
         .manage(dap::DapState::new())
         .manage(search::ContentSearchState::new())
+        .manage(auth_loopback::LoopbackState::new())
         .invoke_handler(tauri::generate_handler![
             read_directory,
             read_file,
@@ -774,6 +775,7 @@ pub fn run() {
             auth::get_arcane_home_dir,
             auth::auth_deep_link_scheme,
             auth_loopback::auth_loopback_start,
+            auth_loopback::auth_loopback_stop,
             unity_ipc::unity_ipc_start,
             unity_ipc::unity_ipc_stop,
             unity_ipc::unity_ipc_send,
