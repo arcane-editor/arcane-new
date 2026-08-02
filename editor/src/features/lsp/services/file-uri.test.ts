@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { fileUri } from './document-sync';
+import { fileUri, pathFromFileUri } from './document-sync';
 
 describe('fileUri', () => {
   describe('posix', () => {
@@ -46,5 +46,47 @@ describe('fileUri', () => {
     const uri = fileUri('D:/Unity/Private Investigator/A.cs');
     expect(uri).not.toContain('\\');
     expect(uri).not.toContain('?');
+  });
+});
+
+describe('pathFromFileUri', () => {
+  // The bug this replaces: `decodeURIComponent(uri.replace('file://', ''))`
+  // left the third slash in front of the drive, and opening `/D:/x/A.cs` fails
+  // with os error 123 (see src-tauri/src/path_util.rs).
+  it('does not leave a slash in front of a Windows drive', () => {
+    expect(pathFromFileUri('file:///D:/Unity/proj/A.cs')).toBe('D:/Unity/proj/A.cs');
+  });
+
+  it('restores the two leading slashes of a UNC path', () => {
+    expect(pathFromFileUri('file://server/share/proj/A.cs')).toBe('//server/share/proj/A.cs');
+  });
+
+  it('keeps the leading slash of a POSIX path', () => {
+    expect(pathFromFileUri('file:///Users/me/proj/A.cs')).toBe('/Users/me/proj/A.cs');
+  });
+
+  it('decodes percent-escapes per segment', () => {
+    expect(pathFromFileUri('file:///Users/me/My%20Proj/A.cs')).toBe('/Users/me/My Proj/A.cs');
+  });
+
+  it('returns a non-file uri untouched (matches the call sites that do not pre-filter)', () => {
+    expect(pathFromFileUri('diff://staged/Assets/Foo.cs')).toBe('diff://staged/Assets/Foo.cs');
+  });
+
+  describe('round-trips fileUri', () => {
+    const paths = [
+      '/Users/me/proj/A.cs',
+      '/Users/me/My Proj/A.cs',
+      'D:/Unity/proj/A.cs',
+      'D:/Unity/UnityProject/Private Investigator/Assets/Scripts/A.cs',
+      'c:/x/y.cs',
+      '//server/share/proj/A.cs',
+      '//server/share/My Proj/A.cs',
+    ];
+    for (const p of paths) {
+      it(`survives ${p}`, () => {
+        expect(pathFromFileUri(fileUri(p))).toBe(p);
+      });
+    }
   });
 });

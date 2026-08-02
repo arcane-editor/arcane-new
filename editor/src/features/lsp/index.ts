@@ -9,6 +9,7 @@ export {
   forgetDocument,
   getOpenDocumentUris,
   fileUri,
+  pathFromFileUri,
 } from './services/document-sync';
 export { registerLspProviders, attachClientToProviders } from './services/providers';
 export {

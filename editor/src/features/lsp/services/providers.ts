@@ -17,7 +17,7 @@ import { useSettingsStore } from '../../../stores/settings';
 import { UNITY_LIFECYCLE_METHODS } from '../data/unity-lifecycle-snippets';
 import { CSHARP_KEYWORDS } from '../data/csharp-keywords';
 import { UNITY_API_NAMES } from '../data/unity-api-names';
-import { getOpenDocumentUris, syncDocumentOpen } from './document-sync';
+import { getOpenDocumentUris, pathFromFileUri, syncDocumentOpen } from './document-sync';
 import { lspManager } from './manager';
 import { LSP_BACKED_MONACO_LANGUAGES } from '../../../utils/language-detect';
 import { setPendingNavigation } from '../../../utils/editor-navigation';
@@ -725,7 +725,7 @@ export function registerLspProviders(monaco: Monaco): () => void {
     monaco.editor.setModelMarkers(model, 'lsp', markers);
     markLspReadyFromActivity();
 
-    const filePath = decodeURIComponent(uri.replace('file://', ''));
+    const filePath = pathFromFileUri(uri);
     const fileName = filePath.split('/').pop() || '';
     const severityMap: Record<number, 'error' | 'warning' | 'info' | 'hint'> = {
       1: 'error',
@@ -886,7 +886,7 @@ export function registerLspProviders(monaco: Monaco): () => void {
       const uri = resource.toString();
       if (!uri.startsWith('file://')) return false;
 
-      const filePath = decodeURIComponent(uri.replace('file://', ''));
+      const filePath = pathFromFileUri(uri);
       const fileName = filePath.split('/').pop() || filePath;
 
       // Same file — let Monaco handle internally

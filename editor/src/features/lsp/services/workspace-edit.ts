@@ -4,7 +4,7 @@ import type { Monaco } from '@monaco-editor/react';
 import { getMonacoInstance } from '../../../utils/monaco-instance';
 import { useWorkspaceStore } from '../../../stores/workspace';
 import { notify } from '../../../stores/notifications';
-import { fileUri } from './document-sync';
+import { fileUri, pathFromFileUri } from './document-sync';
 import { setApplyEditHandler } from './client';
 import type { LspPosition, LspRange } from './model-context';
 
@@ -53,13 +53,13 @@ export interface AppliedWorkspaceEditSummary {
 // ── URI helpers ─────────────────────────────────────────────────
 
 /**
- * Convert a `file://` URI to a filesystem path. Mirrors the conversion
- * used by providers.ts / EditorPanel (`decodeURIComponent` handles
- * spaces and non-ASCII path segments).
+ * Convert a `file://` URI to a filesystem path — the exact inverse of
+ * `fileUri()`, so a Windows drive path survives the round trip (`file:///D:/x`
+ * → `D:/x`, not `/D:/x`, which the Rust side then can't open).
  */
 function uriToFsPath(uri: string): string | null {
   if (!uri.startsWith('file://')) return null;
-  return decodeURIComponent(uri.replace(/^file:\/\//, ''));
+  return pathFromFileUri(uri);
 }
 
 /**
@@ -83,7 +83,9 @@ function findModelForUri(
   for (const model of monaco.editor.getModels()) {
     const modelUri = model.uri.toString();
     if (!modelUri.startsWith('file://')) continue;
-    if (decodeURIComponent(modelUri.replace(/^file:\/\//, '')) === fsPath) {
+    // Same inverse as `uriToFsPath` above — comparing a differently-decoded
+    // spelling against `fsPath` would make this fallback dead code.
+    if (pathFromFileUri(modelUri) === fsPath) {
       return model;
     }
   }

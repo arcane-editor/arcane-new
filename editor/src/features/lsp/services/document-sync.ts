@@ -58,6 +58,42 @@ export function fileUri(filePath: string): string {
 }
 
 /**
+ * Exact inverse of [`fileUri`]: `file:///D:/x/A.cs` → `D:/x/A.cs`,
+ * `file://server/share/A.cs` → `//server/share/A.cs`,
+ * `file:///Users/me/A.cs` → `/Users/me/A.cs`.
+ *
+ * The naive `decodeURIComponent(uri.replace('file://', ''))` this replaces got
+ * both Windows shapes wrong: it left the third slash in front of the drive
+ * (`/D:/x/A.cs`, which Win32 rejects with os error 123 — see
+ * `src-tauri/src/path_util.rs`), and it dropped the two leading slashes of a
+ * UNC path along with its host's authority position.
+ *
+ * Decoding per segment (not over the whole string) matters for the same reason
+ * `fileUri` encodes per segment: a `%2F` inside a file name must not decode
+ * into a separator.
+ *
+ * Non-`file://` input is returned unchanged, matching the previous behaviour
+ * at the call sites that don't pre-filter.
+ */
+export function pathFromFileUri(uri: string): string {
+  if (!uri.startsWith('file://')) return uri;
+  const decodeSegments = (p: string) => p.split('/').map(decodeURIComponent).join('/');
+  const rest = uri.slice('file://'.length);
+
+  // Empty authority (`file:///…`) — a POSIX or Windows-drive path.
+  if (rest.startsWith('/')) {
+    const body = rest.slice(1);
+    // The drive letter belongs to the path, so it must NOT keep that slash.
+    if (/^[A-Za-z]:(\/|$)/.test(body)) return decodeSegments(body);
+    return '/' + decodeSegments(body);
+  }
+
+  // Non-empty authority = a UNC host, which `fileUri` collapsed from
+  // `//host/share` to `file://host/share`; restore the leading slashes.
+  return '//' + decodeSegments(rest);
+}
+
+/**
  * Return the set of file:// URIs the LSP server has been told are open.
  * Used by the completion provider to detect URI mismatches and recover
  * by sending a `didOpen` if the model URI isn't tracked.
