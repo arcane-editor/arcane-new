@@ -1,6 +1,7 @@
 import { Store } from '@tauri-apps/plugin-store';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { normalizeLegacyPath } from './legacy-path';
+import { hashLabel } from './window-label';
 
 const RECENTS_FILE = 'recents.json';
 const WINDOWS_FILE = 'windows.json';
@@ -51,7 +52,7 @@ export interface RecentProject {
   lastOpened: number;
 }
 
-interface WindowState {
+export interface WindowState {
   workspacePath: string | null;
   openFilePaths: PersistedOpenFile[];
   activeFilePath: string | null;
@@ -158,43 +159,110 @@ function migrateOpenFile(entry: PersistedOpenFile | string): PersistedOpenFile |
   };
 }
 
+/**
+ * Upgrade a persisted recents array: Windows paths from pre-`path_util` builds
+ * (verbatim `\\?\...`) are normalized, then entries that collapse onto the same
+ * project are dropped — otherwise the legacy spelling lingers in the list
+ * beside the normalized one, since dedup is an exact string match. `name` is
+ * recomputed for rewritten entries because basename() splits on '/', so a
+ * `\\?\D:\...` entry had degenerated into its own full path.
+ *
+ * Shared by `hydratePersistence` and `refreshRecentsCache`: the latter re-reads
+ * the same store key, so skipping the migration there would resurrect legacy
+ * entries that the next `addRecentProject` would then persist for good.
+ */
+export function migrateRecents(arr: RecentProject[]): RecentProject[] {
+  const out: RecentProject[] = [];
+  const seenPaths = new Set<string>();
+  for (const r of arr) {
+    const path = normalizeLegacyPath(r.path);
+    if (seenPaths.has(path)) continue;
+    seenPaths.add(path);
+    out.push(path === r.path ? r : { ...r, path, name: basename(path) });
+  }
+  return out;
+}
+
+function replaceCachedRecents(arr: RecentProject[]): void {
+  const migrated = migrateRecents(arr);
+  cachedRecents.length = 0;
+  for (const r of migrated) cachedRecents.push(r);
+}
+
+/**
+ * Upgrade one persisted window entry, returning both the migrated state and
+ * the label it should now be stored under.
+ *
+ * A project window's label is `hashLabel(canonicalPath)`, so normalizing the
+ * workspace path changes the KEY, not just the value: a Windows entry written
+ * as `\\?\D:\Unity\Proj` hashes differently from `D:/Unity/Proj`, and
+ * `loadState()` — which looks up the *current* window's label — would find
+ * nothing and silently drop every open tab, the active file and the persisted
+ * pane widths. Re-keying here is what makes the value migration below
+ * reachable at all.
+ *
+ * Only re-keys when the existing label is demonstrably the hash of the old
+ * path: fixed labels (`main`, `welcome`) and any hand-made label keep theirs,
+ * since their state is not addressed by project path.
+ */
+export function migrateWindowEntry(
+  label: string,
+  state: WindowState,
+): { label: string; state: WindowState } {
+  const original = state.workspacePath;
+  const workspacePath = normalizeLegacyPath(original);
+  const migrated: WindowState = {
+    ...state,
+    workspacePath,
+    // Cast: the declared element type is `PersistedOpenFile`, but data
+    // written by old builds can still hold bare path strings — which
+    // `planFileRestore` accepts. `migrateOpenFile` preserves whichever
+    // shape it was given.
+    openFilePaths: (state.openFilePaths?.map(migrateOpenFile) ??
+      state.openFilePaths) as PersistedOpenFile[],
+    activeFilePath: normalizeLegacyPath(state.activeFilePath),
+  };
+
+  const rekey =
+    !!original &&
+    !!workspacePath &&
+    workspacePath !== original &&
+    label === hashLabel(original);
+
+  return { label: rekey ? hashLabel(workspacePath) : label, state: migrated };
+}
+
 export async function hydratePersistence(): Promise<void> {
   if (hydrated) return;
   if (hydratePromise) return hydratePromise;
   hydratePromise = (async () => {
     try {
       const recents = await getRecents();
-      const arr = (await recents.get<RecentProject[]>('projects')) ?? [];
-      cachedRecents.length = 0;
-      // Upgrade Windows paths persisted by pre-`path_util` builds (verbatim
-      // `\\?\...`), then drop entries that collapse onto the same project —
-      // otherwise the legacy spelling lingers in the list beside the
-      // normalized one. `name` is recomputed since basename() splits on '/'.
-      const seenPaths = new Set<string>();
-      for (const r of arr) {
-        const path = normalizeLegacyPath(r.path);
-        if (seenPaths.has(path)) continue;
-        seenPaths.add(path);
-        cachedRecents.push(path === r.path ? r : { ...r, path, name: basename(path) });
-      }
+      replaceCachedRecents((await recents.get<RecentProject[]>('projects')) ?? []);
     } catch { /* ignore */ }
 
     try {
       const windowsStoreInst = await getWindows();
       const entries = (await windowsStoreInst.entries<WindowState>()) ?? [];
+      const rekeyed: Array<{ from: string; to: string }> = [];
       for (const [label, state] of entries) {
-        cachedWindows[label] = {
-          ...state,
-          workspacePath: normalizeLegacyPath(state.workspacePath),
-          // Cast: the declared element type is `PersistedOpenFile`, but data
-          // written by old builds can still hold bare path strings — which
-          // `planFileRestore` accepts. `migrateOpenFile` preserves whichever
-          // shape it was given.
-          openFilePaths: (state.openFilePaths?.map(migrateOpenFile) ??
-            state.openFilePaths) as PersistedOpenFile[],
-          activeFilePath: normalizeLegacyPath(state.activeFilePath),
-        };
+        const next = migrateWindowEntry(label, state);
+        if (next.label !== label) {
+          rekeyed.push({ from: label, to: next.label });
+          // An entry already sitting on the new label was written by a
+          // post-normalization run of the same project — newer than this
+          // legacy one, so it wins and the legacy entry is only deleted.
+          if (cachedWindows[next.label]) continue;
+        }
+        cachedWindows[next.label] = next.state;
       }
+      // Persist the re-key so the next launch has nothing to migrate (and the
+      // orphaned legacy keys don't accumulate in windows.json).
+      for (const { from, to } of rekeyed) {
+        await windowsStoreInst.set(to, cachedWindows[to]);
+        await windowsStoreInst.delete(from);
+      }
+      if (rekeyed.length > 0) await windowsStoreInst.save();
     } catch { /* ignore */ }
 
     if (cachedRecents.length === 0 && Object.keys(cachedWindows).length === 0) {
@@ -271,13 +339,16 @@ export function loadRecentProjectsFull(): RecentProject[] {
  * window is also open) is visible here without a reload. Used by the
  * welcome window's focus-refresh so its recents list doesn't go stale while
  * it stays open alongside project windows.
+ *
+ * Runs the same `migrateRecents` upgrade as `hydratePersistence`: this reads
+ * the raw store key, so without it a focus-refresh would put legacy `\\?\D:\…`
+ * entries back beside their normalized duplicates — and the next
+ * `addRecentProject` would write that un-migrated array back to disk.
  */
 export async function refreshRecentsCache(): Promise<RecentProject[]> {
   try {
     const recents = await getRecents();
-    const arr = (await recents.get<RecentProject[]>('projects')) ?? [];
-    cachedRecents.length = 0;
-    for (const r of arr) cachedRecents.push(r);
+    replaceCachedRecents((await recents.get<RecentProject[]>('projects')) ?? []);
   } catch { /* ignore */ }
   return cachedRecents.slice();
 }

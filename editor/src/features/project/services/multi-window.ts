@@ -1,17 +1,10 @@
 import { WebviewWindow, getAllWebviewWindows, getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { open } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
-
-const HASH_PREFIX = 'editor-';
+import { hashLabel } from '../../../utils/window-label';
 
 function basename(p: string): string {
   return p.split('/').filter(Boolean).pop() ?? p;
-}
-
-function hashLabel(path: string): string {
-  let h = 5381 >>> 0;
-  for (let i = 0; i < path.length; i++) h = ((h * 33) ^ path.charCodeAt(i)) >>> 0;
-  return HASH_PREFIX + h.toString(16).padStart(8, '0');
 }
 
 async function findWindowByLabel(label: string): Promise<WebviewWindow | null> {
