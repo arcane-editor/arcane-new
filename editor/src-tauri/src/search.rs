@@ -525,7 +525,9 @@ fn visit_entry(
         return WalkState::Continue;
     }
 
-    let abs_path = entry.path().to_string_lossy().to_string();
+    // Normalized: search results carry this path back to the frontend, which
+    // splits it on `/` to render the file name. See `path_util`.
+    let abs_path = crate::path_util::to_ui_path(entry.path());
     let name = entry.file_name().to_string_lossy();
 
     // The walker yields root `.env`/`.env.*` only when NOT gitignored; mark any
@@ -746,7 +748,9 @@ where
 fn root_env_set(workspace_path: &str) -> HashSet<String> {
     walk_policy::root_env_files(Path::new(workspace_path))
         .into_iter()
-        .map(|p| p.to_string_lossy().to_string())
+        // Must match `abs_path`'s normalization — this set is membership-
+        // tested against it.
+        .map(crate::path_util::to_ui_path)
         .collect()
 }
 

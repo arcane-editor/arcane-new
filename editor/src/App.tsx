@@ -20,6 +20,7 @@ import {
   openWelcomeWindow,
   openFolderInNewWindow,
   setProjectWindowTitle,
+  initialBootSurface,
 } from './features/project';
 import { AiChatPanel, MaximizedAiOverlay, restoreLatestSessionForWorkspace } from './features/ai-panel';
 import {
@@ -98,6 +99,23 @@ function App() {
   const [unityPicker, setUnityPicker] = useState<UnityPickerMode | null>(null);
   const [newScriptDir, setNewScriptDir] = useState<string | null>(null);
   const persistedLayout = useMemo(() => loadLayoutSizes(), []);
+  // Suppresses the "no folder open" WelcomeScreen for the gap between first
+  // paint and the mount-effect restore below settling. Without it, every
+  // window opened with `?path=` flashes "Open a folder to get started"
+  // before the project renders — see `boot-gate` for the full rationale.
+  // `loadState()` is safe to read during render: main.tsx awaits
+  // `hydratePersistence()` before mounting App, so this initializer and the
+  // effect below observe the same persisted state.
+  const [bootSurface, setBootSurface] = useState(() =>
+    initialBootSurface(new URLSearchParams(location.search).get('path'), loadState()?.workspacePath),
+  );
+  // Name of the project being restored, for the boot shell's delayed label.
+  // Paths reach the frontend `/`-separated (src-tauri/src/path_util.rs), so
+  // this basename is correct on Windows too.
+  const bootProjectName = useMemo(() => {
+    const path = new URLSearchParams(location.search).get('path') ?? loadState()?.workspacePath;
+    return path ? (path.split('/').filter(Boolean).pop() ?? null) : null;
+  }, []);
   // Initial horizontal split: each side pane defaults to 30% of the window on
   // first open (editor takes the rest); persisted drags win. defaultSizes are
   // absolute px scaled to fit, and must have one entry per always-mounted pane.
@@ -203,7 +221,15 @@ function App() {
         // (path + "moved or deleted" hint) before rethrowing — this handler
         // only needs to keep the rejection from becoming unhandled.
         console.error('[App] Failed to restore workspace:', err);
+      }).finally(() => {
+        // Drop the boot gate either way: on success `workspacePath` is set
+        // and the project renders, on failure the user needs the
+        // WelcomeScreen (with its Open Folder button) rather than a shell
+        // that never resolves.
+        setBootSurface('welcome');
       });
+    } else {
+      setBootSurface('welcome');
     }
   }, []);
 
@@ -1176,6 +1202,18 @@ function App() {
             </div>
             <RightActivityBar />
           </>
+        ) : bootSurface === 'restoring' ? (
+          // Quiet shell for the first-paint → restore-settled gap, so opening
+          // a project reads as one continuous paint instead of
+          // blank → "Open a folder" → project. The label is delayed in CSS:
+          // a fast restore shows nothing at all (no new flash), while a slow
+          // one — a network share, a cold disk — still explains itself
+          // rather than sitting as a dead void.
+          <div className="workspace-booting">
+            <span className="workspace-booting-label">
+              {bootProjectName ? `Opening ${bootProjectName}…` : 'Opening…'}
+            </span>
+          </div>
         ) : (
           <WelcomeScreen />
         )}

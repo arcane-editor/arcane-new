@@ -13,10 +13,18 @@
       (function() {
         var id = null;
         try { id = localStorage.getItem('editor-theme-id'); } catch(e) {}
+        var light = id === 'light-plus';
         document.documentElement.setAttribute(
           'data-theme-type',
-          id === 'light-plus' ? 'light' : 'dark'
+          light ? 'light' : 'dark'
         );
+        // Paint the theme's base colour before the bundle (and therefore the
+        // stylesheet) has loaded. Without this the document keeps the UA
+        // default white for the whole webview-startup window — on Windows,
+        // where that startup is slowest, a project window would flash white
+        // on the way in. Mirrors `bg-primary` in
+        // features/theme/definitions/arcane-{light,dark}.ts.
+        document.documentElement.style.backgroundColor = light ? '#FAF7F0' : '#13121A';
       })();
     </script>
     <div id="root"></div>

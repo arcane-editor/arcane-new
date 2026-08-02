@@ -35,9 +35,26 @@ function isSyncablePath(filePath: string): boolean {
 }
 
 export function fileUri(filePath: string): string {
-  // Encode path components for valid URIs (spaces → %20, etc.)
-  const encoded = filePath.split('/').map(encodeURIComponent).join('/');
-  return 'file://' + encoded;
+  // Encode path components for valid URIs (spaces → %20, etc.). Split first
+  // so separators survive — encodeURIComponent would escape them.
+  const encodeSegments = (p: string) => p.split('/').map(encodeURIComponent).join('/');
+
+  // Windows drive path (`D:/x/y`). Paths reach the frontend `/`-separated
+  // (src-tauri/src/path_util.rs), so the drive would otherwise become its own
+  // segment and encode to `D%3A` — producing `file://D%3A/x/y`, where the
+  // drive is parsed as the URI *authority*. The drive must sit in the path:
+  // `file:///D:/x/y`. The colon is left literal, matching what VS Code and
+  // Roslyn-based servers emit.
+  const drive = /^([A-Za-z]:)\/(.*)$/.exec(filePath);
+  if (drive) return `file:///${drive[1]}/${encodeSegments(drive[2])}`;
+
+  // UNC (`//server/share/x`) — here the host genuinely IS the authority, so
+  // it collapses to `file://server/share/x` rather than gaining slashes.
+  const unc = /^\/\/([^/]+)\/(.*)$/.exec(filePath);
+  if (unc) return `file://${unc[1]}/${encodeSegments(unc[2])}`;
+
+  // POSIX: the leading empty segment supplies the third slash.
+  return 'file://' + encodeSegments(filePath);
 }
 
 /**

@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { safeUnlisten, listenScoped } from '../../../utils/tauri-listener';
+import { fileUri } from './document-sync';
 
 interface PendingRequest {
   resolve: (value: unknown) => void;
@@ -161,7 +162,10 @@ export class LspClient {
       throw err;
     }
 
-    const rootUri = `file://${encodeURI(workspacePath).replace(/%2F/g, '/')}`;
+    // Shares `fileUri` with document-sync so the root and the documents opened
+    // under it agree — a Windows `D:/...` root built by hand would come out as
+    // `file://D:/...` (drive as authority) and not match any didOpen URI.
+    const rootUri = fileUri(workspacePath);
 
     const initResult = await this.request('initialize', {
       processId: null,

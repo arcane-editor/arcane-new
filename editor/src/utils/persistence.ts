@@ -1,5 +1,6 @@
 import { Store } from '@tauri-apps/plugin-store';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { normalizeLegacyPath } from './legacy-path';
 
 const RECENTS_FILE = 'recents.json';
 const WINDOWS_FILE = 'windows.json';
@@ -133,6 +134,30 @@ function basename(p: string): string {
   return p.split('/').filter(Boolean).pop() ?? p;
 }
 
+/**
+ * Upgrade one persisted tab entry's Windows paths (see `normalizeLegacyPath`).
+ * Tolerates the pre-`PersistedOpenFile` shape, where an entry was a bare path
+ * string — `planFileRestore` still accepts those.
+ *
+ * `name` is only recomputed when it had degenerated into the full path, which
+ * is what the old `/`-splitting basename produced for a `\\?\D:\...` entry.
+ * Leaving it otherwise preserves purpose-built labels (e.g. diff tabs).
+ */
+function migrateOpenFile(entry: PersistedOpenFile | string): PersistedOpenFile | string {
+  if (typeof entry === 'string') return normalizeLegacyPath(entry);
+  const path = normalizeLegacyPath(entry.path);
+  const diff = entry.diff
+    ? { ...entry.diff, filePath: normalizeLegacyPath(entry.diff.filePath) }
+    : entry.diff;
+  if (path === entry.path && diff === entry.diff) return entry;
+  return {
+    ...entry,
+    path,
+    name: entry.name === entry.path ? basename(path) : entry.name,
+    ...(diff ? { diff } : {}),
+  };
+}
+
 export async function hydratePersistence(): Promise<void> {
   if (hydrated) return;
   if (hydratePromise) return hydratePromise;
@@ -141,13 +166,35 @@ export async function hydratePersistence(): Promise<void> {
       const recents = await getRecents();
       const arr = (await recents.get<RecentProject[]>('projects')) ?? [];
       cachedRecents.length = 0;
-      for (const r of arr) cachedRecents.push(r);
+      // Upgrade Windows paths persisted by pre-`path_util` builds (verbatim
+      // `\\?\...`), then drop entries that collapse onto the same project —
+      // otherwise the legacy spelling lingers in the list beside the
+      // normalized one. `name` is recomputed since basename() splits on '/'.
+      const seenPaths = new Set<string>();
+      for (const r of arr) {
+        const path = normalizeLegacyPath(r.path);
+        if (seenPaths.has(path)) continue;
+        seenPaths.add(path);
+        cachedRecents.push(path === r.path ? r : { ...r, path, name: basename(path) });
+      }
     } catch { /* ignore */ }
 
     try {
       const windowsStoreInst = await getWindows();
       const entries = (await windowsStoreInst.entries<WindowState>()) ?? [];
-      for (const [label, state] of entries) cachedWindows[label] = state;
+      for (const [label, state] of entries) {
+        cachedWindows[label] = {
+          ...state,
+          workspacePath: normalizeLegacyPath(state.workspacePath),
+          // Cast: the declared element type is `PersistedOpenFile`, but data
+          // written by old builds can still hold bare path strings — which
+          // `planFileRestore` accepts. `migrateOpenFile` preserves whichever
+          // shape it was given.
+          openFilePaths: (state.openFilePaths?.map(migrateOpenFile) ??
+            state.openFilePaths) as PersistedOpenFile[],
+          activeFilePath: normalizeLegacyPath(state.activeFilePath),
+        };
+      }
     } catch { /* ignore */ }
 
     if (cachedRecents.length === 0 && Object.keys(cachedWindows).length === 0) {

@@ -616,6 +616,40 @@ html, body, #root {
 }
 
 /* Welcome Screen */
+/* Shown only between first paint and the initial workspace restore settling.
+   Deliberately empty — its whole job is to occupy the space with the editor
+   background so a project window doesn't flash the "no folder open" welcome
+   state on the way in. See features/project/services/boot-gate.ts. */
+.workspace-booting {
+  height: 100%;
+  background: var(--bg-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Held invisible for the first 500ms so a normal (fast) project open shows a
+   single continuous background rather than a label that flashes on and off —
+   the point of the boot shell is to REMOVE a flash, not trade it for another.
+   `both` keeps the pre-delay opacity:0 applied during the delay. */
+.workspace-booting-label {
+  color: var(--text-secondary);
+  font-size: 13px;
+  opacity: 0;
+  animation: workspace-booting-fade 200ms ease 500ms both;
+}
+
+@keyframes workspace-booting-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workspace-booting-label {
+    animation-duration: 1ms;
+  }
+}
+
 .welcome-screen {
   display: flex;
   flex-direction: column;

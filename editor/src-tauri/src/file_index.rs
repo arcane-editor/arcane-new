@@ -151,7 +151,9 @@ pub fn walk_files(workspace_path: &str, extra_excludes: &[String]) -> Vec<String
         .filter_map(|entry| {
             let entry = entry.ok()?;
             if entry.file_type()?.is_file() {
-                Some(entry.path().to_string_lossy().to_string())
+                // Normalized: these are quick-open results the frontend
+                // splits on `/`. See `path_util`.
+                Some(crate::path_util::to_ui_path(entry.path()))
             } else {
                 None
             }
@@ -161,7 +163,9 @@ pub fn walk_files(workspace_path: &str, extra_excludes: &[String]) -> Vec<String
     let seen: HashSet<&str> = files.iter().map(|s| s.as_str()).collect();
     let extra_env_files: Vec<String> = walk_policy::root_env_files(Path::new(workspace_path))
         .into_iter()
-        .map(|p| p.to_string_lossy().to_string())
+        // Same normalization as the walk above — `seen` holds normalized
+        // paths, so the dedup below only works if these match.
+        .map(crate::path_util::to_ui_path)
         .filter(|s| !seen.contains(s.as_str()))
         .collect();
     drop(seen);

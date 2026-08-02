@@ -16,6 +16,7 @@ mod dap;
 mod auth;
 mod auth_loopback;
 mod graphify;
+mod path_util;
 mod sync_util;
 mod walk_policy;
 #[cfg(target_os = "macos")]
@@ -138,7 +139,9 @@ fn read_directory(path: String) -> Result<Vec<FileEntry>, String> {
                 return None;
             }
 
-            let path = entry.path().to_string_lossy().to_string();
+            // Normalized (see `path_util`): these become tree-node ids, which
+            // the frontend splits/joins on `/`.
+            let path = path_util::to_ui_path(entry.path());
 
             Some(FileEntry {
                 name,
@@ -216,11 +219,19 @@ fn dir_exists(path: String) -> bool {
 /// fails (e.g. the path doesn't exist, or a permissions error), so a bad
 /// path still flows through to the existing `dir_exists` guard instead of
 /// erroring out early here.
+///
+/// The result is normalized via `path_util::to_ui_path`. On Windows
+/// `std::fs::canonicalize` returns a *verbatim* (`\\?\`) path, and this
+/// value is persisted into recents and the `?path=` window param — where
+/// the frontend appends `/Assets` to it. Verbatim paths disable Win32
+/// separator normalization, so that join yields os error 123; see
+/// `path_util`'s module docs. Normalizing at this boundary is what keeps
+/// the whole frontend's `/`-joining valid.
 #[tauri::command]
 fn canonicalize_path(path: String) -> String {
     std::fs::canonicalize(&path)
-        .map(|p| p.to_string_lossy().into_owned())
-        .unwrap_or(path)
+        .map(path_util::to_ui_path)
+        .unwrap_or_else(|_| path_util::to_ui_path(&path))
 }
 
 /// `async`: full recursive `WalkDir` walk over the workspace (TS/JS project
@@ -261,15 +272,16 @@ fn scan_workspace_files(path: String) -> Result<Vec<String>, String> {
                 return None;
             }
             let path = entry.path();
-            // Check for .d.ts first (compound extension)
-            let path_str = path.to_string_lossy();
+            // Normalized: these seed the Monaco TS worker's in-memory FS,
+            // which keys files by `/`-separated path. See `path_util`.
+            let path_str = path_util::to_ui_path(path);
             if path_str.ends_with(".d.ts") {
-                return Some(path_str.to_string());
+                return Some(path_str);
             }
             // Check regular extensions
             let ext = path.extension()?.to_string_lossy();
             if valid_extensions.contains(&ext.as_ref()) {
-                Some(path_str.to_string())
+                Some(path_str)
             } else {
                 None
             }

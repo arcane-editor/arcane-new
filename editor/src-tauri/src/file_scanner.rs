@@ -655,7 +655,14 @@ pub async fn start_file_watcher(
                             let mut worktree_touched = false;
                             let mut index_needs_rebuild = false;
                             for path in &event.paths {
-                                let path_str = path.to_string_lossy().to_string();
+                                // Normalized here (not at each push below): these
+                                // strings become `file-index-changed` /
+                                // `file-content-changed` payloads and quick-open
+                                // index entries, all of which the frontend
+                                // splits on `/`. The git-state helpers below
+                                // normalize separators internally, so they are
+                                // unaffected. See `path_util`.
+                                let path_str = crate::path_util::to_ui_path(path);
                                 let inside_dot_git =
                                     is_inside_dot_git(&path_str, linked_git_dir_str.as_deref());
                                 if is_git_state_path(&path_str)
@@ -780,7 +787,9 @@ pub async fn start_file_watcher(
                             // burst has settled.
                             while let Ok(event) = event_rx.try_recv() {
                                 for path in &event.paths {
-                                    let path_str = path.to_string_lossy().to_string();
+                                    // Normalized for the same reason as the
+                                    // leading-edge loop above.
+                                    let path_str = crate::path_util::to_ui_path(path);
                                     let inside_dot_git = is_inside_dot_git(
                                         &path_str,
                                         linked_git_dir_str.as_deref(),
