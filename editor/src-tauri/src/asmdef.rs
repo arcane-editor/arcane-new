@@ -166,9 +166,14 @@ pub fn build_graph(workspace: &Path) -> Vec<AsmdefNode> {
 
         nodes.push(AsmdefNode {
             name,
+            // Normalized (see `path_util`): `root_folder` reaches the frontend
+            // as a path identity — `NewScriptModal` resolves a new script's
+            // owning assembly with `targetDir === n.root_folder ||
+            // targetDir.startsWith(n.root_folder + '/')`, and `targetDir` is
+            // already `/`-separated.
             root_folder: path
                 .parent()
-                .map(|p| p.to_string_lossy().to_string())
+                .map(crate::path_util::to_ui_path)
                 .unwrap_or_default(),
             references,
             define_constraints: array_of_strings(json.get("defineConstraints")),

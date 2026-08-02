@@ -611,9 +611,16 @@ pub async fn start_file_watcher(
     // the workspace root we watch below. Resolve it up front so the event
     // loop can recognize git-state changes there too.
     let linked_git_dir = resolve_linked_git_dir(&ws_path);
+    // Normalized like the event paths it is compared against below: it comes
+    // from `std::fs::canonicalize`, so on Windows it carries the verbatim
+    // `\\?\` prefix. The comparison helpers rewrite `\` → `/` but cannot strip
+    // that prefix, so an un-normalized value would try to match
+    // `//?/D:/main/.git/worktrees/x` against `D:/main/.git/worktrees/x/HEAD`
+    // and never fire — leaving a linked worktree's status bar on a stale
+    // branch after `git checkout`. See `path_util`.
     let linked_git_dir_str = linked_git_dir
         .as_ref()
-        .map(|p| p.to_string_lossy().to_string());
+        .map(crate::path_util::to_ui_path);
 
     // Debounce channel: collect events, emit after 500ms quiet period
     let (event_tx, mut event_rx) = mpsc::channel::<Event>(256);

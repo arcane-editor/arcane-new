@@ -311,7 +311,13 @@ fn scan_all_files(workspace_path: String) -> Result<Vec<String>, String> {
         .filter_map(|entry| {
             let entry = entry.ok()?;
             if entry.file_type().is_dir() { return None; }
-            Some(entry.path().to_string_lossy().to_string())
+            // Normalized (see `path_util`): callers treat these as `/`-separated
+            // identities — `stores/workspace.ts` filters the C# preload with
+            // `f.includes('/Assets/')` (zero matches on a `\`-separated path, so
+            // the Roslyn preload would silently never run for a Unity project),
+            // and the AI mention/context pickers slice the workspace prefix off
+            // them.
+            Some(path_util::to_ui_path(entry.path()))
         })
         .collect();
     Ok(files)
@@ -412,9 +418,13 @@ fn scan_node_modules_types(workspace_path: String) -> Result<Vec<String>, String
         .filter_map(|e| e.ok())
     {
         if entry.file_type().is_file() {
-            let path_str = entry.path().to_string_lossy();
+            // Normalized like every other emitter: the frontend turns these
+            // into `file://<path>` extra-lib URIs, which must use the same
+            // spelling as the model URIs built from normalized paths, or the
+            // same file ends up registered twice under two URIs.
+            let path_str = path_util::to_ui_path(entry.path());
             if path_str.ends_with(".d.ts") {
-                files.push(path_str.to_string());
+                files.push(path_str);
             }
         }
     }

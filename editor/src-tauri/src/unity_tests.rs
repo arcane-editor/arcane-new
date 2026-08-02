@@ -80,7 +80,13 @@ fn is_test_assembly(node: &asmdef::AsmdefNode) -> bool {
 /// assembly that actually owns the file). Used to skip files that belong to a
 /// nested asmdef when walking a parent test assembly.
 fn owning_root<'a>(path: &Path, roots: &'a [String]) -> Option<&'a str> {
-    let p = path.to_string_lossy();
+    // Normalized so both sides of the prefix match use one spelling: `roots`
+    // are `AsmdefNode::root_folder` values (normalized at the source), while
+    // `path` comes off a `WalkDir`, which on Windows appends `\` separators to
+    // whatever it was seeded with. A mixed comparison would stop a *nested*
+    // asmdef root from ever matching, so its files would be attributed to the
+    // parent assembly.
+    let p = crate::path_util::to_ui_path(path);
     roots
         .iter()
         .filter(|r| p.starts_with(r.as_str()))
@@ -179,7 +185,10 @@ pub fn discover(workspace: &Path) -> Vec<TestAssemblyDTO> {
                 Ok(c) => c,
                 Err(_) => continue,
             };
-            let file_path = file.to_string_lossy().to_string();
+            // Normalized (see `path_util`): `TestNode.file_path` is opened by
+            // the test panel, split on '/' for its display name, and compared
+            // against the editor's own path in the test CodeLens.
+            let file_path = crate::path_util::to_ui_path(&file);
             for raw in scan_file(&content) {
                 let fqn = if raw.namespace.is_empty() {
                     raw.class.clone()

@@ -234,7 +234,14 @@ fn record_meta(meta_path: &Path, state: &mut IndexState) {
     if let Some(caps) = guid_regex().captures(&content) {
         if let Some(g) = caps.get(1) {
             let guid = g.as_str().to_string();
-            let asset_str = asset.to_string_lossy().to_string();
+            // Normalized: `guid_to_path` values are handed to the frontend
+            // (`unity_index_guid_map`, `@asset` mentions) and `path_to_guid`
+            // keys are looked up with the frontend's own spelling — the
+            // `file-index-changed` payload `unity_index_apply_delta` receives.
+            // A raw walk path is `\`-separated on Windows, so `drop_path` would
+            // match nothing and `reingest_path` would insert a duplicate under
+            // the other spelling. See `path_util`.
+            let asset_str = crate::path_util::to_ui_path(&asset);
             state.guid_to_path.insert(guid.clone(), asset_str.clone());
             state.path_to_guid.insert(asset_str, guid);
         }
@@ -250,7 +257,10 @@ fn record_refs(asset_path: &Path, state: &mut IndexState) {
         Ok(c) => c,
         Err(_) => return,
     };
-    let path_str = asset_path.to_string_lossy().to_string();
+    // Normalized for the same reason as `record_meta`: `RefHit.path` is both a
+    // frontend-facing path and the value `drop_path` retains against when the
+    // frontend reports the file changed or was removed.
+    let path_str = crate::path_util::to_ui_path(asset_path);
 
     // Distinct guids referenced by this file (lenient parser, no panic).
     let distinct = unity_yaml::extract_guid_refs(&content);
@@ -299,15 +309,19 @@ fn compute_hygiene(workspace: &Path, files: &[PathBuf], state: &mut IndexState) 
             if let Some(asset) = asset_for_meta(path) {
                 let exists = existing.contains(asset.as_path()) || asset.is_dir();
                 if !exists {
-                    orphans.push(path.to_string_lossy().to_string());
+                    // Normalized: the hygiene report's paths are rendered and
+                    // opened by the frontend, which splits them on '/'.
+                    orphans.push(crate::path_util::to_ui_path(path));
                 }
             }
         } else {
             // Only flag missing-meta for files under Assets/.
             if path.starts_with(&assets_root) {
+                // Raw (not `to_ui_path`) — this one is an OS-level existence
+                // probe, not a value that crosses the boundary.
                 let meta = PathBuf::from(format!("{}.meta", path.to_string_lossy()));
                 if !meta.exists() {
-                    without_meta.push(path.to_string_lossy().to_string());
+                    without_meta.push(crate::path_util::to_ui_path(path));
                 }
             }
         }
