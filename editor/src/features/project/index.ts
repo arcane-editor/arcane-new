@@ -1,4 +1,5 @@
 export { default as WelcomeScreen } from './components/WelcomeScreen';
+export { default as ProjectRootBanner } from './components/ProjectRootBanner';
 export { initialBootSurface } from './services/boot-gate';
 export type { BootSurface } from './services/boot-gate';
 export {

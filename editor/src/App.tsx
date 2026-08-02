@@ -17,6 +17,7 @@ import {
 import { EditorPanel, Breadcrumbs, EditorErrorBoundary } from './features/editor';
 import {
   WelcomeScreen,
+  ProjectRootBanner,
   openWelcomeWindow,
   openFolderInNewWindow,
   setProjectWindowTitle,
@@ -1148,6 +1149,7 @@ function App() {
                             <SettingsPanel onClose={() => useUiStore.getState().setSettingsOpen(false)} />
                           ) : (
                             <>
+                              <ProjectRootBanner />
                               <TabBar />
                               {activeFilePath?.startsWith('auth://') ? (
                                 <AuthTab />

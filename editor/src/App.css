@@ -5291,3 +5291,57 @@ html, body, #root {
 .app-modal-tertiary:hover {
   color: var(--text-primary);
 }
+
+/* Explains why Unity features are off when the opened folder is inside (or
+   contains) a Unity project. See features/project/services/root-banner.ts. */
+.project-root-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  flex-shrink: 0;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+.project-root-banner-icon {
+  display: flex;
+  color: var(--accent, #d7ba7d);
+}
+
+.project-root-banner-text {
+  flex: 1;
+  min-width: 0;
+  line-height: 1.4;
+}
+
+.project-root-banner-action {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.project-root-banner-action:hover {
+  background: var(--bg-hover, var(--bg-secondary));
+}
+
+.project-root-banner-dismiss {
+  flex-shrink: 0;
+  display: flex;
+  padding: 2px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.project-root-banner-dismiss:hover {
+  color: var(--text-primary);
+}
