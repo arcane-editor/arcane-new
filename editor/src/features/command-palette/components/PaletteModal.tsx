@@ -6,7 +6,7 @@ import { getFileIcon } from '../../../utils/file-icons';
 import { useCommandsStore } from '../../../stores/commands';
 import { useWorkspaceStore } from '../../../stores/workspace';
 import { useProjectContextStore } from '../../../stores/project-context';
-import { isMac as platformIsMac } from '../../../utils/platform';
+import { formatKeybinding } from '../../../utils/format-keybinding';
 import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
 import { useDelayedTrue } from '../../../hooks/useDelayedTrue';
 
@@ -26,32 +26,6 @@ interface FuzzyFileResult {
   file_name: string;
   score: number;
   match_indices: number[];
-}
-
-// Named physical-key tokens (react-hotkeys-hook v5 matches on `event.code`,
-// so bindings use words like "backslash" instead of the literal character —
-// see the terminal.* commands in App.tsx). Render them as their symbol.
-const NAMED_KEY_LABELS: Record<string, string> = {
-  backslash: '\\',
-  bracketleft: '[',
-  bracketright: ']',
-  backquote: '`',
-};
-
-function formatKeybinding(kb: string): string {
-  const isMac = platformIsMac();
-  return kb
-    .split('+')
-    .map((part) => {
-      const p = part.toLowerCase().trim();
-      if (p === 'mod') return isMac ? '⌘' : 'Ctrl';
-      if (p === 'shift') return isMac ? '⇧' : 'Shift';
-      if (p === 'alt') return isMac ? '⌥' : 'Alt';
-      if (p === '`') return '`';
-      if (NAMED_KEY_LABELS[p]) return NAMED_KEY_LABELS[p];
-      return p.charAt(0).toUpperCase() + p.slice(1);
-    })
-    .join(isMac ? '' : '+');
 }
 
 function highlightMatches(text: string, matchIndices: number[]): React.ReactNode {
