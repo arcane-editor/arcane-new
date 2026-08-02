@@ -11,20 +11,31 @@
     <script>
       // Synchronous theme bootstrap to prevent FOUC
       (function() {
+        // `type` + `bg-primary` for every theme, duplicated from
+        // features/theme/definitions/*.ts because the bundle — and with it the
+        // theme registry — has not loaded yet. Safe to duplicate: the values
+        // are overwritten by `applyCssVariables` the moment the real theme is
+        // applied, so drift here costs at most a brief wrong-coloured flash,
+        // never a wrong final paint. Key must stay in sync with STORAGE_KEY in
+        // stores/theme.ts.
+        var THEMES = {
+          'arcane-dark':  ['dark',  '#13121A'],
+          'arcane-light': ['light', '#FAF7F0'],
+          'dark-plus':    ['dark',  '#1e1e1e'],
+          'light-plus':   ['light', '#ffffff'],
+          'dracula':      ['dark',  '#282a36'],
+          'monokai':      ['dark',  '#272822']
+        };
         var id = null;
-        try { id = localStorage.getItem('editor-theme-id'); } catch(e) {}
-        var light = id === 'light-plus';
-        document.documentElement.setAttribute(
-          'data-theme-type',
-          light ? 'light' : 'dark'
-        );
+        try { id = localStorage.getItem('editor-theme-id-v2'); } catch(e) {}
+        var theme = THEMES[id] || THEMES['arcane-dark'];
+        document.documentElement.setAttribute('data-theme-type', theme[0]);
         // Paint the theme's base colour before the bundle (and therefore the
         // stylesheet) has loaded. Without this the document keeps the UA
         // default white for the whole webview-startup window — on Windows,
         // where that startup is slowest, a project window would flash white
-        // on the way in. Mirrors `bg-primary` in
-        // features/theme/definitions/arcane-{light,dark}.ts.
-        document.documentElement.style.backgroundColor = light ? '#FAF7F0' : '#13121A';
+        // on the way in.
+        document.documentElement.style.backgroundColor = theme[1];
       })();
     </script>
     <div id="root"></div>

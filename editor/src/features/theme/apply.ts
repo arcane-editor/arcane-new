@@ -25,6 +25,13 @@ export function applyCssVariables(theme: ThemeDefinition): void {
   for (const [key, value] of Object.entries(theme.ui)) {
     root.style.setProperty(`--${key}`, value);
   }
+  // Overwrite the anti-FOUC bootstrap's inline background (index.html). That
+  // inline style outranks `html { background: var(--bg-primary) }` in App.css
+  // forever, so leaving it would pin every theme to the bootstrap's guess —
+  // which is only ever right for two of the six themes. Reassigning (rather
+  // than clearing) keeps a painted background at all times, so no theme can
+  // flash the UA white between the bootstrap and the stylesheet.
+  root.style.backgroundColor = theme.ui['bg-primary'];
 }
 
 // ─── Monaco Editor ───────────────────────────────────────────────

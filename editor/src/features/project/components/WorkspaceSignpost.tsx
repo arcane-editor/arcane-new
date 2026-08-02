@@ -1,17 +1,21 @@
 import { useCommandsStore } from '../../../stores/commands';
 import { useProjectContextStore } from '../../../stores/project-context';
-import { useUnityStore } from '../../../stores/unity';
+import { useUnityStore, type BridgeState } from '../../../stores/unity';
 import { useWorkspaceStore } from '../../../stores/workspace';
 import { signpostShortcuts } from '../services/signpost';
 
 /** Human-readable bridge state, mirroring the StatusBar cluster's tooltips. */
-function bridgeLabel(state: string): string {
+function bridgeLabel(state: BridgeState): string {
   switch (state) {
     case 'connected': return 'bridge connected';
     case 'reloading': return 'reloading…';
     case 'not-installed': return 'bridge not installed';
-    default: return 'bridge disconnected';
+    case 'disconnected': return 'bridge disconnected';
   }
+  // No `default:` on purpose: a fifth BridgeState must fail to compile here
+  // rather than silently render as "bridge disconnected".
+  const unhandled: never = state;
+  return unhandled;
 }
 
 /**

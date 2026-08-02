@@ -1,6 +1,12 @@
 import { isMac as platformIsMac } from './platform';
 
-/** Key tokens whose display form isn't just a capitalized name. */
+/**
+ * Named physical-key tokens (react-hotkeys-hook v5 matches on `event.code`, so
+ * bindings are registered with words like "backslash" instead of the literal
+ * character — see the terminal.* commands in App.tsx). Render them as their
+ * symbol, since the word is what the registry holds but the glyph is what is
+ * printed on the user's key.
+ */
 const NAMED_KEY_LABELS: Record<string, string> = {
   backslash: '\\',
   bracketleft: '[',
