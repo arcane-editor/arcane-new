@@ -39,16 +39,20 @@ function ProjectRootBanner() {
     setSetting('project.rootBanner.dismissed', [...dismissedPaths, workspacePath]);
   }
 
-  // `banner` is a const narrowed to non-null by the guard above, so TypeScript
-  // keeps that narrowing inside this closure — no assertion needed.
+  // Extracted once so the closures below capture a plain string instead of
+  // the nullable `banner` object.
   const projectPath = banner.projectPath;
 
   function openRoot() {
     openProjectInNewWindow(projectPath).catch((err) => {
       const msg = err instanceof Error ? err.message : String(err);
       notify.error(`Couldn't open ${projectPath}. (${msg})`);
-      // The detection is stale if the project is gone — stop offering it.
-      dismiss();
+      // Only drop the offer when the project is confirmed gone (tagged by
+      // `openProjectInNewWindow`'s `dir_exists` guard) — a generic rejection
+      // (e.g. a transient window-spawn failure) leaves the situation
+      // unchanged, so a retry should still be offered next time.
+      const missing = err instanceof Error && err.name === 'ProjectMissingError';
+      if (missing) dismiss();
     });
   }
 
