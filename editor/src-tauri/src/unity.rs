@@ -13,6 +13,10 @@ pub struct UnityProjectInfo {
     pub is_unity: bool,
     pub unity_version: Option<String>,
     pub nested_project_path: Option<String>,
+    /// Nearest ancestor directory that is a Unity project root, when the
+    /// opened folder sits *inside* a Unity project (e.g. `Assets/Scripts`).
+    /// `None` when the opened folder is itself a Unity root.
+    pub ancestor_project_path: Option<String>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -74,7 +78,7 @@ fn find_nested_unity_project(root: &Path) -> Option<String> {
     // First pass: check depth 1.
     for dir in &depth1_dirs {
         if is_unity_root(dir) {
-            return Some(dir.to_string_lossy().to_string());
+            return Some(crate::path_util::to_ui_path(dir));
         }
     }
 
@@ -98,7 +102,7 @@ fn find_nested_unity_project(root: &Path) -> Option<String> {
         depth2_dirs.sort();
         for dir in &depth2_dirs {
             if is_unity_root(dir) {
-                return Some(dir.to_string_lossy().to_string());
+                return Some(crate::path_util::to_ui_path(dir));
             }
         }
     }
@@ -106,11 +110,30 @@ fn find_nested_unity_project(root: &Path) -> Option<String> {
     None
 }
 
+/// Cap on how far up the tree to look for an enclosing Unity project. A real
+/// project sits 1–3 levels above a script folder; the cap keeps a pathological
+/// path from turning project-open into a long syscall loop.
+const MAX_ANCESTOR_DEPTH: usize = 12;
+
+/// Nearest ancestor of `dir` that is a Unity project root.
+///
+/// Excludes `dir` itself — `detect_unity_project` checks that separately and
+/// returns early, so this is only ever called for a non-root folder.
+fn find_ancestor_unity_project(dir: &Path) -> Option<String> {
+    dir.ancestors()
+        .skip(1)
+        .take(MAX_ANCESTOR_DEPTH)
+        .find(|candidate| is_unity_root(candidate))
+        .map(crate::path_util::to_ui_path)
+}
+
 /// Detect if the given workspace is a Unity project.
 /// Checks for Assets/ and ProjectSettings/ directories,
 /// reads ProjectSettings/ProjectVersion.txt for the Unity version.
 /// When the root is NOT a Unity project, scans depth-1 and depth-2 subdirectories
-/// for a nested Unity project and returns it in `nested_project_path`.
+/// for a nested Unity project (`nested_project_path`) and walks upward, bounded
+/// by `MAX_ANCESTOR_DEPTH`, for an enclosing one (`ancestor_project_path`) —
+/// covers both "opened the parent of my project" and "opened a subfolder of it".
 #[tauri::command]
 pub fn detect_unity_project(workspace_path: String) -> Result<UnityProjectInfo, String> {
     let root = Path::new(&workspace_path);
@@ -121,16 +144,20 @@ pub fn detect_unity_project(workspace_path: String) -> Result<UnityProjectInfo, 
             is_unity: true,
             unity_version,
             nested_project_path: None,
+            ancestor_project_path: None,
         });
     }
 
-    // Root is not Unity — scan for nested project.
+    // Root is not Unity — look both directions. Downward finds a project the
+    // user opened the parent of; upward finds one they opened a subfolder of.
     let nested = find_nested_unity_project(root);
+    let ancestor = find_ancestor_unity_project(root);
 
     Ok(UnityProjectInfo {
         is_unity: false,
         unity_version: None,
         nested_project_path: nested,
+        ancestor_project_path: ancestor,
     })
 }
 
@@ -868,9 +895,114 @@ mod tests {
         assert!(!result.is_unity, "root should NOT be Unity");
         assert!(result.unity_version.is_none());
         let nested = result.nested_project_path.expect("should find nested project");
-        assert_eq!(nested, child.to_string_lossy().to_string());
+        assert_eq!(nested, crate::path_util::to_ui_path(&child));
 
         fs::remove_dir_all(&dir).ok();
+    }
+
+    // ─── ancestor detection ────────────────────────────────────────────────────
+
+    #[test]
+    fn subfolder_reports_enclosing_project_as_ancestor() {
+        let dir = make_temp_dir("_ancestor_sub");
+        make_unity_project(&dir, "2021.3.45f2");
+        let scripts = dir.join("Assets").join("Scripts");
+        fs::create_dir_all(&scripts).unwrap();
+
+        let result = detect_unity_project(scripts.to_string_lossy().to_string()).unwrap();
+        assert!(!result.is_unity, "a Scripts folder is not itself a Unity root");
+        assert_eq!(
+            result.ancestor_project_path,
+            Some(crate::path_util::to_ui_path(&dir)),
+        );
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn deeply_nested_subfolder_still_finds_the_project() {
+        let dir = make_temp_dir("_ancestor_deep");
+        make_unity_project(&dir, "2021.3.45f2");
+        let deep = dir.join("Assets").join("A").join("B").join("C");
+        fs::create_dir_all(&deep).unwrap();
+
+        let result = detect_unity_project(deep.to_string_lossy().to_string()).unwrap();
+        assert_eq!(
+            result.ancestor_project_path,
+            Some(crate::path_util::to_ui_path(&dir)),
+        );
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn unity_root_itself_reports_no_ancestor() {
+        let dir = make_temp_dir("_ancestor_root");
+        make_unity_project(&dir, "2022.3.10f1");
+
+        let result = detect_unity_project(dir.to_string_lossy().to_string()).unwrap();
+        assert!(result.is_unity);
+        assert!(
+            result.ancestor_project_path.is_none(),
+            "a Unity root needs no ancestor",
+        );
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn plain_directory_reports_no_ancestor() {
+        let dir = make_temp_dir("_ancestor_none");
+        let plain = dir.join("just").join("files");
+        fs::create_dir_all(&plain).unwrap();
+
+        let result = detect_unity_project(plain.to_string_lossy().to_string()).unwrap();
+        assert!(!result.is_unity);
+        assert!(result.ancestor_project_path.is_none());
+        assert!(result.nested_project_path.is_none());
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn ancestor_search_stops_at_the_depth_cap() {
+        let dir = make_temp_dir("_ancestor_capped");
+        make_unity_project(&dir, "2021.3.45f2");
+
+        // MAX_ANCESTOR_DEPTH is 12, and the walk starts at the parent, so a
+        // project 13 levels up must NOT be found.
+        let mut deep = dir.clone();
+        for i in 0..13 {
+            deep = deep.join(format!("l{i}"));
+        }
+        fs::create_dir_all(&deep).unwrap();
+
+        let result = detect_unity_project(deep.to_string_lossy().to_string()).unwrap();
+        assert!(
+            result.ancestor_project_path.is_none(),
+            "walk must stop at the cap rather than climbing to the filesystem root",
+        );
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn nearest_ancestor_wins_when_projects_are_stacked() {
+        let outer = make_temp_dir("_ancestor_stacked");
+        make_unity_project(&outer, "2021.3.45f2");
+        let inner = outer.join("Assets").join("Inner");
+        make_unity_project(&inner, "2022.3.10f1");
+        let leaf = inner.join("Assets").join("Scripts");
+        fs::create_dir_all(&leaf).unwrap();
+
+        let result = detect_unity_project(leaf.to_string_lossy().to_string()).unwrap();
+        assert_eq!(
+            result.ancestor_project_path,
+            Some(crate::path_util::to_ui_path(&inner)),
+            "the closer project root must win",
+        );
+
+        fs::remove_dir_all(&outer).ok();
     }
 
     #[test]
