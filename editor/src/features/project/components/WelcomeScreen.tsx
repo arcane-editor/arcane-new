@@ -3,6 +3,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { openProjectInNewWindow } from '../services/multi-window';
 import { loadRecentProjects, removeRecentProject } from '../../../utils/persistence';
 import { notify } from '../../../stores/notifications';
+import WorkspaceSignpost from './WorkspaceSignpost';
 
 function WelcomeScreen({ hasWorkspace = false }: { hasWorkspace?: boolean }) {
   const [recents, setRecents] = useState<string[]>([]);
@@ -50,13 +51,7 @@ function WelcomeScreen({ hasWorkspace = false }: { hasWorkspace?: boolean }) {
   }
 
   if (hasWorkspace) {
-    return (
-      <div className="welcome-screen">
-        <h2>Editor</h2>
-        <p>Select a file from the explorer to get started</p>
-        <span className="welcome-shortcut">Ctrl+O / Cmd+O to open a different folder</span>
-      </div>
-    );
+    return <WorkspaceSignpost />;
   }
 
   return (
