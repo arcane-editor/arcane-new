@@ -798,26 +798,38 @@ Create `editor/src/utils/format-keybinding.test.ts`:
 import { describe, it, expect } from 'bun:test';
 import { formatKeybinding } from './format-keybinding';
 
-// platform() reads navigator/process at call time; these assert the shape that
-// holds on the test host (non-mac under bun), which is the Windows/Linux path —
-// the platform this work targets.
+// The platform is passed explicitly rather than sniffed, so these assert both
+// platforms deterministically on any host. This matters: bun defines
+// `navigator`, so `isMac()` returns true under `bun test` on a macOS machine
+// and false on a Windows CI box — sniffing would make the same assertions
+// pass on one and fail on the other.
 describe('formatKeybinding', () => {
-  it('renders mod as Ctrl and joins with +', () => {
-    expect(formatKeybinding('mod+p')).toBe('Ctrl+P');
+  describe('windows / linux', () => {
+    it('renders mod as Ctrl and joins with +', () => {
+      expect(formatKeybinding('mod+p', false)).toBe('Ctrl+P');
+    });
+
+    it('renders multi-modifier chords', () => {
+      expect(formatKeybinding('mod+shift+a', false)).toBe('Ctrl+Shift+A');
+    });
+
+    it('maps named key tokens to their symbols', () => {
+      expect(formatKeybinding('mod+backquote', false)).toBe('Ctrl+`');
+      expect(formatKeybinding('mod+shift+bracketright', false)).toBe('Ctrl+Shift+]');
+      expect(formatKeybinding('mod+backslash', false)).toBe('Ctrl+\\');
+    });
+
+    it('passes a literal backtick through', () => {
+      expect(formatKeybinding('mod+`', false)).toBe('Ctrl+`');
+    });
   });
 
-  it('renders multi-modifier chords', () => {
-    expect(formatKeybinding('mod+shift+a')).toBe('Ctrl+Shift+A');
-  });
-
-  it('maps named key tokens to their symbols', () => {
-    expect(formatKeybinding('mod+backquote')).toBe('Ctrl+`');
-    expect(formatKeybinding('mod+shift+bracketright')).toBe('Ctrl+Shift+]');
-    expect(formatKeybinding('mod+backslash')).toBe('Ctrl+\\');
-  });
-
-  it('passes a literal backtick through', () => {
-    expect(formatKeybinding('mod+`')).toBe('Ctrl+`');
+  describe('macos', () => {
+    it('renders modifier symbols with no separator', () => {
+      expect(formatKeybinding('mod+p', true)).toBe('⌘P');
+      expect(formatKeybinding('mod+shift+a', true)).toBe('⌘⇧A');
+      expect(formatKeybinding('mod+alt+right', true)).toBe('⌘⌥Right');
+    });
   });
 });
 ```
@@ -836,9 +848,11 @@ const ALL = [
   { id: 'file.save', keybinding: 'mod+s' },
 ];
 
+// Platform pinned to false (Windows/Linux chords) so assertions hold on any
+// test host — see the note in format-keybinding.test.ts.
 describe('signpostShortcuts', () => {
   it('returns the four signposted commands in a stable order', () => {
-    expect(signpostShortcuts(ALL).map((s) => s.id)).toEqual([
+    expect(signpostShortcuts(ALL, false).map((s) => s.id)).toEqual([
       'palette.quickOpen',
       'terminal.toggle',
       'view.aiPanel',
@@ -847,7 +861,7 @@ describe('signpostShortcuts', () => {
   });
 
   it('labels each shortcut for a newcomer', () => {
-    const byId = Object.fromEntries(signpostShortcuts(ALL).map((s) => [s.id, s.label]));
+    const byId = Object.fromEntries(signpostShortcuts(ALL, false).map((s) => [s.id, s.label]));
     expect(byId['palette.quickOpen']).toBe('Go to file');
     expect(byId['terminal.toggle']).toBe('Terminal');
     expect(byId['view.aiPanel']).toBe('Ask the AI');
@@ -855,7 +869,7 @@ describe('signpostShortcuts', () => {
   });
 
   it('formats the keys for display', () => {
-    const terminal = signpostShortcuts(ALL).find((s) => s.id === 'terminal.toggle');
+    const terminal = signpostShortcuts(ALL, false).find((s) => s.id === 'terminal.toggle');
     expect(terminal?.keys).toBe('Ctrl+`');
   });
 
@@ -863,21 +877,24 @@ describe('signpostShortcuts', () => {
   // opens the terminal", but mod+j is view.toggleBottomPanel — the terminal
   // just lives in that panel. Hardcoding would ship that same confusion.
   it('reads the real binding rather than a hardcoded one', () => {
-    const rebound = signpostShortcuts([
-      ...ALL.filter((b) => b.id !== 'terminal.toggle'),
-      { id: 'terminal.toggle', keybinding: 'mod+shift+t' },
-    ]);
+    const rebound = signpostShortcuts(
+      [
+        ...ALL.filter((b) => b.id !== 'terminal.toggle'),
+        { id: 'terminal.toggle', keybinding: 'mod+shift+t' },
+      ],
+      false,
+    );
     expect(rebound.find((s) => s.id === 'terminal.toggle')?.keys).toBe('Ctrl+Shift+T');
   });
 
   it('omits a command that has no binding rather than showing an empty key', () => {
-    const partial = signpostShortcuts(ALL.filter((b) => b.id !== 'view.aiPanel'));
+    const partial = signpostShortcuts(ALL.filter((b) => b.id !== 'view.aiPanel'), false);
     expect(partial.map((s) => s.id)).not.toContain('view.aiPanel');
     expect(partial).toHaveLength(3);
   });
 
   it('returns nothing when no commands are registered yet', () => {
-    expect(signpostShortcuts([])).toEqual([]);
+    expect(signpostShortcuts([], false)).toEqual([]);
   });
 });
 ```
@@ -909,9 +926,13 @@ const NAMED_KEY_LABELS: Record<string, string> = {
  * Shared so every surface that advertises a shortcut reads the same registry
  * string through the same formatter — a hardcoded chord elsewhere would drift
  * from the real binding without anything failing.
+ *
+ * `isMac` is a parameter defaulting to the sniffed platform so tests can pin
+ * it. Sniffing alone is not testable here: bun defines `navigator`, so
+ * `isMac()` is true under `bun test` on macOS and false on a Windows CI host,
+ * and the same assertion would pass on one and fail on the other.
  */
-export function formatKeybinding(kb: string): string {
-  const isMac = platformIsMac();
+export function formatKeybinding(kb: string, isMac: boolean = platformIsMac()): string {
   return kb
     .split('+')
     .map((part) => {
@@ -970,13 +991,16 @@ const SIGNPOSTED: Array<{ id: string; label: string }> = [
  */
 export function signpostShortcuts(
   bindings: Array<{ id: string; keybinding: string }>,
+  isMac?: boolean,
 ): SignpostShortcut[] {
   const byId = new Map(bindings.map((b) => [b.id, b.keybinding]));
   const out: SignpostShortcut[] = [];
   for (const { id, label } of SIGNPOSTED) {
     const kb = byId.get(id);
     if (!kb) continue;
-    out.push({ id, label, keys: formatKeybinding(kb) });
+    // Undefined `isMac` falls through to formatKeybinding's own default,
+    // which sniffs the platform — production callers pass nothing.
+    out.push({ id, label, keys: isMac === undefined ? formatKeybinding(kb) : formatKeybinding(kb, isMac) });
   }
   return out;
 }
