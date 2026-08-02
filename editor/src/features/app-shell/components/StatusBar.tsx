@@ -107,7 +107,7 @@ function StatusBar() {
           </span>
         )}
 
-        {isUnityProject && unityVersion && (
+        {isUnityProject && (
           <span
             className="status-bar-item"
             title={
@@ -134,7 +134,7 @@ function StatusBar() {
                       : 'var(--text-secondary)',
               }} />
             </span>
-            <span>Unity {unityVersion}</span>
+            <span>{unityVersion ? `Unity ${unityVersion}` : 'Unity'}</span>
           </span>
         )}
 
