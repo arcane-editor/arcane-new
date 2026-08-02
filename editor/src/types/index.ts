@@ -172,6 +172,9 @@ export interface SettingsSchema {
   'unity.explorer.assetsFirst': boolean;
   'unity.explorer.hideMeta': boolean;
   'explorer.autoReveal': boolean;
+  /** Workspace paths for which the "open the Unity project root" banner was
+   *  dismissed. Settings are global, so this is a list rather than a flag. */
+  'project.rootBanner.dismissed': string[];
   'unity.git.metaPairingChecks': boolean;
   'unity.git.yamlMergeIntegration': boolean;
   'unity.testRunner.enabled': boolean;

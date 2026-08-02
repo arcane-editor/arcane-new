@@ -10,6 +10,7 @@ interface UnityProjectInfo {
   is_unity: boolean;
   unity_version: string | null;
   nested_project_path: string | null;
+  ancestor_project_path: string | null;
 }
 
 interface UnityEditorInstall {
@@ -43,6 +44,7 @@ interface ProjectContextState {
   editorInstallPath: string | null;
   unityYamlMergePath: string | null;
   nestedProjectPath: string | null;
+  ancestorProjectPath: string | null;
 
   detectProjectType: (workspacePath: string) => Promise<UnityProjectInfo | null>;
   applyDetection: (workspacePath: string, info: UnityProjectInfo) => void;
@@ -60,6 +62,7 @@ export const useProjectContextStore = create<ProjectContextState>((set) => ({
   editorInstallPath: null,
   unityYamlMergePath: null,
   nestedProjectPath: null,
+  ancestorProjectPath: null,
 
   detectProjectType: async (workspacePath: string) => {
     try {
@@ -79,6 +82,7 @@ export const useProjectContextStore = create<ProjectContextState>((set) => ({
       isUnityProject: info.is_unity,
       unityVersion: info.unity_version,
       nestedProjectPath: info.nested_project_path,
+      ancestorProjectPath: info.ancestor_project_path,
     });
 
     if (info.is_unity) {
@@ -146,6 +150,7 @@ export const useProjectContextStore = create<ProjectContextState>((set) => ({
       editorInstallPath: null,
       unityYamlMergePath: null,
       nestedProjectPath: null,
+      ancestorProjectPath: null,
     });
     useWorkspaceStore.getState().setExcludePatterns([]);
   },

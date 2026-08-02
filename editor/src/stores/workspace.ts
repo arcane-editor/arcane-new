@@ -767,16 +767,24 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     // where to root the file tree. The detection is a fast Rust filesystem check
     // (Assets/ + ProjectSettings/). Running it before read_directory lets us root
     // the tree at <root>/Assets in a single read, with no root→Assets flicker.
-    let unityInfo: { is_unity: boolean; unity_version: string | null; nested_project_path: string | null } = {
+    let unityInfo: {
+      is_unity: boolean;
+      unity_version: string | null;
+      nested_project_path: string | null;
+      ancestor_project_path: string | null;
+    } = {
       is_unity: false,
       unity_version: null,
       nested_project_path: null,
+      ancestor_project_path: null,
     };
     try {
-      unityInfo = await invoke<{ is_unity: boolean; unity_version: string | null; nested_project_path: string | null }>(
-        'detect_unity_project',
-        { workspacePath: path },
-      );
+      unityInfo = await invoke<{
+        is_unity: boolean;
+        unity_version: string | null;
+        nested_project_path: string | null;
+        ancestor_project_path: string | null;
+      }>('detect_unity_project', { workspacePath: path });
     } catch (err) {
       console.warn('[Workspace] Unity detection failed:', err);
     }

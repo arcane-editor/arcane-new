@@ -7,3 +7,5 @@ export {
   openWelcomeWindow,
   setProjectWindowTitle,
 } from './services/multi-window';
+export { rootBannerFor } from './services/root-banner';
+export type { RootBanner, RootBannerInput } from './services/root-banner';

@@ -44,6 +44,7 @@ const DEFAULT_SETTINGS: SettingsSchema = {
   'unity.explorer.assetsFirst': false,
   'unity.explorer.hideMeta': true,
   'explorer.autoReveal': true,
+  'project.rootBanner.dismissed': [],
   'unity.git.metaPairingChecks': true,
   'unity.git.yamlMergeIntegration': true,
   'unity.testRunner.enabled': true,
