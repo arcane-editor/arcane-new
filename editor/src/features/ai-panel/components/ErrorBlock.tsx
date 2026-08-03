@@ -10,6 +10,7 @@
 import { useState } from 'react';
 import { AlertTriangle, ChevronRight, ChevronDown } from 'lucide-react';
 import { useAiStore, type AiMessage } from '../../../stores/ai';
+import { useAuthStore } from '../../../stores/auth';
 import { retryFailedTurn } from '../services/retry-turn';
 
 interface Props {
@@ -54,17 +55,30 @@ function ErrorBlock({ message }: Props) {
       </button>
       {expanded && <div className="ai-message-error-raw">{turnError.raw}</div>}
 
-      {turnError.retriable && (
+      {(turnError.retriable || turnError.kind === 'credits') && (
         <div className="ai-message-error-actions">
-          <button
-            type="button"
-            className="ai-message-error-retry"
-            onClick={handleRetry}
-            disabled={isAgentRunning || !isLatest}
-            title={isLatest ? 'Retry' : 'Only the most recent turn can be retried'}
-          >
-            Retry
-          </button>
+          {turnError.retriable && (
+            <button
+              type="button"
+              className="ai-message-error-retry"
+              onClick={handleRetry}
+              disabled={isAgentRunning || !isLatest}
+              title={isLatest ? 'Retry' : 'Only the most recent turn can be retried'}
+            >
+              Retry
+            </button>
+          )}
+          {turnError.kind === 'credits' && (
+            <button
+              type="button"
+              className="ai-message-error-retry"
+              onClick={() => {
+                void useAuthStore.getState().openBilling();
+              }}
+            >
+              Manage plan & credits
+            </button>
+          )}
         </div>
       )}
     </div>

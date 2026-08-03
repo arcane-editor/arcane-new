@@ -183,6 +183,10 @@ describe('classifyTurnError — [code:] marker', () => {
     const err = classifyTurnError('[code:unknown_thing] Some completely unexpected failure blob');
     expect(err.raw).toBe('Some completely unexpected failure blob');
   });
+
+  it('maps a gateway_timeout marker to kind timeout, title "Connection timed out"', () => {
+    expect(classifyTurnError('[code:gateway_timeout] upstream timed out').kind).toBe('timeout');
+  });
 });
 
 // ---- classifyServerCode ----
@@ -424,5 +428,25 @@ describe('hasRenderableContent', () => {
 
   it('is false when undefined', () => {
     expect(hasRenderableContent(undefined)).toBe(false);
+  });
+});
+
+// ---- new server codes + credits kind ----
+
+describe('new server codes + credits kind', () => {
+  it('maps provider/gateway codes', () => {
+    expect(classifyServerCode('provider_rate_limit')).toBe('rate_limit');
+    expect(classifyServerCode('provider_auth_failure')).toBe('server');
+    expect(classifyServerCode('provider_unavailable')).toBe('server');
+    expect(classifyServerCode('gateway_timeout')).toBe('timeout');
+    expect(classifyServerCode('nonsense')).toBeNull();
+  });
+
+  it('classifies out-of-credits as a non-retriable credits error', () => {
+    const e = classifyTurnError('You are out of credits. Upgrade your plan or add a top-up to keep using AI.');
+    expect(e.kind).toBe('credits');
+    expect(e.retriable).toBe(false);
+    const e2 = classifyTurnError('You are out of AI credits. Open Account to upgrade or buy credits.');
+    expect(e2.kind).toBe('credits');
   });
 });

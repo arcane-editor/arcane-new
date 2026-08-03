@@ -3,6 +3,7 @@ import { AlertCircle, AlertTriangle, Boxes, CheckCircle, Circle, GitBranch, Load
 import { invoke } from '@tauri-apps/api/core';
 import { openPath } from '@tauri-apps/plugin-opener';
 import { useWorkspaceStore } from '../../../stores/workspace';
+import { useAuthStore } from '../../../stores/auth';
 import { useUiStore } from '../../../stores/ui';
 import { useProjectContextStore } from '../../../stores/project-context';
 import { useUnityStore } from '../../../stores/unity';
@@ -41,6 +42,7 @@ function StatusBar() {
   const unityCompiling = useUnityStore((s) => s.isCompiling);
   const isGitRepo = useGitStore((s) => s.isGitRepo);
   const branch = useGitStore((s) => s.branch);
+  const credits = useAuthStore((s) => s.credits);
   const activeFile = openFiles.find((f) => f.path === activeFilePath);
   const language = activeFile ? detectLanguageName(activeFile.name) : null;
   const lspStatus = useUiStore((s) => s.lspStatus);
@@ -199,6 +201,17 @@ function StatusBar() {
       </div>
 
       <div className="status-bar-right">
+        {credits !== null && credits < 10 && (
+          <span
+            className="status-bar-item clickable"
+            onClick={() => void useAuthStore.getState().openBilling()}
+            title="You're almost out of AI credits — click to manage your plan."
+            style={{ cursor: 'pointer', color: 'var(--warning)' }}
+          >
+            <span className="icon"><AlertTriangle size={14} /></span>
+            <span>{Math.max(0, Math.floor(credits))} credits</span>
+          </span>
+        )}
         <InlineSuggestStatusItem />
         <GraphifyStatusBadge />
         {cursorPosition && (

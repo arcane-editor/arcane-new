@@ -15,6 +15,7 @@ import type { AiMessage } from '../../../stores/ai';
 
 export type TurnErrorKind =
   | 'auth'
+  | 'credits'
   | 'rate_limit'
   | 'server'
   | 'network'
@@ -76,6 +77,15 @@ export function classifyTurnError(raw: string): TurnError {
         retriable: true,
       };
     }
+    if (kind === 'timeout') {
+      return {
+        kind: 'timeout',
+        title: 'Connection timed out',
+        detail: 'This is usually temporary — try again in a moment.',
+        raw: stripped,
+        retriable: true,
+      };
+    }
     return classifyTurnErrorTable(stripped);
   }
   return classifyTurnErrorTable(raw);
@@ -92,6 +102,16 @@ function classifyTurnErrorTable(raw: string): TurnError {
       detail: 'You were signed out. Sign back in, then press Retry.',
       raw,
       retriable: true,
+    };
+  }
+
+  if (lower.includes('out of credits') || lower.includes('out of ai credits')) {
+    return {
+      kind: 'credits',
+      title: 'Out of credits',
+      detail: 'Upgrade your plan or add a top-up to continue.',
+      raw,
+      retriable: false,
     };
   }
 
@@ -186,6 +206,14 @@ export function classifyServerCode(code: string | undefined): TurnErrorKind | nu
       return 'server';
     case 'server_error':
       return 'server';
+    case 'provider_rate_limit':
+      return 'rate_limit';
+    case 'provider_auth_failure':
+      return 'server';
+    case 'provider_unavailable':
+      return 'server';
+    case 'gateway_timeout':
+      return 'timeout';
     default:
       return null;
   }
