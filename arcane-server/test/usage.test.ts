@@ -72,4 +72,32 @@ describe('recordUsage', () => {
         const r = await getUserBillingRow(env.arcane_db, user.id);
         expect(r!.plan_credits_micro).toBe(5_000_000 - usdToMicro(estimateCost(model, inTok, outTok)));
     });
+
+    it('skipDebit meters tokens without touching the credit balance', async () => {
+        const user = await seedPasswordUser('skipdebit@test.dev', 'password123');
+        await env.arcane_db.prepare('UPDATE users SET plan_credits_micro = 500000 WHERE id = ?')
+            .bind(user.id).run();
+
+        await recordUsage(env.arcane_db, user.id, '@cf/qwen/qwen2.5-coder-32b-instruct',
+            1000, 100, 50, { taskType: 'inline', skipDebit: true });
+
+        const bal = await env.arcane_db.prepare('SELECT plan_credits_micro FROM users WHERE id = ?')
+            .bind(user.id).first<{ plan_credits_micro: number }>();
+        expect(bal?.plan_credits_micro).toBe(500000); // untouched
+
+        const log = await env.arcane_db.prepare(
+            'SELECT task_type, input_tokens FROM request_logs WHERE user_id = ? ORDER BY created_at DESC LIMIT 1'
+        ).bind(user.id).first<{ task_type: string; input_tokens: number }>();
+        expect(log).toMatchObject({ task_type: 'inline', input_tokens: 1000 }); // still metered
+    });
+
+    it('fallbackModel lands in request_logs.fallback_model', async () => {
+        const user = await seedPasswordUser('fbmodel@test.dev', 'password123');
+        await recordUsage(env.arcane_db, user.id, '@cf/qwen/qwen2.5-coder-32b-instruct',
+            10, 10, 5, { fallbackModel: '@cf/qwen/qwen2.5-coder-32b-instruct' });
+        const log = await env.arcane_db.prepare(
+            'SELECT fallback_model FROM request_logs WHERE user_id = ? ORDER BY created_at DESC LIMIT 1'
+        ).bind(user.id).first<{ fallback_model: string | null }>();
+        expect(log?.fallback_model).toBe('@cf/qwen/qwen2.5-coder-32b-instruct');
+    });
 });

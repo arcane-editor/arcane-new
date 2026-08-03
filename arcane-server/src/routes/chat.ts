@@ -59,6 +59,7 @@ chatRouter.post('/v1/chat/completions', async (c) => {
     const errCtx = { userId: user.sub, model: body.model, reasoningLevel: body.metadata?.reasoningLevel, taskType: body.metadata?.taskType };
 
     if (!body.stream) {
+        let fallbackModel: string | undefined;
         try {
             let content = '';
             const toolCalls: Array<{ id: string; name: string; arguments: string }> = [];
@@ -67,6 +68,7 @@ chatRouter.post('/v1/chat/completions', async (c) => {
             let cachedInputTokens = 0;
 
             for await (const event of streamCompletion(body, env)) {
+                if (event.type === 'fallback') { fallbackModel = event.model; continue; }
                 if (event.type === 'text') content += event.content;
                 if (event.type === 'tool_call') toolCalls.push({ id: event.id, name: event.name, arguments: event.arguments });
                 if (event.type === 'usage') {
@@ -79,7 +81,7 @@ chatRouter.post('/v1/chat/completions', async (c) => {
             }
 
             const durationMs = Date.now() - startTime;
-            await logUsage(env.arcane_db, user, body.model, inputTokens, outputTokens, durationMs, {
+            await logUsage(env.arcane_db, user, fallbackModel ?? body.model, inputTokens, outputTokens, durationMs, {
                 taskType: body.metadata?.taskType,
                 turnIndex: body.metadata?.telemetry?.turnIndex,
                 toolErrorCount: body.metadata?.telemetry?.toolErrorCount,
@@ -91,6 +93,7 @@ chatRouter.post('/v1/chat/completions', async (c) => {
                 groundingToolCalls: body.metadata?.telemetry?.groundingToolCalls,
                 groundingUnavailable: body.metadata?.telemetry?.groundingUnavailable,
                 lastTurnLatencyMs: body.metadata?.telemetry?.lastTurnLatencyMs,
+                fallbackModel,
             });
 
             return c.json({
@@ -130,9 +133,11 @@ chatRouter.post('/v1/chat/completions', async (c) => {
         let inputTokens = 0;
         let outputTokens = 0;
         let cachedInputTokens = 0;
+        let fallbackModel: string | undefined;
 
         try {
             for await (const event of streamCompletion(body, env)) {
+                if (event.type === 'fallback') { fallbackModel = event.model; continue; }
                 if (event.type === 'usage') {
                     inputTokens = event.input_tokens;
                     outputTokens = event.output_tokens;
@@ -152,7 +157,7 @@ chatRouter.post('/v1/chat/completions', async (c) => {
             });
         } finally {
             const durationMs = Date.now() - startTime;
-            await logUsage(env.arcane_db, user, body.model, inputTokens, outputTokens, durationMs, {
+            await logUsage(env.arcane_db, user, fallbackModel ?? body.model, inputTokens, outputTokens, durationMs, {
                 taskType: body.metadata?.taskType,
                 turnIndex: body.metadata?.telemetry?.turnIndex,
                 toolErrorCount: body.metadata?.telemetry?.toolErrorCount,
@@ -164,6 +169,7 @@ chatRouter.post('/v1/chat/completions', async (c) => {
                 groundingToolCalls: body.metadata?.telemetry?.groundingToolCalls,
                 groundingUnavailable: body.metadata?.telemetry?.groundingUnavailable,
                 lastTurnLatencyMs: body.metadata?.telemetry?.lastTurnLatencyMs,
+                fallbackModel,
             });
         }
     });

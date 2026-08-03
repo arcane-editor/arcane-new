@@ -59,6 +59,7 @@ export interface RequestLogRow {
     grounding_tool_calls: number | null;
     grounding_unavailable: number | null;
     last_turn_latency_ms: number | null;
+    fallback_model: string | null;
 }
 
 export interface UserWithUsageRow extends UserRow {
@@ -181,6 +182,9 @@ export async function createRequestLog(
         groundingLintHits?: number; loopGuardHits?: number; escalated?: boolean;
         groundingToolCalls?: number; groundingUnavailable?: number;
         lastTurnLatencyMs?: number | null;
+        // Provider-fallback observability (migration 0014). Non-null ⇒ a
+        // fallback fired and `model` above already records the serving id.
+        fallbackModel?: string;
     },
 ): Promise<void> {
     await db.prepare(
@@ -188,8 +192,8 @@ export async function createRequestLog(
          (user_id, model, input_tokens, output_tokens, cost_usd, duration_ms,
           task_type, turn_index, tool_error_count, repair_count, cached_input_tokens,
           grounding_lint_hits, loop_guard_hits, escalated, grounding_tool_calls,
-          grounding_unavailable, last_turn_latency_ms)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          grounding_unavailable, last_turn_latency_ms, fallback_model)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).bind(
         data.userId, data.model, data.inputTokens, data.outputTokens, data.costUsd, data.durationMs,
         data.taskType ?? null, data.turnIndex ?? null, data.toolErrorCount ?? null,
@@ -197,7 +201,7 @@ export async function createRequestLog(
         data.groundingLintHits ?? null, data.loopGuardHits ?? null,
         data.escalated === undefined ? null : data.escalated ? 1 : 0,
         data.groundingToolCalls ?? null, data.groundingUnavailable ?? null,
-        data.lastTurnLatencyMs ?? null,
+        data.lastTurnLatencyMs ?? null, data.fallbackModel ?? null,
     ).run();
 }
 

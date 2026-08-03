@@ -157,28 +157,89 @@ export function convertTools(tools?: ToolDefinition[]): ToolSet | undefined {
 // `statusCode` carries the mapped HTTP status (internal codes 3036/3040 →
 // 429), so check that first — the stringified message never contains "429".
 // The message-text fallback covers rate-limit/capacity wording and the raw
-// internal codes for errors that escape normalization.
-function classifyStreamError(error: unknown): 'rate_limit' | 'model_error' {
-    if (typeof error === 'object' && error !== null && (error as { statusCode?: number }).statusCode === 429) {
-        return 'rate_limit';
+// internal codes for errors that escape normalization. External-provider
+// (MiniMax/Moonshot, via the gateway /compat endpoint) errors get their own
+// provider_* codes so ops can tell "our CF model is rate-limited" apart from
+// "the external provider is down/unauthorized/timed out".
+export type StreamErrorCode =
+    | 'rate_limit' | 'model_error'
+    | 'provider_rate_limit' | 'provider_auth_failure' | 'provider_unavailable' | 'gateway_timeout';
+
+export function classifyStreamError(error: unknown, externalModel: boolean): StreamErrorCode {
+    const status = typeof error === 'object' && error !== null
+        ? (error as { statusCode?: number }).statusCode
+        : undefined;
+    if (externalModel) {
+        if (status === 429) return 'provider_rate_limit';
+        if (status === 401 || status === 403) return 'provider_auth_failure';
+        if (status !== undefined && status >= 500) return 'provider_unavailable';
+        if (/timeout|timed out/i.test(String(error))) return 'gateway_timeout';
+        return 'model_error';
     }
+    if (status === 429) return 'rate_limit';
     return /rate limit|\b3036\b|\b3040\b|capacity/i.test(String(error)) ? 'rate_limit' : 'model_error';
 }
 
-export async function* streamCompletion(req: ChatCompletionRequest, env: LlmEnv): AsyncGenerator<StreamEvent> {
+// One-shot CF-catalog fallback per external model, so chat survives a
+// MiniMax/Moonshot outage. Keys must exist in MODEL_CATALOG (guard test A1).
+const FALLBACK_MODEL: Record<string, string> = {
+    'custom-minimax/MiniMax-M3': '@cf/qwen/qwen2.5-coder-32b-instruct',
+    'custom-moonshot/kimi-k3':   '@cf/zai-org/glm-5.2',
+};
+
+export function fallbackModelFor(modelId: string): string | null {
+    return FALLBACK_MODEL[modelId] ?? null;
+}
+
+/** 400-class request errors would fail identically anywhere — no fallback.
+ *  Everything else (5xx, 429, network/timeout, provider 401/403) falls back. */
+export function shouldFallback(error: unknown): boolean {
+    const status = typeof error === 'object' && error !== null
+        ? (error as { statusCode?: number }).statusCode
+        : undefined;
+    if (status !== undefined && status >= 400 && status < 500
+        && status !== 401 && status !== 403 && status !== 429) return false;
+    return true;
+}
+
+type StreamTextFn = typeof streamText;
+
+export async function* streamCompletion(
+    req: ChatCompletionRequest, env: LlmEnv, streamTextImpl: StreamTextFn = streamText,
+): AsyncGenerator<StreamEvent> {
+    let modelId = req.model;
+    let allowFallback = true;
+    // A missing secret / account id is a config failure, not a model failure —
+    // fall back immediately (and loudly) instead of 500ing the request.
+    try {
+        resolveModel(modelId, env, { skipCache: true });
+    } catch (err) {
+        const fb = err instanceof LlmConfigError ? fallbackModelFor(modelId) : null;
+        if (!fb) throw err;
+        console.error(JSON.stringify({ event: 'provider_config_fallback', model: modelId, fallback: fb, message: String(err) }));
+        yield { type: 'fallback', model: fb };
+        modelId = fb;
+        allowFallback = false;
+    }
+    yield* streamOnce(req, modelId, env, allowFallback, streamTextImpl);
+}
+
+async function* streamOnce(
+    req: ChatCompletionRequest, modelId: string, env: LlmEnv,
+    allowFallback: boolean, streamTextImpl: StreamTextFn,
+): AsyncGenerator<StreamEvent> {
     // A cached replay of a sampled completion is semantically wrong — chat
     // completions are non-deterministic (temperature-sampled), so bypass the
     // gateway cache for this path.
-    const model = resolveModel(req.model, env, { skipCache: true });
+    const model = resolveModel(modelId, env, { skipCache: true });
     const messages = convertMessages(req.messages);
     const tools = convertTools(req.tools);
 
     // Clamp output tokens to the model's published cap (Workers AI models vary).
-    const cap = getMaxOutput(req.model);
-    const requested = req.max_tokens ?? 8192;
-    const maxOutputTokens = Math.min(requested, cap);
+    const cap = getMaxOutput(modelId);
+    const maxOutputTokens = Math.min(req.max_tokens ?? 8192, cap);
 
-    const result = streamText({
+    const result = streamTextImpl({
         model,
         messages,
         ...(tools ? { tools } : {}),
@@ -186,12 +247,15 @@ export async function* streamCompletion(req: ChatCompletionRequest, env: LlmEnv)
         temperature: req.temperature,
     });
 
+    let yieldedContent = false;
     for await (const part of result.fullStream) {
         switch (part.type) {
             case 'text-delta':
+                yieldedContent = true;
                 yield { type: 'text', content: part.text };
                 break;
             case 'tool-call':
+                yieldedContent = true;
                 yield {
                     type: 'tool_call',
                     id: part.toolCallId,
@@ -215,11 +279,24 @@ export async function* streamCompletion(req: ChatCompletionRequest, env: LlmEnv)
                 };
                 break;
             case 'reasoning-delta':
+                yieldedContent = true;
                 yield { type: 'thinking', thought: part.text, signature: '' };
                 break;
-            case 'error':
-                yield { type: 'error', code: classifyStreamError(part.error), message: String(part.error) };
+            case 'error': {
+                const external = isExternalModel(modelId);
+                const fb = fallbackModelFor(modelId);
+                if (allowFallback && fb && !yieldedContent && shouldFallback(part.error)) {
+                    console.error(JSON.stringify({
+                        event: 'provider_fallback', model: modelId, fallback: fb,
+                        code: classifyStreamError(part.error, external), message: String(part.error),
+                    }));
+                    yield { type: 'fallback', model: fb };
+                    yield* streamOnce(req, fb, env, false, streamTextImpl);
+                    return;
+                }
+                yield { type: 'error', code: classifyStreamError(part.error, external), message: String(part.error) };
                 break;
+            }
         }
     }
 }

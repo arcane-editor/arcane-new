@@ -22,6 +22,10 @@ export interface UsageExtras {
     groundingToolCalls?: number;
     groundingUnavailable?: number;
     lastTurnLatencyMs?: number | null;
+    /** Actual serving model when a provider fallback fired (non-null ⇒ fallback). */
+    fallbackModel?: string;
+    /** Inline completions: meter tokens but never debit credits (allowance model). */
+    skipDebit?: boolean;
 }
 
 /**
@@ -46,14 +50,15 @@ export async function recordUsage(
     const cost = estimateCost(model, inputTokens, outputTokens);
     const micro = usdToMicro(cost);
     const periodStart = getCurrentPeriodStart();
+    const { skipDebit, ...logExtras } = extras;
     await Promise.all([
         upsertUsagePeriod(db, userId, periodStart, getNextPeriodStart(), inputTokens, outputTokens, cost)
             .catch(err => console.error('Failed to log usage period:', err)),
         createRequestLog(db, {
             userId, model, inputTokens, outputTokens,
-            costUsd: cost, durationMs, ...extras,
+            costUsd: cost, durationMs, ...logExtras,
         }).catch(err => console.error('Failed to log request:', err)),
-        micro > 0
+        micro > 0 && !skipDebit
             ? debitCredits(db, userId, micro).catch(err => console.error('Failed to debit credits:', err))
             : Promise.resolve(),
     ]);
