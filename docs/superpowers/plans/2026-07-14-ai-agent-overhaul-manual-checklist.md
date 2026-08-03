@@ -54,3 +54,23 @@ Run `bun run tauri dev` in `editor/` with a Unity (or any) workspace open, signe
 - [x] Observability live (401 smoke requests visible in Workers Logs, custom domain routing confirmed).
 - [ ] **First real chat through the gateway**: after any successful editor chat, gateway Logs show the request (model, tokens, `cached: false`).
 - [ ] **Telemetry columns populate**: `npx wrangler d1 execute arcane-db --remote --command "SELECT grounding_lint_hits, loop_guard_hits, escalated FROM request_logs ORDER BY id DESC LIMIT 3;"` returns non-NULL values after one editor turn.
+
+## 2026-08-03 — Shadow suggestions, external routing, hardening
+
+Routing (dev env, after the manual-setup runbook):
+- [ ] Chat at Low effort → gateway logs show `custom-minimax/…`; response streams normally
+- [ ] Chat at High effort → `custom-moonshot/…` likewise
+- [ ] Remove the MiniMax key from a dev secret → Low chat still answers (CF fallback), `wrangler tail` shows `provider_config_fallback`, request_logs.fallback_model set
+- [ ] /v1/usage shows non-zero cost for external-model chats (catalog prices)
+
+Inline suggestions:
+- [ ] Type in a .cs file, pause → ghost text ≤ ~1s; Tab accepts; Esc dismisses; typing through the suggestion keeps it trimmed without new requests (watch network)
+- [ ] Toggle off via status-bar item / mod+alt+i / Settings row → no requests fire
+- [ ] Seed inline_usage to the cap on dev → status bar shows "Tab · daily limit" with reset tooltip; no toasts
+- [ ] Stop the dev server → after 3 failures status shows "Tab · paused", requests stop for ~60s, then a single probe
+- [ ] File > 1MB → no inline requests
+
+Offline / credits:
+- [ ] Kill wifi → chat send fails INSTANTLY with "You're offline"; wifi back → Retry succeeds; inline shows "Tab · offline" then recovers
+- [ ] Kill wifi mid-stream → existing stall/network error path still works (no regression)
+- [ ] Zero a dev account's credits → chat shows "Out of credits" with working "Manage plan & credits" button; status bar shows the low-credit warning; inline completions STILL work (allowance, not credits)
