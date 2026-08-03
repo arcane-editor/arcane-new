@@ -8,7 +8,7 @@
 // accounting. Adjust these as real per-model neuron rates are confirmed.
 
 interface ModelInfo {
-    provider: 'workers-ai';
+    provider: 'workers-ai' | 'minimax' | 'moonshot';
     inputCostPer1M: number;
     outputCostPer1M: number;
     contextWindow: number;
@@ -17,11 +17,15 @@ interface ModelInfo {
 }
 
 export const MODEL_CATALOG: Record<string, ModelInfo> = {
-    // low — Qwen2.5-Coder 32B (native Workers AI, code-specialized)
+    // low — MiniMax M3 via AI Gateway custom provider. ⚠️ Prices below are
+    // provisional — confirm against MiniMax's pricing page during the manual
+    // setup (runbook) and adjust; wrong prices skew credit debits.
+    'custom-minimax/MiniMax-M3':  { provider: 'minimax',  inputCostPer1M: 0.40, outputCostPer1M: 2.20, contextWindow: 200000, maxOutput: 32000, tier: 'fast' },
+    // high/super — Kimi 3 via AI Gateway custom provider. Same price caveat.
+    'custom-moonshot/kimi-k3':    { provider: 'moonshot', inputCostPer1M: 0.60, outputCostPer1M: 2.50, contextWindow: 256000, maxOutput: 32000, tier: 'premium' },
+    // inline — Qwen2.5-Coder 32B (native Workers AI, code-specialized)
     '@cf/qwen/qwen2.5-coder-32b-instruct': { provider: 'workers-ai', inputCostPer1M: 0.30, outputCostPer1M: 1.20, contextWindow: 32768, maxOutput: 8192, tier: 'fast' },
-    // mid — Kimi K2.7 Code (Moonshot)
-    '@cf/moonshotai/kimi-k2.7-code':       { provider: 'workers-ai', inputCostPer1M: 0.60, outputCostPer1M: 2.40, contextWindow: 256000, maxOutput: 32000, tier: 'standard' },
-    // high + super (extra-high) — GLM-5.2 (Zhipu / Z.AI)
+    // mid — GLM-5.2 (Zhipu / Z.AI)
     '@cf/zai-org/glm-5.2':                 { provider: 'workers-ai', inputCostPer1M: 0.60, outputCostPer1M: 2.20, contextWindow: 200000, maxOutput: 32000, tier: 'premium' },
     // embeddings — BGE Small (384-dim). Input-only cost; embeddings never
     // generate, so outputCostPer1M/maxOutput are 0. Rate is a real published
