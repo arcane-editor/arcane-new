@@ -616,3 +616,15 @@ export async function countRecentAuthTokens(
 export async function cleanExpiredAuthTokens(db: D1Database): Promise<void> {
     await db.prepare("DELETE FROM auth_tokens WHERE expires_at < datetime('now')").run();
 }
+
+// --- Inline completion allowance counter (migration 0015) ---
+
+/** Atomically bump today's inline-completion count and return the new value. */
+export async function incrementInlineUsage(db: D1Database, userId: number, usageDate: string): Promise<number> {
+    const row = await db.prepare(`
+        INSERT INTO inline_usage (user_id, usage_date, count) VALUES (?, ?, 1)
+        ON CONFLICT(user_id, usage_date) DO UPDATE SET count = count + 1
+        RETURNING count
+    `).bind(userId, usageDate).first<{ count: number }>();
+    return row?.count ?? 1;
+}
