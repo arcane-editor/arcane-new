@@ -12,6 +12,7 @@ import { useAsmdefStore } from '../../../stores/asmdef';
 import { lspManager } from '../../lsp';
 import { GraphifyStatusBadge } from '../../graphify';
 import { TelemetryStatusItem } from '../../unity-telemetry';
+import { InlineSuggestStatusItem } from '../../inline-suggest';
 import { detectLanguage } from '../../../utils/language-detect';
 
 async function openLspTrace() {
@@ -198,6 +199,7 @@ function StatusBar() {
       </div>
 
       <div className="status-bar-right">
+        <InlineSuggestStatusItem />
         <GraphifyStatusBadge />
         {cursorPosition && (
           <span className="status-bar-item">

@@ -724,6 +724,16 @@ function App() {
       },
     },
     {
+      id: 'ai.toggleInlineSuggestions',
+      label: 'Toggle AI Inline Suggestions',
+      category: 'AI',
+      keybinding: 'mod+alt+i',
+      handler: () => {
+        const s = useSettingsStore.getState();
+        s.setSetting('ai.inlineSuggestions.enabled', !s.settings['ai.inlineSuggestions.enabled']);
+      },
+    },
+    {
       id: 'view.explorer',
       label: 'Explorer',
       category: 'View',
