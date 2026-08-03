@@ -16,7 +16,10 @@ const MODEL_TIMEOUT_MS = 5_000;
 
 inlineRouter.post('/v1/completions/inline', async (c) => {
     const raw = await c.req.text();
-    if (raw.length > MAX_BODY_BYTES) {
+    // Byte-accurate, not raw.length (UTF-16 code units): CJK/emoji can run
+    // ~3x larger in UTF-8 bytes than .length, letting oversized bodies slip
+    // past a code-unit check.
+    if (new TextEncoder().encode(raw).length > MAX_BODY_BYTES) {
         return c.json({ error: 'Request too large', code: 'inline_too_large' }, 413);
     }
     let parsed: unknown;

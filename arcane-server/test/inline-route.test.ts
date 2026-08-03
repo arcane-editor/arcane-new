@@ -41,6 +41,19 @@ describe('POST /v1/completions/inline', () => {
         expect((await res.json() as { code: string }).code).toBe('inline_too_large');
     });
 
+    it('413 inline_too_large measures UTF-8 bytes, not UTF-16 code units', async () => {
+        // Each '中' is 1 UTF-16 code unit but 3 UTF-8 bytes: 12,000 chars is
+        // under the 32*1024 = 32,768 code-unit count but over it in bytes
+        // (36,000). A .length-based guard would wrongly let this through.
+        const user = await seedPasswordUser('inl-cjk@test.dev', 'password123');
+        const prefix = '中'.repeat(12_000);
+        expect(prefix.length).toBeLessThan(32 * 1024);
+        const res = await jsonPost('/v1/completions/inline',
+            { ...GOOD_BODY, prefix }, await tokenFor(user));
+        expect(res.status).toBe(413);
+        expect((await res.json() as { code: string }).code).toBe('inline_too_large');
+    });
+
     it('429 inline_quota with resetAt once the daily cap is hit', async () => {
         const user = await seedPasswordUser('inl-q@test.dev', 'password123');
         await env.arcane_db.prepare(
