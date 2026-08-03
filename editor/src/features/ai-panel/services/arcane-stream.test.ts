@@ -112,12 +112,12 @@ beforeEach(() => {
   sessionUsageCalls = [];
   authNoticeCalls = [];
   resetTurnTelemetry();
-  // Several existing tests deliberately throw from fetchImpl to exercise the
-  // retry path — since the connect-phase catch now calls
-  // `reportFetchFailure()` on every fetch throw, that flips this global
-  // zustand store offline as a side effect and would otherwise leak into
-  // later tests (whose own fetchImpl would then never even be called, per
-  // the new offline fast-fail check). Reset it clean before every test.
+  // Several existing tests deliberately throw a genuine (un-aborted) error
+  // from fetchImpl to exercise the retry path — the connect-phase catch
+  // calls `reportFetchFailure()` for those, which flips this global zustand
+  // store offline as a side effect and would otherwise leak into later tests
+  // (whose own fetchImpl would then never even be called, per the offline
+  // fast-fail check). Reset it clean before every test.
   useConnectivityStore.getState().setOnline(true);
 });
 
@@ -563,6 +563,39 @@ describe('createArcaneStreamFn', () => {
       await drain(streamFn(ctx, opts()));
 
       expect(useConnectivityStore.getState().online).toBe(false);
+    } finally {
+      useConnectivityStore.getState().setOnline(true);
+    }
+  });
+
+  // Finding 2 regression guard: a fetch rejection caused by the *caller's*
+  // abort (Stop button / navigate-away) is not a network failure and must
+  // not flip the connectivity store offline — otherwise the next send
+  // falsely fast-fails with "You're offline" for up to 30s while fully
+  // online. The fake fetchImpl mirrors real `fetch`: it inspects the signal
+  // it was actually called with (the combined signal — `options.signal` +
+  // the internal connect-timeout controller) and rejects with an AbortError
+  // once that signal is aborted, same as a real fetch would.
+  it('a fetch rejected by the caller aborting before the call does NOT flip the connectivity store offline', async () => {
+    useConnectivityStore.getState().setOnline(true);
+    try {
+      const controller = new AbortController();
+      controller.abort(); // caller (options.signal) already aborted before the call
+
+      const fetchImpl = ((_url: string, init?: { signal?: AbortSignal }) => {
+        if (init?.signal?.aborted) {
+          return Promise.reject(new DOMException('The operation was aborted.', 'AbortError'));
+        }
+        return Promise.reject(new Error('expected the combined signal to already be aborted'));
+      }) as unknown as typeof fetch;
+
+      const streamFn = createArcaneStreamFn({ fetchImpl, maxAttempts: 1 });
+      const events = await drain(streamFn(ctx, opts(controller.signal)));
+
+      expect(useConnectivityStore.getState().online).toBe(true);
+      const done = events.find((e) => e.type === 'done') as Extract<AssistantMessageEvent, { type: 'done' }>;
+      expect(done).toBeDefined();
+      expect(done.message.stopReason).toBe('aborted');
     } finally {
       useConnectivityStore.getState().setOnline(true);
     }

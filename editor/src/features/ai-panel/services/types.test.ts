@@ -2,11 +2,11 @@ import { describe, it, expect } from 'bun:test';
 import { TIER_CONTEXT_WINDOWS, coerceAgentKind } from './types';
 
 describe('TIER_CONTEXT_WINDOWS', () => {
-  it('matches the real windows of the frozen CF model lineup', () => {
-    expect(TIER_CONTEXT_WINDOWS.low).toBe(32768);    // @cf/qwen/qwen2.5-coder-32b-instruct
-    expect(TIER_CONTEXT_WINDOWS.mid).toBe(256000);   // @cf/moonshotai/kimi-k2.7-code
-    expect(TIER_CONTEXT_WINDOWS.high).toBe(200000);  // @cf/zai-org/glm-5.2
-    expect(TIER_CONTEXT_WINDOWS.super).toBe(200000); // @cf/zai-org/glm-5.2
+  it('matches min(primary, fallback) for each tier\'s model lineup', () => {
+    expect(TIER_CONTEXT_WINDOWS.low).toBe(32768);    // min(MiniMax-M3 200k, qwen2.5-coder fallback 32k)
+    expect(TIER_CONTEXT_WINDOWS.mid).toBe(200000);   // glm-5.2, no fallback
+    expect(TIER_CONTEXT_WINDOWS.high).toBe(200000);  // min(kimi-k3 256k, glm-5.2 fallback 200k)
+    expect(TIER_CONTEXT_WINDOWS.super).toBe(200000); // alias of high
   });
 });
 

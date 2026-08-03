@@ -75,18 +75,30 @@ export type Attachment =
     };
 
 /**
- * Context window per tier — the real window of the model the server maps each
- * tier to (must track arcane-server config/plans.ts + lib/costs.ts):
- *   low   → @cf/qwen/qwen2.5-coder-32b-instruct (32k)
- *   mid   → @cf/moonshotai/kimi-k2.7-code       (256k)
- *   high  → @cf/zai-org/glm-5.2                 (200k)
- *   super → @cf/zai-org/glm-5.2                 (200k)
+ * Context window per tier — must track arcane-server config/plans.ts
+ * (`INTENSITY_CONFIG`) + services/llm-router.ts (`fallbackModelFor`) +
+ * lib/costs.ts (`MODEL_CATALOG`).
+ *
+ * low/high/super route to EXTERNAL providers (MiniMax/Moonshot) that each
+ * have a same-tier Workers AI fallback model (`fallbackModelFor`) the server
+ * silently switches to on a provider outage; mid stays on the Workers AI
+ * binding directly and has no fallback. Because a request can land on
+ * EITHER the primary or the fallback model, the window recorded here must be
+ * min(primary window, fallback window) — using the primary's larger window
+ * would let compaction leave in more context than the fallback model can
+ * actually accept, hard-failing the request the moment a tier fails over:
+ *   low   → primary custom-minimax/MiniMax-M3 (200k),
+ *           fallback @cf/qwen/qwen2.5-coder-32b-instruct (32k) → min = 32768
+ *   mid   → @cf/zai-org/glm-5.2 (200k), no fallback             → 200000
+ *   high  → primary custom-moonshot/kimi-k3 (256k),
+ *           fallback @cf/zai-org/glm-5.2 (200k)                 → min = 200000
+ *   super → alias of high                                       → min = 200000
  * Compaction previously assumed 32k for every tier, eliding context the big
  * models actually have room for.
  */
 export const TIER_CONTEXT_WINDOWS: Record<Effort, number> = {
   low: 32768,
-  mid: 256000,
+  mid: 200000,
   high: 200000,
   super: 200000,
 };

@@ -263,13 +263,19 @@ async function doStream(
           signal,
         });
       } catch (error) {
-        // Pessimistically flip the connectivity store offline on ANY fetch
-        // throw — including the per-attempt connect-timeout abort and a
-        // genuine caller cancellation below (navigator.onLine can lag
-        // reality; the window 'online' listener + 30s re-sync in
-        // `initConnectivityListeners` heals a false offline, so reporting
-        // one extra time on a real user abort is harmless).
-        useConnectivityStore.getState().reportFetchFailure();
+        // Only flip the connectivity store offline for a GENUINE network
+        // failure: a fetch throw that neither abort source on this attempt
+        // caused. Two things can abort `signal` (the combined signal above)
+        // without the network being at fault — our own per-attempt
+        // connect-timeout controller (`connectController`) and the caller's
+        // `options.signal` (user hit Stop / navigated away) — and both must
+        // be excluded, or a Stop click or a plain connect-timeout falsely
+        // flips the store offline, making the *next* send fast-fail with
+        // "You're offline" for up to 30s while fully online. An un-aborted
+        // throw is the real network signal.
+        if (!connectController.signal.aborted && !options.signal?.aborted) {
+          useConnectivityStore.getState().reportFetchFailure();
+        }
         // A genuine caller cancellation (user hit stop / navigated away) is
         // not a transient failure worth retrying — surface the existing
         // clean "aborted" done event immediately, same as before hardening.
