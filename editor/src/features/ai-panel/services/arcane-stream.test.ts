@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, mock } from 'bun:test';
 import type { AssistantMessageEvent, Context, StreamOptions } from './vendor/types';
 import { sleep } from './stream-retry';
 import { resetTurnTelemetry, nextTurnTelemetry } from './turn-telemetry';
+import { useConnectivityStore } from '../../../stores/connectivity';
 
 // arcane-stream.ts pulls in `useAuthStore` / `useAiStore`, which (via the
 // ai-panel barrel / theme store) transitively touch `document` — fine in the
@@ -111,6 +112,13 @@ beforeEach(() => {
   sessionUsageCalls = [];
   authNoticeCalls = [];
   resetTurnTelemetry();
+  // Several existing tests deliberately throw from fetchImpl to exercise the
+  // retry path — since the connect-phase catch now calls
+  // `reportFetchFailure()` on every fetch throw, that flips this global
+  // zustand store offline as a side effect and would otherwise leak into
+  // later tests (whose own fetchImpl would then never even be called, per
+  // the new offline fast-fail check). Reset it clean before every test.
+  useConnectivityStore.getState().setOnline(true);
 });
 
 describe('createArcaneStreamFn', () => {
@@ -521,5 +529,42 @@ describe('createArcaneStreamFn', () => {
     expect(calls).toBe(0);
     const errorEvent = events.find((e) => e.type === 'error') as Extract<AssistantMessageEvent, { type: 'error' }>;
     expect(errorEvent.error.message).toMatch(/Not logged in/);
+  });
+
+  it('fails immediately with an offline error when the connectivity store says offline', async () => {
+    useConnectivityStore.getState().setOnline(false);
+    try {
+      let fetchCalled = false;
+      const fetchImpl = (async () => {
+        fetchCalled = true;
+        throw new Error('unreachable');
+      }) as unknown as typeof fetch;
+
+      const streamFn = createArcaneStreamFn({ fetchImpl });
+      const events = await drain(streamFn(ctx, opts()));
+
+      const errorEvent = events.find((e) => e.type === 'error') as Extract<AssistantMessageEvent, { type: 'error' }>;
+      expect(errorEvent).toBeDefined();
+      expect(errorEvent.error.message).toContain("You're offline");
+      expect(fetchCalled).toBe(false);
+    } finally {
+      useConnectivityStore.getState().setOnline(true);
+    }
+  });
+
+  it('a network-level fetch throw flips the connectivity store offline', async () => {
+    useConnectivityStore.getState().setOnline(true);
+    try {
+      const fetchImpl = (async () => {
+        throw new TypeError('fetch failed');
+      }) as unknown as typeof fetch;
+
+      const streamFn = createArcaneStreamFn({ fetchImpl, maxAttempts: 1 });
+      await drain(streamFn(ctx, opts()));
+
+      expect(useConnectivityStore.getState().online).toBe(false);
+    } finally {
+      useConnectivityStore.getState().setOnline(true);
+    }
   });
 });

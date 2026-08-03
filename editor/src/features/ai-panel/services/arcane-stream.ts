@@ -18,6 +18,7 @@
 
 import { useAuthStore } from '../../../stores/auth';
 import { useAiStore } from '../../../stores/ai';
+import { useConnectivityStore } from '../../../stores/connectivity';
 import type {
   Context,
   StreamOptions,
@@ -185,6 +186,17 @@ async function doStream(
     return;
   }
 
+  // Offline fast-fail: no point burning 3 retries × long timeouts when the
+  // OS says there's no network. The connectivity store heals via window
+  // events + periodic re-sync, and the error block's Retry covers resume.
+  if (!useConnectivityStore.getState().online) {
+    stream.push({
+      type: 'error',
+      error: new Error("You're offline — check your internet connection, then retry."),
+    });
+    return;
+  }
+
   // Convert PI messages to OpenAI-compatible format
   const messages = convertToOpenAI(context.systemPrompt, context.messages);
 
@@ -251,6 +263,13 @@ async function doStream(
           signal,
         });
       } catch (error) {
+        // Pessimistically flip the connectivity store offline on ANY fetch
+        // throw — including the per-attempt connect-timeout abort and a
+        // genuine caller cancellation below (navigator.onLine can lag
+        // reality; the window 'online' listener + 30s re-sync in
+        // `initConnectivityListeners` heals a false offline, so reporting
+        // one extra time on a real user abort is harmless).
+        useConnectivityStore.getState().reportFetchFailure();
         // A genuine caller cancellation (user hit stop / navigated away) is
         // not a transient failure worth retrying — surface the existing
         // clean "aborted" done event immediately, same as before hardening.

@@ -124,6 +124,20 @@ describe('classifyTurnError', () => {
     expect(err.kind).toBe('empty');
     expect(err.title).toBe('Empty response');
   });
+
+  it("classifies offline errors as network with a You're-offline title", () => {
+    const e = classifyTurnError("You're offline — check your internet connection, then retry.");
+    expect(e.kind).toBe('network');
+    expect(e.title).toBe("You're offline");
+    expect(e.retriable).toBe(true);
+  });
+
+  it('classifies the "you are offline" spelling case-insensitively', () => {
+    const e = classifyTurnError('YOU ARE OFFLINE right now');
+    expect(e.kind).toBe('network');
+    expect(e.title).toBe("You're offline");
+    expect(e.detail).toBe('Check your internet connection, then press Retry.');
+  });
 });
 
 // ---- classifyTurnError — leading [code:<x>] marker ----

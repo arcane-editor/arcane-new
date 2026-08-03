@@ -125,6 +125,16 @@ function classifyTurnErrorTable(raw: string): TurnError {
     };
   }
 
+  if (lower.includes("you're offline") || lower.includes('you are offline')) {
+    return {
+      kind: 'network',
+      title: "You're offline",
+      detail: 'Check your internet connection, then press Retry.',
+      raw,
+      retriable: true,
+    };
+  }
+
   if (NETWORK_SUBSTRINGS.some((s) => lower.includes(s))) {
     return {
       kind: 'network',
