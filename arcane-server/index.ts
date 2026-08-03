@@ -7,6 +7,7 @@ import { chatRouter } from './src/routes/chat.ts';
 import { embeddingsRouter } from './src/routes/embeddings.ts';
 import { graphRouter } from './src/routes/graph.ts';
 import { unityApiRouter } from './src/routes/unity-api.ts';
+import { inlineRouter } from './src/routes/inline.ts';
 import { authRouter } from './src/routes/auth.ts';
 import { authEmailRouter } from './src/routes/auth-email.ts';
 import { authGoogleRouter } from './src/routes/auth-google.ts';
@@ -70,10 +71,12 @@ app.use('/v1/embeddings', authMiddleware(), requireVerifiedEmail());
 app.use('/v1/graph/*', authMiddleware(), requireVerifiedEmail());
 // /v1/unity/* needs auth; /v1/admin/unity-api/* is guarded inside its router.
 app.use('/v1/unity/*', authMiddleware(), requireVerifiedEmail());
+app.use('/v1/completions/*', authMiddleware(), requireVerifiedEmail());
 app.route('/', chatRouter);
 app.route('/', embeddingsRouter);
 app.route('/', graphRouter);
 app.route('/', unityApiRouter);
+app.route('/', inlineRouter);
 
 // Protected routes (auth only)
 app.route('/', usageRouter);

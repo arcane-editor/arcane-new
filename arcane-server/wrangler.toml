@@ -86,6 +86,11 @@ name = "RL_AUTH_POLL"
 namespace_id = "1002"
 simple = { limit = 60, period = 60 }
 
+[[ratelimits]]
+name = "RL_INLINE"
+namespace_id = "1003"
+simple = { limit = 30, period = 60 }
+
 # ── dev environment ─────────────────────────────────────────────────────────
 # Deploy: wrangler deploy --env dev   (worker: arcane-server-dev)
 # NOTE: bindings/vars are NOT inherited into named envs — the full set is
@@ -141,3 +146,8 @@ simple = { limit = 10, period = 60 }
 name = "RL_AUTH_POLL"
 namespace_id = "2002"
 simple = { limit = 60, period = 60 }
+
+[[env.dev.ratelimits]]
+name = "RL_INLINE"
+namespace_id = "2003"
+simple = { limit = 30, period = 60 }

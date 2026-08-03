@@ -36,6 +36,7 @@ export type AppEnv = {
         EMAIL?: EmailSender;         // Email Service send binding (absent in tests)
         RL_AUTH_STRICT?: RateLimiter;   // 10/60s/IP (absent in tests → fail open)
         RL_AUTH_POLL?: RateLimiter;     // 60/60s/IP (absent in tests → fail open)
+        RL_INLINE?: RateLimiter;        // 30/60s/user inline-completion burst cap (absent in tests → fail open)
         GOOGLE_CLIENT_ID?: string;      // secret — unset until owner provisions OAuth client
         GOOGLE_CLIENT_SECRET?: string;  // secret
         TURNSTILE_SECRET?: string;      // secret — unset = Turnstile verification skipped

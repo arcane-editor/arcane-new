@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { SELF } from 'cloudflare:test';
 import { seedPasswordUser, tokenFor } from './helpers.ts';
 
-const AI_PATHS = ['/v1/chat/completions', '/v1/embeddings', '/v1/graph/enrich', '/v1/unity/search'];
+const AI_PATHS = ['/v1/chat/completions', '/v1/embeddings', '/v1/graph/enrich', '/v1/unity/search', '/v1/completions/inline'];
 
 describe('requireVerifiedEmail on AI routes', () => {
     it('403 email_unverified for unverified users on every AI path', async () => {
