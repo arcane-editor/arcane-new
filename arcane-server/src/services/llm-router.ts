@@ -1,11 +1,14 @@
 import { streamText, jsonSchema } from 'ai';
 import { createWorkersAI } from 'workers-ai-provider';
+import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import type { ModelMessage, ToolSet } from 'ai';
 import type { ChatCompletionRequest, ChatMessage, StreamEvent, ToolDefinition } from '../types.ts';
 import { getMaxOutput } from '../lib/costs.ts';
 
-// Everything routes through Cloudflare Workers AI via the AI Gateway.
-// The Worker only needs the `AI` binding + a gateway id — no provider API keys.
+// Workers AI catalog models route through Cloudflare Workers AI via the AI
+// Gateway (the `AI` binding + a gateway id — no provider API key needed).
+// Everything else (custom-provider ids) routes through the AI Gateway's
+// unified /compat endpoint — see ExternalRoutingEnv below.
 export interface WorkersAiEnv {
     AI: Ai;
     CF_AI_GATEWAY_ID?: string;
@@ -28,10 +31,52 @@ export function workersAiProvider(env: WorkersAiEnv, gatewayOverrides?: GatewayO
     });
 }
 
-export function resolveModel(modelId: string, env: WorkersAiEnv, gatewayOverrides?: GatewayOverrides) {
-    // modelId is a Workers AI catalog id (e.g. '@cf/zai-org/glm-5.2' or 'minimax/m3'),
-    // resolved entirely on the backend from the request's reasoningLevel.
-    return workersAiProvider(env, gatewayOverrides)(modelId as string);
+// External providers (MiniMax, Moonshot) are reached through the AI Gateway's
+// unified /compat endpoint using custom-provider slugs. Keys are Worker
+// secrets sent per-request as the Authorization header (owner declined BYOK).
+export interface ExternalRoutingEnv {
+    CF_ACCOUNT_ID?: string;
+    MINIMAX_API_KEY?: string;
+    MOONSHOT_API_KEY?: string;
+}
+
+export type LlmEnv = WorkersAiEnv & ExternalRoutingEnv;
+
+/** Configuration (not model) failure: missing account id / gateway / secret. */
+export class LlmConfigError extends Error {}
+
+export function isExternalModel(modelId: string): boolean {
+    return !modelId.startsWith('@cf/');
+}
+
+export function externalApiKey(modelId: string, env: ExternalRoutingEnv): string {
+    if (modelId.startsWith('custom-minimax/')) {
+        if (!env.MINIMAX_API_KEY) throw new LlmConfigError('MINIMAX_API_KEY secret is not set');
+        return env.MINIMAX_API_KEY;
+    }
+    if (modelId.startsWith('custom-moonshot/')) {
+        if (!env.MOONSHOT_API_KEY) throw new LlmConfigError('MOONSHOT_API_KEY secret is not set');
+        return env.MOONSHOT_API_KEY;
+    }
+    throw new LlmConfigError(`No provider key mapping for model "${modelId}"`);
+}
+
+export function gatewayCompatUrl(env: ExternalRoutingEnv & { CF_AI_GATEWAY_ID?: string }): string {
+    if (!env.CF_ACCOUNT_ID) throw new LlmConfigError('CF_ACCOUNT_ID is not set');
+    if (!env.CF_AI_GATEWAY_ID) throw new LlmConfigError('CF_AI_GATEWAY_ID is not set');
+    return `https://gateway.ai.cloudflare.com/v1/${env.CF_ACCOUNT_ID}/${env.CF_AI_GATEWAY_ID}/compat`;
+}
+
+export function resolveModel(modelId: string, env: LlmEnv, gatewayOverrides?: GatewayOverrides) {
+    if (!isExternalModel(modelId)) {
+        return workersAiProvider(env, gatewayOverrides)(modelId);
+    }
+    const provider = createOpenAICompatible({
+        name: 'ai-gateway-compat',
+        baseURL: gatewayCompatUrl(env),
+        apiKey: externalApiKey(modelId, env),
+    });
+    return provider(modelId);
 }
 
 export function convertMessages(messages: ChatMessage[]): ModelMessage[] {
@@ -120,7 +165,7 @@ function classifyStreamError(error: unknown): 'rate_limit' | 'model_error' {
     return /rate limit|\b3036\b|\b3040\b|capacity/i.test(String(error)) ? 'rate_limit' : 'model_error';
 }
 
-export async function* streamCompletion(req: ChatCompletionRequest, env: WorkersAiEnv): AsyncGenerator<StreamEvent> {
+export async function* streamCompletion(req: ChatCompletionRequest, env: LlmEnv): AsyncGenerator<StreamEvent> {
     // A cached replay of a sampled completion is semantically wrong — chat
     // completions are non-deterministic (temperature-sampled), so bypass the
     // gateway cache for this path.

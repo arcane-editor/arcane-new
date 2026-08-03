@@ -23,6 +23,7 @@
     "typescript": "^5"
   },
   "dependencies": {
+    "@ai-sdk/openai-compatible": "^2.0.30",
     "ai": "^6.0.90",
     "hono": "^4.11.9",
     "jose": "^6.1.3",
