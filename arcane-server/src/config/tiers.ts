@@ -40,6 +40,12 @@ export const TIERS = {
 
 export type TierId = keyof typeof TIERS;
 
+/** Daily inline (tab) completion allowance per plan — abuse ceilings, not
+ *  billing: inline completions never debit credits (2026-08-03 design). */
+export const INLINE_DAILY_CAP: Record<TierId, number> = {
+    free: 300, pro: 4000, proplus: 10000, ultra: 10000,
+};
+
 export interface TopupPack {
     id: string;
     credits: number;
