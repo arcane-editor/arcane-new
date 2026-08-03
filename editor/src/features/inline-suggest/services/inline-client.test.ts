@@ -5,8 +5,11 @@ const REQ = { prefix: 'a', suffix: 'b', language: 'csharp' };
 const ok = (body: unknown, status = 200) =>
     new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 
-function clientWith(fetchImpl: typeof fetch, timeoutMs = 4000) {
-    return createInlineClient({ fetchImpl, getToken: () => 'tok', baseUrl: 'https://x.test', timeoutMs });
+// bun's fetch mocks below stub only the callable signature, not the
+// `preconnect` member the DOM lib's `typeof fetch` type also requires — cast
+// through `unknown`, same pattern the timeout/single-flight tests already use.
+function clientWith(fetchImpl: (...args: Parameters<typeof fetch>) => ReturnType<typeof fetch>, timeoutMs = 4000) {
+    return createInlineClient({ fetchImpl: fetchImpl as unknown as typeof fetch, getToken: () => 'tok', baseUrl: 'https://x.test', timeoutMs });
 }
 
 describe('inline client', () => {
@@ -17,7 +20,10 @@ describe('inline client', () => {
 
     it('auth result without a token — and never calls fetch', async () => {
         let called = false;
-        const c = createInlineClient({ fetchImpl: async () => { called = true; return ok({}); }, getToken: () => null });
+        const c = createInlineClient({
+            fetchImpl: (async () => { called = true; return ok({}); }) as unknown as typeof fetch,
+            getToken: () => null,
+        });
         expect(await c.fetchCompletion(REQ)).toEqual({ ok: false, reason: 'auth' });
         expect(called).toBe(false);
     });

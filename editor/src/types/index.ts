@@ -152,6 +152,7 @@ export interface SettingsSchema {
   'ai.escalation.enabled': boolean;
   'ai.edits.applyMode': 'approve' | 'auto';
   'ai.edits.alwaysApproveUnityAssets': boolean;
+  'ai.inlineSuggestions.enabled': boolean;
   'unity.analyzers.enabled': boolean;
   'unity.compileGate.enabled': boolean;
   'unity.lspGate.enabled': boolean;

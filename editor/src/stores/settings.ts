@@ -24,6 +24,7 @@ const DEFAULT_SETTINGS: SettingsSchema = {
   'ai.escalation.enabled': true,
   'ai.edits.applyMode': 'auto',
   'ai.edits.alwaysApproveUnityAssets': true,
+  'ai.inlineSuggestions.enabled': true,
   'unity.analyzers.enabled': true,
   'unity.compileGate.enabled': true,
   'unity.lspGate.enabled': true,

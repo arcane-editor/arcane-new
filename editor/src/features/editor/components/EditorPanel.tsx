@@ -33,6 +33,7 @@ import {
 } from '../../unity-asset-viewer';
 import { initTestCodeLens } from '../../unity-test-runner';
 import { attachBreakpointGutter } from '../../debugger';
+import { registerInlineSuggestProvider } from '../../inline-suggest';
 
 const detectLanguage = getMonacoLanguageId;
 
@@ -299,6 +300,7 @@ function EditorPanel() {
           initUnityAnalyzers(monaco);
           initUnityCompilerDiagnostics(monaco);
           initTestCodeLens(monaco);
+          registerInlineSuggestProvider(monaco);
           ensureMonacoTheme(useThemeStore.getState().getActiveTheme());
         }}
         onMount={(editor, monaco) => {
@@ -394,6 +396,7 @@ function EditorPanel() {
           wordBasedSuggestions: isLargeFile ? 'off' : 'currentDocument',
           parameterHints: { enabled: !isLargeFile },
           snippetSuggestions: 'inline',
+          inlineSuggest: { enabled: !isLargeFile },
         }}
       />
     </div>

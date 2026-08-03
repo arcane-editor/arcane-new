@@ -65,6 +65,7 @@ import { initUnityTelemetry } from './features/unity-telemetry';
 import { useUnityStore } from './stores/unity';
 import { useDebugStore } from './stores/debug';
 import { useAuthStore } from './stores/auth';
+import { initConnectivityListeners } from './stores/connectivity';
 import { AuthTab } from './features/auth';
 import { useSceneUsageStore } from './features/unity-context';
 import {
@@ -233,6 +234,10 @@ function App() {
       setBootSurface('welcome');
     }
   }, []);
+
+  // Connectivity signal for inline suggestions (and future offline gating):
+  // window online/offline events + a 30s navigator.onLine re-sync.
+  useEffect(() => initConnectivityListeners(), []);
 
   // Set window title from workspace path
   useEffect(() => {
