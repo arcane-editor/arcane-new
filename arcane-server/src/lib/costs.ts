@@ -27,6 +27,8 @@ export const MODEL_CATALOG: Record<string, ModelInfo> = {
     '@cf/qwen/qwen2.5-coder-32b-instruct': { provider: 'workers-ai', inputCostPer1M: 0.30, outputCostPer1M: 1.20, contextWindow: 32768, maxOutput: 8192, tier: 'fast' },
     // mid — GLM-5.2 (Zhipu / Z.AI)
     '@cf/zai-org/glm-5.2':                 { provider: 'workers-ai', inputCostPer1M: 0.60, outputCostPer1M: 2.20, contextWindow: 200000, maxOutput: 32000, tier: 'premium' },
+    // legacy/fallback — Kimi K2.7 Code (Moonshot). Retained for backward compatibility.
+    '@cf/moonshotai/kimi-k2.7-code':       { provider: 'workers-ai', inputCostPer1M: 0.60, outputCostPer1M: 2.40, contextWindow: 256000, maxOutput: 32000, tier: 'standard' },
     // embeddings — BGE Small (384-dim). Input-only cost; embeddings never
     // generate, so outputCostPer1M/maxOutput are 0. Rate is a real published
     // Workers AI figure: 1841 neurons/1M × $0.011/1000 ≈ $0.020/1M. Without this
