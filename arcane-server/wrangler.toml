@@ -42,6 +42,10 @@ ENVIRONMENT = "production"
 # See: ai-gateway/configuration/authentication ("Expected behavior").
 # Empty string = no gateway (models still work, just without caching/logging).
 CF_AI_GATEWAY_ID = "arcane-ai-gateway"
+# Cloudflare account id — required to build the AI Gateway /compat URL for
+# external models (MiniMax/Moonshot custom providers). `wrangler whoami` shows it.
+# Empty = external routing unconfigured → router falls back to CF models (loud log).
+CF_ACCOUNT_ID = ""
 # Base URL of the user-facing website (auth pages live there). Phase 2 uses
 # this for the device-flow verification_uri and email links.
 WEB_BASE_URL = "https://arcaneai.org"
@@ -110,6 +114,7 @@ index_name = "unity-docs-v1"
 [env.dev.vars]
 ENVIRONMENT = "development"
 CF_AI_GATEWAY_ID = "arcane-ai-gateway-dev"
+CF_ACCOUNT_ID = ""
 WEB_BASE_URL = "https://dev.arcaneai.org"
 API_BASE_URL = "https://api-dev.arcaneai.org"
 EMAIL_FROM = "no-reply@arcaneai.org"

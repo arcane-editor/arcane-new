@@ -25,6 +25,9 @@ export type AppEnv = {
         AI: Ai;                      // Cloudflare Workers AI binding
         VECTORIZE: Vectorize;        // Unity docs/API vector index (384-dim, bge-small)
         CF_AI_GATEWAY_ID: string;    // AI Gateway id (caching/logging/rate-limits)
+        CF_ACCOUNT_ID?: string;      // account id for the gateway /compat URL (external models)
+        MINIMAX_API_KEY?: string;    // secret — MiniMax key, sent through the gateway per-request
+        MOONSHOT_API_KEY?: string;   // secret — Moonshot (Kimi) key
         JWT_SECRET: string;
         ENVIRONMENT: string;
         WEB_BASE_URL: string;        // user-facing website base (auth pages, email links)
