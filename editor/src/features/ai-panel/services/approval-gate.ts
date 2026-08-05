@@ -35,6 +35,21 @@ export interface PendingWriteDiff {
 const pending = new Map<string, (optionId: string) => void>();
 
 /**
+ * `addEventListener('abort', …)` never fires for a signal that was ALREADY
+ * aborted before registration, so a request that reaches this module after a
+ * Stop click would push a permission card, register a listener nothing will
+ * trigger, and leave its promise pending forever — hanging the vendor loop
+ * behind a card whose buttons no longer resolve anything.
+ *
+ * `question-gate.ts` and `write-approval-gate.ts` both guard this explicitly;
+ * this module was the one that didn't. Checked before rendering anything, so
+ * no card is pushed for a run that's already dead.
+ */
+function isAlreadyAborted(signal?: AbortSignal): boolean {
+  return signal?.aborted === true;
+}
+
+/**
  * Render an inline approval request for an engine-mutating action and resolve
  * once the user clicks Allow/Reject (or the run aborts → reject).
  */
@@ -44,6 +59,7 @@ export function requestEngineApproval(
   summary: string,
   signal?: AbortSignal,
 ): Promise<EngineDecision> {
+  if (isAlreadyAborted(signal)) return Promise.resolve('reject');
   useAiStore.getState().addPermissionRequest(
     toolCallId,
     toolName,
@@ -84,6 +100,7 @@ export function requestFileWriteApproval(
   diff: PendingWriteDiff,
   signal?: AbortSignal,
 ): Promise<WriteDecision> {
+  if (isAlreadyAborted(signal)) return Promise.resolve('reject');
   useAiStore.getState().addPermissionRequest(
     toolCallId,
     toolName,
