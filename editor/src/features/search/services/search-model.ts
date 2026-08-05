@@ -132,6 +132,37 @@ export function applyComplete(state: StreamState, payload: SearchCompletePayload
   };
 }
 
+/**
+ * Shortest debounced query that triggers an automatic search. Below this a
+ * query matches so much of a workspace that the scan is pure cost.
+ */
+export const MIN_AUTO_SEARCH_CHARS = 3;
+
+/** What the panel's auto-search effect should do for a settled query. */
+export type AutoSearchAction = 'search' | 'clear' | 'idle';
+
+/**
+ * Decides the auto-search effect's behaviour from the DEBOUNCED query alone.
+ *
+ * Deliberately a function of one settled value, because the bug this replaces
+ * came from the effect depending on more than that: `triggerSearch` closes
+ * over the *live* query, so it was a new function identity on every keystroke,
+ * and listing it as a dependency re-ran the effect per character. The guard
+ * inside (`length >= MIN_AUTO_SEARCH_CHARS`) stays true once the user has
+ * typed that many characters, so every subsequent keystroke started a fresh
+ * search — each one a Rust thread walking the entire workspace, all racing
+ * results into the same list. The 300ms debounce was still running; it just
+ * no longer gated anything.
+ *
+ * `'idle'` (short but non-empty) is a distinct outcome on purpose: clearing
+ * there would wipe results the user is still reading while they finish typing.
+ */
+export function autoSearchAction(debouncedQuery: string): AutoSearchAction {
+  if (debouncedQuery.length >= MIN_AUTO_SEARCH_CHARS) return 'search';
+  if (debouncedQuery.length === 0) return 'clear';
+  return 'idle';
+}
+
 /** A single virtualized row in the flattened search results list (Task B4). */
 export type SearchRow =
   | { kind: 'file'; file: FileSearchResult; collapsed: boolean }

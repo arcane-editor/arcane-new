@@ -4,6 +4,8 @@ import {
   applyBatch,
   applyComplete,
   flattenRows,
+  autoSearchAction,
+  MIN_AUTO_SEARCH_CHARS,
   type StreamState,
 } from './search-model';
 import type { FileSearchResult } from '../../../types';
@@ -323,5 +325,41 @@ describe('flattenRows', () => {
     const f = file('empty.ts', 0);
     const rows = flattenRows([f], new Set());
     expect(rows).toEqual([{ kind: 'file', file: f, collapsed: false }]);
+  });
+});
+
+describe('autoSearchAction', () => {
+  // The panel's auto-search effect must key off the DEBOUNCED query only.
+  // Regression context: `triggerSearch` (rebuilt every keystroke, since it
+  // closes over the live query) used to sit in that effect's dependency list,
+  // so the effect re-ran per character. Its guard — "length >= 3" — stays true
+  // once you've typed three characters, so every further keystroke fired a
+  // fresh full-workspace search. Keeping the decision here, as a function of
+  // the debounced value alone, is what makes that shape impossible to restate.
+  it('searches once the debounced query reaches the minimum length', () => {
+    expect(autoSearchAction('abc')).toBe('search');
+    expect(autoSearchAction('a longer query')).toBe('search');
+  });
+
+  it('clears on an empty query', () => {
+    expect(autoSearchAction('')).toBe('clear');
+  });
+
+  // Below the threshold but non-empty: neither search (too broad, and every
+  // keystroke would rescan) nor clear (that would wipe results the user is
+  // still reading while they finish typing).
+  it('does nothing for a query that is too short to search but not empty', () => {
+    expect(autoSearchAction('a')).toBe('idle');
+    expect(autoSearchAction('ab')).toBe('idle');
+  });
+
+  it('treats whitespace as searchable content, not emptiness', () => {
+    expect(autoSearchAction('   ')).toBe('search');
+  });
+
+  it('exposes the threshold it enforces', () => {
+    expect(MIN_AUTO_SEARCH_CHARS).toBe(3);
+    expect(autoSearchAction('x'.repeat(MIN_AUTO_SEARCH_CHARS - 1))).toBe('idle');
+    expect(autoSearchAction('x'.repeat(MIN_AUTO_SEARCH_CHARS))).toBe('search');
   });
 });

@@ -6,7 +6,7 @@ import { useWorkspaceStore } from '../../../stores/workspace';
 import { getFileIcon } from '../../../utils/file-icons';
 import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
 import { useDelayedTrue } from '../../../hooks/useDelayedTrue';
-import { flattenRows } from '../services/search-model';
+import { flattenRows, autoSearchAction } from '../services/search-model';
 
 // Fixed row heights the virtualizer estimates from; `measureElement` (below)
 // self-corrects if the real rendered height ever drifts from these.
@@ -72,14 +72,26 @@ function SearchPanel() {
     }
   }, [workspacePath, query, search, clearResults]);
 
-  // Auto-search when the debounced query settles (>= 3 chars); clear on empty.
+  // Auto-search when the debounced query settles; clear on empty.
+  //
+  // `triggerSearch` must NOT be a dependency here, even though this effect
+  // does the same job. It closes over the live `query`, so it is a fresh
+  // function on every keystroke — listing it re-ran this effect per character,
+  // and because the guard (`length >= MIN_AUTO_SEARCH_CHARS`) stays true once
+  // you have typed that many characters, every further keystroke fired a full
+  // search. Each one spawns a Rust thread that walks the whole workspace, so a
+  // 15-character query kicked off ~12 concurrent scans racing results into one
+  // list; the 300ms debounce above was still running but gated nothing.
+  // Keying off `debouncedQuery` is what actually debounces. `triggerSearch`
+  // stays for the explicit Enter-key path, where the live query is correct.
   useEffect(() => {
-    if (debouncedQuery.length >= 3) {
-      triggerSearch();
-    } else if (debouncedQuery.length === 0) {
+    const action = autoSearchAction(debouncedQuery);
+    if (action === 'search') {
+      if (workspacePath) search(workspacePath);
+    } else if (action === 'clear') {
       clearResults();
     }
-  }, [debouncedQuery, isRegex, caseSensitive, wholeWord, includePattern, excludePattern, triggerSearch, clearResults]);
+  }, [debouncedQuery, isRegex, caseSensitive, wholeWord, includePattern, excludePattern, workspacePath, search, clearResults]);
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key === 'Enter') {
