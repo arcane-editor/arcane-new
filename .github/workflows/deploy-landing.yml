@@ -47,6 +47,12 @@ jobs:
         with:
           node-version: 22
       - run: pnpm install --frozen-lockfile
+      # `astro:content` and the `?raw` module shims live in .astro/, which is
+      # generated and gitignored — so a clean checkout has no declarations for
+      # them and tsc fails inside Starlight's own sources. Local runs passed
+      # only because .astro/ was left behind by an earlier build.
+      - name: Generate Astro types
+        run: pnpm exec astro sync
       - name: Typecheck (astro build does NOT typecheck .tsx)
         run: pnpm exec tsc --noEmit
       - name: Test
@@ -77,6 +83,12 @@ jobs:
         with:
           node-version: 22
       - run: pnpm install --frozen-lockfile
+      # `astro:content` and the `?raw` module shims live in .astro/, which is
+      # generated and gitignored — so a clean checkout has no declarations for
+      # them and tsc fails inside Starlight's own sources. Local runs passed
+      # only because .astro/ was left behind by an earlier build.
+      - name: Generate Astro types
+        run: pnpm exec astro sync
       - name: Typecheck (astro build does NOT typecheck .tsx)
         run: pnpm exec tsc --noEmit
       - name: Test
