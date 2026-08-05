@@ -1,5 +1,6 @@
 import { FilePlus, FolderPlus, FileCode, Pencil, Trash2, Copy, FolderSymlink } from 'lucide-react';
 import { isMac } from '../../../utils/platform';
+import { useClampedMenuPosition } from '../../../hooks/useClampedMenuPosition';
 
 interface ContextMenuProps {
   x: number;
@@ -33,6 +34,11 @@ function ContextMenu({
   onRevealInOs,
   onClose,
 }: ContextMenuProps) {
+  // Keeps the menu on screen when opened near a viewport edge — without this,
+  // right-clicking near the bottom of the tree pushed Delete / Copy Path /
+  // Reveal below the window, where a fixed-position menu can't be scrolled to.
+  const { ref: menuRef, style: menuPos } = useClampedMenuPosition(x, y);
+
   function handleItem(cb: () => void) {
     cb();
     onClose();
@@ -52,10 +58,10 @@ function ContextMenu({
       />
       {/* Menu */}
       <div
+        ref={menuRef}
         style={{
           position: 'fixed',
-          left: x,
-          top: y,
+          ...menuPos,
           zIndex: 901,
           background: 'var(--bg-dropdown, var(--bg-sidebar))',
           border: '1px solid var(--border)',

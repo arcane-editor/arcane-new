@@ -8,6 +8,7 @@ import { getFileIcon } from '../../../utils/file-icons';
 import { confirmCloseDirty } from '../../../utils/dirty-guard';
 import { toRelativePath } from '../../../utils/relative-path';
 import { isMac } from '../../../utils/platform';
+import { useClampedMenuPosition } from '../../../hooks/useClampedMenuPosition';
 import type { OpenFile } from '../../../types';
 
 const DRAG_MIME = 'application/x-editor-tab-path';
@@ -160,6 +161,10 @@ interface TabMenuItem {
 }
 
 function TabMenu({ x, y, realPath, workspacePath, onClose, onAction, onCloseTab }: TabMenuProps) {
+  // Right-clicking a tab far along the bar used to run the menu off the right
+  // edge of the window; clamp it back on screen.
+  const { ref: menuRef, style: menuPos } = useClampedMenuPosition(x, y);
+
   function handleItem(cb: () => void) {
     cb();
     onClose();
@@ -210,10 +215,10 @@ function TabMenu({ x, y, realPath, workspacePath, onClose, onAction, onCloseTab 
         onContextMenu={(e) => { e.preventDefault(); onClose(); }}
       />
       <div
+        ref={menuRef}
         style={{
           position: 'fixed',
-          left: x,
-          top: y,
+          ...menuPos,
           zIndex: 901,
           background: 'var(--bg-dropdown, var(--bg-sidebar))',
           border: '1px solid var(--border)',
