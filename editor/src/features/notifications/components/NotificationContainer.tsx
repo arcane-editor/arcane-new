@@ -14,11 +14,12 @@ export default function NotificationContainer() {
 
   if (notifications.length === 0) return null;
 
-  const visible = notifications.slice(-3);
-
+  // Render the queue as-is: the store caps it at MAX_NOTIFICATIONS. Slicing
+  // here instead is what used to let evicted-from-view toasts resurface later
+  // (see `enforceCap` in stores/notifications.ts).
   return (
     <div className="notification-container">
-      {visible.map((notif) => (
+      {notifications.map((notif) => (
         <div key={notif.id} className={`notification-toast notification-${notif.type}`}>
           {ICON_MAP[notif.type]}
           <div className="notification-content">
