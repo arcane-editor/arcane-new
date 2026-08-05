@@ -543,14 +543,30 @@ mod tests {
     #[tokio::test]
     async fn stop_before_any_callback_closes_the_listener() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = listener.local_addr().unwrap().port();
-        let (_received, stop, handle) = spawn_serve(listener);
+        let (received, stop, handle) = spawn_serve(listener);
 
         stop.send(()).unwrap();
-        handle.await.unwrap();
+
+        // Deliberately NOT asserting that the port refuses connections. The
+        // kernel is free to hand our just-released ephemeral port to another
+        // test binding 127.0.0.1:0, and `cargo test` runs these in parallel,
+        // so `connect` succeeds against a stranger's listener and the
+        // assertion fires even though our socket closed exactly as intended.
+        // That cost ~1 failure in 12 full-suite runs, and none in 60 runs of
+        // this test alone — the flake was the assertion, not the listener.
+        //
+        // The spawned task owns the listener, so a finished task IS a closed
+        // socket: returning drops it. Bounding the wait keeps the signal the
+        // port probe was really after — a loop that ignored `stop` and stayed
+        // parked in `accept()` fails here instead of hanging the suite.
+        tokio::time::timeout(Duration::from_secs(5), handle)
+            .await
+            .expect("serve loop must exit promptly after stop")
+            .unwrap();
+
         assert!(
-            TcpStream::connect(("127.0.0.1", port)).await.is_err(),
-            "port must refuse connections after stop"
+            received.lock().unwrap().is_empty(),
+            "no callback was sent, so none may be recorded"
         );
     }
 }
