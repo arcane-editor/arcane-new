@@ -343,6 +343,17 @@ function MentionPopover({ open, query, anchorRect, onPick, onClose }: Props) {
     setActiveIndex(0);
   }, [query, open, effectiveCategory]);
 
+  // `activeIndex` is only reset on query/open/category changes, but the list
+  // under it can shrink on its own: `objectItems` tracks the live scene
+  // hierarchy (`ensureFresh()` above refreshes it asynchronously, and objects
+  // can vanish from the running Editor), and the lazy file/asset loads swap
+  // their arrays in after mount. A stale index then pointed past the end, so
+  // Enter ran `onPick(undefined)` → a TypeError thrown inside the window
+  // keydown listener, which reads to the user as "Enter in the @ menu does
+  // nothing". Derive the index actually used for nav, highlight and picking
+  // instead of trusting raw state.
+  const safeIndex = navCount === 0 ? 0 : Math.min(activeIndex, navCount - 1);
+
   // Reset the drilled-in category when the popover closes.
   useEffect(() => {
     if (!open) setActiveCategory(null);
@@ -361,19 +372,23 @@ function MentionPopover({ open, query, anchorRect, onPick, onClose }: Props) {
     function onKey(e: KeyboardEvent) {
       if (e.key === 'ArrowDown') {
         e.preventDefault();
-        setActiveIndex((i) => (navCount === 0 ? 0 : (i + 1) % navCount));
+        setActiveIndex(navCount === 0 ? 0 : (safeIndex + 1) % navCount);
       } else if (e.key === 'ArrowUp') {
         e.preventDefault();
-        setActiveIndex((i) => (navCount === 0 ? 0 : (i - 1 + navCount) % navCount));
+        setActiveIndex(navCount === 0 ? 0 : (safeIndex - 1 + navCount) % navCount);
       } else if (e.key === 'Enter') {
         if (navCount === 0) return;
         e.preventDefault();
         e.stopPropagation();
         if (isCategoryLevel) {
-          setActiveCategory(matchedCategories[activeIndex].id);
+          const cat = matchedCategories[safeIndex];
+          if (!cat) return;
+          setActiveCategory(cat.id);
           setActiveIndex(0);
         } else {
-          onPick(entries[activeIndex]);
+          const entry = entries[safeIndex];
+          if (!entry) return;
+          onPick(entry);
         }
       } else if (e.key === 'Backspace' && activeCategory && query === '') {
         // Step back to the category menu instead of deleting the `@`.
@@ -383,7 +398,7 @@ function MentionPopover({ open, query, anchorRect, onPick, onClose }: Props) {
     }
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [open, navCount, isCategoryLevel, matchedCategories, entries, activeIndex, onPick, activeCategory, query]);
+  }, [open, navCount, isCategoryLevel, matchedCategories, entries, safeIndex, onPick, activeCategory, query]);
 
   // ─── Positioning ──────────────────────────────────────────────
   const style = useMemo<React.CSSProperties | null>(() => {
@@ -403,6 +418,16 @@ function MentionPopover({ open, query, anchorRect, onPick, onClose }: Props) {
     };
     return opensUpward ? { ...base, bottom: vh - anchorRect.top + 6 } : { ...base, top: anchorRect.bottom + 6 };
   }, [anchorRect]);
+
+  // Keep the highlighted row visible while arrow-keying through a list that
+  // scrolls (see `.ai-panel-mention-section`'s overflow rule).
+  const listRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    listRef.current
+      ?.querySelector('.ai-panel-mention-item.is-active')
+      ?.scrollIntoView({ block: 'nearest' });
+  }, [safeIndex, open, effectiveCategory, navCount]);
 
   // Click outside closes
   const popoverRef = useRef<HTMLDivElement>(null);
@@ -425,7 +450,7 @@ function MentionPopover({ open, query, anchorRect, onPick, onClose }: Props) {
   return createPortal(
     <div ref={popoverRef} className="ai-panel-mention-popover" style={style}>
       {isCategoryLevel ? (
-        <div className="ai-panel-mention-section">
+        <div className="ai-panel-mention-section" ref={listRef}>
           <div className="ai-panel-mention-section-header">ADD CONTEXT</div>
           {matchedCategories.length === 0 ? (
             <div className="ai-panel-mention-empty">No matches</div>
@@ -436,7 +461,7 @@ function MentionPopover({ open, query, anchorRect, onPick, onClose }: Props) {
                 <button
                   key={cat.id}
                   type="button"
-                  className={`ai-panel-mention-item ${i === activeIndex ? 'is-active' : ''}`}
+                  className={`ai-panel-mention-item ${i === safeIndex ? 'is-active' : ''}`}
                   onMouseEnter={() => setActiveIndex(i)}
                   onMouseDown={(e) => {
                     e.preventDefault();
@@ -453,7 +478,7 @@ function MentionPopover({ open, query, anchorRect, onPick, onClose }: Props) {
           )}
         </div>
       ) : (
-        <div className="ai-panel-mention-section">
+        <div className="ai-panel-mention-section" ref={listRef}>
           <div className="ai-panel-mention-section-header ai-panel-mention-breadcrumb">
             {activeCategory && categories.length > 1 && (
               <button
@@ -484,7 +509,7 @@ function MentionPopover({ open, query, anchorRect, onPick, onClose }: Props) {
               <EntryRow
                 key={entryKey(entry, i)}
                 entry={entry}
-                active={i === activeIndex}
+                active={i === safeIndex}
                 onHover={() => setActiveIndex(i)}
                 onPick={() => onPick(entry)}
               />

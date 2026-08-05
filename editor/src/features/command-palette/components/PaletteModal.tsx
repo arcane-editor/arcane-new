@@ -203,6 +203,24 @@ function PaletteModal({ initialMode, onClose }: PaletteModalProps) {
     }
   }, [selectedIndex, totalResults, rowVirtualizer]);
 
+  // Arrow-key navigation scrolls the list, which slides a different row under
+  // a stationary cursor — the browser then fires `mouseenter` on that row and
+  // its handler yanks the selection back, so holding ArrowDown would stick or
+  // jump around. Ignore hover until the pointer genuinely moves again.
+  const keyboardNavRef = useRef(false);
+  useEffect(() => {
+    const onMouseMove = () => {
+      keyboardNavRef.current = false;
+    };
+    window.addEventListener('mousemove', onMouseMove);
+    return () => window.removeEventListener('mousemove', onMouseMove);
+  }, []);
+
+  const handleHover = useCallback((index: number) => {
+    if (keyboardNavRef.current) return;
+    setSelectedIndex(index);
+  }, []);
+
   const handleSelect = useCallback(
     (index: number) => {
       if (isCommandMode) {
@@ -227,10 +245,12 @@ function PaletteModal({ initialMode, onClose }: PaletteModalProps) {
       switch (e.key) {
         case 'ArrowDown':
           e.preventDefault();
+          keyboardNavRef.current = true;
           setSelectedIndex((i) => (i + 1) % Math.max(1, totalResults));
           break;
         case 'ArrowUp':
           e.preventDefault();
+          keyboardNavRef.current = true;
           setSelectedIndex((i) => (i - 1 + Math.max(1, totalResults)) % Math.max(1, totalResults));
           break;
         case 'Enter':
@@ -343,7 +363,7 @@ function PaletteModal({ initialMode, onClose }: PaletteModalProps) {
                       data-index={index}
                       ref={rowVirtualizer.measureElement}
                       className={`palette-item${index === selectedIndex ? ' palette-item-selected' : ''}`}
-                      onMouseEnter={() => setSelectedIndex(index)}
+                      onMouseEnter={() => handleHover(index)}
                       onClick={() => handleSelect(index)}
                       style={{
                         position: 'absolute',
@@ -400,7 +420,7 @@ function PaletteModal({ initialMode, onClose }: PaletteModalProps) {
                     data-index={index}
                     ref={rowVirtualizer.measureElement}
                     className={`palette-item${index === selectedIndex ? ' palette-item-selected' : ''}`}
-                    onMouseEnter={() => setSelectedIndex(index)}
+                    onMouseEnter={() => handleHover(index)}
                     onClick={() => handleSelect(index)}
                     style={{
                       position: 'absolute',

@@ -3436,6 +3436,12 @@ html, body, #root {
   flex-direction: column;
   padding: 4px 0;
   border-bottom: 1px solid var(--border);
+  /* The popover is `overflow: hidden` with a max-height, so without a scroll
+     container here any entries past that height were clipped outright —
+     arrow-key navigation would move the highlight onto rows nobody could see.
+     `min-height: 0` is required for overflow to work inside the flex column. */
+  overflow-y: auto;
+  min-height: 0;
 }
 
 .ai-panel-mention-section:last-child {
