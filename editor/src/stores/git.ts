@@ -13,12 +13,23 @@ interface BlameEntry {
 }
 
 export interface GitFileStatus {
+  /**
+   * Repo-root-relative path — NOT relative to the opened workspace, which is a
+   * different directory whenever the workspace sits below the repo root. Join
+   * against `git_repo_root` to get a filesystem path.
+   */
   path: string;
   absolute_path: string;
   status: string;
   staged: boolean;
   /** True for an unmerged (conflicted) path. */
   conflicted?: boolean;
+  /**
+   * For a rename/copy, the path this file had before the rename; absent
+   * otherwise. The HEAD side of a staged rename's diff has to be read from
+   * this, since `path` doesn't exist in HEAD (see `resolveDiffSources`).
+   */
+  orig_path?: string | null;
 }
 
 interface GitStatusResult {
@@ -38,8 +49,16 @@ interface GitStatusResult {
  * mismatched/old backend payload missing the field entirely still parses.
  */
 export interface BranchInfo {
+  /** Display name: `main`, or `origin/feature-x` for a remote branch. */
   name: string;
   last_checkout_ts?: number | null;
+  /** True for a remote-tracking branch (`refs/remotes/**`). */
+  is_remote?: boolean;
+  /**
+   * For a remote branch, the local branch to create or switch to on checkout
+   * (`origin/release/1.x` -> `release/1.x`). Absent for local branches.
+   */
+  local_name?: string | null;
 }
 
 /**
@@ -85,6 +104,12 @@ interface GitState {
   refreshBranches: (workspacePath: string) => Promise<void>;
   refreshLog: (workspacePath: string) => Promise<void>;
   switchBranch: (workspacePath: string, branch: string) => Promise<void>;
+  /**
+   * Check out a remote-tracking branch (`origin/feature-x`) the way VS Code
+   * does: create a local branch of the same name tracking it, or switch to
+   * that local branch if it already exists. Returns the local branch name.
+   */
+  checkoutRemoteBranch: (workspacePath: string, remoteBranch: string) => Promise<string>;
   createBranch: (
     workspacePath: string,
     name: string,
@@ -353,6 +378,24 @@ export const useGitStore = create<GitState>((set, get) => ({
       await reloadAfterCheckout(get, workspacePath, branch);
     } catch (err) {
       notify.error(`Failed to switch branch: ${err}`);
+      throw err;
+    }
+  },
+
+  checkoutRemoteBranch: async (workspacePath: string, remoteBranch: string) => {
+    try {
+      const local = await invoke<string>('git_checkout_remote_branch', {
+        workspacePath,
+        remoteBranch,
+      });
+      // Same optimistic recency stamp as `switchBranch` — stamp the LOCAL
+      // name, which is what the picker now shows as current.
+      set({ branches: stampCheckoutNow(get().branches, local) });
+      await reloadAfterCheckout(get, workspacePath, local);
+      await get().refreshBranches(workspacePath);
+      return local;
+    } catch (err) {
+      notify.error(`Failed to check out ${remoteBranch}: ${err}`);
       throw err;
     }
   },

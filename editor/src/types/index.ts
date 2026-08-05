@@ -19,8 +19,16 @@ export interface TreeNode {
 export interface DiffInfo {
   originalContent: string;
   modifiedContent: string;
+  /** Repo-root-relative path (post-rename, if this entry is a rename). */
   filePath: string;
   staged: boolean;
+  /**
+   * Pre-rename path, for a renamed entry. Retained on the tab so a live
+   * refresh re-reads the HEAD side from the same place the initial open did —
+   * otherwise a refresh would silently turn a rename diff back into a
+   * whole-file insertion.
+   */
+  origPath?: string | null;
   /**
    * True when the workspace is a Unity project, this is a Unity asset file
    * (`.unity`/`.prefab`/`.asset`/…), AND `unity.sceneDiff.enabled` was on

@@ -15,9 +15,13 @@ import {
   GitCommitHorizontal,
   AlertTriangle,
   Download,
+  List,
+  ListTree,
 } from 'lucide-react';
 import { useWorkspaceStore } from '../../../stores/workspace';
 import { useGitStore, type GitFileStatus } from '../../../stores/git';
+import { useUiStore, type ScmViewMode } from '../../../stores/ui';
+import { buildScmTree, type ScmTreeNode } from '../services/scm-tree';
 import type { GitLogEntry, CommitFileChange } from '../../../types';
 import { useProjectContextStore } from '../../../stores/project-context';
 import { formatRelativeDate } from '../../../utils/date';
@@ -55,23 +59,33 @@ function FileItem({
   onUnstage,
   onDiscard,
   onClick,
+  hidePath = false,
 }: {
   file: GitFileStatus;
   onStage?: () => void;
   onUnstage?: () => void;
   onDiscard?: () => void;
   onClick?: () => void;
+  /** Tree mode already shows the directory as the row above — don't repeat it. */
+  hidePath?: boolean;
 }) {
   const fileName = file.path.split('/').pop() || file.path;
-  const dirPath = file.path.includes('/') ? file.path.slice(0, file.path.lastIndexOf('/')) : '';
+  const dirPath =
+    !hidePath && file.path.includes('/') ? file.path.slice(0, file.path.lastIndexOf('/')) : '';
+  // Renames read as "new ← old" (VS Code shows both halves); without the old
+  // name a rename is indistinguishable from an unrelated added file.
+  const origName = file.orig_path ? file.orig_path.split('/').pop() : null;
 
   return (
-    <div className="scm-file-item" onClick={onClick}>
+    <div className="scm-file-item" onClick={onClick} title={file.orig_path ? `${file.orig_path} → ${file.path}` : file.path}>
       <span className="icon" style={{ flexShrink: 0, display: 'flex' }}>
         {getFileIcon(fileName, 14)}
       </span>
       <span className="scm-file-name">
         {fileName}
+        {origName && origName !== fileName && (
+          <span className="scm-file-path">← {origName}</span>
+        )}
         {dirPath && <span className="scm-file-path">{dirPath}</span>}
       </span>
       <div className="scm-file-actions">
@@ -97,6 +111,64 @@ function FileItem({
       </span>
     </div>
   );
+}
+
+/**
+ * Render one section's files, flat or grouped by folder.
+ *
+ * Folder rows are collapsible; collapse state is keyed by the folder's full
+ * path and lives in the parent so it survives re-renders driven by git
+ * refreshes.
+ */
+function FileList({
+  files,
+  mode,
+  collapsed,
+  onToggleFolder,
+  renderFile,
+  depth = 0,
+}: {
+  files: GitFileStatus[];
+  mode: ScmViewMode;
+  collapsed: Set<string>;
+  onToggleFolder: (path: string) => void;
+  renderFile: (file: GitFileStatus, hidePath: boolean) => React.ReactNode;
+  depth?: number;
+}) {
+  if (mode === 'list') {
+    return <>{files.map((file) => renderFile(file, false))}</>;
+  }
+
+  const nodes = buildScmTree(files);
+
+  const renderNodes = (list: ScmTreeNode[], level: number): React.ReactNode =>
+    list.map((node) => {
+      if (node.kind === 'file') {
+        return (
+          <div key={`f-${node.file.path}`} style={{ paddingLeft: level * 12 }}>
+            {renderFile(node.file, true)}
+          </div>
+        );
+      }
+      const isCollapsed = collapsed.has(node.path);
+      return (
+        <div key={`d-${node.path}`}>
+          <div
+            className="scm-file-item"
+            style={{ paddingLeft: 8 + level * 12, cursor: 'pointer' }}
+            onClick={() => onToggleFolder(node.path)}
+            title={node.path}
+          >
+            {isCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+            <Folder size={14} style={{ flexShrink: 0, opacity: 0.8 }} />
+            <span className="scm-file-name">{node.label}</span>
+          </div>
+          {!isCollapsed && renderNodes(node.children, level + 1)}
+        </div>
+      );
+    });
+
+  return <>{renderNodes(nodes, depth)}</>;
 }
 
 function SourceControlPanel() {
@@ -154,6 +226,18 @@ function SourceControlPanel() {
   const [showAddWorktree, setShowAddWorktree] = useState(false);
   const [metaWarning, setMetaWarning] = useState<MetaPairingViolation[] | null>(null);
   const [expandedCommits, setExpandedCommits] = useState<Set<string>>(new Set());
+  const scmViewMode = useUiStore((s) => s.scmViewMode);
+  const setScmViewMode = useUiStore((s) => s.setScmViewMode);
+  // Folders start expanded; only explicitly-collapsed paths are tracked.
+  const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set());
+
+  const toggleFolder = (path: string) =>
+    setCollapsedFolders((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
 
   // Conflicted (unmerged) files surface from either array; dedup by path.
   const conflictedFiles = (() => {
@@ -167,6 +251,12 @@ function SourceControlPanel() {
     }
     return out;
   })();
+
+  // Conflicted entries render in their own section, so the Staged/Changes
+  // sections list — and must therefore count — only the non-conflicted ones.
+  // Counting the raw arrays showed e.g. "Changes 3" above an empty list.
+  const stagedRows = stagedFiles.filter((f) => !f.conflicted);
+  const unstagedRows = unstagedFiles.filter((f) => !f.conflicted);
 
   useEffect(() => {
     if (workspacePath && isGitRepo) {
@@ -241,7 +331,9 @@ function SourceControlPanel() {
 
   function handleFileClick(file: GitFileStatus) {
     const fileName = file.path.split('/').pop() || file.path;
-    openDiffTab(file.path, fileName, file.staged);
+    // `orig_path` lets a staged rename diff against its pre-rename HEAD
+    // content instead of rendering as a whole-file insertion.
+    openDiffTab(file.path, fileName, file.staged, file.orig_path);
   }
 
   function toggleCommit(hash: string) {
@@ -287,6 +379,13 @@ function SourceControlPanel() {
           onClick={() => workspacePath && fetchGit(workspacePath)}
         >
           <Download size={14} />
+        </button>
+        <button
+          className="scm-toolbar-btn"
+          title={scmViewMode === 'list' ? 'View as Tree' : 'View as List'}
+          onClick={() => setScmViewMode(scmViewMode === 'list' ? 'tree' : 'list')}
+        >
+          {scmViewMode === 'list' ? <ListTree size={14} /> : <List size={14} />}
         </button>
         <button
           className="scm-toolbar-btn"
@@ -430,7 +529,7 @@ function SourceControlPanel() {
         )}
 
         {/* Staged Changes */}
-        {stagedFiles.length > 0 && (
+        {stagedRows.length > 0 && (
           <>
             <div
               className="scm-section-header"
@@ -450,17 +549,26 @@ function SourceControlPanel() {
                     <Minus size={14} />
                   </button>
                 </div>
-                <span className="scm-section-count">{stagedFiles.length}</span>
+                <span className="scm-section-count">{stagedRows.length}</span>
               </div>
             </div>
-            {stagedOpen && stagedFiles.filter((f) => !f.conflicted).map((file) => (
-              <FileItem
-                key={`staged-${file.path}`}
-                file={file}
-                onUnstage={() => workspacePath && unstageFile(workspacePath, file.path)}
-                onClick={() => handleFileClick(file)}
+            {stagedOpen && (
+              <FileList
+                files={stagedRows}
+                mode={scmViewMode}
+                collapsed={collapsedFolders}
+                onToggleFolder={toggleFolder}
+                renderFile={(file, hidePath) => (
+                  <FileItem
+                    key={`staged-${file.path}`}
+                    file={file}
+                    hidePath={hidePath}
+                    onUnstage={() => workspacePath && unstageFile(workspacePath, file.path)}
+                    onClick={() => handleFileClick(file)}
+                  />
+                )}
               />
-            ))}
+            )}
           </>
         )}
 
@@ -474,7 +582,7 @@ function SourceControlPanel() {
             Changes
           </span>
           <div className="scm-section-right">
-            {unstagedFiles.length > 0 && (
+            {unstagedRows.length > 0 && (
               <div className="scm-section-actions">
                 <button
                   className="scm-file-action-btn"
@@ -492,21 +600,30 @@ function SourceControlPanel() {
                 </button>
               </div>
             )}
-            <span className="scm-section-count">{unstagedFiles.length}</span>
+            <span className="scm-section-count">{unstagedRows.length}</span>
           </div>
         </div>
-        {changesOpen && unstagedFiles.filter((f) => !f.conflicted).map((file) => (
-          <FileItem
-            key={`unstaged-${file.path}`}
-            file={file}
-            onStage={() => workspacePath && stageFile(workspacePath, file.path)}
-            onDiscard={() => workspacePath && discardFile(workspacePath, file.path, file.status === 'untracked')}
-            onClick={() => handleFileClick(file)}
+        {changesOpen && (
+          <FileList
+            files={unstagedRows}
+            mode={scmViewMode}
+            collapsed={collapsedFolders}
+            onToggleFolder={toggleFolder}
+            renderFile={(file, hidePath) => (
+              <FileItem
+                key={`unstaged-${file.path}`}
+                file={file}
+                hidePath={hidePath}
+                onStage={() => workspacePath && stageFile(workspacePath, file.path)}
+                onDiscard={() => workspacePath && discardFile(workspacePath, file.path, file.status === 'untracked')}
+                onClick={() => handleFileClick(file)}
+              />
+            )}
           />
-        ))}
+        )}
 
         {/* No changes */}
-        {stagedFiles.length === 0 && unstagedFiles.length === 0 && (
+        {stagedRows.length === 0 && unstagedRows.length === 0 && conflictedFiles.length === 0 && (
           <div style={{ padding: '16px', color: 'var(--text-secondary)', textAlign: 'center', fontSize: 13 }}>
             No changes detected
           </div>

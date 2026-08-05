@@ -5,7 +5,12 @@ import type { BranchInfo } from '../../../stores/git';
 /** Build a `BranchInfo` with an optional last-checkout timestamp (defaults to
  * `null`, i.e. "no recency data"), so test fixtures stay terse. */
 function b(name: string, lastCheckoutTs: number | null = null): BranchInfo {
-  return { name, last_checkout_ts: lastCheckoutTs };
+  return { name, last_checkout_ts: lastCheckoutTs, is_remote: false };
+}
+
+/** Build a remote-tracking `BranchInfo` (`origin/feature-x` -> `feature-x`). */
+function r(name: string, localName = name.split('/').slice(1).join('/')): BranchInfo {
+  return { name, last_checkout_ts: null, is_remote: true, local_name: localName };
 }
 
 /** Build a plain name-only `BranchInfo[]` fixture (no recency data on any
@@ -185,6 +190,51 @@ describe('buildBranchResults', () => {
       // Verify that the create row is present and comes last
       expect(createRows).toHaveLength(1);
       expect(rows[rows.length - 1].kind).toBe('create');
+    });
+  });
+
+  describe('remote branches', () => {
+    it('groups remote branches after every local one (empty query)', () => {
+      const rows = buildBranchResults(
+        [r('origin/alpha'), b('zeta'), r('origin/zeta'), b('alpha')],
+        '',
+        'alpha',
+      );
+      const branchRows = rows.filter((row): row is BranchRow => row.kind === 'branch');
+      expect(branchRows.map((row) => row.name)).toEqual([
+        'alpha',
+        'zeta',
+        'origin/alpha',
+        'origin/zeta',
+      ]);
+    });
+
+    it('keeps remotes grouped after locals when fuzzy filtering', () => {
+      const rows = buildBranchResults([r('origin/feature-x'), b('feature-x')], 'feature', null);
+      const branchRows = rows.filter((row): row is BranchRow => row.kind === 'branch');
+      expect(branchRows.map((row) => row.name)).toEqual(['feature-x', 'origin/feature-x']);
+    });
+
+    it('carries isRemote and localName onto the row so checkout can create a tracking branch', () => {
+      const rows = buildBranchResults([r('origin/release/1.x')], '', null);
+      const row = rows.find((x): x is BranchRow => x.kind === 'branch')!;
+      expect(row.isRemote).toBe(true);
+      // Nested names must not be split on the first slash.
+      expect(row.localName).toBe('release/1.x');
+    });
+
+    it('marks local rows as not remote', () => {
+      const rows = buildBranchResults([b('main')], '', null);
+      const row = rows.find((x): x is BranchRow => x.kind === 'branch')!;
+      expect(row.isRemote).toBe(false);
+      expect(row.localName).toBeUndefined();
+    });
+
+    it('does not offer to create a branch whose name matches a remote branch exactly', () => {
+      // `origin/feature-x` is a real ref; a "create branch 'origin/feature-x'"
+      // row would produce an invalid local branch name.
+      const rows = buildBranchResults([r('origin/feature-x')], 'origin/feature-x', null);
+      expect(rows.some((row) => row.kind === 'create')).toBe(false);
     });
   });
 });

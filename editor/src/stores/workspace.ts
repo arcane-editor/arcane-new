@@ -28,6 +28,7 @@ import { notify } from './notifications';
 import { coDeleteMeta, coRenameMeta } from '../features/explorer';
 import { maybeRefreshUnityAfterSave } from '../features/unity-bridge';
 import { isUnityAssetFile } from '../features/unity-asset-viewer';
+import { resolveDiffSources, isLiveDiff, nextDiffInfo } from '../features/git';
 import { ExcludeMatcher } from '../utils/exclude-matcher';
 import { addRecentProject } from '../utils/persistence';
 import { classifyFile, offerClassRenameSync } from '../features/csharp';
@@ -654,6 +655,99 @@ async function refreshIgnoreFlags(get: () => WorkspaceState): Promise<void> {
   useWorkspaceStore.setState({ tree: apply(get().tree) });
 }
 
+/** Both sides of a diff, plus whether either side failed to load. */
+interface DiffContents {
+  originalContent: string;
+  modifiedContent: string;
+  /** True only when BOTH sides failed — i.e. there is nothing to show at all. */
+  bothFailed: boolean;
+  /** Joined failure detail, for the toast. Empty unless `bothFailed`. */
+  detail: string;
+}
+
+/**
+ * Read both sides of a staged/unstaged diff from git.
+ *
+ * Shared by `openDiffTab` (first open) and `refreshOpenDiffTabs` (live update)
+ * so the two can never drift on which revision each side comes from — that
+ * asymmetry is exactly what produced wrong diff contents before.
+ */
+async function fetchDiffContents(
+  workspacePath: string,
+  filePath: string,
+  staged: boolean,
+  origPath?: string | null,
+): Promise<DiffContents> {
+  let originalContent = '';
+  let modifiedContent = '';
+  let originalFailed = false;
+  let modifiedFailed = false;
+  let originalError: unknown = null;
+  let modifiedError: unknown = null;
+
+  if (staged) {
+    // Staged diff: HEAD vs INDEX. A staged deletion naturally renders as
+    // content -> empty (git_show_index returns "" once a path is removed
+    // from the index). For a rename the HEAD side lives at the PRE-rename
+    // path — `filePath` doesn't exist in HEAD at all, so reading it there
+    // would render the move as a whole-file insertion.
+    const { original } = resolveDiffSources({ path: filePath, staged: true, origPath });
+    try {
+      originalContent = await invoke<string>('git_show_head', {
+        workspacePath,
+        filePath: original.path,
+      });
+    } catch (err) {
+      originalFailed = true;
+      originalError = err;
+    }
+    try {
+      modifiedContent = await invoke<string>('git_show_index', { workspacePath, filePath });
+    } catch (err) {
+      modifiedFailed = true;
+      modifiedError = err;
+    }
+  } else {
+    // Unstaged diff: INDEX vs worktree. Unmerged/conflicted paths have no
+    // stage 0, so git_show_index errors for them — fall back to HEAD so
+    // conflicts keep the pre-existing HEAD-vs-worktree behavior. Untracked
+    // files: the index side is "" as before.
+    try {
+      originalContent = await invoke<string>('git_show_index', { workspacePath, filePath });
+    } catch {
+      try {
+        originalContent = await invoke<string>('git_show_head', { workspacePath, filePath });
+      } catch (err) {
+        originalFailed = true;
+        originalError = err;
+      }
+    }
+    try {
+      // `filePath` is repo-root-relative (see `repo_root` in git.rs), and the
+      // root is not the workspace whenever the opened folder sits below it —
+      // joining against `workspacePath` would read the wrong file, or nothing.
+      const root = await invoke<string>('git_repo_root', { workspacePath });
+      modifiedContent = await invoke<string>('read_file', { path: `${root}/${filePath}` });
+    } catch (err) {
+      // File deleted — modifiedContent stays empty. Still tracked as a
+      // failure below so a fully broken repo/workspace (both sides
+      // erroring) surfaces a toast instead of a silently empty diff.
+      modifiedFailed = true;
+      modifiedError = err;
+    }
+  }
+
+  const bothFailed = originalFailed && modifiedFailed;
+  const detail = bothFailed
+    ? [originalError, modifiedError]
+        .filter((e): e is unknown => e != null)
+        .map((e) => (e instanceof Error ? e.message : String(e)))
+        .join('; ')
+    : '';
+
+  return { originalContent, modifiedContent, bothFailed, detail };
+}
+
 interface WorkspaceState {
   workspacePath: string | null;
   assetsRootPath: string | null;
@@ -677,8 +771,25 @@ interface WorkspaceState {
   updateFileContent: (path: string, content: string) => void;
   saveFile: (path: string) => Promise<void>;
   reloadFileFromDisk: (path: string, opts?: { skipIfDirty?: boolean }) => Promise<void>;
-  openDiffTab: (filePath: string, fileName: string, staged: boolean) => Promise<void>;
+  /**
+   * `filePath` is repo-root-relative. `origPath` is the pre-rename path for a
+   * renamed entry — required for a staged rename to diff as a rename rather
+   * than a whole-file insertion.
+   */
+  openDiffTab: (
+    filePath: string,
+    fileName: string,
+    staged: boolean,
+    origPath?: string | null,
+  ) => Promise<void>;
   openCommitDiffTab: (hash: string, filePath: string, title: string) => Promise<void>;
+  /**
+   * Re-read both sides of every open staged/unstaged diff tab. Called on
+   * `git-state-changed` (stage, unstage, commit, checkout) and when a watched
+   * file changes on disk, so an open diff reflects reality instead of the
+   * moment it was opened. Never changes which tab is active.
+   */
+  refreshOpenDiffTabs: () => Promise<void>;
   refreshTree: () => Promise<void>;
   createFile: (parentDir: string, fileName: string) => Promise<string | null>;
   createDirectory: (parentDir: string, dirName: string) => Promise<string | null>;
@@ -927,6 +1038,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
           if (wp) {
             useGitStore.getState().refreshStatus(wp).catch(() => {});
             useGitStore.getState().refreshBranches(wp).catch(() => {});
+            // Staging, committing or checking out changes what an open diff
+            // should show; without this the tab keeps rendering whatever was
+            // true when it was opened.
+            get().refreshOpenDiffTabs().catch(() => {});
           }
         });
         unlistenGitState = unlistenGit;
@@ -943,6 +1058,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
               console.warn('[Workspace] live reload failed:', p, err);
             });
           }
+          // A working-tree edit is the other side of an unstaged diff, and it
+          // never touches `.git`, so `git-state-changed` won't fire for it.
+          store.refreshOpenDiffTabs().catch(() => {});
           // Editing ignore rules changes which tree entries render dimmed.
           if (event.payload.some(isIgnoreFile)) {
             refreshIgnoreFlags(get).catch((err) => {
@@ -1145,6 +1263,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     if (workspacePath) {
       useGitStore.getState().refreshStatus(workspacePath);
       useGitStore.getState().invalidateBlameFile(path);
+      // Saving changes the worktree side of any open unstaged diff. The
+      // watcher would eventually catch this, but going direct makes the diff
+      // update on the same tick as the save.
+      get().refreshOpenDiffTabs().catch(() => {});
     }
 
     // Unity: ask the connected Editor to refresh/recompile on .cs save
@@ -1187,68 +1309,20 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     if (ctx) syncDocumentChange(ctx.client, path, content);
   },
 
-  openDiffTab: async (filePath: string, fileName: string, staged: boolean) => {
+  openDiffTab: async (filePath: string, fileName: string, staged: boolean, origPath?: string | null) => {
     const { workspacePath } = get();
     if (!workspacePath) return;
 
     const diffPath = `diff://${staged ? 'staged' : 'unstaged'}/${filePath}`;
 
-    let originalContent = '';
-    let modifiedContent = '';
-    let originalFailed = false;
-    let modifiedFailed = false;
-    let originalError: unknown = null;
-    let modifiedError: unknown = null;
+    const { originalContent, modifiedContent, bothFailed, detail } = await fetchDiffContents(
+      workspacePath,
+      filePath,
+      staged,
+      origPath,
+    );
 
-    if (staged) {
-      // Staged diff: HEAD vs INDEX. A staged deletion naturally renders as
-      // content -> empty (git_show_index returns "" once a path is removed
-      // from the index).
-      try {
-        originalContent = await invoke<string>('git_show_head', { workspacePath, filePath });
-      } catch (err) {
-        originalFailed = true;
-        originalError = err;
-      }
-      try {
-        modifiedContent = await invoke<string>('git_show_index', { workspacePath, filePath });
-      } catch (err) {
-        modifiedFailed = true;
-        modifiedError = err;
-      }
-    } else {
-      // Unstaged diff: INDEX vs worktree. Unmerged/conflicted paths have no
-      // stage 0, so git_show_index errors for them — fall back to HEAD so
-      // conflicts keep the pre-existing HEAD-vs-worktree behavior. Untracked
-      // files: the index side is "" as before.
-      try {
-        originalContent = await invoke<string>('git_show_index', { workspacePath, filePath });
-      } catch {
-        try {
-          originalContent = await invoke<string>('git_show_head', { workspacePath, filePath });
-        } catch (err) {
-          originalFailed = true;
-          originalError = err;
-        }
-      }
-      try {
-        modifiedContent = await invoke<string>('read_file', {
-          path: `${workspacePath}/${filePath}`,
-        });
-      } catch (err) {
-        // File deleted — modifiedContent stays empty. Still tracked as a
-        // failure below so a fully broken repo/workspace (both sides
-        // erroring) surfaces a toast instead of a silently empty diff.
-        modifiedFailed = true;
-        modifiedError = err;
-      }
-    }
-
-    if (originalFailed && modifiedFailed) {
-      const detail = [originalError, modifiedError]
-        .filter((e): e is unknown => e != null)
-        .map((e) => (e instanceof Error ? e.message : String(e)))
-        .join('; ');
+    if (bothFailed) {
       notify.error(`Couldn't load diff for ${fileName}: ${detail}`);
       return;
     }
@@ -1273,7 +1347,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         const openFiles = state.openFiles.slice();
         openFiles[idx] = {
           ...existing,
-          diff: { ...(existing.diff as DiffInfo), originalContent, modifiedContent, semanticCandidate },
+          diff: { ...(existing.diff as DiffInfo), originalContent, modifiedContent, semanticCandidate, origPath },
         };
         return { openFiles, activeFilePath: diffPath };
       }
@@ -1289,10 +1363,56 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
           filePath,
           staged,
           semanticCandidate,
+          origPath,
         },
       };
       return { openFiles: [...state.openFiles, file], activeFilePath: diffPath };
     });
+  },
+
+  refreshOpenDiffTabs: async () => {
+    const { workspacePath, openFiles } = get();
+    if (!workspacePath) return;
+
+    // Commit diffs are pinned to immutable revisions, so they can never go
+    // stale and are skipped. Everything else compares against the index or the
+    // worktree, both of which the triggering event may have just changed.
+    const targets = openFiles.filter(
+      (f): f is OpenFile & { diff: DiffInfo } => !!f.diff && isLiveDiff(f.diff),
+    );
+    if (targets.length === 0) return;
+
+    const results = await Promise.all(
+      targets.map(async (f) => {
+        try {
+          const contents = await fetchDiffContents(
+            workspacePath,
+            f.diff.filePath,
+            f.diff.staged,
+            f.diff.origPath,
+          );
+          return { path: f.path, contents };
+        } catch {
+          return null;
+        }
+      }),
+    );
+
+    set((state) => ({
+      openFiles: state.openFiles.map((f) => {
+        const result = results.find((r) => r && r.path === f.path);
+        // Both sides failing means the file is gone from git's view entirely
+        // (e.g. discarded while open). Leave the tab's last-known content
+        // rather than blanking it — closing it is the user's call.
+        if (!result || !f.diff || result.contents.bothFailed) return f;
+        const { originalContent, modifiedContent } = result.contents;
+        // `nextDiffInfo` preserves object identity when nothing changed, which
+        // is what keeps Monaco from re-rendering (and resetting scroll) on
+        // every unrelated git event.
+        const next = nextDiffInfo(f.diff, { originalContent, modifiedContent });
+        return next === f.diff ? f : { ...f, diff: next };
+      }),
+    }));
   },
 
   openCommitDiffTab: async (hash: string, filePath: string, title: string) => {

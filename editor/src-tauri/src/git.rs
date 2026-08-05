@@ -13,6 +13,15 @@ pub struct GitFileStatus {
     /// the SCM UI can offer merge-resolution affordances.
     #[serde(default)]
     pub conflicted: bool,
+    /// For a rename/copy entry, the path this file had BEFORE the rename;
+    /// `None` for every other status.
+    ///
+    /// `path` alone is the new path, which does not exist in HEAD — so a
+    /// staged rename diffed as `HEAD:<path>` vs the index came back empty on
+    /// the left and rendered as a 100%-added file. The HEAD side has to be
+    /// read from this instead. Also lets the SCM row show `old → new`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub orig_path: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -44,10 +53,121 @@ fn map_status_char(c: char) -> &'static str {
     }
 }
 
+/// Resolve the root of the repository containing `workspace_path`, expressed
+/// in the caller's own path spelling.
+///
+/// Every git path in this module is repo-root-relative, because that is the
+/// only base all of git's own interfaces agree on: `git show <rev>:<path>`
+/// resolves against the repo root, `git show --name-status` *emits* root
+/// -relative paths, and `git status --porcelain` can be made to emit them with
+/// `status.relativePaths=false`. Without this normalization, a workspace
+/// opened at a subdirectory of the repo fed CWD-relative status paths into
+/// root-relative object specs — which silently returned a DIFFERENT file's
+/// contents whenever a same-named path existed nearer the root.
+///
+/// Derived by stripping `git rev-parse --show-prefix` (the CWD's path relative
+/// to the root — `UnityProject/`, or empty at the root itself) off the tail of
+/// `workspace_path`, deliberately NOT by reading `--show-toplevel`.
+/// `--show-toplevel` resolves symlinks, so on macOS a workspace opened at
+/// `/tmp/x` comes back as `/private/tmp/x`; `absolute_path` would then stop
+/// matching the frontend's tree node ids and every explorer git badge would
+/// quietly disappear. Stripping a relative prefix preserves the caller's
+/// spelling and can't introduce that drift. `--show-toplevel` is kept only as
+/// a fallback for the odd spelling that won't strip (`..` segments, say).
+///
+/// Not cached: `--show-prefix` costs ~3ms against ~9ms for the `git status` it
+/// accompanies, and a cache that went stale (`git init` in a subdirectory of
+/// an open workspace) would resurrect exactly the silent wrong-file-contents
+/// failure this function exists to prevent.
+fn repo_root(workspace_path: &str) -> Result<String, String> {
+    let prefix_out = Command::new("git")
+        .args(["-C", workspace_path, "rev-parse", "--show-prefix"])
+        // Read-only command — see the comment on `git_status`'s call.
+        .env("GIT_OPTIONAL_LOCKS", "0")
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !prefix_out.status.success() {
+        // Outside a repo git says "fatal: not a git repository (...)", which
+        // `doRefreshStatus` in `stores/git.ts` classifies to blank the SCM
+        // panel rather than show an error banner. Pass it through verbatim.
+        return Err(String::from_utf8_lossy(&prefix_out.stderr).to_string());
+    }
+
+    let prefix = String::from_utf8_lossy(&prefix_out.stdout)
+        .trim()
+        .trim_end_matches('/')
+        .to_string();
+    let workspace = workspace_path.trim_end_matches('/');
+
+    if prefix.is_empty() {
+        return Ok(workspace.to_string());
+    }
+
+    if let Some(root) = workspace.strip_suffix(&format!("/{prefix}")) {
+        // A workspace one level below the filesystem root strips to "", which
+        // as a `-C` argument would mean "current directory" rather than "/".
+        return Ok(if root.is_empty() {
+            "/".to_string()
+        } else {
+            root.to_string()
+        });
+    }
+
+    // The prefix didn't line up with the caller's spelling (`..` segments, a
+    // case-insensitive filesystem, ...). Fall back to the authoritative answer
+    // and accept the symlink-resolution risk in this rare case.
+    let toplevel = Command::new("git")
+        .args(["-C", workspace_path, "rev-parse", "--show-toplevel"])
+        .env("GIT_OPTIONAL_LOCKS", "0")
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !toplevel.status.success() {
+        return Err(String::from_utf8_lossy(&toplevel.stderr).to_string());
+    }
+    Ok(String::from_utf8_lossy(&toplevel.stdout).trim().to_string())
+}
+
+/// Expose `repo_root` to the frontend.
+///
+/// Every path in a `GitFileStatus` / `CommitFileChange` is repo-root-relative,
+/// so any frontend code that needs to turn one back into a filesystem path
+/// (reading the worktree side of a diff, say) has to join it against the root
+/// rather than the opened workspace — those differ whenever the workspace is a
+/// subdirectory of the repository.
+#[tauri::command]
+pub fn git_repo_root(workspace_path: String) -> Result<String, String> {
+    repo_root(&workspace_path)
+}
+
 #[tauri::command]
 pub fn git_status(workspace_path: String) -> Result<GitStatusResult, String> {
+    let workspace_path = repo_root(&workspace_path)?;
     let output = Command::new("git")
-        .args(["-C", &workspace_path, "status", "--porcelain=v2", "--branch"])
+        .args([
+            // Emit paths relative to the repo root rather than the CWD. The
+            // command already runs at the root so this is belt-and-braces,
+            // but it makes the contract explicit and immune to a stray
+            // `status.relativePaths` in the user's config.
+            "-c",
+            "status.relativePaths=false",
+            "-C",
+            &workspace_path,
+            "status",
+            "--porcelain=v2",
+            "--branch",
+            // List untracked files individually. Git's default collapses a
+            // directory of new files into one `? newfolder/` entry — a row
+            // the panel can neither diff nor discard, because it's a
+            // directory. This is what VS Code passes too.
+            "-uall",
+            // NUL-delimit records so paths arrive as raw bytes. Without it
+            // git C-quotes anything non-ASCII or containing a quote
+            // (`"h\303\251llo.txt"`), and that literal string then fails as a
+            // pathspec, as a file to read, and as an explorer-node match.
+            // `core.quotePath=false` fixes only the non-ASCII half.
+            "-z",
+        ])
         // Read-only command: opt out of git's opportunistic `.git/index`
         // refresh-write. The file watcher treats `.git/index` as a
         // git-state path (see file_scanner.rs), so without this a
@@ -68,10 +188,23 @@ pub fn git_status(workspace_path: String) -> Result<GitStatusResult, String> {
     Ok(parse_status(&stdout, &workspace_path))
 }
 
-/// Parse `git status --porcelain=v2 --branch` output into the frontend's
+/// Parse `git status --porcelain=v2 --branch -z` output into the frontend's
 /// status shape. Pure so the porcelain field layout is pinned by direct
 /// tests — a silent field-count mismatch here drops entries from the SCM
 /// panel with no error anywhere.
+///
+/// Records are NUL-separated rather than newline-separated (`-z`), which is
+/// what keeps paths unquoted. One consequence needs care: a rename/copy entry
+/// spans TWO records — the entry itself, then the original path on its own.
+/// Verified against git 2.52.0:
+///
+/// ```text
+/// 2 RM N... ... R100 src/new-name.txt\0src/old-name.txt\0
+/// ```
+///
+/// So this iterates an explicit cursor instead of a `for` loop: the `2 ` arm
+/// consumes the following record. Treating that record as a fresh entry would
+/// shift every subsequent one by a position.
 fn parse_status(stdout: &str, workspace_path: &str) -> GitStatusResult {
     let mut branch = String::from("HEAD");
     let mut ahead: i32 = 0;
@@ -79,7 +212,13 @@ fn parse_status(stdout: &str, workspace_path: &str) -> GitStatusResult {
     let mut staged: Vec<GitFileStatus> = Vec::new();
     let mut unstaged: Vec<GitFileStatus> = Vec::new();
 
-    for line in stdout.lines() {
+    // A trailing NUL yields a final empty record; `filter` drops it (and any
+    // stray blank) so it can't be mistaken for an entry.
+    let records: Vec<&str> = stdout.split('\0').filter(|r| !r.is_empty()).collect();
+    let mut idx = 0;
+    while idx < records.len() {
+        let line = records[idx];
+        idx += 1;
         if let Some(name) = line.strip_prefix("# branch.head ") {
             branch = name.to_string();
             continue;
@@ -119,6 +258,7 @@ fn parse_status(stdout: &str, workspace_path: &str) -> GitStatusResult {
                     status: map_status_char(x).to_string(),
                     staged: true,
                     conflicted: false,
+                    orig_path: None,
                 });
             }
             if y != '.' {
@@ -128,20 +268,24 @@ fn parse_status(stdout: &str, workspace_path: &str) -> GitStatusResult {
                     status: map_status_char(y).to_string(),
                     staged: false,
                     conflicted: false,
+                    orig_path: None,
                 });
             }
         } else if let Some(rest) = line.strip_prefix("2 ") {
-            // Renamed/copied entry:
-            //   2 <XY> <sub> <mH> <mI> <mW> <hH> <hI> <X><score> <path>\t<origPath>
-            // — 9 fields after the prefix; the last is <path>\t<origPath>.
+            // Renamed/copied entry, which under `-z` spans two records:
+            //   2 <XY> <sub> <mH> <mI> <mW> <hH> <hI> <X><score> <path>
+            //   <origPath>
+            // — 9 fields after the prefix, then the original path alone in the
+            // NEXT record. Consuming it here is what keeps the entries after a
+            // rename from shifting by one.
             let parts: Vec<&str> = rest.splitn(9, ' ').collect();
             if parts.len() < 9 {
                 continue;
             }
             let xy = parts[0];
-            // The last field contains <path>\t<origPath>
-            let path_field = parts[8];
-            let path = path_field.split('\t').next().unwrap_or(path_field);
+            let path = parts[8];
+            let orig_path = records.get(idx).map(|s| s.to_string());
+            idx += 1;
             let mut xy_chars = xy.chars();
             let x = xy_chars.next().unwrap_or('.');
             let y = xy_chars.next().unwrap_or('.');
@@ -155,15 +299,21 @@ fn parse_status(stdout: &str, workspace_path: &str) -> GitStatusResult {
                     status: map_status_char(x).to_string(),
                     staged: true,
                     conflicted: false,
+                    orig_path: orig_path.clone(),
                 });
             }
             if y != '.' {
+                // The worktree-side change of a rename is an ordinary edit to
+                // the file at its NEW path, so the pre-rename path is not
+                // meaningful for it — only the staged (index) side diffs
+                // against HEAD.
                 unstaged.push(GitFileStatus {
                     path: path.to_string(),
                     absolute_path,
                     status: map_status_char(y).to_string(),
                     staged: false,
                     conflicted: false,
+                    orig_path: None,
                 });
             }
         } else if let Some(rest) = line.strip_prefix("u ") {
@@ -182,6 +332,7 @@ fn parse_status(stdout: &str, workspace_path: &str) -> GitStatusResult {
                 status: "conflicted".to_string(),
                 staged: false,
                 conflicted: true,
+                orig_path: None,
             });
         } else if let Some(rest) = line.strip_prefix("? ") {
             // Untracked entry: ? <path>
@@ -193,6 +344,7 @@ fn parse_status(stdout: &str, workspace_path: &str) -> GitStatusResult {
                 status: "untracked".to_string(),
                 staged: false,
                 conflicted: false,
+                orig_path: None,
             });
         }
     }
@@ -214,8 +366,23 @@ fn parse_status(stdout: &str, workspace_path: &str) -> GitStatusResult {
 /// degrade to "no recency data", never an error.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct BranchInfo {
+    /// Display name: `main` for a local branch, `origin/feature-x` for a
+    /// remote-tracking one.
     pub name: String,
     pub last_checkout_ts: Option<i64>,
+    /// True for a remote-tracking branch (`refs/remotes/**`). The picker groups
+    /// these below local branches, and checking one out goes through
+    /// `git_checkout_remote_branch` rather than a plain switch.
+    #[serde(default)]
+    pub is_remote: bool,
+    /// For a remote branch, the local branch name to create or switch to
+    /// (`origin/feature-x` -> `feature-x`). `None` for local branches.
+    ///
+    /// Taken from `%(refname:lstrip=3)` rather than by splitting `name` on the
+    /// first `/`, so a nested branch name like `origin/release/1.x` resolves to
+    /// `release/1.x` instead of `release`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local_name: Option<String>,
 }
 
 /// Parse `git reflog --date=unix` output into a map of branch name → unix
@@ -292,15 +459,81 @@ fn parse_checkout_timestamps(reflog_output: &str) -> HashMap<String, i64> {
 /// repo with no commits yet, where `git reflog` errors with "does not have
 /// any commits yet") every branch simply gets `last_checkout_ts: None` —
 /// this command never fails because reflog data happens to be unavailable.
+/// Parse `git for-each-ref` output (one NUL-joined
+/// `<refname>\0<lstrip2>\0<lstrip3>\0<symref>` record per line) into branch
+/// entries. Pure so the ref-name handling is pinned by direct tests.
+///
+/// Two things this gets right that `git branch --list --format=%(refname:short)`
+/// did not:
+///
+/// - **Names survive tag collisions.** `%(refname:short)` shortens a ref only
+///   as far as stays unambiguous, so a branch named `v1.0.0` that also has a
+///   tag `v1.0.0` comes back as `heads/v1.0.0` — a string `git switch` then
+///   rejects (`fatal: a branch is expected`). `%(refname:lstrip=2)` always
+///   yields the real name.
+/// - **`refs/remotes/*/HEAD` is dropped.** It's a symbolic ref, not a branch;
+///   left in, it renders as a bare `origin` row that checks out nothing.
+fn parse_branch_refs(stdout: &str) -> Vec<BranchInfo> {
+    let mut branches: Vec<BranchInfo> = Vec::new();
+
+    for line in stdout.lines() {
+        if line.is_empty() {
+            continue;
+        }
+        let mut fields = line.split('\0');
+        let (Some(refname), Some(name), Some(local), symref) = (
+            fields.next(),
+            fields.next(),
+            fields.next(),
+            fields.next().unwrap_or(""),
+        ) else {
+            continue;
+        };
+        if name.is_empty() {
+            continue;
+        }
+        // A non-empty symref means this is `refs/remotes/<remote>/HEAD`.
+        if !symref.is_empty() {
+            continue;
+        }
+
+        let is_remote = refname.starts_with("refs/remotes/");
+        branches.push(BranchInfo {
+            name: name.to_string(),
+            last_checkout_ts: None,
+            is_remote,
+            local_name: if is_remote && !local.is_empty() {
+                Some(local.to_string())
+            } else {
+                None
+            },
+        });
+    }
+
+    branches
+}
+
+/// List local and remote-tracking branches, each annotated with its
+/// last-checkout recency sourced from `git reflog` (true last-checkout time,
+/// including checkouts made outside this app via the CLI). Base ordering is
+/// local branches first, then remotes, alphabetical within each group — the
+/// frontend's `branch-results` layer applies any recency re-sort.
+///
+/// The reflog read is best-effort: on failure (most commonly a brand-new repo
+/// with no commits yet, where `git reflog` errors with "does not have any
+/// commits yet") every branch simply gets `last_checkout_ts: None` — this
+/// command never fails because reflog data happens to be unavailable.
 #[tauri::command]
 pub fn git_list_branches(workspace_path: String) -> Result<Vec<BranchInfo>, String> {
     let output = Command::new("git")
         .args([
             "-C",
             &workspace_path,
-            "branch",
-            "--list",
-            "--format=%(refname:short)",
+            "for-each-ref",
+            // <refname>\0<display name>\0<local name>\0<symref>
+            "--format=%(refname)%00%(refname:lstrip=2)%00%(refname:lstrip=3)%00%(symref)",
+            "refs/heads",
+            "refs/remotes",
         ])
         .output()
         .map_err(|e| e.to_string())?;
@@ -310,13 +543,8 @@ pub fn git_list_branches(workspace_path: String) -> Result<Vec<BranchInfo>, Stri
         return Err(stderr.to_string());
     }
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let mut names: Vec<String> = stdout
-        .lines()
-        .filter(|l| !l.is_empty())
-        .map(|l| l.to_string())
-        .collect();
-    names.sort();
+    let mut branches = parse_branch_refs(&String::from_utf8_lossy(&output.stdout));
+    branches.sort_by(|a, b| a.is_remote.cmp(&b.is_remote).then_with(|| a.name.cmp(&b.name)));
 
     let timestamps = Command::new("git")
         .args(["-C", &workspace_path, "reflog", "--date=unix"])
@@ -326,18 +554,92 @@ pub fn git_list_branches(workspace_path: String) -> Result<Vec<BranchInfo>, Stri
         .map(|o| parse_checkout_timestamps(&String::from_utf8_lossy(&o.stdout)))
         .unwrap_or_default();
 
-    let branches = names
-        .into_iter()
-        .map(|name| {
-            let last_checkout_ts = timestamps.get(&name).copied();
-            BranchInfo {
-                name,
-                last_checkout_ts,
-            }
-        })
-        .collect();
+    for branch in &mut branches {
+        branch.last_checkout_ts = timestamps.get(&branch.name).copied();
+    }
 
     Ok(branches)
+}
+
+/// Check out a remote-tracking branch the way VS Code does: create a local
+/// branch of the same name tracking it, or — if that local branch already
+/// exists — simply switch to it. Returns the local branch name now checked
+/// out.
+///
+/// `remote_branch` is a display name like `origin/feature-x`; `local_name` is
+/// derived by the caller from `%(refname:lstrip=3)` so nested names
+/// (`origin/release/1.x` -> `release/1.x`) survive. Falling back to splitting
+/// on the first `/` here would mangle those, so an explicit local name is
+/// required rather than inferred.
+#[tauri::command]
+pub fn git_checkout_remote_branch(
+    workspace_path: String,
+    remote_branch: String,
+) -> Result<String, String> {
+    validate_ref_name(&remote_branch)?;
+
+    // Strip the remote name off the front. `git remote` is authoritative —
+    // matching the longest configured remote avoids mis-splitting a branch
+    // whose own name contains a slash.
+    let remotes_out = Command::new("git")
+        .args(["-C", &workspace_path, "remote"])
+        .output()
+        .map_err(|e| e.to_string())?;
+    let remotes = String::from_utf8_lossy(&remotes_out.stdout);
+    let local_name = remotes
+        .lines()
+        .filter_map(|r| remote_branch.strip_prefix(&format!("{}/", r.trim())))
+        .max_by_key(|s| remote_branch.len() - s.len())
+        .ok_or_else(|| format!("'{remote_branch}' does not name a remote branch"))?
+        .to_string();
+
+    if local_name.is_empty() {
+        return Err(format!("'{remote_branch}' does not name a remote branch"));
+    }
+
+    // Already have the local branch? Just switch — re-creating it would fail.
+    let exists = Command::new("git")
+        .args([
+            "-C",
+            &workspace_path,
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            &format!("refs/heads/{local_name}"),
+        ])
+        .output()
+        .map_err(|e| e.to_string())?
+        .status
+        .success();
+
+    let args: Vec<String> = if exists {
+        vec![
+            "-C".into(),
+            workspace_path.clone(),
+            "switch".into(),
+            local_name.clone(),
+        ]
+    } else {
+        vec![
+            "-C".into(),
+            workspace_path.clone(),
+            "switch".into(),
+            "-c".into(),
+            local_name.clone(),
+            "--track".into(),
+            remote_branch.clone(),
+        ]
+    };
+
+    let output = Command::new("git")
+        .args(&args)
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).to_string());
+    }
+
+    Ok(local_name)
 }
 
 #[tauri::command]
@@ -361,6 +663,9 @@ pub fn git_diff(
     file_path: String,
     staged: bool,
 ) -> Result<String, String> {
+    // `file_path` is repo-root-relative (see `repo_root`); pathspecs resolve
+    // against the CWD, so the command has to run at the root.
+    let workspace_path = repo_root(&workspace_path)?;
     let mut args = vec!["-C", &workspace_path, "diff"];
     if staged {
         args.push("--cached");
@@ -401,6 +706,7 @@ pub fn git_diff_file_head(workspace_path: String, file_path: String) -> Result<S
         return Err("file path must not be empty".to_string());
     }
 
+    let workspace_path = repo_root(&workspace_path)?;
     let output = Command::new("git")
         .args(["-C", &workspace_path, "diff", "HEAD", "--", &file_path])
         // Read-only command — see the comment on `git_status`'s call.
@@ -419,6 +725,7 @@ pub fn git_diff_file_head(workspace_path: String, file_path: String) -> Result<S
 
 #[tauri::command]
 pub fn git_stage_file(workspace_path: String, file_path: String) -> Result<(), String> {
+    let workspace_path = repo_root(&workspace_path)?;
     let output = Command::new("git")
         .args(["-C", &workspace_path, "add", "--", &file_path])
         .output()
@@ -434,6 +741,7 @@ pub fn git_stage_file(workspace_path: String, file_path: String) -> Result<(), S
 
 #[tauri::command]
 pub fn git_unstage_file(workspace_path: String, file_path: String) -> Result<(), String> {
+    let workspace_path = repo_root(&workspace_path)?;
     let output = Command::new("git")
         .args(["-C", &workspace_path, "restore", "--staged", "--", &file_path])
         .output()
@@ -449,6 +757,9 @@ pub fn git_unstage_file(workspace_path: String, file_path: String) -> Result<(),
 
 #[tauri::command]
 pub fn git_stage_all(workspace_path: String) -> Result<(), String> {
+    // Run at the root so "stage all" means every file the panel lists, not
+    // just the ones under a subdirectory workspace.
+    let workspace_path = repo_root(&workspace_path)?;
     let output = Command::new("git")
         .args(["-C", &workspace_path, "add", "-A"])
         .output()
@@ -640,6 +951,7 @@ pub fn git_stash_drop(workspace_path: String, index: u32) -> Result<(), String> 
 /// is no longer indistinguishable from a plain new file.
 #[tauri::command]
 pub fn git_show_head(workspace_path: String, file_path: String) -> Result<String, String> {
+    let workspace_path = repo_root(&workspace_path)?;
     let output = Command::new("git")
         .args(["-C", &workspace_path, "show", &format!("HEAD:{}", file_path)])
         .output()
@@ -671,6 +983,7 @@ pub fn git_show_head(workspace_path: String, file_path: String) -> Result<String
 /// and so must not be silently swallowed into an empty diff.
 #[tauri::command]
 pub fn git_show_index(workspace_path: String, file_path: String) -> Result<String, String> {
+    let workspace_path = repo_root(&workspace_path)?;
     let spec = format!(":{}", file_path);
     let output = Command::new("git")
         .args(["-C", &workspace_path, "show", &spec])
@@ -723,9 +1036,22 @@ pub struct CommitDetail {
 /// then one name-status line per changed file (`M\tpath`, `A\tpath`, or
 /// `R100\told\tnew` for renames — the score-suffixed R/C codes are the only
 /// ones with a third column).
+///
+/// `--first-parent -m` is what makes MERGE commits work. By default git
+/// suppresses diff output for a merge entirely, so `git show <merge>
+/// --name-status` emits the header and nothing else — every merge in the
+/// Commits list rendered as "No file changes". `-m` diffs against each parent
+/// and `--first-parent` restricts that to the first, giving "what did merging
+/// this bring onto my branch", which is the question the panel is asking.
+/// Ordinary single-parent and root commits are unaffected (verified).
+///
+/// Because `-m` emits one header per parent diff, only the FIRST header is
+/// treated as the metadata line; any later one is skipped rather than parsed
+/// as a file.
 #[tauri::command]
 pub fn git_show_commit(workspace_path: String, hash: String) -> Result<CommitDetail, String> {
     validate_ref_name(&hash)?;
+    let workspace_path = repo_root(&workspace_path)?;
 
     let output = Command::new("git")
         .args([
@@ -735,6 +1061,10 @@ pub fn git_show_commit(workspace_path: String, hash: String) -> Result<CommitDet
             &hash,
             "--name-status",
             "--format=%H%x00%s%x00%an%x00%aI",
+            // See the doc comment: without these, merge commits report no
+            // changed files at all.
+            "--first-parent",
+            "-m",
         ])
         .output()
         .map_err(|e| e.to_string())?;
@@ -761,6 +1091,12 @@ pub fn git_show_commit(workspace_path: String, hash: String) -> Result<CommitDet
     let mut files: Vec<CommitFileChange> = Vec::new();
     for line in lines {
         if line.trim().is_empty() {
+            continue;
+        }
+        // `-m` repeats the `--format` header once per parent diff. Those lines
+        // are NUL-delimited (a name-status line never is), so skipping on that
+        // keeps a repeated header from being parsed as a bogus file entry.
+        if line.contains('\0') {
             continue;
         }
         let cols: Vec<&str> = line.split('\t').collect();
@@ -817,6 +1153,7 @@ pub fn git_show_file_at(
 ) -> Result<String, String> {
     validate_ref_name(&rev)?;
 
+    let workspace_path = repo_root(&workspace_path)?;
     let spec = format!("{rev}:{file_path}");
     let output = Command::new("git")
         .args(["-C", &workspace_path, "show", &spec])
@@ -839,6 +1176,7 @@ pub fn git_show_file_at(
 
 #[tauri::command]
 pub fn git_unstage_all(workspace_path: String) -> Result<(), String> {
+    let workspace_path = repo_root(&workspace_path)?;
     let output = Command::new("git")
         .args(["-C", &workspace_path, "reset", "HEAD"])
         .output()
@@ -858,9 +1196,28 @@ pub fn git_discard_file(
     file_path: String,
     is_untracked: bool,
 ) -> Result<(), String> {
+    let workspace_path = repo_root(&workspace_path)?;
     if is_untracked {
+        // `git clean` rather than `std::fs::remove_file`: the latter errors
+        // outright on a directory ("Is a directory") and leaves empty parent
+        // directories behind after removing a nested file. `-d` is added only
+        // for a directory target, since `git clean -f -- <dir>` alone refuses
+        // to recurse into it.
         let full_path = std::path::Path::new(&workspace_path).join(&file_path);
-        std::fs::remove_file(&full_path).map_err(|e| e.to_string())?;
+        let mut args: Vec<&str> = vec!["-C", &workspace_path, "clean", "-f"];
+        if full_path.is_dir() {
+            args.push("-d");
+        }
+        args.push("--");
+        args.push(&file_path);
+
+        let output = Command::new("git")
+            .args(&args)
+            .output()
+            .map_err(|e| e.to_string())?;
+        if !output.status.success() {
+            return Err(String::from_utf8_lossy(&output.stderr).to_string());
+        }
     } else {
         let output = Command::new("git")
             .args(["-C", &workspace_path, "checkout", "--", &file_path])
@@ -878,6 +1235,11 @@ pub fn git_discard_file(
 
 #[tauri::command]
 pub fn git_discard_all(workspace_path: String) -> Result<(), String> {
+    // Must run at the root: both `checkout -- .` and `clean -fd` are scoped to
+    // the current directory, so from a subdirectory workspace "discard all"
+    // would silently leave every change outside that subtree in place while
+    // the panel reported them discarded.
+    let workspace_path = repo_root(&workspace_path)?;
     // Restore tracked files
     let output = Command::new("git")
         .args(["-C", &workspace_path, "checkout", "--", "."])
@@ -1272,6 +1634,7 @@ pub async fn git_blame_file(
     workspace_path: String,
     file_path: String,
 ) -> Result<Vec<BlameLine>, String> {
+    let workspace_path = repo_root(&workspace_path)?;
     let output = tokio::process::Command::new("git")
         .args([
             "-C",
@@ -1412,6 +1775,11 @@ pub fn git_setup_unityyamlmerge(workspace_path: String, tool_path: String) -> Re
         return Err("UnityYAMLMerge tool path is empty (Unity editor not resolved)".to_string());
     }
 
+    // `.gitattributes` and the merge-driver config belong to the repository,
+    // so both are written at its root rather than under a subdirectory
+    // workspace (where git would ignore the config and scope the attributes).
+    let workspace_path = repo_root(&workspace_path)?;
+
     // 1. Append missing .gitattributes lines.
     let attrs_path = std::path::Path::new(&workspace_path).join(".gitattributes");
     let existing = std::fs::read_to_string(&attrs_path).unwrap_or_default();
@@ -1515,6 +1883,8 @@ pub fn git_run_unityyamlmerge(
     if tool_path.trim().is_empty() {
         return Err("UnityYAMLMerge tool path is empty (Unity editor not resolved)".to_string());
     }
+
+    let workspace_path = repo_root(&workspace_path)?;
 
     // Unique temp prefix so concurrent merges don't collide.
     let stamp = std::time::SystemTime::now()
@@ -1629,6 +1999,7 @@ pub fn git_resolve_conflict_side(
         _ => return Err(format!("invalid side '{side}' (expected ours|theirs)")),
     };
 
+    let workspace_path = repo_root(&workspace_path)?;
     let checkout = Command::new("git")
         .args(["-C", &workspace_path, "checkout", flag, "--", &file_path])
         .output()
@@ -1648,14 +2019,20 @@ pub fn git_resolve_conflict_side(
     Ok(())
 }
 
-/// Append lines to `<workspace>/.gitignore`, skipping any already present
-/// (exact-trimmed-line match). Used by the gitignore doctor's "Fix" action.
-/// Returns the lines that were actually appended.
+/// Append lines to the repository's root `.gitignore`, skipping any already
+/// present (exact-trimmed-line match). Used by the gitignore doctor's "Fix"
+/// action. Returns the lines that were actually appended.
+///
+/// Written at the repo root, not under a subdirectory workspace: the patterns
+/// the doctor suggests (`Library/`, `Temp/`, ...) are repo-wide, and a
+/// `.gitignore` dropped in a subdirectory would silently scope them to that
+/// subtree.
 #[tauri::command]
 pub fn git_append_gitignore(
     workspace_path: String,
     lines: Vec<String>,
 ) -> Result<Vec<String>, String> {
+    let workspace_path = repo_root(&workspace_path)?;
     let ignore_path = std::path::Path::new(&workspace_path).join(".gitignore");
     let existing = std::fs::read_to_string(&ignore_path).unwrap_or_default();
     let existing_set: std::collections::HashSet<String> =
@@ -2221,22 +2598,84 @@ f54bc43 HEAD@{1784090195}: commit (initial): init
         let info = BranchInfo {
             name: "main".to_string(),
             last_checkout_ts: Some(1736831145),
+            is_remote: false,
+            local_name: None,
         };
         let value = serde_json::to_value(&info).unwrap();
         let obj = value.as_object().unwrap();
         assert!(obj.contains_key("name"));
         assert!(obj.contains_key("last_checkout_ts"));
-        assert_eq!(obj.len(), 2, "unexpected extra/missing field on BranchInfo");
+        assert!(obj.contains_key("is_remote"));
+        // `local_name` is `skip_serializing_if = "Option::is_none"`, so a local
+        // branch stays a 3-field payload.
+        assert!(!obj.contains_key("local_name"));
+        assert_eq!(obj.len(), 3, "unexpected extra/missing field on BranchInfo");
         assert_eq!(obj["name"], serde_json::json!("main"));
         assert_eq!(obj["last_checkout_ts"], serde_json::json!(1736831145));
+        assert_eq!(obj["is_remote"], serde_json::json!(false));
 
         let info_none = BranchInfo {
             name: "feature/x".to_string(),
             last_checkout_ts: None,
+            is_remote: false,
+            local_name: None,
         };
         let value_none = serde_json::to_value(&info_none).unwrap();
         assert_eq!(value_none["name"], serde_json::json!("feature/x"));
         assert_eq!(value_none["last_checkout_ts"], serde_json::Value::Null);
+
+        let remote = BranchInfo {
+            name: "origin/release/1.x".to_string(),
+            last_checkout_ts: None,
+            is_remote: true,
+            local_name: Some("release/1.x".to_string()),
+        };
+        let remote_value = serde_json::to_value(&remote).unwrap();
+        assert_eq!(remote_value["is_remote"], serde_json::json!(true));
+        assert_eq!(
+            remote_value["local_name"],
+            serde_json::json!("release/1.x"),
+            "nested remote branch names must not be split on the first slash"
+        );
+    }
+
+    // --- ref-name parsing ---------------------------------------------------
+
+    #[test]
+    fn parse_branch_refs_uses_lstrip_names_and_flags_remotes() {
+        let out = concat!(
+            "refs/heads/main\0main\0\0\n",
+            // A branch colliding with a tag: `%(refname:short)` would have
+            // yielded `heads/v1.0.0` here.
+            "refs/heads/v1.0.0\0v1.0.0\0\0\n",
+            "refs/remotes/origin/feature-x\0origin/feature-x\0feature-x\0\n",
+            "refs/remotes/origin/release/1.x\0origin/release/1.x\0release/1.x\0\n",
+        );
+        let branches = parse_branch_refs(out);
+        let names: Vec<&str> = branches.iter().map(|b| b.name.as_str()).collect();
+        assert_eq!(
+            names,
+            vec!["main", "v1.0.0", "origin/feature-x", "origin/release/1.x"]
+        );
+        assert!(!branches[0].is_remote);
+        assert_eq!(branches[0].local_name, None);
+        assert!(branches[2].is_remote);
+        assert_eq!(branches[2].local_name.as_deref(), Some("feature-x"));
+        assert_eq!(branches[3].local_name.as_deref(), Some("release/1.x"));
+    }
+
+    #[test]
+    fn parse_branch_refs_drops_the_remote_head_symref() {
+        let out = concat!(
+            "refs/heads/main\0main\0\0\n",
+            "refs/remotes/origin/HEAD\0origin/HEAD\0HEAD\0refs/remotes/origin/main\n",
+            "refs/remotes/origin/main\0origin/main\0main\0\n",
+        );
+        let names: Vec<String> = parse_branch_refs(out)
+            .into_iter()
+            .map(|b| b.name)
+            .collect();
+        assert_eq!(names, vec!["main", "origin/main"]);
     }
 }
 
@@ -2316,6 +2755,65 @@ mod commit_detail_tests {
         assert_eq!(by_path.get("c.txt"), Some(&"renamed".to_string()));
         assert!(!by_path.contains_key("b.txt"));
         assert_eq!(detail.files.len(), 3);
+    }
+
+    /// `git show <merge> --name-status` prints NO file lines at all — git
+    /// suppresses diff output for merge commits by default — so expanding a
+    /// merge in the Commits list read "No file changes" however much it
+    /// actually brought in. `--first-parent -m` produces the diff against the
+    /// first parent, which is the "what did merging this bring to my branch"
+    /// view the panel wants.
+    #[test]
+    fn show_commit_lists_files_for_a_merge_commit() {
+        let tmp = init_repo();
+        let path = tmp.path().to_str().unwrap().to_string();
+
+        std::fs::write(tmp.path().join("base.txt"), "base\n").unwrap();
+        run_git(&path, &["add", "-A"]);
+        run_git(&path, &["commit", "-m", "base"]);
+
+        run_git(&path, &["switch", "-c", "feature"]);
+        std::fs::write(tmp.path().join("feature.txt"), "feat\n").unwrap();
+        run_git(&path, &["add", "-A"]);
+        run_git(&path, &["commit", "-m", "feature work"]);
+
+        run_git(&path, &["switch", "main"]);
+        std::fs::write(tmp.path().join("main.txt"), "main\n").unwrap();
+        run_git(&path, &["add", "-A"]);
+        run_git(&path, &["commit", "-m", "main work"]);
+
+        run_git(&path, &["merge", "--no-ff", "feature", "-m", "Merge feature"]);
+        let merge_hash = run_git(&path, &["rev-parse", "HEAD"]);
+
+        let detail = git_show_commit(path, merge_hash.clone()).unwrap();
+
+        assert_eq!(detail.message, "Merge feature");
+        let paths: Vec<&str> = detail.files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(
+            paths,
+            vec!["feature.txt"],
+            "a merge must list what it brought in relative to the first parent"
+        );
+        assert_eq!(detail.files[0].status, "added");
+    }
+
+    /// Guard that adding `-m` didn't disturb the ordinary single-parent case
+    /// (`-m` can repeat the header once per parent).
+    #[test]
+    fn show_commit_still_parses_a_root_commit() {
+        let tmp = init_repo();
+        let path = tmp.path().to_str().unwrap().to_string();
+        std::fs::write(tmp.path().join("only.txt"), "x\n").unwrap();
+        run_git(&path, &["add", "-A"]);
+        run_git(&path, &["commit", "-m", "root work"]);
+        let hash = run_git(&path, &["rev-parse", "HEAD"]);
+
+        let detail = git_show_commit(path, hash).unwrap();
+        assert_eq!(detail.message, "root work");
+        assert_eq!(
+            detail.files.iter().map(|f| f.path.as_str()).collect::<Vec<_>>(),
+            vec!["only.txt"]
+        );
     }
 
     #[test]
@@ -2744,6 +3242,148 @@ mod remote_ops_tests {
         // No retry rewrote history: origin/main still points at work1's commit.
         let bare_log = run_git(&bare_path, &["log", "-1", "--format=%s", "main"]);
         assert_eq!(bare_log, "advance origin");
+    }
+
+    // -----------------------------------------------------------------------
+    // Branch listing: remote branches, and names that survive tag collisions.
+    // -----------------------------------------------------------------------
+
+    /// `%(refname:short)` shortens a ref only as far as stays unambiguous, so
+    /// a branch sharing its name with a TAG comes back as `heads/v1.0.0` —
+    /// which `git switch` then rejects outright:
+    /// `fatal: a branch is expected, got 'refs/heads/v1.0.0'`.
+    /// `%(refname:lstrip=2)` yields the real name in both cases.
+    #[test]
+    fn branch_name_is_not_mangled_by_a_colliding_tag() {
+        let bare_tmp = seeded_bare_origin();
+        let work_tmp = clone_into_work(bare_tmp.path().to_str().unwrap());
+        let work = work_tmp.path().to_str().unwrap().to_string();
+
+        run_git(&work, &["branch", "v1.0.0"]);
+        run_git(&work, &["tag", "v1.0.0"]);
+
+        let names: Vec<String> = git_list_branches(work.clone())
+            .unwrap()
+            .into_iter()
+            .map(|b| b.name)
+            .collect();
+        assert!(
+            names.contains(&"v1.0.0".to_string()),
+            "expected the real branch name, got: {names:?}"
+        );
+        assert!(
+            !names.contains(&"heads/v1.0.0".to_string()),
+            "branch name must not be prefix-disambiguated, got: {names:?}"
+        );
+
+        // And the name we surface is one git will actually switch to.
+        git_switch_branch(work, "v1.0.0".to_string()).unwrap();
+    }
+
+    #[test]
+    fn remote_branches_are_listed_and_flagged() {
+        let bare_tmp = seeded_bare_origin();
+        let bare_path = bare_tmp.path().to_str().unwrap().to_string();
+
+        // Publish a branch that exists ONLY on the remote.
+        let seed_tmp = clone_into_work(&bare_path);
+        let seed = seed_tmp.path().to_str().unwrap().to_string();
+        run_git(&seed, &["switch", "-c", "feature-x"]);
+        write_and_commit(&seed, "f.txt", "x\n", "feature work");
+        run_git(&seed, &["push", "-u", "origin", "feature-x"]);
+
+        let work_tmp = clone_into_work(&bare_path);
+        let work = work_tmp.path().to_str().unwrap().to_string();
+        let branches = git_list_branches(work).unwrap();
+
+        let remote = branches
+            .iter()
+            .find(|b| b.name == "origin/feature-x")
+            .expect("remote-only branch must be listed");
+        assert!(remote.is_remote);
+        assert_eq!(
+            remote.local_name.as_deref(),
+            Some("feature-x"),
+            "the branch to create on checkout comes from lstrip=3, so nested names survive"
+        );
+
+        let local = branches
+            .iter()
+            .find(|b| b.name == "main")
+            .expect("local branch must still be listed");
+        assert!(!local.is_remote);
+        assert_eq!(local.local_name, None);
+    }
+
+    /// `refs/remotes/origin/HEAD` is a symbolic ref, not a branch. Left in, it
+    /// renders as a bare `origin` row that switches to nothing.
+    #[test]
+    fn remote_head_symref_is_not_listed_as_a_branch() {
+        let bare_tmp = seeded_bare_origin();
+        let work_tmp = clone_into_work(bare_tmp.path().to_str().unwrap());
+        let work = work_tmp.path().to_str().unwrap().to_string();
+        // A fresh clone may not create origin/HEAD; set it explicitly so the
+        // filter is genuinely exercised.
+        run_git(&work, &["remote", "set-head", "origin", "main"]);
+
+        let names: Vec<String> = git_list_branches(work)
+            .unwrap()
+            .into_iter()
+            .map(|b| b.name)
+            .collect();
+        assert!(
+            !names.iter().any(|n| n == "origin" || n == "origin/HEAD"),
+            "origin/HEAD must be filtered out, got: {names:?}"
+        );
+    }
+
+    #[test]
+    fn checking_out_a_remote_branch_creates_a_local_tracking_branch() {
+        let bare_tmp = seeded_bare_origin();
+        let bare_path = bare_tmp.path().to_str().unwrap().to_string();
+
+        let seed_tmp = clone_into_work(&bare_path);
+        let seed = seed_tmp.path().to_str().unwrap().to_string();
+        run_git(&seed, &["switch", "-c", "feature-x"]);
+        write_and_commit(&seed, "f.txt", "x\n", "feature work");
+        run_git(&seed, &["push", "-u", "origin", "feature-x"]);
+
+        let work_tmp = clone_into_work(&bare_path);
+        let work = work_tmp.path().to_str().unwrap().to_string();
+
+        let local = git_checkout_remote_branch(work.clone(), "origin/feature-x".to_string()).unwrap();
+        assert_eq!(local, "feature-x");
+
+        assert_eq!(git_status(work.clone()).unwrap().branch, "feature-x");
+        let upstream = run_git(
+            &work,
+            &["rev-parse", "--abbrev-ref", "feature-x@{upstream}"],
+        );
+        assert_eq!(upstream, "origin/feature-x", "tracking must be configured");
+    }
+
+    /// Picking a remote branch whose local counterpart already exists must
+    /// just switch to it, not fail trying to re-create it.
+    #[test]
+    fn checking_out_a_remote_branch_switches_to_an_existing_local_branch() {
+        let bare_tmp = seeded_bare_origin();
+        let bare_path = bare_tmp.path().to_str().unwrap().to_string();
+
+        let seed_tmp = clone_into_work(&bare_path);
+        let seed = seed_tmp.path().to_str().unwrap().to_string();
+        run_git(&seed, &["switch", "-c", "feature-x"]);
+        write_and_commit(&seed, "f.txt", "x\n", "feature work");
+        run_git(&seed, &["push", "-u", "origin", "feature-x"]);
+
+        let work_tmp = clone_into_work(&bare_path);
+        let work = work_tmp.path().to_str().unwrap().to_string();
+        // Local branch already present, and we're currently elsewhere.
+        run_git(&work, &["switch", "-c", "feature-x", "origin/feature-x"]);
+        run_git(&work, &["switch", "main"]);
+
+        let local = git_checkout_remote_branch(work.clone(), "origin/feature-x".to_string()).unwrap();
+        assert_eq!(local, "feature-x");
+        assert_eq!(git_status(work).unwrap().branch, "feature-x");
     }
 }
 
@@ -3190,19 +3830,52 @@ mod status_parse_tests {
         assert_eq!(r.unstaged[0].path, "Assets/My Scripts/Player Controller.cs");
     }
 
+    /// Under `-z` a rename's original path is its OWN NUL record, not a
+    /// tab-joined suffix of the entry record. Verified against git 2.52.0:
+    ///
+    /// ```text
+    /// 2 RM N... ... R100 src/new-name.txt\0src/old-name.txt\0
+    /// ```
     #[test]
-    fn rename_entry_is_parsed_with_new_path() {
-        let line = "2 R. N... 100644 100644 100644 aaaa bbbb R100 src/new.ts\tsrc/old.ts";
-        let r = parse_status(line, WS);
+    fn rename_entry_carries_orig_path_from_its_own_record() {
+        let out = "2 R. N... 100644 100644 100644 aaaa bbbb R100 src/new.ts\0src/old.ts";
+        let r = parse_status(out, WS);
         assert_eq!(r.staged.len(), 1);
         assert_eq!(r.staged[0].path, "src/new.ts");
+        assert_eq!(
+            r.staged[0].orig_path.as_deref(),
+            Some("src/old.ts"),
+            "the pre-rename path is what the HEAD side of the diff must be read from"
+        );
         assert_eq!(r.staged[0].status, map_status_char('R').to_string());
         assert_eq!(r.unstaged.len(), 0);
     }
 
+    /// Failing to consume the rename's extra record would treat `src/old.ts`
+    /// as the next entry and shift everything after it by one — the kind of
+    /// silent corruption that drops real changes off the panel.
+    #[test]
+    fn rename_does_not_shift_the_entries_that_follow_it() {
+        let out = concat!(
+            "2 R. N... 100644 100644 100644 aaaa bbbb R100 src/new.ts\0src/old.ts\0",
+            "1 .M N... 100644 100644 100644 aaaa bbbb src/after.ts\0",
+            "? untracked-after.ts"
+        );
+        let r = parse_status(out, WS);
+        assert_eq!(r.staged.len(), 1, "only the rename is staged");
+        assert_eq!(r.staged[0].path, "src/new.ts");
+
+        let unstaged: Vec<&str> = r.unstaged.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(
+            unstaged,
+            vec!["src/after.ts", "untracked-after.ts"],
+            "entries after a rename must not shift, and `src/old.ts` is not an entry"
+        );
+    }
+
     #[test]
     fn unmerged_and_untracked_still_parse() {
-        let out = "u UU N... 100644 100644 100644 100644 aaaa bbbb cccc conflicted.cs\n? junk.log";
+        let out = "u UU N... 100644 100644 100644 100644 aaaa bbbb cccc conflicted.cs\0? junk.log";
         let r = parse_status(out, WS);
         assert_eq!(r.unstaged.len(), 2);
         assert!(r.unstaged[0].conflicted);
@@ -3212,12 +3885,25 @@ mod status_parse_tests {
 
     #[test]
     fn branch_headers_and_unknown_lines_parse_without_entries() {
-        let out = "# branch.oid deadbeef\n# branch.head feat/x\n# branch.upstream origin/feat/x\n# branch.ab +2 -1\n# stash 3\nbogus line";
+        let out = "# branch.oid deadbeef\0# branch.head feat/x\0# branch.upstream origin/feat/x\0# branch.ab +2 -1\0# stash 3\0bogus line";
         let r = parse_status(out, WS);
         assert_eq!(r.branch, "feat/x");
         assert_eq!(r.ahead, 2);
         assert_eq!(r.behind, 1);
         assert!(r.staged.is_empty() && r.unstaged.is_empty());
+    }
+
+    /// `-z` exists precisely so paths arrive as raw bytes. Without it git
+    /// C-quotes anything non-ASCII (`"h\303\251llo.txt"`), and that literal
+    /// string then fails every downstream use — `git add` rejects it as a
+    /// non-matching pathspec, and no explorer node ever matches it.
+    #[test]
+    fn non_ascii_paths_arrive_unquoted() {
+        let out = "1 .M N... 100644 100644 100644 aaaa bbbb Assets/héllo wörld.cs";
+        let r = parse_status(out, WS);
+        assert_eq!(r.unstaged.len(), 1);
+        assert_eq!(r.unstaged[0].path, "Assets/héllo wörld.cs");
+        assert_eq!(r.unstaged[0].absolute_path, "/ws/Assets/héllo wörld.cs");
     }
 
     // ── Layer 2: end-to-end against real `git status` output ───────────────
@@ -3297,6 +3983,107 @@ mod status_parse_tests {
         let r = git_status(p).unwrap();
         assert_eq!(r.unstaged.len(), 1);
         assert_eq!(r.unstaged[0].status, "untracked");
+    }
+
+    /// The reported "created folders show up in the diff" bug. Git's default
+    /// untracked mode collapses a new directory into a single `? newfolder/`
+    /// entry, which the panel rendered as a file row that could be neither
+    /// diffed (it's a directory) nor discarded. `-uall` lists the files.
+    #[test]
+    fn e2e_untracked_files_in_a_new_folder_are_listed_individually() {
+        let dir = init_repo();
+        let p = dir.path().to_str().unwrap().to_string();
+        std::fs::create_dir_all(dir.path().join("newfolder/inner")).unwrap();
+        std::fs::write(dir.path().join("newfolder/two.txt"), "x\n").unwrap();
+        std::fs::write(dir.path().join("newfolder/inner/one.txt"), "y\n").unwrap();
+
+        let r = git_status(p).unwrap();
+        let mut paths: Vec<&str> = r.unstaged.iter().map(|f| f.path.as_str()).collect();
+        paths.sort();
+        assert_eq!(paths, vec!["newfolder/inner/one.txt", "newfolder/two.txt"]);
+        assert!(
+            !r.unstaged.iter().any(|f| f.path.ends_with('/')),
+            "a directory must never be listed as a changed file"
+        );
+    }
+
+    /// Without `-z`, git C-quotes this path to `"h\303\251llo.txt"` and every
+    /// downstream operation on it fails.
+    #[test]
+    fn e2e_non_ascii_path_round_trips_through_staging() {
+        let dir = init_repo();
+        let p = dir.path().to_str().unwrap().to_string();
+        std::fs::write(dir.path().join("héllo wörld.txt"), "x\n").unwrap();
+
+        let r = git_status(p.clone()).unwrap();
+        assert_eq!(r.unstaged.len(), 1);
+        assert_eq!(r.unstaged[0].path, "héllo wörld.txt");
+
+        // The path the panel shows must be one git will actually accept back.
+        git_stage_file(p.clone(), r.unstaged[0].path.clone()).unwrap();
+        let r = git_status(p).unwrap();
+        assert_eq!(r.staged.len(), 1);
+        assert_eq!(r.staged[0].path, "héllo wörld.txt");
+    }
+
+    /// Unlike a rename, an unmerged (`u `) entry is a SINGLE `-z` record — no
+    /// trailing original-path record to consume. Pinning that against real git
+    /// guards the parser's cursor arithmetic: consuming one record too many
+    /// here would swallow whichever entry follows a conflict.
+    #[test]
+    fn e2e_conflicted_entry_does_not_swallow_the_next_entry() {
+        let dir = init_repo();
+        let p = dir.path().to_str().unwrap().to_string();
+
+        std::fs::write(dir.path().join("c.txt"), "base\n").unwrap();
+        run_git(&p, &["add", "-A"]);
+        run_git(&p, &["commit", "-q", "-m", "base"]);
+
+        run_git(&p, &["switch", "-qc", "feature"]);
+        std::fs::write(dir.path().join("c.txt"), "theirs\n").unwrap();
+        run_git(&p, &["commit", "-qam", "theirs"]);
+
+        // `-` rather than a literal name: this module's `init_repo` runs a
+        // bare `git init`, so the initial branch is whatever the host's
+        // `init.defaultBranch` says (main, master, ...).
+        run_git(&p, &["switch", "-q", "-"]);
+        std::fs::write(dir.path().join("c.txt"), "ours\n").unwrap();
+        run_git(&p, &["commit", "-qam", "ours"]);
+
+        // Conflicting merge — expected to fail, so not run through `run_git`.
+        let _ = Command::new("git")
+            .args(["-C", &p, "merge", "feature"])
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .output()
+            .unwrap();
+
+        std::fs::write(dir.path().join("untracked-after.txt"), "zzz\n").unwrap();
+
+        let r = git_status(p).unwrap();
+        let conflicted: Vec<&str> = r
+            .unstaged
+            .iter()
+            .filter(|f| f.conflicted)
+            .map(|f| f.path.as_str())
+            .collect();
+        assert_eq!(conflicted, vec!["c.txt"]);
+        assert!(
+            r.unstaged.iter().any(|f| f.path == "untracked-after.txt"),
+            "the entry after a conflict must survive, got: {:?}",
+            r.unstaged.iter().map(|f| &f.path).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn e2e_rename_reports_its_original_path() {
+        let dir = init_repo();
+        let p = dir.path().to_str().unwrap().to_string();
+        run_git(&p, &["mv", "a.txt", "b.txt"]);
+        let r = git_status(p).unwrap();
+        assert_eq!(r.staged.len(), 1);
+        assert_eq!(r.staged[0].path, "b.txt");
+        assert_eq!(r.staged[0].orig_path.as_deref(), Some("a.txt"));
     }
 }
 
@@ -3509,6 +4296,7 @@ mod staged_diff_tests {
             status: "modified".to_string(),
             staged: true,
             conflicted: false,
+            orig_path: None,
         };
         let file_value = serde_json::to_value(&file).unwrap();
         let file_obj = file_value.as_object().unwrap();
@@ -3517,7 +4305,29 @@ mod staged_diff_tests {
         assert!(file_obj.contains_key("status"));
         assert!(file_obj.contains_key("staged"));
         assert!(file_obj.contains_key("conflicted"));
+        // `orig_path` is `skip_serializing_if = "Option::is_none"`, so it is
+        // absent for every non-rename entry — the common case stays a 5-field
+        // payload.
+        assert!(!file_obj.contains_key("orig_path"));
         assert_eq!(file_obj.len(), 5, "unexpected extra/missing field on GitFileStatus");
+
+        let renamed = GitFileStatus {
+            orig_path: Some("src/old.txt".to_string()),
+            ..GitFileStatus {
+                path: "src/new.txt".to_string(),
+                absolute_path: "/repo/src/new.txt".to_string(),
+                status: "renamed".to_string(),
+                staged: true,
+                conflicted: false,
+                orig_path: None,
+            }
+        };
+        let renamed_obj = serde_json::to_value(&renamed).unwrap();
+        assert_eq!(
+            renamed_obj["orig_path"],
+            serde_json::json!("src/old.txt"),
+            "renames must carry their pre-rename path to the frontend"
+        );
 
         let result = GitStatusResult {
             branch: "main".to_string(),
@@ -3548,5 +4358,204 @@ mod staged_diff_tests {
         );
         assert_eq!(staged_arr[0]["status"], serde_json::json!("modified"));
         assert_eq!(staged_arr[0]["conflicted"], serde_json::json!(false));
+    }
+
+    // -----------------------------------------------------------------------
+    // Repo-root resolution
+    //
+    // `git status --porcelain` prints paths relative to the CURRENT DIRECTORY,
+    // but `git show <rev>:<path>` resolves them relative to the REPOSITORY
+    // ROOT. Treating those as interchangeable silently showed the wrong file
+    // whenever the opened workspace was a subdirectory of the repo. These
+    // tests pin the resolution that keeps every path on one base.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn repo_root_at_the_root_is_the_workspace_itself() {
+        let tmp = init_repo();
+        let path = tmp.path().to_str().unwrap().to_string();
+
+        // `--show-prefix` is empty here, so the workspace passes through
+        // untouched — the common case must be a no-op.
+        assert_eq!(repo_root(&path).unwrap(), path);
+    }
+
+    #[test]
+    fn repo_root_from_a_subdirectory_strips_the_prefix() {
+        let tmp = init_repo();
+        let root = tmp.path().to_str().unwrap().to_string();
+        std::fs::create_dir_all(tmp.path().join("UnityProject/Assets")).unwrap();
+
+        let nested = format!("{root}/UnityProject/Assets");
+        assert_eq!(repo_root(&nested).unwrap(), root);
+
+        let one_deep = format!("{root}/UnityProject");
+        assert_eq!(repo_root(&one_deep).unwrap(), root);
+    }
+
+    #[test]
+    fn repo_root_preserves_the_callers_path_spelling() {
+        // Regression guard for the macOS symlink trap: `--show-toplevel`
+        // resolves symlinks (`/tmp/x` -> `/private/tmp/x`), which would make
+        // `absolute_path` stop matching the frontend's tree node ids and
+        // silently kill every explorer git badge. Deriving the root by
+        // stripping `--show-prefix` keeps whatever spelling the caller used.
+        let tmp = tempfile::tempdir().unwrap();
+        let real = tmp.path().join("real");
+        std::fs::create_dir_all(real.join("nested")).unwrap();
+        let real_str = real.to_str().unwrap();
+        run_git(real_str, &["init", "--initial-branch=main"]);
+
+        let link = tmp.path().join("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+
+        let via_link = format!("{}/nested", link.to_str().unwrap());
+        assert_eq!(repo_root(&via_link).unwrap(), link.to_str().unwrap());
+    }
+
+    #[test]
+    fn repo_root_outside_a_repo_reports_not_a_git_repository() {
+        // `stores/git.ts`'s `doRefreshStatus` classifies this exact substring
+        // to blank the panel instead of showing an error banner.
+        let tmp = tempfile::tempdir().unwrap();
+        let err = repo_root(tmp.path().to_str().unwrap()).unwrap_err();
+        assert!(
+            err.contains("not a git repository"),
+            "expected a not-a-repo error, got: {err}"
+        );
+    }
+
+    /// The reported bug, end to end: a repo holding BOTH `Assets/Player.cs`
+    /// and `UnityProject/Assets/Player.cs`, with the workspace opened at
+    /// `UnityProject/`. `git status` reports the changed file as
+    /// `Assets/Player.cs` (CWD-relative); feeding that straight to
+    /// `git show HEAD:` used to return the ROOT file's contents with no error
+    /// at all.
+    #[test]
+    fn diff_of_a_subdirectory_workspace_reads_the_right_file() {
+        let tmp = init_repo();
+        let root = tmp.path().to_str().unwrap().to_string();
+        std::fs::create_dir_all(tmp.path().join("Assets")).unwrap();
+        std::fs::create_dir_all(tmp.path().join("UnityProject/Assets")).unwrap();
+        std::fs::write(tmp.path().join("Assets/Player.cs"), "ROOT LEVEL\n").unwrap();
+        std::fs::write(
+            tmp.path().join("UnityProject/Assets/Player.cs"),
+            "UNITY PROJECT\n",
+        )
+        .unwrap();
+        run_git(&root, &["add", "-A"]);
+        run_git(&root, &["commit", "-m", "both"]);
+        std::fs::write(
+            tmp.path().join("UnityProject/Assets/Player.cs"),
+            "UNITY PROJECT edited\n",
+        )
+        .unwrap();
+
+        let workspace = format!("{root}/UnityProject");
+        let status = git_status(workspace.clone()).unwrap();
+
+        // Status paths are repo-root-relative, so the row is unambiguous.
+        let entry = status
+            .unstaged
+            .iter()
+            .find(|f| f.path.ends_with("Player.cs"))
+            .expect("modified Player.cs should be listed");
+        assert_eq!(entry.path, "UnityProject/Assets/Player.cs");
+        assert_eq!(
+            entry.absolute_path,
+            format!("{root}/UnityProject/Assets/Player.cs"),
+            "absolute_path must be built from the repo root"
+        );
+
+        // And that path resolves to the file the user actually clicked.
+        let head = git_show_head(workspace, entry.path.clone()).unwrap();
+        assert_eq!(head, "UNITY PROJECT\n", "diff showed the wrong file");
+    }
+
+    /// Discarding an untracked path used to call `std::fs::remove_file`, which
+    /// fails outright on a directory ("Is a directory") and leaves empty parent
+    /// directories behind for a nested file. `git clean` is what git itself
+    /// uses and handles both.
+    #[test]
+    fn discarding_an_untracked_file_removes_it() {
+        let tmp = init_repo();
+        let path = tmp.path().to_str().unwrap().to_string();
+        std::fs::create_dir_all(tmp.path().join("nested")).unwrap();
+        std::fs::write(tmp.path().join("nested/junk.txt"), "x\n").unwrap();
+
+        git_discard_file(path.clone(), "nested/junk.txt".to_string(), true).unwrap();
+
+        assert!(!tmp.path().join("nested/junk.txt").exists());
+        assert!(git_status(path).unwrap().unstaged.is_empty());
+    }
+
+    #[test]
+    fn discarding_an_untracked_directory_removes_it() {
+        let tmp = init_repo();
+        let path = tmp.path().to_str().unwrap().to_string();
+        std::fs::create_dir_all(tmp.path().join("newfolder/inner")).unwrap();
+        std::fs::write(tmp.path().join("newfolder/inner/a.txt"), "x\n").unwrap();
+
+        git_discard_file(path.clone(), "newfolder".to_string(), true).unwrap();
+
+        assert!(!tmp.path().join("newfolder").exists());
+        assert!(git_status(path).unwrap().unstaged.is_empty());
+    }
+
+    /// Discarding a tracked file still restores it from the index rather than
+    /// deleting it.
+    #[test]
+    fn discarding_a_tracked_file_restores_its_content() {
+        let tmp = init_repo();
+        let path = tmp.path().to_str().unwrap().to_string();
+        std::fs::write(tmp.path().join("tracked.txt"), "original\n").unwrap();
+        run_git(&path, &["add", "-A"]);
+        run_git(&path, &["commit", "-m", "add tracked"]);
+        std::fs::write(tmp.path().join("tracked.txt"), "edited\n").unwrap();
+
+        git_discard_file(path.clone(), "tracked.txt".to_string(), false).unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(tmp.path().join("tracked.txt")).unwrap(),
+            "original\n"
+        );
+    }
+
+    /// Pathspec commands must reach files outside a subdirectory workspace,
+    /// since every path they are handed is now repo-root-relative.
+    #[test]
+    fn pathspec_commands_run_at_the_root_from_a_subdirectory_workspace() {
+        let tmp = init_repo();
+        let root = tmp.path().to_str().unwrap().to_string();
+        std::fs::create_dir_all(tmp.path().join("UnityProject/Assets")).unwrap();
+        std::fs::write(tmp.path().join("UnityProject/Assets/A.cs"), "one\n").unwrap();
+        run_git(&root, &["add", "-A"]);
+        run_git(&root, &["commit", "-m", "add"]);
+        std::fs::write(tmp.path().join("UnityProject/Assets/A.cs"), "two\n").unwrap();
+
+        let workspace = format!("{root}/UnityProject");
+        let rel = "UnityProject/Assets/A.cs".to_string();
+
+        // Staging a root-relative path from a subdirectory workspace.
+        git_stage_file(workspace.clone(), rel.clone()).unwrap();
+        let status = git_status(workspace.clone()).unwrap();
+        assert!(
+            status.staged.iter().any(|f| f.path == rel),
+            "file should be staged, got staged={:?}",
+            status.staged.iter().map(|f| &f.path).collect::<Vec<_>>()
+        );
+
+        git_unstage_file(workspace.clone(), rel.clone()).unwrap();
+        let status = git_status(workspace.clone()).unwrap();
+        assert!(status.staged.is_empty(), "file should be unstaged again");
+
+        // The gutter passes an ABSOLUTE pathspec (see `pathInWorkspace` in
+        // gutter-decorations.ts) — git accepts those from any directory.
+        let abs = format!("{root}/UnityProject/Assets/A.cs");
+        let diff = git_diff_file_head(workspace, abs).unwrap();
+        assert!(
+            diff.contains("UnityProject/Assets/A.cs"),
+            "absolute pathspec should produce a diff, got: {diff:?}"
+        );
     }
 }

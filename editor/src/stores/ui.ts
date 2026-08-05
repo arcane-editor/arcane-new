@@ -6,6 +6,9 @@ export type SidebarView = 'explorer' | 'source-control' | 'search' | 'scene-cont
 export type AssetViewerMode = 'structured' | 'raw-view' | 'raw-edit';
 /** Per-tab view mode for a Unity-asset git diff tab: semantic tree vs raw Monaco text diff. */
 export type DiffViewMode = 'semantic' | 'text';
+
+/** How the Source Control panel groups changed files: flat list, or by folder. */
+export type ScmViewMode = 'list' | 'tree';
 export type RightSidebarView = 'ai-panel' | 'unity-inspector';
 export type BottomPanelTab = 'terminal' | 'problems' | 'output' | 'unity-console';
 export type LspStatus = 'idle' | 'starting' | 'indexing' | 'ready' | 'error';
@@ -130,6 +133,14 @@ interface UiState {
   diffViewMode: Record<string, DiffViewMode>;
   setDiffViewMode: (path: string, mode: DiffViewMode) => void;
 
+  /**
+   * Source Control file grouping. `'list'` (flat) is the default, matching
+   * VS Code's `scm.defaultViewMode`. Lives here rather than in component state
+   * so toggling survives the panel unmounting when the sidebar switches views.
+   */
+  scmViewMode: ScmViewMode;
+  setScmViewMode: (mode: ScmViewMode) => void;
+
   /** uri → source → items */
   diagnostics: DiagnosticsMap;
   /**
@@ -235,6 +246,9 @@ export const useUiStore = create<UiState>((set, get) => ({
   diffViewMode: {},
   setDiffViewMode: (path, mode) =>
     set((s) => ({ diffViewMode: { ...s.diffViewMode, [path]: mode } })),
+
+  scmViewMode: 'list',
+  setScmViewMode: (mode) => set({ scmViewMode: mode }),
 
   diagnostics: new Map(),
   setFileDiagnostics: (fileUri, source, items) => {

@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { GitBranch, Check } from 'lucide-react';
+import { useState, useEffect, useCallback, useRef, useMemo, Fragment } from 'react';
+import { GitBranch, Check, Cloud } from 'lucide-react';
 import { useGitStore } from '../../../stores/git';
 import { useWorkspaceStore } from '../../../stores/workspace';
 import { buildBranchResults, type BranchResultRow } from '../services/branch-results';
@@ -45,6 +45,7 @@ function BranchPicker({ onClose, initialMode = 'switch' }: { onClose: () => void
   const isBranchesLoading = useGitStore((s) => s.isBranchesLoading);
   const currentBranch = useGitStore((s) => s.branch);
   const switchBranch = useGitStore((s) => s.switchBranch);
+  const checkoutRemoteBranch = useGitStore((s) => s.checkoutRemoteBranch);
   const createBranch = useGitStore((s) => s.createBranch);
   const refreshBranches = useGitStore((s) => s.refreshBranches);
 
@@ -133,6 +134,10 @@ function BranchPicker({ onClose, initialMode = 'switch' }: { onClose: () => void
     try {
       if (result.kind === 'create') {
         await createBranch(workspacePath, result.name, { checkout: true });
+      } else if (result.isRemote) {
+        // A remote branch can't be checked out directly without detaching
+        // HEAD; create/switch to the local branch tracking it instead.
+        await checkoutRemoteBranch(workspacePath, result.name);
       } else if (result.name !== currentBranch) {
         await switchBranch(workspacePath, result.name);
       }
@@ -145,7 +150,7 @@ function BranchPicker({ onClose, initialMode = 'switch' }: { onClose: () => void
     } finally {
       isSubmittingRef.current = false;
     }
-  }, [results, workspacePath, currentBranch, switchBranch, createBranch, onClose]);
+  }, [results, workspacePath, currentBranch, switchBranch, checkoutRemoteBranch, createBranch, onClose]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     switch (e.key) {
@@ -171,27 +176,43 @@ function BranchPicker({ onClose, initialMode = 'switch' }: { onClose: () => void
         <div ref={listRef} style={{ maxHeight: 350, overflowY: 'auto' }}>
           {results.map((result, index) => {
             const selectable = result.kind !== 'hint';
+            // `buildBranchResults` groups every remote branch after every
+            // local one, so the group starts at the first remote row.
+            const prev = results[index - 1];
+            const startsRemoteGroup =
+              result.kind === 'branch' &&
+              result.isRemote &&
+              !(prev && prev.kind === 'branch' && prev.isRemote);
             return (
-              <div key={rowKey(result)} data-index={index}
-                onMouseEnter={() => { if (selectable) setSelectedIndex(index); }}
-                onClick={() => handleSelect(index)}
-                style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 14px', cursor: selectable ? 'pointer' : 'default', background: selectable && index === selectedIndex ? 'var(--hover)' : 'transparent', color: selectable ? 'var(--text-primary)' : 'var(--text-secondary)', fontSize: 13, userSelect: 'none' }}>
-                {result.kind === 'create' ? (
-                  <span style={{ flex: 1 }}>
-                    {result.name === '' ? '＋ Create new branch…' : `＋ Create branch '${result.name}'`}
-                  </span>
-                ) : result.kind === 'action' ? (
-                  <span style={{ flex: 1 }}>{result.label}</span>
-                ) : result.kind === 'hint' ? (
-                  <span style={{ flex: 1 }}>{result.label}</span>
-                ) : (
-                  <>
-                    <GitBranch size={14} style={{ color: 'var(--text-secondary)', flexShrink: 0 }} />
-                    <span style={{ flex: 1 }}>{highlightMatches(result.name, result.matches)}</span>
-                    {result.name === currentBranch && <Check size={14} style={{ color: 'var(--accent)', flexShrink: 0 }} />}
-                  </>
+              <Fragment key={rowKey(result)}>
+                {startsRemoteGroup && (
+                  <div style={{ padding: '8px 14px 4px', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--text-secondary)', borderTop: '1px solid var(--border)', marginTop: 4, userSelect: 'none' }}>
+                    Remote branches
+                  </div>
                 )}
-              </div>
+                <div data-index={index}
+                  onMouseEnter={() => { if (selectable) setSelectedIndex(index); }}
+                  onClick={() => handleSelect(index)}
+                  style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 14px', cursor: selectable ? 'pointer' : 'default', background: selectable && index === selectedIndex ? 'var(--hover)' : 'transparent', color: selectable ? 'var(--text-primary)' : 'var(--text-secondary)', fontSize: 13, userSelect: 'none' }}>
+                  {result.kind === 'create' ? (
+                    <span style={{ flex: 1 }}>
+                      {result.name === '' ? '＋ Create new branch…' : `＋ Create branch '${result.name}'`}
+                    </span>
+                  ) : result.kind === 'action' ? (
+                    <span style={{ flex: 1 }}>{result.label}</span>
+                  ) : result.kind === 'hint' ? (
+                    <span style={{ flex: 1 }}>{result.label}</span>
+                  ) : (
+                    <>
+                      {result.isRemote
+                        ? <Cloud size={14} style={{ color: 'var(--text-secondary)', flexShrink: 0 }} />
+                        : <GitBranch size={14} style={{ color: 'var(--text-secondary)', flexShrink: 0 }} />}
+                      <span style={{ flex: 1 }}>{highlightMatches(result.name, result.matches)}</span>
+                      {result.name === currentBranch && <Check size={14} style={{ color: 'var(--accent)', flexShrink: 0 }} />}
+                    </>
+                  )}
+                </div>
+              </Fragment>
             );
           })}
           {/* The create-row affordance means `results` is never empty, so the

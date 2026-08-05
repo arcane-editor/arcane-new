@@ -4,9 +4,18 @@ import { fuzzyMatch } from '../../../utils/fuzzy-match';
 /** A branch that matched the current query (or every branch, for an empty query). */
 export interface BranchRow {
   kind: 'branch';
+  /** Display name: `main`, or `origin/feature-x` for a remote branch. */
   name: string;
   matches: number[];
   score: number;
+  /** True for a remote-tracking branch. Rendered in a group below the locals. */
+  isRemote: boolean;
+  /**
+   * For a remote branch, the local branch to create or switch to on checkout
+   * (`origin/release/1.x` -> `release/1.x`). Comes from git's own
+   * `%(refname:lstrip=3)`, so nested names aren't split on the first slash.
+   */
+  localName?: string | null;
 }
 
 /** Synthetic trailing row offering to create a branch named after the typed query. */
@@ -61,6 +70,10 @@ function compareBranchesByRecency(
  *   Recency plays no role here — unchanged from before this feature.
  * - Create row: appended last when `query.trim()` is non-empty and no branch
  *   name equals the trimmed query exactly.
+ *
+ * Remote-tracking branches always sort AFTER every local branch, in both
+ * modes — matching VS Code, which lists them as a separate group. Ordering
+ * within each group is unchanged (recency, or fuzzy score).
  */
 export function buildBranchResults(
   branches: BranchInfo[],
@@ -69,19 +82,35 @@ export function buildBranchResults(
 ): BranchResultRow[] {
   const trimmed = query.trim();
 
+  const toRow = (b: BranchInfo, matches: number[], score: number): BranchRow => ({
+    kind: 'branch',
+    name: b.name,
+    matches,
+    score,
+    isRemote: b.is_remote === true,
+    ...(b.is_remote ? { localName: b.local_name } : {}),
+  });
+
+  // Locals before remotes, applied after the mode-specific sort so it can't
+  // disturb the ordering within either group.
+  const byLocality = (a: BranchRow, b: BranchRow) =>
+    Number(a.isRemote) - Number(b.isRemote);
+
   const rows: BranchRow[] = trimmed
     ? branches
         .map((b): BranchRow | null => {
           const result = fuzzyMatch(trimmed, b.name);
           if (!result) return null;
-          return { kind: 'branch', name: b.name, matches: result.matches, score: result.score };
+          return toRow(b, result.matches, result.score);
         })
         .filter((r): r is BranchRow => r !== null)
         .sort((a, b) => b.score - a.score)
+        .sort(byLocality)
     : branches
         .slice()
         .sort((a, b) => compareBranchesByRecency(a, b, currentBranch))
-        .map((b): BranchRow => ({ kind: 'branch', name: b.name, matches: [], score: 0 }));
+        .map((b): BranchRow => toRow(b, [], 0))
+        .sort(byLocality);
 
   if (trimmed === '') {
     return [{ kind: 'create', name: '' }, ...rows];

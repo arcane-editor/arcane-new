@@ -123,12 +123,22 @@ function modelFilePath(model: MonacoEditor.ITextModel | null): string | null {
   }
 }
 
-function relativeToWorkspace(absPath: string, workspacePath: string | null): string | null {
+/**
+ * Gate: is `absPath` inside the open workspace at all? Files outside it get no
+ * gutter decorations.
+ *
+ * Returns the absolute path unchanged rather than a relative one — the pathspec
+ * handed to `git_diff_file_head` has to resolve against the *repository* root,
+ * which is not the workspace when the opened folder sits below it, and git
+ * accepts absolute pathspecs from any directory. That sidesteps having to
+ * resolve (and cache, and invalidate) the repo root on this hot path.
+ */
+function pathInWorkspace(absPath: string, workspacePath: string | null): string | null {
   if (!workspacePath) return null;
   if (absPath === workspacePath) return null;
   const prefix = workspacePath.endsWith('/') ? workspacePath : `${workspacePath}/`;
   if (!absPath.startsWith(prefix)) return null;
-  return absPath.slice(prefix.length);
+  return absPath;
 }
 
 /**
@@ -191,14 +201,14 @@ export function attachGitGutter(
     if (disposed || myGen !== generation) return;
 
     const { workspacePath } = useWorkspaceStore.getState();
-    const relPath = relativeToWorkspace(path, workspacePath);
-    if (!relPath) return;
+    const gitPath = pathInWorkspace(path, workspacePath);
+    if (!gitPath) return;
 
     let diff: string;
     try {
       diff = await invoke<string>('git_diff_file_head', {
         workspacePath,
-        filePath: relPath,
+        filePath: gitPath,
       });
     } catch {
       // Not a git repo, file not tracked in a repo we can diff, etc. — no
