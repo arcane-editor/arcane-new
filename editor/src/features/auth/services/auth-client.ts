@@ -22,10 +22,24 @@ interface DeviceTokenResult {
   user?: { email: string; plan: string };
 }
 
+/** Mirrors the server's makeUserResponse() exactly. `plan` and `credits` were
+ *  previously missing from this type — the runtime already carried them, but
+ *  nothing could read them, so the store hardcoded `plan: null` and paid for a
+ *  redundant /v1/usage round-trip (showing "—" in the account view until it
+ *  landed). `id` is a number, as the server sends it. */
+export interface ExchangeUser {
+  id: number;
+  email: string;
+  role: string;
+  emailVerified: boolean;
+  plan: string;
+  credits: number;
+}
+
 export interface ExchangeResult {
   success: boolean;
   error?: string;
-  user?: { id: string; email: string; role: string; emailVerified: boolean };
+  user?: ExchangeUser;
 }
 
 export interface UsageSummary {
@@ -74,10 +88,7 @@ export class AuthClient {
         };
       }
 
-      const data = (await res.json()) as {
-        token: string;
-        user: { id: string; email: string; role: string; emailVerified: boolean };
-      };
+      const data = (await res.json()) as { token: string; user: ExchangeUser };
       await this.saveToken(data.token, data.user.email);
       return { success: true, user: data.user };
     } catch (err) {

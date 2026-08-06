@@ -50,19 +50,46 @@ function savedTokenInvokes(): Array<{ cmd: string; args?: unknown }> {
   return invokeCalls.filter((c) => c.cmd === 'auth_write_token');
 }
 
+describe('exchangeEditorCode plan/credits contract', () => {
+  it('carries plan and credits through, so no /v1/usage round-trip is needed', async () => {
+    fetchImpl = async () =>
+      jsonResponse({
+        token: 'jwt-abc',
+        user: {
+          id: 7, email: 'a@b.dev', role: 'user',
+          emailVerified: true, plan: 'pro', credits: 1400,
+        },
+      });
+
+    const result = await authClient.exchangeEditorCode('code', 'verifier');
+
+    expect(result.success).toBe(true);
+    expect(result.user?.plan).toBe('pro');
+    expect(result.user?.credits).toBe(1400);
+  });
+});
+
 describe('exchangeEditorCode', () => {
   it('200 {token, user} -> success, saves the token via auth_write_token, POSTs the exact URL + body + headers', async () => {
+    // Mirrors the server's makeUserResponse() exactly — including the
+    // numeric id, and the plan/credits this client used to discard.
     fetchImpl = async () =>
       jsonResponse({
         token: 'tok-abc123',
-        user: { id: 'u1', email: 'dev@example.com', role: 'user', emailVerified: true },
+        user: {
+          id: 1, email: 'dev@example.com', role: 'user',
+          emailVerified: true, plan: 'free', credits: 150,
+        },
       });
 
     const result = await authClient.exchangeEditorCode('CODE1', 'VERIFIER1');
 
     expect(result).toEqual({
       success: true,
-      user: { id: 'u1', email: 'dev@example.com', role: 'user', emailVerified: true },
+      user: {
+        id: 1, email: 'dev@example.com', role: 'user',
+        emailVerified: true, plan: 'free', credits: 150,
+      },
     });
 
     expect(fetchCalls).toHaveLength(1);

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, mock } from 'bun:test';
-import type { BrowserLoginHandlers } from '../features/auth';
+import type { BrowserLoginHandlers, ExchangeResult } from '../features/auth';
 
 // stores/auth.ts statically imports both '../features/auth' (the barrel —
 // authClient + the browser-login service functions) and '@tauri-apps/api/event'
@@ -11,14 +11,13 @@ import type { BrowserLoginHandlers } from '../features/auth';
 // this mock can't leak into (or be clobbered by) another file's module cache
 // entry for the same resolved path.
 let exchangeEditorCodeCalls: Array<{ code: string; verifier: string }> = [];
+// Type-only import (erased at runtime, so it does NOT defeat the module mock
+// below): binds this stub to the REAL contract, so the two can't drift the way
+// they did while ExchangeResult was silently missing plan/credits.
 let exchangeEditorCodeImpl: (
   code: string,
   verifier: string,
-) => Promise<{
-  success: boolean;
-  error?: string;
-  user?: { id: string; email: string; role: string; emailVerified: boolean };
-}> = async () => ({ success: false, error: 'not configured' });
+) => Promise<ExchangeResult> = async () => ({ success: false, error: 'not configured' });
 
 let loadFromDiskImpl: () => Promise<{ token: string; email: string } | null> = async () => null;
 
@@ -156,7 +155,10 @@ describe('useAuthStore.beginBrowserLogin', () => {
 
     exchangeEditorCodeImpl = async () => ({
       success: true,
-      user: { id: 'u1', email: 'dev@example.com', role: 'user', emailVerified: true },
+      user: {
+        id: 1, email: 'dev@example.com', role: 'user',
+        emailVerified: true, plan: 'pro', credits: 1400,
+      },
     });
     loadFromDiskImpl = async () => ({ token: 'stored-tok', email: 'dev@example.com' });
 
@@ -171,7 +173,10 @@ describe('useAuthStore.beginBrowserLogin', () => {
     const state = useAuthStore.getState();
     expect(state.loggedIn).toBe(true);
     expect(state.email).toBe('dev@example.com');
-    expect(state.plan).toBeNull(); // exchange response carries no plan
+    // The exchange response DOES carry plan + credits — populating them here
+    // is what stops the account view flashing "—" until /v1/usage lands.
+    expect(state.plan).toBe('pro');
+    expect(state.credits).toBe(1400);
     expect(state.token).toBe('stored-tok');
     expect(state.loginStatus).toBe('idle');
     expect(state.error).toBeNull();
@@ -237,7 +242,10 @@ describe('useAuthStore.submitManualCode', () => {
     submitManualCodeMode = 'pending';
     exchangeEditorCodeImpl = async () => ({
       success: true,
-      user: { id: 'u2', email: 'manual@example.com', role: 'user', emailVerified: false },
+      user: {
+        id: 2, email: 'manual@example.com', role: 'user',
+        emailVerified: false, plan: 'free', credits: 150,
+      },
     });
     loadFromDiskImpl = async () => ({ token: 'manual-tok', email: 'manual@example.com' });
 

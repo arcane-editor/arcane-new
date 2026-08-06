@@ -79,14 +79,18 @@ export const useAuthStore = create<AuthState>((set) => ({
             set({
               loggedIn: true,
               email: result.user.email,
-              // The exchange response carries no plan (contract:
-              // {id, email, role, emailVerified}); /me can hydrate it later.
-              plan: null,
+              // The exchange response DOES carry plan + credits (the server's
+              // makeUserResponse); populate them straight away so the account
+              // view never flashes "—" while a /v1/usage round-trip lands.
+              plan: result.user.plan,
+              credits: result.user.credits,
               token: stored?.token ?? null,
               loginStatus: 'idle',
               error: null,
             });
             void emit('auth-changed');
+            // Still refresh: /v1/usage additionally carries planPeriodEnd and
+            // the per-bucket split, which the exchange response does not.
             void useAuthStore.getState().refreshUsage();
           } else {
             set({ loginStatus: 'error', error: result.error ?? 'Sign-in failed' });
