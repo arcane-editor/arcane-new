@@ -68,6 +68,46 @@ authEditorRouter.post('/v1/auth/editor/grant', authMiddleware(), async (c) => {
     return c.json({ code: rawCode, expires_in: CODE_TTL_SECONDS });
 });
 
+// Step 2b (editor, public): the PULL channel. Covers environments where
+// neither the custom scheme nor the loopback socket can deliver the callback —
+// corporate/VPN setups that filter loopback sockets are the documented case
+// (see the website's AuthSuccess page). Uses the SAME atomic consume as
+// exchange, so exactly one channel can ever win a race between them.
+//
+// Every failure mode returns one opaque `invalid_attempt`, matching the
+// exchange endpoint's no-oracle contract. The only distinguishable answer is
+// 428, which merely says "not authorized yet" about an id the caller already
+// holds — and reaching a session still requires the verifier.
+authEditorRouter.post('/v1/auth/editor/poll', async (c) => {
+    const body = await c.req
+        .json<{ attempt_id?: string; verifier?: string }>()
+        .catch(() => ({} as { attempt_id?: string; verifier?: string }));
+    const { attempt_id: attemptId, verifier } = body;
+    const invalid = () => c.json({ error: 'invalid_attempt' }, 400);
+    if (typeof attemptId !== 'string' || !attemptId
+        || typeof verifier !== 'string' || !verifier) {
+        return invalid();
+    }
+    const db = c.env.arcane_db;
+
+    // Peek before consuming: a still-pending attempt has to survive so the
+    // app can keep polling it, so it must not go through the consuming
+    // statement. `is_live` is computed SQL-side — see findAttempt.
+    const peek = await findAttempt(db, attemptId);
+    if (!peek || peek.consumed_at !== null || peek.is_live !== 1) { return invalid(); }
+    if (peek.status === 'pending') {
+        return c.json({ error: 'authorization_pending' }, 428);
+    }
+
+    const row = await consumeAttemptById(db, attemptId);
+    if (!row || row.user_id === null) { return invalid(); }
+    if (await s256Challenge(verifier) !== row.challenge) { return invalid(); }
+    const user = await findUserById(db, row.user_id);
+    if (!user) { return invalid(); }
+    logAuthEvent('editor_poll_exchange', { userId: user.id });
+    return c.json(await mintAuthResponse(user, c.env.JWT_SECRET));
+});
+
 // Step 2 (editor, public): code + verifier → 30-day session JWT.
 // ONE opaque error for every failure mode — no oracle distinguishing
 // unknown/expired/replayed codes from wrong verifiers.
