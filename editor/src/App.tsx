@@ -156,6 +156,11 @@ function App() {
 
     useSettingsStore.getState().loadSettings();
     useAuthStore.getState().loadFromDisk();
+    // If the OS launched this window with an auth deep link, finish that
+    // sign-in (or re-initiate when there's nothing to match it). Runs after
+    // loadFromDisk so an already-valid session is in place first — a signed-in
+    // user who clicks an old callback link just no-ops.
+    void useAuthStore.getState().resumeColdStartLogin();
     void useRecentsStore.getState().reload();
     // Watch agent activity → auto-rebuild the codebase graph after turns that
     // mutated files. Only fires when a graph already exists.

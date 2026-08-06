@@ -6,6 +6,8 @@ import {
   beginBrowserLogin as serviceBeginBrowserLogin,
   cancelBrowserLogin as serviceCancelBrowserLogin,
   submitManualCode as serviceSubmitManualCode,
+  resumeFromColdStart as serviceResumeFromColdStart,
+  hadLaunchUrl as serviceHadLaunchUrl,
 } from '../features/auth';
 import { ARCANE_WEB_URL } from '../config/api';
 
@@ -27,6 +29,9 @@ interface AuthState {
   cancelBrowserLogin: () => void;
   /** Manual-paste fallback — same grant code + exchange endpoint, NOT device flow. */
   submitManualCode: (code: string) => void;
+  /** Startup hook: finish a cold-start deep link, or re-initiate when one
+   * arrived with nothing to match it. */
+  resumeColdStartLogin: () => Promise<void>;
   logout: () => Promise<void>;
   loadFromDisk: () => Promise<void>;
   /** Pull plan + credit balance from /v1/usage (best-effort). */
@@ -54,6 +59,40 @@ function isJwtExpired(token: string): boolean {
   }
 }
 
+/** Exchange a grant code and land the resulting session in the store. Shared
+ *  by the in-app flow and the cold-start resume so the two can never drift. */
+async function exchangeAndApply(
+  set: (partial: Partial<AuthState>) => void,
+  code: string,
+  verifier: string,
+): Promise<void> {
+  set({ loginStatus: 'exchanging' });
+  const result = await authClient.exchangeEditorCode(code, verifier);
+  if (result.success && result.user) {
+    // exchangeEditorCode saved the token to disk; read it back for
+    // in-memory API clients (arcane-stream etc. read store.token).
+    const stored = await authClient.loadFromDisk().catch(() => null);
+    set({
+      loggedIn: true,
+      email: result.user.email,
+      // The exchange response DOES carry plan + credits (the server's
+      // makeUserResponse); populate them straight away so the account
+      // view never flashes "—" while a /v1/usage round-trip lands.
+      plan: result.user.plan,
+      credits: result.user.credits,
+      token: stored?.token ?? null,
+      loginStatus: 'idle',
+      error: null,
+    });
+    void emit('auth-changed');
+    // Still refresh: /v1/usage additionally carries planPeriodEnd and
+    // the per-bucket split, which the exchange response does not.
+    void useAuthStore.getState().refreshUsage();
+  } else {
+    set({ loginStatus: 'error', error: result.error ?? 'Sign-in failed' });
+  }
+}
+
 export const useAuthStore = create<AuthState>((set) => ({
   loggedIn: false,
   email: null,
@@ -69,33 +108,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       await serviceBeginBrowserLogin({
         // Runs AFTER the service consumed the pending attempt (replay guard);
         // this handler owns the exchange + resulting UI state.
-        onCode: async (code, verifier) => {
-          set({ loginStatus: 'exchanging' });
-          const result = await authClient.exchangeEditorCode(code, verifier);
-          if (result.success && result.user) {
-            // exchangeEditorCode saved the token to disk; read it back for
-            // in-memory API clients (arcane-stream etc. read store.token).
-            const stored = await authClient.loadFromDisk().catch(() => null);
-            set({
-              loggedIn: true,
-              email: result.user.email,
-              // The exchange response DOES carry plan + credits (the server's
-              // makeUserResponse); populate them straight away so the account
-              // view never flashes "—" while a /v1/usage round-trip lands.
-              plan: result.user.plan,
-              credits: result.user.credits,
-              token: stored?.token ?? null,
-              loginStatus: 'idle',
-              error: null,
-            });
-            void emit('auth-changed');
-            // Still refresh: /v1/usage additionally carries planPeriodEnd and
-            // the per-bucket split, which the exchange response does not.
-            void useAuthStore.getState().refreshUsage();
-          } else {
-            set({ loginStatus: 'error', error: result.error ?? 'Sign-in failed' });
-          }
-        },
+        onCode: (code, verifier) => exchangeAndApply(set, code, verifier),
         onError: (message) => set({ loginStatus: 'error', error: message }),
       });
     } catch (err) {
@@ -124,6 +137,30 @@ export const useAuthStore = create<AuthState>((set) => ({
         loginStatus: 'error',
         error: 'No sign-in attempt in progress — click "Continue in browser" first.',
       });
+    }
+  },
+
+  resumeColdStartLogin: async () => {
+    const handlers = {
+      onCode: (code: string, verifier: string) => exchangeAndApply(set, code, verifier),
+      onError: (message: string) => set({ loginStatus: 'error', error: message }),
+    };
+    try {
+      // Case 1: this app started the sign-in, was closed, and the OS has now
+      // launched it with the callback. The persisted attempt still holds the
+      // verifier, so the exchange can happen directly.
+      if (await serviceResumeFromColdStart(handlers)) return;
+
+      // Case 2: a deep link arrived with nothing to match — a sign-in started
+      // on the website, an expired attempt, or a wiped data dir. Re-initiate
+      // rather than dead-ending: the browser already holds a session, so the
+      // round-trip completes without a second login.
+      if (await serviceHadLaunchUrl()) {
+        await useAuthStore.getState().beginBrowserLogin();
+      }
+    } catch (err) {
+      // Startup path — never block the app from opening over this.
+      console.warn('[auth] cold-start resume failed', err);
     }
   },
 

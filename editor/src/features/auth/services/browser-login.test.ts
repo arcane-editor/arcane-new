@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, mock } from 'bun:test';
+import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
 
 // browser-login.ts imports Tauri APIs that don't exist under plain `bun test`
 // (no webview). Same pattern as arcane-stream.test.ts: register module mocks
@@ -23,6 +23,9 @@ mock.module('@tauri-apps/plugin-opener', () => ({
 }));
 
 let deepLinkHandler: ((urls: string[]) => void) | null = null;
+// Cold-start URLs arrive via getCurrent(), NOT the onOpenUrl event — that
+// split is the whole reason resumeFromColdStart has to exist.
+let launchUrls: string[] | null = null;
 mock.module('@tauri-apps/plugin-deep-link', () => ({
   onOpenUrl: async (handler: (urls: string[]) => void) => {
     callOrder.push('onOpenUrl');
@@ -31,7 +34,41 @@ mock.module('@tauri-apps/plugin-deep-link', () => ({
       deepLinkHandler = null;
     };
   },
+  getCurrent: async () => launchUrls,
 }));
+
+// attempt-store persists via tauri-plugin-store, which needs a real webview.
+// `mock.module` is PROCESS-global in bun and attempt-store.test.ts mocks this
+// same module, so both files agree to keep state on a shared global —
+// otherwise whichever factory registers last would strand the other's object.
+declare global {
+  // eslint-disable-next-line no-var
+  var __ATTEMPT_BACKING__: Record<string, unknown>;
+  // eslint-disable-next-line no-var
+  var __ATTEMPT_SAVES__: number;
+}
+globalThis.__ATTEMPT_BACKING__ ??= {};
+globalThis.__ATTEMPT_SAVES__ ??= 0;
+
+mock.module('@tauri-apps/plugin-store', () => ({
+  Store: {
+    load: async () => ({
+      get: async (k: string) =>
+        (k in globalThis.__ATTEMPT_BACKING__ ? globalThis.__ATTEMPT_BACKING__[k] : null),
+      set: async (k: string, v: unknown) => { globalThis.__ATTEMPT_BACKING__[k] = v; },
+      delete: async (k: string) => { delete globalThis.__ATTEMPT_BACKING__[k]; },
+      save: async () => { globalThis.__ATTEMPT_SAVES__++; },
+    }),
+  },
+}));
+
+// beginBrowserLogin registers a server-side attempt before opening the
+// browser. Its default implementation is a bare fetch, so stub the global
+// rather than threading an override through ~20 existing call sites — this
+// also keeps the default path itself under test.
+const ATTEMPT_ID = 'attempt-id-1';
+let createdChallenges: string[] = [];
+const originalFetch = globalThis.fetch;
 
 // login-transport.ts (imported transitively via browser-login.ts) statically
 // imports `listen` from here. It's never invoked by anything browser-login.ts
@@ -70,6 +107,21 @@ beforeEach(() => {
   callOrder = [];
   openedUrls = [];
   deepLinkHandler = null;
+  launchUrls = null;
+  globalThis.__ATTEMPT_BACKING__ = {};
+  createdChallenges = [];
+  globalThis.fetch = (async (_url: string, init?: RequestInit) => {
+    const body = JSON.parse((init?.body as string) ?? '{}') as { challenge?: string };
+    if (body.challenge) createdChallenges.push(body.challenge);
+    return new Response(JSON.stringify({ attempt_id: ATTEMPT_ID, expires_in: 600 }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }) as typeof fetch;
+});
+
+afterEach(() => {
+  globalThis.fetch = originalFetch;
 });
 
 describe('generateVerifier', () => {
@@ -367,5 +419,119 @@ describe('reopenBrowser', () => {
 
   it('returns false when nothing is pending', async () => {
     expect(await bl.reopenBrowser()).toBe(false);
+  });
+});
+
+describe('attempt registration', () => {
+  it('registers a server-side attempt and puts its id in the auth URL', async () => {
+    const { handlers } = makeHandlers();
+    await bl.beginBrowserLogin(handlers);
+
+    expect(createdChallenges).toHaveLength(1);
+    const url = new URL(openedUrls[0]!);
+    expect(url.searchParams.get('attempt')).toBe(ATTEMPT_ID);
+    // The registered challenge must be the one the URL advertises.
+    expect(url.searchParams.get('challenge')).toBe(createdChallenges[0]);
+  });
+
+  it('persists the attempt so a cold start can finish it', async () => {
+    const { handlers } = makeHandlers();
+    await bl.beginBrowserLogin(handlers);
+
+    const stored = globalThis.__ATTEMPT_BACKING__.pending as { attemptId: string; state: string } | undefined;
+    expect(stored?.attemptId).toBe(ATTEMPT_ID);
+    expect(stored?.state).toBe(new URL(openedUrls[0]!).searchParams.get('state')!);
+  });
+
+  it('clears the persisted attempt on cancel', async () => {
+    const { handlers } = makeHandlers();
+    await bl.beginBrowserLogin(handlers);
+    expect(globalThis.__ATTEMPT_BACKING__.pending).toBeDefined();
+
+    bl.cancelBrowserLogin();
+    // teardown fires clearPendingAttempt() without awaiting it (it must stay
+    // synchronous for callers); that chain is Store.load → delete → save, so
+    // let the event loop drain rather than counting microtasks.
+    for (let i = 0; i < 20 && globalThis.__ATTEMPT_BACKING__.pending; i++) {
+      await new Promise((r) => setTimeout(r, 0));
+    }
+    expect(globalThis.__ATTEMPT_BACKING__.pending).toBeUndefined();
+  });
+});
+
+describe('resumeFromColdStart', () => {
+  const persist = (state: string) => {
+    globalThis.__ATTEMPT_BACKING__.pending = {
+      attemptId: ATTEMPT_ID,
+      state,
+      verifier: 'ver-1',
+      expiresAt: Date.now() + 60_000,
+    };
+  };
+
+  it('completes a login from a launch URL matching the persisted attempt', async () => {
+    persist('st-1');
+    launchUrls = [`${scheme}://auth/callback?code=CODE1&state=st-1`];
+    const { calls, handlers } = makeHandlers();
+
+    expect(await bl.resumeFromColdStart(handlers)).toBe(true);
+    expect(calls).toEqual([{ code: 'CODE1', verifier: 'ver-1' }]);
+    // Consumed before delivery — a replayed launch URL finds nothing.
+    expect(globalThis.__ATTEMPT_BACKING__.pending).toBeUndefined();
+  });
+
+  it('ignores a launch URL whose state does not match', async () => {
+    persist('st-1');
+    launchUrls = [`${scheme}://auth/callback?code=CODE1&state=WRONG`];
+    const { calls, handlers } = makeHandlers();
+
+    expect(await bl.resumeFromColdStart(handlers)).toBe(false);
+    expect(calls).toEqual([]);
+  });
+
+  it('returns false when there is no launch URL', async () => {
+    persist('st-1');
+    launchUrls = null;
+    const { handlers } = makeHandlers();
+    expect(await bl.resumeFromColdStart(handlers)).toBe(false);
+  });
+
+  it('returns false when there is a launch URL but no persisted attempt', async () => {
+    launchUrls = [`${scheme}://auth/callback?code=CODE1&state=st-1`];
+    const { handlers } = makeHandlers();
+    // This is the website-initiated case — the caller re-initiates instead.
+    expect(await bl.resumeFromColdStart(handlers)).toBe(false);
+  });
+
+  it('returns false when the persisted attempt has expired', async () => {
+    globalThis.__ATTEMPT_BACKING__.pending = {
+      attemptId: ATTEMPT_ID, state: 'st-1', verifier: 'ver-1',
+      expiresAt: Date.now() - 1,
+    };
+    launchUrls = [`${scheme}://auth/callback?code=CODE1&state=st-1`];
+    const { handlers } = makeHandlers();
+    expect(await bl.resumeFromColdStart(handlers)).toBe(false);
+  });
+
+  it('scans past a non-callback deep link to find the real one', async () => {
+    persist('st-1');
+    launchUrls = [
+      `${scheme}://open-project?path=/tmp/x`,
+      `${scheme}://auth/callback?code=CODE2&state=st-1`,
+    ];
+    const { calls, handlers } = makeHandlers();
+    expect(await bl.resumeFromColdStart(handlers)).toBe(true);
+    expect(calls).toEqual([{ code: 'CODE2', verifier: 'ver-1' }]);
+  });
+});
+
+describe('hadLaunchUrl', () => {
+  it('is true only when the OS launched the app with a deep link', async () => {
+    launchUrls = null;
+    expect(await bl.hadLaunchUrl()).toBe(false);
+    launchUrls = [];
+    expect(await bl.hadLaunchUrl()).toBe(false);
+    launchUrls = [`${scheme}://auth/callback?code=C&state=S`];
+    expect(await bl.hadLaunchUrl()).toBe(true);
   });
 });

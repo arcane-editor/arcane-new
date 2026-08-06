@@ -24,8 +24,15 @@
 // UI state transitions. That keeps this module free of auth-client/store
 // dependencies and fully testable under bun with only Tauri API mocks.
 import { openUrl } from '@tauri-apps/plugin-opener';
+import { invoke } from '@tauri-apps/api/core';
+import { getCurrent } from '@tauri-apps/plugin-deep-link';
 import type { UnlistenFn } from '@tauri-apps/api/event';
-import { ARCANE_WEB_URL } from '../../../config/api';
+import { ARCANE_API_URL, ARCANE_WEB_URL } from '../../../config/api';
+import {
+  savePendingAttempt,
+  loadPendingAttempt,
+  clearPendingAttempt,
+} from './attempt-store';
 import {
   parseCallback,
   selectTransport,
@@ -79,11 +86,33 @@ export interface BrowserLoginHandlers {
   onError: (message: string) => void;
 }
 
+/**
+ * Registers a server-side attempt and returns its id. Injected rather than
+ * imported from auth-client so this module keeps the property its header
+ * claims: no auth-client/store dependencies, testable under bun with only
+ * Tauri API mocks. The default is a bare fetch against the same config the
+ * auth URL below comes from.
+ */
+export type CreateAttemptFn = (challenge: string) => Promise<string>;
+
+const defaultCreateAttempt: CreateAttemptFn = async (challenge) => {
+  const res = await fetch(`${ARCANE_API_URL}/v1/auth/editor/attempt`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ challenge }),
+  });
+  if (!res.ok) throw new Error(`Could not start sign-in (${res.status})`);
+  const data = (await res.json()) as { attempt_id: string };
+  return data.attempt_id;
+};
+
 interface PendingAttempt {
   /** Monotonic id of this attempt (see `attemptSeq`). Lets an attempt that's
    * still awaiting something tell — when it resumes — whether it's still the
    * live one or was superseded by a cancel/restart while it was suspended. */
   epoch: number;
+  /** Server-side attempt id; also what the poll channel consumes against. */
+  attemptId: string;
   state: string;
   verifier: string;
   /** Full `${ARCANE_WEB_URL}/auth?…` URL, kept for "Open browser again". */
@@ -103,6 +132,12 @@ function teardown(): void {
   if (!p) return;
   pending = null;
   clearTimeout(p.timer);
+  // The persisted copy exists only to let a COLD START finish this attempt.
+  // Once the attempt is over — consumed, cancelled, superseded or timed out —
+  // it must not survive to be matched by some later, unrelated deep link.
+  void clearPendingAttempt().catch(() => {
+    /* store unavailable during teardown — the TTL cleans it up regardless */
+  });
   if (p.unlisten) {
     try {
       p.unlisten();
@@ -140,6 +175,7 @@ export async function beginBrowserLogin(
   handlers: BrowserLoginHandlers,
   timeoutMs: number = LOGIN_TIMEOUT_MS,
   transport: LoginTransport = selectTransport(),
+  createAttempt: CreateAttemptFn = defaultCreateAttempt,
 ): Promise<void> {
   teardown();
 
@@ -153,13 +189,33 @@ export async function beginBrowserLogin(
     handlers.onError('Sign-in timed out. Click "Continue in browser" to try again.');
   }, timeoutMs);
 
-  pending = { epoch, state, verifier, url: '', handlers, unlisten: null, timer };
+  pending = { epoch, attemptId: '', state, verifier, url: '', handlers, unlisten: null, timer };
 
   const challenge = await challengeS256(verifier);
   if (pending?.epoch !== epoch) {
     // Superseded (cancel or restart) while awaiting the challenge hash.
     // `pending` now belongs to a different attempt (or is null) — clear only
     // THIS attempt's own timer, never whatever is current.
+    clearTimeout(timer);
+    return;
+  }
+
+  // Register server-side BEFORE opening the browser: the poll channel needs an
+  // id to consume against, and persisting it is what lets a deep link that
+  // launches a cold app finish this login.
+  const attemptId = await createAttempt(challenge);
+  if (pending?.epoch !== epoch) {
+    clearTimeout(timer);
+    return;
+  }
+  pending.attemptId = attemptId;
+  await savePendingAttempt({
+    attemptId,
+    state,
+    verifier,
+    expiresAt: Date.now() + timeoutMs,
+  });
+  if (pending?.epoch !== epoch) {
     clearTimeout(timer);
     return;
   }
@@ -199,7 +255,9 @@ export async function beginBrowserLogin(
   // challenge) always win — a transport can add its own params (e.g. the
   // loopback redirect_uri) but must never be able to overwrite the CSRF
   // state or the PKCE challenge, which are the entire security of the flow.
-  const params = new URLSearchParams({ ...armed.params, flow: 'editor', state, challenge });
+  const params = new URLSearchParams({
+    ...armed.params, flow: 'editor', state, challenge, attempt: attemptId,
+  });
   const url = `${ARCANE_WEB_URL}/auth?${params.toString()}`;
   pending.url = url;
 
@@ -232,4 +290,69 @@ export function submitManualCode(code: string): boolean {
   if (!trimmed) return false;
   consumeAndDeliver(trimmed);
   return true;
+}
+
+// ── Cold start ──────────────────────────────────────────────────────────────
+
+/**
+ * True when the OS launched this process with a deep link.
+ *
+ * `getCurrent()` is the ONLY way to see a startup URL: the plugin delivers
+ * cold-start URLs through it, not through the `new-url` event that the
+ * running-process flow listens on. Resolves false when the plugin is
+ * unavailable (e.g. a loopback-only dev build).
+ */
+export async function hadLaunchUrl(): Promise<boolean> {
+  try {
+    const urls = await getCurrent();
+    return !!urls && urls.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Complete a login from the URL the OS launched this process with.
+ *
+ * Returns true when a launch URL matched the PERSISTED attempt and the code
+ * was handed to `onCode`. Returns false when there was no launch URL, no
+ * persisted attempt (a website-initiated sign-in, an expired attempt, a wiped
+ * data dir), or no state match — in which case the caller should fall back to
+ * `beginBrowserLogin`, since the browser still holds a session and will
+ * complete the re-initiated round-trip without a second login.
+ *
+ * The persisted attempt is consumed BEFORE delivery, mirroring the in-memory
+ * replay guard: a replayed launch URL finds nothing.
+ */
+export async function resumeFromColdStart(handlers: BrowserLoginHandlers): Promise<boolean> {
+  let urls: string[] | null = null;
+  try {
+    urls = await getCurrent();
+  } catch {
+    return false;
+  }
+  if (!urls || urls.length === 0) return false;
+
+  const stored = await loadPendingAttempt().catch(() => null);
+  if (!stored) return false;
+
+  let scheme: string;
+  try {
+    scheme = await invoke<string>('auth_deep_link_scheme');
+  } catch {
+    return false;
+  }
+
+  for (const url of urls) {
+    const parsed = parseCallback(url, scheme);
+    if (!parsed) continue;
+    if (parsed.state !== stored.state) {
+      console.warn('[browser-login] cold-start callback state mismatch — ignoring');
+      continue;
+    }
+    await clearPendingAttempt().catch(() => {});
+    void handlers.onCode(parsed.code, stored.verifier);
+    return true;
+  }
+  return false;
 }

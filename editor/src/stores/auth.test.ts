@@ -33,6 +33,15 @@ let submitManualCodeCalls: string[] = [];
  * pending (returns false, same as the real submitManualCode). */
 let submitManualCodeMode: 'pending' | 'none' = 'none';
 
+// Cold-start resume: `coldStartResumes` is what resumeFromColdStart reports
+// (did a launch URL match a persisted attempt?), `hadLaunchUrlResult` is
+// whether the OS launched the app with a deep link at all. The two together
+// select resume / re-initiate / do-nothing.
+let coldStartCalls = 0;
+let coldStartResumes = false;
+let hadLaunchUrlResult = false;
+let capturedColdStartHandlers: BrowserLoginHandlers | null = null;
+
 mock.module('../features/auth', () => ({
   authClient: {
     exchangeEditorCode: (code: string, verifier: string) => {
@@ -52,6 +61,12 @@ mock.module('../features/auth', () => ({
   cancelBrowserLogin: () => {
     cancelBrowserLoginCalls++;
   },
+  resumeFromColdStart: async (handlers: BrowserLoginHandlers) => {
+    coldStartCalls++;
+    capturedColdStartHandlers = handlers;
+    return coldStartResumes;
+  },
+  hadLaunchUrl: async () => hadLaunchUrlResult,
   submitManualCode: (code: string) => {
     submitManualCodeCalls.push(code);
     if (submitManualCodeMode === 'pending' && capturedHandlers) {
@@ -136,6 +151,59 @@ beforeEach(() => {
   submitManualCodeCalls = [];
   submitManualCodeMode = 'none';
   emitCalls = [];
+  coldStartCalls = 0;
+  coldStartResumes = false;
+  hadLaunchUrlResult = false;
+  capturedColdStartHandlers = null;
+});
+
+describe('useAuthStore.resumeColdStartLogin', () => {
+  it('completes the sign-in when a launch URL matched a persisted attempt', async () => {
+    coldStartResumes = true;
+    exchangeEditorCodeImpl = async () => ({
+      success: true,
+      user: {
+        id: 3, email: 'cold@example.com', role: 'user',
+        emailVerified: true, plan: 'pro', credits: 1400,
+      },
+    });
+    loadFromDiskImpl = async () => ({ token: 'cold-tok', email: 'cold@example.com' });
+
+    await useAuthStore.getState().resumeColdStartLogin();
+    // The service hands the code straight to the handlers it was given.
+    await capturedColdStartHandlers!.onCode('COLD1', 'cold-verifier');
+
+    expect(coldStartCalls).toBe(1);
+    const state = useAuthStore.getState();
+    expect(state.loggedIn).toBe(true);
+    expect(state.email).toBe('cold@example.com');
+    expect(state.plan).toBe('pro');
+    expect(emitCalls).toEqual(['auth-changed']);
+    // Never re-initiates once the resume succeeded.
+    expect(beginBrowserLoginCalls).toBe(0);
+  });
+
+  it('re-initiates when a launch URL arrived with nothing to match it', async () => {
+    coldStartResumes = false;
+    hadLaunchUrlResult = true;
+
+    await useAuthStore.getState().resumeColdStartLogin();
+
+    // This is the website-initiated case: the browser already holds a session,
+    // so re-opening it completes without a second login.
+    expect(beginBrowserLoginCalls).toBe(1);
+  });
+
+  it('does nothing when the app was not launched by a deep link', async () => {
+    coldStartResumes = false;
+    hadLaunchUrlResult = false;
+
+    await useAuthStore.getState().resumeColdStartLogin();
+
+    expect(beginBrowserLoginCalls).toBe(0);
+    expect(useAuthStore.getState().loggedIn).toBe(false);
+    expect(useAuthStore.getState().error).toBeNull();
+  });
 });
 
 describe('useAuthStore.beginBrowserLogin', () => {

@@ -10,5 +10,7 @@ export {
   cancelBrowserLogin,
   submitManualCode,
   reopenBrowser,
+  resumeFromColdStart,
+  hadLaunchUrl,
   type BrowserLoginHandlers,
 } from './services/browser-login';

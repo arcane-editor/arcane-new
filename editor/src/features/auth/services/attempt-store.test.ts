@@ -3,15 +3,28 @@ import { describe, it, expect, beforeEach, mock } from 'bun:test';
 // attempt-store.ts uses tauri-plugin-store's `Store.load`, which needs a real
 // Tauri webview. Mock the module before the dynamic import below, following
 // the pattern in auth-client.test.ts / browser-login.test.ts.
-let backing: Record<string, unknown> = {};
-let saveCalls = 0;
+//
+// `mock.module` is PROCESS-global in bun, and browser-login.test.ts mocks this
+// same module. Whichever factory registers last serves both files, so the two
+// must agree on where state lives — hence the shared globals rather than a
+// file-local object. Each file's beforeEach resets them.
+declare global {
+  // eslint-disable-next-line no-var
+  var __ATTEMPT_BACKING__: Record<string, unknown>;
+  // eslint-disable-next-line no-var
+  var __ATTEMPT_SAVES__: number;
+}
+globalThis.__ATTEMPT_BACKING__ ??= {};
+globalThis.__ATTEMPT_SAVES__ ??= 0;
+
 mock.module('@tauri-apps/plugin-store', () => ({
   Store: {
     load: async () => ({
-      get: async (k: string) => (k in backing ? backing[k] : null),
-      set: async (k: string, v: unknown) => { backing[k] = v; },
-      delete: async (k: string) => { delete backing[k]; },
-      save: async () => { saveCalls++; },
+      get: async (k: string) =>
+        (k in globalThis.__ATTEMPT_BACKING__ ? globalThis.__ATTEMPT_BACKING__[k] : null),
+      set: async (k: string, v: unknown) => { globalThis.__ATTEMPT_BACKING__[k] = v; },
+      delete: async (k: string) => { delete globalThis.__ATTEMPT_BACKING__[k]; },
+      save: async () => { globalThis.__ATTEMPT_SAVES__++; },
     }),
   },
 }));
@@ -28,8 +41,8 @@ const attempt = {
 
 describe('attempt-store', () => {
   beforeEach(() => {
-    backing = {};
-    saveCalls = 0;
+    globalThis.__ATTEMPT_BACKING__ = {};
+    globalThis.__ATTEMPT_SAVES__ = 0;
   });
 
   it('round-trips a pending attempt', async () => {
@@ -39,7 +52,7 @@ describe('attempt-store', () => {
 
   it('persists through save() so a cold start can read it back', async () => {
     await savePendingAttempt(attempt);
-    expect(saveCalls).toBeGreaterThan(0);
+    expect(globalThis.__ATTEMPT_SAVES__).toBeGreaterThan(0);
   });
 
   it('returns null when nothing is stored', async () => {
@@ -67,7 +80,7 @@ describe('attempt-store', () => {
       { attemptId: 1, state: 's', verifier: 'v', expiresAt: 9999 }, // wrong type
       'not-an-object',
     ]) {
-      backing = { pending: bad };
+      globalThis.__ATTEMPT_BACKING__ = { pending: bad };
       expect(await loadPendingAttempt(1000)).toBeNull();
     }
   });

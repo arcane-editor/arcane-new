@@ -25,11 +25,12 @@ export interface PersistedAttempt {
   expiresAt: number;
 }
 
-// Memoized handle, matching src/utils/persistence.ts.
-let attemptStore: Store | null = null;
+// Deliberately NOT memoized (unlike src/utils/persistence.ts): this store is
+// touched a handful of times per sign-in, never in a hot path, and holding a
+// handle across the process would pin a stale one — which is exactly what a
+// cold-start resume must not do.
 async function handle(): Promise<Store> {
-  if (!attemptStore) attemptStore = await Store.load(ATTEMPT_FILE);
-  return attemptStore;
+  return Store.load(ATTEMPT_FILE);
 }
 
 export async function savePendingAttempt(attempt: PersistedAttempt): Promise<void> {
