@@ -172,14 +172,23 @@ export async function apiWebExchange(code: string): Promise<AuthResponse> {
     return res.json();
 }
 
-export async function apiEditorGrant(token: string, challenge: string): Promise<{ code: string; expires_in: number }> {
+/** Bind the signed-in user to the app's pending sign-in and get the one-time
+ *  grant code. Prefers `attempt_id` (migration 0016); falls back to the bare
+ *  `challenge` for older app builds, which the server turns into an attempt
+ *  on the fly so both shapes share one consume path. */
+export async function apiEditorGrant(
+    token: string,
+    opts: { attemptId?: string | null; challenge?: string },
+): Promise<{ code: string; expires_in: number }> {
     const res = await fetch(`${API_URL}/v1/auth/editor/grant`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${token}`,
         },
-        body: JSON.stringify({ challenge }),
+        body: JSON.stringify(
+            opts.attemptId ? { attempt_id: opts.attemptId } : { challenge: opts.challenge },
+        ),
     });
     if (!res.ok) {
         throw new Error(await readErrorMessage(res, 'invalid_challenge'));

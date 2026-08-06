@@ -181,6 +181,32 @@ describe('parseEditorLoginParams', () => {
         expect(r.ok && r.request.target).toEqual({ kind: 'scheme', scheme: 'arcane-dev' });
     });
 
+    const UUID = '11111111-2222-3333-4444-555555555555';
+
+    it('carries a valid attempt id through', () => {
+        const r = parseEditorLoginParams(
+            params({ state: 's', challenge: CHALLENGE, scheme: 'arcane', attempt: UUID }),
+        );
+        expect(r.ok && r.request.attemptId).toBe(UUID);
+    });
+
+    it('accepts a request with no attempt id (older app build)', () => {
+        const r = parseEditorLoginParams(
+            params({ state: 's', challenge: CHALLENGE, scheme: 'arcane' }),
+        );
+        expect(r.ok).toBe(true);
+        expect(r.ok && r.request.attemptId).toBeNull();
+    });
+
+    it('rejects a malformed attempt id rather than forwarding it', () => {
+        for (const attempt of ['not-a-uuid', '', `${UUID}x`, '../../evil']) {
+            const r = parseEditorLoginParams(
+                params({ state: 's', challenge: CHALLENGE, scheme: 'arcane', attempt }),
+            );
+            expect(r.ok).toBe(false);
+        }
+    });
+
     it('accepts a loopback request', () => {
         const r = parseEditorLoginParams(
             params({ state: 's', challenge: CHALLENGE, redirect_uri: 'http://127.0.0.1:53411/callback' }),

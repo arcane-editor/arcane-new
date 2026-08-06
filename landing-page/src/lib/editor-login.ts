@@ -14,6 +14,11 @@ export interface EditorLoginRequest {
     state: string;      // app-generated CSRF token, echoed verbatim in the callback (1-256 chars)
     challenge: string;  // PKCE S256 challenge, base64url 43-128 chars
     target: EditorCallbackTarget;
+    /** Server-side attempt id (migration 0016). The website hands this back to
+     *  /v1/auth/editor/grant so the app's poll channel has something to
+     *  consume. NULL for older app builds that still send only a challenge —
+     *  the server then creates the attempt on the fly. */
+    attemptId: string | null;
 }
 
 export interface EditorHandoff {
@@ -26,6 +31,8 @@ const HANDOFF_KEY = 'arcane_editor_login_handoff';
 const RETURN_KEY = 'arcane_post_auth_return';
 
 const CHALLENGE_RE = /^[A-Za-z0-9_-]{43,128}$/;
+// crypto.randomUUID() output, lowercase hex — the only shape the server mints.
+const ATTEMPT_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 // Derived from SCHEME_ALLOWLIST so the two can't drift apart — schemes are
 // always `[a-z-]`, so no escaping is needed in the alternation.
 const CALLBACK_RE = new RegExp(
@@ -44,6 +51,10 @@ export function isValidChallenge(challenge: string): boolean {
 
 export function isValidState(state: string): boolean {
     return state.length >= 1 && state.length <= 256;
+}
+
+export function isValidAttemptId(attemptId: string): boolean {
+    return ATTEMPT_RE.test(attemptId);
 }
 
 // The 127.0.0.1 IPv4 literal only. `localhost` is deliberately excluded: it
@@ -155,7 +166,14 @@ export function parseEditorLoginParams(params: URLSearchParams): EditorLoginPars
     if (!isValidState(state)) {
         return { ok: false, error: 'The sign-in link from the editor is malformed (bad state). Return to Arcane and click Sign in again.' };
     }
-    return { ok: true, request: { state, challenge, target } };
+    // Absent is fine (older app builds); present-but-malformed is not — this
+    // value is POSTed straight back to the grant endpoint, so it must be
+    // validated here rather than forwarded on trust.
+    const attemptRaw = params.get('attempt');
+    if (attemptRaw !== null && !isValidAttemptId(attemptRaw)) {
+        return { ok: false, error: 'The sign-in link from the editor is malformed (bad attempt id). Return to Arcane and click Sign in again.' };
+    }
+    return { ok: true, request: { state, challenge, target, attemptId: attemptRaw } };
 }
 
 export function buildCallbackUrl(
@@ -234,7 +252,15 @@ export function loadEditorLoginRequest(): EditorLoginRequest | null {
             sessionStorage.removeItem(REQUEST_KEY);
             return null;
         }
-        return { ...parsed, target };
+        // Re-validate on read for the same reason the target is re-derived:
+        // sessionStorage is same-origin writable, so a planted attemptId must
+        // not reach the grant endpoint unchecked. A bad one degrades to null
+        // (the server then creates the attempt from the challenge) rather
+        // than failing the whole sign-in.
+        const attemptId = typeof parsed.attemptId === 'string' && isValidAttemptId(parsed.attemptId)
+            ? parsed.attemptId
+            : null;
+        return { ...parsed, target, attemptId };
     } catch {
         sessionStorage.removeItem(REQUEST_KEY);
         return null;

@@ -42,7 +42,10 @@ export default function AuthHub() {
             setState("boot");
             setBootMessage("Connecting to Arcane…");
             try {
-                const grant = await apiEditorGrant(token, pending.challenge);
+                const grant = await apiEditorGrant(token, {
+                    attemptId: pending.attemptId,
+                    challenge: pending.challenge,
+                });
                 saveEditorHandoff({
                     deepLink: buildCallbackUrl(pending.target, grant.code, pending.state),
                     code: grant.code,
