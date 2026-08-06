@@ -5,6 +5,10 @@ import {
 import { authMiddleware, mintAuthResponse } from '../middleware/auth.ts';
 import type { AuthPayload } from '../middleware/auth.ts';
 import { generateToken, sha256Hex, s256Challenge, TOKEN_TTL_SECONDS } from '../lib/tokens.ts';
+import {
+    createAttempt, authorizeAttempt, consumeAttemptByCode, consumeAttemptById,
+    findAttempt, cleanExpiredAttempts, ATTEMPT_TTL_SECONDS,
+} from '../lib/attempts.ts';
 import { logAuthEvent } from '../lib/log.ts';
 import type { AppEnv } from '../types.ts';
 
@@ -12,6 +16,22 @@ export const authEditorRouter = new Hono<AppEnv>();
 
 // PKCE challenge: base64url, 43-128 chars (spec-fixed bounds).
 const CHALLENGE_RE = /^[A-Za-z0-9_-]{43,128}$/;
+
+// Step 0 (editor, public): register a PKCE-bound attempt BEFORE opening the
+// browser. Storing the challenge server-side here is what lets the poll
+// channel exist at all — it gives the app an id it can redeem against
+// without the browser ever reaching it. Public by design: the app has no
+// session yet, and the attempt is worthless without the matching verifier.
+authEditorRouter.post('/v1/auth/editor/attempt', async (c) => {
+    const body = await c.req.json<{ challenge?: string }>().catch(() => ({} as { challenge?: string }));
+    if (typeof body.challenge !== 'string' || !CHALLENGE_RE.test(body.challenge)) {
+        return c.json({ error: 'invalid_challenge' }, 400);
+    }
+    const db = c.env.arcane_db;
+    await cleanExpiredAttempts(db);
+    const attemptId = await createAttempt(db, body.challenge);
+    return c.json({ attempt_id: attemptId, expires_in: ATTEMPT_TTL_SECONDS });
+});
 
 // Step 1 (website, logged in): mint a 60s one-time code bound to the app's
 // S256 challenge. The verifier never leaves the app.
