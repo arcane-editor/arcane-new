@@ -190,6 +190,15 @@ interface AiState {
    */
   authNotice: string | null;
 
+  /**
+   * True when the server rejected an AI call with 403 `email_unverified`.
+   * Deliberately distinct from `authNotice`: that one explains a session that
+   * ENDED, whereas this is a session that is perfectly VALID and simply has
+   * an unconfirmed mailbox. Conflating the two is what trapped every
+   * email/password signup in a sign-in loop — see arcane-stream.ts.
+   */
+  verificationRequired: boolean;
+
   // Configuration
   mode: ChatMode;
   effort: Effort;
@@ -226,6 +235,7 @@ interface AiState {
   setAgentRunning: (running: boolean) => void;
   setError: (error: string | null) => void;
   setAuthNotice: (notice: string | null) => void;
+  setVerificationRequired: (required: boolean) => void;
   /** Appends a `role: 'error'` message (T5's outcome-detection choke point) and flushes it to disk immediately — an error must survive an instant quit. Returns the new message id. */
   addTurnError: (error: TurnError) => string;
   /** Drops all messages after `messageId` (keeping it), prunes now-orphaned `toolCalls` entries, and schedules a save. Used by Retry (T5) to roll history back before re-sending. */
@@ -423,6 +433,7 @@ export const useAiStore = create<AiState>((set, get) => ({
   toolCalls: new Map(),
   errorMessage: null,
   authNotice: null,
+  verificationRequired: false,
   mode: 'agent',
   effort: 'high',
   sessionId: null,
@@ -443,7 +454,10 @@ export const useAiStore = create<AiState>((set, get) => ({
           sessionId = generateSessionId();
           set({ sessionId });
         }
-        set({ isAgentRunning: true, errorMessage: null, authNotice: null });
+        // Clearing verificationRequired here is self-correcting: if the
+        // mailbox is still unconfirmed, this run's 403 re-arms it immediately;
+        // if the user verified in the meantime, the gate simply goes away.
+        set({ isAgentRunning: true, errorMessage: null, authNotice: null, verificationRequired: false });
         break;
       }
 
@@ -625,6 +639,8 @@ export const useAiStore = create<AiState>((set, get) => ({
 
   setAuthNotice: (notice: string | null) => set({ authNotice: notice }),
 
+  setVerificationRequired: (required: boolean) => set({ verificationRequired: required }),
+
   addTurnError: (error: TurnError) => {
     const id = nextId();
     const msg: AiMessage = {
@@ -670,6 +686,7 @@ export const useAiStore = create<AiState>((set, get) => ({
       toolCalls: new Map(),
       errorMessage: null,
       authNotice: null,
+      verificationRequired: false,
       sessionId: null,
       arcanePlan: null,
       attachments: [],
@@ -693,6 +710,7 @@ export const useAiStore = create<AiState>((set, get) => ({
       toolCalls: new Map(),
       errorMessage: null,
       authNotice: null,
+      verificationRequired: false,
       sessionId: session.id,
       mode: session.mode ?? 'agent',
       effort: session.effort ?? 'high',

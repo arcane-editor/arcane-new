@@ -306,10 +306,27 @@ async function doStream(
     }
 
     if (!attemptResponse.ok) {
-      if (attemptResponse.status === 401 || attemptResponse.status === 403) {
+      // ONLY 401 ends a session. A 403 means the session is valid but the
+      // action isn't allowed — most often `email_unverified`, which gates
+      // every AI route. Signing the user out over that trapped every
+      // email/password signup in a loop: sign in → first message → 403 →
+      // "your session expired" → sign in → identical 403, forever. (Google
+      // signups are auto-verified, which is why it looked intermittent.)
+      if (attemptResponse.status === 403) {
+        const body = (await attemptResponse.json().catch(() => ({}))) as { error?: string };
+        if (body.error === 'email_unverified') {
+          useAiStore.getState().setVerificationRequired(true);
+          throw new Error(
+            'Verify your email address to use AI features. Check your inbox for the verification link.',
+          );
+        }
+        throw new Error(body.error ?? `Request forbidden (${attemptResponse.status})`);
+      }
+
+      if (attemptResponse.status === 401) {
         // Expired/revoked token: clear local auth state so the Arcane
         // sign-in gate appears and we avoid repeated unauthorized calls.
-        // Never retried — a retry would just repeat the same 401/403.
+        // Never retried — a retry would just repeat the same 401.
         // Set BEFORE logout() so the notice is already in the store by the
         // time the sign-in gate replaces the timeline.
         useAiStore

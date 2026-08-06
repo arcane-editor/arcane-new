@@ -28,6 +28,7 @@ mock.module('../../../stores/auth', () => ({
 let aiState: { mode: 'ask' | 'agent' | 'plan' } = { mode: 'ask' };
 let sessionUsageCalls: Array<{ inputTokens: number; outputTokens: number }> = [];
 let authNoticeCalls: Array<string | null> = [];
+let verificationRequiredCalls: boolean[] = [];
 mock.module('../../../stores/ai', () => ({
   useAiStore: {
     getState: () => ({
@@ -37,6 +38,9 @@ mock.module('../../../stores/ai', () => ({
       },
       setAuthNotice: (notice: string | null) => {
         authNoticeCalls.push(notice);
+      },
+      setVerificationRequired: (required: boolean) => {
+        verificationRequiredCalls.push(required);
       },
     }),
   },
@@ -111,6 +115,7 @@ beforeEach(() => {
   aiState = { mode: 'ask' };
   sessionUsageCalls = [];
   authNoticeCalls = [];
+  verificationRequiredCalls = [];
   resetTurnTelemetry();
   // Several existing tests deliberately throw a genuine (un-aborted) error
   // from fetchImpl to exercise the retry path — the connect-phase catch
@@ -205,18 +210,53 @@ describe('createArcaneStreamFn', () => {
     ]);
   });
 
-  it('does not retry a 403 — logs out and signals an authentication error', async () => {
+  // 403 email_unverified is a VALID session whose mailbox isn't confirmed.
+  // Treating it like 401 trapped every email/password signup in a loop:
+  // sign in -> first AI message -> 403 -> "session expired", logged out ->
+  // sign in -> same 403, forever. Only 401 may end a session.
+  it('does not log out on 403 email_unverified — flags verification instead', async () => {
     let calls = 0;
     const fetchImpl = (async () => {
       calls++;
-      return new Response('forbidden', { status: 403 });
+      return new Response(JSON.stringify({ error: 'email_unverified' }), { status: 403 });
     }) as unknown as typeof fetch;
 
     const streamFn = createArcaneStreamFn({ fetchImpl, retryBaseDelayMs: 1 });
-    await drain(streamFn(ctx, opts()));
+    const events = await drain(streamFn(ctx, opts()));
 
     expect(calls).toBe(1);
-    expect(logoutCalls).toBe(1);
+    expect(logoutCalls).toBe(0);
+    expect(verificationRequiredCalls).toEqual([true]);
+    expect(authNoticeCalls).toEqual([]);
+    const errorEvent = events.find((e) => e.type === 'error') as Extract<AssistantMessageEvent, { type: 'error' }>;
+    expect(errorEvent.error.message).toMatch(/[Vv]erify your email/);
+  });
+
+  it('does not log out on a non-verification 403 either', async () => {
+    let calls = 0;
+    const fetchImpl = (async () => {
+      calls++;
+      return new Response(JSON.stringify({ error: 'forbidden_resource' }), { status: 403 });
+    }) as unknown as typeof fetch;
+
+    const streamFn = createArcaneStreamFn({ fetchImpl, retryBaseDelayMs: 1 });
+    const events = await drain(streamFn(ctx, opts()));
+
+    expect(calls).toBe(1);
+    expect(logoutCalls).toBe(0);
+    expect(verificationRequiredCalls).toEqual([]);
+    expect(events.some((e) => e.type === 'error')).toBe(true);
+  });
+
+  it('handles a 403 with a non-JSON body without logging out', async () => {
+    const fetchImpl = (async () =>
+      new Response('forbidden', { status: 403 })) as unknown as typeof fetch;
+
+    const streamFn = createArcaneStreamFn({ fetchImpl, retryBaseDelayMs: 1 });
+    const events = await drain(streamFn(ctx, opts()));
+
+    expect(logoutCalls).toBe(0);
+    expect(events.some((e) => e.type === 'error')).toBe(true);
   });
 
   it('does not retry when the caller signal is already aborted before the first attempt', async () => {
