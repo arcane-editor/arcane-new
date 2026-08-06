@@ -111,7 +111,13 @@ single exception is `refund.succeeded` for the specific top-up pack refunded.
 
 ## 3. Data model
 
-One migration: `arcane-server/migrations/0016_auth_subscription_lifecycle.sql`.
+Two migrations, split along the phase boundary so each phase ships working,
+independently testable software:
+
+- `0016_editor_attempts.sql` — Phase 1: the `editor_attempts` table (§3.3) and
+  the `device_codes` drop (§3.4).
+- `0017_subscription_lifecycle.sql` — Phases 2–3: the `users` and
+  `subscriptions` columns (§3.1, §3.2).
 
 Per the precedent in `0013_billing.sql`, `ALTER TABLE ADD COLUMN` is **not**
 idempotent — a partial failure is reconciled by hand, never blind re-run.
