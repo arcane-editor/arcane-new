@@ -42,3 +42,63 @@ describe('POST /v1/auth/editor/attempt', () => {
         expect(res.status).toBe(200);
     });
 });
+
+describe('attempt → grant → exchange', () => {
+    it('completes a full attempt-based login and returns plan + credits', async () => {
+        const { attemptId, verifier } = await newAttempt();
+        const code = await grantFor(attemptId);
+
+        const res = await jsonPost('/v1/auth/editor/exchange', { code, verifier });
+        expect(res.status).toBe(200);
+        const body = await res.json<{
+            token: string; user: { plan: string; credits: number; emailVerified: boolean };
+        }>();
+        expect(body.token).toBeTruthy();
+        expect(body.user.plan).toBe('free');
+        expect(typeof body.user.credits).toBe('number');
+    });
+
+    it('rejects a grant against an unknown attempt', async () => {
+        const user = await seedPasswordUser(`unk-${crypto.randomUUID()}@test.dev`, 'password123');
+        const res = await jsonPost(
+            '/v1/auth/editor/grant', { attempt_id: crypto.randomUUID() }, await tokenFor(user),
+        );
+        expect(res.status).toBe(400);
+        expect(await res.json()).toEqual({ error: 'invalid_attempt' });
+    });
+
+    it('rejects a second grant against an already-authorized attempt', async () => {
+        const { attemptId } = await newAttempt();
+        await grantFor(attemptId);
+        const user = await seedPasswordUser(`dbl-${crypto.randomUUID()}@test.dev`, 'password123');
+        const res = await jsonPost('/v1/auth/editor/grant', { attempt_id: attemptId }, await tokenFor(user));
+        expect(res.status).toBe(400);
+        expect(await res.json()).toEqual({ error: 'invalid_attempt' });
+    });
+
+    it('still accepts the legacy bare-challenge grant (older app builds)', async () => {
+        const verifier = generateToken();
+        const challenge = await s256Challenge(verifier);
+        const user = await seedPasswordUser(`leg-${crypto.randomUUID()}@test.dev`, 'password123');
+        const grant = await jsonPost('/v1/auth/editor/grant', { challenge }, await tokenFor(user));
+        expect(grant.status).toBe(200);
+        const { code } = await grant.json<{ code: string }>();
+
+        const res = await jsonPost('/v1/auth/editor/exchange', { code, verifier });
+        expect(res.status).toBe(200);
+    });
+
+    it('burns the code on a wrong verifier, so it cannot be retried', async () => {
+        const { attemptId, verifier } = await newAttempt();
+        const code = await grantFor(attemptId);
+
+        const wrong = await jsonPost('/v1/auth/editor/exchange', { code, verifier: generateToken() });
+        expect(wrong.status).toBe(400);
+        expect(await wrong.json()).toEqual({ error: 'invalid_code' });
+
+        // Correct verifier now too late — the attempt was consumed above.
+        const retry = await jsonPost('/v1/auth/editor/exchange', { code, verifier });
+        expect(retry.status).toBe(400);
+        expect(await retry.json()).toEqual({ error: 'invalid_code' });
+    });
+});

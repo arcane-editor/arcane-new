@@ -14,6 +14,7 @@ export interface EditorAttemptRow {
     status: string;
     user_id: number | null;
     code_hash: string | null;
+    code_expires_at: string | null;
     consumed_at: string | null;
     expires_at: string;
     created_at: string;
@@ -25,8 +26,14 @@ export interface EditorAttemptPeek extends EditorAttemptRow {
 }
 
 /** 10 minutes — matches the editor's LOGIN_TIMEOUT_MS so a client-side
- *  timeout and a server-side expiry can never disagree. */
+ *  timeout and a server-side expiry can never disagree. Bounds the poll
+ *  channel, i.e. how long the app may keep asking. */
 export const ATTEMPT_TTL_SECONDS = 600;
+
+/** 60 seconds — the grant code's own life, unchanged from the pre-0016
+ *  auth_tokens flow. Much shorter than the attempt because the code travels
+ *  in a browser-visible callback URL. */
+export const CODE_TTL_SECONDS = 60;
 
 /** expires_at is computed SQL-side (datetime('now', '+N seconds')) so its
  *  format always matches the datetime('now') comparisons below. */
@@ -62,23 +69,27 @@ export async function findAttempt(db: D1Database, attemptId: string): Promise<Ed
  *  it is unknown, expired, already authorized, or already consumed. */
 export async function authorizeAttempt(
     db: D1Database, attemptId: string, userId: number, codeHash: string,
+    codeTtlSeconds: number = CODE_TTL_SECONDS,
 ): Promise<boolean> {
     const res = await db.prepare(
-        `UPDATE editor_attempts SET status = 'authorized', user_id = ?, code_hash = ?
+        `UPDATE editor_attempts
+         SET status = 'authorized', user_id = ?, code_hash = ?,
+             code_expires_at = datetime('now', ?)
          WHERE attempt_id = ? AND status = 'pending' AND consumed_at IS NULL
            AND expires_at > datetime('now')`
-    ).bind(userId, codeHash, attemptId).run();
+    ).bind(userId, codeHash, `+${codeTtlSeconds} seconds`, attemptId).run();
     return res.meta.changes > 0;
 }
 
-/** Atomic single-use consume by grant code (deep-link / loopback / paste). */
+/** Atomic single-use consume by grant code (deep-link / loopback / paste).
+ *  Enforces the CODE's 60s expiry, which is stricter than the attempt's. */
 export async function consumeAttemptByCode(
     db: D1Database, codeHash: string,
 ): Promise<EditorAttemptRow | null> {
     return db.prepare(
         `UPDATE editor_attempts SET consumed_at = datetime('now')
          WHERE code_hash = ? AND status = 'authorized' AND consumed_at IS NULL
-           AND expires_at > datetime('now')
+           AND code_expires_at > datetime('now')
          RETURNING *`
     ).bind(codeHash).first<EditorAttemptRow>();
 }

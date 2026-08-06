@@ -65,10 +65,13 @@ describe('POST /v1/auth/editor/exchange', () => {
         const verifier = generateToken();
         const challenge = await s256Challenge(verifier);
         const raw = generateToken();
+        // The CODE's own 60s life has lapsed even though the attempt itself is
+        // still live — the exchange path must enforce the stricter of the two.
         await env.arcane_db.prepare(
-            `INSERT INTO auth_tokens (user_id, purpose, token_hash, meta, expires_at)
-             VALUES (?, 'editor_login', ?, ?, datetime('now', '-10 seconds'))`
-        ).bind(user.id, await sha256Hex(raw), JSON.stringify({ challenge })).run();
+            `INSERT INTO editor_attempts
+             (attempt_id, challenge, status, user_id, code_hash, code_expires_at, expires_at)
+             VALUES (?, ?, 'authorized', ?, ?, datetime('now', '-10 seconds'), datetime('now', '+9 minutes'))`
+        ).bind(crypto.randomUUID(), challenge, user.id, await sha256Hex(raw)).run();
         const res = await jsonPost('/v1/auth/editor/exchange', { code: raw, verifier });
         expect(res.status).toBe(400);
         expect(await res.json()).toEqual({ error: 'invalid_code' });

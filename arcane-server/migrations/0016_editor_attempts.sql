@@ -25,7 +25,15 @@ CREATE TABLE IF NOT EXISTS editor_attempts (
     -- SHA-256 hex of the one-time grant code. The raw code is handed out once
     -- and never stored, matching the auth_tokens convention.
     code_hash   TEXT,
+    -- The grant code keeps its own, much shorter life (60s) than the attempt
+    -- that carries it. The attempt must survive ~10 minutes so the app can go
+    -- on polling, but the code travels in a browser-visible callback URL and
+    -- should stop being redeemable almost immediately. Both are PKCE-bound and
+    -- useless without the verifier; this is defence in depth, and it preserves
+    -- the 60s TTL the pre-0016 auth_tokens flow already had.
+    code_expires_at TEXT,
     consumed_at TEXT,
+    -- Attempt lifetime: bounds the poll channel.
     expires_at  TEXT NOT NULL,
     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
