@@ -8,6 +8,7 @@ import {
   submitManualCode as serviceSubmitManualCode,
   resumeFromColdStart as serviceResumeFromColdStart,
   hadLaunchUrl as serviceHadLaunchUrl,
+  type Session,
 } from '../features/auth';
 import { ARCANE_WEB_URL } from '../config/api';
 
@@ -57,6 +58,27 @@ function isJwtExpired(token: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** Land an already-minted session (the POLL channel's win) in the store. No
+ *  exchange to do — the server returned the token directly — so this only has
+ *  to persist it and mirror what exchangeAndApply sets. */
+async function applySession(
+  set: (partial: Partial<AuthState>) => void,
+  session: Session,
+): Promise<void> {
+  await authClient.saveToken(session.token, session.user.email);
+  set({
+    loggedIn: true,
+    email: session.user.email,
+    plan: session.user.plan,
+    credits: session.user.credits,
+    token: session.token,
+    loginStatus: 'idle',
+    error: null,
+  });
+  void emit('auth-changed');
+  void useAuthStore.getState().refreshUsage();
 }
 
 /** Exchange a grant code and land the resulting session in the store. Shared
@@ -109,6 +131,7 @@ export const useAuthStore = create<AuthState>((set) => ({
         // Runs AFTER the service consumed the pending attempt (replay guard);
         // this handler owns the exchange + resulting UI state.
         onCode: (code, verifier) => exchangeAndApply(set, code, verifier),
+        onSession: (session) => applySession(set, session),
         onError: (message) => set({ loginStatus: 'error', error: message }),
       });
     } catch (err) {
@@ -143,6 +166,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   resumeColdStartLogin: async () => {
     const handlers = {
       onCode: (code: string, verifier: string) => exchangeAndApply(set, code, verifier),
+      onSession: (session: Session) => applySession(set, session),
       onError: (message: string) => set({ loginStatus: 'error', error: message }),
     };
     try {

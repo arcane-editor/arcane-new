@@ -1,40 +1,21 @@
 // Auth API client. In-app credential login/signup was removed in Phase 3
-// (browser-based login, spec Part C). Browser sign-in now works on every
-// platform (deep link where the scheme is registered, loopback otherwise —
-// including macOS `tauri dev`), so the device-code flow below is just a
-// manual fallback, not something tied to a platform gap.
+// (browser-based login, spec Part C). Browser sign-in works on every platform:
+// a deep link where the scheme is registered, loopback otherwise (including
+// macOS `tauri dev`), and a PKCE-bound poll channel where neither can be
+// delivered. The device-code flow was deleted in 0017 — it was a second login
+// path with no PKCE binding at all.
 // The old X-Refreshed-Token handling was dead code (the server never sends
 // that header) and was removed with it (spec C6 optional cleanup).
 import { invoke } from '@tauri-apps/api/core';
 import { ARCANE_API_URL } from '../../../config/api';
-
-interface DeviceCodeResponse {
-  device_code: string;
-  user_code: string;
-  verification_uri: string;
-  expires_in: number;
-  interval: number;
-}
-
-interface DeviceTokenResult {
-  status: 'authorized' | 'pending' | 'expired';
-  token?: string;
-  user?: { email: string; plan: string };
-}
+import type { SessionUser } from './session-types';
 
 /** Mirrors the server's makeUserResponse() exactly. `plan` and `credits` were
  *  previously missing from this type — the runtime already carried them, but
  *  nothing could read them, so the store hardcoded `plan: null` and paid for a
  *  redundant /v1/usage round-trip (showing "—" in the account view until it
  *  landed). `id` is a number, as the server sends it. */
-export interface ExchangeUser {
-  id: number;
-  email: string;
-  role: string;
-  emailVerified: boolean;
-  plan: string;
-  credits: number;
-}
+export type ExchangeUser = SessionUser;
 
 export interface ExchangeResult {
   success: boolean;
@@ -104,39 +85,6 @@ export class AuthClient {
     }
   }
 
-  async requestDeviceCode(): Promise<DeviceCodeResponse> {
-    const res = await fetch(`${this.serverUrl}/v1/auth/device/code`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-    });
-
-    if (!res.ok) {
-      throw new Error(`Failed to request device code (${res.status})`);
-    }
-
-    return res.json() as Promise<DeviceCodeResponse>;
-  }
-
-  async pollDeviceToken(deviceCode: string): Promise<DeviceTokenResult> {
-    const res = await fetch(`${this.serverUrl}/v1/auth/device/token`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ device_code: deviceCode }),
-    });
-
-    if (!res.ok) {
-      throw new Error(`Device token poll failed (${res.status})`);
-    }
-
-    const data = (await res.json()) as DeviceTokenResult;
-
-    if (data.status === 'authorized' && data.token && data.user) {
-      await this.saveToken(data.token, data.user.email);
-    }
-
-    return data;
-  }
-
   /**
    * `auth_read_token` (Rust) distinguishes "no token file" — resolves
    * `Ok(None)`, i.e. this promise resolves `null` — from a genuine
@@ -184,7 +132,9 @@ export class AuthClient {
     await invoke('auth_delete_token');
   }
 
-  private async saveToken(token: string, email: string): Promise<void> {
+  /** Persist a session token. Public because the poll channel completes
+   *  outside exchangeEditorCode and still has to land the token on disk. */
+  async saveToken(token: string, email: string): Promise<void> {
     await invoke('auth_write_token', { token, email });
   }
 }

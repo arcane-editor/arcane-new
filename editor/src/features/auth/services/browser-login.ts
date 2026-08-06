@@ -28,6 +28,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { getCurrent } from '@tauri-apps/plugin-deep-link';
 import type { UnlistenFn } from '@tauri-apps/api/event';
 import { ARCANE_API_URL, ARCANE_WEB_URL } from '../../../config/api';
+import type { Session } from './session-types';
 import {
   savePendingAttempt,
   loadPendingAttempt,
@@ -82,6 +83,12 @@ export interface BrowserLoginHandlers {
    * The handler owns the exchange (`authClient.exchangeEditorCode`).
    */
   onCode: (code: string, verifier: string) => void | Promise<void>;
+  /**
+   * Called at most once per attempt when the POLL channel won instead. There
+   * is no code to exchange in that case — the server already returned the
+   * session — so the handler only has to persist it and update UI state.
+   */
+  onSession: (session: Session) => void | Promise<void>;
   /** Attempt-level failure (currently: the 10-minute timeout). */
   onError: (message: string) => void;
 }
@@ -106,6 +113,31 @@ const defaultCreateAttempt: CreateAttemptFn = async (challenge) => {
   return data.attempt_id;
 };
 
+export type PollResult =
+  | { status: 'pending' }
+  | { status: 'ok'; session: Session }
+  | { status: 'invalid' };
+
+/** Injected for the same reason as CreateAttemptFn — keeps this module free of
+ *  auth-client. `invalid` covers expired, consumed-by-another-channel, and
+ *  wrong-verifier alike; the server returns one opaque error for all of them. */
+export type PollAttemptFn = (attemptId: string, verifier: string) => Promise<PollResult>;
+
+const defaultPollAttempt: PollAttemptFn = async (attemptId, verifier) => {
+  const res = await fetch(`${ARCANE_API_URL}/v1/auth/editor/poll`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ attempt_id: attemptId, verifier }),
+  });
+  if (res.status === 428) return { status: 'pending' };
+  if (!res.ok) return { status: 'invalid' };
+  return { status: 'ok', session: (await res.json()) as Session };
+};
+
+/** How often the pull channel asks. Fast enough to feel instant when it is the
+ *  only working channel, slow enough to be negligible when it isn't. */
+const POLL_INTERVAL_MS = 2000;
+
 interface PendingAttempt {
   /** Monotonic id of this attempt (see `attemptSeq`). Lets an attempt that's
    * still awaiting something tell — when it resumes — whether it's still the
@@ -120,6 +152,7 @@ interface PendingAttempt {
   handlers: BrowserLoginHandlers;
   unlisten: UnlistenFn | null;
   timer: ReturnType<typeof setTimeout>;
+  pollTimer: ReturnType<typeof setInterval> | null;
 }
 
 const LOGIN_TIMEOUT_MS = 10 * 60 * 1000;
@@ -132,6 +165,7 @@ function teardown(): void {
   if (!p) return;
   pending = null;
   clearTimeout(p.timer);
+  if (p.pollTimer !== null) clearInterval(p.pollTimer);
   // The persisted copy exists only to let a COLD START finish this attempt.
   // Once the attempt is over — consumed, cancelled, superseded or timed out —
   // it must not survive to be matched by some later, unrelated deep link.
@@ -176,6 +210,8 @@ export async function beginBrowserLogin(
   timeoutMs: number = LOGIN_TIMEOUT_MS,
   transport: LoginTransport = selectTransport(),
   createAttempt: CreateAttemptFn = defaultCreateAttempt,
+  pollAttempt: PollAttemptFn = defaultPollAttempt,
+  pollIntervalMs: number = POLL_INTERVAL_MS,
 ): Promise<void> {
   teardown();
 
@@ -189,7 +225,10 @@ export async function beginBrowserLogin(
     handlers.onError('Sign-in timed out. Click "Continue in browser" to try again.');
   }, timeoutMs);
 
-  pending = { epoch, attemptId: '', state, verifier, url: '', handlers, unlisten: null, timer };
+  pending = {
+    epoch, attemptId: '', state, verifier, url: '',
+    handlers, unlisten: null, timer, pollTimer: null,
+  };
 
   const challenge = await challengeS256(verifier);
   if (pending?.epoch !== epoch) {
@@ -250,6 +289,27 @@ export async function beginBrowserLogin(
     return;
   }
   pending.unlisten = armed.unlisten;
+
+  // Pull channel, running alongside the push one. It covers environments where
+  // neither the custom scheme nor the loopback socket can deliver a callback
+  // (corporate/VPN filtering). Whichever channel arrives first wins: the
+  // server's consume is atomic, so the loser just sees `invalid` and stops.
+  pending.pollTimer = setInterval(() => {
+    void (async () => {
+      if (pending?.epoch !== epoch) return;
+      const result = await pollAttempt(attemptId, verifier).catch(() => null);
+      // Re-check after the await: the attempt may have been consumed, cancelled
+      // or superseded while the request was in flight.
+      if (!result || pending?.epoch !== epoch) return;
+      if (result.status === 'ok') {
+        const p = pending;
+        teardown(); // consume BEFORE delivering, exactly like the code path
+        void p.handlers.onSession(result.session);
+      }
+      // 'pending' → keep waiting. 'invalid' → the push channel almost certainly
+      // won; let that path (or the timeout) own teardown rather than racing it.
+    })();
+  }, pollIntervalMs);
 
   // Spread transport params FIRST so the reserved auth keys (flow/state/
   // challenge) always win — a transport can add its own params (e.g. the

@@ -13,4 +13,6 @@ export {
   resumeFromColdStart,
   hadLaunchUrl,
   type BrowserLoginHandlers,
+  type PollResult,
 } from './services/browser-login';
+export type { Session, SessionUser } from './services/session-types';

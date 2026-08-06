@@ -83,16 +83,20 @@ const bl = await import('./browser-login');
 
 function makeHandlers() {
   const calls: Array<{ code: string; verifier: string }> = [];
+  const sessions: Array<import('./session-types').Session> = [];
   const errors: string[] = [];
   const handlers: import('./browser-login').BrowserLoginHandlers = {
     onCode: (code, verifier) => {
       calls.push({ code, verifier });
     },
+    onSession: (session) => {
+      sessions.push(session);
+    },
     onError: (message) => {
       errors.push(message);
     },
   };
-  return { calls, errors, handlers };
+  return { calls, sessions, errors, handlers };
 }
 
 /** state param of the most recently opened ${WEB}/auth URL. */
@@ -533,5 +537,76 @@ describe('hadLaunchUrl', () => {
     expect(await bl.hadLaunchUrl()).toBe(false);
     launchUrls = [`${scheme}://auth/callback?code=C&state=S`];
     expect(await bl.hadLaunchUrl()).toBe(true);
+  });
+});
+
+describe('poll channel', () => {
+  const session = {
+    token: 'polled-jwt',
+    user: {
+      id: 9, email: 'poll@example.com', role: 'user',
+      emailVerified: true, plan: 'pro', credits: 1400,
+    },
+  };
+
+  const settle = async (ms = 30) => { await new Promise((r) => setTimeout(r, ms)); };
+
+  it('completes the sign-in when the poll wins, and tears the attempt down', async () => {
+    const { sessions, calls, handlers } = makeHandlers();
+    let polls = 0;
+    await bl.beginBrowserLogin(
+      handlers, 60_000, undefined, undefined,
+      async () => { polls++; return polls === 1 ? { status: 'pending' } : { status: 'ok', session }; },
+      1,
+    );
+
+    await settle();
+    expect(sessions).toEqual([session]);
+    expect(calls).toEqual([]); // no code path involved
+    // Consumed: the deep-link channel now finds nothing to deliver into.
+    expect(bl.submitManualCode('ANY')).toBe(false);
+  });
+
+  it('keeps waiting while the server says pending', async () => {
+    const { sessions, handlers } = makeHandlers();
+    await bl.beginBrowserLogin(
+      handlers, 60_000, undefined, undefined,
+      async () => ({ status: 'pending' }), 1,
+    );
+
+    await settle();
+    expect(sessions).toEqual([]);
+    expect(bl.submitManualCode('STILL-PENDING')).toBe(true); // attempt still live
+  });
+
+  it('stops polling once the deep link wins the race', async () => {
+    const { handlers } = makeHandlers();
+    let polls = 0;
+    await bl.beginBrowserLogin(
+      handlers, 60_000, undefined, undefined,
+      async () => { polls++; return { status: 'invalid' }; }, 1,
+    );
+
+    // Deep link arrives first and consumes the attempt.
+    deepLinkHandler!([`${scheme}://auth/callback?code=C9&state=${sentState()}`]);
+    const seen = polls;
+    await settle();
+    // The interval was cleared by teardown, so the count cannot keep climbing.
+    expect(polls).toBe(seen);
+  });
+
+  it('does not fire onSession after the attempt was cancelled mid-request', async () => {
+    const { sessions, handlers } = makeHandlers();
+    await bl.beginBrowserLogin(
+      handlers, 60_000, undefined, undefined,
+      async () => {
+        bl.cancelBrowserLogin(); // superseded while the request is in flight
+        return { status: 'ok', session };
+      },
+      1,
+    );
+
+    await settle();
+    expect(sessions).toEqual([]);
   });
 });
