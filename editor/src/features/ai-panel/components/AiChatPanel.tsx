@@ -14,6 +14,7 @@ import ReviewBar from './ReviewBar';
 import PlanList from './PlanList';
 import ChatInput from './ChatInput';
 import AiSignInGate from './AiSignInGate';
+import AiVerifyEmailGate from './AiVerifyEmailGate';
 import AgentPicker from './AgentPicker';
 import SessionHistory from './SessionHistory';
 
@@ -24,6 +25,7 @@ function AiChatPanel() {
   const setError = useAiStore((s) => s.setError);
   const authNotice = useAiStore((s) => s.authNotice);
   const setAuthNotice = useAiStore((s) => s.setAuthNotice);
+  const verificationRequired = useAiStore((s) => s.verificationRequired);
   const [historyOpen, setHistoryOpen] = useState(false);
 
   // T5: the notice explaining WHY the user was signed out (arcane-stream's
@@ -48,6 +50,13 @@ function AiChatPanel() {
         <AiSignInGate />
       </div>
     );
+  }
+
+  // Signed in, but the mailbox isn't confirmed and the server is refusing AI
+  // calls with 403 email_unverified. Checked AFTER the !loggedIn branch so a
+  // stale flag can never mask the sign-in gate.
+  if (verificationRequired) {
+    return <AiVerifyEmailGate />;
   }
 
   function handleNewChat() {

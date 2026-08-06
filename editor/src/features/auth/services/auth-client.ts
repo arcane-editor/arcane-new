@@ -150,6 +150,25 @@ export class AuthClient {
     return res.json() as Promise<UsageSummary>;
   }
 
+  /**
+   * Re-send the verification email for the signed-in user. The server
+   * throttles this to 3 per hour (countRecentAuthTokens) and answers 429
+   * `resend_throttled`; that is mapped here so the panel can render it
+   * verbatim. A user who is already verified gets a plain `ok`.
+   */
+  async resendVerification(token: string): Promise<void> {
+    const res = await fetch(`${this.serverUrl}/v1/auth/resend-verification`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    });
+    if (res.ok) return;
+    const data = (await res.json().catch(() => ({}))) as { error?: string };
+    if (data.error === 'resend_throttled') {
+      throw new Error("You've requested several emails already. Try again in an hour.");
+    }
+    throw new Error(data.error ?? `Could not resend the email (${res.status})`);
+  }
+
   async logout(): Promise<void> {
     await invoke('auth_delete_token');
   }
