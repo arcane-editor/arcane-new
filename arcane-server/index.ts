@@ -48,12 +48,10 @@ for (const path of [
 ]) {
     app.use(path, strict);
 }
-const poll = rateLimit('RL_AUTH_POLL');
-app.use('/v1/auth/device/code', poll);
-app.use('/v1/auth/device/token', poll);
 // Editor sign-in attempt registration + the poll channel. Both are public and
 // called repeatedly during a normal sign-in, so they belong on the poll
 // limiter rather than the strict one.
+const poll = rateLimit('RL_AUTH_POLL');
 app.use('/v1/auth/editor/attempt', poll);
 app.use('/v1/auth/editor/poll', poll);
 

@@ -152,31 +152,11 @@ export async function apiGetMe(token: string): Promise<MeResponse> {
     return res.json();
 }
 
-export async function apiAuthorizeDevice(token: string, userCode: string): Promise<void> {
-    const res = await fetch(`${API_URL}/v1/auth/device/authorize`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify({ user_code: userCode }),
-    });
-    if (!res.ok) {
-        // Carry the HTTP status so callers can detect an expired/invalid
-        // session (401/403) — the server's real 401 bodies ('Invalid or
-        // expired token', 'Missing or invalid Authorization header') don't
-        // match any string check, so the status is the only reliable signal.
-        const e = new Error(await readErrorMessage(res, 'Authorization failed')) as Error & { status?: number };
-        e.status = res.status;
-        throw e;
-    }
-}
-
 // ─── Phase 2b auth API calls ────────────────────────────────
 
-export function googleStartUrl(returnTo: '/auth' | '/auth/device' | '/account'): string {
+export function googleStartUrl(returnTo: '/auth' | '/account'): string {
     // Full-page navigation target (302 to Google), NOT a fetch endpoint.
-    // returnTo must be on the server's allowlist: /auth, /auth/device, /account.
+    // returnTo must be on the server's allowlist: /auth, /account.
     return `${API_URL}/v1/auth/google/start?return_to=${encodeURIComponent(returnTo)}`;
 }
 

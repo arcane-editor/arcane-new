@@ -23,11 +23,12 @@ describe('tokens lib', () => {
     });
 
     it('TTL constants match the spec exactly', () => {
+        // `editor_login` was retired in 0016 — the editor handoff code now
+        // lives on the editor_attempts row (CODE_TTL_SECONDS, still 60s).
         expect(TOKEN_TTL_SECONDS).toEqual({
             verify_email: 86400,
             password_reset: 1800,
             web_login: 60,
-            editor_login: 60,
         });
     });
 });

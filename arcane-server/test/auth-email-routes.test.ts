@@ -22,8 +22,8 @@ describe('POST /v1/auth/verify', () => {
         expect(body.user.emailVerified).toBe(true);
         expect(body.token).toBeTruthy();
         // fresh JWT works against a Bearer route
-        const me = await jsonPost('/v1/auth/device/authorize', { user_code: 'XXXX-XXXX' }, body.token);
-        expect(me.status).toBe(400); // authed fine; the code is just invalid
+        const me = await jsonPost('/v1/auth/resend-verification', {}, body.token);
+        expect(me.status).toBe(200); // authed fine (already verified → plain ok)
     });
 
     it('rejects replay and garbage tokens with invalid_token', async () => {

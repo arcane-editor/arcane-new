@@ -142,8 +142,8 @@ describe('index.ts rate-limit wiring', () => {
         expect(await res.json()).toEqual({ error: 'rate_limited' });
     });
 
-    it('POST /v1/auth/device/code is behind RL_AUTH_POLL', async () => {
-        const res = await app.request('/v1/auth/device/code',
+    it('POST /v1/auth/editor/attempt is behind RL_AUTH_POLL', async () => {
+        const res = await app.request('/v1/auth/editor/attempt',
             {
                 method: 'POST',
                 headers: { 'CF-Connecting-IP': '1.2.3.4', 'Content-Type': 'application/json' },

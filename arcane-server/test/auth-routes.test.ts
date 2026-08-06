@@ -71,11 +71,13 @@ describe('GET /v1/auth/me', () => {
     });
 });
 
-describe('POST /v1/auth/device/code', () => {
-    it('builds verification_uri from WEB_BASE_URL', async () => {
-        const res = await jsonPost('/v1/auth/device/code', {});
-        expect(res.status).toBe(200);
-        const body = await res.json<{ verification_uri: string }>();
-        expect(body.verification_uri).toBe('https://dev.arcaneai.org/auth/device');
+describe('device-code flow (removed in 0017)', () => {
+    it('no longer exposes any /v1/auth/device/* route', async () => {
+        for (const path of [
+            '/v1/auth/device/code', '/v1/auth/device/authorize', '/v1/auth/device/token',
+        ]) {
+            const res = await jsonPost(path, {});
+            expect(res.status).toBe(404);
+        }
     });
 });

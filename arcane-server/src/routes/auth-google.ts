@@ -19,7 +19,7 @@ const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const GOOGLE_JWKS = createRemoteJWKSet(new URL('https://www.googleapis.com/oauth2/v3/certs'));
 const OAUTH_COOKIE = 'g_oauth';
 const OAUTH_COOKIE_ISSUER = 'arcane-server-google-oauth';
-const RETURN_TO_ALLOWLIST = ['/auth', '/auth/device', '/account'];
+const RETURN_TO_ALLOWLIST = ['/auth', '/account'];
 
 interface OAuthCookiePayload {
     state: string;

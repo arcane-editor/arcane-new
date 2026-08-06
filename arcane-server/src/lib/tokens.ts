@@ -5,7 +5,9 @@ export const TOKEN_TTL_SECONDS = {
     verify_email: 24 * 60 * 60,   // 24 h
     password_reset: 30 * 60,      // 30 min
     web_login: 60,                // 60 s (Google → website handoff code)
-    editor_login: 60,             // 60 s (website → editor handoff code)
+    // `editor_login` retired in 0016: the website → editor handoff code now
+    // lives on the editor_attempts row (see src/lib/attempts.ts), which binds
+    // it to a PKCE challenge and gives the poll channel something to consume.
 } as const;
 
 export type TokenPurpose = keyof typeof TOKEN_TTL_SECONDS;

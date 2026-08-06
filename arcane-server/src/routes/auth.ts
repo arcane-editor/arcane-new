@@ -2,8 +2,6 @@ import { Hono } from 'hono';
 import {
     findUserByEmail, findUserById, createUser,
     findCurrentUsagePeriod, getCurrentPeriodStart,
-    createDeviceCode, findDeviceCodeByDeviceCode,
-    authorizeDeviceCode, deleteDeviceCode, cleanExpiredDeviceCodes,
     createAuthToken,
 } from '../lib/db.ts';
 import { hashPassword, verifyPassword } from '../lib/crypto.ts';
@@ -20,17 +18,6 @@ export const authRouter = new Hono<AppEnv>();
 // ─── Helpers ────────────────────────────────────────────────
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-function generateUserCode(): string {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-    let code = '';
-    const bytes = crypto.getRandomValues(new Uint8Array(8));
-    for (let i = 0; i < 8; i++) {
-        code += chars[bytes[i]! % chars.length];
-        if (i === 3) { code += '-'; }
-    }
-    return code;
-}
 
 // ─── Signup / Login ─────────────────────────────────────────
 
@@ -139,83 +126,4 @@ authRouter.get('/v1/auth/me', authMiddleware(), async (c) => {
             totalOutputTokens: usage?.total_output_tokens ?? 0,
         },
     });
-});
-
-// ─── Device Auth Flow ───────────────────────────────────────
-
-// Step 1: IDE requests a device code
-authRouter.post('/v1/auth/device/code', async (c) => {
-    const db = c.env.arcane_db;
-
-    // Clean up expired codes opportunistically
-    await cleanExpiredDeviceCodes(db);
-
-    const deviceCode = crypto.randomUUID();
-    const userCode = generateUserCode();
-    const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
-
-    await createDeviceCode(db, { deviceCode, userCode, expiresAt });
-
-    return c.json({
-        device_code: deviceCode,
-        user_code: userCode,
-        verification_uri: `${c.env.WEB_BASE_URL}/auth/device`,
-        expires_in: 900,
-        interval: 5,
-    });
-});
-
-// Step 2: Logged-in user on web authorizes the device code
-authRouter.post('/v1/auth/device/authorize', authMiddleware(), async (c) => {
-    const { user_code } = await c.req.json<{ user_code?: string }>();
-    if (!user_code) {
-        return c.json({ error: 'user_code is required' }, 400);
-    }
-
-    const authUser = c.get('user') as AuthPayload;
-    const db = c.env.arcane_db;
-
-    const authorized = await authorizeDeviceCode(db, user_code, parseInt(authUser.sub));
-    if (!authorized) {
-        return c.json({ error: 'Invalid or expired device code' }, 400);
-    }
-
-    return c.json({ success: true });
-});
-
-// Step 3: IDE polls for the token
-authRouter.post('/v1/auth/device/token', async (c) => {
-    const { device_code } = await c.req.json<{ device_code?: string }>();
-    if (!device_code) {
-        return c.json({ error: 'device_code is required' }, 400);
-    }
-
-    const db = c.env.arcane_db;
-    const record = await findDeviceCodeByDeviceCode(db, device_code);
-
-    if (!record) {
-        return c.json({ error: 'invalid_device_code' }, 400);
-    }
-
-    if (new Date(record.expires_at) < new Date()) {
-        await deleteDeviceCode(db, record.id);
-        return c.json({ error: 'expired_token' }, 400);
-    }
-
-    if (record.status === 'pending') {
-        return c.json({ error: 'authorization_pending' }, 428);
-    }
-
-    if (record.status === 'authorized' && record.user_id) {
-        const user = await findUserById(db, record.user_id);
-        if (!user) { return c.json({ error: 'user_not_found' }, 404); }
-
-        // Clean up used device code
-        await deleteDeviceCode(db, record.id);
-
-        logAuthEvent('device_login', { userId: user.id });
-        return c.json(await mintAuthResponse(user, c.env.JWT_SECRET));
-    }
-
-    return c.json({ error: 'unknown_status' }, 500);
 });

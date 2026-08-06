@@ -67,15 +67,6 @@ export interface UserWithUsageRow extends UserRow {
     total_requests: number | null;
 }
 
-export interface DeviceCodeRow {
-    id: number;
-    device_code: string;
-    user_code: string;
-    user_id: number | null;
-    status: string;
-    expires_at: string;
-    created_at: string;
-}
 
 // --- Period helpers ---
 
@@ -470,41 +461,6 @@ export async function deleteUnitySignaturesForVersion(db: D1Database, unityVersi
     return result.meta.changes;
 }
 
-// --- Device code queries ---
-
-export async function createDeviceCode(
-    db: D1Database,
-    data: { deviceCode: string; userCode: string; expiresAt: string },
-): Promise<DeviceCodeRow> {
-    const result = await db.prepare(
-        'INSERT INTO device_codes (device_code, user_code, expires_at) VALUES (?, ?, ?) RETURNING *'
-    ).bind(data.deviceCode, data.userCode, data.expiresAt).first<DeviceCodeRow>();
-    return result!;
-}
-
-export async function findDeviceCodeByDeviceCode(db: D1Database, deviceCode: string): Promise<DeviceCodeRow | null> {
-    return db.prepare('SELECT * FROM device_codes WHERE device_code = ?').bind(deviceCode).first<DeviceCodeRow>();
-}
-
-export async function findDeviceCodeByUserCode(db: D1Database, userCode: string): Promise<DeviceCodeRow | null> {
-    return db.prepare('SELECT * FROM device_codes WHERE user_code = ?').bind(userCode).first<DeviceCodeRow>();
-}
-
-export async function authorizeDeviceCode(db: D1Database, userCode: string, userId: number): Promise<boolean> {
-    const result = await db.prepare(
-        "UPDATE device_codes SET status = 'authorized', user_id = ? WHERE user_code = ? AND status = 'pending' AND expires_at > datetime('now')"
-    ).bind(userId, userCode).run();
-    return result.meta.changes > 0;
-}
-
-export async function deleteDeviceCode(db: D1Database, id: number): Promise<void> {
-    await db.prepare('DELETE FROM device_codes WHERE id = ?').bind(id).run();
-}
-
-export async function cleanExpiredDeviceCodes(db: D1Database): Promise<void> {
-    await db.prepare("DELETE FROM device_codes WHERE expires_at < datetime('now')").run();
-}
-
 // --- OAuth / verification user helpers ---
 
 export async function findUserByGoogleSub(db: D1Database, googleSub: string): Promise<UserRow | null> {
@@ -612,7 +568,7 @@ export async function countRecentAuthTokens(
     return row?.n ?? 0;
 }
 
-/** Opportunistic cleanup — mirrors cleanExpiredDeviceCodes. */
+/** Opportunistic cleanup — mirrors cleanExpiredAttempts. */
 export async function cleanExpiredAuthTokens(db: D1Database): Promise<void> {
     await db.prepare("DELETE FROM auth_tokens WHERE expires_at < datetime('now')").run();
 }
