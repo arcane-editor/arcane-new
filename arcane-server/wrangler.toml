@@ -123,12 +123,15 @@ CF_ACCOUNT_ID = ""
 WEB_BASE_URL = "https://dev.arcaneai.org"
 API_BASE_URL = "https://api-dev.arcaneai.org"
 EMAIL_FROM = "no-reply@arcaneai.org"
-# Dodo TEST-mode product ids (empty until owner creates them).
-DODO_PRODUCT_PRO = ""
-DODO_PRODUCT_PROPLUS = ""
-DODO_PRODUCT_ULTRA = ""
-DODO_PRODUCT_TOPUP_1000 = ""
-DODO_PRODUCT_TOPUP_5000 = ""
+# Dodo TEST-mode product ids. Created 2026-08-06 against test.dodopayments.com
+# (business "Arcane"); prices mirror src/config/tiers.ts. These are test-mode
+# only — they do NOT exist on the live host, which is why prod's copies above
+# stay empty until live products are provisioned separately.
+DODO_PRODUCT_PRO = "pdt_0NkmTqRLtYobtctDx4ojT"
+DODO_PRODUCT_PROPLUS = "pdt_0NkmTqTBy5taw2MyrnI5t"
+DODO_PRODUCT_ULTRA = "pdt_0NkmTqUChnKJPJU20lTTi"
+DODO_PRODUCT_TOPUP_1000 = "pdt_0NkmTqYT7iVPq8SPBf7n9"
+DODO_PRODUCT_TOPUP_5000 = "pdt_0NkmTqZeNlpTNdXx4fGlx"
 
 [env.dev.observability]
 enabled = true
