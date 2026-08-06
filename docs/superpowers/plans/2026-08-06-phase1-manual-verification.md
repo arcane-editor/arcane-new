@@ -16,30 +16,35 @@ scheme routing, real cold starts.
 
 ---
 
-## 0. Deploy to dev first
+## 0. Deploy to dev
 
-Deploys are manual — the CI Cloudflare token is broken, so pushing the branch
-does **not** deploy it. Run the interactive login yourself, then:
+Merging `heads/v0.3.0` into `dev` deploys automatically — no manual wrangler
+steps. Three workflows fire on that push, by path:
 
-```bash
-npx --yes wrangler@4 login
+| Path touched | Workflow | Effect |
+|---|---|---|
+| `arcane-server/**` | Deploy Server | `d1 migrations apply arcane-db-dev` **then** `wrangler deploy --env dev` |
+| `landing-page/**` | Deploy Landing | Pages deploy to `arcane-landing-dev` |
+| `editor/**` | Dev Build | builds the side-by-side "Arcane Dev" app |
 
-cd arcane-server
-npx wrangler d1 migrations apply arcane-db-dev --env dev --remote   # 0016 + 0017
-npx wrangler deploy --env dev
+This phase touches all three, so expect all three to run.
 
-cd ../landing-page
-PUBLIC_API_URL=https://api-dev.arcaneai.org npm run build
-npx wrangler@4 pages deploy dist --project-name arcane-landing-dev --branch main
-```
+> **Migrations run before the deploy**, so new code never sees an old schema.
+> That means **`0017` drops `device_codes` automatically** on this merge. It is
+> destructive: any sign-in mid-device-flow at that moment is abandoned. Device
+> codes lived 15 minutes, so merge outside a burst of sign-ins.
+
+Wait for all three workflows to go green before running the checks below — a
+red Deploy Server means the schema and the Worker may disagree.
 
 - [ ] `curl https://api-dev.arcaneai.org/health` → `{"status":"ok"}`
 - [ ] `curl -X POST https://api-dev.arcaneai.org/v1/auth/editor/attempt -H 'content-type: application/json' -d '{}'`
       → **400** `invalid_challenge` (a 404 means the deploy is stale)
 - [ ] `curl -X POST https://api-dev.arcaneai.org/v1/auth/device/code`
       → **404** (the device flow is gone)
-- [ ] Landing page CSS asset hash in `dist/index.html` matches the live page —
-      matching hashes prove the deploy actually landed
+- [ ] Landing page CSS asset hash in a local `dist/index.html` matches the live
+      page — matching hashes prove the deploy actually landed rather than
+      merely reporting success
 
 ---
 
@@ -131,9 +136,7 @@ This is the journey that silently failed before this phase.
 
 ## Notes
 
-- Migration `0017` **drops `device_codes`**. Any sign-in mid-device-flow at
-  deploy time is abandoned; those codes live 15 minutes, so deploy outside a
-  burst of sign-ins.
-- `DODO_WEBHOOK_SECRET` is still unset on the dev Worker. It does not affect
-  anything in Phase 1, but Phase 2 and 3 cannot be verified end to end until
-  it is configured.
+- `DODO_WEBHOOK_SECRET` is a Worker secret, not a `wrangler.toml` var, so it is
+  not carried by the deploy. It does not affect anything in Phase 1, but
+  `/v1/billing/webhook` answers 503 until it is set, and Phase 2/3 cannot be
+  verified end to end without it.
