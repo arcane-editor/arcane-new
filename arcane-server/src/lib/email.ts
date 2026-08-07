@@ -37,14 +37,13 @@ export async function sendVerificationEmail(env: EmailEnv, to: string, token: st
     );
 }
 
-export async function sendMagicLinkEmail(env: EmailEnv, to: string, token: string): Promise<void> {
-    // Lands on /auth, whose ?code= branch already exchanges the one-time code
-    // for a session — the same path Google's callback redirects to.
-    const link = `${env.WEB_BASE_URL}/auth?code=${token}`;
+export async function sendOtpEmail(env: EmailEnv, to: string, code: string): Promise<void> {
+    // No link: the code is typed back into the tab that requested it, which is
+    // what keeps the editor sign-in handoff alive in sessionStorage.
     await sendEmail(
-        env, to, 'Your Arcane sign-in link',
-        `Sign in to Arcane by opening this link:\n${link}\n\nThe link expires in 15 minutes and can be used once. If you didn't request it, ignore this email — nothing has changed.`,
-        `<p>Sign in to Arcane:</p><p><a href="${link}">Sign in</a></p><p>Or paste this link into your browser:<br>${link}</p><p>The link expires in 15 minutes and can be used once. If you didn't request it, ignore this email — nothing has changed.</p>`,
+        env, to, `${code} is your Arcane sign-in code`,
+        `Your Arcane sign-in code is ${code}\n\nEnter it in the tab where you started signing in. The code expires in 10 minutes and can be used once. If you didn't request it, ignore this email — nothing has changed.`,
+        `<p>Your Arcane sign-in code is:</p><p style="font-size:28px;font-weight:700;letter-spacing:4px">${code}</p><p>Enter it in the tab where you started signing in. The code expires in 10 minutes and can be used once.</p><p>If you didn't request it, ignore this email — nothing has changed.</p>`,
     );
 }
 

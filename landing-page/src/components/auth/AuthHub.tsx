@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from "react";
 import {
     getStoredToken, setStoredToken, clearStoredToken,
-    apiLogin, apiSignup, apiGetMe, apiWebExchange, apiEditorGrant, apiMagicLinkRequest,
-    googleStartUrl, authErrorMessage, isKnownAuthErrorCode,
+    apiLogin, apiSignup, apiGetMe, apiWebExchange, apiEditorGrant, apiOtpRequest, apiOtpVerify,
+    authErrorMessage, isKnownAuthErrorCode,
 } from "@/lib/auth";
 import {
     parseEditorLoginParams, saveEditorLoginRequest, loadEditorLoginRequest,
@@ -26,10 +26,13 @@ export default function AuthHub() {
     const [password, setPassword] = useState("");
     const [formError, setFormError] = useState("");
     const [submitting, setSubmitting] = useState(false);
-    const [magicSending, setMagicSending] = useState(false);
-    // Email the link was sent to; non-empty switches the card to the
-    // "check your inbox" state.
-    const [magicSentTo, setMagicSentTo] = useState("");
+    const [otpSending, setOtpSending] = useState(false);
+    // Email a code was sent to; non-empty switches the card to code entry.
+    // Entry stays in THIS tab, which is what keeps a pending editor sign-in
+    // alive in sessionStorage — an emailed link would open a fresh tab and
+    // lose it.
+    const [otpSentTo, setOtpSentTo] = useState("");
+    const [otpCode, setOtpCode] = useState("");
     // Ref, not state: the Turnstile callback fires outside React's render cycle
     // and the token is only read on submit.
     const turnstileToken = useRef("");
@@ -169,14 +172,15 @@ export default function AuthHub() {
         }
     };
 
-    const handleMagicLink = async () => {
-        if (magicSending) return;
+    const handleOtpRequest = async () => {
+        if (otpSending) return;
         if (!email) { setFormError("Enter your email address first."); return; }
-        setMagicSending(true);
+        setOtpSending(true);
         setFormError("");
         try {
-            await apiMagicLinkRequest(email, turnstileToken.current || undefined);
-            setMagicSentTo(email);
+            await apiOtpRequest(email, turnstileToken.current || undefined);
+            setOtpSentTo(email);
+            setOtpCode("");
         } catch (err) {
             setFormError(authErrorMessage((err as Error).message));
         } finally {
@@ -184,7 +188,22 @@ export default function AuthHub() {
             // way, or a follow-up request would fail at the server.
             turnstileReset.current?.();
             turnstileToken.current = "";
-            setMagicSending(false);
+            setOtpSending(false);
+        }
+    };
+
+    const handleOtpVerify = async () => {
+        if (submitting) return;
+        if (otpCode.length !== 6) { setFormError("Enter the 6-digit code from your email."); return; }
+        setSubmitting(true);
+        setFormError("");
+        try {
+            const data = await apiOtpVerify(otpSentTo, otpCode);
+            setStoredToken(data.token);
+            await afterAuthenticated(data.token);
+        } catch (err) {
+            setFormError(authErrorMessage((err as Error).message));
+            setSubmitting(false);
         }
     };
 
@@ -206,25 +225,46 @@ export default function AuthHub() {
         );
     }
 
-    if (magicSentTo) {
+    if (otpSentTo) {
         return (
             <AuthShell>
-                <h1 className="font-display text-2xl font-bold mb-3 text-center">Check your email</h1>
+                <h1 className="font-display text-2xl font-bold mb-1 text-center">Enter your code</h1>
                 {/* The server gives no signal about whether the address has an
                     account, so this copy must not imply one either. */}
-                <p className="text-muted-foreground text-sm text-center">
-                    If an account exists for <span className="text-foreground">{magicSentTo}</span>, a sign-in
-                    link is on its way. It expires in 15 minutes and can be used once.
+                <p className="text-muted-foreground text-sm mb-6 text-center">
+                    If an account exists for <span className="text-foreground">{otpSentTo}</span>, a 6-digit
+                    code is on its way. It expires in 10 minutes.
                 </p>
-                {editorPending && (
-                    <p className="text-muted-foreground text-sm text-center mt-4">
-                        Opening the link signs you in on this site. Then return to Arcane and click Sign in
-                        again to finish connecting the editor.
-                    </p>
-                )}
+
+                {formError && <div className={authErrorBannerClass}>{formError}</div>}
+
+                <div className="flex flex-col gap-3">
+                    <input
+                        className={`${authInputClass} text-center text-lg tracking-[0.4em] font-mono`}
+                        placeholder="000000"
+                        inputMode="numeric"
+                        autoComplete="one-time-code"
+                        maxLength={6}
+                        autoFocus
+                        value={otpCode}
+                        onChange={e => setOtpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                        onKeyDown={e => { if (e.key === "Enter") handleOtpVerify(); }}
+                    />
+                    <button className={authPrimaryBtnClass} onClick={handleOtpVerify} disabled={submitting}>
+                        {submitting ? "Verifying…" : "Sign In"}
+                    </button>
+                </div>
+
                 <button
-                    className="mt-5 block w-full text-center text-primary text-sm hover:underline"
-                    onClick={() => { setMagicSentTo(""); setFormError(""); }}
+                    className="mt-4 block w-full text-center text-primary text-sm hover:underline disabled:opacity-50"
+                    onClick={handleOtpRequest}
+                    disabled={otpSending}
+                >
+                    {otpSending ? "Sending…" : "Send a new code"}
+                </button>
+                <button
+                    className="mt-2 block w-full text-center text-muted-foreground text-xs hover:text-foreground"
+                    onClick={() => { setOtpSentTo(""); setOtpCode(""); setFormError(""); }}
                 >
                     Use a different email
                 </button>
@@ -302,37 +342,27 @@ export default function AuthHub() {
                 </a>
             )}
 
-            {/* Divider */}
-            <div className="flex items-center gap-3 my-5">
-                <div className="h-px flex-1 bg-border/50" />
-                <span className="text-xs text-muted-foreground">or</span>
-                <div className="h-px flex-1 bg-border/50" />
-            </div>
-
-            {/* Sign-in only: the magic-link route is login-only, so offering it
-                on the Create account tab would promise an email that never comes. */}
+            {/* Divider — sign-in only, since the one option below it is too.
+                On Create account it would separate the form from nothing. */}
             {tab === "signin" && (
-                <button
-                    className="h-10 w-full mb-3 rounded-md border border-border bg-secondary/50 text-sm font-semibold text-foreground hover:border-primary transition-colors disabled:opacity-50"
-                    onClick={handleMagicLink}
-                    disabled={magicSending}
-                >
-                    {magicSending ? "Sending…" : "Email me a sign-in link"}
-                </button>
+                <div className="flex items-center gap-3 my-5">
+                    <div className="h-px flex-1 bg-border/50" />
+                    <span className="text-xs text-muted-foreground">or</span>
+                    <div className="h-px flex-1 bg-border/50" />
+                </div>
             )}
 
-            <button
-                className="h-10 w-full rounded-md border border-border bg-secondary/50 text-sm font-semibold text-foreground hover:border-primary transition-colors flex items-center justify-center gap-2"
-                onClick={() => { window.location.href = googleStartUrl("/auth"); }}
-            >
-                <svg className="w-4 h-4" viewBox="0 0 24 24" aria-hidden="true">
-                    <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.27-4.74 3.27-8.1z" />
-                    <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84A11 11 0 0 0 12 23z" />
-                    <path fill="#FBBC05" d="M5.84 14.1A6.6 6.6 0 0 1 5.5 12c0-.73.13-1.44.34-2.1V7.06H2.18a11 11 0 0 0 0 9.88l3.66-2.84z" />
-                    <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1A11 11 0 0 0 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
-                </svg>
-                Continue with Google
-            </button>
+            {/* Sign-in only: the OTP route is login-only, so offering it on the
+                Create account tab would promise an email that never comes. */}
+            {tab === "signin" && (
+                <button
+                    className="h-10 w-full rounded-md border border-border bg-secondary/50 text-sm font-semibold text-foreground hover:border-primary transition-colors disabled:opacity-50"
+                    onClick={handleOtpRequest}
+                    disabled={otpSending}
+                >
+                    {otpSending ? "Sending…" : "Email me a sign-in code"}
+                </button>
+            )}
 
             <a href="/" className="block mt-5 text-center text-muted-foreground text-xs hover:text-foreground">
                 Back to home

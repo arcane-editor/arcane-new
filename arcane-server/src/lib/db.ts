@@ -528,7 +528,11 @@ export interface AuthTokenRow {
     expires_at: string;
     consumed_at: string | null;
     created_at: string;
+    attempts: number;
 }
+
+/** Wrong guesses tolerated before a one-time code destroys itself. */
+export const OTP_MAX_ATTEMPTS = 5;
 
 /** expires_at is computed SQL-side (datetime('now', '+N seconds')) so the
  *  format always matches the datetime('now') comparisons in consume/clean. */
@@ -555,6 +559,26 @@ export async function consumeAuthToken(
          WHERE purpose = ? AND token_hash = ? AND consumed_at IS NULL AND expires_at > datetime('now')
          RETURNING *`
     ).bind(purpose, tokenHash).first<AuthTokenRow>();
+}
+
+/** Charges a wrong guess against the user's live sign-in code, consuming it
+ *  outright once the cap is reached.
+ *
+ *  Looked up by user rather than by hash: a wrong code hashes to nothing that
+ *  exists, so there is no row to find that way. Single statement so concurrent
+ *  guesses cannot interleave a read and a write and lose a count. */
+export async function recordOtpFailure(db: D1Database, userId: number): Promise<void> {
+    await db.prepare(
+        `UPDATE auth_tokens
+            SET attempts = attempts + 1,
+                consumed_at = CASE WHEN attempts + 1 >= ? THEN datetime('now') ELSE NULL END
+          WHERE id = (
+              SELECT id FROM auth_tokens
+               WHERE user_id = ? AND purpose = 'otp_login'
+                 AND consumed_at IS NULL AND expires_at > datetime('now')
+               ORDER BY id DESC LIMIT 1
+          )`
+    ).bind(OTP_MAX_ATTEMPTS, userId).run();
 }
 
 /** Resend/abuse throttle: tokens minted in the last hour (consumed or not). */

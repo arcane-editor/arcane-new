@@ -36,13 +36,16 @@ export interface MeResponse {
 const ERROR_MESSAGES: Record<string, string> = {
     'Invalid credentials': 'Incorrect email or password.',
     invalid_credentials: 'Incorrect email or password.',
-    use_google: 'This account signs in with Google. Use "Continue with Google" instead.',
-    google_account: 'An account with this email already uses Google sign-in. Use "Continue with Google".',
+    // These fire only for accounts carrying a google_sub. None exist while the
+    // OAuth client is unprovisioned, but the copy must not send anyone looking
+    // for a "Continue with Google" button that is no longer on the page.
+    use_google: "This account doesn't have a password. Use \"Email me a sign-in code\" instead.",
+    google_account: 'An account with this email already exists. Sign in instead — use "Email me a sign-in code" if you don\'t have a password.',
     invalid_email: "That doesn't look like a valid email address.",
     weak_password: 'Password must be at least 8 characters.',
     invalid_token: 'This link is invalid or has expired. Request a new one and try again.',
     resend_throttled: "You've requested too many verification emails. Try again in an hour.",
-    invalid_code: 'This code is invalid or has expired. Start the sign-in again.',
+    invalid_code: 'That code is incorrect or has expired. Request a new one.',
     invalid_challenge: "The editor's sign-in request was invalid. Return to Arcane and click Sign in again.",
     no_password_set: 'This account has no password yet. Use "Set a password" on your account page.',
     turnstile_failed: 'Human verification failed. Refresh the page and try again.',
@@ -137,20 +140,32 @@ export async function apiSignup(email: string, password: string, turnstileToken?
     return res.json();
 }
 
-/** Requests an emailed sign-in link. Always resolves for any well-formed
+/** Requests an emailed one-time code. Always resolves for any well-formed
  *  request — the server deliberately gives no signal about whether the
  *  address has an account. */
-export async function apiMagicLinkRequest(email: string, turnstileToken?: string): Promise<void> {
+export async function apiOtpRequest(email: string, turnstileToken?: string): Promise<void> {
     const body: Record<string, string> = { email };
     if (turnstileToken) body['cf-turnstile-response'] = turnstileToken;
-    const res = await fetch(`${API_URL}/v1/auth/magic/request`, {
+    const res = await fetch(`${API_URL}/v1/auth/otp/request`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
     });
     if (!res.ok) {
-        throw new Error(await readErrorMessage(res, "Couldn't send the sign-in link"));
+        throw new Error(await readErrorMessage(res, "Couldn't send the code"));
     }
+}
+
+export async function apiOtpVerify(email: string, code: string): Promise<AuthResponse> {
+    const res = await fetch(`${API_URL}/v1/auth/otp/verify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, code }),
+    });
+    if (!res.ok) {
+        throw new Error(await readErrorMessage(res, 'invalid_code'));
+    }
+    return res.json();
 }
 
 export async function apiGetMe(token: string): Promise<MeResponse> {
@@ -170,6 +185,9 @@ export async function apiGetMe(token: string): Promise<MeResponse> {
 
 // ─── Phase 2b auth API calls ────────────────────────────────
 
+/** Unused since the Google button was removed from /auth — the server route
+ *  and its tests are still in place, so restoring the button is a one-liner if
+ *  the OAuth client is ever provisioned. */
 export function googleStartUrl(returnTo: '/auth' | '/account'): string {
     // Full-page navigation target (302 to Google), NOT a fetch endpoint.
     // returnTo must be on the server's allowlist: /auth, /account.

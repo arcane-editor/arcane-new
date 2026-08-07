@@ -167,10 +167,10 @@ export default function AccountPanel() {
                         </button>
                     </div>
                 )}
-                <div className={rowClass}>
-                    <span className={labelClass}>Google</span>
-                    <span className="text-sm text-foreground">{me.googleLinked ? "Connected" : "Not connected"}</span>
-                </div>
+                {/* The Google row is gone with the sign-in button: no account can
+                    reach a linked state any more, so it read "Not connected" for
+                    everyone. `googleLinked` is still on /me — restore this row if
+                    the OAuth client ever gets provisioned. */}
                 <div className="flex items-center justify-between py-3">
                     <span className={labelClass}>AI requests used</span>
                     <span className="text-sm font-mono text-foreground">{me.usage.totalRequests}</span>

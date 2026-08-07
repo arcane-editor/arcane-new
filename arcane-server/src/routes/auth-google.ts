@@ -3,7 +3,7 @@ import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import { jwtVerify, SignJWT, createRemoteJWKSet } from 'jose';
 import {
     findUserByGoogleSub, findUserByEmail, linkGoogleSub, linkGoogleSubClearingCredentials, createOAuthUser,
-    findUserById, createAuthToken, consumeAuthToken, cleanExpiredAuthTokens, setEmailVerified,
+    findUserById, createAuthToken, consumeAuthToken, cleanExpiredAuthTokens,
 } from '../lib/db.ts';
 import type { UserRow } from '../lib/db.ts';
 import { generateToken, sha256Hex, s256Challenge, TOKEN_TTL_SECONDS } from '../lib/tokens.ts';
@@ -178,10 +178,6 @@ authGoogleRouter.get('/v1/auth/google/callback', async (c) => {
 });
 
 // ─── Web exchange: one-time code → session JWT ──
-// Shared by both landing paths that hand the website a code in the query
-// string: this file's Google callback (`web_login`) and the emailed sign-in
-// link (`magic_login`). It lives here for historical reasons — Google was the
-// first caller — not because it is Google-specific.
 
 authGoogleRouter.post('/v1/auth/web/exchange', async (c) => {
     const { code } = await c.req.json<{ code?: string }>();
@@ -189,26 +185,14 @@ authGoogleRouter.post('/v1/auth/web/exchange', async (c) => {
         return c.json({ error: 'invalid_code' }, 400);
     }
     const db = c.env.arcane_db;
-    const hash = await sha256Hex(code);
-    // Each consume is atomic and single-use, so trying both purposes in turn
-    // cannot double-spend a code — at most one UPDATE can ever match.
-    let row = await consumeAuthToken(db, 'web_login', hash);
-    const viaMagicLink = !row;
-    if (!row) {
-        row = await consumeAuthToken(db, 'magic_login', hash);
-    }
+    const row = await consumeAuthToken(db, 'web_login', await sha256Hex(code));
     if (!row) {
         return c.json({ error: 'invalid_code' }, 400);
     }
-    let user = await findUserById(db, row.user_id);
+    const user = await findUserById(db, row.user_id);
     if (!user) {
         return c.json({ error: 'invalid_code' }, 400);
     }
-    // Opening a link delivered to that address proves ownership — the same
-    // reasoning the Google path uses when it sets email_verified on link.
-    if (viaMagicLink && user.email_verified !== 1) {
-        user = await setEmailVerified(db, user.id) ?? user;
-    }
-    logAuthEvent('web_exchange', { userId: user.id, viaMagicLink });
+    logAuthEvent('web_exchange', { userId: user.id });
     return c.json(await mintAuthResponse(user, c.env.JWT_SECRET));
 });

@@ -29,9 +29,9 @@ describe('tokens lib', () => {
             verify_email: 86400,
             password_reset: 1800,
             web_login: 60,
-            // Emailed sign-in link — must stay a separate purpose from
-            // web_login, whose 60s is tuned for an instant redirect handoff.
-            magic_login: 900,
+            // Emailed 6-digit code. Short because it is guessable in a way the
+            // 256-bit link tokens are not — TTL is the main brute-force lever.
+            otp_login: 600,
         });
     });
 });
