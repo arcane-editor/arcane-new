@@ -93,7 +93,10 @@ export interface ChatCompletionRequest {
 
 export interface ChatMessage {
     role: 'system' | 'user' | 'assistant' | 'tool';
-    content: string | ContentPart[];
+    /** `null` is legal: OpenAI's convention for an assistant turn carrying no
+     *  text (tool calls only, reasoning only, or cut short). The editor sends
+     *  it — see `contentText` in services/llm-router.ts. */
+    content: string | ContentPart[] | null;
     tool_calls?: ToolCall[];
     tool_call_id?: string;
     name?: string;

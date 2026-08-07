@@ -79,18 +79,31 @@ export function resolveModel(modelId: string, env: LlmEnv, gatewayOverrides?: Ga
     return provider(modelId);
 }
 
+/**
+ * Flatten a message's content to text.
+ *
+ * `content` can legally be `null` — that's OpenAI's convention for an assistant
+ * turn carrying no text (only tool calls, only reasoning, or cut short), and the
+ * editor emits exactly that (`openai-format.ts`: `textParts || null`). Because
+ * `typeof null === 'object'`, a bare `typeof x === 'string' ? … : x.filter(…)`
+ * sends null down the array branch and throws. Every content read goes through
+ * here so that can't happen again.
+ */
+function contentText(content: ChatMessage['content'], separator = ''): string {
+    if (typeof content === 'string') return content;
+    if (!Array.isArray(content)) return '';
+    return content.filter(p => p.type === 'text').map(p => p.text ?? '').join(separator);
+}
+
 export function convertMessages(messages: ChatMessage[]): ModelMessage[] {
     const result: ModelMessage[] = [];
 
     for (const msg of messages) {
         if (msg.role === 'system') {
-            const text = typeof msg.content === 'string'
-                ? msg.content
-                : msg.content.filter(p => p.type === 'text').map(p => p.text ?? '').join('\n');
-            result.push({ role: 'system', content: text });
+            result.push({ role: 'system', content: contentText(msg.content, '\n') });
         } else if (msg.role === 'user') {
-            if (typeof msg.content === 'string') {
-                result.push({ role: 'user', content: msg.content });
+            if (typeof msg.content === 'string' || !Array.isArray(msg.content)) {
+                result.push({ role: 'user', content: contentText(msg.content) });
             } else {
                 const parts = msg.content.map(part => {
                     if (part.type === 'text') return { type: 'text' as const, text: part.text ?? '' };
@@ -117,13 +130,12 @@ export function convertMessages(messages: ChatMessage[]): ModelMessage[] {
                 }
                 result.push({ role: 'assistant', content: parts });
             } else {
-                const text = typeof msg.content === 'string'
-                    ? msg.content
-                    : msg.content.filter(p => p.type === 'text').map(p => p.text ?? '').join('');
-                result.push({ role: 'assistant', content: text });
+                result.push({ role: 'assistant', content: contentText(msg.content) });
             }
         } else if (msg.role === 'tool') {
-            const text = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
+            const text = typeof msg.content === 'string'
+                ? msg.content
+                : msg.content == null ? '' : JSON.stringify(msg.content);
             result.push({
                 role: 'tool',
                 content: [{

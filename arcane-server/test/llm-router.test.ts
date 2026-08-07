@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import {
     isExternalModel, externalApiKey, gatewayCompatUrl, resolveModel, LlmConfigError,
-    fallbackModelFor, shouldFallback, classifyStreamError, streamCompletion,
+    fallbackModelFor, shouldFallback, classifyStreamError, streamCompletion, convertMessages,
 } from '../src/services/llm-router.ts';
-import type { ChatCompletionRequest, StreamEvent } from '../src/types.ts';
+import type { ChatCompletionRequest, ChatMessage, StreamEvent } from '../src/types.ts';
 
 const FULL_ENV = {
     AI: {} as Ai,
@@ -66,6 +66,39 @@ describe('fallback policy', () => {
         expect(classifyStreamError({ statusCode: 429 }, false)).toBe('rate_limit');
         expect(classifyStreamError(new Error('capacity'), false)).toBe('rate_limit');
         expect(classifyStreamError(new Error('boom'), false)).toBe('model_error');
+    });
+});
+
+// `content: null` is the OpenAI convention for an assistant turn that carried
+// no text, and the editor emits exactly that (openai-format.ts: `textParts ||
+// null`) whenever a turn produced only thinking, only tool calls, or was cut
+// short. `typeof null === 'object'`, so the array branch used to run and call
+// `null.filter(...)` — one such message anywhere in the history 500'd every
+// subsequent send in that conversation.
+describe('convertMessages tolerates null content', () => {
+    it('handles an assistant turn with no text and no tool calls', () => {
+        const messages = [{ role: 'assistant', content: null }] as unknown as ChatMessage[];
+        expect(() => convertMessages(messages)).not.toThrow();
+        expect(convertMessages(messages)).toEqual([{ role: 'assistant', content: '' }]);
+    });
+
+    it('handles an assistant turn with null content alongside tool calls', () => {
+        const messages = [{
+            role: 'assistant',
+            content: null,
+            tool_calls: [{ id: 'c1', type: 'function', function: { name: 'read', arguments: '{"p":1}' } }],
+        }] as unknown as ChatMessage[];
+        expect(() => convertMessages(messages)).not.toThrow();
+        expect(convertMessages(messages)[0].content).toEqual([
+            { type: 'tool-call', toolCallId: 'c1', toolName: 'read', input: { p: 1 } },
+        ]);
+    });
+
+    it('handles null content on system and tool messages too', () => {
+        expect(() => convertMessages([{ role: 'system', content: null }] as unknown as ChatMessage[])).not.toThrow();
+        expect(() => convertMessages(
+            [{ role: 'tool', content: null, tool_call_id: 'c1', name: 'read' }] as unknown as ChatMessage[],
+        )).not.toThrow();
     });
 });
 
