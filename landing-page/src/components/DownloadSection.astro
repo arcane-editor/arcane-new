@@ -1,8 +1,15 @@
 ---
+import { downloadUrls } from "../lib/releases";
+
 // Stable "latest" links — the Release workflow uploads each installer to both
 // arcane-releases/<tag>/ and arcane-releases/latest/, so these never need editing
 // per release. Bump `version` (display only) when you cut a new tag.
-const version = "v0.2.0";
+//
+// The channel follows the environment this site was built for: the dev site
+// links to the "Arcane Dev" installers, never the production ones.
+const isDev = (import.meta.env.PUBLIC_API_URL ?? "").includes("api-dev");
+const urls = downloadUrls(import.meta.env.PUBLIC_API_URL ?? "");
+const version = isDev ? "dev build" : "v0.2.0";
 const osCards = [
   {
     id: "macos-arm",
@@ -10,7 +17,7 @@ const osCards = [
     version,
     ext: ".dmg",
     subtitle: "Apple Silicon (M1+)",
-    href: "https://releases.arcaneai.org/latest/Arcane-arm64.dmg",
+    href: urls.macArm,
     icon: `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/></svg>`,
   },
   {
@@ -19,7 +26,7 @@ const osCards = [
     version,
     ext: ".exe",
     subtitle: "Windows 10+ (64-bit)",
-    href: "https://releases.arcaneai.org/latest/ArcaneSetup.exe",
+    href: urls.windows,
     icon: `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></svg>`,
   },
   {
