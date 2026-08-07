@@ -2,13 +2,14 @@
 // handed to the caller exactly once; only their SHA-256 hex lands in D1.
 
 export const TOKEN_TTL_SECONDS = {
-    verify_email: 24 * 60 * 60,   // 24 h
+    // Emailed 6-digit signup verification code. Short by design: a 6-digit
+    // code is guessable in a way the 256-bit link tokens are not, so its life
+    // is the main lever limiting how long an attacker has to work against it.
+    // (Was 24 h while this was a link token.) Users who miss the window
+    // request a new one from /v1/auth/resend-verification.
+    verify_email: 15 * 60,        // 15 min
     password_reset: 30 * 60,      // 30 min
     web_login: 60,                // 60 s (Google → website handoff code)
-    // Emailed 6-digit sign-in code. Short by design: the code is guessable in
-    // a way the 256-bit link tokens are not, so its life is the main lever
-    // limiting how long an attacker has to work against it.
-    otp_login: 10 * 60,           // 10 min
     // `editor_login` retired in 0016: the website → editor handoff code now
     // lives on the editor_attempts row (see src/lib/attempts.ts), which binds
     // it to a PKCE challenge and gives the poll channel something to consume.

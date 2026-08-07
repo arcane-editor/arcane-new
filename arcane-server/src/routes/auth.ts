@@ -7,7 +7,7 @@ import {
 import { hashPassword, verifyPassword } from '../lib/crypto.ts';
 import { authMiddleware, mintAuthResponse, makeUserResponse } from '../middleware/auth.ts';
 import type { AuthPayload } from '../middleware/auth.ts';
-import { generateToken, sha256Hex, TOKEN_TTL_SECONDS } from '../lib/tokens.ts';
+import { generateOtp, otpHash, TOKEN_TTL_SECONDS } from '../lib/tokens.ts';
 import { sendVerificationEmail } from '../lib/email.ts';
 import { verifyTurnstile } from '../lib/turnstile.ts';
 import { logAuthEvent } from '../lib/log.ts';
@@ -57,12 +57,12 @@ authRouter.post('/v1/auth/signup', async (c) => {
     const { hash, salt } = await hashPassword(password);
     const user = await createUser(db, { email, passwordHash: hash, salt });
 
-    const rawToken = generateToken();
+    const code = generateOtp();
     await createAuthToken(db, {
         userId: user.id, purpose: 'verify_email',
-        tokenHash: await sha256Hex(rawToken), ttlSeconds: TOKEN_TTL_SECONDS.verify_email,
+        tokenHash: await otpHash(user.id, code), ttlSeconds: TOKEN_TTL_SECONDS.verify_email,
     });
-    c.executionCtx.waitUntil(sendVerificationEmail(c.env, user.email, rawToken));
+    c.executionCtx.waitUntil(sendVerificationEmail(c.env, user.email, code));
     logAuthEvent('signup', { userId: user.id });
 
     return c.json(await mintAuthResponse(user, c.env.JWT_SECRET));

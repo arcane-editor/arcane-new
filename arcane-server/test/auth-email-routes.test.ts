@@ -12,30 +12,8 @@ async function seedToken(userId: number, purpose: 'verify_email' | 'password_res
     return raw;
 }
 
-describe('POST /v1/auth/verify', () => {
-    it('consumes a valid token, verifies the user, returns a fresh JWT', async () => {
-        const user = await seedPasswordUser('verify@test.dev', 'password123', { verified: false });
-        const raw = await seedToken(user.id, 'verify_email');
-        const res = await jsonPost('/v1/auth/verify', { token: raw });
-        expect(res.status).toBe(200);
-        const body = await res.json<{ token: string; user: { emailVerified: boolean } }>();
-        expect(body.user.emailVerified).toBe(true);
-        expect(body.token).toBeTruthy();
-        // fresh JWT works against a Bearer route
-        const me = await jsonPost('/v1/auth/resend-verification', {}, body.token);
-        expect(me.status).toBe(200); // authed fine (already verified → plain ok)
-    });
-
-    it('rejects replay and garbage tokens with invalid_token', async () => {
-        const user = await seedPasswordUser('verify2@test.dev', 'password123', { verified: false });
-        const raw = await seedToken(user.id, 'verify_email');
-        expect((await jsonPost('/v1/auth/verify', { token: raw })).status).toBe(200);
-        const replay = await jsonPost('/v1/auth/verify', { token: raw });
-        expect(replay.status).toBe(400);
-        expect(await replay.json()).toEqual({ error: 'invalid_token' });
-        expect((await jsonPost('/v1/auth/verify', { token: 'nope' })).status).toBe(400);
-    });
-});
+// /v1/auth/verify moved from a link token to an authenticated 6-digit code;
+// see auth-verify-code.test.ts for its full coverage.
 
 describe('POST /v1/auth/resend-verification', () => {
     it('requires auth, creates a token, throttles after 3/hour', async () => {

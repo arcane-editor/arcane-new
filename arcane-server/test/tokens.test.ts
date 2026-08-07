@@ -26,12 +26,12 @@ describe('tokens lib', () => {
         // `editor_login` was retired in 0016 — the editor handoff code now
         // lives on the editor_attempts row (CODE_TTL_SECONDS, still 60s).
         expect(TOKEN_TTL_SECONDS).toEqual({
-            verify_email: 86400,
+            // 15 min, not 24 h: verify_email is now a 6-digit code, guessable
+            // in a way the 256-bit link tokens are not — TTL is the main
+            // brute-force lever, alongside the attempts cap.
+            verify_email: 900,
             password_reset: 1800,
             web_login: 60,
-            // Emailed 6-digit code. Short because it is guessable in a way the
-            // 256-bit link tokens are not — TTL is the main brute-force lever.
-            otp_login: 600,
         });
     });
 });

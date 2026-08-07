@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { sendVerificationEmail, sendPasswordResetEmail, sendOtpEmail } from '../src/lib/email.ts';
+import { sendVerificationEmail, sendPasswordResetEmail } from '../src/lib/email.ts';
 import type { EmailSender } from '../src/types.ts';
 
 type SentMessage = Parameters<EmailSender['send']>[0];
@@ -15,15 +15,18 @@ function fakeEnv(capture: SentMessage[], sendImpl?: EmailSender['send']) {
 }
 
 describe('email lib', () => {
-    it('sendVerificationEmail sends html+text containing the verify link', async () => {
+    it('sendVerificationEmail carries the code in the subject and both bodies, with no link', async () => {
         const calls: SentMessage[] = [];
-        await sendVerificationEmail(fakeEnv(calls), 'user@test.dev', 'tok123');
+        await sendVerificationEmail(fakeEnv(calls), 'user@test.dev', '481920');
         expect(calls).toHaveLength(1);
         expect(calls[0]!.to).toBe('user@test.dev');
         expect(calls[0]!.from).toEqual({ email: 'no-reply@arcaneai.org', name: 'Arcane' });
-        expect(calls[0]!.subject).toBe('Verify your Arcane email');
-        expect(calls[0]!.text).toContain('https://dev.arcaneai.org/verify?token=tok123');
-        expect(calls[0]!.html).toContain('https://dev.arcaneai.org/verify?token=tok123');
+        // Leading the subject with the code lets clients preview it unopened.
+        expect(calls[0]!.subject).toBe('481920 is your Arcane verification code');
+        expect(calls[0]!.text).toContain('481920');
+        expect(calls[0]!.html).toContain('481920');
+        // The code is typed back into the signup tab — a link would defeat that.
+        expect(calls[0]!.html).not.toContain('href');
     });
 
     it('sendPasswordResetEmail links to /reset', async () => {
@@ -32,19 +35,6 @@ describe('email lib', () => {
         expect(calls[0]!.subject).toBe('Reset your Arcane password');
         expect(calls[0]!.text).toContain('https://dev.arcaneai.org/reset?token=tok456');
         expect(calls[0]!.html).toContain('https://dev.arcaneai.org/reset?token=tok456');
-    });
-
-    it('sendOtpEmail puts the code in the subject and both bodies, with no link', async () => {
-        const calls: SentMessage[] = [];
-        await sendOtpEmail(fakeEnv(calls), 'user@test.dev', '481920');
-        expect(calls).toHaveLength(1);
-        expect(calls[0]!.to).toBe('user@test.dev');
-        // Leading the subject with the code lets clients preview it without opening.
-        expect(calls[0]!.subject).toBe('481920 is your Arcane sign-in code');
-        expect(calls[0]!.text).toContain('481920');
-        expect(calls[0]!.html).toContain('481920');
-        // The code is typed back into the original tab — a link would defeat that.
-        expect(calls[0]!.html).not.toContain('href');
     });
 
     it('never throws when the binding rejects (waitUntil safety)', async () => {

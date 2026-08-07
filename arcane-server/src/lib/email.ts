@@ -28,22 +28,13 @@ async function sendEmail(env: EmailEnv, to: string, subject: string, text: strin
     }
 }
 
-export async function sendVerificationEmail(env: EmailEnv, to: string, token: string): Promise<void> {
-    const link = `${env.WEB_BASE_URL}/verify?token=${token}`;
+export async function sendVerificationEmail(env: EmailEnv, to: string, code: string): Promise<void> {
+    // No link: the code is typed back into the tab that signed up, so the user
+    // never leaves the flow and any pending editor sign-in survives.
     await sendEmail(
-        env, to, 'Verify your Arcane email',
-        `Welcome to Arcane!\n\nConfirm your email address by opening this link:\n${link}\n\nThe link expires in 24 hours. If you didn't create an Arcane account, ignore this email.`,
-        `<p>Welcome to Arcane!</p><p>Confirm your email address:</p><p><a href="${link}">Verify email</a></p><p>Or paste this link into your browser:<br>${link}</p><p>The link expires in 24 hours. If you didn't create an Arcane account, ignore this email.</p>`,
-    );
-}
-
-export async function sendOtpEmail(env: EmailEnv, to: string, code: string): Promise<void> {
-    // No link: the code is typed back into the tab that requested it, which is
-    // what keeps the editor sign-in handoff alive in sessionStorage.
-    await sendEmail(
-        env, to, `${code} is your Arcane sign-in code`,
-        `Your Arcane sign-in code is ${code}\n\nEnter it in the tab where you started signing in. The code expires in 10 minutes and can be used once. If you didn't request it, ignore this email — nothing has changed.`,
-        `<p>Your Arcane sign-in code is:</p><p style="font-size:28px;font-weight:700;letter-spacing:4px">${code}</p><p>Enter it in the tab where you started signing in. The code expires in 10 minutes and can be used once.</p><p>If you didn't request it, ignore this email — nothing has changed.</p>`,
+        env, to, `${code} is your Arcane verification code`,
+        `Welcome to Arcane!\n\nYour verification code is ${code}\n\nEnter it in the tab where you signed up. The code expires in 15 minutes and can be used once. If you didn't create an Arcane account, ignore this email.`,
+        `<p>Welcome to Arcane!</p><p>Your verification code is:</p><p style="font-size:28px;font-weight:700;letter-spacing:4px">${code}</p><p>Enter it in the tab where you signed up. The code expires in 15 minutes and can be used once.</p><p>If you didn't create an Arcane account, ignore this email.</p>`,
     );
 }
 

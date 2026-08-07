@@ -8,7 +8,7 @@ import { hashPassword, verifyPassword } from '../lib/crypto.ts';
 import { authMiddleware, mintAuthResponse } from '../middleware/auth.ts';
 import type { AuthPayload } from '../middleware/auth.ts';
 import { generateToken, generateOtp, otpHash, sha256Hex, TOKEN_TTL_SECONDS } from '../lib/tokens.ts';
-import { sendVerificationEmail, sendPasswordResetEmail, sendOtpEmail } from '../lib/email.ts';
+import { sendVerificationEmail, sendPasswordResetEmail } from '../lib/email.ts';
 import { verifyTurnstile } from '../lib/turnstile.ts';
 import { logAuthEvent } from '../lib/log.ts';
 import type { AppEnv } from '../types.ts';
@@ -17,19 +17,26 @@ export const authEmailRouter = new Hono<AppEnv>();
 
 // ─── Email verification ─────────────────────────────────────
 
-authEmailRouter.post('/v1/auth/verify', async (c) => {
-    const { token } = await c.req.json<{ token?: string }>();
-    if (typeof token !== 'string' || !token) {
-        return c.json({ error: 'invalid_token' }, 400);
+// Authenticated: signup hands back a session JWT, so the account is known from
+// the token rather than the request body. That keeps a 6-digit code from being
+// something anyone can grind against an arbitrary email address.
+authEmailRouter.post('/v1/auth/verify', authMiddleware(), async (c) => {
+    const authUser = c.get('user') as AuthPayload;
+    const userId = parseInt(authUser.sub);
+    const { code } = await c.req.json<{ code?: string }>();
+    if (typeof code !== 'string' || !code) {
+        return c.json({ error: 'invalid_code' }, 400);
     }
     const db = c.env.arcane_db;
-    const row = await consumeAuthToken(db, 'verify_email', await sha256Hex(token));
+    const row = await consumeAuthToken(db, 'verify_email', await otpHash(userId, code));
     if (!row) {
-        return c.json({ error: 'invalid_token' }, 400);
+        await recordOtpFailure(db, userId, 'verify_email');
+        logAuthEvent('email_verify_failed', { userId });
+        return c.json({ error: 'invalid_code' }, 400);
     }
     const user = await setEmailVerified(db, row.user_id);
     if (!user) {
-        return c.json({ error: 'invalid_token' }, 400);
+        return c.json({ error: 'invalid_code' }, 400);
     }
     logAuthEvent('email_verified', { userId: user.id });
     // Fresh JWT so the website can immediately replace its stored token with
@@ -50,85 +57,14 @@ authEmailRouter.post('/v1/auth/resend-verification', authMiddleware(), async (c)
     if (await countRecentAuthTokens(db, user.id, 'verify_email') >= 3) {
         return c.json({ error: 'resend_throttled' }, 429);
     }
-    const rawToken = generateToken();
-    await createAuthToken(db, {
-        userId: user.id, purpose: 'verify_email',
-        tokenHash: await sha256Hex(rawToken), ttlSeconds: TOKEN_TTL_SECONDS.verify_email,
-    });
-    c.executionCtx.waitUntil(sendVerificationEmail(c.env, user.email, rawToken));
-    logAuthEvent('verification_resent', { userId: user.id });
-    return c.json({ ok: true });
-});
-
-// ─── Passwordless sign-in (emailed one-time code) ───────────
-
-// Login-only, never login-or-register. This endpoint is unauthenticated and
-// wired to the send_email binding, so auto-registering would let anyone mint
-// users rows for arbitrary addresses AND make no-reply@arcaneai.org send to
-// them — a spam-relay vector against the domain's sending reputation. New
-// users go through /v1/auth/signup.
-authEmailRouter.post('/v1/auth/otp/request', async (c) => {
-    const body = await c.req.json<Record<string, unknown>>();
-    const email = body.email;
-    // Always-200 on the account-existence axis: no enumeration oracle.
-    const ok = () => c.json({ ok: true });
-    const turnstileOk = await verifyTurnstile(
-        c.env.TURNSTILE_SECRET,
-        (body['cf-turnstile-response'] ?? body.turnstileToken) as string | undefined,
-        c.req.header('CF-Connecting-IP'),
-    );
-    if (!turnstileOk) {
-        return c.json({ error: 'turnstile_failed' }, 400);
-    }
-    if (typeof email !== 'string' || !email) {
-        return ok();
-    }
-    const db = c.env.arcane_db;
-    await cleanExpiredAuthTokens(db);
-    const user = await findUserByEmail(db, email);
-    if (!user) {
-        return ok();
-    }
-    // Silent throttle — still {ok:true} so throttling can't be probed either.
-    if (await countRecentAuthTokens(db, user.id, 'otp_login') >= 3) {
-        return ok();
-    }
     const code = generateOtp();
     await createAuthToken(db, {
-        userId: user.id, purpose: 'otp_login',
-        tokenHash: await otpHash(user.id, code), ttlSeconds: TOKEN_TTL_SECONDS.otp_login,
+        userId: user.id, purpose: 'verify_email',
+        tokenHash: await otpHash(user.id, code), ttlSeconds: TOKEN_TTL_SECONDS.verify_email,
     });
-    c.executionCtx.waitUntil(sendOtpEmail(c.env, user.email, code));
-    logAuthEvent('otp_requested', { userId: user.id });
-    return ok();
-});
-
-authEmailRouter.post('/v1/auth/otp/verify', async (c) => {
-    const body = await c.req.json<Record<string, unknown>>();
-    const { email, code } = body as { email?: unknown; code?: unknown };
-    // One rejection for every failure mode — unknown account, wrong code,
-    // expired, replayed, burnt by too many guesses. Telling them apart would
-    // hand an attacker both an account oracle and a progress meter.
-    const reject = () => c.json({ error: 'invalid_code' }, 400);
-    if (typeof email !== 'string' || typeof code !== 'string' || !email || !code) {
-        return reject();
-    }
-    const db = c.env.arcane_db;
-    const user = await findUserByEmail(db, email);
-    if (!user) {
-        return reject();
-    }
-    const row = await consumeAuthToken(db, 'otp_login', await otpHash(user.id, code));
-    if (!row) {
-        await recordOtpFailure(db, user.id);
-        logAuthEvent('otp_failed', { userId: user.id });
-        return reject();
-    }
-    // Receiving a code sent to that address proves ownership, the same
-    // reasoning the Google path uses when it sets email_verified on link.
-    const verified = user.email_verified === 1 ? user : (await setEmailVerified(db, user.id) ?? user);
-    logAuthEvent('otp_login', { userId: user.id });
-    return c.json(await mintAuthResponse(verified, c.env.JWT_SECRET));
+    c.executionCtx.waitUntil(sendVerificationEmail(c.env, user.email, code));
+    logAuthEvent('verification_resent', { userId: user.id });
+    return c.json({ ok: true });
 });
 
 // ─── Password reset ─────────────────────────────────────────

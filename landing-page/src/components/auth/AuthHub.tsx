@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from "react";
 import {
     getStoredToken, setStoredToken, clearStoredToken,
-    apiLogin, apiSignup, apiGetMe, apiWebExchange, apiEditorGrant, apiOtpRequest, apiOtpVerify,
+    apiLogin, apiSignup, apiGetMe, apiWebExchange, apiEditorGrant,
+    apiVerifyEmail, apiResendVerification,
     authErrorMessage, isKnownAuthErrorCode,
 } from "@/lib/auth";
 import {
@@ -26,13 +27,14 @@ export default function AuthHub() {
     const [password, setPassword] = useState("");
     const [formError, setFormError] = useState("");
     const [submitting, setSubmitting] = useState(false);
-    const [otpSending, setOtpSending] = useState(false);
-    // Email a code was sent to; non-empty switches the card to code entry.
-    // Entry stays in THIS tab, which is what keeps a pending editor sign-in
-    // alive in sessionStorage — an emailed link would open a fresh tab and
-    // lose it.
-    const [otpSentTo, setOtpSentTo] = useState("");
-    const [otpCode, setOtpCode] = useState("");
+    const [resending, setResending] = useState(false);
+    // Set after a successful signup: the address awaiting its emailed code.
+    // Non-empty switches the card to code entry, which stays in THIS tab — so
+    // a pending editor sign-in survives in sessionStorage, and the new account
+    // reaches a verified state without ever leaving the flow.
+    const [pendingVerifyEmail, setPendingVerifyEmail] = useState("");
+    const [pendingVerifyToken, setPendingVerifyToken] = useState("");
+    const [verifyCode, setVerifyCode] = useState("");
     // Ref, not state: the Turnstile callback fires outside React's render cycle
     // and the token is only read on submit.
     const turnstileToken = useRef("");
@@ -161,6 +163,16 @@ export default function AuthHub() {
                 ? await apiLogin(email, password, turnstileToken.current || undefined)
                 : await apiSignup(email, password, turnstileToken.current || undefined);
             setStoredToken(data.token);
+            // A brand-new account is signed in but unverified, and every AI
+            // route is gated on verification — so send them straight to the
+            // code rather than to an account page that can't do anything yet.
+            if (tab === "signup") {
+                setPendingVerifyToken(data.token);
+                setPendingVerifyEmail(email);
+                setVerifyCode("");
+                setSubmitting(false);
+                return;
+            }
             await afterAuthenticated(data.token);
         } catch (err) {
             // Turnstile tokens are single-use — the consumed token must not be
@@ -172,38 +184,34 @@ export default function AuthHub() {
         }
     };
 
-    const handleOtpRequest = async () => {
-        if (otpSending) return;
-        if (!email) { setFormError("Enter your email address first."); return; }
-        setOtpSending(true);
-        setFormError("");
-        try {
-            await apiOtpRequest(email, turnstileToken.current || undefined);
-            setOtpSentTo(email);
-            setOtpCode("");
-        } catch (err) {
-            setFormError(authErrorMessage((err as Error).message));
-        } finally {
-            // Turnstile tokens are single-use — drop the consumed one either
-            // way, or a follow-up request would fail at the server.
-            turnstileReset.current?.();
-            turnstileToken.current = "";
-            setOtpSending(false);
-        }
-    };
-
-    const handleOtpVerify = async () => {
+    const handleVerifyCode = async () => {
         if (submitting) return;
-        if (otpCode.length !== 6) { setFormError("Enter the 6-digit code from your email."); return; }
+        if (verifyCode.length !== 6) { setFormError("Enter the 6-digit code from your email."); return; }
         setSubmitting(true);
         setFormError("");
         try {
-            const data = await apiOtpVerify(otpSentTo, otpCode);
+            const data = await apiVerifyEmail(verifyCode, pendingVerifyToken);
+            // Swap in the fresh JWT — it carries the verified claim, and the
+            // old one may now fail the token_version check.
             setStoredToken(data.token);
             await afterAuthenticated(data.token);
         } catch (err) {
             setFormError(authErrorMessage((err as Error).message));
             setSubmitting(false);
+        }
+    };
+
+    const handleResendCode = async () => {
+        if (resending) return;
+        setResending(true);
+        setFormError("");
+        try {
+            await apiResendVerification(pendingVerifyToken);
+            setVerifyCode("");
+        } catch (err) {
+            setFormError(authErrorMessage((err as Error).message));
+        } finally {
+            setResending(false);
         }
     };
 
@@ -225,15 +233,13 @@ export default function AuthHub() {
         );
     }
 
-    if (otpSentTo) {
+    if (pendingVerifyEmail) {
         return (
             <AuthShell>
-                <h1 className="font-display text-2xl font-bold mb-1 text-center">Enter your code</h1>
-                {/* The server gives no signal about whether the address has an
-                    account, so this copy must not imply one either. */}
+                <h1 className="font-display text-2xl font-bold mb-1 text-center">Verify your email</h1>
                 <p className="text-muted-foreground text-sm mb-6 text-center">
-                    If an account exists for <span className="text-foreground">{otpSentTo}</span>, a 6-digit
-                    code is on its way. It expires in 10 minutes.
+                    We sent a 6-digit code to <span className="text-foreground">{pendingVerifyEmail}</span>.
+                    It expires in 15 minutes.
                 </p>
 
                 {formError && <div className={authErrorBannerClass}>{formError}</div>}
@@ -246,28 +252,25 @@ export default function AuthHub() {
                         autoComplete="one-time-code"
                         maxLength={6}
                         autoFocus
-                        value={otpCode}
-                        onChange={e => setOtpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                        onKeyDown={e => { if (e.key === "Enter") handleOtpVerify(); }}
+                        value={verifyCode}
+                        onChange={e => setVerifyCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                        onKeyDown={e => { if (e.key === "Enter") handleVerifyCode(); }}
                     />
-                    <button className={authPrimaryBtnClass} onClick={handleOtpVerify} disabled={submitting}>
-                        {submitting ? "Verifying…" : "Sign In"}
+                    <button className={authPrimaryBtnClass} onClick={handleVerifyCode} disabled={submitting}>
+                        {submitting ? "Verifying…" : "Verify email"}
                     </button>
                 </div>
 
                 <button
                     className="mt-4 block w-full text-center text-primary text-sm hover:underline disabled:opacity-50"
-                    onClick={handleOtpRequest}
-                    disabled={otpSending}
+                    onClick={handleResendCode}
+                    disabled={resending}
                 >
-                    {otpSending ? "Sending…" : "Send a new code"}
+                    {resending ? "Sending…" : "Send a new code"}
                 </button>
-                <button
-                    className="mt-2 block w-full text-center text-muted-foreground text-xs hover:text-foreground"
-                    onClick={() => { setOtpSentTo(""); setOtpCode(""); setFormError(""); }}
-                >
-                    Use a different email
-                </button>
+                <p className="text-muted-foreground text-xs text-center mt-3">
+                    Your account is created — AI features unlock once the email is verified.
+                </p>
             </AuthShell>
         );
     }
@@ -340,28 +343,6 @@ export default function AuthHub() {
                 <a href="/forgot" className="block mt-3 text-center text-primary text-sm hover:underline">
                     Forgot password?
                 </a>
-            )}
-
-            {/* Divider — sign-in only, since the one option below it is too.
-                On Create account it would separate the form from nothing. */}
-            {tab === "signin" && (
-                <div className="flex items-center gap-3 my-5">
-                    <div className="h-px flex-1 bg-border/50" />
-                    <span className="text-xs text-muted-foreground">or</span>
-                    <div className="h-px flex-1 bg-border/50" />
-                </div>
-            )}
-
-            {/* Sign-in only: the OTP route is login-only, so offering it on the
-                Create account tab would promise an email that never comes. */}
-            {tab === "signin" && (
-                <button
-                    className="h-10 w-full rounded-md border border-border bg-secondary/50 text-sm font-semibold text-foreground hover:border-primary transition-colors disabled:opacity-50"
-                    onClick={handleOtpRequest}
-                    disabled={otpSending}
-                >
-                    {otpSending ? "Sending…" : "Email me a sign-in code"}
-                </button>
             )}
 
             <a href="/" className="block mt-5 text-center text-muted-foreground text-xs hover:text-foreground">

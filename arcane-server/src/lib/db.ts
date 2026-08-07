@@ -567,18 +567,20 @@ export async function consumeAuthToken(
  *  Looked up by user rather than by hash: a wrong code hashes to nothing that
  *  exists, so there is no row to find that way. Single statement so concurrent
  *  guesses cannot interleave a read and a write and lose a count. */
-export async function recordOtpFailure(db: D1Database, userId: number): Promise<void> {
+export async function recordOtpFailure(
+    db: D1Database, userId: number, purpose: TokenPurpose,
+): Promise<void> {
     await db.prepare(
         `UPDATE auth_tokens
             SET attempts = attempts + 1,
                 consumed_at = CASE WHEN attempts + 1 >= ? THEN datetime('now') ELSE NULL END
           WHERE id = (
               SELECT id FROM auth_tokens
-               WHERE user_id = ? AND purpose = 'otp_login'
+               WHERE user_id = ? AND purpose = ?
                  AND consumed_at IS NULL AND expires_at > datetime('now')
                ORDER BY id DESC LIMIT 1
           )`
-    ).bind(OTP_MAX_ATTEMPTS, userId).run();
+    ).bind(OTP_MAX_ATTEMPTS, userId, purpose).run();
 }
 
 /** Resend/abuse throttle: tokens minted in the last hour (consumed or not). */

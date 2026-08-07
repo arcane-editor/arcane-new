@@ -37,10 +37,11 @@ const ERROR_MESSAGES: Record<string, string> = {
     'Invalid credentials': 'Incorrect email or password.',
     invalid_credentials: 'Incorrect email or password.',
     // These fire only for accounts carrying a google_sub. None exist while the
-    // OAuth client is unprovisioned, but the copy must not send anyone looking
-    // for a "Continue with Google" button that is no longer on the page.
-    use_google: "This account doesn't have a password. Use \"Email me a sign-in code\" instead.",
-    google_account: 'An account with this email already exists. Sign in instead — use "Email me a sign-in code" if you don\'t have a password.',
+    // OAuth client is unprovisioned, but the copy must name something that is
+    // actually on the page — with both Google and code sign-in gone, the only
+    // way into such an account is to set a password via Forgot password.
+    use_google: "This account doesn't have a password yet. Use \"Forgot password?\" to set one.",
+    google_account: 'An account with this email already exists. Sign in instead, or use "Forgot password?" if you never set a password.',
     invalid_email: "That doesn't look like a valid email address.",
     weak_password: 'Password must be at least 8 characters.',
     invalid_token: 'This link is invalid or has expired. Request a new one and try again.',
@@ -140,34 +141,6 @@ export async function apiSignup(email: string, password: string, turnstileToken?
     return res.json();
 }
 
-/** Requests an emailed one-time code. Always resolves for any well-formed
- *  request — the server deliberately gives no signal about whether the
- *  address has an account. */
-export async function apiOtpRequest(email: string, turnstileToken?: string): Promise<void> {
-    const body: Record<string, string> = { email };
-    if (turnstileToken) body['cf-turnstile-response'] = turnstileToken;
-    const res = await fetch(`${API_URL}/v1/auth/otp/request`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-    });
-    if (!res.ok) {
-        throw new Error(await readErrorMessage(res, "Couldn't send the code"));
-    }
-}
-
-export async function apiOtpVerify(email: string, code: string): Promise<AuthResponse> {
-    const res = await fetch(`${API_URL}/v1/auth/otp/verify`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, code }),
-    });
-    if (!res.ok) {
-        throw new Error(await readErrorMessage(res, 'invalid_code'));
-    }
-    return res.json();
-}
-
 export async function apiGetMe(token: string): Promise<MeResponse> {
     const res = await fetch(`${API_URL}/v1/auth/me`, {
         headers: { 'Authorization': `Bearer ${token}` },
@@ -230,14 +203,17 @@ export async function apiEditorGrant(
     return res.json();
 }
 
-export async function apiVerifyEmail(verifyToken: string): Promise<AuthResponse> {
+/** Confirms the 6-digit code emailed at signup. Authenticated: the server
+ *  takes the account from the session token, so a code can't be ground against
+ *  someone else's address. Returns a fresh JWT carrying the verified claim. */
+export async function apiVerifyEmail(code: string, token: string): Promise<AuthResponse> {
     const res = await fetch(`${API_URL}/v1/auth/verify`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token: verifyToken }),
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ code }),
     });
     if (!res.ok) {
-        throw new Error(await readErrorMessage(res, 'invalid_token'));
+        throw new Error(await readErrorMessage(res, 'invalid_code'));
     }
     return res.json();
 }

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import {
     getStoredToken, setStoredToken, clearStoredToken,
-    apiGetMe, apiResendVerification, apiForgot, apiChangePassword,
+    apiGetMe, apiForgot, apiChangePassword,
     authErrorMessage, type MeResponse,
 } from "@/lib/auth";
 import { authInputClass, authPrimaryBtnClass, authErrorBannerClass } from "./AuthShell";
@@ -13,9 +13,6 @@ export default function AccountPanel() {
     const [token, setToken] = useState("");
     const [me, setMe] = useState<MeResponse | null>(null);
     const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
-
-    // Resend verification
-    const [resending, setResending] = useState(false);
 
     // Change password
     const [currentPassword, setCurrentPassword] = useState("");
@@ -58,17 +55,6 @@ export default function AccountPanel() {
         if (!t) { window.location.href = "/auth?return=/account"; return; }
         void loadMe(t);
     }, [loadMe]);
-
-    const handleResend = async () => {
-        setResending(true);
-        try {
-            await apiResendVerification(token);
-            showToast("Verification email sent — check your inbox.");
-        } catch (err) {
-            showToast(authErrorMessage((err as Error).message), "error");
-        }
-        setResending(false);
-    };
 
     const handleChangePassword = async () => {
         if (!currentPassword || !newPassword) { setPwError("Both fields are required."); return; }
@@ -158,13 +144,14 @@ export default function AccountPanel() {
                         <span className="text-xs text-muted-foreground">
                             AI features stay locked until you verify your email.
                         </span>
-                        <button
-                            className="h-8 shrink-0 rounded-md px-3 text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90 transition-all disabled:opacity-50"
-                            onClick={handleResend}
-                            disabled={resending}
+                        {/* Links rather than resending inline: verification is a
+                            code now, and /verify is the one place to type it. */}
+                        <a
+                            href="/verify"
+                            className="h-8 shrink-0 inline-flex items-center rounded-md px-3 text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90 transition-all"
                         >
-                            {resending ? "Sending…" : "Resend email"}
-                        </button>
+                            Enter code
+                        </a>
                     </div>
                 )}
                 {/* The Google row is gone with the sign-in button: no account can
