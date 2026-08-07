@@ -614,6 +614,17 @@ async fn debug_panic_async() {
 /// and — on every desktop platform — the single-instance callback in `run()`,
 /// so a plain app re-launch opens a window in the running process instead of
 /// spawning a second process. (`tauri::Manager` is imported at module level.)
+/// Window title for this build, taken from the configured `productName` so the
+/// dev overlay shows "Arcane Dev" wherever a title is surfaced — the Window
+/// menu and Mission Control on macOS (where `hiddenTitle` keeps it out of the
+/// title bar itself), and the title bar proper on Windows and Linux.
+pub(crate) fn window_title(product_name: Option<&str>) -> String {
+    product_name
+        .filter(|s| !s.is_empty())
+        .unwrap_or("Arcane")
+        .to_string()
+}
+
 pub(crate) fn open_or_focus_welcome(app: &tauri::AppHandle) {
     if let Some(w) = app.webview_windows().get("welcome") {
         let _ = w.show();
@@ -621,12 +632,13 @@ pub(crate) fn open_or_focus_welcome(app: &tauri::AppHandle) {
     } else {
         let app = app.clone();
         tauri::async_runtime::spawn(async move {
+            let title = window_title(app.config().product_name.as_deref());
             let _ = tauri::WebviewWindowBuilder::new(
                 &app,
                 "welcome",
                 tauri::WebviewUrl::App("index.html?view=welcome".into()),
             )
-            .title("Arcane")
+            .title(&title)
             .inner_size(720.0, 480.0)
             .min_inner_size(600.0, 360.0)
             .resizable(true)
@@ -820,6 +832,18 @@ pub fn run() {
             execute_command,
         ])
         .setup(|_app| {
+            // The welcome window is declared in tauri.conf.json, so it is built
+            // before any of this runs and carries that file's literal title.
+            // Retitle from productName here rather than duplicating the whole
+            // window block in the dev overlay just to change one string.
+            {
+                use tauri::Manager;
+                let title = window_title(_app.config().product_name.as_deref());
+                if let Some(w) = _app.webview_windows().get("welcome") {
+                    let _ = w.set_title(&title);
+                }
+            }
+
             // Runtime deep-link registration for unbundled runs (`tauri dev`,
             // portable exe) — writes the registry/desktop-file entries the
             // installer would otherwise create. No macOS arm: LaunchServices
@@ -938,6 +962,23 @@ pub fn run() {
                 let _ = (&app_handle, &event);
             }
         });
+}
+
+#[cfg(test)]
+mod window_title_tests {
+    use super::window_title;
+
+    #[test]
+    fn uses_the_configured_product_name() {
+        assert_eq!(window_title(Some("Arcane Dev")), "Arcane Dev");
+        assert_eq!(window_title(Some("Arcane")), "Arcane");
+    }
+
+    #[test]
+    fn falls_back_when_product_name_is_missing_or_blank() {
+        assert_eq!(window_title(None), "Arcane");
+        assert_eq!(window_title(Some("")), "Arcane");
+    }
 }
 
 #[cfg(test)]
