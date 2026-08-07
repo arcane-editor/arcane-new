@@ -141,7 +141,13 @@ function corruptionErrorEvent(
  */
 export function createArcaneStreamFn(config: ArcaneStreamHardeningConfig = {}): StreamFn {
   const resolved: ResolvedArcaneStreamConfig = {
-    fetchImpl: config.fetchImpl ?? fetch,
+    // Bound to the global on the way in. This lands on a config object and is
+    // then invoked as `cfg.fetchImpl(...)` below — a method call, so an unbound
+    // `fetch` would receive `cfg` as its `this`. WKWebView (Tauri's macOS
+    // webview) enforces the WebIDL brand check and throws "Can only call
+    // Window.fetch on instances of Window", killing every send before it
+    // reaches the network.
+    fetchImpl: (config.fetchImpl ?? fetch).bind(globalThis),
     maxAttempts: config.maxAttempts ?? 3,
     retryBaseDelayMs: config.retryBaseDelayMs ?? 5_000,
     connectTimeoutMs: config.connectTimeoutMs ?? 180_000,

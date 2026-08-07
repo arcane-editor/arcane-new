@@ -640,4 +640,30 @@ describe('createArcaneStreamFn', () => {
       useConnectivityStore.getState().setOnline(true);
     }
   });
+
+  // Every other test in this file injects `fetchImpl`, so the production
+  // default (`?? fetch`) was never exercised. Stored on the config object and
+  // invoked as `cfg.fetchImpl(...)`, a bare `fetch` receives the config object
+  // as `this` — and WKWebView, which is what Tauri runs on macOS, rejects that
+  // with "Can only call Window.fetch on instances of Window". Every chat send
+  // died before reaching the network.
+  it('calls the default fetch with a global `this`, not the config object', async () => {
+    const seenThis: unknown[] = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = function (this: unknown) {
+      seenThis.push(this);
+      return Promise.resolve(sseResponse(['data: {"type":"text","content":"hi"}\n', 'data: [DONE]\n']));
+    } as unknown as typeof fetch;
+
+    try {
+      const streamFn = createArcaneStreamFn();
+      await drain(streamFn(ctx, opts()));
+    } finally {
+      globalThis.fetch = original;
+    }
+
+    expect(seenThis).toHaveLength(1);
+    // WebKit's check is `this instanceof Window`; globalThis is what satisfies it.
+    expect(seenThis[0]).toBe(globalThis);
+  });
 });
