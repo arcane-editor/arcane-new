@@ -57,7 +57,10 @@ export function registerInlineSuggestProvider(monaco: Monaco): IDisposable | und
     if (registered) return undefined;
     registered = true;
 
-    return monaco.languages.registerInlineCompletionsProvider('*', {
+    // Annotated explicitly: @monaco-editor/react's `Monaco` type resolves to `any`,
+    // so the provider argument is unchecked at the call site. This is what catches
+    // Monaco renaming a hook out from under us.
+    const provider: languages.InlineCompletionsProvider = {
         async provideInlineCompletions(model: editor.ITextModel, position: Position, _context: languages.InlineCompletionContext, token: CancellationToken) {
             const empty: languages.InlineCompletions = { items: [] };
 
@@ -110,8 +113,10 @@ export function registerInlineSuggestProvider(monaco: Monaco): IDisposable | und
             if (token.isCancellationRequested || result.text === '') return empty;
             return { items: [{ insertText: result.text, range }] };
         },
-        freeInlineCompletions() {
+        disposeInlineCompletions() {
             // items are plain objects — nothing to dispose
         },
-    });
+    };
+
+    return monaco.languages.registerInlineCompletionsProvider('*', provider);
 }
