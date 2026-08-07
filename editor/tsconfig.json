@@ -10,6 +10,12 @@
     /* Bundler mode */
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,
+    /* monaco-editor's `exports` map hides the esm/ subpath @monaco-editor/react's
+       types import, which silently degraded `Monaco` (and every beforeMount/onMount
+       callback) to `any`. Point it at the real declarations. */
+    "paths": {
+      "monaco-editor/esm/vs/editor/editor.api": ["./node_modules/monaco-editor/esm/vs/editor/editor.api.d.ts"]
+    },
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": true,

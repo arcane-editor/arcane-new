@@ -280,6 +280,17 @@ export function registerLspProviders(monaco: Monaco): () => void {
 
           const items: LspCompletionItem[] = Array.isArray(result) ? result : result.items;
 
+          // Monaco requires a range on every suggestion — it decides what the
+          // item replaces. Servers routinely omit textEdit, so fall back to the
+          // word being typed, which is what VS Code's LSP client does too.
+          const word = model.getWordUntilPosition(position);
+          const wordRange = {
+            startLineNumber: position.lineNumber,
+            startColumn: word.startColumn,
+            endLineNumber: position.lineNumber,
+            endColumn: word.endColumn,
+          };
+
           const suggestions = items.map((item) => {
             const label =
               typeof item.label === 'string' ? item.label : item.label.label;
@@ -312,7 +323,7 @@ export function registerLspProviders(monaco: Monaco): () => void {
               documentation,
               sortText: item.sortText,
               filterText: item.filterText,
-              range,
+              range: range ?? wordRange,
             };
           });
 

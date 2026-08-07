@@ -1,6 +1,20 @@
 import type { Monaco } from '@monaco-editor/react';
+import type * as monacoEditor from 'monaco-editor';
 import { invoke } from '@tauri-apps/api/core';
 import type { FileContent } from '../../../types';
+
+/** The real TS-worker API, whose declarations moved to monaco's top-level namespace. */
+type MonacoTypescript = typeof monacoEditor.typescript;
+
+/**
+ * Monaco 0.55 narrowed the *type* of `languages.typescript` to `{ deprecated: true }`
+ * and republished the declarations as the top-level `typescript` namespace. The runtime
+ * property is untouched — `editor.main.js` still does `monacoApi.languages.typescript = …`
+ * — so reading it is correct; only the type needs restoring. Keep that cast here alone.
+ */
+function tsNamespace(monaco: Monaco): MonacoTypescript {
+  return monaco.languages.typescript as unknown as MonacoTypescript;
+}
 
 /**
  * Maps tsconfig.json string values to Monaco's numeric enum values.
@@ -9,7 +23,7 @@ import type { FileContent } from '../../../types';
  */
 function mapTsConfigToMonaco(
   tsCompilerOptions: Record<string, unknown>,
-  ts: Monaco['languages']['typescript'],
+  ts: MonacoTypescript,
 ): Record<string, unknown> {
   const mapped: Record<string, unknown> = {};
 
@@ -97,7 +111,7 @@ export function configureTypeScriptDefaults(
   monaco: Monaco,
   workspaceTsConfig?: Record<string, unknown>,
 ): void {
-  const ts = monaco.languages.typescript;
+  const ts = tsNamespace(monaco);
 
   // Sensible defaults for a modern React + Vite project
   const compilerOptions: Record<string, unknown> = {
@@ -155,7 +169,7 @@ export async function loadWorkspaceFiles(
   monaco: Monaco,
   workspacePath: string,
 ): Promise<void> {
-  const ts = monaco.languages.typescript;
+  const ts = tsNamespace(monaco);
 
   // Scan workspace for source files
   const filePaths = await invoke<string[]>('scan_workspace_files', {
@@ -182,7 +196,7 @@ export async function loadTypeDefinitions(
   monaco: Monaco,
   workspacePath: string,
 ): Promise<void> {
-  const ts = monaco.languages.typescript;
+  const ts = tsNamespace(monaco);
 
   // Scan ALL .d.ts files in node_modules (like VS Code does)
   const typePaths = await invoke<string[]>('scan_node_modules_types', {
@@ -210,7 +224,7 @@ export function updateExtraLib(
   filePath: string,
   content: string,
 ): void {
-  const ts = monaco.languages.typescript;
+  const ts = tsNamespace(monaco);
   const uri = `file://${filePath}`;
   // addExtraLib with the same URI replaces the previous entry
   ts.typescriptDefaults.addExtraLib(content, uri);
