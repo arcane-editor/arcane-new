@@ -102,12 +102,9 @@ const osCards = [
       </div>
     </div>
 
-    <!-- All releases link -->
-    <div class="mx-auto mt-12 max-w-2xl scroll-reveal text-center" style="transition-delay: 500ms;">
-      <!-- <a href="https://github.com/arcane-editor/arcane/releases" target="_blank" rel="noopener"
-         class="text-sm text-muted-foreground hover:text-primary transition-colors">
-        View all releases on GitHub &rarr;
-      </a> -->
-    </div>
+    {/* Was an empty div wrapping a commented-out "View all releases on GitHub"
+        link. Astro emits html comments, so that dead markup — including the
+        repo URL — was being served to every visitor. Removed rather than
+        converted: the div rendered nothing either way. */}
   </div>
 </section>
