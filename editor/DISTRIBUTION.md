@@ -86,6 +86,42 @@ Recommended CI matrix for release builds:
 
 **Pyright follow-up**. Pyright's distribution uses webpack-style chunked code with dynamic `require()` calls that pkg's static analysis can't fully follow; the bundled binary exits silently on `--stdio` inside pkg's snapshot filesystem. Options for a future PR: (a) ship the pyright source as Tauri resources + a bundled Node binary, (b) wait for pkg to resolve the chunked require issue, or (c) switch the Python LSP to one without this packaging pattern.
 
+## Side-by-side dev app
+
+`src-tauri/tauri.dev.conf.json` is an overlay that produces a **second app you
+can install next to the production one**:
+
+```
+bun run tauri:dev-app          # run it
+bun run tauri:build:dev-app    # package it
+```
+
+Everything that would otherwise collide is keyed off the overlay:
+
+| | prod | dev app |
+|---|---|---|
+| App name | Arcane | Arcane Dev |
+| Bundle id | `com.inno.editor` | `com.inno.editor.dev` |
+| Deep-link scheme | `arcane://` | `arcane-dev://` |
+| Config dir | `~/.arcane` | `~/.arcane-dev` |
+| API / web | `api.arcaneai.org` | `api-dev.arcaneai.org` |
+
+The bundle id is what lets macOS treat them as different apps, and
+`arcane_dir_name()` (`src-tauri/src/auth.rs`) derives the config dir from it —
+so the two never share tokens, sessions, or graphs. The deep-link scheme is
+read from the runtime config rather than hardcoded
+(`scheme_from_plugin_config`), so a dev build tells the website to call back to
+`arcane-dev://` and sign-in lands in the right app. The website accepts both
+via `SCHEME_ALLOWLIST` in `landing-page/src/lib/editor-login.ts`.
+
+**The endpoints are the part that needs the extra script.** Vite only reads
+`.env.development` in development mode, and `tauri build` runs `vite build`,
+which is production mode — so a plain
+`tauri build --config src-tauri/tauri.dev.conf.json` would be *named* "Arcane
+Dev" while talking to the **production** API. The overlay therefore points
+`beforeBuildCommand` at `build:dev-env` (`vite build --mode development`).
+Use the scripts above rather than invoking `tauri build --config` directly.
+
 ## Releasing (CI → Cloudflare R2)
 
 All three installers are built by **`.github/workflows/release.yml`** (repo root). Push a version tag to trigger it:

@@ -6,11 +6,14 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "build:dev-env": "tsc && vite build --mode development",
     "check:modules": "bun run scripts/check-deep-modules.mjs",
     "sync:bridge": "node scripts/sync-unity-bridge.mjs",
     "preview": "vite preview",
     "build:lsp-sidecars": "bun run scripts/build-lsp-sidecars.ts",
     "tauri": "bun run build:lsp-sidecars && tauri",
+    "tauri:dev-app": "bun run build:lsp-sidecars && tauri dev --config src-tauri/tauri.dev.conf.json",
+    "tauri:build:dev-app": "bun run build:lsp-sidecars && tauri build --config src-tauri/tauri.dev.conf.json",
     "test": "bun test src",
     "eval": "bun tooling/unity-eval/run-eval.ts"
   },
