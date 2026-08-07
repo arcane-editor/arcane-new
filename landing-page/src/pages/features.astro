@@ -88,7 +88,7 @@ const featureCategories = [
 <LandingLayout>
   <Navbar client:load />
 
-  <!-- Hero -->
+  {/* Hero */}
   <section class="relative min-h-[60vh] flex items-center overflow-hidden pt-16">
     <div class="absolute inset-0 bg-grid-pattern opacity-20"></div>
     <div class="absolute inset-0 gradient-mesh"></div>
@@ -122,13 +122,13 @@ const featureCategories = [
     </div>
   </section>
 
-  <!-- Feature Categories -->
+  {/* Feature Categories */}
   <section class="relative py-12 sm:py-20">
     <div class="container mx-auto px-4">
       <div class="mx-auto max-w-4xl space-y-16 sm:space-y-24">
         {featureCategories.map((cat, i) => (
           <div class={`scroll-reveal flex flex-col gap-8 lg:flex-row lg:items-start lg:gap-16 ${i % 2 === 1 ? 'lg:flex-row-reverse' : ''}`} style={`transition-delay: ${i * 60}ms;`}>
-            <!-- Text side -->
+            {/* Text side */}
             <div class="flex-1 min-w-0">
               <div class="mb-4 inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-primary border border-primary/20">
                 <Fragment set:html={cat.icon} />
@@ -149,7 +149,7 @@ const featureCategories = [
               </ul>
             </div>
 
-            <!-- Visual side -->
+            {/* Visual side */}
             <div class="flex-1 min-w-0">
               <div class="rounded-2xl glass p-6 sm:p-8 border border-border/40">
                 <div class="flex items-center gap-2 mb-4">
@@ -257,7 +257,7 @@ const featureCategories = [
     </div>
   </section>
 
-  <!-- Bottom CTA -->
+  {/* Bottom CTA */}
   <section class="relative py-16 sm:py-24">
     <div class="container mx-auto px-4 text-center">
       <div class="mx-auto max-w-2xl scroll-reveal">

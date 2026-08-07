@@ -15,7 +15,7 @@ const API_URL = import.meta.env.PUBLIC_API_URL || 'https://api.arcaneai.org';
       </div>
 
       <form id="feedback-form" class="space-y-5">
-        <!-- Rating -->
+        {/* Rating */}
         <div>
           <label class="block text-sm font-medium text-foreground mb-2">How would you rate your experience?</label>
           <div id="star-rating" class="flex gap-2">
@@ -30,7 +30,7 @@ const API_URL = import.meta.env.PUBLIC_API_URL || 'https://api.arcaneai.org';
           <input type="hidden" name="rating" id="rating-value" value="" required />
         </div>
 
-        <!-- Category -->
+        {/* Category */}
         <div>
           <label for="category" class="block text-sm font-medium text-foreground mb-2">Category</label>
           <select name="category" id="category"
@@ -42,7 +42,7 @@ const API_URL = import.meta.env.PUBLIC_API_URL || 'https://api.arcaneai.org';
           </select>
         </div>
 
-        <!-- Message -->
+        {/* Message */}
         <div>
           <label for="message" class="block text-sm font-medium text-foreground mb-2">Your feedback</label>
           <textarea name="message" id="message" rows="4" required
@@ -50,7 +50,7 @@ const API_URL = import.meta.env.PUBLIC_API_URL || 'https://api.arcaneai.org';
             class="w-full rounded-lg border border-border/60 bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/50 transition-colors focus:border-primary/40 focus:outline-none resize-none"></textarea>
         </div>
 
-        <!-- Email (optional) -->
+        {/* Email (optional) */}
         <div>
           <label for="email" class="block text-sm font-medium text-foreground mb-2">
             Email <span class="text-muted-foreground font-normal">(optional, for follow-up)</span>
@@ -60,7 +60,7 @@ const API_URL = import.meta.env.PUBLIC_API_URL || 'https://api.arcaneai.org';
             class="w-full rounded-lg border border-border/60 bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/50 transition-colors focus:border-primary/40 focus:outline-none" />
         </div>
 
-        <!-- Submit -->
+        {/* Submit */}
         <div class="flex items-center gap-4">
           <button type="submit" id="submit-btn"
             class="inline-flex items-center justify-center gap-2 rounded-md font-semibold bg-primary text-primary-foreground hover:bg-primary/90 glow-orange-sm h-11 px-6 transition-colors">
@@ -71,7 +71,7 @@ const API_URL = import.meta.env.PUBLIC_API_URL || 'https://api.arcaneai.org';
           </span>
         </div>
 
-        <!-- Status messages -->
+        {/* Status messages */}
         <div id="form-status" class="hidden text-sm"></div>
       </form>
     </div>
