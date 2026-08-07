@@ -15,7 +15,22 @@ function fmtPrice(usd: number): string {
     return usd === 0 ? "Free" : `$${usd}`;
 }
 
-export default function PricingTable() {
+/**
+ * `page` — the standalone /pricing route: h1, tall top padding to clear the
+ *   fixed navbar.
+ * `section` — a band inside the landing page: h2 (the hero already owns the
+ *   only h1), section padding matching its siblings, and an #pricing anchor.
+ *
+ * Both render the SAME tiers fetched from /v1/billing/plans, so prices can
+ * never drift from the server's config/tiers.ts — which is why this is a
+ * variant rather than a second, hardcoded marketing component.
+ */
+export interface PricingTableProps {
+    variant?: 'page' | 'section';
+}
+
+export default function PricingTable({ variant = 'page' }: PricingTableProps) {
+    const isSection = variant === 'section';
     const [tiers, setTiers] = useState<PlanTier[] | null>(null);
     const [authed, setAuthed] = useState(false);
     const [loadError, setLoadError] = useState("");
@@ -55,10 +70,23 @@ export default function PricingTable() {
     };
 
     return (
-        <section className="container mx-auto px-4 pt-32 pb-24 max-w-6xl">
-            <div className="text-center mb-4">
-                <h1 className="font-display text-3xl md:text-4xl font-bold">Simple, usage-based pricing</h1>
-                <p className="text-muted-foreground text-sm mt-3 max-w-xl mx-auto">
+        <section
+            id={isSection ? 'pricing' : undefined}
+            className={`container mx-auto px-4 max-w-6xl ${
+                isSection ? 'py-16 sm:py-28' : 'pt-32 pb-24'
+            }`}
+        >
+            <div className={`text-center ${isSection ? 'mb-12 sm:mb-16' : 'mb-4'}`}>
+                {isSection ? (
+                    <h2 className="mb-4 font-display text-3xl font-bold tracking-tight sm:text-4xl md:text-5xl">
+                        Simple, <span className="text-gradient-orange">usage-based</span> pricing
+                    </h2>
+                ) : (
+                    <h1 className="font-display text-3xl md:text-4xl font-bold">Simple, usage-based pricing</h1>
+                )}
+                <p className={`text-muted-foreground mx-auto max-w-xl ${
+                    isSection ? 'text-base sm:text-lg' : 'text-sm mt-3'
+                }`}>
                     Every plan includes a monthly pool of AI credits. Each request spends credits based on the
                     model it uses — bigger models cost more. Run out? Top up anytime.
                 </p>

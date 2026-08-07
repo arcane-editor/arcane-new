@@ -6,6 +6,7 @@ import StatsBar from '../components/StatsBar.tsx';
 import FeaturesSection from '../components/FeaturesSection.astro';
 import HowItWorksSection from '../components/HowItWorksSection.astro';
 import DownloadSection from '../components/DownloadSection.astro';
+import PricingTable from '../components/billing/PricingTable.tsx';
 import FeedbackSection from '../components/FeedbackSection.astro';
 import DocsSection from '../components/DocsSection.astro';
 import Footer from '../components/Footer.astro';
@@ -18,6 +19,11 @@ import Footer from '../components/Footer.astro';
   <FeaturesSection />
   <HowItWorksSection />
   <DownloadSection />
+  {/* Same component as /pricing, in `section` form. Sharing it keeps prices
+      sourced from the server's config/tiers.ts instead of a hardcoded copy
+      that would silently drift. `client:visible` defers the
+      /v1/billing/plans fetch until the band is actually scrolled to. */}
+  <PricingTable client:visible variant="section" />
   <FeedbackSection />
   <DocsSection />
   <Footer />

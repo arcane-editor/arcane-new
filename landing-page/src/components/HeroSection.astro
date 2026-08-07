@@ -2,7 +2,11 @@
 import HeroIDEMockup from './HeroIDEMockup.tsx';
 ---
 
-<section class="relative min-h-screen flex items-center overflow-hidden pt-16">
+<!-- min-h-svh, NOT min-h-screen: on mobile `100vh` is the viewport with the
+     URL bar *collapsed*, so a 100vh hero is taller than what you can actually
+     see and its bottom content sits under the browser chrome until you
+     scroll. `svh` is the small-viewport height — the honest one. -->
+<section class="relative min-h-svh flex items-center overflow-hidden pt-16">
   <!-- Background -->
   <div class="absolute inset-0 bg-grid-pattern opacity-20"></div>
   <div class="absolute inset-0 gradient-mesh"></div>
