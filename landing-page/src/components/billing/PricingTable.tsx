@@ -11,8 +11,11 @@ const TAGLINES: Record<string, string> = {
     ultra: "Maximum monthly credits for power users.",
 };
 
+/** `$0`, not "Free" — the tier is ALREADY named Free, so returning "Free"
+ *  here rendered the card as "Free / Free / 150 credits/mo". Every price row
+ *  now has the same shape ($N + /mo), which is what lets the row scan. */
 function fmtPrice(usd: number): string {
-    return usd === 0 ? "Free" : `$${usd}`;
+    return `$${usd}`;
 }
 
 /**
@@ -110,26 +113,42 @@ export default function PricingTable({ variant = 'page' }: PricingTableProps) {
                         return (
                             <div
                                 key={t.id}
-                                className={`glass rounded-2xl p-6 flex flex-col ${highlight ? "border-primary/40 ring-1 ring-primary/30" : ""}`}
+                                className={`glass rounded-2xl p-6 flex flex-col transition-all duration-300 hover:-translate-y-1 hover:border-primary/40 ${
+                                    highlight ? "border-primary/40 ring-1 ring-primary/30" : ""
+                                }`}
                             >
-                                {highlight && (
-                                    <span className="self-start mb-3 rounded-full bg-primary/15 border border-primary/30 px-2 py-0.5 text-[11px] font-bold uppercase tracking-wider text-primary">
-                                        Most popular
-                                    </span>
-                                )}
+                                {/* Rendered in EVERY card, hidden where it doesn't apply.
+                                    Mounting it only on the highlighted one pushed that
+                                    card's name, price, credits and tagline ~56px below
+                                    its neighbours, so nothing in the row lined up. */}
+                                <span
+                                    aria-hidden={!highlight}
+                                    className={`self-start mb-3 rounded-full border px-2 py-0.5 text-[11px] font-bold uppercase tracking-wider ${
+                                        highlight
+                                            ? "bg-primary/15 border-primary/30 text-primary"
+                                            : "invisible border-transparent"
+                                    }`}
+                                >
+                                    Most popular
+                                </span>
                                 <h3 className="font-display text-lg font-bold">{t.name}</h3>
                                 <div className="mt-2 mb-1 flex items-baseline gap-1">
                                     <span className="font-display text-3xl font-bold">{fmtPrice(t.priceUsd)}</span>
-                                    {t.priceUsd > 0 && <span className="text-muted-foreground text-sm">/mo</span>}
+                                    <span className="text-muted-foreground text-sm">/mo</span>
                                 </div>
                                 <p className="text-sm text-foreground/80 font-mono">
                                     {t.monthlyCredits.toLocaleString()} credits/mo
                                 </p>
-                                <p className="text-muted-foreground text-xs mt-3 min-h-[2.5rem]">
+                                <p className="text-muted-foreground text-xs mt-3 mb-6 min-h-[2.5rem]">
                                     {TAGLINES[t.id] ?? ""}
                                 </p>
 
-                                <div className="mt-6 pt-4 border-t border-border/30">
+                                {/* mt-auto, not mt-6: the grid stretches every card to the
+                                    tallest, and without this the slack fell BELOW the
+                                    button — leaving each CTA (and its divider) at a
+                                    different height. Bottom-anchoring puts the slack
+                                    above the rule instead, so all four line up. */}
+                                <div className="mt-auto pt-5 border-t border-border/30">
                                     {isFree ? (
                                         <a
                                             href="/#download"

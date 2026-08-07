@@ -50,11 +50,16 @@ const osCards = [
     <div class="mx-auto max-w-4xl grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
       {osCards.map((os, i) => (
         <div
-          class="scroll-reveal group relative rounded-2xl glass p-6 text-center transition-all duration-300 hover:glow-orange hover:border-primary/40 hover:-translate-y-1"
+          class="scroll-reveal group relative flex flex-col rounded-2xl glass p-6 text-center transition-all duration-300 hover:glow-orange hover:border-primary/40 hover:-translate-y-1"
           style={`transition-delay: ${i * 100}ms;`}
         >
           <div class="absolute inset-0 rounded-2xl bg-gradient-to-b from-primary/5 to-transparent opacity-0 transition-opacity group-hover:opacity-100"></div>
-          <div class="relative z-10">
+          {/* flex-1 + flex-col so the CTA below can mt-auto to the card floor.
+              The grid stretches all three cards to the tallest, and the
+              subtitles differ in length ("Apple Silicon (M1+)" vs "Ubuntu
+              20.04+, Fedora 36+"), so without this the buttons sit at
+              different heights the moment one wraps. */}
+          <div class="relative z-10 flex flex-1 flex-col">
             <div class="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-primary transition-all group-hover:bg-primary/20 group-hover:scale-110">
               <Fragment set:html={os.icon} />
             </div>
@@ -62,12 +67,12 @@ const osCards = [
             <p class="mb-1 font-mono text-xs text-primary/70">{os.version}</p>
             <p class="mb-5 text-xs text-muted-foreground">{os.subtitle}</p>
             {os.href ? (
-              <a href={os.href} class="inline-flex items-center justify-center gap-2 w-full whitespace-nowrap rounded-md font-semibold text-base bg-primary text-primary-foreground hover:bg-primary/90 glow-orange-sm h-9 px-3 transition-colors text-sm">
+              <a href={os.href} class="mt-auto inline-flex items-center justify-center gap-2 w-full whitespace-nowrap rounded-md font-semibold text-base bg-primary text-primary-foreground hover:bg-primary/90 glow-orange-sm h-9 px-3 transition-colors text-sm">
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-1 h-4 w-4"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
                 Download {os.ext}
               </a>
             ) : (
-              <span class="inline-flex items-center justify-center gap-2 w-full whitespace-nowrap rounded-md font-semibold text-base bg-muted text-muted-foreground h-9 px-3 text-sm cursor-not-allowed">
+              <span class="mt-auto inline-flex items-center justify-center gap-2 w-full whitespace-nowrap rounded-md font-semibold text-base bg-muted text-muted-foreground h-9 px-3 text-sm cursor-not-allowed">
                 Coming Soon
               </span>
             )}
