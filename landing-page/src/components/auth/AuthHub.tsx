@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import {
     getStoredToken, setStoredToken, clearStoredToken,
-    apiLogin, apiSignup, apiGetMe, apiWebExchange, apiEditorGrant,
+    apiLogin, apiSignup, apiGetMe, apiWebExchange, apiEditorGrant, apiMagicLinkRequest,
     googleStartUrl, authErrorMessage, isKnownAuthErrorCode,
 } from "@/lib/auth";
 import {
@@ -26,6 +26,10 @@ export default function AuthHub() {
     const [password, setPassword] = useState("");
     const [formError, setFormError] = useState("");
     const [submitting, setSubmitting] = useState(false);
+    const [magicSending, setMagicSending] = useState(false);
+    // Email the link was sent to; non-empty switches the card to the
+    // "check your inbox" state.
+    const [magicSentTo, setMagicSentTo] = useState("");
     // Ref, not state: the Turnstile callback fires outside React's render cycle
     // and the token is only read on submit.
     const turnstileToken = useRef("");
@@ -165,6 +169,25 @@ export default function AuthHub() {
         }
     };
 
+    const handleMagicLink = async () => {
+        if (magicSending) return;
+        if (!email) { setFormError("Enter your email address first."); return; }
+        setMagicSending(true);
+        setFormError("");
+        try {
+            await apiMagicLinkRequest(email, turnstileToken.current || undefined);
+            setMagicSentTo(email);
+        } catch (err) {
+            setFormError(authErrorMessage((err as Error).message));
+        } finally {
+            // Turnstile tokens are single-use — drop the consumed one either
+            // way, or a follow-up request would fail at the server.
+            turnstileReset.current?.();
+            turnstileToken.current = "";
+            setMagicSending(false);
+        }
+    };
+
     if (state === "boot") {
         return (
             <AuthShell>
@@ -179,6 +202,32 @@ export default function AuthHub() {
                 <h1 className="font-display text-2xl font-bold mb-3 text-center">Can't continue</h1>
                 <div className={authErrorBannerClass}>{hardError}</div>
                 <a href="/" className="block mt-4 text-center text-primary text-sm hover:underline">Back to home</a>
+            </AuthShell>
+        );
+    }
+
+    if (magicSentTo) {
+        return (
+            <AuthShell>
+                <h1 className="font-display text-2xl font-bold mb-3 text-center">Check your email</h1>
+                {/* The server gives no signal about whether the address has an
+                    account, so this copy must not imply one either. */}
+                <p className="text-muted-foreground text-sm text-center">
+                    If an account exists for <span className="text-foreground">{magicSentTo}</span>, a sign-in
+                    link is on its way. It expires in 15 minutes and can be used once.
+                </p>
+                {editorPending && (
+                    <p className="text-muted-foreground text-sm text-center mt-4">
+                        Opening the link signs you in on this site. Then return to Arcane and click Sign in
+                        again to finish connecting the editor.
+                    </p>
+                )}
+                <button
+                    className="mt-5 block w-full text-center text-primary text-sm hover:underline"
+                    onClick={() => { setMagicSentTo(""); setFormError(""); }}
+                >
+                    Use a different email
+                </button>
             </AuthShell>
         );
     }
@@ -259,6 +308,18 @@ export default function AuthHub() {
                 <span className="text-xs text-muted-foreground">or</span>
                 <div className="h-px flex-1 bg-border/50" />
             </div>
+
+            {/* Sign-in only: the magic-link route is login-only, so offering it
+                on the Create account tab would promise an email that never comes. */}
+            {tab === "signin" && (
+                <button
+                    className="h-10 w-full mb-3 rounded-md border border-border bg-secondary/50 text-sm font-semibold text-foreground hover:border-primary transition-colors disabled:opacity-50"
+                    onClick={handleMagicLink}
+                    disabled={magicSending}
+                >
+                    {magicSending ? "Sending…" : "Email me a sign-in link"}
+                </button>
+            )}
 
             <button
                 className="h-10 w-full rounded-md border border-border bg-secondary/50 text-sm font-semibold text-foreground hover:border-primary transition-colors flex items-center justify-center gap-2"

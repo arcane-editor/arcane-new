@@ -137,6 +137,22 @@ export async function apiSignup(email: string, password: string, turnstileToken?
     return res.json();
 }
 
+/** Requests an emailed sign-in link. Always resolves for any well-formed
+ *  request — the server deliberately gives no signal about whether the
+ *  address has an account. */
+export async function apiMagicLinkRequest(email: string, turnstileToken?: string): Promise<void> {
+    const body: Record<string, string> = { email };
+    if (turnstileToken) body['cf-turnstile-response'] = turnstileToken;
+    const res = await fetch(`${API_URL}/v1/auth/magic/request`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+        throw new Error(await readErrorMessage(res, "Couldn't send the sign-in link"));
+    }
+}
+
 export async function apiGetMe(token: string): Promise<MeResponse> {
     const res = await fetch(`${API_URL}/v1/auth/me`, {
         headers: { 'Authorization': `Bearer ${token}` },

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { sendVerificationEmail, sendPasswordResetEmail } from '../src/lib/email.ts';
+import { sendVerificationEmail, sendPasswordResetEmail, sendMagicLinkEmail } from '../src/lib/email.ts';
 import type { EmailSender } from '../src/types.ts';
 
 type SentMessage = Parameters<EmailSender['send']>[0];
@@ -32,6 +32,16 @@ describe('email lib', () => {
         expect(calls[0]!.subject).toBe('Reset your Arcane password');
         expect(calls[0]!.text).toContain('https://dev.arcaneai.org/reset?token=tok456');
         expect(calls[0]!.html).toContain('https://dev.arcaneai.org/reset?token=tok456');
+    });
+
+    it('sendMagicLinkEmail links to /auth?code= — the branch AuthHub exchanges', async () => {
+        const calls: SentMessage[] = [];
+        await sendMagicLinkEmail(fakeEnv(calls), 'user@test.dev', 'tok789');
+        expect(calls).toHaveLength(1);
+        expect(calls[0]!.to).toBe('user@test.dev');
+        expect(calls[0]!.subject).toBe('Your Arcane sign-in link');
+        expect(calls[0]!.text).toContain('https://dev.arcaneai.org/auth?code=tok789');
+        expect(calls[0]!.html).toContain('https://dev.arcaneai.org/auth?code=tok789');
     });
 
     it('never throws when the binding rejects (waitUntil safety)', async () => {
