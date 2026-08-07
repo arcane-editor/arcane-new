@@ -3,10 +3,11 @@ import { Button } from "@/components/ui/button";
 import { Menu, X } from "lucide-react";
 import { getStoredToken } from "@/lib/auth";
 
+// Order mirrors the landing page itself: features → download → pricing → docs.
 const links = [
   { label: "Features", href: "/features" },
-  { label: "Pricing", href: "/pricing" },
   { label: "Download", href: "#download" },
+  { label: "Pricing", href: "/pricing" },
   { label: "Docs", href: "/docs/" },
 ];
 
@@ -66,23 +67,32 @@ const Navbar = () => {
               <a
                 key={l.label}
                 href={l.href}
-                className={`relative rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
-                  isActive ? "text-primary" : "text-muted-foreground hover:text-foreground"
+                className={`group relative rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
+                  isActive ? "text-primary" : "text-muted-foreground hover:text-primary"
                 }`}
               >
                 {l.label}
-                {isActive && (
-                  <span className="absolute bottom-0 left-1/2 -translate-x-1/2 h-0.5 w-6 rounded-full bg-primary glow-orange-sm" />
-                )}
+                {/* Always rendered, so the bar can TRANSITION rather than pop
+                    in — mounting it only when active gave no animation. Grows
+                    from the centre (default transform-origin) on hover, and
+                    stays put while the section is active. */}
+                <span
+                  className={`pointer-events-none absolute bottom-0 left-1/2 h-0.5 w-6 -translate-x-1/2 rounded-full bg-primary glow-orange-sm transition-transform duration-200 ease-out ${
+                    isActive ? "scale-x-100" : "scale-x-0 group-hover:scale-x-100"
+                  }`}
+                />
               </a>
             );
           })}
 
+          {/* Same hover treatment as the nav links above — it sits in the same
+              row, so hovering it to a different colour reads as a bug. */}
           <a
             href={authed ? "/account" : "/auth"}
-            className="relative rounded-lg px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+            className="group relative rounded-lg px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-primary"
           >
             {authed ? "Account" : "Sign in"}
+            <span className="pointer-events-none absolute bottom-0 left-1/2 h-0.5 w-6 -translate-x-1/2 scale-x-0 rounded-full bg-primary glow-orange-sm transition-transform duration-200 ease-out group-hover:scale-x-100" />
           </a>
 
           <Button variant="hero" size="sm" className="ml-4" asChild>
@@ -103,7 +113,7 @@ const Navbar = () => {
                 key={l.label}
                 href={l.href}
                 onClick={() => setOpen(false)}
-                className="rounded-md px-3 py-2 text-sm font-medium text-muted-foreground hover:text-primary"
+                className="rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary"
               >
                 {l.label}
               </a>
@@ -111,7 +121,7 @@ const Navbar = () => {
             <a
               href={authed ? "/account" : "/auth"}
               onClick={() => setOpen(false)}
-              className="rounded-md px-3 py-2 text-sm font-medium text-muted-foreground hover:text-primary"
+              className="rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary"
             >
               {authed ? "Account" : "Sign in"}
             </a>
