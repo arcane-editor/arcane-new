@@ -7,7 +7,7 @@ import { hashPassword, verifyPassword } from '../lib/crypto.ts';
 import { authMiddleware, mintAuthResponse } from '../middleware/auth.ts';
 import type { AuthPayload } from '../middleware/auth.ts';
 import { generateToken, sha256Hex, TOKEN_TTL_SECONDS } from '../lib/tokens.ts';
-import { sendVerificationEmail, sendPasswordResetEmail } from '../lib/email.ts';
+import { sendVerificationEmail, sendPasswordResetEmail, sendMagicLinkEmail } from '../lib/email.ts';
 import { verifyTurnstile } from '../lib/turnstile.ts';
 import { logAuthEvent } from '../lib/log.ts';
 import type { AppEnv } from '../types.ts';
@@ -57,6 +57,49 @@ authEmailRouter.post('/v1/auth/resend-verification', authMiddleware(), async (c)
     c.executionCtx.waitUntil(sendVerificationEmail(c.env, user.email, rawToken));
     logAuthEvent('verification_resent', { userId: user.id });
     return c.json({ ok: true });
+});
+
+// ─── Passwordless sign-in (magic link) ──────────────────────
+
+// Login-only, never login-or-register. This endpoint is unauthenticated and
+// wired to the send_email binding, so auto-registering would let anyone mint
+// users rows for arbitrary addresses AND make no-reply@arcaneai.org send to
+// them — a spam-relay vector against the domain's sending reputation. New
+// users go through /v1/auth/signup.
+authEmailRouter.post('/v1/auth/magic/request', async (c) => {
+    const body = await c.req.json<Record<string, unknown>>();
+    const email = body.email;
+    // Always-200 on the account-existence axis: no enumeration oracle.
+    const ok = () => c.json({ ok: true });
+    const turnstileOk = await verifyTurnstile(
+        c.env.TURNSTILE_SECRET,
+        (body['cf-turnstile-response'] ?? body.turnstileToken) as string | undefined,
+        c.req.header('CF-Connecting-IP'),
+    );
+    if (!turnstileOk) {
+        return c.json({ error: 'turnstile_failed' }, 400);
+    }
+    if (typeof email !== 'string' || !email) {
+        return ok();
+    }
+    const db = c.env.arcane_db;
+    await cleanExpiredAuthTokens(db);
+    const user = await findUserByEmail(db, email);
+    if (!user) {
+        return ok();
+    }
+    // Silent throttle — still {ok:true} so throttling can't be probed either.
+    if (await countRecentAuthTokens(db, user.id, 'magic_login') >= 3) {
+        return ok();
+    }
+    const rawToken = generateToken();
+    await createAuthToken(db, {
+        userId: user.id, purpose: 'magic_login',
+        tokenHash: await sha256Hex(rawToken), ttlSeconds: TOKEN_TTL_SECONDS.magic_login,
+    });
+    c.executionCtx.waitUntil(sendMagicLinkEmail(c.env, user.email, rawToken));
+    logAuthEvent('magic_link_requested', { userId: user.id });
+    return ok();
 });
 
 // ─── Password reset ─────────────────────────────────────────

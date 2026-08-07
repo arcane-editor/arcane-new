@@ -29,6 +29,9 @@ describe('tokens lib', () => {
             verify_email: 86400,
             password_reset: 1800,
             web_login: 60,
+            // Emailed sign-in link — must stay a separate purpose from
+            // web_login, whose 60s is tuned for an instant redirect handoff.
+            magic_login: 900,
         });
     });
 });

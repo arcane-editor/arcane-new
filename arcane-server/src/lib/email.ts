@@ -37,6 +37,17 @@ export async function sendVerificationEmail(env: EmailEnv, to: string, token: st
     );
 }
 
+export async function sendMagicLinkEmail(env: EmailEnv, to: string, token: string): Promise<void> {
+    // Lands on /auth, whose ?code= branch already exchanges the one-time code
+    // for a session — the same path Google's callback redirects to.
+    const link = `${env.WEB_BASE_URL}/auth?code=${token}`;
+    await sendEmail(
+        env, to, 'Your Arcane sign-in link',
+        `Sign in to Arcane by opening this link:\n${link}\n\nThe link expires in 15 minutes and can be used once. If you didn't request it, ignore this email — nothing has changed.`,
+        `<p>Sign in to Arcane:</p><p><a href="${link}">Sign in</a></p><p>Or paste this link into your browser:<br>${link}</p><p>The link expires in 15 minutes and can be used once. If you didn't request it, ignore this email — nothing has changed.</p>`,
+    );
+}
+
 export async function sendPasswordResetEmail(env: EmailEnv, to: string, token: string): Promise<void> {
     const link = `${env.WEB_BASE_URL}/reset?token=${token}`;
     await sendEmail(

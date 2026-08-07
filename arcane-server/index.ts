@@ -45,6 +45,7 @@ for (const path of [
     '/v1/auth/signup', '/v1/auth/login', '/v1/auth/forgot', '/v1/auth/reset',
     '/v1/auth/verify', '/v1/auth/resend-verification', '/v1/auth/change-password',
     '/v1/auth/web/exchange', '/v1/auth/editor/exchange', '/v1/auth/google/start',
+    '/v1/auth/magic/request',
 ]) {
     app.use(path, strict);
 }

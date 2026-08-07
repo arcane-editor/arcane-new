@@ -5,6 +5,10 @@ export const TOKEN_TTL_SECONDS = {
     verify_email: 24 * 60 * 60,   // 24 h
     password_reset: 30 * 60,      // 30 min
     web_login: 60,                // 60 s (Google → website handoff code)
+    // Emailed sign-in link. Deliberately NOT a longer `web_login`: that one is
+    // an instant redirect handoff, and stretching it to minutes would leave
+    // Google's code sitting in browser history far longer than it needs to.
+    magic_login: 15 * 60,         // 15 min
     // `editor_login` retired in 0016: the website → editor handoff code now
     // lives on the editor_attempts row (see src/lib/attempts.ts), which binds
     // it to a PKCE challenge and gives the poll channel something to consume.
