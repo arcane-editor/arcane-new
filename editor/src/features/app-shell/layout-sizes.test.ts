@@ -110,4 +110,14 @@ describe('widthsForRestore', () => {
     widthsForRestore(current, 0, 400, EDITOR_PANE_INDEX, MIN_EDITOR_WIDTH);
     expect(current).toEqual([0, 1120, 480]);
   });
+
+  // The sibling resolveSideWidth guards `<= 0` for the same reason: a stored
+  // width can be garbage. Without a floor here the "fits" branch happily
+  // returns a negative pane, because shrinking the pane only grows the editor.
+  it('floors a non-positive width at zero rather than returning a negative pane', () => {
+    expect(widthsForRestore([0, 1120, 480], 0, -50, EDITOR_PANE_INDEX, MIN_EDITOR_WIDTH))
+      .toEqual([0, 1120, 480]);
+    expect(widthsForRestore([0, 1120, 480], 0, 0, EDITOR_PANE_INDEX, MIN_EDITOR_WIDTH))
+      .toEqual([0, 1120, 480]);
+  });
 });

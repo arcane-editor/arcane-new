@@ -87,7 +87,7 @@ export function widthsForRestore(
 ): number[] {
   const total = current.reduce((sum, n) => sum + n, 0);
   const next = [...current];
-  next[paneIndex] = Math.round(width);
+  next[paneIndex] = Math.max(0, Math.round(width));
 
   const nonEditor = next.reduce((sum, n, i) => (i === editorIndex ? sum : sum + n), 0);
   const editor = total - nonEditor;
