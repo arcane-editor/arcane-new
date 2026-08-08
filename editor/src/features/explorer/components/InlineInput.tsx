@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { isolateFromTree } from './tree-key-isolation';
 
 interface InlineInputProps {
   defaultValue: string;
@@ -83,7 +84,10 @@ function InlineInput({ defaultValue, onSubmit, onCancel, siblingNames = [] }: In
         onKeyDown={(e) => {
           if (e.key === 'Enter') { e.preventDefault(); commit(inputRef.current?.value ?? ''); }
           if (e.key === 'Escape') { e.preventDefault(); cancel(); }
-          e.stopPropagation();
+          // Not a blanket stop: that also blocked every app hotkey, because
+          // react-hotkeys-hook listens on `document` and React's listeners sit
+          // on #root below it. See tree-key-isolation.ts for the policy.
+          if (isolateFromTree(e)) e.stopPropagation();
         }}
         onBlur={() => {
           // Match VS Code: commit a valid name on blur, otherwise abandon the
