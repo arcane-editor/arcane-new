@@ -160,10 +160,12 @@ function App() {
 
   const prevShownRef = useRef({ sidebar: sidebarVisible, rightPanel: rightSidebarVisible });
 
-  // Reads visibility from the store rather than the render closure. Allotment
-  // assigns `onDidChange` in an effect that runs *after* its reconcile effect,
-  // so the callback invoked during a visibility flip is the previous render's
-  // — with a stale `sidebarVisible` captured. getState() is always current.
+  // Reads visibility from the store rather than a closure. Allotment rebinds
+  // `onDidChange` in a passive effect, which always runs after this commit's
+  // layout effects — so a layout-effect-timed visibility flip fires whichever
+  // callback was bound *before* this render, no matter how that callback's
+  // own dependency array is written. getState() is the only visibility read
+  // that is guaranteed current at that moment.
   const onLayoutChange = useCallback((sizes: number[]) => {
     currentSizesRef.current = sizes;
     const ui = useUiStore.getState();
@@ -210,26 +212,36 @@ function App() {
     const handle = allotmentRef.current;
     if (!handle) return;
 
-    let paneIndex: number | null = null;
-    let width = 0;
+    // Two independent blocks, not if/else if — mirrors the two separate `if`s
+    // above so a same-commit double show (both panes hidden -> visible at
+    // once) restores both instead of silently dropping the second. Each call
+    // reads currentSizesRef.current fresh rather than a hoisted local:
+    // handle.resize() re-enters onLayoutChange synchronously, which updates
+    // currentSizesRef.current before the next widthsForRestore call below
+    // runs. Reading a value captured earlier would compute the second
+    // correction against the pre-first-resize sizes and clobber it.
     if (!prev.sidebar && sidebarVisible) {
-      paneIndex = 0;
-      width = restoreWidthsRef.current.sidebar;
-    } else if (!prev.rightPanel && rightSidebarVisible) {
-      paneIndex = currentSizesRef.current.length - 1;
-      width = restoreWidthsRef.current.rightPanel;
+      handle.resize(
+        widthsForRestore(
+          currentSizesRef.current,
+          0,
+          restoreWidthsRef.current.sidebar,
+          EDITOR_PANE_INDEX,
+          MIN_EDITOR_WIDTH,
+        ),
+      );
     }
-    if (paneIndex === null) return;
-
-    handle.resize(
-      widthsForRestore(
-        currentSizesRef.current,
-        paneIndex,
-        width,
-        EDITOR_PANE_INDEX,
-        MIN_EDITOR_WIDTH,
-      ),
-    );
+    if (!prev.rightPanel && rightSidebarVisible) {
+      handle.resize(
+        widthsForRestore(
+          currentSizesRef.current,
+          currentSizesRef.current.length - 1,
+          restoreWidthsRef.current.rightPanel,
+          EDITOR_PANE_INDEX,
+          MIN_EDITOR_WIDTH,
+        ),
+      );
+    }
   }, [sidebarVisible, rightSidebarVisible]);
 
   // Restore persisted state on mount
