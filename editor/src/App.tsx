@@ -13,6 +13,7 @@ import {
   StatusBar,
   TabBar,
   TitleBar,
+  initialPaneSizes,
 } from './features/app-shell';
 import { EditorPanel, Breadcrumbs, EditorErrorBoundary } from './features/editor';
 import {
@@ -122,24 +123,13 @@ function App() {
     return path ? (path.split('/').filter(Boolean).pop() ?? null) : null;
   }, []);
   // Initial horizontal split: each side pane defaults to 30% of the window on
-  // first open (editor takes the rest); persisted drags win. defaultSizes are
-  // absolute px scaled to fit, and must have one entry per always-mounted pane.
+  // first open (editor takes the rest); persisted drags win. Arithmetic lives
+  // in layout-sizes.ts so it can be unit-tested — see that module for why the
+  // implausible-value cap is 80% rather than the 45% that used to discard a
+  // deliberately wide sidebar on every launch.
   const initialLayout = useMemo(() => {
     const w = typeof window !== 'undefined' ? window.innerWidth : 1280;
-    // Use a persisted width only when it's plausible for a side pane; discard
-    // unset/invalid or implausibly large values (e.g. left over from a bad layout)
-    // and fall back to the default fraction so panes never open absurdly wide.
-    const sideWidth = (v: number | undefined, fallbackFrac: number) => {
-      const fallback = Math.round(w * fallbackFrac);
-      if (typeof v !== 'number' || !Number.isFinite(v) || v <= 0 || v > w * 0.45) {
-        return fallback;
-      }
-      return Math.round(v);
-    };
-    const left = sideWidth(persistedLayout.sidebar, 0.3);
-    const right = sideWidth(persistedLayout.rightPanel, 0.3);
-    const editor = Math.max(w - left - right, 320);
-    return { left, right, sizes: [left, editor, right] };
+    return initialPaneSizes(persistedLayout, w);
   }, [persistedLayout]);
 
   // Restore persisted state on mount

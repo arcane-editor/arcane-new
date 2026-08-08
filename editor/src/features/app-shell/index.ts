@@ -8,3 +8,4 @@ export { default as SidebarPanel } from './components/SidebarPanel';
 export { default as StatusBar } from './components/StatusBar';
 export { default as TabBar } from './components/TabBar';
 export { default as TitleBar } from './components/TitleBar';
+export { initialPaneSizes } from './layout-sizes';
