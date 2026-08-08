@@ -3405,7 +3405,30 @@ html, body, #root {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  /* The filename is the identifying part of a chip, so it holds its intrinsic
+     width and the directory beside it gives way instead. */
+  flex: 0 0 auto;
+}
+
+/* Parent directory, dimmed and secondary to the filename.
+
+   Truncates from the LEFT: `features/ai-panel/components` cut from the right
+   leaves `features/ai-p…`, which is the half that does not disambiguate. RTL
+   direction moves the ellipsis to the front, and `unicode-bidi: plaintext` is
+   load-bearing — without it the RTL context reorders the `/` separators and
+   renders the segments in the wrong order. */
+.ai-panel-attachment-dir {
+  direction: rtl;
+  text-align: left;
+  unicode-bidi: plaintext;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   min-width: 0;
+  flex: 0 1 auto;
+  color: var(--text-secondary);
+  font-size: 10px;
+  opacity: 0.85;
 }
 
 .ai-panel-attachment-remove {
@@ -3511,6 +3534,10 @@ html, body, #root {
 .ai-panel-mention-icon {
   color: var(--text-secondary);
   flex-shrink: 0;
+  /* Also used as a wrapper around an <img> material icon, which needs a flex
+     box to sit on the text baseline the way the inline lucide SVGs do. */
+  display: inline-flex;
+  align-items: center;
 }
 
 .ai-panel-mention-label {

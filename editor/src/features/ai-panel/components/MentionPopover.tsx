@@ -24,6 +24,7 @@ import { useUnitySceneStore } from '../../../stores/unity-scene';
 import { useUnityIndexStore, getGuidMap, INDEX_RELEVANT } from '../../../stores/unity-index';
 import type { HierarchyNode } from '../../unity-bridge';
 import { UNITY_API_LIST, UNITY_API_DEFAULTS } from '../../../data/unity-api-list';
+import { FileIcon } from '../../../utils/file-icons';
 
 type CategoryId = 'files' | 'unity-docs' | 'unity-console' | 'scene-objects' | 'assets';
 
@@ -537,11 +538,19 @@ function EntryRow({
   let label = '';
   let meta = '';
   switch (entry.kind) {
-    case 'file':
-      icon = <FileText size={14} className="ai-panel-mention-icon" />;
-      label = entry.relPath.split('/').pop() ?? entry.relPath;
+    case 'file': {
+      // Same icon the explorer and tab bar show for this file, so picking a
+      // result and seeing it staged as a chip look like the same object.
+      const name = entry.relPath.split('/').pop() ?? entry.relPath;
+      icon = (
+        <span className="ai-panel-mention-icon">
+          <FileIcon name={name} size={14} />
+        </span>
+      );
+      label = name;
       meta = dirOf(entry.relPath);
       break;
+    }
     case 'unity-doc':
       icon = <BookOpen size={14} className="ai-panel-mention-icon" />;
       label = entry.name;
@@ -557,11 +566,17 @@ function EntryRow({
       label = entry.name;
       meta = 'object';
       break;
-    case 'unity-asset':
-      icon = <Box size={14} className="ai-panel-mention-icon" />;
-      label = entry.relPath.split('/').pop() ?? entry.relPath;
+    case 'unity-asset': {
+      const name = entry.relPath.split('/').pop() ?? entry.relPath;
+      icon = (
+        <span className="ai-panel-mention-icon">
+          <FileIcon name={name} size={14} />
+        </span>
+      );
+      label = name;
       meta = extOf(entry.relPath);
       break;
+    }
   }
   return (
     <button
