@@ -1,4 +1,5 @@
 import { Files, GitBranch, Search, Settings, Bug, Network, FlaskConical, SquareTerminal } from 'lucide-react';
+import { formatKeybinding } from '../../../utils/format-keybinding';
 import { useUiStore, type SidebarView } from '../../../stores/ui';
 import { useCommandsStore } from '../../../stores/commands';
 import { useProjectContextStore } from '../../../stores/project-context';
@@ -27,6 +28,13 @@ function ActivityBar() {
     const uniquePaths = new Set(allChanges);
     return uniquePaths.size;
   });
+
+  // Read the chord back out of the registry rather than writing it here. The
+  // tooltip used to hardcode "Cmd+`" and went stale the moment the binding
+  // moved; formatKeybinding is the same formatter the onboarding signpost uses.
+  const terminalChord = useCommandsStore(
+    (s) => s.commands.get('terminal.toggle')?.keybinding
+  );
 
   const items: typeof SIDEBAR_ITEMS = [
     ...SIDEBAR_ITEMS,
@@ -90,7 +98,7 @@ function ActivityBar() {
             // terminal when none exists yet.
             useCommandsStore.getState().executeCommand('terminal.toggle');
           }}
-          title="Terminal (Cmd+`)"
+          title={terminalChord ? `Terminal (${formatKeybinding(terminalChord)})` : 'Terminal'}
         >
           <SquareTerminal size={24} />
         </button>

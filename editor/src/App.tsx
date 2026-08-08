@@ -469,7 +469,12 @@ function App() {
       id: 'terminal.toggle',
       label: 'Toggle Terminal',
       category: 'Terminal',
-      keybinding: 'mod+`',
+      // mod+j, not mod+`: this is the command that also spawns the first
+      // terminal, and mod+j is the chord users reach for (signpost.ts:14
+      // documents the reverse confusion this replaces). On Linux/Windows
+      // Ctrl+J is LF, but terminal.toggle is in COMMANDS_TO_SKIP_SHELL so the
+      // app wins — you must be able to close the panel from inside it.
+      keybinding: 'mod+j',
       handler: () => {
         const ui = useUiStore.getState();
         const wasVisible = ui.bottomPanelVisible;
@@ -691,7 +696,9 @@ function App() {
       id: 'view.toggleBottomPanel',
       label: 'Toggle Bottom Panel',
       category: 'View',
-      keybinding: 'mod+j',
+      // Deliberately unbound. `terminal.toggle` owns mod+j because it also
+      // spawns the first terminal; this plain visibility flip stays reachable
+      // from the command palette so two commands never share one chord.
       handler: () => {
         useUiStore.getState().toggleBottomPanel();
       },
