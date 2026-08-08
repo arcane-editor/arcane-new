@@ -304,13 +304,19 @@ export function loadLayoutSizes(): LayoutSizes {
   return cachedWindows[label]?.layoutSizes ?? {};
 }
 
-export function saveLayoutSizes(sizes: LayoutSizes): void {
+/**
+ * Returns the underlying write's promise, unlike `saveState`'s
+ * fire-and-forget `void writeWindowState(...)`, so `layout-persist.ts`'s
+ * `flush()` can be awaited by close-time callers (`flushLayoutPersisters`)
+ * and actually wait for the store write rather than just firing it.
+ */
+export function saveLayoutSizes(sizes: LayoutSizes): Promise<void> {
   const label = currentLabel();
   const existing = cachedWindows[label] ?? { workspacePath: null, openFilePaths: [], activeFilePath: null };
   const merged: LayoutSizes = { ...existing.layoutSizes, ...sizes };
   const next: WindowState = { ...existing, layoutSizes: merged };
   cachedWindows[label] = next;
-  void writeWindowState(label, next);
+  return writeWindowState(label, next);
 }
 
 async function writeWindowState(label: string, state: WindowState): Promise<void> {

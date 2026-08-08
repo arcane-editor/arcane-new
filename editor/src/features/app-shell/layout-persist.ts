@@ -1,3 +1,5 @@
+import { saveLayoutSizes } from '../../utils/persistence';
+
 /**
  * Trailing-edge debounce for layout persistence.
  *
@@ -13,9 +15,9 @@
  * matters at next launch.
  */
 export function createLayoutPersister<T>(
-  write: (value: T) => void,
+  write: (value: T) => void | Promise<void>,
   delayMs = 250,
-): { persist(value: T): void; flush(): void; cancel(): void } {
+): { persist(value: T): void; flush(): void | Promise<void>; cancel(): void } {
   let timer: ReturnType<typeof setTimeout> | null = null;
   let pending: { value: T } | null = null;
 
@@ -38,12 +40,17 @@ export function createLayoutPersister<T>(
       }, delayMs);
     },
 
-    /** Write any pending value now — for teardown, before the window goes. */
-    flush(): void {
+    /**
+     * Write any pending value now — for teardown, before the window goes.
+     * Cancels the pending timer first (not just an early fire), and returns
+     * whatever `write` returns so a caller with an awaitable `write` (like
+     * `saveLayoutSizes` below) can wait for the write to actually go out.
+     */
+    flush(): void | Promise<void> {
       clear();
       const p = pending;
       pending = null;
-      if (p) write(p.value);
+      if (p) return write(p.value);
     },
 
     cancel(): void {
@@ -51,4 +58,45 @@ export function createLayoutPersister<T>(
       pending = null;
     },
   };
+}
+
+/**
+ * Module-level singletons, not per-render `useMemo` values.
+ *
+ * `<App/>` is never unmounted while its window is alive — closing a Tauri
+ * window tears down that window's whole webview/JS context directly, without
+ * routing through React's reconciler, so a `useEffect` cleanup on `<App/>`
+ * never runs at quit (there is no `.unmount()` call anywhere in this repo).
+ * A `useMemo`-scoped persister flushed only from such a cleanup is therefore
+ * dead code — the debounced write is genuinely delayed, but nothing ever
+ * forces it out at close time.
+ *
+ * The three flushes this app already relies on at close time —
+ * `useAiStore`'s `flushSessionNow`, `useCheckpointsStore`'s
+ * `flushCheckpointsNow`, `useEditReviewStore`'s `flushNow` — solve the same
+ * problem the same way: state reachable from outside any component's render
+ * scope (via `getState()`), driven from `useCloseGuard`'s
+ * `onCloseRequested` (awaited, blocks the actual window close) and
+ * `App.tsx`'s `beforeunload` handler (best-effort, for reload/navigation,
+ * which can't await). These two persisters are wired into both the same way,
+ * through `flushLayoutPersisters` below.
+ *
+ * Module scope here is already window-scoped, the same reason those three
+ * stores never leak state between windows: each Tauri window
+ * (`features/project/services/multi-window.ts`'s `new WebviewWindow(...)`)
+ * boots its own copy of this JS bundle in its own webview, with its own
+ * module registry. There is exactly one `layoutPersister`/`verticalPersister`
+ * pair *per window*, not one shared across all open windows.
+ */
+export const layoutPersister = createLayoutPersister<Parameters<typeof saveLayoutSizes>[0]>(saveLayoutSizes);
+export const verticalPersister = createLayoutPersister<number[]>((vertical) => saveLayoutSizes({ vertical }));
+
+/**
+ * Flushes both persisters and awaits `saveLayoutSizes`' underlying
+ * `store.save()` call. This waits for the Tauri store plugin's own save()
+ * to resolve — it does not, and cannot from here, guarantee an OS-level
+ * fsync-to-disk beyond whatever that plugin itself provides.
+ */
+export async function flushLayoutPersisters(): Promise<void> {
+  await Promise.all([layoutPersister.flush(), verticalPersister.flush()]);
 }

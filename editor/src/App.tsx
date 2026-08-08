@@ -15,8 +15,10 @@ import {
   StatusBar,
   TabBar,
   TitleBar,
-  createLayoutPersister,
+  flushLayoutPersisters,
   initialPaneSizes,
+  layoutPersister,
+  verticalPersister,
   widthsForRestore,
 } from './features/app-shell';
 import { EditorPanel, Breadcrumbs, EditorErrorBoundary } from './features/editor';
@@ -81,7 +83,6 @@ import {
   loadState,
   saveState,
   loadLayoutSizes,
-  saveLayoutSizes,
   planFileRestore,
   resolveActiveFilePath,
   shouldPersistTab,
@@ -161,13 +162,11 @@ function App() {
 
   const prevShownRef = useRef({ sidebar: sidebarVisible, rightPanel: rightSidebarVisible });
 
-  // One persister per window, flushed on teardown so a quit right after a drag
-  // still keeps the width. See layout-persist.ts for why this is debounced.
-  const layoutPersister = useMemo(
-    () => createLayoutPersister<Parameters<typeof saveLayoutSizes>[0]>(saveLayoutSizes),
-    [],
-  );
-  useEffect(() => () => layoutPersister.flush(), [layoutPersister]);
+  // layoutPersister/verticalPersister are module-level singletons (see
+  // layout-persist.ts), not per-render values — <App/> is never unmounted
+  // while its window is open, so a useEffect cleanup here would never run at
+  // quit. They're flushed from useCloseGuard's onCloseRequested and the
+  // beforeunload handler below instead.
 
   // Reads visibility from the store rather than a closure. Allotment rebinds
   // `onDidChange` in a passive effect, which always runs after this commit's
@@ -194,16 +193,11 @@ function App() {
     if (next.sidebar !== undefined || next.rightPanel !== undefined) {
       layoutPersister.persist(next);
     }
-  }, [layoutPersister]);
+  }, []);
 
-  const verticalPersister = useMemo(
-    () => createLayoutPersister<number[]>((vertical) => saveLayoutSizes({ vertical })),
-    [],
-  );
-  useEffect(() => () => verticalPersister.flush(), [verticalPersister]);
   const onVerticalLayoutChange = useCallback(
     (sizes: number[]) => verticalPersister.persist(sizes),
-    [verticalPersister],
+    [],
   );
 
   // Reopen a side pane at the width it was dragged to.
@@ -397,12 +391,14 @@ function App() {
     return unsub;
   }, []);
 
-  // Best-effort flush of the chat session (and its checkpoints/edit-reviews) on reload/navigation (can't await).
+  // Best-effort flush of the chat session (and its checkpoints/edit-reviews),
+  // and any pending layout-size write, on reload/navigation (can't await).
   useEffect(() => {
     const onBeforeUnload = () => {
       void useAiStore.getState().flushSessionNow();
       void useCheckpointsStore.getState().flushCheckpointsNow();
       void useEditReviewStore.getState().flushNow();
+      void flushLayoutPersisters();
     };
     window.addEventListener('beforeunload', onBeforeUnload);
     return () => window.removeEventListener('beforeunload', onBeforeUnload);
