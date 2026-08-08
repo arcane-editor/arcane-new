@@ -1,0 +1,245 @@
+/**
+ * Executable version of the token contract documented in `types.ts`.
+ *
+ * Themes broke in the past not because a palette was ugly but because the
+ * MECHANISM had no invariants: `--hover` was a 4% overlay in the Arcane themes
+ * and an opaque slab in the four VS Code-derived ones, so no single CSS rule
+ * could be right in both; `--bg-hover` was referenced 19 times and defined by
+ * nobody, so those hovers silently did nothing; `--overlay-shadow` was a bare
+ * colour used as a `box-shadow`, which is invalid and rendered no shadow at all.
+ *
+ * Each of those is a rule below. The section headers in `types.ts` are the
+ * single source of truth for which token belongs to which class — this file
+ * parses them rather than restating them, so the doc and the test cannot drift.
+ */
+import { describe, it, expect } from 'bun:test';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { join } from 'node:path';
+import { getAllThemes } from './registry';
+import type { ThemeDefinition } from './types';
+
+const THEME_DIR = import.meta.dir;
+const EDITOR_ROOT = join(THEME_DIR, '..', '..', '..');
+const SRC = join(EDITOR_ROOT, 'src');
+
+const themes: ThemeDefinition[] = getAllThemes();
+
+// ─── colour helpers ──────────────────────────────────────────────────
+
+interface Rgba { r: number; g: number; b: number; a: number }
+
+function parseColor(value: string): Rgba | null {
+  const hex = value.trim().match(/^#([0-9a-f]{3,8})$/i);
+  if (hex) {
+    let h = hex[1];
+    if (h.length === 3) h = [...h].map((c) => c + c).join('');
+    if (h.length === 6) h += 'ff';
+    if (h.length !== 8) return null;
+    const n = (i: number) => parseInt(h.slice(i, i + 2), 16);
+    return { r: n(0), g: n(2), b: n(4), a: n(6) / 255 };
+  }
+  const fn = value.trim().match(/^rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)(?:[,\s/]+([\d.]+))?\s*\)$/i);
+  if (fn) {
+    return { r: +fn[1], g: +fn[2], b: +fn[3], a: fn[4] === undefined ? 1 : +fn[4] };
+  }
+  return null;
+}
+
+function relativeLuminance({ r, g, b }: Rgba): number {
+  const ch = [r, g, b].map((v) => {
+    const s = v / 255;
+    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2];
+}
+
+/** WCAG contrast ratio. Both colours must be opaque for this to be meaningful. */
+function contrast(fg: string, bg: string): number {
+  const f = parseColor(fg), b = parseColor(bg);
+  if (!f || !b) return NaN;
+  const [hi, lo] = [relativeLuminance(f), relativeLuminance(b)].sort((x, y) => y - x);
+  return (hi + 0.05) / (lo + 0.05);
+}
+
+// ─── the contract, parsed out of types.ts ────────────────────────────
+
+type TokenClass = 'SURFACE' | 'FILL' | 'OVERLAY' | 'CONTENT' | 'SHADOWS';
+
+function tokenClasses(): Record<TokenClass, string[]> {
+  const src = readFileSync(join(THEME_DIR, 'types.ts'), 'utf8');
+  const body = src.slice(src.indexOf('export interface UiColors'));
+  const out: Record<string, string[]> = { SURFACE: [], FILL: [], OVERLAY: [], CONTENT: [], SHADOWS: [] };
+  let current: TokenClass | null = null;
+  for (const line of body.split('\n')) {
+    if (line.startsWith('}')) break;
+    const header = line.match(/\/\/ ── (SURFACE|FILL|OVERLAY|CONTENT|SHADOWS)/);
+    if (header) { current = header[1] as TokenClass; continue; }
+    const key = line.match(/^\s*'([\w-]+)':\s*string;/);
+    if (key && current) out[current].push(key[1]);
+  }
+  return out as Record<TokenClass, string[]>;
+}
+
+const CLASSES = tokenClasses();
+const ALL_TOKENS = Object.values(CLASSES).flat();
+
+describe('token contract is parseable', () => {
+  it('assigns every UiColors key to exactly one semantic class', () => {
+    expect(ALL_TOKENS.length).toBeGreaterThan(40);
+    expect(new Set(ALL_TOKENS).size).toBe(ALL_TOKENS.length);
+  });
+
+  it('registers all six themes', () => {
+    expect(themes.map((t) => t.id).sort()).toEqual([
+      'arcane-dark', 'arcane-light', 'dark-plus', 'dracula', 'light-plus', 'monokai',
+    ]);
+  });
+});
+
+describe.each(themes.map((t) => [t.id, t] as const))('%s', (_id, theme) => {
+  it('defines every token in the contract', () => {
+    const missing = ALL_TOKENS.filter((t) => !(t in theme.ui));
+    const extra = Object.keys(theme.ui).filter((k) => !ALL_TOKENS.includes(k));
+    expect({ missing, extra }).toEqual({ missing: [], extra: [] });
+  });
+
+  it('every colour token parses', () => {
+    const bad = ALL_TOKENS
+      .filter((t) => !CLASSES.SHADOWS.includes(t))
+      .filter((t) => parseColor(theme.ui[t as keyof typeof theme.ui]) === null)
+      .map((t) => `${t}=${theme.ui[t as keyof typeof theme.ui]}`);
+    expect(bad).toEqual([]);
+  });
+
+  // A surface is the only opaque thing under a floating element. If it is
+  // translucent, whatever is behind it reads through.
+  it('SURFACE tokens are fully opaque', () => {
+    const bad = CLASSES.SURFACE
+      .map((t) => [t, theme.ui[t as keyof typeof theme.ui]] as const)
+      .filter(([, v]) => (parseColor(v)?.a ?? 1) < 1)
+      .map(([t, v]) => `${t}=${v}`);
+    expect(bad).toEqual([]);
+  });
+
+  // A fill REPLACES a row's background, so it must hide what it covers.
+  it('FILL tokens are fully opaque', () => {
+    const bad = CLASSES.FILL
+      .map((t) => [t, theme.ui[t as keyof typeof theme.ui]] as const)
+      .filter(([, v]) => (parseColor(v)?.a ?? 1) < 1)
+      .map(([t, v]) => `${t}=${v}`);
+    expect(bad).toEqual([]);
+  });
+
+  // An overlay is composited ON something. Opaque here means it erases the
+  // layer it was supposed to tint.
+  it('OVERLAY tokens are translucent', () => {
+    const bad = CLASSES.OVERLAY
+      .map((t) => [t, theme.ui[t as keyof typeof theme.ui]] as const)
+      .filter(([, v]) => (parseColor(v)?.a ?? 1) >= 1)
+      .map(([t, v]) => `${t}=${v}`);
+    expect(bad).toEqual([]);
+  });
+
+  // `box-shadow: rgba(...)` is invalid and renders nothing.
+  it('SHADOW tokens are complete box-shadow lists, not bare colours', () => {
+    const bad = CLASSES.SHADOWS
+      .map((t) => [t, theme.ui[t as keyof typeof theme.ui]] as const)
+      .filter(([, v]) => parseColor(v) !== null || !/\d/.test(v))
+      .map(([t, v]) => `${t}=${v}`);
+    expect(bad).toEqual([]);
+  });
+
+  it('body text clears WCAG AA on every surface it sits on', () => {
+    const failures: string[] = [];
+    for (const bg of ['bg-primary', 'bg-sidebar', 'bg-input'] as const) {
+      const r = contrast(theme.ui['text-primary'], theme.ui[bg]);
+      if (r < 4.5) failures.push(`text-primary on ${bg} = ${r.toFixed(2)}`);
+    }
+    expect(failures).toEqual([]);
+  });
+
+  it('secondary text and accents clear the 3:1 UI-text floor', () => {
+    const failures: string[] = [];
+    for (const [fg, bg] of [
+      ['text-secondary', 'bg-primary'], ['text-secondary', 'bg-sidebar'],
+      ['accent', 'bg-primary'], ['accent', 'bg-sidebar'],
+    ] as const) {
+      const r = contrast(theme.ui[fg], theme.ui[bg]);
+      if (r < 3) failures.push(`${fg} on ${bg} = ${r.toFixed(2)}`);
+    }
+    expect(failures).toEqual([]);
+  });
+
+  // The regression this was written for: `bg-statusbar` is VS Code blue in the
+  // +Plus themes regardless of theme type, so no `[data-theme-type]` rule can
+  // pick its foreground. Each theme states it, and it has to be readable.
+  it('status bar text clears WCAG AA on its own bar', () => {
+    const r = contrast(theme.ui['statusbar-fg'], theme.ui['bg-statusbar']);
+    expect(r).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it('primary button text clears WCAG AA on its own button', () => {
+    const r = contrast(theme.ui['button-primary-text'], theme.ui['button-primary-bg']);
+    expect(r).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it('hover and selected fills are distinguishable from the surfaces they sit on', () => {
+    for (const bg of ['bg-primary', 'bg-sidebar'] as const) {
+      for (const fill of ['hover', 'selected'] as const) {
+        expect(theme.ui[fill]).not.toBe(theme.ui[bg]);
+      }
+    }
+  });
+});
+
+// ─── stylesheet references must resolve ──────────────────────────────
+
+function sourceFiles(dir: string, out: string[] = []): string[] {
+  for (const entry of readdirSync(dir)) {
+    const p = join(dir, entry);
+    if (statSync(p).isDirectory()) sourceFiles(p, out);
+    else if (/\.(css|tsx|ts)$/.test(p) && !p.endsWith('.test.ts')) out.push(p);
+  }
+  return out;
+}
+
+/** Blanks out block comments and whole-line `//` comments, preserving line count. */
+function stripComments(text: string): string {
+  const withoutBlocks = text.replace(/\/\*[\s\S]*?\*\//g, (block) => block.replace(/[^\n]/g, ' '));
+  return withoutBlocks
+    .split('\n')
+    .map((line) => (/^\s*(\/\/|\*)/.test(line) ? '' : line))
+    .join('\n');
+}
+
+describe('every custom-property reference resolves', () => {
+  it('has no reference to a token that no theme and no :root block defines', () => {
+    const files = sourceFiles(SRC);
+
+    // Tokens can also come from a plain CSS `--x: value` declaration (the font
+    // stacks live in App.css's :root, not in the themes).
+    const cssDefined = new Set<string>();
+    const references = new Map<string, string[]>();
+
+    for (const file of files) {
+      const text = readFileSync(file, 'utf8');
+      for (const m of text.matchAll(/(?<!var\()--([\w-]+)\s*:/g)) cssDefined.add(m[1]);
+      // Prose in doc comments talks about tokens without referencing them.
+      stripComments(text).split('\n').forEach((line, i) => {
+        for (const m of line.matchAll(/var\(\s*--([\w-]+)\s*\)/g)) {
+          // Bare references only: one WITH a fallback still renders something.
+          const where = `${file.slice(EDITOR_ROOT.length + 1)}:${i + 1}`;
+          references.set(m[1], [...(references.get(m[1]) ?? []), where]);
+        }
+      });
+    }
+
+    const known = new Set([...ALL_TOKENS, ...cssDefined]);
+    const dangling: string[] = [];
+    for (const [token, where] of references) {
+      if (known.has(token)) continue;
+      dangling.push(`--${token} (${where.length}x, e.g. ${where[0]})`);
+    }
+    expect(dangling).toEqual([]);
+  });
+});

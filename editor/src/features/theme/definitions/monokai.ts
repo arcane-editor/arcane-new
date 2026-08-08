@@ -20,6 +20,8 @@ const monokai: ThemeDefinition = {
     'text-breadcrumb': '#a0a0a0',
     'text-breadcrumb-active': '#f8f8f2',
     'text-on-dark': '#f8f8f2',
+    // on #414339 dark olive
+    'statusbar-fg': '#f8f8f2',
     'border': '#3b3a32',
     'accent': '#a6e22e',
     'accent-secondary': '#f92672',
@@ -29,7 +31,6 @@ const monokai: ThemeDefinition = {
     'git-added': '#a6e22e',
     'git-deleted': '#f92672',
     'git-untracked': '#a6e22e',
-    'overlay-shadow': 'rgba(0, 0, 0, 0.5)',
     'badge-bg': 'rgba(255, 255, 255, 0.1)',
     'hover-overlay': 'rgba(255, 255, 255, 0.08)',
     'statusbar-hover': 'rgba(255, 255, 255, 0.12)',

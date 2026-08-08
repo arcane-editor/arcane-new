@@ -49,7 +49,7 @@ export function TelemetryStatusItem() {
             bottom: '100%',
             right: 0,
             marginBottom: 6,
-            background: 'var(--bg-dropdown, var(--bg-sidebar))',
+            background: 'var(--bg-sidebar)',
             border: '1px solid var(--border)',
             borderRadius: 4,
             padding: '8px 10px',

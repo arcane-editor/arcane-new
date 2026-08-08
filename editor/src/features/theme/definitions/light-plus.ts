@@ -20,6 +20,8 @@ const lightPlus: ThemeDefinition = {
     'text-breadcrumb': '#717171',
     'text-breadcrumb-active': '#333333',
     'text-on-dark': '#ffffff',
+    // on #007acc VS Code blue
+    'statusbar-fg': '#ffffff',
     'border': '#e5e5e5',
     'accent': '#007acc',
     'accent-secondary': '#33aadd',
@@ -29,7 +31,6 @@ const lightPlus: ThemeDefinition = {
     'git-added': '#587c0c',
     'git-deleted': '#ad0707',
     'git-untracked': '#587c0c',
-    'overlay-shadow': 'rgba(0, 0, 0, 0.16)',
     'badge-bg': 'rgba(0, 0, 0, 0.08)',
     'hover-overlay': 'rgba(0, 0, 0, 0.05)',
     'statusbar-hover': 'rgba(255, 255, 255, 0.12)',

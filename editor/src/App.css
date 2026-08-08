@@ -736,7 +736,7 @@ html, body, #root {
 }
 
 .welcome-recent-item:hover {
-  background: var(--bg-hover, var(--hover-overlay));
+  background: var(--hover);
 }
 
 .welcome-recent-name {
@@ -801,7 +801,7 @@ html, body, #root {
   padding: 2px 6px;
   border: 1px solid var(--border);
   border-radius: 4px;
-  background: var(--bg-secondary);
+  background: var(--surface-container-high);
   color: var(--text-primary);
   font-family: var(--font-mono, monospace);
   font-size: 11px;
@@ -853,14 +853,14 @@ html, body, #root {
   justify-content: space-between;
   padding: 0 12px;
   font-size: 12px;
-  color: var(--text-on-dark);
+  /* Stated per theme, NOT derived from the theme type. The +Plus themes paint
+     this bar VS Code blue while still being dark/light themes respectively, so
+     the old `[data-theme-type="dark"] { color: var(--text-primary) }` override
+     put #cccccc grey on #007acc blue — 2.81:1, well under AA. Now 4.51:1. */
+  color: var(--statusbar-fg);
   flex-shrink: 0;
   position: relative;
   border-top: 1px solid color-mix(in srgb, var(--accent) 18%, transparent);
-}
-
-:root[data-theme-type="dark"] .status-bar {
-  color: var(--text-primary);
 }
 
 .status-bar-left,
@@ -1200,7 +1200,7 @@ html, body, #root {
   gap: 8px;
   padding: 4px 10px;
   font-size: 12px;
-  background: var(--bg-secondary, #1d1c25);
+  background: var(--surface-container-high);
   border-bottom: 1px solid var(--border);
   color: var(--text-secondary);
   flex-shrink: 0;
@@ -1253,7 +1253,7 @@ html, body, #root {
 }
 .dbg-btn {
   display: inline-flex; align-items: center; gap: 4px;
-  background: var(--bg-secondary, #26252e); color: var(--text-primary);
+  background: var(--surface-container-highest); color: var(--text-primary);
   border: 1px solid var(--border); border-radius: 4px; padding: 3px 7px; cursor: pointer; font-size: 11px;
 }
 .dbg-btn:disabled { opacity: 0.45; cursor: default; }
@@ -1271,26 +1271,26 @@ html, body, #root {
 .dbg-scroll { flex: 1; overflow-y: auto; }
 .dbg-section-title {
   padding: 5px 8px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;
-  color: var(--text-secondary); background: var(--bg-secondary, #1d1c25); position: sticky; top: 0;
+  color: var(--text-secondary); background: var(--surface-container-high); position: sticky; top: 0;
 }
 .dbg-section-empty { padding: 6px 8px; color: var(--text-secondary); font-style: italic; }
 .dbg-callstack, .dbg-variables, .dbg-watch { list-style: none; margin: 0; padding: 2px 0; }
 .dbg-frame { display: flex; justify-content: space-between; gap: 8px; padding: 2px 8px; cursor: pointer; }
-.dbg-frame:hover, .dbg-frame.active { background: var(--bg-hover, rgba(255,255,255,0.06)); }
+.dbg-frame:hover, .dbg-frame.active { background: var(--hover); }
 .dbg-frame-loc { color: var(--text-secondary); font-size: 10px; white-space: nowrap; }
 .dbg-scope-name { padding: 3px 8px; font-weight: 600; color: var(--text-secondary); }
 .dbg-var { display: flex; align-items: center; gap: 3px; padding: 1px 8px; cursor: default; white-space: nowrap; }
-.dbg-var:hover { background: var(--bg-hover, rgba(255,255,255,0.06)); }
+.dbg-var:hover { background: var(--hover); }
 .dbg-var-twisty { width: 12px; display: inline-flex; }
-.dbg-var-name { color: var(--accent-fg, #9cdcfe); }
+.dbg-var-name { color: var(--info); }
 .dbg-var-eq { color: var(--text-secondary); }
 .dbg-var-value { color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; }
 .dbg-var-swatch { width: 11px; height: 11px; border-radius: 2px; border: 1px solid var(--border); display: inline-block; }
 .dbg-watch-add { display: flex; gap: 4px; padding: 4px 8px; }
-.dbg-watch-add input { flex: 1; background: var(--bg-secondary, #26252e); border: 1px solid var(--border); color: var(--text-primary); border-radius: 4px; padding: 2px 6px; font-size: 11px; }
+.dbg-watch-add input { flex: 1; background: var(--bg-input); border: 1px solid var(--border); color: var(--text-primary); border-radius: 4px; padding: 2px 6px; font-size: 11px; }
 .dbg-watch-add button, .dbg-watch-del { background: transparent; border: none; color: var(--text-secondary); cursor: pointer; }
 .dbg-watch-row { display: flex; align-items: center; gap: 6px; padding: 2px 8px; }
-.dbg-watch-expr { color: var(--accent-fg, #9cdcfe); }
+.dbg-watch-expr { color: var(--info); }
 .dbg-watch-value { color: var(--text-primary); margin-left: auto; }
 
 /* ==================== Editor Git Gutter (changed lines vs HEAD) ==================== */
@@ -3006,7 +3006,7 @@ html, body, #root {
   background: var(--bg-primary);
   border: 1px solid var(--border);
   border-radius: 8px;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.32);
+  box-shadow: var(--modal-shadow);
   padding: 4px;
   display: flex;
   flex-direction: column;
@@ -3218,8 +3218,15 @@ html, body, #root {
   z-index: 2;
 }
 
+/* Must stay OPAQUE. `--hover` is an overlay token (4% alpha) meant to be
+   layered onto an already-opaque surface like a sidebar row; this pill floats
+   over the scrolling message list, so its own background IS the only opaque
+   surface. Setting `background: var(--hover)` replaced that surface with a
+   4%-alpha wash and the messages behind it read straight through the button.
+   Mix the tint INTO the base colour instead, as `.ai-panel-permission-btn`
+   does — opaque in both light and dark themes. */
 .ai-jump-to-bottom:hover {
-  background: var(--hover);
+  background: color-mix(in srgb, var(--text-primary) 8%, var(--bg-sidebar));
 }
 
 /* ---- AI Messages ---- */
@@ -3425,7 +3432,7 @@ html, body, #root {
   background: var(--bg-primary);
   border: 1px solid var(--border);
   border-radius: 6px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  box-shadow: var(--modal-shadow);
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -3476,7 +3483,7 @@ html, body, #root {
 }
 .ai-panel-mention-back:hover {
   color: var(--text-primary);
-  background: var(--bg-hover, rgba(127, 127, 127, 0.15));
+  background: var(--hover);
 }
 
 .ai-panel-mention-item {
@@ -3712,10 +3719,10 @@ html, body, #root {
   max-height: 420px;
   display: flex;
   flex-direction: column;
-  background: var(--bg-sidebar, var(--bg-editor));
+  background: var(--bg-sidebar);
   border: 1px solid var(--border);
   border-radius: 6px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  box-shadow: var(--modal-shadow);
   z-index: 1000;
   overflow: hidden;
 }
@@ -3798,7 +3805,7 @@ html, body, #root {
   flex: 1 1 auto;
   min-width: 0;
   font-size: 12px;
-  background: var(--bg-editor);
+  background: var(--bg-primary);
   border: 1px solid var(--accent, #4493f8);
   border-radius: 3px;
   color: var(--text-primary);
@@ -3825,7 +3832,7 @@ html, body, #root {
 }
 .ai-history-action:hover {
   color: var(--text-primary);
-  background: var(--bg-editor);
+  background: var(--bg-primary);
 }
 
 /* ---- AI Panel: Agent picker (header) ---- */
@@ -4549,7 +4556,7 @@ html, body, #root {
 .ai-tool-call-code {
   margin: 0;
   padding: 6px 8px;
-  background: var(--bg-editor, var(--bg-sidebar));
+  background: var(--bg-primary);
   border-radius: 3px;
   color: var(--text-primary);
   font-size: 11px;
@@ -4655,7 +4662,7 @@ html, body, #root {
 .ai-diff-block-body {
   margin: 0;
   padding: 4px 0;
-  background: var(--bg-editor, var(--bg-sidebar));
+  background: var(--bg-primary);
   font-size: 11px;
   font-family: var(--font-mono, 'Fira Code', monospace);
   line-height: 1.5;
@@ -4669,8 +4676,8 @@ html, body, #root {
   color: var(--text-primary);
 }
 .ai-diff-add {
-  background: color-mix(in srgb, var(--success-text, #3fb950) 16%, transparent);
-  color: var(--success-text, #3fb950);
+  background: color-mix(in srgb, var(--success) 16%, transparent);
+  color: var(--success);
 }
 .ai-diff-del {
   background: color-mix(in srgb, var(--error-text, #f85149) 16%, transparent);
@@ -4737,7 +4744,7 @@ html, body, #root {
   color: var(--text-secondary);
 }
 .ai-plan-completed .ai-plan-icon {
-  color: var(--success-text, #3fb950);
+  color: var(--success);
 }
 .ai-plan-completed .ai-plan-text {
   color: var(--text-secondary);
@@ -5190,7 +5197,7 @@ html, body, #root {
 .ai-panel-overlay-backdrop {
   position: absolute;
   inset: 0;
-  background: rgba(0, 0, 0, 0.42);
+  background: var(--modal-backdrop);
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
   pointer-events: auto;
@@ -5367,7 +5374,7 @@ html, body, #root {
   gap: 10px;
   padding: 8px 12px;
   flex-shrink: 0;
-  background: var(--bg-secondary);
+  background: var(--surface-container-high);
   border-bottom: 1px solid var(--border);
   font-size: 12px;
   color: var(--text-primary);
@@ -5396,7 +5403,7 @@ html, body, #root {
 }
 
 .project-root-banner-action:hover {
-  background: var(--bg-hover, var(--bg-secondary));
+  background: var(--hover);
 }
 
 .project-root-banner-dismiss {

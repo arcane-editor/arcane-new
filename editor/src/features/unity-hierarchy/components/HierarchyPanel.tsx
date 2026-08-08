@@ -25,7 +25,7 @@ function ComponentRow({ type, depth }: { type: string; depth: number }) {
         e.stopPropagation();
         void openScriptForType(type);
       }}
-      onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg-hover)')}
+      onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--hover)')}
       onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
     >
       <Plug size={12} style={{ flexShrink: 0, opacity: 0.7 }} />
@@ -49,7 +49,7 @@ function NodeRow({ node, depth, expanded, toggle }: NodeRowProps) {
       <div
         style={{ ...ROW, paddingLeft: depth * 14 + 4, opacity: node.active ? 1 : 0.5 }}
         onClick={() => hasDetail && toggle(node.instanceId)}
-        onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg-hover)')}
+        onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--hover)')}
         onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
         title={`${node.name}  [tag: ${node.tag}, layer: ${node.layer}]`}
       >

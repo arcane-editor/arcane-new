@@ -220,7 +220,7 @@ function TabMenu({ x, y, realPath, workspacePath, onClose, onAction, onCloseTab 
           position: 'fixed',
           ...menuPos,
           zIndex: 901,
-          background: 'var(--bg-dropdown, var(--bg-sidebar))',
+          background: 'var(--bg-sidebar)',
           border: '1px solid var(--border)',
           borderRadius: '4px',
           padding: '4px 0',
@@ -234,7 +234,7 @@ function TabMenu({ x, y, realPath, workspacePath, onClose, onAction, onCloseTab 
           <button
             key={item.label}
             onClick={item.onClick}
-            onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg-hover)')}
+            onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--hover)')}
             onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
             style={{
               display: 'flex',
@@ -245,7 +245,7 @@ function TabMenu({ x, y, realPath, workspacePath, onClose, onAction, onCloseTab 
               border: 'none',
               cursor: 'pointer',
               fontSize: '13px',
-              color: item.danger ? 'var(--color-error, #f44747)' : 'inherit',
+              color: item.danger ? 'var(--error-text)' : 'inherit',
               textAlign: 'left',
               fontFamily: 'inherit',
             }}
@@ -262,7 +262,7 @@ function TabMenu({ x, y, realPath, workspacePath, onClose, onAction, onCloseTab 
                 <button
                   key={item.label}
                   onClick={() => handleItem(item.onClick)}
-                  onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg-hover)')}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--hover)')}
                   onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
                   style={{
                     display: 'flex',

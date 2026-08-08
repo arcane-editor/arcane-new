@@ -72,9 +72,9 @@ function AddWorktreeDialog({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="palette-overlay" onClick={onClose}
-      style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'var(--overlay-shadow)' }}>
+      style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'var(--modal-backdrop)' }}>
       <div className="palette-panel" onClick={(e) => e.stopPropagation()} onKeyDown={onKeyDown}
-        style={{ position: 'fixed', top: 60, left: '50%', transform: 'translateX(-50%)', width: 520, maxWidth: '92vw', background: 'var(--bg-primary)', border: '1px solid var(--border)', boxShadow: 'var(--overlay-shadow)', borderRadius: 8, overflow: 'hidden' }}>
+        style={{ position: 'fixed', top: 60, left: '50%', transform: 'translateX(-50%)', width: 520, maxWidth: '92vw', background: 'var(--bg-primary)', border: '1px solid var(--border)', boxShadow: 'var(--modal-shadow)', borderRadius: 8, overflow: 'hidden' }}>
         <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
           Add Worktree
         </div>
@@ -88,7 +88,7 @@ function AddWorktreeDialog({ onClose }: { onClose: () => void }) {
                 autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}
                 style={{ flex: 1, padding: '8px 10px', background: 'var(--bg-input)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-primary)', fontSize: 13, outline: 'none' }} />
               <button onClick={browse}
-                style={{ padding: '8px 12px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-primary)', cursor: 'pointer', fontSize: 12 }}>
+                style={{ padding: '8px 12px', background: 'var(--bg-input)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-primary)', cursor: 'pointer', fontSize: 12 }}>
                 Browse
               </button>
             </div>

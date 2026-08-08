@@ -116,7 +116,7 @@ export function UnityAssetPickerModal({ mode, onClose }: Props) {
                 gap: 8,
                 padding: '6px 12px',
                 cursor: 'pointer',
-                background: i === selected ? 'var(--bg-hover)' : 'transparent',
+                background: i === selected ? 'var(--hover)' : 'transparent',
               }}
             >
               <span style={{ flexShrink: 0 }}>{getFileIcon(r.file_name, 14)}</span>

@@ -20,6 +20,8 @@ const darkPlus: ThemeDefinition = {
     'text-breadcrumb': '#a0a0a0',
     'text-breadcrumb-active': '#cccccc',
     'text-on-dark': '#ffffff',
+    // on #007acc VS Code blue
+    'statusbar-fg': '#ffffff',
     'border': '#3c3c3c',
     'accent': '#007acc',
     'accent-secondary': '#3399dd',
@@ -29,7 +31,6 @@ const darkPlus: ThemeDefinition = {
     'git-added': '#73c991',
     'git-deleted': '#c74e39',
     'git-untracked': '#73c991',
-    'overlay-shadow': 'rgba(0, 0, 0, 0.4)',
     'badge-bg': 'rgba(255, 255, 255, 0.1)',
     'hover-overlay': 'rgba(255, 255, 255, 0.1)',
     'statusbar-hover': 'rgba(255, 255, 255, 0.12)',

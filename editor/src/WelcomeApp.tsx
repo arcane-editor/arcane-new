@@ -143,7 +143,7 @@ function WelcomeApp() {
       height: '100vh',
       background: 'var(--bg-primary)',
       color: 'var(--text-primary)',
-      fontFamily: 'var(--font-ui)',
+      fontFamily: 'var(--font-display)',
     }}>
       <div data-tauri-drag-region style={{ height: 28, flexShrink: 0 }} />
       <div style={{

@@ -26,16 +26,22 @@ const arcaneDark: ThemeDefinition = {
     'text-breadcrumb': '#5C5965',
     'text-breadcrumb-active': '#E2E0DA',
     'text-on-dark': '#E2E0DA',
+    // on #0E0D11 near-black
+    'statusbar-fg': '#E2E0DA',
     'border': 'rgba(255, 255, 255, 0.05)',
     'accent': '#D4B062',
     'accent-secondary': '#E8C97D',
-    'hover': 'rgba(255, 255, 255, 0.04)',
-    'selected': 'rgba(212, 176, 98, 0.10)',
+    // Opaque per the fill-token contract in types.ts. These are the exact
+    // composites of the translucent values they replace — rgba(255,255,255,.04)
+    // and rgba(212,176,98,.10) blended over `bg-sidebar`/`bg-primary` — so the
+    // Arcane look is unchanged while the token now means the same thing here as
+    // it does in the four VS Code-derived themes.
+    'hover': '#1B1A20',
+    'selected': '#25201E',
     'git-modified': '#E0B048',
     'git-added': '#7DA66B',
     'git-deleted': '#C97A8A',
     'git-untracked': '#7DA66B',
-    'overlay-shadow': 'rgba(0, 0, 0, 0.65)',
     'badge-bg': 'rgba(212, 176, 98, 0.16)',
     'hover-overlay': 'rgba(255, 255, 255, 0.04)',
     'statusbar-hover': 'rgba(255, 255, 255, 0.05)',

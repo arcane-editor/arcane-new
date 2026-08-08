@@ -63,7 +63,7 @@ function ContextMenu({
           position: 'fixed',
           ...menuPos,
           zIndex: 901,
-          background: 'var(--bg-dropdown, var(--bg-sidebar))',
+          background: 'var(--bg-sidebar)',
           border: '1px solid var(--border)',
           borderRadius: '4px',
           padding: '4px 0',
@@ -77,7 +77,7 @@ function ContextMenu({
           className="context-menu-item"
           onClick={() => handleItem(onNewFile)}
           style={menuItemStyle}
-          onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg-hover)')}
+          onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--hover)')}
           onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
         >
           <FilePlus size={14} style={{ marginRight: 8, flexShrink: 0 }} />
@@ -87,7 +87,7 @@ function ContextMenu({
           className="context-menu-item"
           onClick={() => handleItem(onNewFolder)}
           style={menuItemStyle}
-          onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg-hover)')}
+          onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--hover)')}
           onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
         >
           <FolderPlus size={14} style={{ marginRight: 8, flexShrink: 0 }} />
@@ -98,7 +98,7 @@ function ContextMenu({
             className="context-menu-item"
             onClick={() => handleItem(onNewScript)}
             style={menuItemStyle}
-            onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg-hover)')}
+            onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--hover)')}
             onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
           >
             <FileCode size={14} style={{ marginRight: 8, flexShrink: 0 }} />
@@ -110,7 +110,7 @@ function ContextMenu({
           className="context-menu-item"
           onClick={() => handleItem(onRename)}
           style={menuItemStyle}
-          onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg-hover)')}
+          onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--hover)')}
           onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
         >
           <Pencil size={14} style={{ marginRight: 8, flexShrink: 0 }} />
@@ -119,8 +119,8 @@ function ContextMenu({
         <button
           className="context-menu-item"
           onClick={() => handleItem(onDelete)}
-          style={{ ...menuItemStyle, color: 'var(--color-error, #f44747)' }}
-          onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg-hover)')}
+          style={{ ...menuItemStyle, color: 'var(--error-text)' }}
+          onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--hover)')}
           onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
         >
           <Trash2 size={14} style={{ marginRight: 8, flexShrink: 0 }} />
@@ -134,7 +134,7 @@ function ContextMenu({
                 className="context-menu-item"
                 onClick={() => handleItem(onCopyPath)}
                 style={menuItemStyle}
-                onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg-hover)')}
+                onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--hover)')}
                 onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
               >
                 <Copy size={14} style={{ marginRight: 8, flexShrink: 0 }} />
@@ -146,7 +146,7 @@ function ContextMenu({
                 className="context-menu-item"
                 onClick={() => handleItem(onCopyRelativePath)}
                 style={menuItemStyle}
-                onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg-hover)')}
+                onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--hover)')}
                 onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
               >
                 <Copy size={14} style={{ marginRight: 8, flexShrink: 0 }} />
@@ -158,7 +158,7 @@ function ContextMenu({
                 className="context-menu-item"
                 onClick={() => handleItem(onRevealInOs)}
                 style={menuItemStyle}
-                onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg-hover)')}
+                onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--hover)')}
                 onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
               >
                 <FolderSymlink size={14} style={{ marginRight: 8, flexShrink: 0 }} />

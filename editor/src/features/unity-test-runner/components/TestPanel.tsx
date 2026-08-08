@@ -71,7 +71,7 @@ function TestRow({ test }: { test: TestNode }) {
           cursor: 'pointer',
         }}
         onClick={() => (failed ? setOpen((o) => !o) : openAt(test.filePath, test.line))}
-        onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg-hover)')}
+        onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--hover)')}
         onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
         title={test.fullName}
       >

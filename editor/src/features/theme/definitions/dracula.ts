@@ -20,6 +20,8 @@ const dracula: ThemeDefinition = {
     'text-breadcrumb': '#6272a4',
     'text-breadcrumb-active': '#f8f8f2',
     'text-on-dark': '#f8f8f2',
+    // on #191a21 near-black
+    'statusbar-fg': '#f8f8f2',
     'border': '#44475a',
     'accent': '#bd93f9',
     'accent-secondary': '#ff79c6',
@@ -29,7 +31,6 @@ const dracula: ThemeDefinition = {
     'git-added': '#50fa7b',
     'git-deleted': '#ff5555',
     'git-untracked': '#50fa7b',
-    'overlay-shadow': 'rgba(0, 0, 0, 0.5)',
     'badge-bg': 'rgba(255, 255, 255, 0.1)',
     'hover-overlay': 'rgba(255, 255, 255, 0.08)',
     'statusbar-hover': 'rgba(255, 255, 255, 0.12)',

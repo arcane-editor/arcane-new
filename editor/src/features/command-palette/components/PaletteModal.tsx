@@ -283,7 +283,7 @@ function PaletteModal({ initialMode, onClose }: PaletteModalProps) {
         position: 'fixed',
         inset: 0,
         zIndex: 1000,
-        background: 'var(--overlay-shadow)',
+        background: 'var(--modal-backdrop)',
       }}
     >
       <div
@@ -298,7 +298,7 @@ function PaletteModal({ initialMode, onClose }: PaletteModalProps) {
           maxWidth: '90vw',
           background: 'var(--bg-primary)',
           border: '1px solid var(--border)',
-          boxShadow: 'var(--overlay-shadow)',
+          boxShadow: 'var(--modal-shadow)',
           borderRadius: '0 0 6px 6px',
           overflow: 'hidden',
         }}

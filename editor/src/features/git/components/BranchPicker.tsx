@@ -163,9 +163,9 @@ function BranchPicker({ onClose, initialMode = 'switch' }: { onClose: () => void
 
   return (
     <div className="palette-overlay" onClick={onClose}
-      style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'var(--overlay-shadow)' }}>
+      style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'var(--modal-backdrop)' }}>
       <div className="palette-panel" onClick={(e) => e.stopPropagation()}
-        style={{ position: 'fixed', top: 0, left: '50%', transform: 'translateX(-50%)', width: 500, maxWidth: '90vw', background: 'var(--bg-primary)', border: '1px solid var(--border)', boxShadow: 'var(--overlay-shadow)', borderRadius: '0 0 6px 6px', overflow: 'hidden' }}>
+        style={{ position: 'fixed', top: 0, left: '50%', transform: 'translateX(-50%)', width: 500, maxWidth: '90vw', background: 'var(--bg-primary)', border: '1px solid var(--border)', boxShadow: 'var(--modal-shadow)', borderRadius: '0 0 6px 6px', overflow: 'hidden' }}>
         <input ref={inputRef} type="text" value={query}
           onChange={(e) => setQuery(e.target.value)} onKeyDown={handleKeyDown}
           placeholder={mode === 'create'
