@@ -439,6 +439,26 @@ html, body, #root {
   background: var(--hover);
 }
 
+/* ---- Explorer: OS file drop targets ----
+
+   Tauri intercepts OS drops natively, so there is no :hover and no drag-over
+   event on these rows — `services/drop-target.ts` toggles these classes from
+   a hand-rolled hit-test instead. */
+
+/* A folder row: the copy lands inside this folder. */
+.tree-node--drop-over {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+  border-radius: 3px;
+}
+
+/* Over a file row or empty space: the copy lands in an enclosing folder, so
+   the whole tree is marked rather than implying a specific row. */
+.sidebar-tree--drop-over {
+  box-shadow: inset 0 0 0 2px var(--accent);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+
 .tree-node.selected {
   background: var(--selected);
   border-left: 2px solid var(--accent);
@@ -1903,118 +1923,377 @@ html, body, #root {
 
 /* ==================== Settings Panel ==================== */
 
-.settings-panel {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  background: var(--bg-primary);
-  overflow: hidden;
-}
+/* ==================== Settings + Account modal ====================
 
-.settings-header {
+   One modal with a nav rail, replacing two surfaces that both displaced the
+   editor: settings swapped out the entire editor subtree, and account was an
+   `auth://` tab pretending to be a file. */
+
+.settings-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: var(--modal-backdrop);
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 10px 16px;
-  border-bottom: 1px solid var(--border);
+  justify-content: center;
+  padding: 24px;
+  animation: settings-modal-fade 120ms ease-out;
+}
+
+.settings-modal {
+  display: flex;
+  width: min(920px, 100%);
+  height: min(660px, 88vh);
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 24px 64px rgb(0 0 0 / 0.45);
+  animation: settings-modal-rise 140ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes settings-modal-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes settings-modal-rise {
+  from { opacity: 0; transform: translateY(6px) scale(0.99); }
+  to { opacity: 1; transform: none; }
+}
+
+/* ---- Nav rail ---- */
+
+.settings-modal-rail {
+  display: flex;
+  flex-direction: column;
+  width: 224px;
+  flex-shrink: 0;
+  background: var(--bg-sidebar);
+  border-right: 1px solid var(--border);
+  padding: 12px 8px;
+  gap: 10px;
+  overflow-y: auto;
+}
+
+.settings-modal-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  flex-shrink: 0;
+  transition: border-color 140ms ease;
+}
+
+.settings-modal-search:focus-within {
+  border-color: var(--accent);
+}
+
+.settings-modal-search-icon {
+  color: var(--text-secondary);
   flex-shrink: 0;
 }
 
-.settings-header-title {
-  font-size: 13px;
-  font-weight: 600;
+.settings-modal-search input {
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: none;
+  outline: none;
   color: var(--text-primary);
-  letter-spacing: 0.3px;
+  font-family: inherit;
+  font-size: 12px;
+  padding: 6px 0;
 }
 
-.settings-header-close {
+.settings-modal-search input::placeholder {
+  color: var(--text-secondary);
+}
+
+.settings-modal-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.settings-modal-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 9px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.settings-modal-nav-item:hover {
+  background: var(--hover);
+  color: var(--text-primary);
+}
+
+.settings-modal-nav-item.is-active {
+  background: var(--selected);
+  color: var(--text-active);
+}
+
+.settings-modal-nav-label {
+  display: block;
+  font-weight: 500;
+}
+
+/* The account entry carries the signed-in address underneath its label, so it
+   is taller than a plain category row and its text block needs to stack. */
+.settings-modal-nav-account-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 1px;
+}
+
+.settings-modal-nav-sublabel {
+  font-size: 10px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-modal-nav-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 7px 9px;
+}
+
+/* ---- Content pane ---- */
+
+.settings-modal-content {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 20px 24px 28px;
+}
+
+.settings-modal-close {
+  position: absolute;
+  top: 14px;
+  right: 16px;
   width: 26px;
   height: 26px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 4px;
   border: none;
+  border-radius: 5px;
   background: none;
   color: var(--text-secondary);
   cursor: pointer;
   transition: background 120ms ease, color 120ms ease;
 }
 
-.settings-header-close:hover {
+.settings-modal-close:hover {
   background: var(--hover);
   color: var(--text-primary);
 }
 
-.settings-search {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 16px;
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-}
-
-.settings-search-icon {
-  color: var(--text-secondary);
-  flex-shrink: 0;
-}
-
-.settings-search-input {
-  flex: 1;
-  background: var(--bg-input);
-  border: none;
-  border-bottom: 1px solid transparent;
+.settings-section-title {
+  margin: 0 0 4px;
+  font-size: 16px;
+  font-weight: 600;
   color: var(--text-primary);
-  padding: 5px 8px;
-  border-radius: 3px;
-  font-size: 13px;
-  font-family: inherit;
-  outline: none;
-  transition: border-color 150ms ease;
 }
 
-.settings-search-input:focus {
-  border-bottom-color: var(--accent);
-}
-
-.settings-search-input::placeholder {
+.settings-section-subtitle {
+  margin: 0 0 16px;
+  font-size: 12px;
   color: var(--text-secondary);
 }
 
-.settings-content {
-  flex: 1;
-  overflow-y: auto;
-  padding: 8px 16px 16px;
+.settings-section-title + .settings-row,
+.settings-section-title + .settings-section-group {
+  margin-top: 12px;
+}
+
+.settings-section-group {
+  margin-bottom: 18px;
+}
+
+.settings-section-group-title {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-secondary);
+  padding: 8px 0 6px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 4px;
 }
 
 .settings-empty {
-  padding: 32px 0;
+  padding: 40px 0;
   text-align: center;
   color: var(--text-secondary);
   font-size: 13px;
 }
 
-.settings-category {
-  margin-bottom: 20px;
+/* ---- Account pane ---- */
+
+.settings-account-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  margin: 18px 0 22px;
 }
 
-.settings-category-title {
+.settings-account-field {
+  min-width: 140px;
+}
+
+.settings-account-field-label {
   font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 1px;
   color: var(--text-secondary);
-  padding: 6px 0;
-  border-bottom: 1px solid var(--border);
   margin-bottom: 4px;
 }
 
+.settings-account-field-value {
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.settings-account-plan {
+  text-transform: capitalize;
+}
+
+.settings-account-credits {
+  font-family: var(--font-mono);
+}
+
+.settings-account-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  max-width: 320px;
+}
+
+.settings-account-error {
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  background: var(--error-bg);
+  border: 1px solid var(--error-border);
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--error-text);
+}
+
+.settings-account-spinner {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.settings-account-input {
+  width: 100%;
+  padding: 8px 10px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 13px;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.settings-account-input:focus {
+  border-color: var(--accent);
+}
+
+.settings-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border: none;
+  border-radius: 5px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: filter 120ms ease;
+}
+
+.settings-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.settings-btn:not(:disabled):hover {
+  filter: brightness(1.1);
+}
+
+.settings-btn-primary {
+  background: var(--button-primary-bg);
+  color: var(--button-primary-text);
+}
+
+.settings-btn-secondary {
+  background: var(--bg-input);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  font-weight: 500;
+}
+
+.settings-btn-danger {
+  background: var(--button-danger-bg);
+  color: var(--button-danger-text);
+}
+
+.settings-btn-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 14px;
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-family: inherit;
+  font-size: 12px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
 .settings-row {
-  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 11px 12px;
   border-left: 2px solid transparent;
   border-radius: 0 4px 4px 0;
   transition: background 120ms ease;
+}
+
+/* Text column takes the slack so the control stays pinned right and every
+   control in a section lines up regardless of description length. */
+.settings-row-text {
+  flex: 1;
+  min-width: 0;
 }
 
 .settings-row:hover {
@@ -2035,14 +2314,15 @@ html, body, #root {
 .settings-row-description {
   font-size: 12px;
   color: var(--text-secondary);
-  margin-bottom: 8px;
   line-height: 1.4;
 }
 
 .settings-row-control {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 8px;
+  flex-shrink: 0;
 }
 
 .settings-control-select,
@@ -2875,6 +3155,50 @@ html, body, #root {
   flex-direction: column;
   background: var(--bg-sidebar);
   overflow: hidden;
+  /* Anchors the drop overlay below. */
+  position: relative;
+}
+
+/* ---- AI Panel: drag a file in as context ---- */
+.ai-panel-drop-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Load-bearing: the overlay covers the panel, so taking the pointer would
+     swallow the drop it is advertising. */
+  pointer-events: none;
+  background: color-mix(in srgb, var(--bg-sidebar) 72%, transparent);
+  backdrop-filter: blur(1px);
+  animation: ai-panel-drop-in 100ms ease-out;
+}
+
+.ai-panel--drop-over {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.ai-panel-drop-overlay-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 14px;
+  border-radius: 6px;
+  border: 1px dashed var(--accent);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 12px;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.28);
+}
+
+@keyframes ai-panel-drop-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 .ai-panel-header {
@@ -3405,7 +3729,34 @@ html, body, #root {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  /* The filename is the identifying part of a chip, so it holds its intrinsic
+     width and the directory beside it gives way instead. */
+  flex: 0 0 auto;
+}
+
+/* Parent directory, dimmed and secondary to the filename.
+
+   Truncates from the LEFT: `features/ai-panel/components` cut from the right
+   leaves `features/ai-p…`, which is the half that does not disambiguate. RTL
+   direction moves the ellipsis to the front while each path segment, being
+   strong-LTR text, keeps its own order.
+
+   Do NOT add `unicode-bidi: plaintext` here. It derives the direction from the
+   first strong character — always LTR for a path — which silently cancels the
+   `direction: rtl` above and truncates from the right again. Verified in a
+   browser: with it, `a/very/deeply/nested/path` renders `a/very/deeply/nes…`
+   instead of `…/deeply/nested/path`. */
+.ai-panel-attachment-dir {
+  direction: rtl;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   min-width: 0;
+  flex: 0 1 auto;
+  color: var(--text-secondary);
+  font-size: 10px;
+  opacity: 0.85;
 }
 
 .ai-panel-attachment-remove {
@@ -3511,6 +3862,10 @@ html, body, #root {
 .ai-panel-mention-icon {
   color: var(--text-secondary);
   flex-shrink: 0;
+  /* Also used as a wrapper around an <img> material icon, which needs a flex
+     box to sit on the text baseline the way the inline lucide SVGs do. */
+  display: inline-flex;
+  align-items: center;
 }
 
 .ai-panel-mention-label {

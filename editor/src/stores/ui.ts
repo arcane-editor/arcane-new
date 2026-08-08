@@ -119,7 +119,13 @@ interface UiState {
   setBottomPanelMaximized: (v: boolean) => void;
 
   settingsOpen: boolean;
-  setSettingsOpen: (open: boolean) => void;
+  /** Nav section shown by the settings modal; survives close/reopen within a session. */
+  settingsSection: string;
+  /** Opens the modal, optionally jumping straight to a section. */
+  openSettings: (section?: string) => void;
+  closeSettings: () => void;
+  toggleSettings: () => void;
+  setSettingsSection: (section: string) => void;
 
   /** path → Unity-asset view mode override (absent ⇒ settings default). */
   assetViewerMode: Record<string, AssetViewerMode>;
@@ -237,7 +243,19 @@ export const useUiStore = create<UiState>((set, get) => ({
   setBottomPanelMaximized: (v) => set({ bottomPanelMaximized: v }),
 
   settingsOpen: false,
-  setSettingsOpen: (open) => set({ settingsOpen: open }),
+  // Seeded with the first category so the modal opens on real content rather
+  // than an empty pane. Not persisted — each session starts here. The modal
+  // validates this against the live category list before using it, so renaming
+  // the first category cannot leave the pane blank.
+  settingsSection: 'Editor',
+  openSettings: (section) =>
+    set((s) => ({
+      settingsOpen: true,
+      settingsSection: section ?? s.settingsSection,
+    })),
+  closeSettings: () => set({ settingsOpen: false }),
+  toggleSettings: () => set((s) => ({ settingsOpen: !s.settingsOpen })),
+  setSettingsSection: (section) => set({ settingsSection: section }),
 
   assetViewerMode: {},
   setAssetViewerMode: (path, mode) =>

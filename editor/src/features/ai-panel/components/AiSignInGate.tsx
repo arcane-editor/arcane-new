@@ -1,15 +1,16 @@
 import { LogIn, Sparkles } from 'lucide-react';
-import { useWorkspaceStore } from '../../../stores/workspace';
 import { useUiStore } from '../../../stores/ui';
+import { ACCOUNT_SECTION } from '../../settings';
 
 function AiSignInGate() {
-  const openFile = useWorkspaceStore((s) => s.openFile);
   const setAiPanelMaximized = useUiStore((s) => s.setAiPanelMaximized);
+  const openSettings = useUiStore((s) => s.openSettings);
 
-  function openAuthTab() {
-    // Collapse the maximized overlay (if any) so the auth tab is interactable.
+  function openAccount() {
+    // Collapse the maximized overlay (if any) so the modal isn't competing
+    // with a full-window panel for the foreground.
     setAiPanelMaximized(false);
-    void openFile('auth://account', 'Account');
+    openSettings(ACCOUNT_SECTION);
   }
 
   return (
@@ -28,11 +29,11 @@ function AiSignInGate() {
           <div style={subtitleStyle}>
             Connect your account to chat, edit code, and run agents in this workspace.
           </div>
-          <button onClick={openAuthTab} style={primaryBtnStyle}>
+          <button onClick={openAccount} style={primaryBtnStyle}>
             <LogIn size={14} />
             Sign In
           </button>
-          <button onClick={openAuthTab} style={secondaryBtnStyle}>
+          <button onClick={openAccount} style={secondaryBtnStyle}>
             Create account
           </button>
         </div>

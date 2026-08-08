@@ -1,18 +1,31 @@
 /**
  * AttachmentChip — pill displaying an attachment. Click opens the resource;
  * the × removes it from staging.
+ *
+ * Files carry their real Material icon and their parent directory, because a
+ * basename alone is ambiguous in any project with more than one `index.ts`.
+ * The directory is dimmed and truncates from the left so the deepest — and
+ * most disambiguating — segment survives the truncation.
  */
 
-import { FileText, BookOpen, Image as ImageIcon, Boxes, Box, X } from 'lucide-react';
+import { BookOpen, Image as ImageIcon, Boxes, Box, X } from 'lucide-react';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { useWorkspaceStore } from '../../../stores/workspace';
 import { useAiStore } from '../../../stores/ai';
+import { FileIcon } from '../../../utils/file-icons';
 import type { Attachment } from '../services/types';
 
 interface Props {
   attachment: Attachment;
   /** When false, the remove button is hidden (e.g. inside a sent message). */
   removable?: boolean;
+}
+
+/** Splits a workspace-relative path into its basename and parent directory. */
+function splitRelPath(relPath: string): { name: string; dir: string } {
+  const idx = relPath.lastIndexOf('/');
+  if (idx < 0) return { name: relPath, dir: '' };
+  return { name: relPath.slice(idx + 1), dir: relPath.slice(0, idx) };
 }
 
 function AttachmentChip({ attachment: a, removable = true }: Props) {
@@ -35,14 +48,26 @@ function AttachmentChip({ attachment: a, removable = true }: Props) {
 
   let icon: React.ReactNode;
   let label: string;
+  let dir = '';
   let title: string;
 
   switch (a.kind) {
-    case 'file':
-      icon = <FileText size={12} />;
-      label = a.relPath.split('/').pop() ?? a.relPath;
+    case 'file': {
+      const parts = splitRelPath(a.relPath);
+      icon = <FileIcon name={parts.name} size={14} />;
+      label = parts.name;
+      dir = parts.dir;
       title = a.relPath;
       break;
+    }
+    case 'unity-asset': {
+      const parts = splitRelPath(a.relPath);
+      icon = <FileIcon name={parts.name} size={14} />;
+      label = parts.name;
+      dir = parts.dir;
+      title = a.relPath;
+      break;
+    }
     case 'unity-doc':
       icon = <BookOpen size={12} />;
       label = a.name;
@@ -63,11 +88,6 @@ function AttachmentChip({ attachment: a, removable = true }: Props) {
       label = a.name;
       title = `Live GameObject "${a.name}" (resolved when sent)`;
       break;
-    case 'unity-asset':
-      icon = <Box size={12} />;
-      label = a.relPath.split('/').pop() ?? a.relPath;
-      title = a.relPath;
-      break;
   }
 
   return (
@@ -83,6 +103,7 @@ function AttachmentChip({ attachment: a, removable = true }: Props) {
         <span className="ai-panel-attachment-icon">{icon}</span>
       )}
       <span className="ai-panel-attachment-label">{label}</span>
+      {dir && <span className="ai-panel-attachment-dir">{dir}</span>}
       {removable && (
         <span
           role="button"

@@ -22,8 +22,12 @@ import ContextMenu from './ContextMenu';
 import InlineInput from './InlineInput';
 import TypedConfirmDialog from './TypedConfirmDialog';
 import ImpactDeleteDialog from './ImpactDeleteDialog';
+import MetaChoiceDialog from './MetaChoiceDialog';
 import { applyUnityTreeView } from '../services/unity-tree-view';
 import { ancestorDirs, consumePendingReveal } from '../services/reveal';
+import { copyIntoDir, existingMetaSiblings } from '../services/drop-target';
+import { ARCANE_FILE_MIME } from '../../../utils/drag-mime';
+import { notify } from '../../../stores/notifications';
 
 // Asset/script kinds whose deletion can leave dangling references in scenes/prefabs.
 const REFABLE_DELETE_EXTS = ['.cs', '.prefab', '.asset', '.mat', '.anim', '.controller'];
@@ -99,6 +103,22 @@ function NodeRenderer({
     <div
       className={`tree-node${node.isSelected ? ' selected' : ''}${node.data.ignored ? ' dimmed' : ''}`}
       style={isRenaming ? { ...style, zIndex: 20, overflow: 'visible' } : style}
+      // Read by `services/drop-target.ts`, which must hit-test OS drops by
+      // coordinate: Tauri intercepts them natively, so no DOM drop event with
+      // a target ever reaches this element.
+      data-path={node.data.id}
+      data-is-dir={node.data.isDir ? 'true' : 'false'}
+      // In-webview drag *out* of the tree — HTML5 DnD is unaffected by the
+      // native interception above. react-arborist's own drag stays disabled;
+      // this only exports the node to drop zones like the AI panel.
+      draggable={!isRenaming}
+      onDragStart={(e) => {
+        e.dataTransfer.setData(
+          ARCANE_FILE_MIME,
+          JSON.stringify({ path: node.data.id, isDir: node.data.isDir }),
+        );
+        e.dataTransfer.effectAllowed = 'copy';
+      }}
       onClick={isRenaming ? undefined : handleClick}
       onContextMenu={(e) => {
         e.preventDefault();
@@ -197,6 +217,14 @@ function ExplorerPanel() {
   } | null>(null);
   const [renamingNodeId, setRenamingNodeId] = useState<string | null>(null);
   const [creatingIn, setCreatingIn] = useState<{ parentPath: string; type: 'file' | 'folder' } | null>(null);
+  // A drop waiting on the Unity `.meta` question. Held rather than copied
+  // immediately so nothing touches disk before the user answers.
+  const [pendingDrop, setPendingDrop] = useState<{
+    destDir: string;
+    paths: string[];
+    /** Sibling `.meta` paths confirmed to exist on disk. */
+    metas: string[];
+  } | null>(null);
 
   // Expands every ancestor directory of `path` (lazy-loading children as
   // needed), then selects + scrolls to it. Reads store state fresh at each
@@ -249,6 +277,56 @@ function ExplorerPanel() {
       api.select(path, { align: 'center' });
     });
   }
+
+  // Copies dropped paths into `destDir`. Reloads the destination so the copies
+  // appear, and reveals one so the user can see where it landed.
+  async function runCopy(destDir: string, paths: string[]): Promise<void> {
+    const { copied, errors } = await copyIntoDir(destDir, paths);
+
+    if (copied.length > 0) {
+      await loadChildren(destDir);
+      const first = copied.find((p) => !p.toLowerCase().endsWith('.meta'));
+      if (first) void revealPath(first);
+    }
+
+    if (errors.length > 0) {
+      notify.error(
+        errors.length === 1
+          ? `Could not copy ${errors[0]}`
+          : `Could not copy ${errors.length} items: ${errors.slice(0, 3).join('; ')}`,
+      );
+    }
+  }
+
+  // OS file drops arrive from App.tsx's window-level Tauri handler, which owns
+  // the only observable drop event and has already hit-tested this panel.
+  useEffect(() => {
+    function onExplorerDrop(e: Event) {
+      const detail = (e as CustomEvent<{ destDir: string; paths: string[] }>).detail;
+      if (!detail || detail.paths.length === 0) return;
+
+      const { destDir, paths } = detail;
+
+      // Non-Unity projects never see the .meta question.
+      if (!useProjectContextStore.getState().isUnityProject) {
+        void runCopy(destDir, paths);
+        return;
+      }
+
+      void (async () => {
+        const metas = await existingMetaSiblings(paths);
+        if (metas.length > 0) {
+          setPendingDrop({ destDir, paths, metas });
+        } else {
+          void runCopy(destDir, paths);
+        }
+      })();
+    }
+
+    window.addEventListener('explorer-drop', onExplorerDrop);
+    return () => window.removeEventListener('explorer-drop', onExplorerDrop);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (!treeRef.current) return;
@@ -533,6 +611,20 @@ function ExplorerPanel() {
             void deletePath(p);
           }}
           onCancel={() => setMetaConfirm(null)}
+        />
+      )}
+      {pendingDrop && (
+        <MetaChoiceDialog
+          count={pendingDrop.metas.length}
+          onChoose={(includeMeta) => {
+            const drop = pendingDrop;
+            setPendingDrop(null);
+            void runCopy(
+              drop.destDir,
+              includeMeta ? [...drop.paths, ...drop.metas] : drop.paths,
+            );
+          }}
+          onCancel={() => setPendingDrop(null)}
         />
       )}
       {impactDelete && (

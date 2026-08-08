@@ -4,7 +4,7 @@ import type { BrowserLoginHandlers, ExchangeResult } from '../features/auth';
 // stores/auth.ts statically imports both '../features/auth' (the barrel —
 // authClient + the browser-login service functions) and '@tauri-apps/api/event'
 // (emit). Neither is safe to load for real under plain `bun test` (no Tauri
-// webview, and the real barrel also re-exports the AuthTab component). Mock
+// webview, and the real barrel reaches Tauri plugin code). Mock
 // both BEFORE the dynamic import of the store below, following the pattern
 // `stores/edit-review.test.ts` uses for the ai-panel barrel. No other test
 // file imports '../features/auth' or '@tauri-apps/api/event' for real, so

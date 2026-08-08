@@ -1,4 +1,3 @@
-export { default as AuthTab } from './components/AuthTab';
 export {
   authClient,
   type UsageSummary,

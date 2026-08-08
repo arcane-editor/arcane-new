@@ -16,6 +16,7 @@ mod dap;
 mod auth;
 mod auth_loopback;
 mod graphify;
+mod fs_copy;
 mod path_util;
 mod sync_util;
 mod walk_policy;
@@ -717,6 +718,7 @@ pub fn run() {
             create_directory,
             rename_path,
             delete_path,
+            fs_copy::copy_path,
             read_files_bulk,
             scan_node_modules_types,
             #[cfg(debug_assertions)]

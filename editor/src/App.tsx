@@ -40,11 +40,16 @@ import { classifyFile, DotnetMissingModal, FilePriority, NewScriptModal } from '
 import { useGraphifyStore } from './stores/graphify';
 import { ThemePicker, applyTheme } from './features/theme';
 import { NotificationContainer } from './features/notifications';
-import { SettingsPanel } from './features/settings';
+import { SettingsModal, ACCOUNT_SECTION } from './features/settings';
 import { PaletteModal } from './features/command-palette';
 import { BranchPicker, runGitignoreDoctor } from './features/git';
 import { UnityAssetPickerModal, type UnityPickerMode } from './features/unity-quick-open';
-import { setPendingReveal } from './features/explorer';
+import {
+  setPendingReveal,
+  resolveExplorerDrop,
+  highlightExplorerDropTarget,
+  clearExplorerDropTarget,
+} from './features/explorer';
 import { useUnitySceneStore } from './stores/unity-scene';
 import { useRegisterCommands } from './hooks/useRegisterCommands';
 import { useAutoSave } from './hooks/useAutoSave';
@@ -66,7 +71,6 @@ import { useUnityStore } from './stores/unity';
 import { useDebugStore } from './stores/debug';
 import { useAuthStore } from './stores/auth';
 import { initConnectivityListeners } from './stores/connectivity';
-import { AuthTab } from './features/auth';
 import { useSceneUsageStore } from './features/unity-context';
 import {
   loadState,
@@ -88,7 +92,6 @@ function App() {
   const sidebarVisible = useUiStore((s) => s.sidebarVisible);
   const rightSidebarVisible = useUiStore((s) => s.rightSidebarVisible);
   const bottomPanelVisible = useUiStore((s) => s.bottomPanelVisible);
-  const settingsOpen = useUiStore((s) => s.settingsOpen);
   const aiPanelMaximized = useUiStore((s) => s.aiPanelMaximized);
   const graphifyIntroOpen = useUiStore((s) => s.graphifyIntroOpen);
   const setGraphifyIntroOpen = useUiStore((s) => s.setGraphifyIntroOpen);
@@ -375,15 +378,34 @@ function App() {
       const fn = await win.onDragDropEvent(async (event) => {
         if (event.payload.type === 'enter' || event.payload.type === 'over') {
           highlightTerminalDropTarget(event.payload.position);
+          highlightExplorerDropTarget(event.payload.position);
           return;
         }
         if (event.payload.type === 'leave') {
           clearTerminalDropTarget();
+          clearExplorerDropTarget();
           return;
         }
 
         const paths = event.payload.paths;
+        clearExplorerDropTarget();
         if (await handleTerminalDrop(event.payload.position, paths)) return;
+
+        // Dropped on the file tree: copy into the folder under the cursor.
+        // The explorer owns the rest (the Unity .meta question, the copy
+        // itself), so this only resolves the target and hands off — same
+        // reason the reveal flow goes through an event.
+        {
+          const ws0 = useWorkspaceStore.getState();
+          const treeRoot = ws0.assetsRootPath ?? ws0.workspacePath;
+          if (treeRoot) {
+            const req = resolveExplorerDrop(event.payload.position, paths, treeRoot);
+            if (req) {
+              window.dispatchEvent(new CustomEvent('explorer-drop', { detail: req }));
+              return;
+            }
+          }
+        }
 
         const ws = useWorkspaceStore.getState();
         for (const path of paths) {
@@ -629,8 +651,7 @@ function App() {
       category: 'Preferences',
       keybinding: 'mod+,',
       handler: () => {
-        const ui = useUiStore.getState();
-        ui.setSettingsOpen(!ui.settingsOpen);
+        useUiStore.getState().toggleSettings();
       },
     },
     {
@@ -1067,8 +1088,7 @@ function App() {
       label: 'Account / Sign In',
       category: 'Account',
       handler: () => {
-        const ws = useWorkspaceStore.getState();
-        ws.openFile('auth://account', 'Account').catch(() => {});
+        useUiStore.getState().openSettings(ACCOUNT_SECTION);
       },
     },
   ], []);
@@ -1164,25 +1184,19 @@ function App() {
                   <div className="editor-area">
                     <Allotment vertical onChange={(sizes) => saveLayoutSizes({ vertical: sizes })}>
                       <Allotment.Pane>
+                        {/* Settings and Account are no longer rendered here.
+                            Both used to displace the editor — settings by
+                            replacing this whole subtree, account as an
+                            `auth://` tab pretending to be a file. They are one
+                            modal now (`SettingsModal`, mounted at the app
+                            root), so the workspace stays put behind them. */}
                         <div className="editor-section">
-                          {settingsOpen ? (
-                            <SettingsPanel onClose={() => useUiStore.getState().setSettingsOpen(false)} />
-                          ) : (
-                            <>
-                              <ProjectRootBanner />
-                              <TabBar />
-                              {activeFilePath?.startsWith('auth://') ? (
-                                <AuthTab />
-                              ) : (
-                                <>
-                                  <Breadcrumbs />
-                                  <EditorErrorBoundary>
-                                    {activeFilePath ? <EditorPanel /> : <WelcomeScreen hasWorkspace />}
-                                  </EditorErrorBoundary>
-                                </>
-                              )}
-                            </>
-                          )}
+                          <ProjectRootBanner />
+                          <TabBar />
+                          <Breadcrumbs />
+                          <EditorErrorBoundary>
+                            {activeFilePath ? <EditorPanel /> : <WelcomeScreen hasWorkspace />}
+                          </EditorErrorBoundary>
                         </div>
                       </Allotment.Pane>
                       {/* `visible`, never a conditional render — load-bearing.
@@ -1242,6 +1256,9 @@ function App() {
       </div>
       <StatusBar />
       <NotificationContainer />
+      {/* Mounted at the app root, not inside the editor pane: it overlays the
+          workspace instead of displacing it. Gates itself on `settingsOpen`. */}
+      <SettingsModal />
       {showThemePicker && (
         <ThemePicker onClose={() => setShowThemePicker(false)} />
       )}

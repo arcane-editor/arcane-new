@@ -1146,16 +1146,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       return;
     }
 
-    // Handle virtual tabs (auth://, etc.)
-    if (path.startsWith('auth://')) {
-      const file: OpenFile = { path, name, content: '', isDirty: false };
-      set((state) => ({
-        openFiles: [...state.openFiles, file],
-        activeFilePath: path,
-      }));
-      return;
-    }
-
+    // `auth://account` used to be opened here as a contentless virtual tab.
+    // The account view is a section of the settings modal now, so nothing
+    // creates one — the remaining `auth://` guards elsewhere in the codebase
+    // are kept only to tolerate state persisted by an older version.
     const content = await invoke<string>('read_file', { path });
     const file: OpenFile = { path, name, content, isDirty: false };
     set((state) => ({

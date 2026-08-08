@@ -1,9 +1,12 @@
-import { MessageSquare, Layers } from 'lucide-react';
+import { BotMessageSquare, Layers } from 'lucide-react';
 import { useUiStore, type RightSidebarView } from '../../../stores/ui';
 import { useProjectContextStore } from '../../../stores/project-context';
 
-const BASE_ITEMS: Array<{ id: RightSidebarView; icon: typeof MessageSquare; label: string }> = [
-  { id: 'ai-panel', icon: MessageSquare, label: 'AI Assistant' },
+// A bare speech bubble said "chat" but not "AI" — it read as a comments or
+// messaging panel. The bot face keeps the bubble silhouette (so the panel is
+// still recognisable at a glance) while naming what the chat actually is.
+const BASE_ITEMS: Array<{ id: RightSidebarView; icon: typeof BotMessageSquare; label: string }> = [
+  { id: 'ai-panel', icon: BotMessageSquare, label: 'AI Assistant' },
 ];
 
 function RightActivityBar() {
