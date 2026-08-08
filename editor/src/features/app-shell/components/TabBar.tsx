@@ -8,6 +8,7 @@ import { getFileIcon } from '../../../utils/file-icons';
 import { confirmCloseDirty } from '../../../utils/dirty-guard';
 import { toRelativePath } from '../../../utils/relative-path';
 import { isMac } from '../../../utils/platform';
+import { ARCANE_FILE_MIME, serializeFileDrag } from '../../../utils/drag-mime';
 import { useClampedMenuPosition } from '../../../hooks/useClampedMenuPosition';
 import type { OpenFile } from '../../../types';
 
@@ -73,7 +74,20 @@ function TabBar() {
               draggable
               onDragStart={(e) => {
                 e.dataTransfer.setData(DRAG_MIME, file.path);
-                e.dataTransfer.effectAllowed = 'move';
+                // Second payload, for drop zones outside the tab strip (the AI
+                // panel takes it as context). Carried alongside rather than
+                // instead of DRAG_MIME so reordering is unaffected: each drop
+                // zone checks for the MIME it understands and ignores the
+                // other, which is also what stops an explorer drag from
+                // reordering tabs.
+                const real = resolveRealPath(file, workspacePath);
+                if (real) {
+                  e.dataTransfer.setData(
+                    ARCANE_FILE_MIME,
+                    serializeFileDrag({ path: real, isDir: false }),
+                  );
+                }
+                e.dataTransfer.effectAllowed = 'copyMove';
               }}
               onDragOver={(e) => {
                 if (!e.dataTransfer.types.includes(DRAG_MIME)) return;

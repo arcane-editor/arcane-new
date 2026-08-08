@@ -5,10 +5,13 @@
  */
 
 import { useState, useEffect } from 'react';
-import { RotateCcw, History } from 'lucide-react';
+import { RotateCcw, History, Paperclip } from 'lucide-react';
 import { useAiStore } from '../../../stores/ai';
 import { useAuthStore } from '../../../stores/auth';
+import { useWorkspaceStore } from '../../../stores/workspace';
+import { ARCANE_FILE_MIME, parseFileDrag } from '../../../utils/drag-mime';
 import { resetAgentService } from '../services/agent-service';
+import { buildFileAttachment, isAlreadyStaged } from '../services/stage-file';
 import MessageList from './MessageList';
 import ReviewBar from './ReviewBar';
 import PlanList from './PlanList';
@@ -27,6 +30,7 @@ function AiChatPanel() {
   const setAuthNotice = useAiStore((s) => s.setAuthNotice);
   const verificationRequired = useAiStore((s) => s.verificationRequired);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
 
   // T5: the notice explaining WHY the user was signed out (arcane-stream's
   // 401/403 path) should disappear once they've actually logged back in,
@@ -64,8 +68,50 @@ function AiChatPanel() {
     resetAgentService();
   }
 
+  // Files dragged in from the explorer tree or the tab bar. These are
+  // in-webview HTML5 drags, unaffected by Tauri's native interception of OS
+  // file drops — those still open as editor tabs via App.tsx.
+  function handleDragOver(e: React.DragEvent) {
+    if (!e.dataTransfer.types.includes(ARCANE_FILE_MIME)) return;
+    // Without preventDefault the browser refuses the drop outright.
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    if (!dragOver) setDragOver(true);
+  }
+
+  function handleDragLeave(e: React.DragEvent) {
+    // dragleave also fires when crossing between children, which would flicker
+    // the overlay; only a leave that exits the panel entirely counts.
+    if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+    setDragOver(false);
+  }
+
+  function handleDrop(e: React.DragEvent) {
+    setDragOver(false);
+    const payload = parseFileDrag(e.dataTransfer.getData(ARCANE_FILE_MIME));
+    if (!payload) return;
+    e.preventDefault();
+
+    if (payload.isDir) {
+      setError('Folders cannot be attached as context — drop a file instead.');
+      return;
+    }
+
+    const { attachments, addAttachment } = useAiStore.getState();
+    // Re-dropping a staged file is a no-op rather than a duplicate chip.
+    if (isAlreadyStaged(attachments, payload.path)) return;
+
+    const workspacePath = useWorkspaceStore.getState().workspacePath;
+    addAttachment(buildFileAttachment(payload.path, workspacePath));
+  }
+
   return (
-    <div className="ai-panel">
+    <div
+      className={`ai-panel${dragOver ? ' ai-panel--drop-over' : ''}`}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
       {/* Header */}
       <div className="ai-panel-header">
         <AgentPicker />
@@ -113,6 +159,18 @@ function AiChatPanel() {
 
       {/* Input */}
       <ChatInput />
+
+      {/* Drop affordance. `pointer-events: none` in CSS is load-bearing: the
+          overlay sits above the panel, and intercepting the pointer would
+          swallow the very drop it is advertising. */}
+      {dragOver && (
+        <div className="ai-panel-drop-overlay">
+          <div className="ai-panel-drop-overlay-label">
+            <Paperclip size={14} />
+            <span>Drop to add as context</span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

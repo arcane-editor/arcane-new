@@ -25,6 +25,7 @@ import { useUnityIndexStore, getGuidMap, INDEX_RELEVANT } from '../../../stores/
 import type { HierarchyNode } from '../../unity-bridge';
 import { UNITY_API_LIST, UNITY_API_DEFAULTS } from '../../../data/unity-api-list';
 import { FileIcon } from '../../../utils/file-icons';
+import { relPathOf } from '../services/stage-file';
 
 type CategoryId = 'files' | 'unity-docs' | 'unity-console' | 'scene-objects' | 'assets';
 
@@ -620,12 +621,6 @@ function extOf(relPath: string): string {
   return idx >= 0 ? relPath.slice(idx + 1) : '';
 }
 
-function relPathOf(absPath: string, workspacePath: string | null): string {
-  if (workspacePath && absPath.startsWith(workspacePath + '/')) {
-    return absPath.slice(workspacePath.length + 1);
-  }
-  return absPath;
-}
 
 /**
  * Whether `absPath` should appear in the Files picker for the current project.

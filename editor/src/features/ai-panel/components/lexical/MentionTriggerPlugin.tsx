@@ -109,6 +109,9 @@ function MentionTriggerPlugin() {
       let label: string;
       switch (pick.kind) {
         case 'file':
+          // Shape is pinned to the drop path's `buildFileAttachment` by the
+          // `Attachment` union itself; the picker already knows `relPath` and
+          // `bytes`, so it fills them directly rather than re-deriving.
           attachment = {
             kind: 'file',
             id: attachmentId,
