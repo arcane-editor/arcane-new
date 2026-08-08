@@ -1,12 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { Allotment, LayoutPriority } from 'allotment';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Allotment, LayoutPriority, type AllotmentHandle } from 'allotment';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import 'allotment/dist/style.css';
 import {
   ActivityBar,
   BottomPanel,
+  EDITOR_PANE_INDEX,
   KeyboardShortcutManager,
+  MIN_EDITOR_WIDTH,
   RightActivityBar,
   RightSidebarPanel,
   SidebarPanel,
@@ -14,6 +16,7 @@ import {
   TabBar,
   TitleBar,
   initialPaneSizes,
+  widthsForRestore,
 } from './features/app-shell';
 import { EditorPanel, Breadcrumbs, EditorErrorBoundary } from './features/editor';
 import {
@@ -131,6 +134,103 @@ function App() {
     const w = typeof window !== 'undefined' ? window.innerWidth : 1280;
     return initialPaneSizes(persistedLayout, w);
   }, [persistedLayout]);
+
+  const allotmentRef = useRef<AllotmentHandle>(null);
+
+  // Live pane sizes, as last reported by Allotment. Kept in a ref rather than
+  // state so a drag doesn't re-render the whole shell on every frame.
+  const currentSizesRef = useRef<number[]>(initialLayout.sizes);
+
+  // Width each side pane had the last time it was *visible*.
+  const liveWidthsRef = useRef({
+    sidebar: initialLayout.left,
+    rightPanel: initialLayout.right,
+  });
+
+  // Width to reopen each side pane at, snapshotted when it was last hidden.
+  //
+  // Separate from liveWidthsRef on purpose: on a show, Allotment's onChange
+  // fires before this component's layout effect, so a single ref would already
+  // have been overwritten with whatever width the pane came back at — which is
+  // the value we are trying to correct.
+  const restoreWidthsRef = useRef({
+    sidebar: initialLayout.left,
+    rightPanel: initialLayout.right,
+  });
+
+  const prevShownRef = useRef({ sidebar: sidebarVisible, rightPanel: rightSidebarVisible });
+
+  // Reads visibility from the store rather than the render closure. Allotment
+  // assigns `onDidChange` in an effect that runs *after* its reconcile effect,
+  // so the callback invoked during a visibility flip is the previous render's
+  // — with a stale `sidebarVisible` captured. getState() is always current.
+  const onLayoutChange = useCallback((sizes: number[]) => {
+    currentSizesRef.current = sizes;
+    const ui = useUiStore.getState();
+
+    // Record each side's width only while it is actually shown (>0), so a
+    // hidden pane keeps its last width instead of recording 0.
+    const next: { sidebar?: number; rightPanel?: number } = {};
+    if (ui.sidebarVisible && sizes[0] > 0) {
+      liveWidthsRef.current.sidebar = sizes[0];
+      next.sidebar = sizes[0];
+    }
+    const last = sizes[sizes.length - 1];
+    if (ui.rightSidebarVisible && sizes.length >= 3 && last > 0) {
+      liveWidthsRef.current.rightPanel = last;
+      next.rightPanel = last;
+    }
+    if (next.sidebar !== undefined || next.rightPanel !== undefined) {
+      saveLayoutSizes(next);
+    }
+  }, []);
+
+  // Reopen a side pane at the width it was dragged to.
+  //
+  // Allotment caches a hidden pane's size and is supposed to restore it, but
+  // the width does not reliably come back. Rather than depend on that implicit
+  // cache, drive the restore explicitly. useLayoutEffect, not useEffect: React
+  // runs child layout effects first, so Allotment has already made the pane
+  // visible by now, and committing the correct width here means no frame ever
+  // paints at the wrong one.
+  useLayoutEffect(() => {
+    const prev = prevShownRef.current;
+    prevShownRef.current = { sidebar: sidebarVisible, rightPanel: rightSidebarVisible };
+
+    // Going hidden: snapshot the width to come back at. liveWidthsRef is still
+    // the pre-hide width — the onChange that just fired reported 0 for this
+    // pane and its `>0` guard refused to record it.
+    if (prev.sidebar && !sidebarVisible) {
+      restoreWidthsRef.current.sidebar = liveWidthsRef.current.sidebar;
+    }
+    if (prev.rightPanel && !rightSidebarVisible) {
+      restoreWidthsRef.current.rightPanel = liveWidthsRef.current.rightPanel;
+    }
+
+    const handle = allotmentRef.current;
+    if (!handle) return;
+
+    let paneIndex: number | null = null;
+    let width = 0;
+    if (!prev.sidebar && sidebarVisible) {
+      paneIndex = 0;
+      width = restoreWidthsRef.current.sidebar;
+    } else if (!prev.rightPanel && rightSidebarVisible) {
+      paneIndex = currentSizesRef.current.length - 1;
+      width = restoreWidthsRef.current.rightPanel;
+    }
+    if (paneIndex === null) return;
+
+    handle.resize(
+      widthsForRestore(
+        currentSizesRef.current,
+        paneIndex,
+        width,
+        EDITOR_PANE_INDEX,
+        MIN_EDITOR_WIDTH,
+      ),
+    );
+  }, [sidebarVisible, rightSidebarVisible]);
 
   // Restore persisted state on mount
   useEffect(() => {
@@ -1146,23 +1246,10 @@ function App() {
             <ActivityBar />
             <div className="main-content">
               <Allotment
+                ref={allotmentRef}
                 proportionalLayout={false}
                 defaultSizes={initialLayout.sizes}
-                onChange={(sizes) => {
-                  // Panes are always mounted (toggled via `visible`), so the
-                  // sizes array is stable: [sidebar, editor, rightPanel]. Persist
-                  // each side's width only while it's actually shown (>0) so a
-                  // hidden pane keeps its last width instead of saving 0.
-                  const next: { sidebar?: number; rightPanel?: number } = {};
-                  if (sidebarVisible && sizes[0] > 0) next.sidebar = sizes[0];
-                  const last = sizes[sizes.length - 1];
-                  if (rightSidebarVisible && sizes.length >= 3 && last > 0) {
-                    next.rightPanel = last;
-                  }
-                  if (next.sidebar !== undefined || next.rightPanel !== undefined) {
-                    saveLayoutSizes(next);
-                  }
-                }}
+                onChange={onLayoutChange}
               >
                 {/* All three panes are always rendered and toggled via `visible`
                     so opening the right panel never re-distributes (and snaps
