@@ -1274,3 +1274,21 @@ No gaps.
 **Type consistency:** `initialPaneSizes`, `widthsForRestore`, `EDITOR_PANE_INDEX`, `MIN_EDITOR_WIDTH`, `DEFAULT_SIDE_FRACTION`, `MAX_SIDE_FRACTION` are defined in Task 4 and used under those exact names in Tasks 4-5. `isolateFromTree` is defined and used in Task 3. `createLayoutPersister`'s `{ persist, flush, cancel }` shape matches its use in Task 6. `AllotmentHandle.resize(sizes: number[])` matches `allotment/dist/types/src/allotment.d.ts`. `onLayoutChange` is introduced in Task 5, Step 3 and modified in Task 6, Step 5 — Task 6 quotes the exact lines it replaces.
 
 **Ordering note:** Tasks 1-3 are independent of each other and of 4-6. Task 5 depends on Task 4; Task 6 depends on Task 5 (it edits the callback Task 5 introduces). Run them in order.
+
+---
+
+## Post-Execution Corrections
+
+Written after the plan was executed. **The plan text above is the plan as written, not as built** — it contains defects that review caught. Do not re-run it without applying these. Each was escalated to and ruled on by the human.
+
+**1. Task 3 was reverted in full.** Narrowing `InlineInput`'s propagation stop was wrong. Modifier chords that bubble past it reach `react-arborist`'s container key handler, which only stands down when `tree.isEditing` — and this app renames via its own `renamingNodeId` state, never entering arborist's edit mode, so that guard never closes. An unconditional type-ahead then calls `tree.focus()`, `row-container.js:50` turns that into a real DOM `focus()` on another row, the rename input blurs, and `onBlur` commits the half-typed name. Dead hotkeys beat silent data loss. A real fix requires making the rename register as an arborist edit; see the comment left in `InlineInput.tsx`. **Spec §2b is therefore not delivered.**
+
+**2. Every deep import in this plan is wrong.** `scripts/check-deep-modules.mjs` (`package.json` → `check:modules`) mechanically rejects them. All app-shell symbols must be exported from `src/features/app-shell/index.ts` and imported through the barrel. This affects Task 4 Step 5, Task 5 Step 1, and Task 6 Step 5.
+
+**3. Task 4's `widthsForRestore` needs a zero floor.** As written it returns a negative pane width for non-positive input: `widthsForRestore([0,1120,480], 0, -50, 1, 320)` → `[-50, 1170, 480]`, because shrinking the pane only grows the editor and so makes the "fits" branch *more* likely to be taken. Use `next[paneIndex] = Math.max(0, Math.round(width));`. Task 4's step text also miscounts the tests as 16; the code block contains 15.
+
+**4. Task 5 had two defects.** Its `onLayoutChange` comment blames "the previous render's callback with a stale `sidebarVisible` captured" — false, since the callback is `useCallback(fn, [])` and captures no visibility value. The real reason `getState()` is required is that Allotment rebinds `onDidChange` in a *passive* effect, which always lags a same-commit layout-effect-timed flip **regardless of the callback's deps** — so the original wording would lead a maintainer to "just add deps" and reintroduce the bug. Separately, its `if`/`else if` restore branch drops the right pane when both panes show in one commit; use two independent `if` blocks, each reading `currentSizesRef.current` **fresh** (the first `resize()` re-enters `onLayoutChange` and updates it before the second read).
+
+**5. Task 6's flush-on-unmount is dead code.** `src/main.tsx` renders `<App/>` once and nothing calls `.unmount()`; a Tauri window close tears down the JS context without running React cleanups. Combined with the debounce delaying the write, that made drag-then-quit *worse* than before the task. Flush through the codebase's existing close paths instead — `useCloseGuard.ts`'s awaited `onCloseRequested` handler and `App.tsx`'s `beforeunload` listener — which requires the persisters to be module-scope rather than `useMemo`'d. Task 6's flush test also needs retiming: at `delayMs=1000` with `tick(20)` it proves nothing.
+
+**A general rule this plan violated:** no task's commit message may assert verification the executing agent cannot perform. Task 2's mandated message said "Verified by hand" for a GUI check that never ran. Every GUI verification step in Tasks 2, 3, 5 and 6 is un-runnable by an agent and must be handed to a human.
