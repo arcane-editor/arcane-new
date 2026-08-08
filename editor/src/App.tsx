@@ -15,6 +15,7 @@ import {
   StatusBar,
   TabBar,
   TitleBar,
+  createLayoutPersister,
   initialPaneSizes,
   widthsForRestore,
 } from './features/app-shell';
@@ -160,6 +161,14 @@ function App() {
 
   const prevShownRef = useRef({ sidebar: sidebarVisible, rightPanel: rightSidebarVisible });
 
+  // One persister per window, flushed on teardown so a quit right after a drag
+  // still keeps the width. See layout-persist.ts for why this is debounced.
+  const layoutPersister = useMemo(
+    () => createLayoutPersister<Parameters<typeof saveLayoutSizes>[0]>(saveLayoutSizes),
+    [],
+  );
+  useEffect(() => () => layoutPersister.flush(), [layoutPersister]);
+
   // Reads visibility from the store rather than a closure. Allotment rebinds
   // `onDidChange` in a passive effect, which always runs after this commit's
   // layout effects — so a layout-effect-timed visibility flip fires whichever
@@ -183,9 +192,19 @@ function App() {
       next.rightPanel = last;
     }
     if (next.sidebar !== undefined || next.rightPanel !== undefined) {
-      saveLayoutSizes(next);
+      layoutPersister.persist(next);
     }
-  }, []);
+  }, [layoutPersister]);
+
+  const verticalPersister = useMemo(
+    () => createLayoutPersister<number[]>((vertical) => saveLayoutSizes({ vertical })),
+    [],
+  );
+  useEffect(() => () => verticalPersister.flush(), [verticalPersister]);
+  const onVerticalLayoutChange = useCallback(
+    (sizes: number[]) => verticalPersister.persist(sizes),
+    [verticalPersister],
+  );
 
   // Reopen a side pane at the width it was dragged to.
   //
@@ -1278,7 +1297,7 @@ function App() {
                 </Allotment.Pane>
                 <Allotment.Pane key="editor" priority={LayoutPriority.High}>
                   <div className="editor-area">
-                    <Allotment vertical onChange={(sizes) => saveLayoutSizes({ vertical: sizes })}>
+                    <Allotment vertical onChange={onVerticalLayoutChange}>
                       <Allotment.Pane>
                         {/* Settings and Account are no longer rendered here.
                             Both used to displace the editor — settings by

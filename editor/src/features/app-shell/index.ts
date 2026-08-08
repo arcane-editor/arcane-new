@@ -9,3 +9,4 @@ export { default as StatusBar } from './components/StatusBar';
 export { default as TabBar } from './components/TabBar';
 export { default as TitleBar } from './components/TitleBar';
 export { EDITOR_PANE_INDEX, MIN_EDITOR_WIDTH, initialPaneSizes, widthsForRestore } from './layout-sizes';
+export { createLayoutPersister } from './layout-persist';
