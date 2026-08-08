@@ -414,21 +414,9 @@ pub fn resolve_unity_editor(version: String) -> Result<Option<UnityEditorInstall
     Ok(None)
 }
 
-/// Recursively copy a directory tree (creating `dst` and parents as needed).
-fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
-    fs::create_dir_all(dst)?;
-    for entry in fs::read_dir(src)? {
-        let entry = entry?;
-        let file_type = entry.file_type()?;
-        let target = dst.join(entry.file_name());
-        if file_type.is_dir() {
-            copy_dir_recursive(&entry.path(), &target)?;
-        } else {
-            fs::copy(entry.path(), &target)?;
-        }
-    }
-    Ok(())
-}
+// Recursive directory copy lives in `fs_copy`, shared with the explorer's
+// drop-to-copy command.
+use crate::fs_copy::copy_dir_recursive;
 
 /// Locate the bundled `unity-bridge/` package source. In a packaged build it
 /// lives under the Tauri resource dir; in dev it's `<crate>/../unity-bridge`.

@@ -44,7 +44,12 @@ import { SettingsPanel } from './features/settings';
 import { PaletteModal } from './features/command-palette';
 import { BranchPicker, runGitignoreDoctor } from './features/git';
 import { UnityAssetPickerModal, type UnityPickerMode } from './features/unity-quick-open';
-import { setPendingReveal } from './features/explorer';
+import {
+  setPendingReveal,
+  resolveExplorerDrop,
+  highlightExplorerDropTarget,
+  clearExplorerDropTarget,
+} from './features/explorer';
 import { useUnitySceneStore } from './stores/unity-scene';
 import { useRegisterCommands } from './hooks/useRegisterCommands';
 import { useAutoSave } from './hooks/useAutoSave';
@@ -375,15 +380,34 @@ function App() {
       const fn = await win.onDragDropEvent(async (event) => {
         if (event.payload.type === 'enter' || event.payload.type === 'over') {
           highlightTerminalDropTarget(event.payload.position);
+          highlightExplorerDropTarget(event.payload.position);
           return;
         }
         if (event.payload.type === 'leave') {
           clearTerminalDropTarget();
+          clearExplorerDropTarget();
           return;
         }
 
         const paths = event.payload.paths;
+        clearExplorerDropTarget();
         if (await handleTerminalDrop(event.payload.position, paths)) return;
+
+        // Dropped on the file tree: copy into the folder under the cursor.
+        // The explorer owns the rest (the Unity .meta question, the copy
+        // itself), so this only resolves the target and hands off — same
+        // reason the reveal flow goes through an event.
+        {
+          const ws0 = useWorkspaceStore.getState();
+          const treeRoot = ws0.assetsRootPath ?? ws0.workspacePath;
+          if (treeRoot) {
+            const req = resolveExplorerDrop(event.payload.position, paths, treeRoot);
+            if (req) {
+              window.dispatchEvent(new CustomEvent('explorer-drop', { detail: req }));
+              return;
+            }
+          }
+        }
 
         const ws = useWorkspaceStore.getState();
         for (const path of paths) {

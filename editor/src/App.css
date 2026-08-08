@@ -439,6 +439,26 @@ html, body, #root {
   background: var(--hover);
 }
 
+/* ---- Explorer: OS file drop targets ----
+
+   Tauri intercepts OS drops natively, so there is no :hover and no drag-over
+   event on these rows — `services/drop-target.ts` toggles these classes from
+   a hand-rolled hit-test instead. */
+
+/* A folder row: the copy lands inside this folder. */
+.tree-node--drop-over {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+  border-radius: 3px;
+}
+
+/* Over a file row or empty space: the copy lands in an enclosing folder, so
+   the whole tree is marked rather than implying a specific row. */
+.sidebar-tree--drop-over {
+  box-shadow: inset 0 0 0 2px var(--accent);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+
 .tree-node.selected {
   background: var(--selected);
   border-left: 2px solid var(--accent);
