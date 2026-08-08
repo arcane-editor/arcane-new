@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "dodopayments": {
+      "type": "stdio",
+      "command": "npx",
+
+    "permissions": {
+      "allow": ["mcp__dodopayments__execute"]
+    },
+      "args": [
+        "-y",
+        "mcp-remote@latest",
+        "https://mcp.dodopayments.com/sse"
+      ],
+      "env": {}
+    }
+  }
+}
