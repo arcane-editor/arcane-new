@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { isolateFromTree } from './tree-key-isolation';
 
 interface InlineInputProps {
   defaultValue: string;
@@ -84,10 +83,22 @@ function InlineInput({ defaultValue, onSubmit, onCancel, siblingNames = [] }: In
         onKeyDown={(e) => {
           if (e.key === 'Enter') { e.preventDefault(); commit(inputRef.current?.value ?? ''); }
           if (e.key === 'Escape') { e.preventDefault(); cancel(); }
-          // Not a blanket stop: that also blocked every app hotkey, because
-          // react-hotkeys-hook listens on `document` and React's listeners sit
-          // on #root below it. See tree-key-isolation.ts for the policy.
-          if (isolateFromTree(e)) e.stopPropagation();
+          // Blanket stop, deliberately. This also blocks app hotkeys — React's
+          // listeners sit on #root, below the document listener
+          // react-hotkeys-hook uses — and that is the lesser evil.
+          //
+          // Narrowing it to let modifier chords bubble was tried and reverted:
+          // this input renders inside a react-arborist tree whose key handler
+          // only stands down when `tree.isEditing` (default-container.js:31),
+          // and this app renames via its own `renamingNodeId` state without
+          // ever entering arborist's edit mode — so that guard never closes.
+          // Anything reaching it hits an unconditional type-ahead that calls
+          // tree.focus(), and row-container.js:50 turns that into a real DOM
+          // focus() on another row. The rename input blurs, onBlur fires, and
+          // a half-typed filename gets committed. Dead hotkeys beat silent
+          // data loss. Fixing this properly means making the rename register
+          // as an arborist edit so `tree.isEditing` is actually true.
+          e.stopPropagation();
         }}
         onBlur={() => {
           // Match VS Code: commit a valid name on blur, otherwise abandon the
