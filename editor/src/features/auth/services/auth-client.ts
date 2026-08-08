@@ -39,7 +39,7 @@ export class AuthClient {
    * mode (expired, replayed, verifier mismatch) by design.
    *
    * `timeoutMs` bounds a hung connection (no AbortController previously —
-   * a stalled request left AuthTab stuck on the 'exchanging' spinner
+   * a stalled request left the account view stuck on the 'exchanging' spinner
    * forever); overridable for tests, same pattern as browser-login's
    * `beginBrowserLogin(handlers, timeoutMs)`.
    */

@@ -1,9 +1,16 @@
-import { useState } from 'react';
-import { Search, RotateCcw, X } from 'lucide-react';
-import { useSettingsStore, DEFAULT_SETTINGS } from '../../../stores/settings';
+/**
+ * The settings catalogue — every user-facing preference, its control type, and
+ * the copy shown beside it.
+ *
+ * Data, not UI: kept out of the components so the modal shell, the section
+ * renderer and the search filter can each consume it without any of them
+ * owning it. `category` drives the modal's left-hand nav, so adding a new
+ * category here is enough to make it appear.
+ */
+
 import type { SettingsSchema } from '../../../types';
 
-interface SettingDefinition {
+export interface SettingDefinition {
   key: keyof SettingsSchema;
   category: string;
   label: string;
@@ -14,7 +21,7 @@ interface SettingDefinition {
   max?: number;
 }
 
-const SETTING_DEFINITIONS: SettingDefinition[] = [
+export const SETTING_DEFINITIONS: SettingDefinition[] = [
   { key: 'editor.fontSize', type: 'number', min: 10, max: 30, category: 'Editor', label: 'Font Size', description: 'Controls the font size in pixels.' },
   { key: 'editor.tabSize', type: 'select', options: [2, 4, 8], category: 'Editor', label: 'Tab Size', description: 'The number of spaces a tab is equal to.' },
   { key: 'editor.wordWrap', type: 'select', options: ['off', 'on', 'wordWrapColumn'], category: 'Editor', label: 'Word Wrap', description: 'Controls how lines should wrap.' },
@@ -67,146 +74,3 @@ const SETTING_DEFINITIONS: SettingDefinition[] = [
   { key: 'unity.packages.manifestIntelligence', type: 'boolean', category: 'Unity', label: 'Packages: Manifest Intelligence', description: 'Enable completions and validation in Packages/manifest.json.' },
   { key: 'unity.index.enabled', type: 'boolean', category: 'Unity', label: 'Project Index', description: 'Build and maintain a background index of Unity assets for fast cross-file lookups.' },
 ];
-
-interface SettingRowProps {
-  definition: SettingDefinition;
-}
-
-function SettingRow({ definition }: SettingRowProps) {
-  const { settings, setSetting, resetSetting } = useSettingsStore();
-  const currentValue = settings[definition.key];
-  const defaultValue = DEFAULT_SETTINGS[definition.key];
-  const isModified = currentValue !== defaultValue;
-
-  function handleChange(newValue: unknown) {
-    setSetting(definition.key, newValue as SettingsSchema[typeof definition.key]);
-  }
-
-  function renderControl() {
-    if (definition.type === 'boolean') {
-      return (
-        <label className="settings-toggle">
-          <input
-            type="checkbox"
-            checked={currentValue as boolean}
-            onChange={(e) => handleChange(e.target.checked)}
-          />
-          <span className="settings-toggle-slider" />
-        </label>
-      );
-    }
-
-    if (definition.type === 'select') {
-      return (
-        <select
-          className="settings-control-select"
-          value={String(currentValue)}
-          onChange={(e) => {
-            const raw = e.target.value;
-            const parsed = definition.options?.find((o) => String(o) === raw);
-            handleChange(parsed !== undefined ? parsed : raw);
-          }}
-        >
-          {definition.options?.map((opt) => (
-            <option key={String(opt)} value={String(opt)}>
-              {String(opt)}
-            </option>
-          ))}
-        </select>
-      );
-    }
-
-    if (definition.type === 'number') {
-      return (
-        <input
-          type="number"
-          className="settings-control-number"
-          value={currentValue as number}
-          min={definition.min}
-          max={definition.max}
-          onChange={(e) => handleChange(Number(e.target.value))}
-        />
-      );
-    }
-
-    return null;
-  }
-
-  return (
-    <div className={`settings-row ${isModified ? 'settings-row-modified' : ''}`}>
-      <div className="settings-row-label">{definition.label}</div>
-      <div className="settings-row-description">{definition.description}</div>
-      <div className="settings-row-control">
-        {renderControl()}
-        {isModified && (
-          <button
-            className="settings-reset-btn"
-            title="Reset to default"
-            onClick={() => resetSetting(definition.key)}
-          >
-            <RotateCcw size={13} />
-          </button>
-        )}
-      </div>
-    </div>
-  );
-}
-
-interface SettingsPanelProps {
-  onClose: () => void;
-}
-
-export default function SettingsPanel({ onClose }: SettingsPanelProps) {
-  const [search, setSearch] = useState('');
-
-  const filtered = search.trim()
-    ? SETTING_DEFINITIONS.filter(
-        (d) =>
-          d.label.toLowerCase().includes(search.toLowerCase()) ||
-          d.description.toLowerCase().includes(search.toLowerCase()) ||
-          d.key.toLowerCase().includes(search.toLowerCase())
-      )
-    : SETTING_DEFINITIONS;
-
-  const categories = Array.from(new Set(filtered.map((d) => d.category)));
-
-  return (
-    <div className="settings-panel">
-      <div className="settings-header">
-        <span className="settings-header-title">Settings</span>
-        <button onClick={onClose} title="Close" className="settings-header-close">
-          <X size={16} />
-        </button>
-      </div>
-
-      <div className="settings-search">
-        <Search size={14} className="settings-search-icon" />
-        <input
-          type="text"
-          placeholder="Search settings"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="settings-search-input"
-          autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}
-        />
-      </div>
-
-      <div className="settings-content">
-        {categories.length === 0 ? (
-          <div className="settings-empty">No settings match your search.</div>
-        ) : (
-          categories.map((category) => (
-            <div key={category} className="settings-category">
-              <div className="settings-category-title">{category}</div>
-              {filtered
-                .filter((d) => d.category === category)
-                .map((definition) => (
-                  <SettingRow key={definition.key} definition={definition} />
-                ))}
-            </div>
-          ))
-        )}
-      </div>
-    </div>
-  );
-}
