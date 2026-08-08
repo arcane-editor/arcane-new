@@ -119,7 +119,7 @@ interface UiState {
   setBottomPanelMaximized: (v: boolean) => void;
 
   settingsOpen: boolean;
-  /** Nav section shown by the settings modal; survives close/reopen. */
+  /** Nav section shown by the settings modal; survives close/reopen within a session. */
   settingsSection: string;
   /** Opens the modal, optionally jumping straight to a section. */
   openSettings: (section?: string) => void;
@@ -243,9 +243,10 @@ export const useUiStore = create<UiState>((set, get) => ({
   setBottomPanelMaximized: (v) => set({ bottomPanelMaximized: v }),
 
   settingsOpen: false,
-  // Seeded with the first category so a fresh install lands on real content
-  // rather than an empty pane. The modal re-validates this against the live
-  // category list, so a value persisted by an older version can't blank it.
+  // Seeded with the first category so the modal opens on real content rather
+  // than an empty pane. Not persisted — each session starts here. The modal
+  // validates this against the live category list before using it, so renaming
+  // the first category cannot leave the pane blank.
   settingsSection: 'Editor',
   openSettings: (section) =>
     set((s) => ({

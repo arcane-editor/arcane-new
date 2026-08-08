@@ -45,10 +45,12 @@ export function filterSettings(
 }
 
 /**
- * Whether a remembered section still exists.
+ * Whether a section id corresponds to something renderable.
  *
- * The last-viewed section outlives the session, so a category removed in a
- * later version would otherwise select nothing and render a blank pane.
+ * The section is a free-form string — it comes from the ui store's default,
+ * from `openSettings(section)` callers, and from nav clicks. Only nav clicks
+ * are guaranteed to name a live category, so this is checked before use rather
+ * than trusting the caller and rendering a blank pane.
  */
 export function isKnownSection(section: string, categories: string[]): boolean {
   return section === ACCOUNT_SECTION || categories.includes(section);

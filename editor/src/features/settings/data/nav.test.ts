@@ -64,9 +64,10 @@ describe('isKnownSection', () => {
     for (const c of cats) expect(isKnownSection(c, cats)).toBe(true);
   });
 
-  it('rejects a stale section, so a removed category cannot blank the pane', () => {
-    // The last-viewed section persists across sessions; a category deleted in
-    // a later version must fall back rather than render nothing.
+  it('rejects a section that names nothing, so the pane cannot render blank', () => {
+    // Section ids reach the modal from the store default and from
+    // `openSettings(section)` callers, neither of which is checked at the
+    // call site.
     expect(isKnownSection('Telepathy', cats)).toBe(false);
     expect(isKnownSection('', cats)).toBe(false);
   });

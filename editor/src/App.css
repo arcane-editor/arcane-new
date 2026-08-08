@@ -3738,13 +3738,17 @@ html, body, #root {
 
    Truncates from the LEFT: `features/ai-panel/components` cut from the right
    leaves `features/ai-p…`, which is the half that does not disambiguate. RTL
-   direction moves the ellipsis to the front, and `unicode-bidi: plaintext` is
-   load-bearing — without it the RTL context reorders the `/` separators and
-   renders the segments in the wrong order. */
+   direction moves the ellipsis to the front while each path segment, being
+   strong-LTR text, keeps its own order.
+
+   Do NOT add `unicode-bidi: plaintext` here. It derives the direction from the
+   first strong character — always LTR for a path — which silently cancels the
+   `direction: rtl` above and truncates from the right again. Verified in a
+   browser: with it, `a/very/deeply/nested/path` renders `a/very/deeply/nes…`
+   instead of `…/deeply/nested/path`. */
 .ai-panel-attachment-dir {
   direction: rtl;
   text-align: left;
-  unicode-bidi: plaintext;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
