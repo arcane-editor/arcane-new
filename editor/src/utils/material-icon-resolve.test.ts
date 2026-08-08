@@ -104,8 +104,50 @@ describe('Unity extension overlay', () => {
     expect(regressed).toEqual([]);
   });
 
+  it('gives Unity folders an icon where upstream has none', () => {
+    // Prefabs / Scenes / Materials / Editor / StreamingAssets are five of the
+    // folders in Unity's own standard project layout, and upstream has none of
+    // them — they would all render as the plain default folder.
+    expect(resolveFolderIconId('Prefabs', false, false)).not.toBe(DEFAULT_FOLDER);
+    expect(resolveFolderIconId('Scenes', false, false)).not.toBe(DEFAULT_FOLDER);
+    expect(resolveFolderIconId('Materials', false, false)).not.toBe(DEFAULT_FOLDER);
+    expect(resolveFolderIconId('Editor', false, false)).not.toBe(DEFAULT_FOLDER);
+    expect(resolveFolderIconId('StreamingAssets', false, false)).not.toBe(DEFAULT_FOLDER);
+  });
+
+  it('derives a real open variant for every overridden folder', () => {
+    // The `-open` id is derived by suffix rather than looked up, so it has to
+    // be asserted against the icon set rather than assumed.
+    for (const name of ['Prefabs', 'Scenes', 'Materials', 'Editor', 'StreamingAssets']) {
+      const open = resolveFolderIconId(name, true, false);
+      expect(open).toEndWith('-open');
+      expect(ICON_PATHS[open]).toBeDefined();
+    }
+  });
+
+  it('does not regress any folder the previous hand-written map covered', () => {
+    // Companion to the file-extension guard above. Its absence is what let the
+    // five Unity folders above regress unnoticed when the vendored set landed.
+    const previouslyCovered = [
+      'assets', 'scripts', 'prefabs', 'scenes', 'editor', 'plugins', 'resources',
+      'shaders', 'materials', 'textures', 'animations', 'streamingassets',
+      'src', 'lib', 'dist', 'build', 'public', 'components', 'features', 'hooks',
+      'utils', 'types', 'stores', 'config', 'docs', 'test', 'tests', 'node_modules',
+      '.git', '.github', 'api', 'routes', 'server', 'client', 'shared', 'theme',
+      'styles', 'css', 'images', 'img', 'fonts', 'audio', 'video', 'database',
+      'docker', 'templates', 'app', 'rust', 'target', 'content', 'project',
+    ];
+    const regressed = previouslyCovered.filter(
+      (f) => resolveFolderIconId(f, false, false) === DEFAULT_FOLDER,
+    );
+    expect(regressed).toEqual([]);
+  });
+
   it('resolves every overlay target to a real SVG', () => {
-    const overlayTargets = ['unity', 'shader', 'settings', 'xml', 'css', 'document', 'image'];
+    const overlayTargets = [
+      'unity', 'shader', 'settings', 'xml', 'css', 'document', 'image',
+      'folder-unity', 'folder-resource', 'folder-config',
+    ];
     const orphans = overlayTargets.filter((id) => !ICON_PATHS[id]);
     expect(orphans).toEqual([]);
   });

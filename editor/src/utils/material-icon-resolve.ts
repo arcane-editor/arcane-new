@@ -62,6 +62,28 @@ const UNITY_EXTENSION_OVERRIDES: Record<string, string> = {
   cubemap: 'image',
 };
 
+/**
+ * Unity folders upstream has no icon for.
+ *
+ * Same gap as `UNITY_EXTENSION_OVERRIDES`, on the folder side: Material covers
+ * `Scripts`, `Shaders`, `Textures`, `Animations` and `Resources`, but not
+ * `Prefabs`, `Scenes`, `Materials`, `Editor` or `StreamingAssets` — five of the
+ * folders in Unity's own standard project layout, which would otherwise all
+ * render as the plain default folder.
+ *
+ * Values are base ids; the `-open` variant is derived, and both are asserted to
+ * exist in `ICON_PATHS` by the unit tests.
+ */
+const UNITY_FOLDER_OVERRIDES: Record<string, string> = {
+  prefabs: 'folder-unity',
+  scenes: 'folder-unity',
+  materials: 'folder-resource',
+  streamingassets: 'folder-resource',
+  scriptableobjects: 'folder-resource',
+  // `Editor/` is Unity's build-excluded tooling directory, not a text editor.
+  editor: 'folder-config',
+};
+
 /** Icon id → SVG filename, falling back to the default file icon. */
 export function iconFileName(iconId: string): string {
   return ICON_PATHS[iconId] ?? ICON_PATHS[DEFAULT_FILE];
@@ -126,6 +148,9 @@ export function resolveFolderIconId(
   const name = folderName.toLowerCase();
   const fallback = isOpen ? DEFAULT_FOLDER_OPEN : DEFAULT_FOLDER;
   if (!name) return fallback;
+
+  const override = UNITY_FOLDER_OVERRIDES[name];
+  if (override) return isOpen ? `${override}-open` : override;
 
   const hit = isOpen
     ? pick(name, FOLDER_NAMES_EXPANDED, LIGHT_FOLDER_NAMES_EXPANDED, isLight)
