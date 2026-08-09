@@ -919,7 +919,7 @@ pub fn diff_unity_assets(
 
 /// `git show <rev>:<path>`. Empty string on any failure.
 fn show_rev(workspace_path: &str, rev: &str, file_path: &str) -> String {
-    let output = std::process::Command::new("git")
+    let output = crate::process_util::command("git")
         .args(["-C", workspace_path, "show", &format!("{rev}:{file_path}")])
         .output();
     match output {

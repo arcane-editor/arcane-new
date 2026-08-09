@@ -12,7 +12,6 @@
 //! path (streaming) over either of these.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde::Serialize;
 use walkdir::WalkDir;
@@ -393,7 +392,7 @@ pub fn unity_tests_run_headless(
         "EditMode"
     };
 
-    let mut cmd = Command::new(&exe);
+    let mut cmd = crate::process_util::command(&exe);
     cmd.args([
         "-batchmode",
         "-runTests",

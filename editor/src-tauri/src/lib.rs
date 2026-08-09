@@ -19,6 +19,7 @@ mod auth_loopback;
 mod graphify;
 mod fs_copy;
 mod path_util;
+mod process_util;
 mod sync_util;
 mod walk_policy;
 #[cfg(target_os = "macos")]
@@ -53,13 +54,13 @@ pub struct FileEntry {
 /// break the file tree.
 fn classify_ignored(dir: &str, names: &[String]) -> std::collections::HashSet<String> {
     use std::io::Write;
-    use std::process::{Command, Stdio};
+    use std::process::Stdio;
 
     if names.is_empty() {
         return std::collections::HashSet::new();
     }
 
-    let child = Command::new("git")
+    let child = crate::process_util::command("git")
         .args(["-C", dir, "check-ignore", "-z", "--stdin"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -453,11 +454,10 @@ async fn execute_command(
     timeout_ms: Option<u64>,
 ) -> Result<CommandOutput, String> {
     use std::process::Stdio;
-    use tokio::process::Command;
 
     let timeout = std::time::Duration::from_millis(timeout_ms.unwrap_or(30000));
 
-    let child = Command::new(if cfg!(target_os = "windows") { "cmd" } else { "sh" })
+    let child = crate::process_util::async_command(if cfg!(target_os = "windows") { "cmd" } else { "sh" })
         .args(if cfg!(target_os = "windows") { vec!["/C", &command] } else { vec!["-c", &command] })
         .current_dir(&cwd)
         .stdout(Stdio::piped())
@@ -813,12 +813,15 @@ pub fn run() {
             auth::auth_delete_token,
             auth::get_arcane_home_dir,
             auth::auth_deep_link_scheme,
+            auth::auth_check_channel,
             auth_loopback::auth_loopback_start,
             auth_loopback::auth_loopback_stop,
             unity_ipc::unity_ipc_start,
             unity_ipc::unity_ipc_stop,
             unity_ipc::unity_ipc_send,
             unity_ipc::unity_ipc_request,
+            unity_ipc::unity_ipc_reconnect,
+            unity_ipc::unity_ipc_status,
             dap::dap_start,
             dap::dap_send,
             dap::dap_stop,
@@ -1014,7 +1017,7 @@ mod read_directory_ignore_tests {
     fn run_git(path: &str, args: &[&str]) {
         let mut full: Vec<&str> = vec!["-C", path];
         full.extend_from_slice(args);
-        let output = Command::new("git")
+        let output = crate::process_util::command("git")
             .args(&full)
             .env("GIT_CONFIG_GLOBAL", "/dev/null")
             .env("GIT_CONFIG_SYSTEM", "/dev/null")

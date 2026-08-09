@@ -338,6 +338,10 @@ fn resolve_from_hub_json(version: &str) -> Option<PathBuf> {
 /// dead C# IntelliSense with nothing reported anywhere.
 ///
 /// Platform-neutral and directory-parameterised so it is testable on any host.
+/// Only called from the Windows resolver, but deliberately not cfg-gated:
+/// gating it would make the Windows behaviour untestable from a macOS run,
+/// which is the blind spot that let the single-hard-coded-path bug ship.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub(crate) fn hub_roots_from_config_dir(dir: &std::path::Path) -> Vec<PathBuf> {
     let mut roots = Vec::new();
 
@@ -359,6 +363,7 @@ pub(crate) fn hub_roots_from_config_dir(dir: &std::path::Path) -> Vec<PathBuf> {
 ///
 /// Platform-neutral: the executable layout differs per OS, but the root/version
 /// nesting does not, so the Windows path is exercisable from a macOS test run.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub(crate) fn resolve_from_hub_roots(roots: &[PathBuf], version: &str) -> Option<PathBuf> {
     for root in roots {
         let candidate = if cfg!(target_os = "windows") {

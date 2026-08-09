@@ -3,7 +3,7 @@ use crate::unity_journal::{JournalReader, JournalWriter};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, Window};
@@ -22,9 +22,29 @@ const DEFAULT_RPC_TIMEOUT_MS: u64 = 10_000;
 // Journal poll pacing. Must match arcane-extension/Editor/BridgeClient.cs.
 const POLL_ACTIVE_MS: u64 = 25;
 const POLL_IDLE_MS: u64 = 250;
+/// Poll rate while waiting for a handshake. Deliberately NOT the idle rate: an
+/// unconnected session has no traffic, so the idle backoff would otherwise pin
+/// us at 250ms for the one window where latency is most visible to the user.
+const POLL_CONNECTING_MS: u64 = 100;
+/// How long after a drop or a re-arm a handshake is still plausibly on its way,
+/// and therefore worth polling fast for. Comfortably covers Unity's 1s discovery
+/// poll without leaving an idle project stat-polling at 10Hz forever.
+const HANDSHAKE_WINDOW_MS: u64 = 3000;
 const IDLE_AFTER_MS: u64 = 3000;
 const HEARTBEAT_MS: u64 = 2000;
 const PEER_DEAD_MS: u64 = 8000;
+/// Widened peer-dead deadline while Unity has announced a domain reload. A big
+/// project's recompile far outlasts PEER_DEAD_MS, and dropping the connection
+/// for it is exactly the flicker the journal transport exists to avoid.
+const RELOAD_DEAD_MS: u64 = 90_000;
+/// How long the session stays disconnected before it re-arms itself (mints a new
+/// ide_session_id and republishes bridge.json, forcing Unity to re-handshake).
+/// Long enough that an ordinary domain reload reconnects on its own first.
+const REARM_GRACE_MS: u64 = 5_000;
+/// Cadence of subsequent re-arms while still disconnected.
+const REARM_INTERVAL_MS: u64 = 10_000;
+/// Outbound queue depth. Bounded, but never awaited on — see `unity_ipc_send`.
+const CLIENT_CHANNEL_CAPACITY: usize = 256;
 /// How long to wait for the Unity package to show up before concluding it is
 /// missing or outdated (only when Unity itself is demonstrably running).
 const STALE_PACKAGE_AFTER_MS: u64 = 15_000;
@@ -106,6 +126,14 @@ pub struct UnityIpcInner {
     pub pending: Mutex<HashMap<String, oneshot::Sender<serde_json::Value>>>,
     /// Monotonic counter for unique request ids (no Math.random / clock needed).
     pub req_counter: AtomicU64,
+    /// Whether the handshake currently holds. Published by the session loop and
+    /// read by `unity_ipc_send`/`unity_ipc_request` so they can fail fast: the
+    /// outbound channel is only drained while connected, so queueing into it
+    /// while disconnected used to fill it and then block the caller forever.
+    pub connected: AtomicBool,
+    /// Forces an immediate session re-arm (the manual "Reconnect" path). A
+    /// capacity-1 channel is deliberate: several clicks coalesce into one.
+    pub rearm_tx: Mutex<Option<mpsc::Sender<()>>>,
 }
 
 impl UnityIpcInner {
@@ -115,6 +143,8 @@ impl UnityIpcInner {
             client_tx: Mutex::new(None),
             pending: Mutex::new(HashMap::new()),
             req_counter: AtomicU64::new(0),
+            connected: AtomicBool::new(false),
+            rearm_tx: Mutex::new(None),
         }
     }
 }
@@ -191,6 +221,8 @@ async fn shutdown_inner(inner: &UnityIpcInner) {
         let _ = tx.send(()).await;
     }
     *inner.client_tx.lock().await = None;
+    *inner.rearm_tx.lock().await = None;
+    inner.connected.store(false, Ordering::SeqCst);
     inner.pending.lock().await.clear();
 }
 
@@ -264,8 +296,7 @@ fn process_is_alive(pid: u32) -> bool {
 
 #[cfg(windows)]
 fn process_is_alive(pid: u32) -> bool {
-    use std::process::Command;
-    Command::new("tasklist")
+    crate::process_util::command("tasklist")
         .args(["/FI", &format!("PID eq {}", pid), "/NH"])
         .output()
         .map(|o| String::from_utf8_lossy(&o.stdout).contains(&pid.to_string()))
@@ -361,6 +392,12 @@ pub async fn unity_ipc_start(
     let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
     *inner.shutdown_tx.lock().await = Some(shutdown_tx);
 
+    // Capacity 1: a re-arm is idempotent, so several rapid "Reconnect" clicks
+    // should coalesce into one rather than queue up a burst of session resets.
+    let (rearm_tx, rearm_rx) = mpsc::channel::<()>(1);
+    *inner.rearm_tx.lock().await = Some(rearm_tx);
+    inner.connected.store(false, Ordering::SeqCst);
+
     let app_handle = app.clone();
     let ipc_state = inner.clone();
     let label_for_task = label.clone();
@@ -377,6 +414,7 @@ pub async fn unity_ipc_start(
                 app_handle,
                 ipc_state,
                 label_for_task,
+                rearm_rx,
             ) => {}
         }
         // Whichever way we got here, the session is over: retract the discovery
@@ -390,6 +428,13 @@ pub async fn unity_ipc_start(
 /// One journal session: poll `to-ide.jsonl`, gate on the handshake, pump the
 /// outbound channel into `to-unity.jsonl`. Replaces the old socket/pipe
 /// `handle_client` and its two platform-specific accept loops.
+///
+/// The session is self-healing. `connected` can only be raised by a
+/// `connection_init` echoing our current `ide_session_id`, and Unity only sends
+/// one when it cold-starts or observes a changed id in `bridge.json` — so a
+/// disconnect that leaves Unity believing its session is still live used to be
+/// permanent. Re-arming (see `rearm`) makes the IDE change that id itself,
+/// which is the same path that makes an IDE restart recover.
 #[allow(clippy::too_many_arguments)]
 async fn run_journal_session(
     workspace_path: String,
@@ -399,34 +444,45 @@ async fn run_journal_session(
     app: AppHandle,
     state: Arc<UnityIpcInner>,
     label: String,
+    mut rearm_rx: mpsc::Receiver<()>,
 ) {
-    let (client_tx, mut client_rx) = mpsc::channel::<String>(64);
+    let (client_tx, mut client_rx) = mpsc::channel::<String>(CLIENT_CHANNEL_CAPACITY);
     *state.client_tx.lock().await = Some(client_tx);
 
+    // Only actual Unity projects get a bridge.json, so only they can be re-armed.
+    let is_unity_project = Path::new(&workspace_path).join("ProjectSettings").is_dir();
+
+    let mut ide_session_id = ide_session_id;
     let mut reader: Option<JournalReader> = None;
     let mut connected = false;
     let mut unity_session_id: Option<String> = None;
     let mut last_heartbeat = now_ms();
     let mut last_traffic = now_ms();
     let mut last_peer_bytes = now_ms();
+    // Widened to RELOAD_DEAD_MS while Unity is mid-domain-reload.
+    let mut peer_deadline = PEER_DEAD_MS;
     let mut stale_checked = false;
+    let mut stale_check_at = now_ms() + STALE_PACKAGE_AFTER_MS;
     let mut package_version_warned = false;
-    let started = now_ms();
+    // Start of the current unconnected window — drives the re-arm schedule.
+    let mut disconnected_since = now_ms();
+    let mut last_rearm: Option<u64> = None;
 
     loop {
         let now = now_ms();
 
         // Lazily open Unity's journal — a reader never creates the peer's file.
+        //
+        // Deliberately NOT seek_to_end(): the handshake we are waiting for may
+        // be the very first bytes of this file. Unity creates it, truncates it
+        // and appends connection_init in well under one poll interval, so
+        // skipping to EOF here could land the read head permanently past the
+        // only message that can ever raise `connected`. Everything that is not
+        // our handshake is discarded below instead, which costs one pass over a
+        // backlog bounded by ROTATE_THRESHOLD and makes the race unwinnable in
+        // either ordering.
         if reader.is_none() {
             reader = JournalReader::open(&dir.join("to-ide.jsonl"), &dir.join("to-ide.ack")).ok();
-            if let Some(r) = reader.as_mut() {
-                // Skip a previous session's backlog rather than replaying it
-                // through route_message. Nothing is lost: a stale connection_init
-                // would be rejected by the handshake gate anyway, and once Unity
-                // notices our new bridge.json it truncates and re-handshakes,
-                // which the epoch check turns into a reset back to 0.
-                r.seek_to_end();
-            }
         }
 
         let mut saw_bytes = false;
@@ -442,6 +498,38 @@ async fn run_journal_session(
                     // One malformed line never kills the session.
                     Err(_) => continue,
                 };
+
+                if msg.msg_type == "reloading" {
+                    // Unity is tearing down its AppDomain for a script recompile.
+                    // It resumes mid-stream afterwards, so this is explicitly NOT
+                    // a disconnect — we only widen the liveness deadline, because
+                    // a large project's recompile far outlasts PEER_DEAD_MS.
+                    peer_deadline = RELOAD_DEAD_MS;
+                    let _ = app.emit_to(
+                        label.as_str(),
+                        "unity-reloading",
+                        serde_json::json!({ "reloading": true }),
+                    );
+                    continue;
+                }
+
+                // Any other traffic means the AppDomain is live again.
+                if peer_deadline != PEER_DEAD_MS {
+                    peer_deadline = PEER_DEAD_MS;
+                    let _ = app.emit_to(
+                        label.as_str(),
+                        "unity-reloading",
+                        serde_json::json!({ "reloading": false }),
+                    );
+                }
+
+                // Pre-handshake, the ONLY message that means anything is a
+                // connection_init addressed to this session. Dropping the rest
+                // is what lets the reader start at offset 0 without replaying a
+                // previous session's logs into the console.
+                if !connected && msg.msg_type != "connection_init" {
+                    continue;
+                }
 
                 if msg.msg_type == "connection_init" {
                     // The handshake gate: we write NOTHING until a
@@ -468,6 +556,9 @@ async fn run_journal_session(
                         unity_session_id = Some(incoming.to_string());
                     }
                     connected = true;
+                    state.connected.store(true, Ordering::SeqCst);
+                    // A fresh handshake retires any pending re-arm schedule.
+                    last_rearm = None;
                     // The handshake landed, so the package is present — the
                     // "missing" timeout below must never fire for this session.
                     stale_checked = true;
@@ -498,15 +589,8 @@ async fn run_journal_session(
                     // Unity quit cleanly; don't make the user wait out PEER_DEAD_MS.
                     connected = false;
                     unity_session_id = None;
-                    state.pending.lock().await.clear();
-                    let _ = app.emit_to(
-                        label.as_str(),
-                        "unity-connection-changed",
-                        ConnectionChangedPayload {
-                            connected: false,
-                            info: None,
-                        },
-                    );
+                    disconnected_since = now;
+                    announce_disconnect(&app, &state, &label).await;
                     continue;
                 }
 
@@ -516,18 +600,27 @@ async fn run_journal_session(
             r.publish_ack_if_needed(now);
         }
 
-        // Outbound — only after the handshake.
+        // Outbound. The channel is drained UNCONDITIONALLY — a queue that only
+        // empties while connected is a queue that blocks its senders once it
+        // fills, which is exactly how a disconnected bridge used to hang
+        // `unity_ipc_send` forever. Anything queued while disconnected is stale
+        // control traffic, so it is drained and dropped rather than replayed at
+        // reconnect. `unity_ipc_send` also rejects up front, so in practice
+        // nothing reaches this path.
         let mut wrote = false;
-        if connected {
-            while let Ok(msg) = client_rx.try_recv() {
-                match writer.append(&msg) {
-                    Ok(true) => wrote = true,
-                    Ok(false) => {
-                        eprintln!("[UnityIPC] outbound message exceeds the 16 MB cap — dropped")
-                    }
-                    Err(e) => eprintln!("[UnityIPC] journal write failed: {}", e),
-                }
+        while let Ok(msg) = client_rx.try_recv() {
+            if !connected {
+                continue;
             }
+            match writer.append(&msg) {
+                Ok(true) => wrote = true,
+                Ok(false) => {
+                    eprintln!("[UnityIPC] outbound message exceeds the 16 MB cap — dropped")
+                }
+                Err(e) => eprintln!("[UnityIPC] journal write failed: {}", e),
+            }
+        }
+        if connected {
             if now.saturating_sub(last_heartbeat) >= HEARTBEAT_MS {
                 last_heartbeat = now;
                 let hb = serde_json::json!({
@@ -546,23 +639,18 @@ async fn run_journal_session(
         }
 
         // Liveness: with no socket to close, a journal that stops growing IS the
-        // disconnect signal.
-        if connected && now.saturating_sub(last_peer_bytes) > PEER_DEAD_MS {
+        // disconnect signal. `peer_deadline` is widened while Unity has told us
+        // it is reloading, so a long recompile is not mistaken for a death.
+        if connected && now.saturating_sub(last_peer_bytes) > peer_deadline {
             connected = false;
             unity_session_id = None;
-            state.pending.lock().await.clear();
-            let _ = app.emit_to(
-                label.as_str(),
-                "unity-connection-changed",
-                ConnectionChangedPayload {
-                    connected: false,
-                    info: None,
-                },
-            );
+            peer_deadline = PEER_DEAD_MS;
+            disconnected_since = now;
+            announce_disconnect(&app, &state, &label).await;
         }
 
         // Distinguish "Unity isn't open" from "the package is missing or too old".
-        if !stale_checked && now.saturating_sub(started) > STALE_PACKAGE_AFTER_MS {
+        if !stale_checked && now >= stale_check_at {
             stale_checked = true;
             if unity_editor_is_running(&workspace_path) {
                 let _ = app.emit_to(
@@ -577,19 +665,113 @@ async fn run_journal_session(
             }
         }
 
+        // Re-arm. Unity re-handshakes when — and only when — it observes a
+        // different ideSessionId in bridge.json, so changing it ourselves is the
+        // one lever that recovers a session Unity still believes is healthy.
+        // A manual "Reconnect" jumps the queue via the trigger channel.
+        let manual = rearm_rx.try_recv().is_ok();
+        let due = rearm_is_due(
+            now,
+            connected,
+            is_unity_project,
+            disconnected_since,
+            last_rearm,
+        );
+        if manual || due {
+            last_rearm = Some(now);
+            unity_session_id = None;
+            peer_deadline = PEER_DEAD_MS;
+            if connected {
+                // A manual retry against a live session still resets it — the
+                // user asked for a reconnect, and half of one is worse than none.
+                connected = false;
+                disconnected_since = now;
+                announce_disconnect(&app, &state, &label).await;
+            }
+            // Re-run package detection only when the USER asked to retry — they
+            // may have installed it since. Automatic re-arms must not re-prompt:
+            // they repeat every REARM_INTERVAL_MS for as long as Unity is closed,
+            // and the user already knows.
+            if manual {
+                stale_checked = false;
+                stale_check_at = now + STALE_PACKAGE_AFTER_MS;
+            }
+            ide_session_id = new_session_id();
+            // We have written nothing since losing the handshake, so nothing live
+            // is discarded here.
+            let _ = writer.truncate();
+            if let Some(r) = reader.as_mut() {
+                r.rewind();
+            }
+            if let Err(e) = write_bridge_discovery(&workspace_path, &ide_session_id) {
+                eprintln!("[UnityIPC] re-arm could not publish bridge.json: {}", e);
+            }
+            last_peer_bytes = now;
+        }
+
         // Heartbeats deliberately do NOT reset the backoff — otherwise the 2s
         // heartbeat would pin polling at 25ms forever and idle CPU would never
         // drop.
         if saw_bytes {
             last_traffic = now;
         }
-        let interval = if now.saturating_sub(last_traffic) >= IDLE_AFTER_MS {
+        let interval = if !connected {
+            // Fast only while a handshake is plausibly in flight — just after a
+            // drop (Unity finishing a reload) or a re-arm (Unity's 1s discovery
+            // poll is about to fire). Beyond that nobody is coming, and 10Hz
+            // stat-polling a project whose Unity is simply closed is pure
+            // battery drain.
+            if now.saturating_sub(last_rearm.unwrap_or(disconnected_since)) < HANDSHAKE_WINDOW_MS {
+                POLL_CONNECTING_MS
+            } else {
+                POLL_IDLE_MS
+            }
+        } else if now.saturating_sub(last_traffic) >= IDLE_AFTER_MS {
             POLL_IDLE_MS
         } else {
             POLL_ACTIVE_MS
         };
         tokio::time::sleep(Duration::from_millis(interval)).await;
     }
+}
+
+/// Whether the session should re-arm itself: `REARM_GRACE_MS` after losing the
+/// handshake, then every `REARM_INTERVAL_MS` for as long as it stays lost.
+///
+/// The grace period matters. An ordinary domain reload reconnects on its own in
+/// well under it, and re-arming during one would throw away a resumable session
+/// to buy nothing. Pure so the schedule is testable without a live bridge.
+fn rearm_is_due(
+    now: u64,
+    connected: bool,
+    is_unity_project: bool,
+    disconnected_since: u64,
+    last_rearm: Option<u64>,
+) -> bool {
+    if connected || !is_unity_project {
+        return false;
+    }
+    let (since, wait) = match last_rearm {
+        Some(t) => (t, REARM_INTERVAL_MS),
+        None => (disconnected_since, REARM_GRACE_MS),
+    };
+    now.saturating_sub(since) >= wait
+}
+
+/// Publish a disconnect: clear the fail-fast flag, fail every in-flight RPC
+/// (dropping their senders resolves the awaiting receivers to `Err` rather than
+/// leaving callers to hang until their own timeout), and tell the frontend.
+async fn announce_disconnect(app: &AppHandle, state: &Arc<UnityIpcInner>, label: &str) {
+    state.connected.store(false, Ordering::SeqCst);
+    state.pending.lock().await.clear();
+    let _ = app.emit_to(
+        label,
+        "unity-connection-changed",
+        ConnectionChangedPayload {
+            connected: false,
+            info: None,
+        },
+    );
 }
 
 async fn route_message(app: &AppHandle, state: &Arc<UnityIpcInner>, label: &str, msg: UnityMessage) {
@@ -698,18 +880,69 @@ pub async fn unity_ipc_stop(app: AppHandle, window: Window) -> Result<(), String
     Ok(())
 }
 
+/// Force an immediate session re-arm: a new `ideSessionId` is published to
+/// `bridge.json`, which is what makes Unity tear down its side and handshake
+/// again. This is the user-facing "Reconnect" action, and the same code path the
+/// session loop takes on its own schedule while disconnected.
+#[tauri::command]
+pub async fn unity_ipc_reconnect(app: AppHandle, window: Window) -> Result<(), String> {
+    let label = window.label().to_string();
+    let inner = app.state::<UnityIpcState>().get_or_create(&label);
+    let armed = {
+        let guard = inner.rearm_tx.lock().await;
+        // A full channel already holds an un-consumed re-arm request, so the
+        // reconnect the caller asked for is going to happen either way.
+        guard.as_ref().map(|tx| tx.try_send(())).is_some()
+    };
+    if armed {
+        Ok(())
+    } else {
+        Err("The Unity bridge is not running for this window".to_string())
+    }
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct UnityIpcStatus {
+    /// The handshake currently holds.
+    pub connected: bool,
+    /// A session loop is running for this window (whether or not Unity answered).
+    pub running: bool,
+}
+
+/// Current bridge state for this window. Lets the frontend resync on mount
+/// instead of relying on having caught every `unity-connection-changed` event.
+#[tauri::command]
+pub async fn unity_ipc_status(app: AppHandle, window: Window) -> Result<UnityIpcStatus, String> {
+    let label = window.label().to_string();
+    let inner = app.state::<UnityIpcState>().get_or_create(&label);
+    let running = inner.shutdown_tx.lock().await.is_some();
+    Ok(UnityIpcStatus {
+        connected: inner.connected.load(Ordering::SeqCst),
+        running,
+    })
+}
+
 #[tauri::command]
 pub async fn unity_ipc_send(app: AppHandle, window: Window, message_json: String) -> Result<(), String> {
     let label = window.label().to_string();
     let inner = app.state::<UnityIpcState>().get_or_create(&label);
-    if let Some(tx) = inner.client_tx.lock().await.as_ref() {
-        tx.send(message_json)
-            .await
-            .map_err(|e| format!("Failed to send: {}", e))?;
-    } else {
-        return Err("No Unity client connected".to_string());
+    // Reject before queueing. The session loop only writes while connected, so
+    // an await on a full channel here would never be relieved — that is how a
+    // disconnected bridge used to hang the caller's promise outright.
+    if !inner.connected.load(Ordering::SeqCst) {
+        return Err("Unity is not connected".to_string());
     }
-    Ok(())
+    let guard = inner.client_tx.lock().await;
+    // try_send, never send: a bounded channel plus an await is a deadlock
+    // waiting for the connection to drop at the wrong moment.
+    let result = match guard.as_ref() {
+        Some(tx) => tx
+            .try_send(message_json)
+            .map_err(|e| format!("Failed to send: {}", e)),
+        None => Err("No Unity client connected".to_string()),
+    };
+    drop(guard);
+    result
 }
 
 /// Send an RPC request to the connected Unity bridge and await its response.
@@ -726,6 +959,12 @@ pub async fn unity_ipc_request(
     let label = window.label().to_string();
     let inner = app.state::<UnityIpcState>().get_or_create(&label);
 
+    // Fail fast rather than queueing into a channel nothing is draining and then
+    // reporting a misleading "timed out" ten seconds later.
+    if !inner.connected.load(Ordering::SeqCst) {
+        return Err(format!("Unity is not connected (RPC '{}')", method));
+    }
+
     let id = format!("rpc-{}", inner.req_counter.fetch_add(1, Ordering::Relaxed));
     let (tx, rx) = oneshot::channel::<serde_json::Value>();
     inner.pending.lock().await.insert(id.clone(), tx);
@@ -741,7 +980,7 @@ pub async fn unity_ipc_request(
         let guard = inner.client_tx.lock().await;
         match guard.as_ref() {
             Some(client_tx) => {
-                if let Err(e) = client_tx.send(request.to_string()).await {
+                if let Err(e) = client_tx.try_send(request.to_string()) {
                     inner.pending.lock().await.remove(&id);
                     return Err(format!("Failed to send RPC '{}': {}", method, e));
                 }
@@ -843,6 +1082,65 @@ mod tests {
         assert_eq!(
             parsed["minPackageVersion"], MIN_PACKAGE_VERSION,
             "bridge.json and the runtime check must not drift apart"
+        );
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn rearm_waits_out_a_domain_reload_then_retries_on_a_fixed_cadence() {
+        // Connected sessions never re-arm, however long they have been up.
+        assert!(!rearm_is_due(999_999, true, true, 0, None));
+        // Neither do non-Unity workspaces — they have no bridge.json to publish.
+        assert!(!rearm_is_due(999_999, false, false, 0, None));
+
+        // First re-arm waits out the grace period, so an ordinary domain reload
+        // (which reconnects on its own) is never interrupted by a session reset.
+        assert!(!rearm_is_due(REARM_GRACE_MS - 1, false, true, 0, None));
+        assert!(rearm_is_due(REARM_GRACE_MS, false, true, 0, None));
+
+        // After one re-arm the cadence switches to the (longer) retry interval,
+        // measured from that attempt rather than from the original disconnect.
+        let armed_at = 100_000;
+        assert!(!rearm_is_due(
+            armed_at + REARM_INTERVAL_MS - 1,
+            false,
+            true,
+            0,
+            Some(armed_at)
+        ));
+        assert!(rearm_is_due(
+            armed_at + REARM_INTERVAL_MS,
+            false,
+            true,
+            0,
+            Some(armed_at)
+        ));
+    }
+
+    #[test]
+    fn a_rearm_publishes_a_session_id_unity_can_tell_apart() {
+        // Re-arm's entire contract with the C# side: bridge.json carries a
+        // DIFFERENT ideSessionId than before, because that difference is the
+        // only signal that makes Unity tear down and handshake again.
+        let d = tmp_dir("rearm");
+        std::fs::create_dir_all(d.join("ProjectSettings")).unwrap();
+        let ws = d.to_str().unwrap();
+
+        let read_id = || -> String {
+            let p = bridge_dir(ws).join("bridge.json");
+            let v: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(p).unwrap()).unwrap();
+            v["ideSessionId"].as_str().unwrap().to_string()
+        };
+
+        write_bridge_discovery(ws, &new_session_id()).unwrap().unwrap();
+        let first = read_id();
+        write_bridge_discovery(ws, &new_session_id()).unwrap().unwrap();
+        let second = read_id();
+
+        assert_ne!(
+            first, second,
+            "a re-arm that reuses the id would leave Unity in its stale session"
         );
         let _ = std::fs::remove_dir_all(&d);
     }

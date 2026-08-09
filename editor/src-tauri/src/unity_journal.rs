@@ -200,12 +200,24 @@ impl JournalReader {
         self.did_reset
     }
 
-    /// Skip everything already present — used on a cold start so a previous
-    /// session's messages are not replayed.
+    /// Skip everything already present. Mirrored from `Journal.cs`, where Unity
+    /// uses it on a cold start; the IDE deliberately does NOT, because the
+    /// handshake it is waiting for can be the first bytes of the file and
+    /// skipping past it strands the session permanently.
+    #[allow(dead_code)]
     pub fn seek_to_end(&mut self) {
         self.read_pos = self.len();
         self.buf.clear();
         self.epoch = Some(read_epoch(&self.epoch_path));
+    }
+
+    /// Restart from the beginning and re-adopt the writer's epoch. Used when the
+    /// IDE re-arms its session: the handshake it now needs may sit anywhere in
+    /// the journal, including behind the current read head.
+    pub fn rewind(&mut self) {
+        self.read_pos = 0;
+        self.buf.clear();
+        self.epoch = None;
     }
 
     pub fn poll(&mut self) -> Vec<String> {
@@ -499,6 +511,54 @@ mod tests {
         r.poll();
         r.publish_ack_if_needed(1000);
         assert!(!a.exists(), "a small journal must do zero ack I/O");
+    }
+
+    #[test]
+    fn a_fresh_reader_dispatches_what_is_already_there() {
+        // The F1 regression. Unity creates to-ide.jsonl, truncates it and appends
+        // connection_init in far less than one IDE poll interval, so by the time
+        // the IDE opens its reader the handshake can already be on disk. A reader
+        // that started at EOF would sit past the only message able to raise
+        // `connected`, and — since Unity re-announces only on a changed
+        // ideSessionId — would never see another one.
+        let d = tmp();
+        let (j, a) = paths(&d, "handshake");
+        let mut w = JournalWriter::open(&j, &a).unwrap();
+        w.truncate().unwrap(); // Unity's fresh-handshake reset, epoch 0 -> 1
+        w.append("{\"type\":\"connection_init\"}").unwrap();
+        w.flush().unwrap();
+
+        let mut r = JournalReader::open(&j, &a).unwrap();
+        assert_eq!(
+            r.poll(),
+            vec!["{\"type\":\"connection_init\"}".to_string()],
+            "a handshake written before the reader opened must still be seen"
+        );
+    }
+
+    #[test]
+    fn rewind_replays_from_the_start() {
+        // What a session re-arm needs: the handshake it now waits for may sit
+        // anywhere in the journal, including behind the current read head.
+        let d = tmp();
+        let (j, a) = paths(&d, "rw");
+        let mut w = JournalWriter::open(&j, &a).unwrap();
+        w.append("{\"a\":1}").unwrap();
+        w.flush().unwrap();
+
+        let mut r = JournalReader::open(&j, &a).unwrap();
+        assert_eq!(r.poll().len(), 1);
+        assert!(r.poll().is_empty(), "nothing new to read");
+
+        r.rewind();
+        assert_eq!(r.poll(), vec!["{\"a\":1}".to_string()]);
+
+        // And a truncation after a rewind is still detected, so the epoch was
+        // re-adopted rather than left stale.
+        w.truncate().unwrap();
+        w.append("{\"b\":2}").unwrap();
+        w.flush().unwrap();
+        assert_eq!(r.poll(), vec!["{\"b\":2}".to_string()]);
     }
 
     #[test]

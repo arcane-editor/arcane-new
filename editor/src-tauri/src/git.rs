@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::process::Command;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct GitFileStatus {
@@ -80,7 +79,7 @@ fn map_status_char(c: char) -> &'static str {
 /// an open workspace) would resurrect exactly the silent wrong-file-contents
 /// failure this function exists to prevent.
 fn repo_root(workspace_path: &str) -> Result<String, String> {
-    let prefix_out = Command::new("git")
+    let prefix_out = crate::process_util::command("git")
         .args(["-C", workspace_path, "rev-parse", "--show-prefix"])
         // Read-only command — see the comment on `git_status`'s call.
         .env("GIT_OPTIONAL_LOCKS", "0")
@@ -117,7 +116,7 @@ fn repo_root(workspace_path: &str) -> Result<String, String> {
     // The prefix didn't line up with the caller's spelling (`..` segments, a
     // case-insensitive filesystem, ...). Fall back to the authoritative answer
     // and accept the symlink-resolution risk in this rare case.
-    let toplevel = Command::new("git")
+    let toplevel = crate::process_util::command("git")
         .args(["-C", workspace_path, "rev-parse", "--show-toplevel"])
         .env("GIT_OPTIONAL_LOCKS", "0")
         .output()
@@ -143,7 +142,7 @@ pub fn git_repo_root(workspace_path: String) -> Result<String, String> {
 #[tauri::command]
 pub fn git_status(workspace_path: String) -> Result<GitStatusResult, String> {
     let workspace_path = repo_root(&workspace_path)?;
-    let output = Command::new("git")
+    let output = crate::process_util::command("git")
         .args([
             // Emit paths relative to the repo root rather than the CWD. The
             // command already runs at the root so this is belt-and-braces,
@@ -525,7 +524,7 @@ fn parse_branch_refs(stdout: &str) -> Vec<BranchInfo> {
 /// command never fails because reflog data happens to be unavailable.
 #[tauri::command]
 pub fn git_list_branches(workspace_path: String) -> Result<Vec<BranchInfo>, String> {
-    let output = Command::new("git")
+    let output = crate::process_util::command("git")
         .args([
             "-C",
             &workspace_path,
@@ -546,7 +545,7 @@ pub fn git_list_branches(workspace_path: String) -> Result<Vec<BranchInfo>, Stri
     let mut branches = parse_branch_refs(&String::from_utf8_lossy(&output.stdout));
     branches.sort_by(|a, b| a.is_remote.cmp(&b.is_remote).then_with(|| a.name.cmp(&b.name)));
 
-    let timestamps = Command::new("git")
+    let timestamps = crate::process_util::command("git")
         .args(["-C", &workspace_path, "reflog", "--date=unix"])
         .output()
         .ok()
@@ -581,7 +580,7 @@ pub fn git_checkout_remote_branch(
     // Strip the remote name off the front. `git remote` is authoritative —
     // matching the longest configured remote avoids mis-splitting a branch
     // whose own name contains a slash.
-    let remotes_out = Command::new("git")
+    let remotes_out = crate::process_util::command("git")
         .args(["-C", &workspace_path, "remote"])
         .output()
         .map_err(|e| e.to_string())?;
@@ -598,7 +597,7 @@ pub fn git_checkout_remote_branch(
     }
 
     // Already have the local branch? Just switch — re-creating it would fail.
-    let exists = Command::new("git")
+    let exists = crate::process_util::command("git")
         .args([
             "-C",
             &workspace_path,
@@ -631,7 +630,7 @@ pub fn git_checkout_remote_branch(
         ]
     };
 
-    let output = Command::new("git")
+    let output = crate::process_util::command("git")
         .args(&args)
         .output()
         .map_err(|e| e.to_string())?;
@@ -644,7 +643,7 @@ pub fn git_checkout_remote_branch(
 
 #[tauri::command]
 pub fn git_switch_branch(workspace_path: String, branch: String) -> Result<(), String> {
-    let output = Command::new("git")
+    let output = crate::process_util::command("git")
         .args(["-C", &workspace_path, "switch", &branch])
         .output()
         .map_err(|e| e.to_string())?;
@@ -673,7 +672,7 @@ pub fn git_diff(
     args.push("--");
     args.push(&file_path);
 
-    let output = Command::new("git")
+    let output = crate::process_util::command("git")
         .args(&args)
         // Read-only command — see the comment on `git_status`'s call.
         .env("GIT_OPTIONAL_LOCKS", "0")
@@ -707,7 +706,7 @@ pub fn git_diff_file_head(workspace_path: String, file_path: String) -> Result<S
     }
 
     let workspace_path = repo_root(&workspace_path)?;
-    let output = Command::new("git")
+    let output = crate::process_util::command("git")
         .args(["-C", &workspace_path, "diff", "HEAD", "--", &file_path])
         // Read-only command — see the comment on `git_status`'s call.
         .env("GIT_OPTIONAL_LOCKS", "0")
@@ -726,7 +725,7 @@ pub fn git_diff_file_head(workspace_path: String, file_path: String) -> Result<S
 #[tauri::command]
 pub fn git_stage_file(workspace_path: String, file_path: String) -> Result<(), String> {
     let workspace_path = repo_root(&workspace_path)?;
-    let output = Command::new("git")
+    let output = crate::process_util::command("git")
         .args(["-C", &workspace_path, "add", "--", &file_path])
         .output()
         .map_err(|e| e.to_string())?;
@@ -742,7 +741,7 @@ pub fn git_stage_file(workspace_path: String, file_path: String) -> Result<(), S
 #[tauri::command]
 pub fn git_unstage_file(workspace_path: String, file_path: String) -> Result<(), String> {
     let workspace_path = repo_root(&workspace_path)?;
-    let output = Command::new("git")
+    let output = crate::process_util::command("git")
         .args(["-C", &workspace_path, "restore", "--staged", "--", &file_path])
         .output()
         .map_err(|e| e.to_string())?;
@@ -760,7 +759,7 @@ pub fn git_stage_all(workspace_path: String) -> Result<(), String> {
     // Run at the root so "stage all" means every file the panel lists, not
     // just the ones under a subdirectory workspace.
     let workspace_path = repo_root(&workspace_path)?;
-    let output = Command::new("git")
+    let output = crate::process_util::command("git")
         .args(["-C", &workspace_path, "add", "-A"])
         .output()
         .map_err(|e| e.to_string())?;
@@ -790,7 +789,7 @@ pub fn git_commit(
     args.push("-m");
     args.push(&message);
 
-    let output = Command::new("git")
+    let output = crate::process_util::command("git")
         .args(&args)
         .output()
         .map_err(|e| e.to_string())?;
@@ -847,7 +846,7 @@ pub fn git_stash_push(
         args.push(m);
     }
 
-    let output = Command::new("git")
+    let output = crate::process_util::command("git")
         .args(args.iter().map(String::as_str).collect::<Vec<_>>())
         .output()
         .map_err(|e| e.to_string())?;
@@ -864,7 +863,7 @@ pub fn git_stash_push(
 /// subject (the stash "message"), `%ci` the committer date.
 #[tauri::command]
 pub fn git_stash_list(workspace_path: String) -> Result<Vec<StashEntry>, String> {
-    let output = Command::new("git")
+    let output = crate::process_util::command("git")
         .args([
             "-C",
             &workspace_path,
@@ -901,7 +900,7 @@ pub fn git_stash_list(workspace_path: String) -> Result<Vec<StashEntry>, String>
 
 #[tauri::command]
 pub fn git_stash_apply(workspace_path: String, index: u32) -> Result<(), String> {
-    let output = Command::new("git")
+    let output = crate::process_util::command("git")
         .args(["-C", &workspace_path, "stash", "apply", &stash_ref(index)])
         .output()
         .map_err(|e| e.to_string())?;
@@ -915,7 +914,7 @@ pub fn git_stash_apply(workspace_path: String, index: u32) -> Result<(), String>
 
 #[tauri::command]
 pub fn git_stash_pop(workspace_path: String, index: u32) -> Result<(), String> {
-    let output = Command::new("git")
+    let output = crate::process_util::command("git")
         .args(["-C", &workspace_path, "stash", "pop", &stash_ref(index)])
         .output()
         .map_err(|e| e.to_string())?;
@@ -929,7 +928,7 @@ pub fn git_stash_pop(workspace_path: String, index: u32) -> Result<(), String> {
 
 #[tauri::command]
 pub fn git_stash_drop(workspace_path: String, index: u32) -> Result<(), String> {
-    let output = Command::new("git")
+    let output = crate::process_util::command("git")
         .args(["-C", &workspace_path, "stash", "drop", &stash_ref(index)])
         .output()
         .map_err(|e| e.to_string())?;
@@ -952,7 +951,7 @@ pub fn git_stash_drop(workspace_path: String, index: u32) -> Result<(), String> 
 #[tauri::command]
 pub fn git_show_head(workspace_path: String, file_path: String) -> Result<String, String> {
     let workspace_path = repo_root(&workspace_path)?;
-    let output = Command::new("git")
+    let output = crate::process_util::command("git")
         .args(["-C", &workspace_path, "show", &format!("HEAD:{}", file_path)])
         .output()
         .map_err(|e| e.to_string())?;
@@ -985,7 +984,7 @@ pub fn git_show_head(workspace_path: String, file_path: String) -> Result<String
 pub fn git_show_index(workspace_path: String, file_path: String) -> Result<String, String> {
     let workspace_path = repo_root(&workspace_path)?;
     let spec = format!(":{}", file_path);
-    let output = Command::new("git")
+    let output = crate::process_util::command("git")
         .args(["-C", &workspace_path, "show", &spec])
         .output()
         .map_err(|e| e.to_string())?;
@@ -1053,7 +1052,7 @@ pub fn git_show_commit(workspace_path: String, hash: String) -> Result<CommitDet
     validate_ref_name(&hash)?;
     let workspace_path = repo_root(&workspace_path)?;
 
-    let output = Command::new("git")
+    let output = crate::process_util::command("git")
         .args([
             "-C",
             &workspace_path,
@@ -1155,7 +1154,7 @@ pub fn git_show_file_at(
 
     let workspace_path = repo_root(&workspace_path)?;
     let spec = format!("{rev}:{file_path}");
-    let output = Command::new("git")
+    let output = crate::process_util::command("git")
         .args(["-C", &workspace_path, "show", &spec])
         .output()
         .map_err(|e| e.to_string())?;
@@ -1177,7 +1176,7 @@ pub fn git_show_file_at(
 #[tauri::command]
 pub fn git_unstage_all(workspace_path: String) -> Result<(), String> {
     let workspace_path = repo_root(&workspace_path)?;
-    let output = Command::new("git")
+    let output = crate::process_util::command("git")
         .args(["-C", &workspace_path, "reset", "HEAD"])
         .output()
         .map_err(|e| e.to_string())?;
@@ -1211,7 +1210,7 @@ pub fn git_discard_file(
         args.push("--");
         args.push(&file_path);
 
-        let output = Command::new("git")
+        let output = crate::process_util::command("git")
             .args(&args)
             .output()
             .map_err(|e| e.to_string())?;
@@ -1219,7 +1218,7 @@ pub fn git_discard_file(
             return Err(String::from_utf8_lossy(&output.stderr).to_string());
         }
     } else {
-        let output = Command::new("git")
+        let output = crate::process_util::command("git")
             .args(["-C", &workspace_path, "checkout", "--", &file_path])
             .output()
             .map_err(|e| e.to_string())?;
@@ -1241,7 +1240,7 @@ pub fn git_discard_all(workspace_path: String) -> Result<(), String> {
     // the panel reported them discarded.
     let workspace_path = repo_root(&workspace_path)?;
     // Restore tracked files
-    let output = Command::new("git")
+    let output = crate::process_util::command("git")
         .args(["-C", &workspace_path, "checkout", "--", "."])
         .output()
         .map_err(|e| e.to_string())?;
@@ -1252,7 +1251,7 @@ pub fn git_discard_all(workspace_path: String) -> Result<(), String> {
     }
 
     // Remove untracked files
-    let output = Command::new("git")
+    let output = crate::process_util::command("git")
         .args(["-C", &workspace_path, "clean", "-fd"])
         .output()
         .map_err(|e| e.to_string())?;
@@ -1289,7 +1288,7 @@ fn ssh_command_override(env_val: Option<String>, config_val: Option<String>) -> 
 /// Read `core.sshCommand` from the repo's effective git config (local >
 /// global > system). Returns `None` when unset or blank.
 fn core_ssh_command(workspace_path: &str) -> Option<String> {
-    let output = Command::new("git")
+    let output = crate::process_util::command("git")
         .args(["-C", workspace_path, "config", "--get", "core.sshCommand"])
         .output()
         .ok()?;
@@ -1326,7 +1325,7 @@ fn run_git_remote(workspace_path: &str, args: &[&str]) -> Result<String, String>
         core_ssh_command(workspace_path)
     };
 
-    let mut command = Command::new("git");
+    let mut command = crate::process_util::command("git");
     command
         .args(["-C", workspace_path])
         .args(args)
@@ -1382,7 +1381,7 @@ pub fn git_push(workspace_path: String) -> Result<GitPushResult, String> {
                 return Err(err);
             }
 
-            let branch_output = Command::new("git")
+            let branch_output = crate::process_util::command("git")
                 .args(["-C", &workspace_path, "rev-parse", "--abbrev-ref", "HEAD"])
                 .output()
                 .map_err(|e| e.to_string())?;
@@ -1411,7 +1410,7 @@ pub fn git_push(workspace_path: String) -> Result<GitPushResult, String> {
 #[tauri::command]
 pub fn git_log(workspace_path: String, count: Option<u32>) -> Result<Vec<GitLogEntry>, String> {
     let n = count.unwrap_or(20);
-    let output = Command::new("git")
+    let output = crate::process_util::command("git")
         .args([
             "-C",
             &workspace_path,
@@ -1472,7 +1471,7 @@ pub struct BlameLine {
 
 #[tauri::command]
 pub fn git_worktree_list(workspace_path: String) -> Result<Vec<WorktreeInfo>, String> {
-    let output = Command::new("git")
+    let output = crate::process_util::command("git")
         .args(["-C", &workspace_path, "worktree", "list", "--porcelain"])
         .output()
         .map_err(|e| e.to_string())?;
@@ -1576,7 +1575,7 @@ pub fn git_worktree_add(
     } else {
         args.push(path);
     }
-    let output = Command::new("git")
+    let output = crate::process_util::command("git")
         .args(args.iter().map(String::as_str).collect::<Vec<_>>())
         .output()
         .map_err(|e| e.to_string())?;
@@ -1597,7 +1596,7 @@ pub fn git_worktree_remove(
         args.push("--force");
     }
     args.push(&path);
-    let output = Command::new("git")
+    let output = crate::process_util::command("git")
         .args(&args)
         .output()
         .map_err(|e| e.to_string())?;
@@ -1609,7 +1608,7 @@ pub fn git_worktree_remove(
 
 #[tauri::command]
 pub fn git_worktree_prune(workspace_path: String) -> Result<(), String> {
-    let output = Command::new("git")
+    let output = crate::process_util::command("git")
         .args(["-C", &workspace_path, "worktree", "prune"])
         .output()
         .map_err(|e| e.to_string())?;
@@ -1635,7 +1634,7 @@ pub async fn git_blame_file(
     file_path: String,
 ) -> Result<Vec<BlameLine>, String> {
     let workspace_path = repo_root(&workspace_path)?;
-    let output = tokio::process::Command::new("git")
+    let output = crate::process_util::async_command("git")
         .args([
             "-C",
             &workspace_path,
@@ -1812,7 +1811,7 @@ pub fn git_setup_unityyamlmerge(workspace_path: String, tool_path: String) -> Re
     // 2. Configure the merge driver.
     let driver = format!("'{}' merge -p %O %B %A %A", tool_path);
 
-    let name_out = Command::new("git")
+    let name_out = crate::process_util::command("git")
         .args([
             "-C",
             &workspace_path,
@@ -1826,7 +1825,7 @@ pub fn git_setup_unityyamlmerge(workspace_path: String, tool_path: String) -> Re
         return Err(String::from_utf8_lossy(&name_out.stderr).to_string());
     }
 
-    let driver_out = Command::new("git")
+    let driver_out = crate::process_util::command("git")
         .args([
             "-C",
             &workspace_path,
@@ -1853,7 +1852,7 @@ fn extract_stage(
     dest: &std::path::Path,
 ) -> Result<bool, String> {
     let spec = format!(":{}:{}", stage, file_path);
-    let output = Command::new("git")
+    let output = crate::process_util::command("git")
         .args(["-C", workspace_path, "show", &spec])
         .output()
         .map_err(|e| e.to_string())?;
@@ -1931,7 +1930,7 @@ pub fn git_run_unityyamlmerge(
     }
 
     // merge -p <base> <theirs> <ours> <merged>
-    let status = Command::new(&tool_path)
+    let status = crate::process_util::command(&tool_path)
         .arg("merge")
         .arg("-p")
         .arg(&base_path)
@@ -1973,7 +1972,7 @@ pub fn git_run_unityyamlmerge(
     cleanup(&all_tmp);
 
     // Stage the resolved file to clear the conflict.
-    let add_out = Command::new("git")
+    let add_out = crate::process_util::command("git")
         .args(["-C", &workspace_path, "add", "--", &file_path])
         .output()
         .map_err(|e| e.to_string())?;
@@ -2000,7 +1999,7 @@ pub fn git_resolve_conflict_side(
     };
 
     let workspace_path = repo_root(&workspace_path)?;
-    let checkout = Command::new("git")
+    let checkout = crate::process_util::command("git")
         .args(["-C", &workspace_path, "checkout", flag, "--", &file_path])
         .output()
         .map_err(|e| e.to_string())?;
@@ -2008,7 +2007,7 @@ pub fn git_resolve_conflict_side(
         return Err(String::from_utf8_lossy(&checkout.stderr).to_string());
     }
 
-    let add_out = Command::new("git")
+    let add_out = crate::process_util::command("git")
         .args(["-C", &workspace_path, "add", "--", &file_path])
         .output()
         .map_err(|e| e.to_string())?;
@@ -2103,7 +2102,7 @@ pub fn git_create_branch(
         args.push(b);
     }
 
-    let output = Command::new("git")
+    let output = crate::process_util::command("git")
         .args(args.iter().map(String::as_str).collect::<Vec<_>>())
         .output()
         .map_err(|e| e.to_string())?;
@@ -2126,7 +2125,7 @@ pub fn git_rename_branch(
     validate_ref_name(&old_name)?;
     validate_ref_name(&new_name)?;
 
-    let output = Command::new("git")
+    let output = crate::process_util::command("git")
         .args(["-C", &workspace_path, "branch", "-m", &old_name, &new_name])
         .output()
         .map_err(|e| e.to_string())?;
@@ -2146,7 +2145,7 @@ pub fn git_delete_branch(workspace_path: String, name: String, force: bool) -> R
     validate_ref_name(&name)?;
 
     let flag = if force { "-D" } else { "-d" };
-    let output = Command::new("git")
+    let output = crate::process_util::command("git")
         .args(["-C", &workspace_path, "branch", flag, &name])
         .output()
         .map_err(|e| e.to_string())?;
@@ -2178,7 +2177,7 @@ mod branch_lifecycle_tests {
     fn run_git(path: &str, args: &[&str]) {
         let mut full: Vec<&str> = vec!["-C", path];
         full.extend_from_slice(args);
-        let output = Command::new("git").args(&full).output().unwrap();
+        let output = crate::process_util::command("git").args(&full).output().unwrap();
         assert!(
             output.status.success(),
             "git {:?} failed: {}",
@@ -2405,7 +2404,7 @@ mod branch_reflog_tests {
     fn run_git(path: &str, args: &[&str]) {
         let mut full: Vec<&str> = vec!["-C", path];
         full.extend_from_slice(args);
-        let output = Command::new("git").args(&full).output().unwrap();
+        let output = crate::process_util::command("git").args(&full).output().unwrap();
         assert!(
             output.status.success(),
             "git {:?} failed: {}",
@@ -2690,7 +2689,7 @@ mod commit_detail_tests {
     fn run_git(path: &str, args: &[&str]) -> String {
         let mut full: Vec<&str> = vec!["-C", path];
         full.extend_from_slice(args);
-        let output = Command::new("git").args(&full).output().unwrap();
+        let output = crate::process_util::command("git").args(&full).output().unwrap();
         assert!(
             output.status.success(),
             "git {:?} failed: {}",
@@ -2916,7 +2915,7 @@ mod remote_ops_tests {
     fn run_git(path: &str, args: &[&str]) -> String {
         let mut full: Vec<&str> = vec!["-C", path];
         full.extend_from_slice(args);
-        let output = Command::new("git").args(&full).output().unwrap();
+        let output = crate::process_util::command("git").args(&full).output().unwrap();
         assert!(
             output.status.success(),
             "git {:?} failed: {}",
@@ -2965,7 +2964,7 @@ mod remote_ops_tests {
     fn clone_into_work(bare_path: &str) -> tempfile::TempDir {
         let tmp = tempfile::tempdir().unwrap();
         let work_path = tmp.path().to_str().unwrap().to_string();
-        let output = Command::new("git")
+        let output = crate::process_util::command("git")
             .args(["clone", bare_path, &work_path])
             .output()
             .unwrap();
@@ -3101,7 +3100,7 @@ mod remote_ops_tests {
         // Sanity: the "not-origin" remote was untouched (no upstream config
         // was ever written for it), proving the retry never silently
         // succeeded against the wrong remote.
-        let bare_has_main = Command::new("git")
+        let bare_has_main = crate::process_util::command("git")
             .args(["-C", &bare_path, "rev-parse", "--verify", "refs/heads/main"])
             .output()
             .unwrap();
@@ -3208,7 +3207,7 @@ mod remote_ops_tests {
             "expected the detached-HEAD error verbatim, got: {err}"
         );
         // The retry never invented an upstream for HEAD.
-        let head_cfg = Command::new("git")
+        let head_cfg = crate::process_util::command("git")
             .args(["-C", &work_path, "config", "--get", "branch.HEAD.remote"])
             .output()
             .unwrap();
@@ -3394,7 +3393,7 @@ mod diff_file_head_tests {
     fn run_git(path: &str, args: &[&str]) -> String {
         let mut full: Vec<&str> = vec!["-C", path];
         full.extend_from_slice(args);
-        let output = Command::new("git").args(&full).output().unwrap();
+        let output = crate::process_util::command("git").args(&full).output().unwrap();
         assert!(
             output.status.success(),
             "git {:?} failed: {}",
@@ -3507,7 +3506,7 @@ mod stash_and_amend_tests {
     fn run_git(path: &str, args: &[&str]) -> String {
         let mut full: Vec<&str> = vec!["-C", path];
         full.extend_from_slice(args);
-        let output = Command::new("git").args(&full).output().unwrap();
+        let output = crate::process_util::command("git").args(&full).output().unwrap();
         assert!(
             output.status.success(),
             "git {:?} failed: {}",
@@ -3912,7 +3911,7 @@ mod status_parse_tests {
     fn run_git(path: &str, args: &[&str]) {
         let mut full: Vec<&str> = vec!["-C", path];
         full.extend_from_slice(args);
-        let output = Command::new("git")
+        let output = crate::process_util::command("git")
             .args(&full)
             .env("GIT_CONFIG_GLOBAL", "/dev/null")
             .env("GIT_CONFIG_SYSTEM", "/dev/null")
@@ -4051,7 +4050,7 @@ mod status_parse_tests {
         run_git(&p, &["commit", "-qam", "ours"]);
 
         // Conflicting merge — expected to fail, so not run through `run_git`.
-        let _ = Command::new("git")
+        let _ = crate::process_util::command("git")
             .args(["-C", &p, "merge", "feature"])
             .env("GIT_CONFIG_GLOBAL", "/dev/null")
             .env("GIT_CONFIG_SYSTEM", "/dev/null")
@@ -4107,7 +4106,7 @@ mod staged_diff_tests {
     fn run_git(path: &str, args: &[&str]) -> String {
         let mut full: Vec<&str> = vec!["-C", path];
         full.extend_from_slice(args);
-        let output = Command::new("git")
+        let output = crate::process_util::command("git")
             .args(&full)
             .env("GIT_CONFIG_GLOBAL", "/dev/null")
             .env("GIT_CONFIG_SYSTEM", "/dev/null")
@@ -4207,7 +4206,7 @@ mod staged_diff_tests {
         // Merge branch-a into branch-b — conflicts on a.txt, leaving it
         // unmerged (no stage 0). This `git merge` is expected to fail (exit
         // non-zero) — that's the conflict itself, not a test setup error.
-        let _ = Command::new("git")
+        let _ = crate::process_util::command("git")
             .args(["-C", &path, "merge", "--no-edit", "branch-a"])
             .env("GIT_CONFIG_GLOBAL", "/dev/null")
             .env("GIT_CONFIG_SYSTEM", "/dev/null")

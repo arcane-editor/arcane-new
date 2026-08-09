@@ -478,13 +478,19 @@ mod tests {
             ]
         );
 
-        // Only the explicit stop signal closes the listener.
+        // Only the explicit stop signal closes the listener. `handle.await`
+        // returning IS that proof: the serve loop owns the TcpListener, so the
+        // task completing means the loop exited and the listener was dropped.
+        //
+        // Deliberately no "the port now refuses connections" assertion. Once
+        // the listener drops, the OS is free to hand that ephemeral port to
+        // anyone — including one of this binary's other tests, which cargo runs
+        // in parallel and which bind 127.0.0.1:0 themselves. When that
+        // happened, connect() succeeded and this test failed for a reason
+        // entirely unrelated to the behaviour under test. It added no coverage
+        // that `handle.await` does not already give.
         stop.send(()).unwrap();
         handle.await.unwrap();
-        assert!(
-            TcpStream::connect(("127.0.0.1", port)).await.is_err(),
-            "port must refuse connections after stop"
-        );
     }
 
     #[tokio::test]

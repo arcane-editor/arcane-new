@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex as StdMutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Window};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
-use tokio::process::{Child, Command};
+use tokio::process::Child;
 use tokio::sync::Mutex;
 
 // ── LSP traffic trace file ──────────────────────────────────────
@@ -383,7 +383,7 @@ pub async fn lsp_start(
     );
     trace_open_session(&header, truncate_trace);
 
-    let mut command = Command::new(&bin);
+    let mut command = crate::process_util::async_command(&bin);
     command
         .args(&args)
         .current_dir(&workspace_path)

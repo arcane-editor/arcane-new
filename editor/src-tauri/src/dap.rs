@@ -219,7 +219,7 @@ async fn spawn_adapter(
         }
     }
 
-    let mut child = tokio::process::Command::new(&program)
+    let mut child = crate::process_util::async_command(&program)
         .args(&args)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
@@ -377,7 +377,7 @@ mod tests {
     /// confirming the framing encode + decode loop round-trips.
     #[tokio::test]
     async fn cat_roundtrip() {
-        let mut child = match tokio::process::Command::new("cat")
+        let mut child = match crate::process_util::async_command("cat")
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .spawn()
