@@ -150,7 +150,10 @@ struct PtyInstance {
     master: Box<dyn MasterPty + Send>,
     /// Behind its own lock so a blocking write can't be taken while the global
     /// window map is held — see `terminal_write`.
-    writer: Arc<Mutex<std::fs::File>>,
+    ///
+    /// Boxed rather than a `File`: ConPTY has no file descriptor to hand back,
+    /// so the Windows writer is whatever portable-pty's `take_writer` returns.
+    writer: Arc<Mutex<Box<dyn Write + Send>>>,
     /// Signalling handle only. The `Child` itself lives on the sender thread,
     /// which blocks in `wait()` to reap it.
     killer: Box<dyn portable_pty::ChildKiller + Send + Sync>,
@@ -412,7 +415,7 @@ fn detect_shell() -> String {
 }
 
 #[cfg(unix)]
-fn clone_master_as_writer(master: &dyn MasterPty) -> Result<std::fs::File, String> {
+fn clone_master_as_writer(master: &dyn MasterPty) -> Result<Box<dyn Write + Send>, String> {
     use std::os::unix::io::FromRawFd;
 
     let raw_fd = master
@@ -424,12 +427,24 @@ fn clone_master_as_writer(master: &dyn MasterPty) -> Result<std::fs::File, Strin
         return Err("Failed to duplicate master PTY fd".to_string());
     }
 
-    Ok(unsafe { std::fs::File::from_raw_fd(dup_fd) })
+    Ok(Box::new(unsafe { std::fs::File::from_raw_fd(dup_fd) }))
 }
 
+/// ConPTY exposes no descriptor to `dup`, so take portable-pty's own writer.
+///
+/// This was a stub returning `Err("Windows PTY writer not implemented")`, and
+/// `terminal_spawn` propagates it with `?` — so the integrated terminal could
+/// never open on Windows, which is the platform most Unity developers use. It
+/// was invisible because every PTY test in this file was `#[cfg(unix)]` and no
+/// CI job ran the Rust suite on Windows at all.
+///
+/// `take_writer` may only be called once per master. That is exactly how it is
+/// used: `terminal_spawn` calls it a single time and stores the result.
 #[cfg(windows)]
-fn clone_master_as_writer(_master: &dyn MasterPty) -> Result<std::fs::File, String> {
-    Err("Windows PTY writer not implemented".to_string())
+fn clone_master_as_writer(master: &dyn MasterPty) -> Result<Box<dyn Write + Send>, String> {
+    master
+        .take_writer()
+        .map_err(|e| format!("Failed to take PTY writer: {}", e))
 }
 
 /// Reap every PTY belonging to this window's *previous* incarnation.
@@ -567,6 +582,17 @@ pub fn terminal_spawn(
         cmd.arg("-l");
     }
 
+    // Take the writer and reader BEFORE spawning. Both can fail, and on the
+    // old ordering that failure returned after `spawn_command` had already
+    // started a shell — which nothing then killed, so every failed attempt
+    // orphaned a process. Nothing between here and the spawn needs the child.
+    let writer = clone_master_as_writer(pair.master.as_ref())?;
+
+    let mut reader = pair
+        .master
+        .try_clone_reader()
+        .map_err(|e| format!("Failed to clone PTY reader: {}", e))?;
+
     let mut child = pair
         .slave
         .spawn_command(cmd)
@@ -577,12 +603,6 @@ pub fn terminal_spawn(
     // taken from a handle someone else is blocked on.
     let killer = child.clone_killer();
 
-    let mut reader = pair
-        .master
-        .try_clone_reader()
-        .map_err(|e| format!("Failed to clone PTY reader: {}", e))?;
-
-    let writer = clone_master_as_writer(pair.master.as_ref())?;
     let master = pair.master;
     let fc = Arc::new(FlowControl::new());
 
@@ -1173,6 +1193,33 @@ mod flow_control_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every platform this app ships on must be able to write to a PTY.
+    ///
+    /// Deliberately NOT `#[cfg(unix)]`. The Windows implementation was a stub
+    /// that always returned `Err`, so the terminal could not open at all on the
+    /// platform most Unity developers use — and it survived because every test
+    /// that touched a real PTY was gated to unix, making the Windows path
+    /// literally untested. A gate here would recreate that blind spot exactly.
+    #[test]
+    fn master_writer_is_available_on_every_platform() {
+        let pty = native_pty_system();
+        let pair = pty
+            .openpty(PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .expect("openpty");
+
+        let writer = clone_master_as_writer(pair.master.as_ref());
+        assert!(
+            writer.is_ok(),
+            "no PTY writer on this platform: {:?}",
+            writer.err()
+        );
+    }
 
     /// A frame shaped like the real thing: box-drawing borders, a spinner
     /// frame, a check mark and an emoji — i.e. the 2- 3- and 4-byte sequences
