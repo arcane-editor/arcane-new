@@ -108,8 +108,10 @@ on: no cross-process locking anywhere, no interleaving, no retry loops.
 |---|---|---|---|
 | `bridge.json` | IDE | Unity | IDE session identity + protocol version |
 | `to-ide.jsonl` | Unity | IDE | Unity → IDE messages |
+| `to-ide.epoch` | Unity | IDE | truncation counter for `to-ide.jsonl` |
 | `to-ide.ack` | IDE | Unity | IDE's consumed byte offset |
 | `to-unity.jsonl` | IDE | Unity | IDE → Unity messages |
+| `to-unity.epoch` | IDE | Unity | truncation counter for `to-unity.jsonl` |
 | `to-unity.ack` | Unity | IDE | Unity's consumed byte offset |
 
 All under `<projectRoot>/Library/ArcaneIDE/`. `Library/` is VCS-ignored and
@@ -169,11 +171,29 @@ read `[offset, len)`, split on `\n`, dispatch complete lines, and advance
 `offset` past the **last newline only**. A partial trailing line stays buffered
 and unconsumed until its `\n` arrives.
 
-**Universal reset rule.** If `len < offset` at any poll, the file was truncated:
-reset `offset = 0`, discard any buffered partial line, and re-read from the
-start. This single rule handles *every* truncation in this design — rotation and
-both session-reset paths below — so no reader needs to special-case why the file
-shrank.
+**Universal reset rule.** A reader **cannot** detect truncation from length
+alone. If the writer truncates and then rewrites to the same-or-greater length
+before the reader's next poll, `len < offset` is false and the reader silently
+skips the new content — which is precisely what a session reset does (truncate,
+then immediately append a fat `connection_init`). This was caught by
+`DetectsTruncationEvenWhenRewrittenToTheSameLength`.
+
+So each journal carries an **epoch sidecar** — `to-ide.jsonl` → `to-ide.epoch` —
+holding a counter its writer bumps on every truncation. Reset detection is:
+
+1. **Authoritative:** the epoch changed → `offset = 0`, discard the buffer.
+2. **Safety net:** `len < offset` → same reset. This covers the window between
+   the writer's `SetLength(0)` and its epoch publish, where the file is merely
+   short.
+
+The epoch is written by the journal's single writer, so the one-writer-per-file
+invariant is preserved. Cost is one small cached read per poll.
+
+**Readers must disable `FileStream` buffering** (`bufferSize: 1` in C#). With
+buffering on, seeking back to 0 after a truncation is served from the cached
+*old* bytes and replays stale content. The reader does its own buffering and
+reads in large chunks, so the FileStream buffer bought nothing and cost
+correctness.
 
 **Windows sharing flags — mandatory.** C# must set these explicitly on both
 handles; the default `FileShare.Read` on the writer makes the peer's concurrent

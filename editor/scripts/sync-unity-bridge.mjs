@@ -38,6 +38,7 @@ const DENY_NAMES = new Set([
   '.DS_Store',
   '.wrangler',
   'Documentation~',
+  'Tests',
   'deploy-prod.sh',
   'install-dev.sh',
 ]);
