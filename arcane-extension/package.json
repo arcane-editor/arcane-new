@@ -1,6 +1,6 @@
 {
     "name": "com.arcane.editor",
-    "version": "0.0.1",
+    "version": "0.1.0",
     "displayName": "Arcane IDE Integration",
     "description": "Connects Unity Editor to the Arcane IDE for AI-powered game development. Provides real-time IPC communication, console log streaming, play mode controls, build management, Inspector field sync, and test runner integration.",
     "unity": "2021.3",
