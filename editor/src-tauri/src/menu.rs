@@ -86,7 +86,18 @@ pub fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     let toggle_right = MenuItemBuilder::with_id("view.toggleRightSidebar", "Toggle Right Sidebar")
         .accelerator("CmdOrCtrl+K")
         .build(&app_handle)?;
-    let toggle_bottom = MenuItemBuilder::with_id("view.toggleBottomPanel", "Toggle Bottom Panel")
+    // id/label/accelerator must track `terminal.toggle`, not
+    // `view.toggleBottomPanel`: this branch moved `mod+j` to the command that
+    // spawns the first terminal and left `view.toggleBottomPanel` unbound in
+    // the JS command registry (App.tsx) so exactly one command owns the
+    // chord. But the native menu's accelerator is registered with the OS
+    // independently of that registry — `handle_menu_event` below just emits
+    // this item's id and the frontend calls `executeCommand(id)` on it
+    // directly, bypassing the keybinding lookup entirely. Leaving the id as
+    // `view.toggleBottomPanel` would let macOS's menu keep answering Cmd+J
+    // with the plain visibility flip, and — since `mod+`` ` was also removed
+    // — `terminal.toggle` would have no keyboard chord at all on macOS.
+    let toggle_terminal = MenuItemBuilder::with_id("terminal.toggle", "Toggle Terminal")
         .accelerator("CmdOrCtrl+J")
         .build(&app_handle)?;
     let cmd_palette = MenuItemBuilder::with_id("palette.commands", "Command Palette")
@@ -104,7 +115,7 @@ pub fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         .separator()
         .item(&toggle_left)
         .item(&toggle_right)
-        .item(&toggle_bottom)
+        .item(&toggle_terminal)
         .separator()
         .item(&theme_picker)
         .item(&PredefinedMenuItem::fullscreen(&app_handle, None)?)

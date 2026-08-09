@@ -1,4 +1,5 @@
 import { Files, GitBranch, Search, Settings, Bug, Network, FlaskConical, SquareTerminal } from 'lucide-react';
+import { formatKeybinding } from '../../../utils/format-keybinding';
 import { useUiStore, type SidebarView } from '../../../stores/ui';
 import { useCommandsStore } from '../../../stores/commands';
 import { useProjectContextStore } from '../../../stores/project-context';
@@ -27,6 +28,13 @@ function ActivityBar() {
     const uniquePaths = new Set(allChanges);
     return uniquePaths.size;
   });
+
+  // Read the chord back out of the registry rather than writing it here. The
+  // tooltip used to hardcode "Cmd+`" and went stale the moment the binding
+  // moved; formatKeybinding is the same formatter the onboarding signpost uses.
+  const terminalChord = useCommandsStore(
+    (s) => s.commands.get('terminal.toggle')?.keybinding
+  );
 
   const items: typeof SIDEBAR_ITEMS = [
     ...SIDEBAR_ITEMS,
@@ -68,10 +76,12 @@ function ActivityBar() {
       ))}
 
       <div className="activity-bar-bottom">
-        {/* The terminal had no button at all — it was reachable only by
-            Cmd+` or the palette, which is the discoverability gap reported in
+        {/* The terminal had no button at all — keyboard or palette only, which
+            is the discoverability gap reported in
             docs/superpowers/specs/2026-08-02-onboarding-unity-visibility-design.md
-            ("they had to be told that Ctrl+J reveals the terminal"). */}
+            ("they had to be told that Ctrl+J reveals the terminal"). The chord
+            in the tooltip below is read back out of the command registry, so it
+            cannot drift from the real binding the way a hardcoded one did. */}
         <button
           className={`activity-bar-icon${
             bottomPanelVisible && activeBottomTab === 'terminal' ? ' active' : ''
@@ -90,7 +100,7 @@ function ActivityBar() {
             // terminal when none exists yet.
             useCommandsStore.getState().executeCommand('terminal.toggle');
           }}
-          title="Terminal (Cmd+`)"
+          title={terminalChord ? `Terminal (${formatKeybinding(terminalChord)})` : 'Terminal'}
         >
           <SquareTerminal size={24} />
         </button>

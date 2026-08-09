@@ -1,18 +1,25 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { Allotment, LayoutPriority } from 'allotment';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Allotment, LayoutPriority, type AllotmentHandle } from 'allotment';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import 'allotment/dist/style.css';
 import {
   ActivityBar,
   BottomPanel,
+  EDITOR_PANE_INDEX,
   KeyboardShortcutManager,
+  MIN_EDITOR_WIDTH,
   RightActivityBar,
   RightSidebarPanel,
   SidebarPanel,
   StatusBar,
   TabBar,
   TitleBar,
+  flushLayoutPersisters,
+  initialPaneSizes,
+  layoutPersister,
+  verticalPersister,
+  widthsForRestore,
 } from './features/app-shell';
 import { EditorPanel, Breadcrumbs, EditorErrorBoundary } from './features/editor';
 import {
@@ -76,7 +83,6 @@ import {
   loadState,
   saveState,
   loadLayoutSizes,
-  saveLayoutSizes,
   planFileRestore,
   resolveActiveFilePath,
   shouldPersistTab,
@@ -122,25 +128,134 @@ function App() {
     return path ? (path.split('/').filter(Boolean).pop() ?? null) : null;
   }, []);
   // Initial horizontal split: each side pane defaults to 30% of the window on
-  // first open (editor takes the rest); persisted drags win. defaultSizes are
-  // absolute px scaled to fit, and must have one entry per always-mounted pane.
+  // first open (editor takes the rest); persisted drags win. Arithmetic lives
+  // in layout-sizes.ts so it can be unit-tested — see that module for why the
+  // implausible-value cap is 80% rather than the 45% that used to discard a
+  // deliberately wide sidebar on every launch.
   const initialLayout = useMemo(() => {
     const w = typeof window !== 'undefined' ? window.innerWidth : 1280;
-    // Use a persisted width only when it's plausible for a side pane; discard
-    // unset/invalid or implausibly large values (e.g. left over from a bad layout)
-    // and fall back to the default fraction so panes never open absurdly wide.
-    const sideWidth = (v: number | undefined, fallbackFrac: number) => {
-      const fallback = Math.round(w * fallbackFrac);
-      if (typeof v !== 'number' || !Number.isFinite(v) || v <= 0 || v > w * 0.45) {
-        return fallback;
-      }
-      return Math.round(v);
-    };
-    const left = sideWidth(persistedLayout.sidebar, 0.3);
-    const right = sideWidth(persistedLayout.rightPanel, 0.3);
-    const editor = Math.max(w - left - right, 320);
-    return { left, right, sizes: [left, editor, right] };
+    return initialPaneSizes(persistedLayout, w);
   }, [persistedLayout]);
+
+  const allotmentRef = useRef<AllotmentHandle>(null);
+
+  // Live pane sizes, as last reported by Allotment. Kept in a ref rather than
+  // state so a drag doesn't re-render the whole shell on every frame.
+  const currentSizesRef = useRef<number[]>(initialLayout.sizes);
+
+  // Width each side pane had the last time it was *visible*.
+  const liveWidthsRef = useRef({
+    sidebar: initialLayout.left,
+    rightPanel: initialLayout.right,
+  });
+
+  // Width to reopen each side pane at, snapshotted when it was last hidden.
+  //
+  // Separate from liveWidthsRef on purpose: on a show, Allotment's onChange
+  // fires before this component's layout effect, so a single ref would already
+  // have been overwritten with whatever width the pane came back at — which is
+  // the value we are trying to correct.
+  const restoreWidthsRef = useRef({
+    sidebar: initialLayout.left,
+    rightPanel: initialLayout.right,
+  });
+
+  const prevShownRef = useRef({ sidebar: sidebarVisible, rightPanel: rightSidebarVisible });
+
+  // layoutPersister/verticalPersister are module-level singletons (see
+  // layout-persist.ts), not per-render values — <App/> is never unmounted
+  // while its window is open, so a useEffect cleanup here would never run at
+  // quit. They're flushed from useCloseGuard's onCloseRequested and the
+  // beforeunload handler below instead.
+
+  // Reads visibility from the store rather than a closure. Allotment rebinds
+  // `onDidChange` in a passive effect, which always runs after this commit's
+  // layout effects — so a layout-effect-timed visibility flip fires whichever
+  // callback was bound *before* this render, no matter how that callback's
+  // own dependency array is written. getState() is the only visibility read
+  // that is guaranteed current at that moment.
+  const onLayoutChange = useCallback((sizes: number[]) => {
+    currentSizesRef.current = sizes;
+    const ui = useUiStore.getState();
+
+    // Record each side's width only while it is actually shown (>0), so a
+    // hidden pane keeps its last width instead of recording 0.
+    const next: { sidebar?: number; rightPanel?: number } = {};
+    if (ui.sidebarVisible && sizes[0] > 0) {
+      liveWidthsRef.current.sidebar = sizes[0];
+      next.sidebar = sizes[0];
+    }
+    const last = sizes[sizes.length - 1];
+    if (ui.rightSidebarVisible && sizes.length >= 3 && last > 0) {
+      liveWidthsRef.current.rightPanel = last;
+      next.rightPanel = last;
+    }
+    if (next.sidebar !== undefined || next.rightPanel !== undefined) {
+      layoutPersister.persist(next);
+    }
+  }, []);
+
+  const onVerticalLayoutChange = useCallback(
+    (sizes: number[]) => verticalPersister.persist(sizes),
+    [],
+  );
+
+  // Reopen a side pane at the width it was dragged to.
+  //
+  // Allotment caches a hidden pane's size and is supposed to restore it, but
+  // the width does not reliably come back. Rather than depend on that implicit
+  // cache, drive the restore explicitly. useLayoutEffect, not useEffect: React
+  // runs child layout effects first, so Allotment has already made the pane
+  // visible by now, and committing the correct width here means no frame ever
+  // paints at the wrong one.
+  useLayoutEffect(() => {
+    const prev = prevShownRef.current;
+    prevShownRef.current = { sidebar: sidebarVisible, rightPanel: rightSidebarVisible };
+
+    // Going hidden: snapshot the width to come back at. liveWidthsRef is still
+    // the pre-hide width — the onChange that just fired reported 0 for this
+    // pane and its `>0` guard refused to record it.
+    if (prev.sidebar && !sidebarVisible) {
+      restoreWidthsRef.current.sidebar = liveWidthsRef.current.sidebar;
+    }
+    if (prev.rightPanel && !rightSidebarVisible) {
+      restoreWidthsRef.current.rightPanel = liveWidthsRef.current.rightPanel;
+    }
+
+    const handle = allotmentRef.current;
+    if (!handle) return;
+
+    // Two independent blocks, not if/else if — mirrors the two separate `if`s
+    // above so a same-commit double show (both panes hidden -> visible at
+    // once) restores both instead of silently dropping the second. Each call
+    // reads currentSizesRef.current fresh rather than a hoisted local:
+    // handle.resize() re-enters onLayoutChange synchronously, which updates
+    // currentSizesRef.current before the next widthsForRestore call below
+    // runs. Reading a value captured earlier would compute the second
+    // correction against the pre-first-resize sizes and clobber it.
+    if (!prev.sidebar && sidebarVisible) {
+      handle.resize(
+        widthsForRestore(
+          currentSizesRef.current,
+          0,
+          restoreWidthsRef.current.sidebar,
+          EDITOR_PANE_INDEX,
+          MIN_EDITOR_WIDTH,
+        ),
+      );
+    }
+    if (!prev.rightPanel && rightSidebarVisible) {
+      handle.resize(
+        widthsForRestore(
+          currentSizesRef.current,
+          currentSizesRef.current.length - 1,
+          restoreWidthsRef.current.rightPanel,
+          EDITOR_PANE_INDEX,
+          MIN_EDITOR_WIDTH,
+        ),
+      );
+    }
+  }, [sidebarVisible, rightSidebarVisible]);
 
   // Restore persisted state on mount
   useEffect(() => {
@@ -276,12 +391,14 @@ function App() {
     return unsub;
   }, []);
 
-  // Best-effort flush of the chat session (and its checkpoints/edit-reviews) on reload/navigation (can't await).
+  // Best-effort flush of the chat session (and its checkpoints/edit-reviews),
+  // and any pending layout-size write, on reload/navigation (can't await).
   useEffect(() => {
     const onBeforeUnload = () => {
       void useAiStore.getState().flushSessionNow();
       void useCheckpointsStore.getState().flushCheckpointsNow();
       void useEditReviewStore.getState().flushNow();
+      void flushLayoutPersisters();
     };
     window.addEventListener('beforeunload', onBeforeUnload);
     return () => window.removeEventListener('beforeunload', onBeforeUnload);
@@ -469,7 +586,17 @@ function App() {
       id: 'terminal.toggle',
       label: 'Toggle Terminal',
       category: 'Terminal',
-      keybinding: 'mod+`',
+      // mod+j, not mod+`: this is the command that also spawns the first
+      // terminal, and mod+j is the chord users reach for (signpost.ts:14
+      // documents the reverse confusion this replaces). On Linux/Windows,
+      // Ctrl+J is xterm's default encoding for LF — TerminalInstance's
+      // attachCustomKeyEventHandler is what actually stops that, by telling
+      // xterm to swallow the keystroke while a terminal has focus, so only
+      // this command sees it. COMMANDS_TO_SKIP_SHELL (skip-shell.ts) is a
+      // separate, narrower thing: it only decides whether this command's
+      // handler fires while a terminal has focus, not whether xterm hands
+      // the shell a byte first.
+      keybinding: 'mod+j',
       handler: () => {
         const ui = useUiStore.getState();
         const wasVisible = ui.bottomPanelVisible;
@@ -691,7 +818,9 @@ function App() {
       id: 'view.toggleBottomPanel',
       label: 'Toggle Bottom Panel',
       category: 'View',
-      keybinding: 'mod+j',
+      // Deliberately unbound. `terminal.toggle` owns mod+j because it also
+      // spawns the first terminal; this plain visibility flip stays reachable
+      // from the command palette so two commands never share one chord.
       handler: () => {
         useUiStore.getState().toggleBottomPanel();
       },
@@ -1149,23 +1278,10 @@ function App() {
             <ActivityBar />
             <div className="main-content">
               <Allotment
+                ref={allotmentRef}
                 proportionalLayout={false}
                 defaultSizes={initialLayout.sizes}
-                onChange={(sizes) => {
-                  // Panes are always mounted (toggled via `visible`), so the
-                  // sizes array is stable: [sidebar, editor, rightPanel]. Persist
-                  // each side's width only while it's actually shown (>0) so a
-                  // hidden pane keeps its last width instead of saving 0.
-                  const next: { sidebar?: number; rightPanel?: number } = {};
-                  if (sidebarVisible && sizes[0] > 0) next.sidebar = sizes[0];
-                  const last = sizes[sizes.length - 1];
-                  if (rightSidebarVisible && sizes.length >= 3 && last > 0) {
-                    next.rightPanel = last;
-                  }
-                  if (next.sidebar !== undefined || next.rightPanel !== undefined) {
-                    saveLayoutSizes(next);
-                  }
-                }}
+                onChange={onLayoutChange}
               >
                 {/* All three panes are always rendered and toggled via `visible`
                     so opening the right panel never re-distributes (and snaps
@@ -1182,7 +1298,7 @@ function App() {
                 </Allotment.Pane>
                 <Allotment.Pane key="editor" priority={LayoutPriority.High}>
                   <div className="editor-area">
-                    <Allotment vertical onChange={(sizes) => saveLayoutSizes({ vertical: sizes })}>
+                    <Allotment vertical onChange={onVerticalLayoutChange}>
                       <Allotment.Pane>
                         {/* Settings and Account are no longer rendered here.
                             Both used to displace the editor — settings by

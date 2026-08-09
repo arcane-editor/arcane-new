@@ -34,7 +34,12 @@ function HotkeyBinding({
 
     e.preventDefault();
     handler();
-  }, { enableOnFormTags: true });
+    // enableOnFormTags covers <input>/<textarea>/<select>, but v5 gates
+    // contenteditable behind a *separate* option (dist/index.js:194 bails when
+    // `target.isContentEditable && !enableOnContentEditable`). Without it every
+    // app chord is dead while typing in the Lexical AI chat box. Enabling it
+    // makes that box behave like every other input rather than a special case.
+  }, { enableOnFormTags: true, enableOnContentEditable: true });
   return null;
 }
 

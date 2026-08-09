@@ -24,8 +24,14 @@ describe('overrideKeySequence', () => {
     expect(overrideKeySequence(key('Enter'))).toBeNull();
   });
 
-  // Ctrl+J is Claude Code's universal newline and must reach the PTY as 0x0A
-  // via xterm's own encoding; Ctrl/Alt/Cmd+Enter have their own meanings too.
+  // Ctrl+Enter/Alt+Enter/Meta+Enter (and Shift combined with Ctrl or Alt) all
+  // have their own meanings and must keep xterm's default encoding — this
+  // module only ever special-cases bare Shift+Enter. That holds regardless
+  // of platform: it's a distinct question from Ctrl+J, Claude Code's actual
+  // universal newline, which reaches the PTY as 0x0A via xterm's own
+  // encoding on macOS but is now swallowed before xterm sees it on
+  // Linux/Windows, where mod+j (= Ctrl+J) belongs to terminal.toggle instead
+  // (TerminalInstance's attachCustomKeyEventHandler).
   it('leaves other Enter chords to xterm', () => {
     expect(overrideKeySequence(key('Enter', { ctrlKey: true }))).toBeNull();
     expect(overrideKeySequence(key('Enter', { altKey: true }))).toBeNull();

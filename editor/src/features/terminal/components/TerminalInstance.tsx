@@ -182,6 +182,17 @@ function TerminalInstance({ id }: Props) {
           ) {
             return false;
           }
+          // terminal.toggle owns mod+j (= Ctrl+J here) everywhere, including
+          // from inside a focused terminal — the human ruled the panel toggle
+          // wins, the same call VS Code makes. Swallow it here so xterm's
+          // default encoding never gets a chance to run: this is what costs
+          // Ctrl+J its old job as plain LF (0x0A) into the shell on
+          // Linux/Windows. On macOS this guard is dormant like the others
+          // above; the app's chord there is Cmd+J, which xterm never forwards
+          // to the PTY to begin with.
+          if (e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey && e.code === 'KeyJ') {
+            return false;
+          }
         }
 
         // ---- Clipboard ----------------------------------------------------

@@ -61,7 +61,7 @@ describe('commandBeatsShell', () => {
   // yielding would make them dead keys.
   it('keeps terminal-management commands working from inside a terminal', () => {
     const cases: Array<[string, string]> = [
-      ['terminal.toggle', 'mod+`'],
+      ['terminal.toggle', 'mod+j'],
       ['terminal.new', 'mod+shift+`'],
       ['terminal.split', 'mod+backslash'],
       ['terminal.focusNextPane', 'mod+shift+bracketright'],
@@ -70,6 +70,16 @@ describe('commandBeatsShell', () => {
     for (const [id, kb] of cases) {
       expect(commandBeatsShell(id, kb, inTerminalLinux)).toBe(true);
     }
+  });
+
+  // Ctrl+J is LF (0x0A) — squarely in the shell's vocabulary, and the exact
+  // shape isBareCtrlLetterChord yields on. terminal.toggle is exempt anyway:
+  // you have to be able to close the panel from inside the pane filling it,
+  // and xterm already swallows the chord, so yielding would make it dead.
+  it('lets terminal.toggle win mod+j even though Ctrl+J is the shell\'s LF', () => {
+    expect(commandBeatsShell('terminal.toggle', 'mod+j', inTerminalLinux)).toBe(true);
+    // Same chord, a command that is not terminal management: still yields.
+    expect(commandBeatsShell('view.toggleBottomPanel', 'mod+j', inTerminalLinux)).toBe(false);
   });
 
   it('is not confused by spacing or case in a binding', () => {

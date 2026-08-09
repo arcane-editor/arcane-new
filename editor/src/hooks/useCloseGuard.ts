@@ -5,6 +5,7 @@ import { useWorkspaceStore } from '../stores/workspace';
 import { useAiStore } from '../stores/ai';
 import { useCheckpointsStore } from '../stores/checkpoints';
 import { useEditReviewStore } from '../stores/edit-review';
+import { flushLayoutPersisters } from '../features/app-shell';
 import { safeUnlisten } from '../utils/tauri-listener';
 
 export function useCloseGuard() {
@@ -15,10 +16,12 @@ export function useCloseGuard() {
     (async () => {
       const win = getCurrentWindow();
       const fn = await win.onCloseRequested(async (event) => {
-        // Persist any pending chat-session (checkpoint, and edit-review) changes before the window goes away.
+        // Persist any pending chat-session (checkpoint, and edit-review)
+        // changes, and any pending layout-size write, before the window goes away.
         await useAiStore.getState().flushSessionNow();
         await useCheckpointsStore.getState().flushCheckpointsNow();
         await useEditReviewStore.getState().flushNow();
+        await flushLayoutPersisters();
 
         const dirty = useWorkspaceStore.getState().openFiles.filter(
           (f) => f.isDirty && !f.path.startsWith('diff://') && !f.path.startsWith('auth://'),

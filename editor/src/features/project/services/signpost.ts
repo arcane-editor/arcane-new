@@ -11,11 +11,14 @@ export interface SignpostShortcut {
  * labels. Order is the display order.
  *
  * Keys are resolved from the live command registry rather than written here.
- * That is load-bearing: the tester who prompted this work was told "Ctrl+J
- * opens the terminal", but `mod+j` is `view.toggleBottomPanel` — the terminal
- * merely lives in that panel. The direct binding is `terminal.toggle`, and the
- * AI panel is `view.aiPanel` (not `view.toggleRightSidebar`). Hardcoding would
- * have shipped exactly that confusion.
+ * That is load-bearing, and it has already paid for itself once: a tester was
+ * told "Ctrl+J opens the terminal" when `mod+j` was still
+ * `view.toggleBottomPanel` — a plain visibility flip that opens an empty panel
+ * on a cold workspace — while the command that actually spawns a terminal,
+ * `terminal.toggle`, sat on `` mod+` ``. Because these keys are looked up by
+ * command id, this signpost showed the right chord throughout, and the
+ * registry has since been corrected so `terminal.toggle` owns `mod+j`.
+ * Same shape for the AI panel: `view.aiPanel`, not `view.toggleRightSidebar`.
  */
 const SIGNPOSTED: Array<{ id: string; label: string }> = [
   { id: 'palette.quickOpen', label: 'Go to file' },
