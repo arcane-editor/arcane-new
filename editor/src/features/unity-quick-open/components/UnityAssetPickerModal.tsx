@@ -35,6 +35,9 @@ export function UnityAssetPickerModal({ mode, onClose }: Props) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<FuzzyFileResult[]>([]);
   const [selected, setSelected] = useState(0);
+  // A failed lookup used to render as "No scenes found", which is why this
+  // being broken since launch was invisible. An error is not an empty result.
+  const [error, setError] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -43,16 +46,23 @@ export function UnityAssetPickerModal({ mode, onClose }: Props) {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(async () => {
       try {
+        // `maxResults` / `extraExcludes`, NOT `limit` — both are non-Option on
+        // the Rust side, so Tauri rejected this payload outright and the catch
+        // below turned it into an empty list. "Unity: Open Scene…" and "Unity:
+        // Find Asset…" reported "No results" in every project, always.
         const res = await invoke<FuzzyFileResult[]>('fuzzy_search_files', {
           workspacePath: ws,
           query,
-          limit: 50,
+          maxResults: 50,
+          extraExcludes: useWorkspaceStore.getState().extraExcludePatterns,
           fileExtensions: EXTENSIONS[mode],
         });
         setResults(res);
         setSelected(0);
-      } catch {
+        setError(null);
+      } catch (err) {
         setResults([]);
+        setError(err instanceof Error ? err.message : String(err));
       }
     }, 120);
     return () => {
@@ -94,7 +104,12 @@ export function UnityAssetPickerModal({ mode, onClose }: Props) {
           autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}
         />
         <div className="palette-list">
-          {query && results.length === 0 && (
+          {error && (
+            <div className="palette-empty" style={{ padding: 12, color: 'var(--error, #f14c4c)', fontSize: 13 }}>
+              Search failed: {error}
+            </div>
+          )}
+          {!error && query && results.length === 0 && (
             <div className="palette-empty" style={{ padding: 12, color: 'var(--text-secondary)', fontSize: 13 }}>
               No {mode === 'scene' ? 'scenes' : 'assets'} found.
             </div>

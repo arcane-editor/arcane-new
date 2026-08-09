@@ -1,0 +1,66 @@
+name: CI
+
+# The editor app had NO test job at all. release.yml and dev-build.yml build on
+# windows-latest but never run a test, so `bun run verify` had only ever run on
+# one developer's Mac, by hand — and nothing had ever verified a single line of
+# Windows behaviour. That is how a hard-coded `Err("Windows PTY writer not
+# implemented")` shipped: the terminal simply could not open on the platform
+# most Unity developers use.
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-14]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash # bash on Windows too, so one set of steps works everywhere
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      # Pin OFFICIAL Node (static libuv) — homebrew node crashes native addons.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: editor/src-tauri
+
+      - name: Install JS deps
+        run: cd editor && bun install --frozen-lockfile
+
+      - name: Typecheck
+        run: cd editor && bunx tsc --noEmit
+
+      - name: Module boundaries
+        run: cd editor && bun run check:modules
+
+      - name: Invoke arguments
+        run: cd editor && bun run check:invoke
+
+      - name: JS tests
+        run: cd editor && bun test src scripts
+
+      # verify:intellisense is deliberately NOT run here. It needs a real Unity
+      # install, and its skip semantics (ARCANE_INTELLISENSE_E2E=required) make
+      # a CI skip indistinguishable from a pass — which is precisely the failure
+      # mode editor/CLAUDE.md documents. It stays a local gate via
+      # `bun run verify`. Do NOT "fix" this by adding it with a quiet skip.
+      - name: Rust tests
+        run: cd editor/src-tauri && cargo test --lib
