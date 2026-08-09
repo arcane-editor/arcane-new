@@ -20,6 +20,12 @@ namespace Arcane.Editor
         private static bool _packageInstallRequested;
         private static EditorApplication.CallbackFunction _installCheckCallback;
 
+        /// Consecutive Sync() failures; reset by the first success.
+        private static int _consecutiveFailures;
+
+        /// How many failures in a row before we surface a visible error.
+        private const int FailureReportThreshold = 3;
+
         public static bool IsInstallingPackage => _packageInstallRequested;
 
         private static readonly (string assemblyName, string typeName)[] Candidates =
@@ -43,6 +49,7 @@ namespace Arcane.Editor
             {
                 _syncMethod.Invoke(_generatorInstance, null);
                 ArcaneLog.Info("Project files (.sln/.csproj) regenerated successfully.");
+                _consecutiveFailures = 0;
                 return true;
             }
             catch (TargetInvocationException ex)
@@ -50,14 +57,37 @@ namespace Arcane.Editor
                 // The IDE package's ProjectGeneration can throw NullReferenceException
                 // when called during early asset postprocessing. Reset so it re-initializes next time.
                 Reset();
-                ArcaneLog.Warn($"Project file generation deferred: {ex.InnerException?.Message ?? ex.Message}");
+                ReportFailure(ex.InnerException?.Message ?? ex.Message);
                 return false;
             }
             catch (Exception ex)
             {
                 Reset();
-                ArcaneLog.Warn($"Project file generation deferred: {ex.Message}");
+                ReportFailure(ex.Message);
                 return false;
+            }
+        }
+
+        /// <summary>
+        /// A single failure here is usually a transient deferral (generation
+        /// attempted during early asset postprocessing), so it stays at Info.
+        /// Sustained failure is not transient: it means the project never gets
+        /// .csproj files, which silently costs the user all C# IntelliSense.
+        /// That case is escalated to an Error once, because verbose logging is
+        /// compiled out by default and the failure is otherwise invisible.
+        /// </summary>
+        private static void ReportFailure(string message)
+        {
+            _consecutiveFailures++;
+            ArcaneLog.Info($"Project file generation deferred: {message}");
+
+            if (_consecutiveFailures == FailureReportThreshold)
+            {
+                ArcaneLog.Error(
+                    $"Could not generate .sln/.csproj files after {_consecutiveFailures} attempts: {message}. " +
+                    "Unity-side IntelliSense project generation is not working. " +
+                    "Arcane falls back to generating its own project files from the Unity install, " +
+                    "so C# IntelliSense should still work in the editor.");
             }
         }
 
