@@ -96,15 +96,22 @@ function clearUnityCsprojReload(): void {
  * `<workspace>/Assets/`, then debounces ~2s to coalesce Unity's bursty file
  * events into a single regen + notification.
  *
- * v1 uses `workspace/didChangeWatchedFiles` (project file Changed + each
- * added/removed script). FALLBACK: csharp-ls (Roslyn) MAY ignore
- * didChangeWatchedFiles for project-*structure* changes — if live testing
- * (T11) shows new files still don't resolve, escalate to a targeted csharp
- * restart with document re-sync. The machinery already exists:
- * `handleClientCrash('csharp')` / `attemptLspStartFor('csharp', path,
- * csharpSolutionPath)` tears down + re-spawns and the runLspStart re-sync loop
- * re-opens every tracked .cs file (forgetDocument → syncDocumentOpen). Do NOT
- * wire that here yet — the notification path is correct-first and far cheaper.
+ * Sends `workspace/didChangeWatchedFiles` (project file Changed + each
+ * added/removed script) AND then restarts csharp-ls.
+ *
+ * The notification alone is not enough, and this was confirmed in live use:
+ * a newly created script reported `CS0518: Predefined type 'System.Void' is
+ * not defined` on every line until the window was reloaded. csharp-ls (Roslyn)
+ * ignores didChangeWatchedFiles for project *structure*, and `.arcane.csproj`
+ * globs `Assets/**​/*.cs` — MSBuild expands that glob at load, so a file
+ * created afterwards belongs to no project at all. A file in no project has no
+ * corelib reference, which is precisely what CS0518 reports.
+ *
+ * The notification is kept because it is correct and cheap, and a csharp-ls
+ * that honours it makes the restart a no-op in practice. The restart is the
+ * guarantee. It costs a solution reload (seconds), but Unity is recompiling
+ * anyway on a new script, and the alternative is IntelliSense that stays
+ * silently broken until the user thinks to reload the window.
  */
 function scheduleUnityCsprojReload(delta: FileIndexDelta): void {
   if (!useProjectContextStore.getState().isUnityProject) return;
@@ -186,8 +193,26 @@ async function runUnityCsprojReload(
   if (changes.length === 0) return;
 
   client.notify('workspace/didChangeWatchedFiles', { changes });
+
+  // Escalation. Roslyn does not rebuild its project graph off that
+  // notification, so without this a brand-new script sits in no project and
+  // every predefined type reports CS0518 until the user reloads the window.
+  //
+  // Only structure changes reach here (adds/removes), and they are already
+  // coalesced by the ~2s debounce above, so a burst of Unity file events
+  // produces one restart rather than one per file.
+  try {
+    await client.stop();
+  } catch (err) {
+    console.warn('[Workspace] csharp-ls stop before project-structure restart failed:', err);
+  }
+  // runLspStart's re-sync loop reopens every tracked .cs file
+  // (forgetDocument → syncDocumentOpen), so open editors get real diagnostics
+  // back against the rebuilt project without the user touching anything.
+  await attemptLspStartFor('csharp', workspacePath, solutionPath);
+
   console.log(
-    `[Workspace] Unity csproj hot-reload: regenerated + notified csharp-ls`,
+    `[Workspace] Unity csproj hot-reload: regenerated, notified, restarted csharp-ls`,
     { added: addedCs.length, removed: removedCs.length },
   );
 }
