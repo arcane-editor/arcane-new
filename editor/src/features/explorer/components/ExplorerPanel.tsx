@@ -172,7 +172,6 @@ function ExplorerPanel() {
   const tree = useWorkspaceStore((s) => s.tree);
   const isLoadingTree = useWorkspaceStore((s) => s.isLoadingTree);
   const loadChildren = useWorkspaceStore((s) => s.loadChildren);
-  const setWorkspace = useWorkspaceStore((s) => s.setWorkspace);
   const openFile = useWorkspaceStore((s) => s.openFile);
   const createFile = useWorkspaceStore((s) => s.createFile);
   const createDirectory = useWorkspaceStore((s) => s.createDirectory);
@@ -401,7 +400,12 @@ function ExplorerPanel() {
   const workspaceName = treeRoot.split('/').pop() || treeRoot;
 
   function handleRefresh() {
-    if (workspacePath) setWorkspace(workspacePath);
+    // NOT setWorkspace(). That is the full workspace-switch action: it closes
+    // every tab with no dirty prompt, kills every terminal mid-command, resets
+    // the AI conversation, restarts the LSP, and clears recentlyClosed so
+    // Cmd+Shift+T cannot undo any of it. Refreshing the tree is all this
+    // button ever meant.
+    void useWorkspaceStore.getState().refreshTree();
   }
 
   async function handleDelete(path: string) {
@@ -512,10 +516,10 @@ function ExplorerPanel() {
           <button
             className="explorer-action-btn"
             title="Collapse All"
-            onClick={() => {
-              // Collapse all by re-setting workspace (reloads root)
-              if (workspacePath) setWorkspace(workspacePath);
-            }}
+            // Purely a view operation — it must not touch the workspace.
+            // react-arborist owns expansion state; treeApiRef is the same
+            // handle revealPath already uses to open ancestors.
+            onClick={() => treeApiRef.current?.closeAll()}
           >
             <ChevronsDownUp size={14} />
           </button>

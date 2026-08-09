@@ -153,7 +153,15 @@ export const useSearchStore = create<SearchState>((set, get) => ({
           wholeWord,
           includePatterns: parseGlobList(includePattern),
           excludePatterns: parseGlobList(excludePattern),
-          fileExtensions: isUnity ? ['cs'] : null,
+          // No extension filter. This was `isUnity ? ['cs'] : null`, which made
+          // shaders, .asmdef, .uxml, StreamingAssets JSON and anything inside
+          // .prefab / .unity YAML unsearchable — and because the backend ANDs
+          // fileExtensions with the include glob, typing `*.shader` into
+          // "files to include" could not override it. The panel just reported
+          // "No results found". Walk cost is bounded by walk_policy.rs, which
+          // already excludes Library/ and Temp/; the extension list was the
+          // wrong lever.
+          fileExtensions: null,
           maxTotalMatches: null,
           maxMatchesPerFile: null,
         },
