@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useRecentsStore } from './stores/recents';
-import { openProjectInNewWindow } from './features/project';
+import { openProjectInNewWindow, routePendingGotoToProjectWindow } from './features/project';
 import { listenScoped, safeUnlisten } from './utils/tauri-listener';
 import { formatRelativeDate } from './utils/date';
 import { Folder, FolderOpen } from 'lucide-react';
@@ -42,6 +42,28 @@ function WelcomeApp() {
   }, []);
 
   useEffect(() => { void reload(); }, [reload]);
+
+  // Unity launches us as `Arcane.exe --goto <file>:<line>:<col> <project>`.
+  // When no window has that project open, this one routes it: open the project
+  // window, which then claims the target itself on boot. Also re-checked on
+  // `arcane-goto-pending`, which the single-instance handler emits when an
+  // already-running app is launched again by Unity.
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    let cancelled = false;
+    void routePendingGotoToProjectWindow();
+    (async () => {
+      const fn = await listenScoped('arcane-goto-pending', () => {
+        void routePendingGotoToProjectWindow();
+      });
+      if (cancelled) safeUnlisten(fn);
+      else unlisten = fn;
+    })();
+    return () => {
+      cancelled = true;
+      if (unlisten) safeUnlisten(unlisten);
+    };
+  }, []);
 
   // The manager window stays open after spawning a project window (it's not
   // tied to any single project), so recents can go stale on disk — another

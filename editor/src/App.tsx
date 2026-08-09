@@ -29,6 +29,7 @@ import {
   openFolderInNewWindow,
   setProjectWindowTitle,
   initialBootSurface,
+  consumePendingGotoForWorkspace,
 } from './features/project';
 import { AiChatPanel, MaximizedAiOverlay, restoreLatestSessionForWorkspace } from './features/ai-panel';
 import {
@@ -342,6 +343,12 @@ function App() {
             store.setActiveFile(activeToSet);
           }
         }
+        // Unity's `--goto` lands last, so it wins over the restored active
+        // tab: the user double-clicked a specific script and that is what
+        // they are waiting to see. The claim is conditional on the Rust side,
+        // so a target belonging to another project stays pending for the
+        // window that owns it.
+        await consumePendingGotoForWorkspace(workspacePath);
       }).catch((err) => {
         // setWorkspace's own catch already surfaces a user-facing toast
         // (path + "moved or deleted" hint) before rethrowing — this handler
@@ -424,6 +431,26 @@ function App() {
     (async () => {
       const fn = await listenScoped<string>('menu-action', (event) => {
         useCommandsStore.getState().executeCommand(event.payload);
+      });
+      if (cancelled) safeUnlisten(fn);
+      else unlisten = fn;
+    })();
+    return () => {
+      cancelled = true;
+      safeUnlisten(unlisten);
+    };
+  }, []);
+
+  // Unity re-launching an already-running app: the single-instance handler
+  // stores the --goto and emits this. Every project window tries to claim it;
+  // the Rust side only hands it to the one whose workspace matches, so exactly
+  // one window opens the file and the rest are no-ops.
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    let cancelled = false;
+    (async () => {
+      const fn = await listenScoped('arcane-goto-pending', () => {
+        void consumePendingGotoForWorkspace(useWorkspaceStore.getState().workspacePath);
       });
       if (cancelled) safeUnlisten(fn);
       else unlisten = fn;

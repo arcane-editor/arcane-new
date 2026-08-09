@@ -18,6 +18,7 @@ mod auth;
 mod auth_loopback;
 mod graphify;
 mod fs_copy;
+mod cli;
 mod path_util;
 mod process_util;
 mod sync_util;
@@ -683,9 +684,22 @@ pub fn run() {
     let builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
         let scheme_prefix = format!("{}://", auth::deep_link_scheme(app));
         let has_deep_link = argv.iter().skip(1).any(|a| a.starts_with(&scheme_prefix));
-        if !has_deep_link {
-            open_or_focus_welcome(app);
+        if has_deep_link {
+            return;
         }
+        // Unity launches the external script editor as
+        // `Arcane.exe --goto <file>:<line>:<col> <project>`. argv was never
+        // read, so double-clicking a script in Unity's Project window showed
+        // the Welcome window instead of the file.
+        if let Some(target) = cli::parse_goto(argv.as_slice()) {
+            use tauri::{Emitter, Manager};
+            cli::set_pending(&app.state::<cli::PendingGoto>(), target);
+            // Nudge every live window: one of them may already have this
+            // project open and can act immediately. The welcome window is the
+            // fallback surface when none can.
+            let _ = app.emit("arcane-goto-pending", ());
+        }
+        open_or_focus_welcome(app);
     }));
     #[cfg(desktop)]
     let builder = builder.plugin(tauri_plugin_deep_link::init());
@@ -698,6 +712,7 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        .manage(cli::PendingGoto::default())
         .manage(lsp::LspState::new())
         .manage(terminal::TerminalState::new())
         .manage(file_scanner::FileWatcherState::new())
@@ -835,8 +850,22 @@ pub fn run() {
             graphify::graphify_enrich_payload,
             create_directory_recursive,
             execute_command,
+            cli::peek_pending_goto,
+            cli::claim_pending_goto,
         ])
         .setup(|_app| {
+            // Cold start: the same `--goto` Unity passes on a second launch
+            // also arrives on the first one, and is likewise ignored unless
+            // read here. Stored rather than emitted — no window is listening
+            // yet at this point in boot.
+            {
+                use tauri::Manager;
+                let argv: Vec<String> = std::env::args().collect();
+                if let Some(target) = cli::parse_goto(&argv) {
+                    cli::set_pending(&_app.state::<cli::PendingGoto>(), target);
+                }
+            }
+
             // The welcome window is declared in tauri.conf.json, so it is built
             // before any of this runs and carries that file's literal title.
             // Retitle from productName here rather than duplicating the whole
