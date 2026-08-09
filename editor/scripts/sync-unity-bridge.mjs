@@ -46,8 +46,12 @@ const DENY_SUFFIXES = ['.tgz'];
 
 function keep(sourcePath) {
   const name = basename(sourcePath);
-  if (DENY_NAMES.has(name)) return false;
-  if (DENY_SUFFIXES.some((suffix) => name.endsWith(suffix))) return false;
+  // A denied asset's Unity .meta sidecar has to go with it. Matching only the
+  // literal basename ships an orphaned `Tests.meta` next to no `Tests/`, and
+  // Unity greets the user with a "meta file with no asset" warning on import.
+  const asset = name.endsWith('.meta') ? name.slice(0, -'.meta'.length) : name;
+  if (DENY_NAMES.has(name) || DENY_NAMES.has(asset)) return false;
+  if (DENY_SUFFIXES.some((suffix) => asset.endsWith(suffix))) return false;
   return true;
 }
 

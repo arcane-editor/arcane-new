@@ -739,10 +739,25 @@ mod tests {
         assert_eq!(a.len(), 32);
     }
 
+    /// Unique per call. cargo runs tests on multiple threads, so a per-process
+    /// directory would let two tests delete each other's fixtures mid-run.
+    fn tmp_dir(tag: &str) -> PathBuf {
+        use std::sync::atomic::AtomicU32;
+        static N: AtomicU32 = AtomicU32::new(0);
+        let d = std::env::temp_dir().join(format!(
+            "arcane-{}-{}-{}",
+            tag,
+            std::process::id(),
+            N.fetch_add(1, Ordering::SeqCst)
+        ));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
     #[test]
     fn detects_a_running_unity_editor_from_editor_instance_json() {
-        let d = std::env::temp_dir().join(format!("arcane-ei-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
+        let d = tmp_dir("ei");
         std::fs::create_dir_all(d.join("Library")).unwrap();
         let ws = d.to_str().unwrap();
 
@@ -769,9 +784,7 @@ mod tests {
 
     #[test]
     fn bridge_discovery_round_trips_and_is_skipped_for_non_unity_projects() {
-        let d = std::env::temp_dir().join(format!("arcane-disc-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        std::fs::create_dir_all(&d).unwrap();
+        let d = tmp_dir("disc");
         let ws = d.to_str().unwrap();
 
         // No ProjectSettings/ → not a Unity project → nothing written.
