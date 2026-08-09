@@ -329,6 +329,52 @@ fn resolve_from_hub_json(version: &str) -> Option<PathBuf> {
     None
 }
 
+/// Read Unity Hub's configured install roots out of a Hub config directory.
+///
+/// Hub asks for an install location during setup and writes the answer to
+/// `secondaryInstallPath.json` (a bare JSON string). A second drive is a very
+/// common answer, and the Windows resolver used to probe exactly one
+/// hard-coded path — so those users got no `.csproj`, no `.sln`, and silently
+/// dead C# IntelliSense with nothing reported anywhere.
+///
+/// Platform-neutral and directory-parameterised so it is testable on any host.
+pub(crate) fn hub_roots_from_config_dir(dir: &std::path::Path) -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+
+    let secondary = dir.join("secondaryInstallPath.json");
+    if let Ok(text) = fs::read_to_string(&secondary) {
+        // The file holds a bare JSON string, e.g. "D:\\Unity\\Hub\\Editor".
+        if let Ok(serde_json::Value::String(s)) = serde_json::from_str::<serde_json::Value>(&text) {
+            let trimmed = s.trim();
+            if !trimmed.is_empty() {
+                roots.push(PathBuf::from(trimmed));
+            }
+        }
+    }
+
+    roots
+}
+
+/// Probe a set of Hub install roots for a specific editor version.
+///
+/// Platform-neutral: the executable layout differs per OS, but the root/version
+/// nesting does not, so the Windows path is exercisable from a macOS test run.
+pub(crate) fn resolve_from_hub_roots(roots: &[PathBuf], version: &str) -> Option<PathBuf> {
+    for root in roots {
+        let candidate = if cfg!(target_os = "windows") {
+            root.join(version).join("Editor").join("Unity.exe")
+        } else if cfg!(target_os = "macos") {
+            root.join(version).join("Unity.app")
+        } else {
+            root.join(version).join("Editor").join("Unity")
+        };
+        if candidate.exists() {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
 /// Resolve a Unity editor install for the given version string.
 /// Returns Ok(None) when not found (not an error).
 #[tauri::command]
@@ -369,15 +415,21 @@ pub fn resolve_unity_editor(version: String) -> Result<Option<UnityEditorInstall
 
     #[cfg(target_os = "windows")]
     {
-        let exe: PathBuf = [
-            r"C:\Program Files\Unity\Hub\Editor",
-            &version,
-            "Editor",
-            "Unity.exe",
-        ]
-        .iter()
-        .collect();
-        if exe.exists() {
+        // Hub-configured roots FIRST, then the default. Probing only the
+        // default is what silently killed IntelliSense for anyone who let Unity
+        // Hub install editors anywhere else — which its setup actively invites,
+        // and a second drive is the common answer. macOS has had an
+        // editors-v2.json fallback (`resolve_from_hub_json`) since day one;
+        // Windows had none, so the failure was invisible from a Mac.
+        let mut roots: Vec<PathBuf> = Vec::new();
+        if let Some(appdata) = std::env::var_os("APPDATA") {
+            roots.extend(hub_roots_from_config_dir(
+                &PathBuf::from(appdata).join("UnityHub"),
+            ));
+        }
+        roots.push(PathBuf::from(r"C:\Program Files\Unity\Hub\Editor"));
+
+        if let Some(exe) = resolve_from_hub_roots(&roots, &version) {
             let yaml_merge = yaml_merge_path(&exe);
             return Ok(Some(UnityEditorInstall {
                 path: exe.to_string_lossy().to_string(),
@@ -982,6 +1034,76 @@ pub fn unity_setup_lsp(workspace_path: String) -> Result<Option<String>, String>
     }
 
     generate_solution(root)
+}
+
+#[cfg(test)]
+mod hub_discovery_tests {
+    use super::*;
+
+    /// Unity Hub prompts for an install location at setup, and a second drive
+    /// is a common answer. Probing only `C:\Program Files\Unity\Hub\Editor`
+    /// meant those users got no .csproj, no .sln, and silently dead C#
+    /// IntelliSense — no error, nothing in the logs.
+    #[test]
+    fn a_hub_root_outside_the_default_is_probed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let version = "6000.0.23f1";
+
+        // Lay out the editor exactly as Hub does on the host we're running on.
+        let editor_dir = if cfg!(target_os = "windows") {
+            tmp.path().join(version).join("Editor")
+        } else if cfg!(target_os = "macos") {
+            tmp.path().join(version)
+        } else {
+            tmp.path().join(version).join("Editor")
+        };
+        std::fs::create_dir_all(&editor_dir).unwrap();
+
+        let exe_name = if cfg!(target_os = "windows") {
+            "Unity.exe"
+        } else if cfg!(target_os = "macos") {
+            "Unity.app"
+        } else {
+            "Unity"
+        };
+        let exe = editor_dir.join(exe_name);
+        std::fs::write(&exe, b"").unwrap();
+
+        let found = resolve_from_hub_roots(&[tmp.path().to_path_buf()], version);
+        assert_eq!(found, Some(exe));
+    }
+
+    #[test]
+    fn an_unknown_version_resolves_to_nothing() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert_eq!(
+            resolve_from_hub_roots(&[tmp.path().to_path_buf()], "1234.5.6f7"),
+            None
+        );
+    }
+
+    #[test]
+    fn secondary_install_path_json_is_read_as_a_root() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join("secondaryInstallPath.json"),
+            r#""D:\\Unity\\Hub\\Editor""#,
+        )
+        .unwrap();
+
+        let roots = hub_roots_from_config_dir(tmp.path());
+        assert_eq!(roots.len(), 1);
+        assert!(roots[0].to_string_lossy().contains("Editor"));
+    }
+
+    #[test]
+    fn a_missing_or_empty_hub_config_yields_no_roots() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert!(hub_roots_from_config_dir(tmp.path()).is_empty());
+
+        std::fs::write(tmp.path().join("secondaryInstallPath.json"), r#""""#).unwrap();
+        assert!(hub_roots_from_config_dir(tmp.path()).is_empty());
+    }
 }
 
 #[cfg(test)]

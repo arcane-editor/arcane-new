@@ -47,24 +47,56 @@ pub struct MonoDebugInfo {
     pub available: bool,
 }
 
+/// The Mono runtime's executable name on this platform.
+///
+/// Named (rather than inlined) so the Windows behaviour is assertable from a
+/// macOS test run — the `.exe` suffix was simply missing, so no candidate path
+/// could ever exist on Windows.
+pub(crate) fn mono_binary_name() -> &'static str {
+    if cfg!(windows) {
+        "mono.exe"
+    } else {
+        "mono"
+    }
+}
+
+/// Well-known install locations for the Mono runtime on this platform.
+fn mono_candidate_paths() -> Vec<PathBuf> {
+    #[cfg(windows)]
+    {
+        // Mono's MSI installs here; Unity also ships a MonoBleedingEdge runtime
+        // beside the editor, but that one is found via the Unity install.
+        vec![
+            PathBuf::from(r"C:\Program Files\Mono\bin\mono.exe"),
+            PathBuf::from(r"C:\Program Files (x86)\Mono\bin\mono.exe"),
+        ]
+    }
+    #[cfg(not(windows))]
+    {
+        vec![
+            PathBuf::from("/Library/Frameworks/Mono.framework/Versions/Current/Commands/mono"),
+            PathBuf::from("/opt/homebrew/bin/mono"),
+            PathBuf::from("/usr/local/bin/mono"),
+            PathBuf::from("/usr/bin/mono"),
+        ]
+    }
+}
+
 /// Find the system Mono runtime, if installed.
 fn find_mono() -> Option<PathBuf> {
-    let candidates = [
-        "/Library/Frameworks/Mono.framework/Versions/Current/Commands/mono",
-        "/opt/homebrew/bin/mono",
-        "/usr/local/bin/mono",
-        "/usr/bin/mono",
-    ];
-    for c in candidates {
-        let p = PathBuf::from(c);
+    for p in mono_candidate_paths() {
         if p.exists() {
             return Some(p);
         }
     }
-    // PATH fallback.
-    if let Ok(path) = std::env::var("PATH") {
-        for dir in path.split(':') {
-            let p = PathBuf::from(dir).join("mono");
+    // PATH fallback. `std::env::split_paths` uses the platform separator — the
+    // old code split on ':', which on Windows both uses the wrong separator
+    // (';') and shreds every drive-lettered entry: "C:\bin" became "C" and
+    // "\bin". Combined with the missing .exe, the Unity debugger could never
+    // attach on Windows.
+    if let Some(path) = std::env::var_os("PATH") {
+        for dir in std::env::split_paths(&path) {
+            let p = dir.join(mono_binary_name());
             if p.exists() {
                 return Some(p);
             }
@@ -307,6 +339,30 @@ pub async fn dap_stop(window: Window, app: AppHandle) -> Result<(), String> {
 mod tests {
     use super::*;
     use tokio::io::{AsyncReadExt, AsyncWriteExt, AsyncBufReadExt, BufReader};
+
+    /// The Unity debugger could never attach on Windows: PATH was split on
+    /// ':', which is the POSIX separator AND shreds a drive-lettered entry
+    /// ("C:\bin" -> "C", "\bin"), and the binary name omitted `.exe`.
+    #[test]
+    fn path_entries_split_on_the_platform_separator() {
+        let joined = if cfg!(windows) {
+            r"C:\bin;D:\tools"
+        } else {
+            "/usr/bin:/usr/local/bin"
+        };
+        let parts: Vec<_> = std::env::split_paths(joined).collect();
+        assert_eq!(parts.len(), 2, "got {:?}", parts);
+        // The whole point: a Windows entry keeps its drive letter.
+        assert!(parts[0].to_string_lossy().len() > 2);
+    }
+
+    #[test]
+    fn mono_binary_name_is_platform_correct() {
+        assert_eq!(
+            mono_binary_name(),
+            if cfg!(windows) { "mono.exe" } else { "mono" }
+        );
+    }
 
     #[test]
     fn frame_message_has_content_length_header() {
