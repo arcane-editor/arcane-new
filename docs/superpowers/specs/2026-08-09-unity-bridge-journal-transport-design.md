@@ -290,7 +290,7 @@ holds for Unity and `to-ide.jsonl`, whose only pre-handshake content is the
    `to-ide.jsonl`, sets its read offset on `to-unity.jsonl` to current length,
    appends `connection_init{Y, B}`.
 2. IDE sees a new `unitySessionId`, truncates `to-unity.jsonl` **before**
-   writing anything else. Unity detects `len < offset` and resets to 0.
+   writing anything else. Unity detects the epoch bump and resets to 0.
 
 ### Sequence C — domain reload (the common case)
 
@@ -374,7 +374,9 @@ The `sha1` crate dependency **stays** — `graphify.rs:13` still uses it.
 
 **Rust unit tests** (pure filesystem against a tempdir — no Unity needed):
 round-trip, partial-line buffering across polls, truncation reset via
-`len < offset`, ack gating below/above threshold, stale-ack skip,
+truncation reset via both the epoch and the `len < offset` safety net,
+same-length truncation detection, epoch survival across a writer reopen,
+ack gating below/above threshold, stale-ack skip,
 `MAX_LINE_BYTES` guard, malformed-line skip.
 
 **C# unit tests.** The package has no test infrastructure today. Add

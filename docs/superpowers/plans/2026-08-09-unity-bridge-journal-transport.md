@@ -2364,6 +2364,32 @@ git commit -m "test(bridge): pin the journal wire format with a cross-language g
 
 ---
 
+## As-Built Deviations
+
+Recorded after execution. The spec was updated to match; this plan's task bodies
+were not rewritten, so read these first if you are following them.
+
+1. **Epoch sidecars were added** (`to-ide.epoch`, `to-unity.epoch`). The plan's
+   `len < offset` rule cannot detect a truncation that rewrites to the same
+   byte length — exactly what a session reset does. Caught by
+   `DetectsTruncationEvenWhenRewrittenToTheSameLength`. Each journal's single
+   writer bumps a counter on every truncate; the reader treats a change as
+   authoritative and keeps `len < offset` as a safety net.
+2. **C# readers must open with `bufferSize: 1`.** `FileStream`'s read buffer
+   served stale bytes after a truncation, replaying old content. Rust's
+   `std::fs::File` is unbuffered, so only C# needed this.
+3. **`RestorePosition` takes `(offset, epoch)`**, not `(offset)`. A saved offset
+   is meaningless if the writer rotated during the domain reload.
+   `BridgeBootstrap` persists `Arcane.Bridge.ReadEpoch` alongside the offset.
+4. **`unity_write_bridge_discovery` was deleted, not ported.** It was registered
+   but never called, and would have published a session id owned by no running
+   journal loop.
+5. **The IDE `seek_to_end()`s on first open** of `to-ide.jsonl`, instead of
+   reading from 0 and replaying a previous session's backlog through
+   `route_message`.
+6. **`keep()` in `sync-unity-bridge.mjs` strips `.meta` before matching**, or
+   excluding `Tests` still ships an orphaned `Tests.meta`.
+
 ## Self-Review Notes
 
 **Spec coverage:** File layout → Task 2. Wire format → Tasks 1, 4, 7. Read/write mechanics incl. Windows sharing flags → Tasks 1, 4 (+ Global Constraints). Truncation protocol → Tasks 1, 4. Session protocol Sequences A/B/C → Task 3 (`EnsureSession`), Task 5 (handshake gate). Liveness → Tasks 3, 5. Stale-package detection → Task 6. Limits table → Tasks 1, 4. C# code changes → Tasks 1-3. Rust code changes → Tasks 4-6. Testing → all tasks + Task 7. Rollout → Task 7 Step 5.
