@@ -55,6 +55,14 @@ pub fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     let close_all_tabs = MenuItemBuilder::with_id("tab.closeAll", "Close All Tabs")
         .accelerator("CmdOrCtrl+Shift+W")
         .build(&app_handle)?;
+    // CmdOrCtrl+Shift+T belongs to this command in the JS registry
+    // (`tab.reopenClosed` in App.tsx). The native menu used to give the chord
+    // to the theme picker, and on macOS the native menu wins — so the same
+    // chord reopened a closed tab on Windows and opened the theme picker on
+    // macOS. `keybinding-parity.test.ts` now fails on any such divergence.
+    let reopen_closed_tab = MenuItemBuilder::with_id("tab.reopenClosed", "Reopen Closed Tab")
+        .accelerator("CmdOrCtrl+Shift+T")
+        .build(&app_handle)?;
     let file_submenu = SubmenuBuilder::new(&app_handle, "File")
         .item(&new_file)
         .item(&new_window)
@@ -66,6 +74,7 @@ pub fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         .separator()
         .item(&close_tab)
         .item(&close_all_tabs)
+        .item(&reopen_closed_tab)
         .build()?;
 
     // Edit menu
@@ -106,8 +115,10 @@ pub fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     let quick_open = MenuItemBuilder::with_id("palette.quickOpen", "Quick Open File…")
         .accelerator("CmdOrCtrl+P")
         .build(&app_handle)?;
+    // No accelerator: CmdOrCtrl+Shift+T is Reopen Closed Tab (see the File
+    // menu). The theme picker stays reachable from this menu and the command
+    // palette, which is enough for something used once a month.
     let theme_picker = MenuItemBuilder::with_id("theme.openPicker", "Color Theme…")
-        .accelerator("CmdOrCtrl+Shift+T")
         .build(&app_handle)?;
     let view_submenu = SubmenuBuilder::new(&app_handle, "View")
         .item(&cmd_palette)
