@@ -10,6 +10,7 @@ import type {
   PlaystateChangedPayload,
   CompilationPayload,
   OpenFilePayload,
+  StalePackagePayload,
 } from '../types/unity';
 import { parseStackTrace } from '../types/unity';
 import { useWorkspaceStore } from './workspace';
@@ -221,21 +222,28 @@ export const useUnityStore = create<UnityState>((set, get) => ({
     // on "waiting for Unity" forever, which is indistinguishable from Unity
     // simply being closed — the single worst failure mode of the hard protocol
     // switch, and the one a user cannot diagnose on their own.
-    const u8 = await listenScoped<void>('unity-package-stale', () => {
+    const u8 = await listenScoped<StalePackagePayload>('unity-package-stale', (event) => {
       if (get().packageStale) return; // already prompted this session
       set({ packageStale: true });
+
+      const { reason, installed, required } = event.payload;
+      // 'outdated' means it handshook and then misbehaves in ways that point
+      // nowhere near the install being old, so name the versions explicitly.
+      const message =
+        reason === 'outdated'
+          ? `The Arcane Unity package is out of date (${installed ?? 'unknown'}; needs ${required}). ` +
+            'Update it — a stale package fails in confusing ways.'
+          : 'Unity is running but the Arcane package is missing. Install it to connect the editor.';
 
       const workspacePath = useWorkspaceStore.getState().workspacePath;
       useNotificationsStore.getState().addNotification({
         type: 'warning',
         persistent: true,
-        message:
-          'Unity is running but the Arcane package is missing or out of date. ' +
-          'Install it to connect the editor.',
+        message,
         actions: workspacePath
           ? [
               {
-                label: 'Install package',
+                label: reason === 'outdated' ? 'Update package' : 'Install package',
                 run: () => {
                   installBridge(workspacePath)
                     .then(() => {

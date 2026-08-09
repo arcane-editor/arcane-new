@@ -28,6 +28,10 @@ const PEER_DEAD_MS: u64 = 8000;
 /// How long to wait for the Unity package to show up before concluding it is
 /// missing or outdated (only when Unity itself is demonstrably running).
 const STALE_PACKAGE_AFTER_MS: u64 = 15_000;
+/// Oldest `com.arcane.editor` this IDE will work with. Must stay in lockstep
+/// with `minPackageVersion` in `write_bridge_discovery` and `PackageVersion` in
+/// `arcane-extension/Editor/BridgeBootstrap.cs`.
+const MIN_PACKAGE_VERSION: &str = "0.1.0";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -49,6 +53,43 @@ pub struct UnityMessage {
 pub struct ConnectionChangedPayload {
     pub connected: bool,
     pub info: Option<serde_json::Value>,
+}
+
+/// Why the bridge package needs attention. `missing` = Unity is running but no
+/// journal ever appeared; `outdated` = it handshook, but below the floor.
+///
+/// Carrying the versions matters: without them a stale embedded package fails
+/// as an unexplained runtime error in Unity's console, with nothing pointing at
+/// the install being old.
+#[derive(Debug, Serialize, Clone)]
+pub struct StalePackagePayload {
+    pub reason: &'static str,
+    pub installed: Option<String>,
+    pub required: String,
+}
+
+/// Parse `major.minor.patch`, ignoring any `-suffix`. Returns None if unparseable.
+fn parse_semver(v: &str) -> Option<(u32, u32, u32)> {
+    let core = v.split(['-', '+']).next()?;
+    let mut it = core.split('.');
+    let major = it.next()?.trim().parse().ok()?;
+    let minor = it.next().unwrap_or("0").trim().parse().unwrap_or(0);
+    let patch = it.next().unwrap_or("0").trim().parse().unwrap_or(0);
+    Some((major, minor, patch))
+}
+
+/// True when `installed` is older than `required`. An unparseable or absent
+/// installed version counts as too old — better a spurious "update it" prompt
+/// than a silent failure the user cannot diagnose.
+fn package_is_too_old(installed: Option<&str>, required: &str) -> bool {
+    let req = match parse_semver(required) {
+        Some(r) => r,
+        None => return false,
+    };
+    match installed.and_then(parse_semver) {
+        Some(got) => got < req,
+        None => true,
+    }
 }
 
 // ── State ───────────────────────────────────────────────────────────────────
@@ -259,7 +300,7 @@ fn write_bridge_discovery(
         "ideSessionId": ide_session_id,
         "ideVersion": env!("CARGO_PKG_VERSION"),
         "idePid": std::process::id(),
-        "minPackageVersion": "0.1.0",
+        "minPackageVersion": MIN_PACKAGE_VERSION,
         "_note": "Arcane IDE bridge. If Unity is not connecting, update the com.arcane.editor package.",
     });
     let serialized = serde_json::to_string_pretty(&content).map_err(|e| e.to_string())?;
@@ -369,6 +410,7 @@ async fn run_journal_session(
     let mut last_traffic = now_ms();
     let mut last_peer_bytes = now_ms();
     let mut stale_checked = false;
+    let mut package_version_warned = false;
     let started = now_ms();
 
     loop {
@@ -426,9 +468,32 @@ async fn run_journal_session(
                         unity_session_id = Some(incoming.to_string());
                     }
                     connected = true;
-                    // The handshake landed, so the package is present and current
-                    // — never warn about a stale package for this session.
+                    // The handshake landed, so the package is present — the
+                    // "missing" timeout below must never fire for this session.
                     stale_checked = true;
+
+                    // But present is not the same as current. A stale embedded
+                    // package handshakes fine and then fails in ways that point
+                    // nowhere near the install being old, so say so explicitly.
+                    if !package_version_warned {
+                        package_version_warned = true;
+                        let installed = msg
+                            .payload
+                            .get("packageVersion")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string());
+                        if package_is_too_old(installed.as_deref(), MIN_PACKAGE_VERSION) {
+                            let _ = app.emit_to(
+                                label.as_str(),
+                                "unity-package-stale",
+                                StalePackagePayload {
+                                    reason: "outdated",
+                                    installed,
+                                    required: MIN_PACKAGE_VERSION.to_string(),
+                                },
+                            );
+                        }
+                    }
                 } else if msg.msg_type == "disconnect" {
                     // Unity quit cleanly; don't make the user wait out PEER_DEAD_MS.
                     connected = false;
@@ -500,7 +565,15 @@ async fn run_journal_session(
         if !stale_checked && now.saturating_sub(started) > STALE_PACKAGE_AFTER_MS {
             stale_checked = true;
             if unity_editor_is_running(&workspace_path) {
-                let _ = app.emit_to(label.as_str(), "unity-package-stale", ());
+                let _ = app.emit_to(
+                    label.as_str(),
+                    "unity-package-stale",
+                    StalePackagePayload {
+                        reason: "missing",
+                        installed: None,
+                        required: MIN_PACKAGE_VERSION.to_string(),
+                    },
+                );
             }
         }
 
@@ -729,6 +802,49 @@ mod tests {
         // what retired the sha1 path fallback and its symlink mismatch.
         let dir = bridge_dir("/x/proj");
         assert_eq!(dir, PathBuf::from("/x/proj/Library/ArcaneIDE"));
+    }
+
+    #[test]
+    fn package_version_comparison_handles_the_cases_that_reach_it() {
+        // Older on any component.
+        assert!(package_is_too_old(Some("0.0.1"), "0.1.0"));
+        assert!(package_is_too_old(Some("0.0.9"), "0.1.0"));
+        assert!(package_is_too_old(Some("0.1.0"), "0.2.0"));
+        assert!(package_is_too_old(Some("1.9.9"), "2.0.0"));
+
+        // Equal or newer is fine.
+        assert!(!package_is_too_old(Some("0.1.0"), "0.1.0"));
+        assert!(!package_is_too_old(Some("0.1.1"), "0.1.0"));
+        assert!(!package_is_too_old(Some("1.0.0"), "0.1.0"));
+        assert!(!package_is_too_old(Some("10.0.0"), "9.0.0"), "numeric, not lexical");
+
+        // Pre-release suffixes compare on the core version.
+        assert!(!package_is_too_old(Some("0.1.0-preview.3"), "0.1.0"));
+
+        // Short forms.
+        assert!(package_is_too_old(Some("0"), "0.1.0"));
+        assert!(!package_is_too_old(Some("1"), "0.1.0"));
+
+        // Absent or unparseable counts as too old — a spurious prompt beats a
+        // silent failure the user cannot diagnose.
+        assert!(package_is_too_old(None, "0.1.0"));
+        assert!(package_is_too_old(Some("garbage"), "0.1.0"));
+        assert!(package_is_too_old(Some(""), "0.1.0"));
+    }
+
+    #[test]
+    fn min_package_version_matches_what_the_discovery_file_advertises() {
+        let d = tmp_dir("minver");
+        std::fs::create_dir_all(d.join("ProjectSettings")).unwrap();
+        let ws = d.to_str().unwrap();
+        let written = write_bridge_discovery(ws, "s").unwrap().unwrap();
+        let parsed: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&written).unwrap()).unwrap();
+        assert_eq!(
+            parsed["minPackageVersion"], MIN_PACKAGE_VERSION,
+            "bridge.json and the runtime check must not drift apart"
+        );
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]
