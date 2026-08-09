@@ -13,6 +13,7 @@ import { useAsmdefStore } from '../../../stores/asmdef';
 import { lspManager } from '../../lsp';
 import { GraphifyStatusBadge } from '../../graphify';
 import { TelemetryStatusItem } from '../../unity-telemetry';
+import { UnityBridgeStatusItem } from '../../unity-bridge';
 import { InlineSuggestStatusItem } from '../../inline-suggest';
 import { detectLanguage } from '../../../utils/language-detect';
 
@@ -36,9 +37,7 @@ function StatusBar() {
   const cursorPosition = useUiStore((s) => s.cursorPosition);
   const diagnosticCounts = useUiStore((s) => s.diagnosticCounts);
   const isUnityProject = useProjectContextStore((s) => s.isUnityProject);
-  const unityVersion = useProjectContextStore((s) => s.unityVersion);
   const unityConnected = useUnityStore((s) => s.connected);
-  const bridgeState = useUnityStore((s) => s.bridgeState);
   const unityCompiling = useUnityStore((s) => s.isCompiling);
   const isGitRepo = useGitStore((s) => s.isGitRepo);
   const branch = useGitStore((s) => s.branch);
@@ -110,36 +109,7 @@ function StatusBar() {
           </span>
         )}
 
-        {isUnityProject && (
-          <span
-            className="status-bar-item"
-            title={
-              bridgeState === 'connected'
-                ? 'Unity bridge connected'
-                : bridgeState === 'reloading'
-                  ? 'Unity reloading…'
-                  : bridgeState === 'not-installed'
-                    ? 'Unity bridge not installed'
-                    : 'Unity bridge disconnected'
-            }
-          >
-            <span className="icon">
-              <span style={{
-                display: 'inline-block',
-                width: 8,
-                height: 8,
-                borderRadius: '50%',
-                background:
-                  bridgeState === 'connected'
-                    ? 'var(--git-added)'
-                    : bridgeState === 'reloading'
-                      ? 'var(--git-modified, #d7ba7d)'
-                      : 'var(--text-secondary)',
-              }} />
-            </span>
-            <span>{unityVersion ? `Unity ${unityVersion}` : 'Unity'}</span>
-          </span>
-        )}
+        <UnityBridgeStatusItem />
 
         {isUnityProject && unityCompiling && (
           <span className="status-bar-item" title="Unity is compiling scripts">

@@ -16,3 +16,4 @@ export { isBridgeInstalled, installBridge, BRIDGE_DOCS_URL } from './services/br
 export { maybeRefreshUnityAfterSave } from './services/refresh-on-save';
 export { triggerRecompileAndWait } from './services/compile-wait';
 export { BridgeInstallBanner } from './components/BridgeInstallBanner';
+export { UnityBridgeStatusItem } from './components/UnityBridgeStatusItem';
