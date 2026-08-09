@@ -62,6 +62,44 @@ describe('initialPaneSizes', () => {
     const { sizes } = initialPaneSizes({ sidebar: 700, rightPanel: 700 }, 1000);
     expect(sizes[EDITOR_PANE_INDEX]).toBe(MIN_EDITOR_WIDTH);
   });
+
+  // Allotment does not scale oversized defaultSizes down for us — with
+  // proportionalLayout={false} it shrinks the High-priority editor first, to
+  // its 30px default min, and then re-persists the oversized side widths. So
+  // the sum has to be clamped here, before Allotment ever sees it.
+  it('clamps two oversized side widths so the editor keeps its floor', () => {
+    const { left, right, sizes } = initialPaneSizes({ sidebar: 700, rightPanel: 700 }, 1000);
+    expect(left + right).toBe(1000 - MIN_EDITOR_WIDTH);
+    expect(sizes).toEqual([340, 320, 340]);
+  });
+
+  // Shrunk in proportion to what each asked for, rather than taking it all
+  // from one side. Both values must clear MAX_SIDE_FRACTION first or
+  // resolveSideWidth discards them and the clamp never runs: at W=1000 the cap
+  // is 800, so 600 + 300 = 900 both survives and overruns the 680 budget.
+  it('clamps unequal side widths proportionally', () => {
+    const { left, right } = initialPaneSizes({ sidebar: 600, rightPanel: 300 }, 1000);
+    expect(left).toBe(453);
+    expect(right).toBe(226);
+    expect(left + right).toBeLessThanOrEqual(1000 - MIN_EDITOR_WIDTH);
+  });
+
+  it('leaves widths alone when they already fit', () => {
+    const { left, right, sizes } = initialPaneSizes({ sidebar: 300, rightPanel: 400 }, 1600);
+    expect(left).toBe(300);
+    expect(right).toBe(400);
+    expect(sizes).toEqual([300, 900, 400]);
+  });
+
+  // Degenerate window: narrower than the editor's own floor. Give the editor
+  // everything rather than emitting negative side widths.
+  it('yields no side panes when the window is narrower than the editor floor', () => {
+    expect(initialPaneSizes({ sidebar: 400, rightPanel: 400 }, 200)).toEqual({
+      left: 0,
+      right: 0,
+      sizes: [0, 200, 0],
+    });
+  });
 });
 
 describe('widthsForRestore', () => {

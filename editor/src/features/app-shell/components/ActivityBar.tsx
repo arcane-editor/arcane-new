@@ -76,10 +76,12 @@ function ActivityBar() {
       ))}
 
       <div className="activity-bar-bottom">
-        {/* The terminal had no button at all — it was reachable only by
-            Cmd+` or the palette, which is the discoverability gap reported in
+        {/* The terminal had no button at all — keyboard or palette only, which
+            is the discoverability gap reported in
             docs/superpowers/specs/2026-08-02-onboarding-unity-visibility-design.md
-            ("they had to be told that Ctrl+J reveals the terminal"). */}
+            ("they had to be told that Ctrl+J reveals the terminal"). The chord
+            in the tooltip below is read back out of the command registry, so it
+            cannot drift from the real binding the way a hardcoded one did. */}
         <button
           className={`activity-bar-icon${
             bottomPanelVisible && activeBottomTab === 'terminal' ? ' active' : ''

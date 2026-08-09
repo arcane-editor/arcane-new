@@ -51,17 +51,42 @@ export function resolveSideWidth(
 }
 
 /**
- * Pane sizes for the initial mount, as absolute px.
- *
- * Allotment scales `defaultSizes` to fit, and wants one entry per
+ * Pane sizes for the initial mount, as absolute px. One entry per
  * always-mounted pane.
+ *
+ * The two side widths are clamped so they cannot sum past
+ * `windowWidth - MIN_EDITOR_WIDTH`. That guard is load-bearing, and it is not
+ * Allotment's job: with `proportionalLayout={false}` Allotment does not scale
+ * oversized `defaultSizes` down proportionally — it shrinks the
+ * LayoutPriority.High pane first, which is the editor, down to its own
+ * minimum. The editor pane declares no `minSize` in App.tsx, so that minimum
+ * is Allotment's 30px default and MIN_EDITOR_WIDTH would be advisory only.
+ * Worse, the resulting layout fires `onChange`, which persists the oversized
+ * side widths again — so a one-off squeeze sticks across launches.
+ *
+ * Reachable since MAX_SIDE_FRACTION went to 0.8: two panes each restored at
+ * 60% of the window ask for 120% of it between them.
  */
 export function initialPaneSizes(
   persisted: { sidebar?: number; rightPanel?: number },
   windowWidth: number,
 ): { left: number; right: number; sizes: number[] } {
-  const left = resolveSideWidth(persisted.sidebar, windowWidth, DEFAULT_SIDE_FRACTION);
-  const right = resolveSideWidth(persisted.rightPanel, windowWidth, DEFAULT_SIDE_FRACTION);
+  let left = resolveSideWidth(persisted.sidebar, windowWidth, DEFAULT_SIDE_FRACTION);
+  let right = resolveSideWidth(persisted.rightPanel, windowWidth, DEFAULT_SIDE_FRACTION);
+
+  // Shrink both sides in proportion to what they asked for, so neither is
+  // singled out, then let the editor take exactly what is left.
+  const budget = windowWidth - MIN_EDITOR_WIDTH;
+  if (budget <= 0) {
+    // Window narrower than the editor's own floor: nothing sane to allocate.
+    return { left: 0, right: 0, sizes: [0, windowWidth, 0] };
+  }
+  if (left + right > budget) {
+    const scale = budget / (left + right);
+    left = Math.floor(left * scale);
+    right = Math.floor(right * scale);
+  }
+
   const editor = Math.max(windowWidth - left - right, MIN_EDITOR_WIDTH);
   return { left, right, sizes: [left, editor, right] };
 }

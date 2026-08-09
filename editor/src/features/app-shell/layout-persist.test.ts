@@ -60,4 +60,52 @@ describe('createLayoutPersister', () => {
     await tick(30);
     expect(writes).toEqual([]);
   });
+
+  // The regression this parameter exists to fix: onLayoutChange (App.tsx)
+  // emits a partial patch whose keys depend on which side panes are visible.
+  // A drag reports {sidebar, rightPanel}; hiding a pane before the debounce
+  // fires reports {rightPanel} alone. Without merging, that second call's
+  // plain replace drops the drag's sidebar width and it never reaches disk.
+  it('merges a burst into one write when a merge function is given', async () => {
+    const writes: Array<{ sidebar?: number; rightPanel?: number }> = [];
+    const p = createLayoutPersister<{ sidebar?: number; rightPanel?: number }>(
+      (v) => { writes.push(v); },
+      10,
+      (prev, next) => ({ ...prev, ...next }),
+    );
+    p.persist({ sidebar: 420, rightPanel: 300 });
+    p.persist({ rightPanel: 310 });
+    await tick(30);
+    expect(writes).toEqual([{ sidebar: 420, rightPanel: 310 }]);
+  });
+
+  // verticalPersister's contract: no merge function means the original
+  // last-write-wins replace, unchanged — needed because it carries a plain
+  // number[] positional array, which merging by spread would corrupt rather
+  // than combine.
+  it('replaces rather than merges when no merge function is given', async () => {
+    const writes: Array<{ sidebar?: number; rightPanel?: number }> = [];
+    const p = createLayoutPersister<{ sidebar?: number; rightPanel?: number }>(
+      (v) => { writes.push(v); },
+      10,
+    );
+    p.persist({ sidebar: 420, rightPanel: 300 });
+    p.persist({ rightPanel: 310 });
+    await tick(30);
+    expect(writes).toEqual([{ rightPanel: 310 }]);
+  });
+
+  it('composes merge across three queued patches', async () => {
+    const writes: Array<{ a?: number; b?: number; c?: number }> = [];
+    const p = createLayoutPersister<{ a?: number; b?: number; c?: number }>(
+      (v) => { writes.push(v); },
+      10,
+      (prev, next) => ({ ...prev, ...next }),
+    );
+    p.persist({ a: 1 });
+    p.persist({ b: 2 });
+    p.persist({ c: 3 });
+    await tick(30);
+    expect(writes).toEqual([{ a: 1, b: 2, c: 3 }]);
+  });
 });

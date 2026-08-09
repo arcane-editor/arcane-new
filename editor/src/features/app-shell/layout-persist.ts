@@ -13,10 +13,21 @@ import { saveLayoutSizes } from '../../utils/persistence';
  * Safe to defer: nothing in-session reads persistence back. App holds the live
  * pane widths in refs and restores from those, so the persisted copy only
  * matters at next launch.
+ *
+ * `merge`, when given, combines a still-pending value with the next one
+ * instead of last-write-wins replacing it. This matters because a caller can
+ * persist a *partial* patch — `onLayoutChange` (App.tsx) only includes the
+ * side panes currently visible — so two patches queued inside one debounce
+ * window can carry different keys: drag both side panes, then hide one
+ * before the timer fires, and a plain replace drops the hidden pane's
+ * dragged width from ever reaching disk. `verticalPersister` below carries a
+ * plain `number[]` with no keys to partially clobber, so it omits `merge`
+ * and keeps the original last-write-wins behaviour.
  */
 export function createLayoutPersister<T>(
   write: (value: T) => void | Promise<void>,
   delayMs = 250,
+  merge?: (prev: T, next: T) => T,
 ): { persist(value: T): void; flush(): void | Promise<void>; cancel(): void } {
   let timer: ReturnType<typeof setTimeout> | null = null;
   let pending: { value: T } | null = null;
@@ -30,7 +41,7 @@ export function createLayoutPersister<T>(
 
   return {
     persist(value: T): void {
-      pending = { value };
+      pending = { value: pending && merge ? merge(pending.value, value) : value };
       clear();
       timer = setTimeout(() => {
         timer = null;
@@ -88,7 +99,11 @@ export function createLayoutPersister<T>(
  * module registry. There is exactly one `layoutPersister`/`verticalPersister`
  * pair *per window*, not one shared across all open windows.
  */
-export const layoutPersister = createLayoutPersister<Parameters<typeof saveLayoutSizes>[0]>(saveLayoutSizes);
+export const layoutPersister = createLayoutPersister<Parameters<typeof saveLayoutSizes>[0]>(
+  saveLayoutSizes,
+  undefined,
+  (prev, next) => ({ ...prev, ...next }),
+);
 export const verticalPersister = createLayoutPersister<number[]>((vertical) => saveLayoutSizes({ vertical }));
 
 /**

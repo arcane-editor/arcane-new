@@ -588,9 +588,14 @@ function App() {
       category: 'Terminal',
       // mod+j, not mod+`: this is the command that also spawns the first
       // terminal, and mod+j is the chord users reach for (signpost.ts:14
-      // documents the reverse confusion this replaces). On Linux/Windows
-      // Ctrl+J is LF, but terminal.toggle is in COMMANDS_TO_SKIP_SHELL so the
-      // app wins — you must be able to close the panel from inside it.
+      // documents the reverse confusion this replaces). On Linux/Windows,
+      // Ctrl+J is xterm's default encoding for LF — TerminalInstance's
+      // attachCustomKeyEventHandler is what actually stops that, by telling
+      // xterm to swallow the keystroke while a terminal has focus, so only
+      // this command sees it. COMMANDS_TO_SKIP_SHELL (skip-shell.ts) is a
+      // separate, narrower thing: it only decides whether this command's
+      // handler fires while a terminal has focus, not whether xterm hands
+      // the shell a byte first.
       keybinding: 'mod+j',
       handler: () => {
         const ui = useUiStore.getState();
