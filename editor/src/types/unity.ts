@@ -79,6 +79,17 @@ export interface ConnectionChangedPayload {
   info: UnityProjectInfo | null;
 }
 
+/**
+ * The bridge package needs attention. `missing` = Unity is running but no
+ * journal ever appeared; `outdated` = it handshook but is below the floor the
+ * IDE requires (`unity_ipc.rs::MIN_PACKAGE_VERSION`).
+ */
+export interface StalePackagePayload {
+  reason: 'missing' | 'outdated';
+  installed: string | null;
+  required: string;
+}
+
 // Stack trace parser — ported from unity-protocol.ts
 const STACK_FRAME_REGEX = /(\S+)\.(\S+)\s*\(.*?\)\s*\(at\s+(.+):(\d+)\)/;
 

@@ -65,6 +65,42 @@ src/
 - The LSP client has crash detection (`lsp-exited` Tauri event) and auto-restart with document re-sync.
 - Files opened before LSP starts get retroactive `didOpen` notifications when the LSP becomes ready.
 
+## C# IntelliSense: verify it, every time
+
+**Run `bun run verify` before reporting any change as done — including changes
+that have nothing to do with C#, LSP, or Unity.** It runs tsc, the module-boundary
+check, the JS and Rust suites, and `verify:intellisense`.
+
+`bun run verify:intellisense` alone (~8s) regenerates the project files through
+the real Rust generator, starts the real `csharp-ls`, and asserts it answers
+`transform.` with the real Unity member list and resolves hover on
+`MonoBehaviour`. It exits non-zero if IntelliSense is dead.
+
+**Why this is unconditional.** C# IntelliSense was completely broken for an
+unknown period — every hover, completion and code action returning `null` —
+while the entire test suite stayed green. Two properties made that possible and
+both still hold:
+
+1. **The break was environmental, not a code change.** Unity stops generating
+   `.csproj` files once Arcane is registered as its external script editor, and
+   the generator used to read its Unity DLL paths out of those files. No diff
+   introduced the bug, so no amount of reviewing a diff could have caught it.
+   Only probing the running server detects this class of failure.
+2. **A skipped test looked identical to a passing one.** The Rust smoke tests
+   were pinned to a project path that had been deleted, so they returned early
+   and reported success.
+
+So: when the check reports `SKIPPED`, that is **not** a pass — it means the
+check did not run, and the claim "IntelliSense works" is unsupported. Say so
+plainly rather than treating it as green. Set
+`ARCANE_INTELLISENSE_E2E=required` to turn a skip into a failure, and
+`ARCANE_SMOKE_UNITY_PROJECT=<path>` to point it at a Unity project.
+
+The generator must never depend on Unity's `Assembly-CSharp*.csproj` again; it
+derives its reference set from the Unity install (`unity.rs`,
+`unity_install_references`). `csproj_is_complete_without_any_unity_generated_csproj`
+is the hermetic regression test for that and needs no Unity installed.
+
 ## Keybindings: always check both sides
 
 A keyboard chord can be owned in **two independent places**, and changing one does not change the other:

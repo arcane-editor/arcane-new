@@ -16,6 +16,8 @@
     "tauri:dev-app": "bun run build:lsp-sidecars && tauri dev --config src-tauri/tauri.dev.conf.json",
     "tauri:build:dev-app": "bun run build:lsp-sidecars && tauri build --config src-tauri/tauri.dev.conf.json",
     "test": "bun test src",
+    "verify:intellisense": "node scripts/verify-csharp-intellisense.mjs",
+    "verify": "tsc --noEmit && bun run check:modules && bun test src && (cd src-tauri && cargo test --lib) && bun run verify:intellisense",
     "eval": "bun tooling/unity-eval/run-eval.ts"
   },
   "dependencies": {

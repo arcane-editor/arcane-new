@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "d=\"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null)}\"; s=\"$d/editor/scripts/hooks/stop-verify-intellisense.sh\"; [ -x \"$s\" ] || exit 0; exec \"$s\"",
+            "timeout": 300,
+            "statusMessage": "Verifying C# IntelliSense..."
+          }
+        ]
+      }
+    ]
+  }
+}
