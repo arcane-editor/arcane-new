@@ -22,6 +22,7 @@ import { useWorkspaceStore } from '../../../stores/workspace';
 import { useGitStore, type GitFileStatus } from '../../../stores/git';
 import { useUiStore, type ScmViewMode } from '../../../stores/ui';
 import { buildScmTree, type ScmTreeNode } from '../services/scm-tree';
+import { confirmDiscard } from '../services/discard-message';
 import type { GitLogEntry, CommitFileChange } from '../../../types';
 import { useProjectContextStore } from '../../../stores/project-context';
 import { formatRelativeDate } from '../../../utils/date';
@@ -587,7 +588,20 @@ function SourceControlPanel() {
                 <button
                   className="scm-file-action-btn"
                   title="Discard All"
-                  onClick={(e) => { e.stopPropagation(); workspacePath && discardAll(workspacePath); }}
+                  onClick={async (e) => {
+                    // `git checkout -- .` plus `git clean -fd`. This button sits
+                    // directly beside Stage All, and untracked files are in no
+                    // commit and no stash — a misclick used to be unrecoverable.
+                    e.stopPropagation();
+                    if (!workspacePath) return;
+                    const untracked = unstagedRows.filter((f) => f.status === 'untracked').length;
+                    const ok = await confirmDiscard({
+                      scope: 'all',
+                      tracked: unstagedRows.length - untracked,
+                      untracked,
+                    });
+                    if (ok) discardAll(workspacePath);
+                  }}
                 >
                   <Undo2 size={14} />
                 </button>
@@ -615,7 +629,17 @@ function SourceControlPanel() {
                 file={file}
                 hidePath={hidePath}
                 onStage={() => workspacePath && stageFile(workspacePath, file.path)}
-                onDiscard={() => workspacePath && discardFile(workspacePath, file.path, file.status === 'untracked')}
+                onDiscard={async () => {
+                  if (!workspacePath) return;
+                  const isUntracked = file.status === 'untracked';
+                  const ok = await confirmDiscard({
+                    scope: 'file',
+                    fileName: file.path.split('/').pop() ?? file.path,
+                    tracked: isUntracked ? 0 : 1,
+                    untracked: isUntracked ? 1 : 0,
+                  });
+                  if (ok) discardFile(workspacePath, file.path, isUntracked);
+                }}
                 onClick={() => handleFileClick(file)}
               />
             )}
