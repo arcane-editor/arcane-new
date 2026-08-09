@@ -503,58 +503,162 @@ pub fn scan_meta_files(workspace_path: String) -> Result<HashMap<String, String>
     Ok(map)
 }
 
+/// Locate the Unity install's "scripting root" — the directory holding
+/// `Managed/`, `NetStandard/` and `UnityReferenceAssemblies/`.
+///
+/// Unity 6 (6000.x) moved this payload from `<data root>` down to
+/// `<data root>/Resources/Scripting`; earlier versions keep it at the data
+/// root itself. We probe both and pick whichever actually has `Managed/`,
+/// so one code path covers 2019 through 6000+ without version sniffing.
+///
+/// `install_path` is what `resolve_unity_editor` returns: `Unity.app` on
+/// macOS, the `Unity.exe` binary elsewhere.
+fn unity_scripting_root(install_path: &Path) -> Option<PathBuf> {
+    // Map the install path to the data root that holds the managed payload.
+    let data_root: PathBuf = if install_path.extension().map_or(false, |e| e == "app") {
+        install_path.join("Contents")
+    } else {
+        // `<...>/Editor/Unity.exe` → `<...>/Editor/Data`
+        install_path.parent()?.join("Data")
+    };
+
+    for candidate in [data_root.join("Resources").join("Scripting"), data_root] {
+        if candidate.join("Managed").is_dir() {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+/// Resolve the Unity install backing `workspace_path` via its
+/// ProjectSettings/ProjectVersion.txt, then locate its scripting root.
+fn workspace_scripting_root(workspace_path: &Path) -> Option<PathBuf> {
+    let version = read_unity_version(&workspace_path.join("ProjectSettings"))?;
+    let install = resolve_unity_editor(version).ok()??;
+    unity_scripting_root(Path::new(&install.path))
+}
+
+/// Collect every reference assembly Roslyn needs straight out of the Unity
+/// install: the UnityEngine/UnityEditor modules, the top-level engine and
+/// editor assemblies, and the netstandard 2.1 reference + shim facades.
+///
+/// Returned as (assembly name, absolute dll path). The module directory is
+/// walked first so its copies win over the top-level duplicates.
+fn unity_install_references(scripting_root: &Path) -> Vec<(String, PathBuf)> {
+    let mut refs: Vec<(String, PathBuf)> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+
+    let push_dll = |path: PathBuf, refs: &mut Vec<(String, PathBuf)>, seen: &mut HashSet<String>| {
+        if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+            if seen.insert(stem.to_string()) {
+                refs.push((stem.to_string(), path));
+            }
+        }
+    };
+
+    let push_dir = |dir: PathBuf, refs: &mut Vec<(String, PathBuf)>, seen: &mut HashSet<String>| {
+        let entries = match fs::read_dir(&dir) {
+            Ok(e) => e,
+            Err(_) => return,
+        };
+        // Sort for deterministic output — read_dir order is filesystem-defined.
+        let mut dlls: Vec<PathBuf> = entries
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().map_or(false, |e| e == "dll"))
+            .collect();
+        dlls.sort();
+        for dll in dlls {
+            push_dll(dll, refs, seen);
+        }
+    };
+
+    let managed = scripting_root.join("Managed");
+    push_dir(managed.join("UnityEngine"), &mut refs, &mut seen);
+    push_dir(managed, &mut refs, &mut seen);
+
+    let netstandard = scripting_root.join("NetStandard");
+    push_dll(
+        netstandard.join("ref").join("2.1.0").join("netstandard.dll"),
+        &mut refs,
+        &mut seen,
+    );
+    push_dir(
+        netstandard
+            .join("compat")
+            .join("2.1.0")
+            .join("shims")
+            .join("netstandard"),
+        &mut refs,
+        &mut seen,
+    );
+
+    // A path we synthesised rather than read from disk may not exist.
+    refs.retain(|(_, p)| p.is_file());
+    refs
+}
+
 /// Search .csproj files for the Unity reference assemblies framework path.
 /// Checks Assembly-CSharp-Editor.csproj first, then Assembly-CSharp.csproj.
 /// Returns the directory containing the framework DLLs, if found and it exists on disk.
+///
+/// Falls back to the Unity install's own `UnityReferenceAssemblies` directory
+/// when Unity hasn't generated its csprojs — which is the normal state when
+/// Arcane is registered as Unity's external script editor, since Unity then
+/// stops asking the Visual Studio/Rider packages to generate them.
 fn find_unity_framework_path(workspace_path: &Path) -> Option<String> {
-    let re = Regex::new(
-        r"<HintPath>([^<]*UnityReferenceAssemblies[/\\][^<]*)[/\\][^/\\<]+\.dll</HintPath>",
-    )
-    .ok()?;
-
     let candidates = [
         "Assembly-CSharp-Editor.csproj",
         "Assembly-CSharp.csproj",
     ];
 
-    for filename in &candidates {
-        let csproj = workspace_path.join(filename);
-        if let Ok(content) = fs::read_to_string(&csproj) {
-            if let Some(caps) = re.captures(&content) {
-                if let Some(dir_match) = caps.get(1) {
-                    let dir_path = dir_match.as_str();
-                    if Path::new(dir_path).is_dir() {
-                        return Some(dir_path.to_string());
+    if let Ok(re) = Regex::new(
+        r"<HintPath>([^<]*UnityReferenceAssemblies[/\\][^<]*)[/\\][^/\\<]+\.dll</HintPath>",
+    ) {
+        for filename in &candidates {
+            let csproj = workspace_path.join(filename);
+            if let Ok(content) = fs::read_to_string(&csproj) {
+                if let Some(caps) = re.captures(&content) {
+                    if let Some(dir_match) = caps.get(1) {
+                        let dir_path = dir_match.as_str();
+                        if Path::new(dir_path).is_dir() {
+                            return Some(dir_path.to_string());
+                        }
                     }
                 }
             }
         }
     }
 
-    None
+    let scripting_root = workspace_scripting_root(workspace_path)?;
+    let reference_assemblies = scripting_root.join("UnityReferenceAssemblies");
+    // The api directory is version-stamped (`unity-4.8-api`); take whichever
+    // `*-api` directory the install ships rather than pinning a name.
+    let mut api_dirs: Vec<PathBuf> = fs::read_dir(&reference_assemblies)
+        .ok()?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| {
+            p.is_dir()
+                && p.file_name()
+                    .and_then(|n| n.to_str())
+                    .map_or(false, |n| n.ends_with("-api"))
+        })
+        .collect();
+    api_dirs.sort();
+    api_dirs
+        .pop()
+        .map(|p| p.to_string_lossy().to_string())
 }
 
-/// Ensure a Directory.Build.props file exists at the workspace root with the
-/// Unity framework path override. Returns Ok(true) if the file was created,
-/// Ok(false) if it already existed or the framework path couldn't be determined.
-fn ensure_build_props(workspace_path: &Path) -> Result<bool, String> {
-    let props_path = workspace_path.join("Directory.Build.props");
-    if props_path.exists() {
-        return Ok(false);
-    }
-
-    let framework_path = match find_unity_framework_path(workspace_path) {
-        Some(p) => p,
-        None => return Ok(false),
-    };
-
-    let content = format!(
-        "<Project>\n  <PropertyGroup>\n    <FrameworkPathOverride>{}</FrameworkPathOverride>\n  </PropertyGroup>\n</Project>\n",
-        framework_path
-    );
-
-    fs::write(&props_path, content).map_err(|e| format!("Failed to write Directory.Build.props: {}", e))?;
-    Ok(true)
+/// Escape text for inclusion in an XML element body or attribute value.
+/// Project paths routinely contain `&` (e.g. `~/Games/Rock & Roll/`), which
+/// makes the generated csproj unparseable if written through verbatim.
+fn xml_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
 }
 
 /// Generate a deterministic GUID string from a project name using a simple hash.
@@ -674,8 +778,23 @@ fn generate_arcane_csproj(workspace: &Path) -> Result<bool, String> {
         }
     }
 
-    // Without inherited refs we have no UnityEngine/netstandard hint paths;
-    // bail and let the caller surface the "open in Unity once" hint.
+    // Unity's csprojs are frequently absent — notably whenever Arcane is the
+    // registered external script editor, because Unity then never asks the
+    // Visual Studio/Rider packages to generate them. Fill the reference set
+    // straight from the Unity install so IntelliSense works cold: with Unity
+    // closed, on a fresh clone, before any project files have been generated.
+    // Existing entries win, since Unity's own hint paths are authoritative
+    // when they are available.
+    if let Some(scripting_root) = workspace_scripting_root(workspace) {
+        for (name, path) in unity_install_references(&scripting_root) {
+            refs.entry(name)
+                .or_insert_with(|| path.to_string_lossy().to_string());
+        }
+    }
+
+    // Neither Unity's csprojs nor a resolvable Unity install: we have no
+    // UnityEngine/netstandard hint paths at all, so a generated project would
+    // be worse than none. Bail and let the caller surface the hint.
     if refs.is_empty() {
         return Ok(false);
     }
@@ -706,6 +825,22 @@ fn generate_arcane_csproj(workspace: &Path) -> Result<bool, String> {
         }
     }
 
+    // Editor/standalone defines follow the host OS: hardcoding the macOS pair
+    // makes `#if UNITY_EDITOR_WIN` blocks vanish from IntelliSense on Windows.
+    let (editor_define, standalone_define) = if cfg!(target_os = "windows") {
+        ("UNITY_EDITOR_WIN", "UNITY_STANDALONE_WIN")
+    } else if cfg!(target_os = "macos") {
+        ("UNITY_EDITOR_OSX", "UNITY_STANDALONE_OSX")
+    } else {
+        ("UNITY_EDITOR_LINUX", "UNITY_STANDALONE_LINUX")
+    };
+
+    // Roslyn resolves mscorlib/System.* against this directory. Without it,
+    // MSBuild looks for .NET Framework reference assemblies that don't exist
+    // on a machine with only the .NET SDK installed, and every type in the
+    // BCL comes back unresolved.
+    let framework_path = find_unity_framework_path(workspace);
+
     let mut xml = String::new();
     xml.push_str(r#"<?xml version="1.0" encoding="utf-8"?>
 <!-- Auto-generated by Arcane Editor for IntelliSense. Regenerated on every workspace open. -->
@@ -722,21 +857,32 @@ fn generate_arcane_csproj(workspace: &Path) -> Result<bool, String> {
     <FileAlignment>512</FileAlignment>
     <NoStdLib>false</NoStdLib>
     <OutputPath>Library/IntellisenseBin</OutputPath>
-    <DefineConstants>UNITY_EDITOR;UNITY_EDITOR_OSX;UNITY_2022_3_OR_NEWER;UNITY_2021_1_OR_NEWER;UNITY_2020_1_OR_NEWER;UNITY_2019_1_OR_NEWER;UNITY_2018_1_OR_NEWER;UNITY_2017_1_OR_NEWER;UNITY_5_3_OR_NEWER;UNITY_64;UNITY_STANDALONE_OSX;UNITY_STANDALONE;ENABLE_MONO;ENABLE_INPUT_SYSTEM;NETSTANDARD2_1;NET_STANDARD;NET_STANDARD_2_1;CSHARP_7_3_OR_NEWER</DefineConstants>
-    <NoWarn>0169;0436;CS0436;CS0162;CS0168</NoWarn>
+"#);
+    if let Some(ref fp) = framework_path {
+        xml.push_str("    <FrameworkPathOverride>");
+        xml.push_str(&xml_escape(fp));
+        xml.push_str("</FrameworkPathOverride>\n");
+    }
+    xml.push_str(&format!(
+        "    <DefineConstants>UNITY_EDITOR;{};UNITY_2022_3_OR_NEWER;UNITY_2021_1_OR_NEWER;UNITY_2020_1_OR_NEWER;UNITY_2019_1_OR_NEWER;UNITY_2018_1_OR_NEWER;UNITY_2017_1_OR_NEWER;UNITY_5_3_OR_NEWER;UNITY_64;{};UNITY_STANDALONE;ENABLE_MONO;ENABLE_INPUT_SYSTEM;NETSTANDARD2_1;NET_STANDARD;NET_STANDARD_2_1;CSHARP_7_3_OR_NEWER</DefineConstants>\n",
+        editor_define, standalone_define
+    ));
+    xml.push_str(
+        r#"    <NoWarn>0169;0436;CS0436;CS0162;CS0168</NoWarn>
     <ErrorReport>none</ErrorReport>
     <WarningLevel>0</WarningLevel>
   </PropertyGroup>
   <ItemGroup>
-"#);
+"#,
+    );
 
     let mut sorted: Vec<(&String, &String)> = refs.iter().collect();
     sorted.sort_by(|a, b| a.0.cmp(b.0));
     for (name, path) in sorted {
         xml.push_str("    <Reference Include=\"");
-        xml.push_str(name);
+        xml.push_str(&xml_escape(name));
         xml.push_str("\">\n      <HintPath>");
-        xml.push_str(path);
+        xml.push_str(&xml_escape(path));
         xml.push_str("</HintPath>\n      <Private>false</Private>\n    </Reference>\n");
     }
 
@@ -804,9 +950,14 @@ fn generate_solution(workspace_path: &Path) -> Result<Option<String>, String> {
     Ok(Some(".arcane.sln".to_string()))
 }
 
-/// Set up a Unity workspace for LSP usage: generate Directory.Build.props,
-/// a self-contained .arcane.csproj, and a .arcane.sln solution file if the
-/// workspace is a Unity project. Returns the solution file path on success.
+/// Set up a Unity workspace for LSP usage: generate a self-contained
+/// `.arcane.csproj` and the `.arcane.sln` that points at it, if the workspace
+/// is a Unity project. Returns the solution file path on success.
+///
+/// The generated project carries its own `FrameworkPathOverride`, so this
+/// writes nothing outside the two `.arcane.*` files — earlier versions also
+/// dropped a `Directory.Build.props` at the workspace root, which every other
+/// csproj in the user's project silently inherited.
 #[tauri::command]
 pub fn unity_setup_lsp(workspace_path: String) -> Result<Option<String>, String> {
     let root = Path::new(&workspace_path);
@@ -817,7 +968,6 @@ pub fn unity_setup_lsp(workspace_path: String) -> Result<Option<String>, String>
         return Ok(None);
     }
 
-    ensure_build_props(root)?;
     generate_solution(root)
 }
 
@@ -1033,35 +1183,236 @@ mod tests {
         assert!(result.unwrap().is_none(), "nonexistent version should be None");
     }
 
+    // ─── Unity-install reference discovery ─────────────────────────────────────
+
+    /// Build a fake Unity install laid out the way the given generation does.
+    /// `unity6` selects the `Contents/Resources/Scripting` layout introduced in
+    /// 6000.x; otherwise the payload sits directly under the data root.
+    fn make_unity_install(dir: &Path, unity6: bool) -> PathBuf {
+        let app = dir.join("Unity.app");
+        let data_root = app.join("Contents");
+        let scripting = if unity6 {
+            data_root.join("Resources").join("Scripting")
+        } else {
+            data_root.clone()
+        };
+
+        let modules = scripting.join("Managed").join("UnityEngine");
+        fs::create_dir_all(&modules).unwrap();
+        fs::write(modules.join("UnityEngine.CoreModule.dll"), b"x").unwrap();
+        fs::write(modules.join("UnityEditor.CoreModule.dll"), b"x").unwrap();
+
+        let managed = scripting.join("Managed");
+        fs::write(managed.join("UnityEngine.dll"), b"x").unwrap();
+        fs::write(managed.join("UnityEditor.dll"), b"x").unwrap();
+
+        let ns_ref = scripting.join("NetStandard").join("ref").join("2.1.0");
+        fs::create_dir_all(&ns_ref).unwrap();
+        fs::write(ns_ref.join("netstandard.dll"), b"x").unwrap();
+
+        let shims = scripting
+            .join("NetStandard")
+            .join("compat")
+            .join("2.1.0")
+            .join("shims")
+            .join("netstandard");
+        fs::create_dir_all(&shims).unwrap();
+        fs::write(shims.join("System.Runtime.dll"), b"x").unwrap();
+
+        let api = scripting
+            .join("UnityReferenceAssemblies")
+            .join("unity-4.8-api");
+        fs::create_dir_all(&api).unwrap();
+
+        app
+    }
+
+    #[test]
+    fn scripting_root_found_for_unity6_layout() {
+        let dir = make_temp_dir("_scripting_u6");
+        let app = make_unity_install(&dir, true);
+
+        let root = unity_scripting_root(&app).expect("scripting root");
+        assert!(
+            root.ends_with("Contents/Resources/Scripting"),
+            "expected the Unity 6 layout, got {:?}",
+            root
+        );
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn scripting_root_found_for_legacy_layout() {
+        let dir = make_temp_dir("_scripting_legacy");
+        let app = make_unity_install(&dir, false);
+
+        let root = unity_scripting_root(&app).expect("scripting root");
+        assert!(
+            root.ends_with("Contents"),
+            "expected the pre-6000 layout, got {:?}",
+            root
+        );
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn scripting_root_none_without_managed_dir() {
+        let dir = make_temp_dir("_scripting_none");
+        let app = dir.join("Unity.app");
+        fs::create_dir_all(app.join("Contents")).unwrap();
+
+        assert!(unity_scripting_root(&app).is_none());
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn install_references_cover_engine_editor_and_netstandard() {
+        let dir = make_temp_dir("_install_refs");
+        let app = make_unity_install(&dir, true);
+        let root = unity_scripting_root(&app).unwrap();
+
+        let refs = unity_install_references(&root);
+        let names: Vec<&str> = refs.iter().map(|(n, _)| n.as_str()).collect();
+
+        for expected in [
+            "UnityEngine",
+            "UnityEditor",
+            "UnityEngine.CoreModule",
+            "UnityEditor.CoreModule",
+            "netstandard",
+            "System.Runtime",
+        ] {
+            assert!(names.contains(&expected), "missing {} in {:?}", expected, names);
+        }
+
+        // Every entry must point at a file that exists — Roslyn silently drops
+        // references whose HintPath is dangling, which is exactly the failure
+        // mode this generator exists to avoid.
+        for (name, path) in &refs {
+            assert!(path.is_file(), "{} points at a missing file {:?}", name, path);
+        }
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn install_references_dedupe_module_copies_over_toplevel() {
+        let dir = make_temp_dir("_install_dedupe");
+        let app = make_unity_install(&dir, true);
+        let root = unity_scripting_root(&app).unwrap();
+
+        // Same assembly name in both Managed/ and Managed/UnityEngine/.
+        fs::write(
+            root.join("Managed").join("UnityEngine").join("UnityEngine.dll"),
+            b"x",
+        )
+        .unwrap();
+
+        let refs = unity_install_references(&root);
+        let engine: Vec<_> = refs.iter().filter(|(n, _)| n == "UnityEngine").collect();
+        assert_eq!(engine.len(), 1, "UnityEngine must appear exactly once");
+        assert!(
+            engine[0].1.ends_with("Managed/UnityEngine/UnityEngine.dll"),
+            "the module directory copy should win, got {:?}",
+            engine[0].1
+        );
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn xml_escape_handles_ampersand_paths() {
+        assert_eq!(
+            xml_escape("/Users/x/Rock & Roll/<a>"),
+            "/Users/x/Rock &amp; Roll/&lt;a&gt;"
+        );
+    }
+
     // ─── smoke tests (skipped when real workspace absent) ──────────────────────
+
+    /// Locate a real Unity project to smoke-test against.
+    ///
+    /// `ARCANE_SMOKE_UNITY_PROJECT` overrides; otherwise we try a couple of
+    /// known local projects. These tests are opt-in by nature — but a hardcoded
+    /// path that has since been deleted makes them *silently* vacuous, which is
+    /// how a total IntelliSense outage stayed green through a full suite.
+    fn smoke_workspace() -> Option<PathBuf> {
+        if let Ok(p) = env::var("ARCANE_SMOKE_UNITY_PROJECT") {
+            let path = PathBuf::from(p);
+            return path.join("Assets").is_dir().then_some(path);
+        }
+        ["/Users/inno/Arcane Demo", "/Users/inno/My project"]
+            .iter()
+            .map(PathBuf::from)
+            .find(|p| p.join("Assets").is_dir())
+    }
 
     #[test]
     fn smoke_generate_arcane_csproj() {
         let _guard = crate::sync_util::lock_recover(&SMOKE_WORKSPACE);
-        let workspace = Path::new("/Users/inno/My project");
-        if !workspace.join("Assets").is_dir() {
-            return;
-        }
-        let result = generate_arcane_csproj(workspace).expect("generate ok");
+        let workspace = match smoke_workspace() {
+            Some(w) => w,
+            None => return,
+        };
+        let result = generate_arcane_csproj(&workspace).expect("generate ok");
         assert!(result, "csproj should have been generated");
 
-        let csproj_path = workspace.join(".arcane.csproj");
-        let content = fs::read_to_string(&csproj_path).expect("read csproj");
+        let content = fs::read_to_string(workspace.join(".arcane.csproj")).expect("read csproj");
         assert!(content.contains("<Compile Include=\"Assets/**/*.cs\""));
         assert!(content.contains("Reference Include=\"UnityEngine\""));
         assert!(content.contains("UnityEngine.dll</HintPath>"));
+        // The whole point of the install-derived reference set: these must be
+        // present even when Unity has generated no csproj of its own.
+        assert!(
+            content.contains("Reference Include=\"UnityEditor\""),
+            "UnityEditor reference missing — editor-only APIs won't resolve"
+        );
+        assert!(
+            content.contains("Reference Include=\"netstandard\""),
+            "netstandard reference missing — the BCL won't resolve"
+        );
+        assert!(
+            content.contains("<FrameworkPathOverride>"),
+            "FrameworkPathOverride missing — mscorlib won't resolve"
+        );
+    }
+
+    /// Every HintPath the generator emits must resolve on disk. Roslyn drops
+    /// dangling references without complaint, so a bad path degrades silently
+    /// into "no IntelliSense" rather than an error anyone would notice.
+    #[test]
+    fn smoke_generated_hint_paths_all_exist() {
+        let _guard = crate::sync_util::lock_recover(&SMOKE_WORKSPACE);
+        let workspace = match smoke_workspace() {
+            Some(w) => w,
+            None => return,
+        };
+        generate_arcane_csproj(&workspace).expect("generate ok");
+        let content = fs::read_to_string(workspace.join(".arcane.csproj")).expect("read csproj");
+
+        let re = Regex::new(r"<HintPath>([^<]+)</HintPath>").unwrap();
+        let mut checked = 0;
+        for caps in re.captures_iter(&content) {
+            let raw = caps.get(1).unwrap().as_str().replace("&amp;", "&");
+            assert!(Path::new(&raw).is_file(), "dangling HintPath: {}", raw);
+            checked += 1;
+        }
+        assert!(checked > 50, "expected a full reference set, saw {}", checked);
     }
 
     #[test]
     fn smoke_generate_full_setup() {
         let _guard = crate::sync_util::lock_recover(&SMOKE_WORKSPACE);
-        let workspace_path = "/Users/inno/My project";
-        if !Path::new(workspace_path).join("Assets").is_dir() {
-            return;
-        }
-        let sln = unity_setup_lsp(workspace_path.to_string()).expect("setup ok");
+        let workspace = match smoke_workspace() {
+            Some(w) => w,
+            None => return,
+        };
+        let sln = unity_setup_lsp(workspace.to_string_lossy().to_string()).expect("setup ok");
         assert_eq!(sln.as_deref(), Some(".arcane.sln"));
-        assert!(Path::new(workspace_path).join(".arcane.sln").exists());
-        assert!(Path::new(workspace_path).join(".arcane.csproj").exists());
+        assert!(workspace.join(".arcane.sln").exists());
+        assert!(workspace.join(".arcane.csproj").exists());
     }
 }

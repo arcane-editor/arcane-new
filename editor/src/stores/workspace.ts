@@ -969,9 +969,15 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         csharpSolutionPath = solutionPath;
 
         if (!solutionPath) {
+          // The generator builds its reference set from the Unity install
+          // itself, so reaching here no longer means "Unity hasn't generated
+          // its csprojs" — it means we couldn't resolve the Unity editor for
+          // this project's version at all.
           useUiStore
             .getState()
-            .setLspProgress('Unity csproj missing — open project in Unity once to regenerate');
+            .setLspProgress(
+              'Unity editor not found for this project version — C# IntelliSense unavailable',
+            );
         }
 
         attemptLspStartFor('csharp', path, solutionPath).then(() => {

@@ -60,7 +60,10 @@ namespace Arcane.Bridge
         private bool _warnedUnwritable;
         private bool _warnedProtocol;
 
-        /// <summary>Raised (on the worker thread) when the connection state flips.</summary>
+        /// <summary>
+        /// Raised when the connection state flips. Always delivered on the MAIN
+        /// THREAD (see SetConnected), so handlers may call Unity APIs freely.
+        /// </summary>
         public event Action<bool> ConnectionStateChanged;
 
         public bool IsConnected { get { return _connected; } }
@@ -448,7 +451,35 @@ namespace Arcane.Bridge
         {
             if (_connected == value) return;
             _connected = value;
-            try { if (ConnectionStateChanged != null) ConnectionStateChanged(value); }
+
+            var handler = ConnectionStateChanged;
+            if (handler == null) return;
+
+            // Raise on the MAIN THREAD. Subscribers legitimately want Unity APIs —
+            // BridgeBootstrap reads SessionState to dedupe the "Connected" log
+            // across domain reloads — and every Unity API throws off the main
+            // thread ("GetBool can only be called from the main thread").
+            //
+            // Marshalling HERE rather than inside each subscriber makes the
+            // guarantee a property of the event, so a future subscriber cannot
+            // reintroduce this by forgetting the rule.
+            //
+            // Inline when already on the main thread (Stop() runs there, via
+            // beforeAssemblyReload / quitting): the dispatcher is cleared during
+            // shutdown, so a queued action would simply be dropped.
+            if (MainThreadDispatcher.IsMainThread)
+            {
+                Raise(handler, value);
+            }
+            else
+            {
+                MainThreadDispatcher.Enqueue(() => Raise(handler, value));
+            }
+        }
+
+        private static void Raise(Action<bool> handler, bool value)
+        {
+            try { handler(value); }
             catch (Exception e) { Debug.LogError("[ArcaneBridge] ConnectionStateChanged handler threw: " + e); }
         }
 

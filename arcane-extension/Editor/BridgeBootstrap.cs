@@ -186,7 +186,11 @@ namespace Arcane.Bridge
 
         private static void OnConnectionStateChanged(bool connected)
         {
-            // Fires on the worker thread — only do thread-safe work here.
+            // Delivered on the MAIN THREAD — BridgeClient.SetConnected marshals it
+            // through the dispatcher, so SessionState is safe to touch here. It
+            // was not always: raising this straight from the worker thread threw
+            // "UnityException: GetBool can only be called from the main thread"
+            // on every connect.
             if (connected)
             {
                 bool announced = SessionState.GetBool(SessionConnectedKey, false);
