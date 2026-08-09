@@ -12,6 +12,7 @@ mod unity_index;
 mod unity_diff;
 mod unity_tests;
 mod unity_ipc;
+mod unity_journal;
 mod dap;
 mod auth;
 mod auth_loopback;
@@ -205,13 +206,13 @@ fn dir_exists(path: String) -> bool {
 
 /// Canonicalize a project path before `openProjectInNewWindow`
 /// (`src/features/project/services/multi-window.ts`) hashes it into a
-/// per-window label. `unity_ipc::hash_workspace` already canonicalizes the
-/// workspace path when computing the Unity IPC socket/pipe path; if the
-/// window label were hashed from the RAW path instead, the same project
-/// opened via two different spellings (a symlink, a trailing slash, `..`
-/// segments) would get two different window labels — so both windows'
-/// `unity_ipc` sockets collide on the SAME canonical path, and the second
-/// window's cleanup can unlink the first window's still-live socket.
+/// per-window label. The Unity bridge's journal files sit at a fixed location
+/// relative to the project (`<project>/Library/ArcaneIDE/`), so if the window
+/// label were hashed from the RAW path instead, the same project opened via
+/// two different spellings (a symlink, a trailing slash, `..` segments) would
+/// get two different window labels while both windows' bridges wrote the SAME
+/// journal files — two writers on one file, which is exactly the invariant the
+/// transport depends on not being violated.
 /// Calling this first and using its result everywhere downstream (label,
 /// window dedup, `?path=` query param, recents) keeps all of that on one
 /// canonical form.
@@ -818,7 +819,6 @@ pub fn run() {
             unity_ipc::unity_ipc_stop,
             unity_ipc::unity_ipc_send,
             unity_ipc::unity_ipc_request,
-            unity_ipc::unity_write_bridge_discovery,
             dap::dap_start,
             dap::dap_send,
             dap::dap_stop,

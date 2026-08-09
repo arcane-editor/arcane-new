@@ -13,8 +13,8 @@ import type {
 } from '../types/unity';
 import { parseStackTrace } from '../types/unity';
 import { useWorkspaceStore } from './workspace';
-import { useNotificationsStore } from './notifications';
-import { isBridgeInstalled } from '../features/unity-bridge';
+import { useNotificationsStore, notify } from './notifications';
+import { isBridgeInstalled, installBridge } from '../features/unity-bridge';
 
 const MAX_LOG_ENTRIES = 10_000;
 /** How long after a disconnect we assume Unity is mid-domain-reload (not gone). */
@@ -36,6 +36,13 @@ interface UnityState {
   bridgeState: BridgeState;
   /** Last full compilation report (errors/warnings) — drives compile feedback. */
   lastCompilation: CompilationPayload | null;
+  /**
+   * Unity has the project open but no bridge journal ever appeared, so the
+   * package is missing or predates the journal transport. Distinguishes that
+   * from the ordinary "Unity just isn't running" case, which otherwise looks
+   * identical from here — both are simply "never connected".
+   */
+  packageStale: boolean;
 
   startIpc: (workspacePath: string) => Promise<void>;
   stopIpc: () => Promise<void>;
@@ -63,6 +70,7 @@ export const useUnityStore = create<UnityState>((set, get) => ({
   bridgeInstalled: false,
   bridgeState: 'disconnected',
   lastCompilation: null,
+  packageStale: false,
 
   startIpc: async (workspacePath: string) => {
     try {
@@ -140,6 +148,7 @@ export const useUnityStore = create<UnityState>((set, get) => ({
           projectInfo: event.payload.info ?? get().projectInfo,
           bridgeInstalled: true, // it connected, so it's installed
           bridgeState: 'connected',
+          packageStale: false, // a handshake proves the package is current
         });
       } else {
         // A drop is usually a domain reload — show 'reloading' briefly, then
@@ -207,7 +216,41 @@ export const useUnityStore = create<UnityState>((set, get) => ({
       },
     );
 
-    unlisteners = [u1, u2, u3, u4, u5, u6, u7];
+    // Unity is demonstrably running (Library/EditorInstance.json names a live
+    // pid) but nothing ever wrote a bridge journal. Without this the UI would sit
+    // on "waiting for Unity" forever, which is indistinguishable from Unity
+    // simply being closed — the single worst failure mode of the hard protocol
+    // switch, and the one a user cannot diagnose on their own.
+    const u8 = await listenScoped<void>('unity-package-stale', () => {
+      if (get().packageStale) return; // already prompted this session
+      set({ packageStale: true });
+
+      const workspacePath = useWorkspaceStore.getState().workspacePath;
+      useNotificationsStore.getState().addNotification({
+        type: 'warning',
+        persistent: true,
+        message:
+          'Unity is running but the Arcane package is missing or out of date. ' +
+          'Install it to connect the editor.',
+        actions: workspacePath
+          ? [
+              {
+                label: 'Install package',
+                run: () => {
+                  installBridge(workspacePath)
+                    .then(() => {
+                      set({ packageStale: false, bridgeInstalled: true });
+                      notify.success('Arcane package installed — Unity will connect shortly.');
+                    })
+                    .catch((e) => notify.error(`Could not install the Arcane package: ${e}`));
+                },
+              },
+            ]
+          : undefined,
+      });
+    });
+
+    unlisteners = [u1, u2, u3, u4, u5, u6, u7, u8];
     set({ listenersActive: true });
   },
 

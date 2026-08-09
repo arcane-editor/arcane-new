@@ -20,6 +20,7 @@
 
 using System;
 using System.Diagnostics;
+using System.Globalization;
 using UnityEditor;
 using UnityEditor.Compilation;
 using UnityEngine;
@@ -33,6 +34,22 @@ namespace Arcane.Bridge
         // SessionState survives domain reloads (but not editor restart). We use it
         // only to avoid logging "connected" on every reload while a session stays up.
         private const string SessionConnectedKey = "Arcane.Bridge.AnnouncedConnected";
+
+        // Identity + read position, persisted across domain reloads so a script
+        // recompile resumes the journal mid-stream instead of re-handshaking.
+        // This is what removes the disconnect flicker the socket transport had on
+        // every recompile. The epoch travels with the offset: if the IDE rotated
+        // its journal while we were reloading, the offset alone would be a lie.
+        private const string SessionUnityIdKey = "Arcane.Bridge.UnitySessionId";
+        private const string SessionIdeIdKey = "Arcane.Bridge.IdeSessionId";
+        private const string SessionOffsetKey = "Arcane.Bridge.ReadOffset";
+        private const string SessionEpochKey = "Arcane.Bridge.ReadEpoch";
+
+        /// <summary>
+        /// Mirrors "version" in package.json. Reported in connection_init so the
+        /// IDE can tell an outdated package from a missing one. Keep in lockstep.
+        /// </summary>
+        private const string PackageVersion = "0.1.0";
 
         private static BridgeClient _client;
         private static bool _started;
@@ -87,6 +104,21 @@ namespace Arcane.Bridge
             AssemblyReloadEvents.beforeAssemblyReload += OnBeforeAssemblyReload;
             EditorApplication.quitting += OnQuitting;
 
+            // Empty ids mean a cold start, which is exactly what triggers a fresh
+            // handshake inside BridgeClient.
+            string unityId = SessionState.GetString(SessionUnityIdKey, "");
+            string ideId = SessionState.GetString(SessionIdeIdKey, "");
+            long offset, epoch;
+            long.TryParse(SessionState.GetString(SessionOffsetKey, "-1"),
+                NumberStyles.Integer, CultureInfo.InvariantCulture, out offset);
+            long.TryParse(SessionState.GetString(SessionEpochKey, "0"),
+                NumberStyles.Integer, CultureInfo.InvariantCulture, out epoch);
+            _client.RestoreSession(
+                string.IsNullOrEmpty(unityId) ? null : unityId,
+                string.IsNullOrEmpty(ideId) ? null : ideId,
+                offset,
+                epoch);
+
             _client.Start();
         }
 
@@ -129,6 +161,7 @@ namespace Arcane.Bridge
             p["productName"] = PlayerSettings.productName ?? "";
             p["scriptingBackend"] = ScriptingBackendString();
             p["protocolVersion"] = Discovery.ProtocolVersion;
+            p["packageVersion"] = PackageVersion;
             p["pid"] = Process.GetCurrentProcess().Id;
             return p;
         }
@@ -183,8 +216,13 @@ namespace Arcane.Bridge
         private static void OnQuitting()
         {
             Shutdown();
-            // Editor is closing — clear the session marker so a fresh launch logs.
+            // Editor is closing — clear the session markers so the next launch
+            // cold-starts and handshakes afresh rather than resuming a dead session.
             SessionState.EraseBool(SessionConnectedKey);
+            SessionState.EraseString(SessionUnityIdKey);
+            SessionState.EraseString(SessionIdeIdKey);
+            SessionState.EraseString(SessionOffsetKey);
+            SessionState.EraseString(SessionEpochKey);
         }
 
         private static void Shutdown()
@@ -207,6 +245,15 @@ namespace Arcane.Bridge
 
                 if (_client != null)
                 {
+                    // Capture BEFORE Stop() closes the journals — the reader's
+                    // position is gone once it is disposed.
+                    SessionState.SetString(SessionUnityIdKey, _client.UnitySessionId ?? "");
+                    SessionState.SetString(SessionIdeIdKey, _client.HandshakenIdeSessionId ?? "");
+                    SessionState.SetString(SessionOffsetKey,
+                        _client.ReadOffset.ToString(CultureInfo.InvariantCulture));
+                    SessionState.SetString(SessionEpochKey,
+                        _client.ReadEpoch.ToString(CultureInfo.InvariantCulture));
+
                     _client.ConnectionStateChanged -= OnConnectionStateChanged;
                     _client.Stop();
                     _client = null;

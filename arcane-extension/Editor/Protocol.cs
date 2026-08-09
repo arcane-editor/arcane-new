@@ -17,6 +17,9 @@ namespace Arcane.Bridge
         // ── C# → IDE (we send) ───────────────────────────────────────────────
         public const string ConnectionInit = "connection_init";
         public const string Heartbeat = "heartbeat";
+        /// <summary>Clean shutdown. With no socket to close, this is what saves the
+        /// IDE from waiting out the heartbeat timeout when Unity quits.</summary>
+        public const string Disconnect = "disconnect";
         public const string Log = "log";
         public const string LogBatch = "log_batch";
         public const string PlaystateChanged = "playstate_changed";
