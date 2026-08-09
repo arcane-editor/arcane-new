@@ -606,7 +606,7 @@ fn unity_install_references(scripting_root: &Path) -> Vec<(String, PathBuf)> {
 /// when Unity hasn't generated its csprojs — which is the normal state when
 /// Arcane is registered as Unity's external script editor, since Unity then
 /// stops asking the Visual Studio/Rider packages to generate them.
-fn find_unity_framework_path(workspace_path: &Path) -> Option<String> {
+fn find_unity_framework_path(workspace_path: &Path, scripting_root: Option<&Path>) -> Option<String> {
     let candidates = [
         "Assembly-CSharp-Editor.csproj",
         "Assembly-CSharp.csproj",
@@ -630,8 +630,7 @@ fn find_unity_framework_path(workspace_path: &Path) -> Option<String> {
         }
     }
 
-    let scripting_root = workspace_scripting_root(workspace_path)?;
-    let reference_assemblies = scripting_root.join("UnityReferenceAssemblies");
+    let reference_assemblies = scripting_root?.join("UnityReferenceAssemblies");
     // The api directory is version-stamped (`unity-4.8-api`); take whichever
     // `*-api` directory the install ships rather than pinning a name.
     let mut api_dirs: Vec<PathBuf> = fs::read_dir(&reference_assemblies)
@@ -761,6 +760,20 @@ fn find_asmdef_assemblies(assets: &Path) -> Vec<String> {
 /// `Library/ScriptAssemblies/*.dll` outputs from package and asmdef
 /// compilation, replacing the ProjectReferences Roslyn can't resolve.
 fn generate_arcane_csproj(workspace: &Path) -> Result<bool, String> {
+    let scripting_root = workspace_scripting_root(workspace);
+    generate_arcane_csproj_from(workspace, scripting_root.as_deref())
+}
+
+/// Body of [`generate_arcane_csproj`] with the Unity install injected rather
+/// than resolved from the machine.
+///
+/// The split exists so the "Unity generated no csprojs" case — the one that
+/// silently cost every Unity project its C# IntelliSense — can be reproduced
+/// hermetically against a fixture install, with no Unity on the box.
+fn generate_arcane_csproj_from(
+    workspace: &Path,
+    scripting_root: Option<&Path>,
+) -> Result<bool, String> {
     let assets = workspace.join("Assets");
     if !assets.is_dir() {
         return Ok(false);
@@ -785,8 +798,8 @@ fn generate_arcane_csproj(workspace: &Path) -> Result<bool, String> {
     // closed, on a fresh clone, before any project files have been generated.
     // Existing entries win, since Unity's own hint paths are authoritative
     // when they are available.
-    if let Some(scripting_root) = workspace_scripting_root(workspace) {
-        for (name, path) in unity_install_references(&scripting_root) {
+    if let Some(root) = scripting_root {
+        for (name, path) in unity_install_references(root) {
             refs.entry(name)
                 .or_insert_with(|| path.to_string_lossy().to_string());
         }
@@ -839,7 +852,7 @@ fn generate_arcane_csproj(workspace: &Path) -> Result<bool, String> {
     // MSBuild looks for .NET Framework reference assemblies that don't exist
     // on a machine with only the .NET SDK installed, and every type in the
     // BCL comes back unresolved.
-    let framework_path = find_unity_framework_path(workspace);
+    let framework_path = find_unity_framework_path(workspace, scripting_root);
 
     let mut xml = String::new();
     xml.push_str(r#"<?xml version="1.0" encoding="utf-8"?>
@@ -1319,6 +1332,99 @@ mod tests {
             "the module directory copy should win, got {:?}",
             engine[0].1
         );
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The regression test for the outage: Unity has generated **no** csproj
+    /// files (the normal state when Arcane is the registered external script
+    /// editor), and the generated project must still carry a complete
+    /// reference set. Before the fix this produced nothing at all, csharp-ls
+    /// launched with no solution, and every completion/hover returned null.
+    ///
+    /// Hermetic: fixture Unity install, no Unity on the machine required.
+    #[test]
+    fn csproj_is_complete_without_any_unity_generated_csproj() {
+        let dir = make_temp_dir("_no_unity_csproj");
+        let workspace = dir.join("project");
+        make_unity_project(&workspace, "6000.3.5f2");
+        fs::write(workspace.join("Assets").join("Player.cs"), "class Player {}").unwrap();
+
+        let app = make_unity_install(&dir, true);
+        let root = unity_scripting_root(&app).unwrap();
+
+        // Precondition: this is the broken-environment shape.
+        assert!(!workspace.join("Assembly-CSharp.csproj").exists());
+        assert!(!workspace.join("Assembly-CSharp-Editor.csproj").exists());
+
+        let generated =
+            generate_arcane_csproj_from(&workspace, Some(root.as_path())).expect("generate ok");
+        assert!(generated, "must generate even with no Unity csproj present");
+
+        let content = fs::read_to_string(workspace.join(".arcane.csproj")).expect("read csproj");
+        for needed in [
+            "Reference Include=\"UnityEngine\"",
+            "Reference Include=\"UnityEditor\"",
+            "Reference Include=\"UnityEngine.CoreModule\"",
+            "Reference Include=\"netstandard\"",
+            "<FrameworkPathOverride>",
+            "<Compile Include=\"Assets/**/*.cs\"",
+        ] {
+            assert!(content.contains(needed), "generated csproj is missing: {}", needed);
+        }
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// With neither Unity's csprojs nor a resolvable install there is nothing
+    /// to reference, and emitting a project full of dangling HintPaths would
+    /// be worse than emitting none — Roslyn would load it and serve garbage.
+    #[test]
+    fn csproj_is_skipped_when_no_unity_install_resolves() {
+        let dir = make_temp_dir("_no_install");
+        let workspace = dir.join("project");
+        make_unity_project(&workspace, "6000.3.5f2");
+
+        let generated = generate_arcane_csproj_from(&workspace, None).expect("generate ok");
+        assert!(!generated, "must not generate a reference-less project");
+        assert!(!workspace.join(".arcane.csproj").exists());
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Unity's own hint paths win when present — they are authoritative for
+    /// that exact project — while the install still fills every gap.
+    #[test]
+    fn unity_csproj_references_win_over_install_ones() {
+        let dir = make_temp_dir("_ref_precedence");
+        let workspace = dir.join("project");
+        make_unity_project(&workspace, "6000.3.5f2");
+
+        let vendored = dir.join("vendored");
+        fs::create_dir_all(&vendored).unwrap();
+        let vendored_engine = vendored.join("UnityEngine.dll");
+        fs::write(&vendored_engine, b"x").unwrap();
+
+        fs::write(
+            workspace.join("Assembly-CSharp.csproj"),
+            format!(
+                r#"<Project><ItemGroup><Reference Include="UnityEngine"><HintPath>{}</HintPath></Reference></ItemGroup></Project>"#,
+                vendored_engine.display()
+            ),
+        )
+        .unwrap();
+
+        let app = make_unity_install(&dir, true);
+        let root = unity_scripting_root(&app).unwrap();
+        generate_arcane_csproj_from(&workspace, Some(root.as_path())).expect("generate ok");
+
+        let content = fs::read_to_string(workspace.join(".arcane.csproj")).unwrap();
+        assert!(
+            content.contains(&vendored_engine.to_string_lossy().to_string()),
+            "Unity's own UnityEngine hint path should have won"
+        );
+        // ...and the install still supplies what Unity's csproj never listed.
+        assert!(content.contains("Reference Include=\"netstandard\""));
 
         fs::remove_dir_all(&dir).ok();
     }
