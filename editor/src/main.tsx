@@ -6,6 +6,7 @@ import ReactDOM from "react-dom/client";
 import ErrorBoundary from './components/ErrorBoundary';
 import { notify } from './stores/notifications';
 import { hydratePersistence } from './utils/persistence';
+import { isMac, isWindows } from './utils/platform';
 
 // Apply theme before React renders to prevent FOUC
 import { getTheme, DEFAULT_THEME_ID, applyTheme, ensureMonacoTheme } from './features/theme';
@@ -13,6 +14,17 @@ import { getTheme, DEFAULT_THEME_ID, applyTheme, ensureMonacoTheme } from './fea
 const params = new URLSearchParams(location.search);
 const view = params.get('view');
 const isWelcomeView = view === 'welcome';
+
+// Stamp the platform so CSS can branch on it. The title bar in particular
+// reserves space for macOS's traffic lights, which do not exist elsewhere —
+// `isWindows()` had been sitting in utils/platform.ts with zero callers for
+// exactly this reason. Set before render so the first paint is already
+// correct rather than reflowing.
+document.documentElement.dataset.os = isMac()
+  ? 'macos'
+  : isWindows()
+    ? 'windows'
+    : 'linux';
 
 // Global error handlers
 //

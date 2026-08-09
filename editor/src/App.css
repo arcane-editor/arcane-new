@@ -143,9 +143,56 @@ html, body, #root {
   background: var(--bg-titlebar);
   display: flex;
   align-items: center;
-  padding: 0 12px 0 78px;
+  padding: 0 12px;
   -webkit-app-region: drag;
   user-select: none;
+}
+
+/* Room for macOS's close/minimize/zoom buttons, which the window overlays on
+   top of our bar. They do not exist on Windows or Linux, where this padding
+   was just a dead band to the left of the wordmark. `data-os` is stamped on
+   <html> in main.tsx. */
+[data-os='macos'] .title-bar {
+  padding-left: 78px;
+}
+
+/* Window controls (Windows/Linux, where `decorations` is off). Sized to the
+   platform convention — 46x35 hit targets flush to the top-right corner —
+   rather than the app's own button metrics, so they read as chrome. */
+.window-controls {
+  display: flex;
+  align-items: stretch;
+  align-self: stretch;
+  margin-left: 4px;
+  margin-right: -12px; /* cancel .title-bar's padding: flush to the corner */
+  -webkit-app-region: no-drag;
+}
+
+.window-control {
+  width: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background var(--motion-fast, 120ms) ease, color var(--motion-fast, 120ms) ease;
+}
+
+.window-control:hover {
+  background: var(--hover);
+  color: var(--text-primary);
+}
+
+.window-control:focus-visible {
+  outline: 1px solid var(--accent, #4ec9b0);
+  outline-offset: -2px;
+}
+
+.window-control--close:hover {
+  background: #e81123; /* the platform convention, deliberately not themed */
+  color: #fff;
 }
 
 .title-bar-left,

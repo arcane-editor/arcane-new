@@ -1,4 +1,7 @@
 import { Search, Settings } from 'lucide-react';
+import { formatKeybinding } from '../../../utils/format-keybinding';
+import { isMac } from '../../../utils/platform';
+import WindowControls from './WindowControls';
 import { useAuthStore } from '../../../stores/auth';
 import { useCommandsStore } from '../../../stores/commands';
 import { useUnityStore } from '../../../stores/unity';
@@ -10,6 +13,10 @@ function TitleBar() {
   const authLoggedIn = useAuthStore((s) => s.loggedIn);
   const unityConnected = useUnityStore((s) => s.connected);
   const isUnityProject = useProjectContextStore((s) => s.isUnityProject);
+  // Read the chords out of the registry rather than writing them here: these
+  // two said "Cmd+P" / "Cmd+," verbatim on Windows and Linux.
+  const quickOpenChord = useCommandsStore((s) => s.commands.get('palette.quickOpen')?.keybinding);
+  const settingsChord = useCommandsStore((s) => s.commands.get('settings.open')?.keybinding);
 
   return (
     <div className="title-bar" data-tauri-drag-region>
@@ -30,14 +37,14 @@ function TitleBar() {
       <div className="title-bar-right" data-tauri-drag-region>
         <button
           className="title-bar-btn"
-          title="Quick Open (Cmd+P)"
+          title={quickOpenChord ? `Quick Open (${formatKeybinding(quickOpenChord)})` : 'Quick Open'}
           onClick={() => useCommandsStore.getState().executeCommand('palette.quickOpen')}
         >
           <Search size={16} />
         </button>
         <button
           className="title-bar-btn"
-          title="Settings (Cmd+,)"
+          title={settingsChord ? `Settings (${formatKeybinding(settingsChord)})` : 'Settings'}
           onClick={() => useCommandsStore.getState().executeCommand('settings.open')}
         >
           <Settings size={16} />
@@ -59,6 +66,9 @@ function TitleBar() {
             Sign in
           </button>
         )}
+        {/* macOS overlays its own traffic lights; everywhere else decorations
+            are off, so the window owes the user these. */}
+        {!isMac() && <WindowControls />}
       </div>
     </div>
   );

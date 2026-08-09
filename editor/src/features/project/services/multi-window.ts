@@ -2,6 +2,7 @@ import { WebviewWindow, getAllWebviewWindows, getCurrentWebviewWindow } from '@t
 import { open } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
 import { hashLabel } from '../../../utils/window-label';
+import { isMac } from '../../../utils/platform';
 
 function basename(p: string): string {
   return p.split('/').filter(Boolean).pop() ?? p;
@@ -52,8 +53,12 @@ export async function openProjectInNewWindow(rawPath: string): Promise<void> {
     height: 800,
     minWidth: 800,
     minHeight: 600,
+    // macOS-only options; elsewhere they are ignored and the OS keeps drawing
+    // its own title bar on top of ours. Turning decorations off there is what
+    // stops the doubled bar — TitleBar renders WindowControls to compensate.
     titleBarStyle: 'overlay',
     hiddenTitle: true,
+    decorations: isMac(),
     backgroundColor: '#13121A',
   });
   await new Promise<void>((resolve, reject) => {

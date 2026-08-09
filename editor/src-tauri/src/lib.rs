@@ -875,6 +875,13 @@ pub fn run() {
                 let title = window_title(_app.config().product_name.as_deref());
                 if let Some(w) = _app.webview_windows().get("welcome") {
                     let _ = w.set_title(&title);
+                    // titleBarStyle/hiddenTitle in tauri.conf.json are macOS
+                    // options; everywhere else `decorations` stayed true and
+                    // the OS drew its own title bar directly above the app's,
+                    // two stacked bars. TitleBar renders WindowControls off
+                    // macOS to make up for turning them off here.
+                    #[cfg(not(target_os = "macos"))]
+                    let _ = w.set_decorations(false);
                 }
             }
 
