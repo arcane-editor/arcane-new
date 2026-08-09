@@ -9,10 +9,11 @@ function bridgeLabel(state: BridgeState): string {
   switch (state) {
     case 'connected': return 'bridge connected';
     case 'reloading': return 'reloading…';
+    case 'connecting': return 'reconnecting…';
     case 'not-installed': return 'bridge not installed';
     case 'disconnected': return 'bridge disconnected';
   }
-  // No `default:` on purpose: a fifth BridgeState must fail to compile here
+  // No `default:` on purpose: a sixth BridgeState must fail to compile here
   // rather than silently render as "bridge disconnected".
   const unhandled: never = state;
   return unhandled;

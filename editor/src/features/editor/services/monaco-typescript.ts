@@ -2,6 +2,7 @@ import type { Monaco } from '@monaco-editor/react';
 import type * as monacoEditor from 'monaco-editor';
 import { invoke } from '@tauri-apps/api/core';
 import type { FileContent } from '../../../types';
+import { fileUri } from '../../lsp';
 
 /** The real TS-worker API, whose declarations moved to monaco's top-level namespace. */
 type MonacoTypescript = typeof monacoEditor.typescript;
@@ -185,7 +186,11 @@ export async function loadWorkspaceFiles(
     });
 
     for (const file of files) {
-      const uri = `file://${file.path}`;
+      // Shared with document-sync so a Windows drive path lands in the URI
+      // path rather than its authority — and so `updateExtraLib` below
+      // produces a byte-identical URI, which is what makes addExtraLib
+      // *replace* an entry instead of accumulating duplicates.
+      const uri = fileUri(file.path);
       const disposable = ts.typescriptDefaults.addExtraLib(file.content, uri);
       extraLibDisposables.push(disposable);
     }
@@ -212,7 +217,11 @@ export async function loadTypeDefinitions(
     });
 
     for (const file of files) {
-      const uri = `file://${file.path}`;
+      // Shared with document-sync so a Windows drive path lands in the URI
+      // path rather than its authority — and so `updateExtraLib` below
+      // produces a byte-identical URI, which is what makes addExtraLib
+      // *replace* an entry instead of accumulating duplicates.
+      const uri = fileUri(file.path);
       const disposable = ts.typescriptDefaults.addExtraLib(file.content, uri);
       extraLibDisposables.push(disposable);
     }
@@ -225,7 +234,7 @@ export function updateExtraLib(
   content: string,
 ): void {
   const ts = tsNamespace(monaco);
-  const uri = `file://${filePath}`;
+  const uri = fileUri(filePath);
   // addExtraLib with the same URI replaces the previous entry
   ts.typescriptDefaults.addExtraLib(content, uri);
 }

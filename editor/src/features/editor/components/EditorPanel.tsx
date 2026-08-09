@@ -34,6 +34,7 @@ import {
 import { initTestCodeLens } from '../../unity-test-runner';
 import { attachBreakpointGutter } from '../../debugger';
 import { registerInlineSuggestProvider } from '../../inline-suggest';
+import { fileUri } from '../../lsp';
 
 const detectLanguage = getMonacoLanguageId;
 
@@ -127,7 +128,12 @@ function EditorPanel() {
   }
 
   const activeLanguage = detectLanguage(activeFile.name);
-  const modelPath = `file://${activeFile.path.split('/').map(encodeURIComponent).join('/')}`;
+  // Must be `fileUri`, not a hand-rolled `file://` + encoded path. On Windows
+  // the latter yields `file://D%3A/...`, where the drive is parsed as the URI
+  // *authority* — so Monaco's model URI never equals the `file:///D:/...` the
+  // language server was told about at didOpen, and every completion, hover and
+  // definition asks about a document csharp-ls has never heard of.
+  const modelPath = fileUri(activeFile.path);
   const isLargeFile = activeFile.content.length > 1_000_000;
 
   // Unity YAML assets (+ Input System .inputactions) render in a structured

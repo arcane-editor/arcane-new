@@ -14,6 +14,7 @@ export function BridgeInstallBanner() {
   const bridgeState = useUnityStore((s) => s.bridgeState);
   const workspacePath = useWorkspaceStore((s) => s.workspacePath);
   const refreshBridgeInstalled = useUnityStore((s) => s.refreshBridgeInstalled);
+  const reconnect = useUnityStore((s) => s.reconnect);
   const notify = useNotificationsStore((s) => s.addNotification);
   const [installing, setInstalling] = useState(false);
 
@@ -24,9 +25,11 @@ export function BridgeInstallBanner() {
 
   const label = isReloading
     ? 'Unity reloading…'
-    : notInstalled
-      ? 'Unity Editor not connected — bridge not installed'
-      : 'Unity Editor not connected';
+    : bridgeState === 'connecting'
+      ? 'Reconnecting to Unity…'
+      : notInstalled
+        ? 'Unity Editor not connected — bridge not installed'
+        : 'Unity Editor not connected';
 
   const handleInstall = async () => {
     if (!workspacePath) return;
@@ -55,6 +58,18 @@ export function BridgeInstallBanner() {
           disabled={installing || !workspacePath}
         >
           {installing ? 'Installing…' : 'Install bridge'}
+        </button>
+      )}
+      {/* The bridge re-handshakes on its own schedule, but that lands a Unity
+          discovery poll later — so give the user a way to stop waiting. Hidden
+          while an attempt is already in flight, since a second click would only
+          restart the one being waited on. */}
+      {bridgeState !== 'connecting' && (
+        <button
+          className="unity-bridge-banner__action unity-bridge-banner__action--ghost"
+          onClick={() => void reconnect()}
+        >
+          Retry
         </button>
       )}
       <button

@@ -937,6 +937,14 @@ html, body, #root {
   animation: unity-bridge-pulse 1s ease-in-out infinite;
 }
 
+/* Actively re-handshaking. Deliberately slower than the reloading pulse and in
+   the neutral text colour, not amber: a reload is a known-good state that ends
+   on its own, whereas this is a retry that may not succeed. */
+.unity-bridge-dot--connecting {
+  background: var(--text-secondary);
+  animation: unity-bridge-pulse 1.8s ease-in-out infinite;
+}
+
 /* One-shot ring on the rising edge into connected. A pseudo-element keeps the
    ripple off the dot's own box, so it can scale past the 8px footprint without
    nudging status-bar layout. */
@@ -970,6 +978,7 @@ html, body, #root {
 @media (prefers-reduced-motion: reduce) {
   .unity-bridge-dot--connected,
   .unity-bridge-dot--reloading,
+  .unity-bridge-dot--connecting,
   .unity-bridge-dot--just-connected::after {
     animation: none;
   }

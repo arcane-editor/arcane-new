@@ -5,6 +5,15 @@
  * store write per `windowMs`, instead of one `messages` array replacement
  * (and downstream re-render + markdown re-parse) per token.
  *
+ * Lives in `utils/`, not `features/ai-panel/`, despite having exactly one
+ * caller. It has no imports and knows nothing about the AI panel, and while it
+ * sat behind that feature's barrel it formed an import cycle that crashed the
+ * app before first render: the barrel's first export pulls in `AiChatPanel`,
+ * which imports `stores/ai`, which imports the barrel back and calls
+ * `createUpdateCoalescer` at MODULE SCOPE — reaching a hoisted function whose
+ * module-level `const`s were still in the temporal dead zone. `utils/` is
+ * importable by anyone, so a store can depend on it without a cycle.
+ *
  * Semantics:
  *  - If no flush is currently pending AND the last `apply` happened at least
  *    `windowMs` ago (or never happened), `push` applies immediately.

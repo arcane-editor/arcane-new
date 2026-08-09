@@ -11,6 +11,7 @@ import { isMac } from '../../../utils/platform';
 import { ARCANE_FILE_MIME, serializeFileDrag } from '../../../utils/drag-mime';
 import { useClampedMenuPosition } from '../../../hooks/useClampedMenuPosition';
 import type { OpenFile } from '../../../types';
+import { fileUri } from '../../lsp';
 
 const DRAG_MIME = 'application/x-editor-tab-path';
 
@@ -53,8 +54,12 @@ function TabBar() {
     <>
       <div className="tab-bar">
         {openFiles.map((file) => {
-          const fileUri = `file://${file.path}`;
-          const byUri = getFlatDiagnosticsForUri(diagnosticsMap, fileUri);
+          // `fileUri`, not a raw template: unencoded and drive-unaware, this
+          // key never matched the URI diagnostics are actually stored under,
+          // so tab error/warning badges silently fell through to the
+          // path-keyed fallback below — and showed nothing on Windows.
+          const uri = fileUri(file.path);
+          const byUri = getFlatDiagnosticsForUri(diagnosticsMap, uri);
           const fileDiags = byUri.length > 0 ? byUri : getFlatDiagnosticsForUri(diagnosticsMap, file.path);
           const errorCount = fileDiags.filter((d) => d.severity === 'error').length;
           const diagCount = fileDiags.length;

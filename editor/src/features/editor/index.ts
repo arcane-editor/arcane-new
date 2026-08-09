@@ -13,6 +13,7 @@ export {
   setupWorkspaceIntelliSense,
   teardownWorkspaceIntelliSense,
 } from './services/monaco-init';
+export { disposeModelForPath } from './services/model-disposal';
 export {
   configureTypeScriptDefaults,
   loadWorkspaceFiles,

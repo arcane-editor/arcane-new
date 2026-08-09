@@ -25,8 +25,12 @@ import {
   type VerifiedCardData,
   resetWriteApprovalSession,
   resolvePendingQuestion,
-  createUpdateCoalescer,
 } from '../features/ai-panel';
+// From utils/, NOT the ai-panel barrel. This is called at MODULE SCOPE below,
+// and the barrel is mid-evaluation when this module runs (barrel → AiChatPanel
+// → here), so a barrel import resolved to a module whose own `const`s had not
+// been initialized yet — a TDZ ReferenceError before the app could even render.
+import { createUpdateCoalescer } from '../utils/update-coalescer';
 import { useWorkspaceStore } from './workspace';
 import { useCheckpointsStore } from './checkpoints';
 import { useEditReviewStore } from './edit-review';

@@ -62,6 +62,7 @@ import { useRegisterCommands } from './hooks/useRegisterCommands';
 import { useAutoSave } from './hooks/useAutoSave';
 import { useCloseGuard } from './hooks/useCloseGuard';
 import { notify, useNotificationsStore } from './stores/notifications';
+import { checkReleaseChannel } from './config/api';
 import { useCommandsStore } from './stores/commands';
 import { listenScoped } from './utils/tauri-listener';
 import { useWorkspaceStore } from './stores/workspace';
@@ -366,6 +367,18 @@ function App() {
   useEffect(() => {
     setProjectWindowTitle(workspacePath ?? null);
   }, [workspacePath]);
+
+  // Refuse to run silently with mismatched halves of "dev-ness": dev endpoints
+  // under the production identifier write dev-API tokens into ~/.arcane, which
+  // the real app then presents to the production API.
+  useEffect(() => {
+    void checkReleaseChannel(invoke).then((problem) => {
+      if (!problem) return;
+      useNotificationsStore
+        .getState()
+        .addNotification({ type: 'error', message: problem, persistent: true });
+    });
+  }, []);
 
   // Auto-save hook
   useAutoSave();
@@ -1129,6 +1142,13 @@ function App() {
       label: 'Clear Unity Console',
       category: 'Unity',
       handler: () => useUnityStore.getState().clearLogs(),
+      when: () => useProjectContextStore.getState().isUnityProject,
+    },
+    {
+      id: 'unity.reconnectBridge',
+      label: 'Reconnect Unity Bridge',
+      category: 'Unity',
+      handler: () => void useUnityStore.getState().reconnect(),
       when: () => useProjectContextStore.getState().isUnityProject,
     },
     {

@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { useProjectContextStore } from '../../../stores/project-context';
 import { useUnityStore } from '../../../stores/unity';
+import type { BridgeState } from '../../../stores/unity';
 
-const LABELS: Record<string, string> = {
+const LABELS: Record<BridgeState, string> = {
   connected: 'Unity bridge connected',
   reloading: 'Unity reloading…',
-  'not-installed': 'Unity bridge not installed',
-  disconnected: 'Unity bridge disconnected',
+  connecting: 'Reconnecting to Unity…',
+  'not-installed': 'Unity bridge not installed — click to retry',
+  disconnected: 'Unity bridge disconnected — click to reconnect',
 };
 
 /** Matches the ripple keyframe duration in App.css. */
@@ -24,11 +26,17 @@ const RIPPLE_MS = 900;
  * `reloading` (domain reload / recompile) gets its own amber pulse rather than
  * falling back to the disconnected grey, because the connection is expected to
  * come back on its own and a grey dot would read as a failure.
+ *
+ * It is also the retry affordance. The bridge recovers on its own now, but
+ * recovery takes a Unity discovery poll to land, and "wait and see" is a poor
+ * answer when a user is looking at a grey dot — so clicking while not connected
+ * forces the re-handshake immediately.
  */
 export function UnityBridgeStatusItem() {
   const isUnityProject = useProjectContextStore((s) => s.isUnityProject);
   const unityVersion = useProjectContextStore((s) => s.unityVersion);
   const bridgeState = useUnityStore((s) => s.bridgeState);
+  const reconnect = useUnityStore((s) => s.reconnect);
 
   const [rippling, setRippling] = useState(false);
   const previousState = useRef(bridgeState);
@@ -50,8 +58,17 @@ export function UnityBridgeStatusItem() {
 
   if (!isUnityProject) return null;
 
+  // Connected needs no action, and `connecting` already has one in flight —
+  // a second click would only reset the attempt it is waiting on.
+  const canRetry = bridgeState !== 'connected' && bridgeState !== 'connecting';
+  const label = unityVersion ? `Unity ${unityVersion}` : 'Unity';
+
   return (
-    <span className="status-bar-item" title={LABELS[bridgeState] ?? LABELS.disconnected}>
+    <span
+      className={`status-bar-item${canRetry ? ' clickable' : ''}`}
+      title={LABELS[bridgeState] ?? LABELS.disconnected}
+      onClick={canRetry ? () => void reconnect() : undefined}
+    >
       <span className="icon">
         <span
           className={`unity-bridge-dot unity-bridge-dot--${bridgeState}${
@@ -60,7 +77,7 @@ export function UnityBridgeStatusItem() {
           aria-hidden
         />
       </span>
-      <span>{unityVersion ? `Unity ${unityVersion}` : 'Unity'}</span>
+      <span>{bridgeState === 'connecting' ? 'Reconnecting…' : label}</span>
     </span>
   );
 }

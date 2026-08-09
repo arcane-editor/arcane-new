@@ -22,7 +22,12 @@ const MAX_LOG_ENTRIES = 10_000;
 const RELOAD_GRACE_MS = 15_000;
 
 /** UI-facing bridge connection state for the status cluster. */
-export type BridgeState = 'not-installed' | 'disconnected' | 'connected' | 'reloading';
+export type BridgeState =
+  | 'not-installed'
+  | 'disconnected'
+  | 'connected'
+  | 'reloading'
+  | 'connecting';
 
 interface UnityState {
   connected: boolean;
@@ -47,11 +52,19 @@ interface UnityState {
 
   startIpc: (workspacePath: string) => Promise<void>;
   stopIpc: () => Promise<void>;
+  /**
+   * Force the bridge to re-handshake now. Publishes a fresh `ideSessionId`, which
+   * is the only signal that makes Unity tear down a session it still believes is
+   * healthy — the state the bridge used to get permanently stuck in.
+   */
+  reconnect: () => Promise<void>;
   sendPlay: () => Promise<void>;
   sendPause: () => Promise<void>;
   sendStop: () => Promise<void>;
   sendStep: () => Promise<void>;
   clearLogs: () => void;
+  /** Reconcile the UI against the backend's actual connection state. */
+  syncStatus: () => Promise<void>;
   setupListeners: () => Promise<void>;
   teardownListeners: () => void;
   refreshBridgeInstalled: (workspacePath: string) => Promise<void>;
@@ -90,11 +103,12 @@ export const useUnityStore = create<UnityState>((set, get) => ({
     const installed = await isBridgeInstalled(workspacePath);
     set((state) => ({
       bridgeInstalled: installed,
-      // Don't override a live connection; only adjust the idle state.
+      // Don't override a live connection or an in-flight attempt; only adjust
+      // the idle state.
       bridgeState: state.connected
         ? 'connected'
-        : state.bridgeState === 'reloading'
-          ? 'reloading'
+        : state.bridgeState === 'reloading' || state.bridgeState === 'connecting'
+          ? state.bridgeState
           : installed
             ? 'disconnected'
             : 'not-installed',
@@ -109,6 +123,36 @@ export const useUnityStore = create<UnityState>((set, get) => ({
     }
     get().teardownListeners();
     set({ connected: false, projectInfo: null, playState: 'Stopped', isCompiling: false });
+  },
+
+  reconnect: async () => {
+    if (reloadGraceTimer) {
+      clearTimeout(reloadGraceTimer);
+      reloadGraceTimer = null;
+    }
+    // Show the attempt immediately. The backend re-arms within one poll tick,
+    // but the handshake needs Unity's discovery poll (~1s) to come back, and an
+    // unacknowledged click reads as a dead button.
+    set({ connected: false, bridgeState: 'connecting', packageStale: false });
+    try {
+      await invoke('unity_ipc_reconnect');
+    } catch (err) {
+      set((state) => ({
+        bridgeState: state.bridgeInstalled ? 'disconnected' : 'not-installed',
+      }));
+      notify.error(`Could not reconnect to Unity: ${String(err)}`);
+      return;
+    }
+    // Unity re-handshakes on its own schedule; fall back to the idle state if it
+    // never answers, exactly as the disconnect path does.
+    reloadGraceTimer = setTimeout(() => {
+      reloadGraceTimer = null;
+      set((state) =>
+        state.connected
+          ? {}
+          : { bridgeState: state.bridgeInstalled ? 'disconnected' : 'not-installed' },
+      );
+    }, RELOAD_GRACE_MS);
   },
 
   sendPlay: async () => {
@@ -133,6 +177,21 @@ export const useUnityStore = create<UnityState>((set, get) => ({
 
   clearLogs: () => set({ logs: [] }),
 
+  syncStatus: async () => {
+    let status: { connected: boolean; running: boolean };
+    try {
+      status = await invoke<{ connected: boolean; running: boolean }>('unity_ipc_status');
+    } catch {
+      return; // no session for this window — leave the UI as it is
+    }
+    set((state) => {
+      if (state.connected === status.connected) return {};
+      return status.connected
+        ? { connected: true, bridgeInstalled: true, bridgeState: 'connected', packageStale: false }
+        : { connected: false, bridgeState: state.bridgeInstalled ? 'disconnected' : 'not-installed' };
+    });
+  },
+
   setupListeners: async () => {
     // Clean up any existing listeners
     get().teardownListeners();
@@ -152,9 +211,16 @@ export const useUnityStore = create<UnityState>((set, get) => ({
           packageStale: false, // a handshake proves the package is current
         });
       } else {
-        // A drop is usually a domain reload — show 'reloading' briefly, then
-        // demote to 'disconnected' if Unity doesn't reconnect.
-        set({ connected: false, playState: 'Stopped', isCompiling: false, bridgeState: 'reloading' });
+        // A domain reload no longer looks like a drop — Unity announces it as
+        // `reloading` and the connection is held open across it. So a drop here
+        // is a genuine loss, and the backend is already re-arming: show
+        // 'connecting' while that plays out, then settle to 'disconnected'.
+        set({
+          connected: false,
+          playState: 'Stopped',
+          isCompiling: false,
+          bridgeState: 'connecting',
+        });
         reloadGraceTimer = setTimeout(() => {
           reloadGraceTimer = null;
           set((state) =>
@@ -258,8 +324,26 @@ export const useUnityStore = create<UnityState>((set, get) => ({
       });
     });
 
-    unlisteners = [u1, u2, u3, u4, u5, u6, u7, u8];
+    // Unity is rebuilding its AppDomain after a script change. The session
+    // survives it — the journal simply goes quiet and resumes at its persisted
+    // offset — so this is a distinct state, not a disconnect. Before Unity
+    // announced it, the only signal was silence, and silence past the liveness
+    // deadline was indistinguishable from Unity dying.
+    const u9 = await listenScoped<{ reloading: boolean }>('unity-reloading', (event) => {
+      set((state) => {
+        if (!state.connected) return {};
+        return { bridgeState: event.payload.reloading ? 'reloading' : 'connected' };
+      });
+    });
+
+    unlisteners = [u1, u2, u3, u4, u5, u6, u7, u8, u9];
     set({ listenersActive: true });
+
+    // Reconcile against the backend now that we are listening. Events emitted
+    // before the listeners attached are gone, and a UI that believes it is
+    // disconnected while the bridge is live hides every Unity panel behind a
+    // banner for no reason.
+    await get().syncStatus();
   },
 
   teardownListeners: () => {

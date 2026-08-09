@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 import { listenScoped } from '../utils/tauri-listener';
 import type { FileEntry, TreeNode, OpenFile, DiffInfo } from '../types';
-import { initMonaco } from '../features/editor';
+import { initMonaco, disposeModelForPath } from '../features/editor';
 import {
   lspManager,
   registerLspProviders,
@@ -1202,6 +1202,13 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       const ctx = getRunningClientForFile(file.name);
       if (ctx) syncDocumentClose(ctx.client, path);
     }
+
+    // Free the Monaco model — AFTER didClose, so the server is told about a
+    // document that still exists. Left alive, the orphan keeps whatever the
+    // user typed (including changes discarded at the "Close Anyway" prompt),
+    // and a later LSP rename that touches this file will find it and write
+    // that whole buffer back to disk.
+    disposeModelForPath(path);
 
     set((state) => {
       const openFiles = state.openFiles.filter((f) => f.path !== path);

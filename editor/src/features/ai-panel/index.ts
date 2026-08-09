@@ -53,5 +53,7 @@ export type {
   AgentTool,
   AgentToolResult,
 } from './services/vendor/types';
-export { createUpdateCoalescer } from './services/update-coalescer';
-export type { UpdateCoalescer } from './services/update-coalescer';
+// NOTE: `createUpdateCoalescer` deliberately does NOT live here. It is a pure,
+// dependency-free timing utility, and re-exporting it through this barrel made
+// it part of a cycle that broke app startup outright — see
+// src/utils/update-coalescer.ts. Import it from '../utils/update-coalescer'.
