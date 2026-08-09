@@ -64,3 +64,19 @@ src/
 - Unity lifecycle method snippets are provided as a separate CompletionItemProvider alongside LSP completions.
 - The LSP client has crash detection (`lsp-exited` Tauri event) and auto-restart with document re-sync.
 - Files opened before LSP starts get retroactive `didOpen` notifications when the LSP becomes ready.
+
+## Keybindings: always check both sides
+
+A keyboard chord can be owned in **two independent places**, and changing one does not change the other:
+
+1. The JS command registry (`App.tsx`), bound at the document level by `KeyboardShortcutManager` and bridged into Monaco by `bind-shortcuts.ts`.
+2. The **native macOS menu** (`src-tauri/src/menu.rs`), whose accelerators are registered with the OS. `handle_menu_event` emits the menu item's **id** and the frontend runs `executeCommand(id)` on it directly — bypassing the keybinding lookup entirely.
+
+On macOS the native menu wins. So moving a chord in `App.tsx` without updating `menu.rs` leaves the old command answering it, and can leave the new command with no chord at all.
+
+**When you add, move, or remove a keybinding, grep `src-tauri/src/menu.rs` for the chord and the command id.** This is not hypothetical: `mod+j` was moved to `terminal.toggle` while `menu.rs` still bound `CmdOrCtrl+J` to `view.toggleBottomPanel`, which survived a full green suite and eleven review passes because every one of them was scoped to the JS diff.
+
+Two related traps in the same area:
+
+- `COMMANDS_TO_SKIP_SHELL` (`skip-shell.ts`) only decides whether an **app command fires** while a terminal has focus. It does **not** stop xterm sending the byte to the PTY — only a branch in `TerminalInstance`'s `attachCustomKeyEventHandler` does that. Both are needed to take a chord away from the shell.
+- React attaches its listeners to `#root`, **below** the `document` listener react-hotkeys-hook uses. Any `e.stopPropagation()` in a React `onKeyDown` therefore kills every app hotkey for as long as that element has focus.
