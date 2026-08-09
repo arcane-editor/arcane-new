@@ -1,0 +1,4 @@
+{"type":"connection_init","payload":{"unitySessionId":"u1","ideSessionId":"i1","projectName":"Demo"},"timestamp":1.5}
+{"type":"log","payload":{"message":"line one\nline two","stackTrace":"at Foo()\n  at Bar()"},"timestamp":2.5}
+{"type":"log","payload":{"message":"日本語 → emoji 🎮"},"timestamp":3.5}
+{"type":"heartbeat","payload":{},"timestamp":4.5}

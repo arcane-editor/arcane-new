@@ -12,6 +12,7 @@ mod unity_index;
 mod unity_diff;
 mod unity_tests;
 mod unity_ipc;
+mod unity_journal;
 mod dap;
 mod auth;
 mod auth_loopback;
