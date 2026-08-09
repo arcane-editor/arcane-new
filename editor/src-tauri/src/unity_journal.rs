@@ -75,10 +75,14 @@ impl JournalWriter {
         self.file.metadata().map(|m| m.len()).unwrap_or(0)
     }
 
+    /// Part of the API mirrored from `Journal.cs`; exercised by the tests even
+    /// where this side's session loop has no use for it.
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
+    #[allow(dead_code)]
     pub fn epoch(&self) -> u64 {
         self.epoch
     }
@@ -171,6 +175,11 @@ impl JournalReader {
         self.file.metadata().map(|m| m.len()).unwrap_or(0)
     }
 
+    /// Part of the API mirrored from `Journal.cs`; exercised by the tests even
+    /// where this side's session loop has no use for it. Unity needs `epoch`
+    /// because it persists a read position across domain reloads — the IDE has
+    /// no equivalent teardown, so it never restores one.
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
@@ -180,11 +189,13 @@ impl JournalReader {
         self.read_pos.saturating_sub(self.buf.len() as u64)
     }
 
+    #[allow(dead_code)]
     pub fn epoch(&self) -> u64 {
         self.epoch.unwrap_or(0)
     }
 
     /// Set on the poll where the reset rule fired.
+    #[allow(dead_code)]
     pub fn did_reset(&self) -> bool {
         self.did_reset
     }
