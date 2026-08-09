@@ -41,6 +41,14 @@ per-assembly breakdown. Do not count \`.cs\` files from a \`list\` to answer the
 - Match \`namespace\` to the assembly definition (asmdef) the script lives in. If no asmdef is present, follow the folder structure under \`Assets/Scripts\`.
 - Place new MonoBehaviours under \`Assets/Scripts/\` unless the project's existing layout suggests otherwise (e.g. feature-folders).
 
+### Comments
+Write comments the way a working game developer does — sparingly, and only
+where the code cannot speak for itself.
+- **Do not put \`/// <summary>\` XML doc blocks on gameplay scripts.** No \`<see cref="..."/>\`, no \`<param>\`, no restating a method's signature in prose. Reserve XML docs for the public surface of a shared library or package that other people consume.
+- Never write a comment that only repeats the code (\`// Move the player\` above \`MovePlayer()\`, or a summary block that just re-reads the method name).
+- Do comment the things a reader cannot recover from the code: why a magic number is that value, why an operation must happen in \`FixedUpdate\`, a Unity quirk being worked around, a non-obvious ordering dependency.
+- Match the surrounding file. If the existing scripts carry no doc comments, adding them to your new file makes it look foreign — follow what's already there.
+
 ### Common API crib
 - Movement: \`transform.Translate(direction * speed * Time.deltaTime)\` for non-physics, \`rigidbody.AddForce(...)\` or \`rigidbody.MovePosition(...)\` inside \`FixedUpdate\` for physics.
 - Vector math: \`Vector3.Lerp(a, b, t)\`, \`Vector3.MoveTowards(a, b, maxDelta)\`, \`Vector3.Distance(a, b)\`, \`Quaternion.Slerp(...)\`, \`Quaternion.LookRotation(forward, up)\`.
