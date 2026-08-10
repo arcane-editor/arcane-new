@@ -7,7 +7,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Sparkles, Trash2, Pencil, X, Check } from 'lucide-react';
+import { Sparkles, Trash2, Pencil, X, Check, FileText } from 'lucide-react';
 import { useAiStore } from '../../../stores/ai';
 import { useWorkspaceStore } from '../../../stores/workspace';
 import {
@@ -140,6 +140,18 @@ function SessionHistory({ open, onClose }: Props) {
                   <span className="ai-history-title-text">{s.title}</span>
                   <span className="ai-history-meta">
                     {s.messageCount} msg · {relativeTime(s.updatedAt)}
+                    {/* A plan is an artifact of the session that produced it,
+                        so the row that reopens the conversation also says a
+                        plan came out of it. */}
+                    {s.planCount > 0 && (
+                      <>
+                        {' · '}
+                        <span className="ai-session-plan-chip">
+                          <FileText size={10} />
+                          {s.planCount} plan{s.planCount === 1 ? '' : 's'}
+                        </span>
+                      </>
+                    )}
                   </span>
                 </button>
               )}

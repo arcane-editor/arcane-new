@@ -15,6 +15,7 @@ import {
   type Attachment,
   type ChatMode,
   type Effort,
+  type PlanRef,
   type SaveSessionInput,
   type SessionData,
   type StopReason,
@@ -293,6 +294,14 @@ interface AiState {
   clearAttachments: () => void;
   setPlanPhase: (phase: PlanPhase) => void;
   setActivePlanPath: (path: string | null) => void;
+  /**
+   * Plans produced by the current session, persisted with it so they are
+   * reachable from chat history. Re-adding the same path replaces its entry
+   * rather than duplicating it — regenerating a plan overwrites the file.
+   */
+  sessionPlans: PlanRef[];
+  addSessionPlan: (plan: PlanRef) => void;
+  setSessionPlans: (plans: PlanRef[]) => void;
   setPendingPrompt: (prompt: string | null) => void;
   setLastAttachments: (attachments: Attachment[]) => void;
   /** Accumulates a completed request's token usage into `sessionUsage` (P4, `arcane-stream.ts`). */
@@ -342,6 +351,7 @@ function buildSaveInput(): SaveSessionInput | null {
     agentKind: state.selectedAgent,
     workspacePath: useWorkspaceStore.getState().workspacePath,
     arcanePlan: state.arcanePlan,
+    plans: state.sessionPlans,
   };
 }
 
@@ -693,6 +703,7 @@ export const useAiStore = create<AiState>((set, get) => ({
       verificationRequired: false,
       sessionId: null,
       arcanePlan: null,
+      sessionPlans: [],
       attachments: [],
       planPhase: 'idle',
       activePlanPath: null,
@@ -725,6 +736,8 @@ export const useAiStore = create<AiState>((set, get) => ({
       // session file saved before T9 lacks the key entirely (undefined),
       // which falls back to null same as a fresh conversation.
       arcanePlan: session.arcanePlan ?? null,
+      // Absent on sessions saved before plans were linked.
+      sessionPlans: session.plans ?? [],
       attachments: [],
       planPhase: 'idle',
       activePlanPath: null,
@@ -907,6 +920,12 @@ export const useAiStore = create<AiState>((set, get) => ({
 
   setPlanPhase: (phase: PlanPhase) => set({ planPhase: phase }),
   setActivePlanPath: (path: string | null) => set({ activePlanPath: path }),
+  sessionPlans: [],
+  addSessionPlan: (plan) =>
+    set((s) => ({
+      sessionPlans: [...s.sessionPlans.filter((p) => p.path !== plan.path), plan],
+    })),
+  setSessionPlans: (plans) => set({ sessionPlans: plans }),
   setPendingPrompt: (prompt: string | null) => set({ pendingPrompt: prompt }),
   setLastAttachments: (attachments: Attachment[]) => set({ lastAttachments: attachments }),
 

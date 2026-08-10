@@ -27,6 +27,7 @@ import {
 } from './plan-files';
 import type { TextContent, ThinkingContent, ToolCall } from './vendor/types';
 import type { Attachment } from './types';
+import type { PlanNote } from '../../markdown-preview';
 
 function getCurrentWorkspacePath(): string | null {
   return useWorkspaceStore.getState().workspacePath;
@@ -97,6 +98,14 @@ async function startPlanning(
 
   openPlanInEditor(planPath);
   after.setActivePlanPath(planPath);
+  // Attach the plan to this session so it is reachable later from chat
+  // history, rather than only from the conversation that produced it.
+  after.addSessionPlan({
+    path: planPath,
+    title: prompt.slice(0, 80),
+    createdAt: Date.now(),
+    status: 'draft',
+  });
   after.setPlanPhase('awaiting-execute');
 }
 
@@ -149,6 +158,54 @@ async function regenerate(): Promise<void> {
   await startPlanning(store.pendingPrompt, store.lastAttachments);
 }
 
+/**
+ * Send the user's pinned suggestions back to the model and rewrite the plan.
+ *
+ * Each note is presented as its quoted text under the heading it was pinned
+ * to, so the model knows exactly which part of its own plan is being
+ * questioned — that targeting is the whole reason notes are anchored rather
+ * than collected as free text.
+ *
+ * Notes whose text no longer appears (the plan moved on) are still sent, but
+ * marked, so the model treats them as general feedback rather than hunting for
+ * a passage that is gone.
+ */
+async function reviseWithNotes(planPath: string, notes: PlanNote[]): Promise<void> {
+  const store = useAiStore.getState();
+  if (notes.length === 0) return;
+  if (store.isAgentRunning) return;
+
+  let planContent: string;
+  try {
+    planContent = await readPlan(planPath);
+  } catch (err) {
+    store.setError(`Could not read plan file: ${formatErr(err)}`);
+    return;
+  }
+
+  const body = notes
+    .map((n, i) => {
+      const where = n.anchored
+        ? `under "${n.headingPath}"`
+        : `under "${n.headingPath}" (this text is no longer in the plan — treat as general feedback)`;
+      return `${i + 1}. ${where}\n   > ${n.quotedText}\n   ${n.body}`;
+    })
+    .join('\n\n');
+
+  const prompt =
+    `Revise the plan at ${planPath} to address these suggestions, then write the ` +
+    `full revised plan back to that file in the same format.\n\n${body}`;
+
+  store.setPlanPhase('planning');
+  await getAgentService().sendMessage(prompt, {
+    mode: 'plan',
+    effort: store.effort,
+    promptMode: 'plan-planning',
+    planExecution: { planPath, planContent },
+  });
+  useAiStore.getState().setPlanPhase('awaiting-execute');
+}
+
 function abortExecution(): void {
   getAgentService().abort();
   // Agent loop will set isAgentRunning=false; we restore planPhase here too.
@@ -166,6 +223,7 @@ function formatErr(err: unknown): string {
 export const planController = {
   startPlanning,
   executePlan,
+  reviseWithNotes,
   regenerate,
   abortExecution,
   openPlanTab,

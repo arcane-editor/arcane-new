@@ -9,9 +9,10 @@ export {
   deleteSession,
   renameSession,
 } from './services/session-persistence';
-export type { SessionData, SessionSummary, SaveSessionInput } from './services/session-persistence';
+export type { SessionData, SessionSummary, SaveSessionInput, PlanRef } from './services/session-persistence';
 export { restoreLatestSessionForWorkspace } from './services/session-restore';
 export { fixConsoleError } from './services/fix-console-error';
+export { planController } from './services/plan-controller';
 export { resetWriteApprovalSession } from './services/write-approval-gate';
 export type { AskUserOption, AskUserParams } from './services/ask-user-tool';
 export { resolvePendingQuestion } from './services/question-gate';

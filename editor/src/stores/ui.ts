@@ -12,6 +12,8 @@ export type ScmViewMode = 'list' | 'tree';
 export type RightSidebarView = 'ai-panel' | 'unity-inspector';
 // 'output' removed: the tab existed and was selectable, but nothing in the
 // codebase could ever write to it — it rendered a permanent "No output".
+export type MarkdownViewMode = 'preview' | 'source';
+
 export type BottomPanelTab = 'terminal' | 'problems' | 'unity-console';
 export type LspStatus = 'idle' | 'starting' | 'indexing' | 'ready' | 'error';
 
@@ -132,6 +134,9 @@ interface UiState {
   /** path → Unity-asset view mode override (absent ⇒ settings default). */
   assetViewerMode: Record<string, AssetViewerMode>;
   setAssetViewerMode: (path: string, mode: AssetViewerMode) => void;
+  /** Per-file Preview/Source choice for markdown. Same pattern as above. */
+  markdownViewMode: Record<string, MarkdownViewMode>;
+  setMarkdownViewMode: (path: string, mode: MarkdownViewMode) => void;
 
   /**
    * diff-tab path → semantic/text view mode override (absent ⇒ 'semantic'
@@ -262,6 +267,9 @@ export const useUiStore = create<UiState>((set, get) => ({
   assetViewerMode: {},
   setAssetViewerMode: (path, mode) =>
     set((s) => ({ assetViewerMode: { ...s.assetViewerMode, [path]: mode } })),
+  markdownViewMode: {},
+  setMarkdownViewMode: (path, mode) =>
+    set((s) => ({ markdownViewMode: { ...s.markdownViewMode, [path]: mode } })),
 
   diffViewMode: {},
   setDiffViewMode: (path, mode) =>

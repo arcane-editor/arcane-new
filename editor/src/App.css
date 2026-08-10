@@ -6270,3 +6270,296 @@ html, body, #root {
   text-align: center;
 }
 .hierarchy-empty-hint { opacity: 0.8; }
+
+/* ── Markdown preview & plan document ────────────────────────────────────
+   A plan is something you act on, so it renders as a working document —
+   steps carrying live state, suggestions pinned to text, execute controls —
+   rather than a read-only render you have to leave in order to do anything. */
+.md-preview,
+.md-preview-standalone,
+.plan-doc {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.md-preview { position: relative; overflow: auto; }
+.md-preview-body {
+  max-width: 76ch;
+  margin: 0 auto;
+  padding: var(--space-6) var(--space-5);
+  font-size: var(--text-base);
+  line-height: 1.7;
+}
+.md-preview-body h1 { font-size: 1.7em; margin: 0 0 var(--space-4); }
+.md-preview-body h2 {
+  font-size: 1.25em;
+  margin: var(--space-6) 0 var(--space-2);
+  padding-bottom: var(--space-1);
+  border-bottom: 1px solid var(--border);
+}
+.md-preview-body h3 { font-size: 1.08em; margin: var(--space-5) 0 var(--space-2); }
+.md-preview-body p, .md-preview-body ul, .md-preview-body ol { margin: 0 0 var(--space-3); }
+.md-preview-body li { margin-bottom: var(--space-1); }
+.md-preview-body code {
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+}
+.md-preview-body pre {
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-input);
+  overflow-x: auto;
+}
+.md-preview-body pre code { padding: 0; background: none; }
+.md-preview-body blockquote {
+  margin: 0 0 var(--space-3);
+  padding-left: var(--space-3);
+  border-left: 3px solid var(--border);
+  color: var(--text-secondary);
+}
+.md-preview-body table { border-collapse: collapse; width: 100%; margin-bottom: var(--space-3); }
+.md-preview-body th, .md-preview-body td {
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border);
+  text-align: left;
+}
+.md-preview-body a { color: var(--accent); }
+
+.md-note-mark {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: inherit;
+  border-radius: var(--radius-sm);
+  padding: 0 2px;
+}
+
+.md-preview-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  padding: var(--space-1) var(--space-2);
+  border-bottom: 1px solid var(--border);
+}
+
+.md-preview-hint {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-5) var(--space-5);
+  max-width: 76ch;
+  margin: 0 auto;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  opacity: 0.75;
+}
+
+.md-suggest-popover {
+  position: fixed;
+  z-index: 3500;
+  width: 280px;
+  transform: translateX(-50%);
+  padding: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-container-highest);
+  box-shadow: var(--shadow-3);
+  animation: app-tooltip-in var(--motion-fast) var(--ease-out);
+}
+.md-suggest-quote {
+  margin-bottom: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  font-style: italic;
+}
+.md-suggest-input {
+  width: 100%;
+  min-height: 54px;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: var(--text-sm);
+  resize: vertical;
+}
+.md-suggest-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
+}
+.md-suggest-btn {
+  padding: 3px var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-primary);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: background var(--motion-fast) var(--ease-out);
+}
+.md-suggest-btn:hover { background: var(--hover); }
+.md-suggest-btn--primary { background: var(--accent); border-color: var(--accent); color: var(--text-on-dark); }
+.md-suggest-btn:disabled { opacity: 0.5; cursor: default; }
+
+.md-notes {
+  max-width: 76ch;
+  margin: 0 auto var(--space-5);
+  padding: 0 var(--space-5);
+}
+.md-notes-title {
+  margin-bottom: var(--space-2);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+}
+.md-note {
+  margin-bottom: var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+}
+/* An unanchored note is kept, not dropped — the user still wants that change. */
+.md-note--orphan { border-left-color: var(--warning); }
+.md-note-head { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-1); }
+.md-note-heading { font-size: var(--text-xs); color: var(--text-secondary); }
+.md-note-orphan-tag {
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-sm);
+  background: var(--warning-bg);
+  color: var(--warning);
+  font-size: var(--text-xs);
+}
+.md-note-remove {
+  margin-left: auto;
+  border: none;
+  background: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: color var(--motion-fast) var(--ease-out);
+}
+.md-note-remove:hover { color: var(--error-text); }
+.md-note-quote { font-size: var(--text-xs); color: var(--text-secondary); font-style: italic; }
+.md-note-body { font-size: var(--text-sm); margin-top: 2px; }
+
+.plan-doc-header,
+.plan-doc-progress,
+.plan-doc-footer {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  flex-shrink: 0;
+}
+.plan-doc-header { border-bottom: 1px solid var(--border); }
+.plan-doc-title { font-size: var(--text-sm); font-weight: 500; }
+.plan-doc-modes { margin-left: auto; display: flex; gap: 2px; }
+.plan-doc-mode {
+  padding: 2px var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: background var(--motion-fast) var(--ease-out), color var(--motion-fast) var(--ease-out);
+}
+.plan-doc-mode:hover { background: var(--hover); color: var(--text-primary); }
+.plan-doc-mode.is-active { background: var(--selected); color: var(--text-active); }
+
+.plan-doc-progress { border-bottom: 1px solid var(--border); font-size: var(--text-xs); }
+.plan-doc-progress-label { color: var(--text-secondary); white-space: nowrap; }
+.plan-doc-progress-track {
+  flex: 1;
+  height: 4px;
+  border-radius: var(--radius-full);
+  background: var(--bg-input);
+  overflow: hidden;
+}
+.plan-doc-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: var(--radius-full);
+  transition: width var(--motion-slow) var(--ease-out);
+}
+.plan-doc-progress-pct { color: var(--text-secondary); min-width: 34px; text-align: right; }
+
+.plan-doc-steps {
+  flex-shrink: 0;
+  max-height: 30%;
+  overflow-y: auto;
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  list-style: none;
+  border-bottom: 1px solid var(--border);
+}
+.plan-doc-step {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: 2px 0;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+.plan-doc-step-icon { flex-shrink: 0; margin-top: 2px; }
+.plan-doc-step--done { color: var(--success); }
+.plan-doc-step--running { color: var(--accent); }
+.plan-doc-step--done .plan-doc-step-text { text-decoration: line-through; opacity: 0.75; }
+
+.plan-doc-body { flex: 1; min-height: 0; overflow: auto; }
+.plan-doc-source {
+  margin: 0;
+  padding: var(--space-4);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  white-space: pre-wrap;
+  color: var(--text-primary);
+}
+
+.plan-doc-footer { border-top: 1px solid var(--border); background: var(--bg-sidebar); }
+.plan-doc-footer-count { font-size: var(--text-xs); color: var(--text-secondary); margin-right: auto; }
+.plan-doc-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 4px var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: background var(--motion-fast) var(--ease-out);
+}
+.plan-doc-btn:hover:not(:disabled) { background: var(--hover); }
+.plan-doc-btn:disabled { opacity: 0.5; cursor: default; }
+.plan-doc-btn--primary { background: var(--accent); border-color: var(--accent); color: var(--text-on-dark); }
+.plan-doc-btn--stop { border-color: var(--error-text); color: var(--error-text); }
+.plan-doc-effort {
+  padding: 3px var(--space-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font-size: var(--text-xs);
+}
+
+.ai-session-plan-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-sm);
+  background: var(--badge-bg);
+  color: var(--accent);
+}

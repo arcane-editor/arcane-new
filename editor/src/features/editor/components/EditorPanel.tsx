@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import MonacoEditor, { DiffEditor } from '@monaco-editor/react';
 import type { editor as MonacoEditorNs } from 'monaco-editor';
 import { ask } from '@tauri-apps/plugin-dialog';
@@ -35,6 +35,8 @@ import { attachUnityDecorations } from '../../csharp';
 import { initTestCodeLens } from '../../unity-test-runner';
 import { attachBreakpointGutter } from '../../debugger';
 import { registerInlineSuggestProvider } from '../../inline-suggest';
+import { MarkdownPreview, PlanDocumentView, isMarkdownPath, isPlanPath, type PlanNote } from '../../markdown-preview';
+import { planController } from '../../ai-panel';
 import { fileUri } from '../../lsp';
 
 const detectLanguage = getMonacoLanguageId;
@@ -58,6 +60,10 @@ function EditorPanel() {
   const structuredDefault = useSettingsStore((s) => s.settings['unity.assetViewer.structuredDefault']);
   const assetViewerModeMap = useUiStore((s) => s.assetViewerMode);
   const diffViewModeMap = useUiStore((s) => s.diffViewMode);
+  const markdownViewModeMap = useUiStore((s) => s.markdownViewMode);
+  // Suggestions live with the open document, not in the .md — the file
+  // stays clean because execution re-reads it from disk.
+  const [planNotes, setPlanNotes] = useState<PlanNote[]>([]);
 
   const editorRef = useRef<MonacoEditorNs.IStandaloneCodeEditor | null>(null);
 
@@ -176,6 +182,48 @@ function EditorPanel() {
         onEditRaw={setRawEdit}
       />
     );
+  }
+
+  // Markdown renders as a document, not as source. A plan additionally gets
+  // its steps, suggestions and execute controls — the reason it opens here
+  // rather than in Monaco is that a plan is something you act on, and sending
+  // the user to a raw text buffer to do that was the gap.
+  if (isMarkdownPath(activeFile.name) && !activeFile.diff) {
+    const mode = markdownViewModeMap[activeFile.path] ?? 'preview';
+    if (mode === 'preview') {
+      if (isPlanPath(activeFile.path)) {
+        return (
+          <PlanDocumentView
+            path={activeFile.path}
+            content={activeFile.content}
+            notes={planNotes}
+            onNotesChange={setPlanNotes}
+            onRevise={() => planController.reviseWithNotes(activeFile.path, planNotes)}
+            onExecute={() => planController.executePlan(activeFile.path)}
+            onStop={() => planController.abortExecution()}
+          />
+        );
+      }
+      return (
+        <div className="md-preview-standalone">
+          <div className="md-preview-toolbar">
+            <button
+              type="button"
+              className="plan-doc-mode"
+              onClick={() => useUiStore.getState().setMarkdownViewMode(activeFile.path, 'source')}
+            >
+              Edit source
+            </button>
+          </div>
+          <MarkdownPreview
+            content={activeFile.content}
+            notes={[]}
+            onNotesChange={() => {}}
+            allowNotes={false}
+          />
+        </div>
+      );
+    }
   }
 
   if (activeFile.diff) {

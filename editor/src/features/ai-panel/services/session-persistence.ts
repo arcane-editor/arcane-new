@@ -17,6 +17,22 @@ import { deleteCheckpointsFile } from './checkpoints/checkpoint-store-io';
 import { deleteReviewsFile } from './edit-review/review-store-io';
 import { coerceAgentKind, type AgentKind, type ChatMode, type Effort } from './types';
 
+/**
+ * A plan produced by this session.
+ *
+ * Optional on both records, exactly like `arcanePlan`: session files written
+ * before this existed simply have no key, `JSON.parse` leaves it undefined,
+ * and an old session loads unchanged.
+ */
+export interface PlanRef {
+  /** Absolute path of the plan file. */
+  path: string;
+  /** Human title, derived from the prompt that produced it. */
+  title: string;
+  createdAt: number;
+  status: 'draft' | 'executing' | 'done' | 'failed';
+}
+
 export interface SessionData {
   id: string;
   createdAt: number;
@@ -36,6 +52,12 @@ export interface SessionData {
    * brand-new session with no plan yet.
    */
   arcanePlan?: ArcanePlanEntry[] | null;
+  /**
+   * Markdown plans this session produced, so they are reachable from chat
+   * history rather than only from the conversation that made them. See
+   * `PlanRef`.
+   */
+  plans?: PlanRef[];
 }
 
 /** Lightweight header used by the history list (no full message bodies). */
@@ -47,6 +69,8 @@ export interface SessionSummary {
   createdAt: number;
   updatedAt: number;
   messageCount: number;
+  /** How many plans this session produced; 0 for sessions that made none. */
+  planCount: number;
 }
 
 export interface SaveSessionInput {
@@ -59,6 +83,8 @@ export interface SaveSessionInput {
   title?: string;
   /** See `SessionData.arcanePlan`. */
   arcanePlan?: ArcanePlanEntry[] | null;
+  /** See `SessionData.plans`. */
+  plans?: PlanRef[];
 }
 
 let sessionsDir: string | null = null;
@@ -129,6 +155,9 @@ export function buildSessionData(input: SaveSessionInput): SessionData {
     workspacePath: input.workspacePath,
     title: input.title ?? deriveTitle(input.messages),
     arcanePlan: input.arcanePlan ?? null,
+    // Omitted entirely when there are none, so a session file for a
+    // plain chat is unchanged in shape.
+    ...(input.plans && input.plans.length > 0 ? { plans: input.plans } : {}),
   };
 }
 
@@ -245,6 +274,8 @@ export async function listSessions(workspacePath?: string | null): Promise<Sessi
         createdAt: data.createdAt ?? 0,
         updatedAt: data.updatedAt ?? 0,
         messageCount: data.messages?.length ?? 0,
+        // Absent on sessions written before plans were linked.
+        planCount: data.plans?.length ?? 0,
       });
     } catch {
       // skip malformed files
