@@ -1,15 +1,25 @@
 import { Files, GitBranch, Search, Settings, Bug, Network, FlaskConical, SquareTerminal } from 'lucide-react';
-import { formatKeybinding } from '../../../utils/format-keybinding';
+import Tooltip from '../../../components/Tooltip';
 import { useUiStore, type SidebarView } from '../../../stores/ui';
 import { useCommandsStore } from '../../../stores/commands';
 import { useProjectContextStore } from '../../../stores/project-context';
 import { useSettingsStore } from '../../../stores/settings';
 import { useGitStore } from '../../../stores/git';
 
-const SIDEBAR_ITEMS: Array<{ id: SidebarView; icon: typeof Files; label: string }> = [
-  { id: 'explorer', icon: Files, label: 'Explorer' },
-  { id: 'search', icon: Search, label: 'Search' },
-  { id: 'source-control', icon: GitBranch, label: 'Source Control' },
+// `commandId` is what supplies the chord in the tooltip. Never spell a chord
+// into `label`: it goes stale the moment the binding moves, and five tooltips
+// in this app hardcoded macOS glyphs that Windows users were shown verbatim.
+interface ActivityItem {
+  id: SidebarView;
+  icon: typeof Files;
+  label: string;
+  commandId?: string;
+}
+
+const SIDEBAR_ITEMS: ActivityItem[] = [
+  { id: 'explorer', icon: Files, label: 'Explorer', commandId: 'view.explorer' },
+  { id: 'search', icon: Search, label: 'Search', commandId: 'search.focus' },
+  { id: 'source-control', icon: GitBranch, label: 'Source Control', commandId: 'view.sourceControl' },
 ];
 
 function ActivityBar() {
@@ -32,47 +42,43 @@ function ActivityBar() {
   // Read the chord back out of the registry rather than writing it here. The
   // tooltip used to hardcode "Cmd+`" and went stale the moment the binding
   // moved; formatKeybinding is the same formatter the onboarding signpost uses.
-  const terminalChord = useCommandsStore(
-    (s) => s.commands.get('terminal.toggle')?.keybinding
-  );
-
-  const items: typeof SIDEBAR_ITEMS = [
+  const items: ActivityItem[] = [
     ...SIDEBAR_ITEMS,
     ...(isUnityProject && hierarchyEnabled
-      ? [{ id: 'hierarchy' as SidebarView, icon: Network, label: 'Unity Hierarchy' }]
+      ? [{ id: 'hierarchy' as SidebarView, icon: Network, label: 'Unity Hierarchy', commandId: 'view.hierarchy' }]
       : []),
     ...(isUnityProject && testRunnerEnabled
-      ? [{ id: 'test' as SidebarView, icon: FlaskConical, label: 'Unity Tests' }]
+      ? [{ id: 'test' as SidebarView, icon: FlaskConical, label: 'Unity Tests', commandId: 'view.testRunner' }]
       : []),
     ...(isUnityProject && debuggerEnabled
-      ? [{ id: 'debug' as SidebarView, icon: Bug, label: 'Run and Debug' }]
+      ? [{ id: 'debug' as SidebarView, icon: Bug, label: 'Run and Debug', commandId: 'view.debug' }]
       : []),
   ];
 
   return (
     <div className="activity-bar">
-      {items.map(({ id, icon: Icon, label }) => (
-        <button
-          key={id}
-          className={`activity-bar-icon${activeView === id && sidebarVisible ? ' active' : ''}`}
-          onClick={() => {
-            const ui = useUiStore.getState();
-            if (id === ui.activeSidebarView && ui.sidebarVisible) {
-              ui.setSidebarVisible(false);
-            } else {
-              ui.setActiveSidebarView(id);
-              ui.setSidebarVisible(true);
-            }
-          }}
-          title={label}
-        >
-          <Icon size={18} />
-          {id === 'source-control' && changedCount > 0 && (
-            <span className="activity-bar-badge">
-              {changedCount > 99 ? '99+' : changedCount}
-            </span>
-          )}
-        </button>
+      {items.map(({ id, icon: Icon, label, commandId }) => (
+        <Tooltip key={id} label={label} commandId={commandId}>
+          <button
+            className={`activity-bar-icon${activeView === id && sidebarVisible ? ' active' : ''}`}
+            onClick={() => {
+              const ui = useUiStore.getState();
+              if (id === ui.activeSidebarView && ui.sidebarVisible) {
+                ui.setSidebarVisible(false);
+              } else {
+                ui.setActiveSidebarView(id);
+                ui.setSidebarVisible(true);
+              }
+            }}
+          >
+            <Icon size={18} />
+            {id === 'source-control' && changedCount > 0 && (
+              <span className="activity-bar-badge">
+                {changedCount > 99 ? '99+' : changedCount}
+              </span>
+            )}
+          </button>
+        </Tooltip>
       ))}
 
       <div className="activity-bar-bottom">
@@ -82,6 +88,7 @@ function ActivityBar() {
             ("they had to be told that Ctrl+J reveals the terminal"). The chord
             in the tooltip below is read back out of the command registry, so it
             cannot drift from the real binding the way a hardcoded one did. */}
+        <Tooltip label="Terminal" commandId="terminal.toggle">
         <button
           className={`activity-bar-icon${
             bottomPanelVisible && activeBottomTab === 'terminal' ? ' active' : ''
@@ -100,17 +107,18 @@ function ActivityBar() {
             // terminal when none exists yet.
             useCommandsStore.getState().executeCommand('terminal.toggle');
           }}
-          title={terminalChord ? `Terminal (${formatKeybinding(terminalChord)})` : 'Terminal'}
         >
           <SquareTerminal size={18} />
         </button>
+        </Tooltip>
+        <Tooltip label="Settings" commandId="settings.open">
         <button
           className="activity-bar-icon"
           onClick={() => useCommandsStore.getState().executeCommand('settings.open')}
-          title="Settings"
         >
           <Settings size={18} />
         </button>
+        </Tooltip>
       </div>
     </div>
   );

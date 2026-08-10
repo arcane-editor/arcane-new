@@ -5894,3 +5894,104 @@ html, body, #root {
 .project-root-banner-dismiss:hover {
   color: var(--text-primary);
 }
+
+/* ── Tooltip ─────────────────────────────────────────────────────────────
+   Replaces the native `title=` attribute, which cannot be styled, takes ~1s
+   to appear, never appears for keyboard users, and cannot present a chord.
+   Portal-rendered, so it escapes the activity bar's and sidebar's clipping. */
+.app-tooltip {
+  position: fixed;
+  z-index: 4000;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: 320px;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-container-highest);
+  box-shadow: var(--shadow-2);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  line-height: var(--text-sm-lh);
+  white-space: nowrap;
+  pointer-events: none; /* never steals the hover that opened it */
+  animation: app-tooltip-in var(--motion-fast) var(--ease-out);
+}
+
+/* Anchored on the control's midpoint, so each side shifts by half its own
+   size rather than needing a measured second pass. */
+.app-tooltip--right { transform: translateY(-50%); }
+.app-tooltip--left { transform: translate(-100%, -50%); }
+.app-tooltip--top { transform: translate(-50%, -100%); }
+.app-tooltip--bottom { transform: translateX(-50%); }
+
+.app-tooltip-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.app-tooltip-chord {
+  flex-shrink: 0;
+  padding: 1px var(--space-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: var(--text-xs);
+}
+
+@keyframes app-tooltip-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* ── AI mode identity ────────────────────────────────────────────────────
+   The active mode used to be legible only by reading the pill's label, so it
+   was easy to send an editing request believing you were in Ask. `data-mode`
+   carries the identity and the colour comes from the theme contract, so each
+   theme picks accents that clear its own contrast rules. */
+.ai-panel-mode-pill[data-mode='ask'] { --mode-accent: var(--mode-ask); }
+.ai-panel-mode-pill[data-mode='agent'] { --mode-accent: var(--mode-agent); }
+.ai-panel-mode-pill[data-mode='plan'] { --mode-accent: var(--mode-plan); }
+
+.ai-panel-mode-pill {
+  border-color: color-mix(in srgb, var(--mode-accent) 45%, var(--border));
+  color: var(--mode-accent);
+  transition:
+    border-color var(--motion-fast) var(--ease-out),
+    color var(--motion-fast) var(--ease-out),
+    background var(--motion-fast) var(--ease-out);
+}
+
+.ai-panel-mode-pill .ai-panel-mode-pill-icon { color: var(--mode-accent); }
+
+.ai-panel-mode-pill:hover,
+.ai-panel-mode-pill.is-open {
+  background: color-mix(in srgb, var(--mode-accent) 12%, transparent);
+}
+
+.ai-panel-mode-menu-item[data-mode='ask'] { --mode-accent: var(--mode-ask); }
+.ai-panel-mode-menu-item[data-mode='agent'] { --mode-accent: var(--mode-agent); }
+.ai-panel-mode-menu-item[data-mode='plan'] { --mode-accent: var(--mode-plan); }
+
+.ai-panel-mode-menu-item .ai-panel-mode-menu-icon { color: var(--mode-accent); }
+.ai-panel-mode-menu-item.is-selected { box-shadow: inset 2px 0 0 var(--mode-accent); }
+.ai-panel-mode-menu-item .ai-panel-mode-menu-check { color: var(--mode-accent); }
+
+/* A hairline above the composer, so the mode is readable while typing without
+   looking away at the pill. */
+.ai-panel-composer[data-mode='ask'] { --mode-accent: var(--mode-ask); }
+.ai-panel-composer[data-mode='agent'] { --mode-accent: var(--mode-agent); }
+.ai-panel-composer[data-mode='plan'] { --mode-accent: var(--mode-plan); }
+.ai-panel-composer::before {
+  content: '';
+  display: block;
+  height: 2px;
+  margin: 0 0 var(--space-1);
+  border-radius: var(--radius-full);
+  background: linear-gradient(90deg, var(--mode-accent), transparent 70%);
+  opacity: 0.75;
+  transition: background var(--motion-base) var(--ease-out);
+}

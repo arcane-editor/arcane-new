@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { useAiStore } from '../../../stores/ai';
 import type { ChatMode } from '../services/types';
+import Tooltip from '../../../components/Tooltip';
 
 interface ModeOption {
   value: ChatMode;
@@ -118,25 +119,27 @@ function ModeSelector() {
 
   return (
     <>
+      <Tooltip label={active.description} commandId="ai.cycleMode" side="top">
       <button
         ref={buttonRef}
         type="button"
         className={`ai-panel-mode-pill ${open ? 'is-open' : ''}`}
+        data-mode={mode}
         onClick={toggle}
         disabled={isAgentRunning}
         aria-haspopup="menu"
         aria-expanded={open}
-        title={active.description}
       >
         <ActiveIcon size={12} className="ai-panel-mode-pill-icon" strokeWidth={2.25} />
         <span className="ai-panel-mode-pill-label">{active.label}</span>
         <ChevronDown size={11} className="ai-panel-mode-pill-caret" strokeWidth={2} />
       </button>
+      </Tooltip>
 
       {open &&
         popoverStyle &&
         createPortal(
-          <div ref={popoverRef} className="ai-panel-mode-menu" style={popoverStyle} role="menu">
+          <div ref={popoverRef} className="ai-panel-mode-menu" style={popoverStyle} role="menu" data-mode={mode}>
             {MODES.map((m) => {
               const Icon = m.Icon;
               const selected = mode === m.value;
@@ -147,6 +150,7 @@ function ModeSelector() {
                   role="menuitemradio"
                   aria-checked={selected}
                   className={`ai-panel-mode-menu-item ${selected ? 'is-selected' : ''}`}
+                  data-mode={m.value}
                   onClick={() => pick(m.value)}
                 >
                   <span className="ai-panel-mode-menu-icon">

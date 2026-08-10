@@ -1,13 +1,19 @@
 import { BotMessageSquare, Layers } from 'lucide-react';
 import { useUiStore, type RightSidebarView } from '../../../stores/ui';
 import { useProjectContextStore } from '../../../stores/project-context';
+import Tooltip from '../../../components/Tooltip';
 
 // A bare speech bubble said "chat" but not "AI" — it read as a comments or
 // messaging panel. The bot face keeps the bubble silhouette (so the panel is
 // still recognisable at a glance) while naming what the chat actually is.
-const BASE_ITEMS: Array<{ id: RightSidebarView; icon: typeof BotMessageSquare; label: string }> = [
-  { id: 'ai-panel', icon: BotMessageSquare, label: 'AI Assistant' },
-];
+// `commandId` supplies the chord shown in the tooltip. Never spell a chord
+// into `label` — it goes stale on a rebinding and is wrong on some platform.
+const BASE_ITEMS: Array<{
+  id: RightSidebarView;
+  icon: typeof BotMessageSquare;
+  label: string;
+  commandId?: string;
+}> = [{ id: 'ai-panel', icon: BotMessageSquare, label: 'AI Assistant', commandId: 'view.aiPanel' }];
 
 function RightActivityBar() {
   const activeView = useUiStore((s) => s.activeRightSidebarView);
@@ -20,9 +26,9 @@ function RightActivityBar() {
 
   return (
     <div className="activity-bar activity-bar--right">
-      {items.map(({ id, icon: Icon, label }) => (
+      {items.map(({ id, icon: Icon, label, commandId }) => (
+        <Tooltip key={id} label={label} commandId={commandId} side="left">
         <button
-          key={id}
           className={`activity-bar-icon${activeView === id && rightSidebarVisible ? ' active' : ''}`}
           onClick={() => {
             const ui = useUiStore.getState();
@@ -33,10 +39,10 @@ function RightActivityBar() {
               ui.setRightSidebarVisible(true);
             }
           }}
-          title={label}
         >
           <Icon size={18} />
         </button>
+        </Tooltip>
       ))}
     </div>
   );

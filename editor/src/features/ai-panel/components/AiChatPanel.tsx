@@ -20,6 +20,7 @@ import AiSignInGate from './AiSignInGate';
 import AiVerifyEmailGate from './AiVerifyEmailGate';
 import AgentPicker from './AgentPicker';
 import SessionHistory from './SessionHistory';
+import Tooltip from '../../../components/Tooltip';
 
 function AiChatPanel() {
   const loggedIn = useAuthStore((s) => s.loggedIn);
@@ -67,6 +68,20 @@ function AiChatPanel() {
     resetConversation();
     resetAgentService();
   }
+
+  // The header buttons and the mod+shift+L / mod+shift+H chords must do the
+  // same thing, so the commands dispatch these events rather than duplicating
+  // the handlers. The panel owns `historyOpen`, which a command cannot reach.
+  useEffect(() => {
+    const onNewChat = () => handleNewChat();
+    const onToggleHistory = () => setHistoryOpen((v) => !v);
+    window.addEventListener('ai-new-chat', onNewChat);
+    window.addEventListener('ai-toggle-history', onToggleHistory);
+    return () => {
+      window.removeEventListener('ai-new-chat', onNewChat);
+      window.removeEventListener('ai-toggle-history', onToggleHistory);
+    };
+  }, []);
 
   // Files dragged in from the explorer tree or the tab bar. These are
   // in-webview HTML5 drags, unaffected by Tauri's native interception of OS
@@ -116,22 +131,24 @@ function AiChatPanel() {
       <div className="ai-panel-header">
         <AgentPicker />
         <div className="ai-panel-header-actions">
-          <button
-            className="ai-panel-header-btn"
-            onClick={() => setHistoryOpen((v) => !v)}
-            title="Chat history"
-          >
-            <History size={12} />
-            <span>History</span>
-          </button>
-          <button
-            className="ai-panel-new-chat"
-            onClick={handleNewChat}
-            title="New Chat"
-          >
-            <RotateCcw size={12} />
-            <span>New Chat</span>
-          </button>
+          <Tooltip label="Chat history" commandId="ai.history" side="bottom">
+            <button
+              className="ai-panel-header-btn"
+              onClick={() => setHistoryOpen((v) => !v)}
+            >
+              <History size={12} />
+              <span>History</span>
+            </button>
+          </Tooltip>
+          <Tooltip label="New Chat" commandId="ai.newChat" side="bottom">
+            <button
+              className="ai-panel-new-chat"
+              onClick={handleNewChat}
+            >
+              <RotateCcw size={12} />
+              <span>New Chat</span>
+            </button>
+          </Tooltip>
           <SessionHistory open={historyOpen} onClose={() => setHistoryOpen(false)} />
         </div>
       </div>

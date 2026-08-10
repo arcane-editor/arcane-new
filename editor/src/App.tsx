@@ -948,6 +948,80 @@ function App() {
         useUiStore.getState().setSidebarVisible(true);
       },
     },
+    // The Unity views had no commands at all, so they were mouse-only and
+    // their activity-bar tooltips had no chord to show. mod+shift+d matches
+    // VS Code's Run and Debug; the other two take free letters near their
+    // names (h is Chat History, so Hierarchy takes y).
+    {
+      id: 'view.hierarchy',
+      label: 'Unity Hierarchy',
+      category: 'View',
+      keybinding: 'mod+shift+y',
+      handler: () => {
+        useUiStore.getState().setActiveSidebarView('hierarchy');
+        useUiStore.getState().setSidebarVisible(true);
+      },
+    },
+    {
+      id: 'view.testRunner',
+      label: 'Unity Tests',
+      category: 'View',
+      keybinding: 'mod+shift+u',
+      handler: () => {
+        useUiStore.getState().setActiveSidebarView('test');
+        useUiStore.getState().setSidebarVisible(true);
+      },
+    },
+    {
+      id: 'view.debug',
+      label: 'Run and Debug',
+      category: 'View',
+      keybinding: 'mod+shift+d',
+      handler: () => {
+        useUiStore.getState().setActiveSidebarView('debug');
+        useUiStore.getState().setSidebarVisible(true);
+      },
+    },
+    // AI mode / session shortcuts. Cycling is a no-op mid-run, matching
+    // ModeSelector's own `disabled` — switching mode under a running agent
+    // would change the toolset out from under it.
+    {
+      id: 'ai.cycleMode',
+      label: 'Cycle AI Mode (Ask / Agent / Plan)',
+      category: 'AI',
+      keybinding: 'mod+.',
+      handler: () => {
+        const ai = useAiStore.getState();
+        if (ai.isAgentRunning) return;
+        const order: Array<'ask' | 'agent' | 'plan'> = ['ask', 'agent', 'plan'];
+        const next = order[(order.indexOf(ai.mode) + 1) % order.length];
+        ai.setMode(next);
+        useUiStore.getState().setActiveRightSidebarView('ai-panel');
+        useUiStore.getState().setRightSidebarVisible(true);
+      },
+    },
+    {
+      id: 'ai.newChat',
+      label: 'New Chat',
+      category: 'AI',
+      keybinding: 'mod+shift+l',
+      handler: () => {
+        useUiStore.getState().setActiveRightSidebarView('ai-panel');
+        useUiStore.getState().setRightSidebarVisible(true);
+        window.dispatchEvent(new CustomEvent('ai-new-chat'));
+      },
+    },
+    {
+      id: 'ai.history',
+      label: 'Chat History',
+      category: 'AI',
+      keybinding: 'mod+shift+h',
+      handler: () => {
+        useUiStore.getState().setActiveRightSidebarView('ai-panel');
+        useUiStore.getState().setRightSidebarVisible(true);
+        window.dispatchEvent(new CustomEvent('ai-toggle-history'));
+      },
+    },
     {
       id: 'file.new',
       label: 'New File',

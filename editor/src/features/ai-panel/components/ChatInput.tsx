@@ -89,6 +89,7 @@ function ChatInput() {
     <div className="ai-panel-input-area">
       <div
         className={`ai-panel-composer ${isAgentRunning ? 'is-running' : ''} ${!workspacePath ? 'is-disabled' : ''}`}
+        data-mode={mode}
       >
         {attachmentCount > 0 && <AttachmentBar />}
 
