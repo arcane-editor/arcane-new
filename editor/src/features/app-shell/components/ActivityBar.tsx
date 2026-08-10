@@ -66,6 +66,7 @@ function ActivityBar() {
       {items.map(({ id, icon: Icon, label, commandId }) => (
         <Tooltip key={id} label={label} commandId={commandId}>
           <button
+            data-coach={id}
             className={`activity-bar-icon${activeView === id && sidebarVisible ? ' active' : ''}`}
             onClick={() => {
               const ui = useUiStore.getState();

@@ -6563,3 +6563,67 @@ html, body, #root {
   background: var(--badge-bg);
   color: var(--accent);
 }
+
+/* ── Coach marks ─────────────────────────────────────────────────────────
+   One at a time, once ever, fired by a real event rather than a timer. */
+.coach-mark {
+  position: fixed;
+  z-index: 4200;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: 320px;
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-md);
+  background: var(--surface-container-highest);
+  box-shadow: var(--shadow-3);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  transform: translateY(-50%);
+  animation: coach-mark-in var(--motion-slow) var(--ease-out);
+}
+
+/* A small pointer back to the thing being described. */
+.coach-mark::before {
+  content: '';
+  position: absolute;
+  left: -5px;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  background: var(--surface-container-highest);
+  border-left: 1px solid var(--accent);
+  border-bottom: 1px solid var(--accent);
+  transform: translateY(-50%) rotate(45deg);
+}
+
+.coach-mark-text { flex: 1; }
+.coach-mark-chord {
+  flex-shrink: 0;
+  padding: 1px var(--space-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: var(--text-xs);
+}
+.coach-mark-close {
+  flex-shrink: 0;
+  border: none;
+  background: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: color var(--motion-fast) var(--ease-out);
+}
+.coach-mark-close:hover { color: var(--text-primary); }
+
+@keyframes coach-mark-in {
+  from { opacity: 0; transform: translateY(-50%) translateX(-6px); }
+  to { opacity: 1; transform: translateY(-50%) translateX(0); }
+}
+
+/* The anchor itself pulses once, so the eye is drawn to what is described
+   rather than only to the words. */
+.activity-bar-icon[data-coach] { position: relative; }

@@ -161,6 +161,8 @@ export interface SettingsSchema {
   'ai.edits.applyMode': 'approve' | 'auto';
   'ai.edits.alwaysApproveUnityAssets': boolean;
   'ai.inlineSuggestions.enabled': boolean;
+  /** Contextual one-time hints. See features/app-shell/services/coach-marks.ts */
+  'ui.coachMarks.enabled': boolean;
   'unity.analyzers.enabled': boolean;
   'unity.compileGate.enabled': boolean;
   'unity.lspGate.enabled': boolean;

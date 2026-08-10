@@ -29,6 +29,7 @@ function RightActivityBar() {
       {items.map(({ id, icon: Icon, label, commandId }) => (
         <Tooltip key={id} label={label} commandId={commandId} side="left">
         <button
+          data-coach={id}
           className={`activity-bar-icon${activeView === id && rightSidebarVisible ? ' active' : ''}`}
           onClick={() => {
             const ui = useUiStore.getState();

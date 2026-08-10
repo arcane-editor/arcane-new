@@ -72,6 +72,7 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
       { value: "'Courier New', monospace", label: 'Courier New' },
     ], category: 'Terminal', label: 'Font Family', description: 'System fonts only — web fonts break xterm\'s cell measurement. Each option is previewed in its own face; one not installed on your machine falls back to the next in its stack.' },
   { key: 'terminal.cursorBlink', type: 'boolean', category: 'Terminal', label: 'Cursor Blink', description: 'Controls whether the terminal cursor blinks.' },
+  { key: 'ui.coachMarks.enabled', type: 'boolean', category: 'Editor', label: 'Contextual Tips', description: 'Show a one-time hint the first time a capability becomes relevant — when Unity connects, when you open your first C# file. Each appears at most once.' },
   { key: 'ai.inlineSuggestions.enabled', type: 'boolean', category: 'AI', label: 'Inline suggestions (Tab)', description: 'Ghost-text code suggestions as you type. Accept with Tab.' },
   { key: 'ai.checkpoints.enabled', type: 'boolean', category: 'AI', label: 'Checkpoints', description: 'Snapshot files before the AI writes to them, so you can restore a turn (and everything after it) from the chat timeline.' },
   { key: 'ai.escalation.enabled', type: 'boolean', category: 'AI', label: 'Repair-Triggered Escalation', description: 'When the agent needs 2+ compile/analyzer repairs in a single send, escalate to a stronger model for the rest of that send.' },
