@@ -51,11 +51,14 @@ const lightPlus: ThemeDefinition = {
     'info-bg': 'rgba(49, 107, 205, 0.10)',
     'success': '#388a34',
     // Unity semantics, derived from this theme's own warning / info /
-    // error-border so no new palette decisions are made on its behalf.
+    // text-secondary so no new palette decisions are made on its behalf.
+    // Inspector deliberately does NOT use error-border: a serialized field
+    // is a healthy field, and error-coloured a file full of them reads as a
+    // list of problems.
     'unity-lifecycle': '#bf8803',
     'unity-engine-type': '#316bcd',
-    'unity-inspector': '#cc3333',
-    'unity-inspector-rail': 'rgba(204, 51, 51, 0.06)',
+    'unity-inspector': '#717171',
+    'unity-inspector-rail': 'rgba(113, 113, 113, 0.05)',
     'modal-backdrop': 'rgba(0, 0, 0, 0.18)',
     'modal-shadow': '0 8px 24px rgba(0, 0, 0, 0.16)',
     'scrollbar-thumb': 'rgba(0, 0, 0, 0.16)',

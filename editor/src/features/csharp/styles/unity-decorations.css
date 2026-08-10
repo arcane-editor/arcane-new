@@ -22,18 +22,37 @@
   color: var(--unity-inspector) !important;
 }
 
-/* Whole-line marker: this field reaches the Inspector. */
+/*
+ * Whole-line marker: this field reaches the Inspector.
+ *
+ * The RAIL is the marking; the background is only there to group consecutive
+ * fields into a block, at an alpha low enough to read as a shadow rather than
+ * a highlight. An earlier version used a rose fill at 5% and a full-strength
+ * rose rail, which striped a real MonoBehaviour — six or seven serialized
+ * fields per file — in a colour one step from `error-text`. A healthy field
+ * must never look like a diagnostic.
+ */
 .unity-inspector-line {
   background: var(--unity-inspector-rail);
-  box-shadow: inset 2px 0 0 var(--unity-inspector);
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--unity-inspector) 50%, transparent);
 }
 
-/* Gutter glyph on methods the engine calls. */
+/*
+ * Gutter glyph on methods the engine calls.
+ *
+ * Monaco sizes the glyph-margin element itself, so the pseudo-element needs
+ * explicit box metrics — inheriting `line-height` from the margin container
+ * collapses it and the glyph never paints.
+ */
+.unity-lifecycle-glyph {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .unity-lifecycle-glyph::after {
   content: '▸';
-  display: block;
   color: var(--unity-lifecycle);
-  font-size: 11px;
-  line-height: inherit;
-  text-align: center;
+  font-size: 10px;
+  line-height: 1;
 }

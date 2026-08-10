@@ -61,6 +61,29 @@ function contrast(fg: string, bg: string): number {
   return (hi + 0.05) / (lo + 0.05);
 }
 
+/** CIE Lab. Perceptually uniform, so straight-line distance means something. */
+function toLab(color: string): [number, number, number] | null {
+  const c = parseColor(color);
+  if (!c) return null;
+  const lin = (v: number) => {
+    const s = v / 255;
+    return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+  };
+  const [r, g, b] = [lin(c.r), lin(c.g), lin(c.b)];
+  const X = (0.4124 * r + 0.3576 * g + 0.1805 * b) / 0.95047;
+  const Y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  const Z = (0.0193 * r + 0.1192 * g + 0.9505 * b) / 1.08883;
+  const f = (t: number) => (t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116);
+  return [116 * f(Y) - 16, 500 * (f(X) - f(Y)), 200 * (f(Y) - f(Z))];
+}
+
+/** ΔE76. Below ~6 two colours are not reliably tellable apart. */
+function deltaE(a: string, b: string): number {
+  const A = toLab(a), B = toLab(b);
+  if (!A || !B) return NaN;
+  return Math.hypot(A[0] - B[0], A[1] - B[1], A[2] - B[2]);
+}
+
 /** CIE L* — perceptual lightness, 0 (black) to 100 (white). */
 function lightness(color: string): number {
   const c = parseColor(color);
@@ -205,6 +228,28 @@ describe.each(themes.map((t) => [t.id, t] as const))('%s', (_id, theme) => {
   it('primary button text clears WCAG AA on its own button', () => {
     const r = contrast(theme.ui['button-primary-text'], theme.ui['button-primary-bg']);
     expect(r).toBeGreaterThanOrEqual(4.5);
+  });
+
+  // A serialized field is a HEALTHY field. The first version of this feature
+  // painted `unity-inspector` #D4879A while `error-border` was #C97A8A — ΔE 5.2,
+  // which is under the threshold where two colours are tellable apart at all —
+  // and put it on a tinted whole-line band. A real MonoBehaviour carries six or
+  // seven [SerializeField]s, so every file looked like a list of problems.
+  //
+  // Enforced for all six themes: unlike the syntax-contrast rule this is not
+  // about fidelity to an upstream palette, it is about our own feature not
+  // impersonating a diagnostic.
+  it('does not colour Inspector fields like errors', () => {
+    const failures: string[] = [];
+    for (const err of ['error-border', 'error-text'] as const) {
+      const d = deltaE(theme.ui['unity-inspector'], theme.ui[err]);
+      if (d < 20) {
+        failures.push(
+          `unity-inspector ${theme.ui['unity-inspector']} vs ${err} ${theme.ui[err]} ΔE=${d.toFixed(1)}`,
+        );
+      }
+    }
+    expect(failures).toEqual([]);
   });
 
   it('hover and selected fills are distinguishable from the surfaces they sit on', () => {

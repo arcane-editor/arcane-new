@@ -72,8 +72,15 @@ const arcaneDark: ThemeDefinition = {
     // it comes back — on the handful of methods per file the engine calls.
     'unity-lifecycle': '#E8C97D',
     'unity-engine-type': '#8FBEDA',
-    'unity-inspector': '#D4879A',
-    'unity-inspector-rail': 'rgba(212, 135, 154, 0.05)',
+    // Quiet lavender-grey, NOT rose. "This field reaches the Inspector" is a
+    // neutral fact about a healthy field, and a real .cs file has six or seven
+    // of them — coloured anywhere near `error-text` (#D89AA5) the file reads
+    // as a list of problems. Low chroma keeps it legible without competing
+    // with the six syntax roles.
+    'unity-inspector': '#A79FB8',
+    // A whisper, not a band. See `.unity-inspector-line`: the marking is the
+    // 2px rail; this only groups consecutive fields.
+    'unity-inspector-rail': 'rgba(167, 159, 184, 0.045)',
     'modal-backdrop': 'rgba(8, 7, 14, 0.55)',
     'modal-shadow': '0 16px 48px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.06)',
     'scrollbar-thumb': 'rgba(255, 255, 255, 0.10)',
@@ -107,8 +114,13 @@ const arcaneDark: ThemeDefinition = {
       { token: 'constant', foreground: 'E0A76B' },
       { token: 'parameter', foreground: 'C6C2CE' },
       { token: 'property', foreground: '8FBEDA' },
+      // `tag` keeps the rose: pink tags are the convention in JSX/HTML and
+      // there is no error confusion there. C# attributes do NOT — a .cs file
+      // carries six or seven of them and rose sits one step from `error-text`
+      // (#D89AA5), so they read as a column of alarms. They get the quiet
+      // metadata lavender instead.
       { token: 'tag', foreground: 'D4879A' },
-      { token: 'attribute.name', foreground: 'D4879A' },
+      { token: 'attribute.name', foreground: 'A79FB8' },
       { token: 'attribute.value', foreground: '8FBE7A' },
       { token: 'delimiter', foreground: '8B8798' },
       { token: 'operator', foreground: 'C79BE0' },
@@ -148,7 +160,7 @@ const arcaneDark: ThemeDefinition = {
       { token: 'punctuation.definition.template-expression', foreground: 'C79BE0' },
 
       // --- Decorators ---
-      { token: 'meta.decorator', foreground: 'D4879A' },
+      { token: 'meta.decorator', foreground: 'A79FB8' },
     ],
     colors: {
       'editor.background': '#16151F',
