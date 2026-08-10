@@ -62,7 +62,7 @@ const cardStyle: React.CSSProperties = {
 };
 
 const wordmarkStyle: React.CSSProperties = {
-  fontFamily: "'Geist Variable', 'Geist', system-ui, sans-serif",
+  fontFamily: 'var(--font-display)',
   fontSize: 12,
   fontWeight: 600,
   letterSpacing: '2px',

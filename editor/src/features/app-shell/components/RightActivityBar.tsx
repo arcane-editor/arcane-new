@@ -35,7 +35,7 @@ function RightActivityBar() {
           }}
           title={label}
         >
-          <Icon size={24} />
+          <Icon size={18} />
         </button>
       ))}
     </div>

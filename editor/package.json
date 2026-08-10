@@ -22,10 +22,8 @@
     "eval": "bun tooling/unity-eval/run-eval.ts"
   },
   "dependencies": {
-    "@fontsource-variable/geist": "^5.2.8",
     "@fontsource-variable/geist-mono": "^5.2.7",
-    "@fontsource/inter": "^5.2.8",
-    "@fontsource/jetbrains-mono": "^5.2.8",
+    "@fontsource-variable/instrument-sans": "^5.3.0",
     "@lexical/react": "^0.44.0",
     "@lexical/utils": "^0.44.0",
     "@monaco-editor/react": "^4.7.0",

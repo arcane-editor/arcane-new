@@ -66,7 +66,7 @@ function ActivityBar() {
           }}
           title={label}
         >
-          <Icon size={24} />
+          <Icon size={18} />
           {id === 'source-control' && changedCount > 0 && (
             <span className="activity-bar-badge">
               {changedCount > 99 ? '99+' : changedCount}
@@ -102,14 +102,14 @@ function ActivityBar() {
           }}
           title={terminalChord ? `Terminal (${formatKeybinding(terminalChord)})` : 'Terminal'}
         >
-          <SquareTerminal size={24} />
+          <SquareTerminal size={18} />
         </button>
         <button
           className="activity-bar-icon"
           onClick={() => useCommandsStore.getState().executeCommand('settings.open')}
           title="Settings"
         >
-          <Settings size={24} />
+          <Settings size={18} />
         </button>
       </div>
     </div>

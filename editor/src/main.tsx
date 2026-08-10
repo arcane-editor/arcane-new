@@ -1,4 +1,4 @@
-import '@fontsource-variable/geist/index.css';
+import '@fontsource-variable/instrument-sans/index.css';
 import '@fontsource-variable/geist-mono/index.css';
 import './App.css';
 import React from "react";
