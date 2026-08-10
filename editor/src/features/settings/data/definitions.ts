@@ -10,19 +10,46 @@
 
 import type { SettingsSchema } from '../../../types';
 
+/** An option whose stored value is not fit to show a human. */
+export interface LabelledOption {
+  value: string | number;
+  label: string;
+}
+
+export type SettingOption = string | number | LabelledOption;
+
 export interface SettingDefinition {
   key: keyof SettingsSchema;
   category: string;
   label: string;
   description: string;
-  type: 'boolean' | 'select' | 'number';
-  options?: (string | number)[];
+  /**
+   * `select` renders a plain dropdown whose option values ARE its labels, so
+   * it is only correct for short values. `font` renders each option in the
+   * font it names; `range` renders a slider beside a number input.
+   */
+  type: 'boolean' | 'select' | 'number' | 'font' | 'range';
+  options?: SettingOption[];
   min?: number;
   max?: number;
+  /** `range` only: slider granularity. */
+  step?: number;
+  /** `range` only: unit shown beside the value (e.g. 'px', 'ms'). */
+  unit?: string;
+}
+
+/** Narrow an option to its stored value. */
+export function optionValue(opt: SettingOption): string | number {
+  return typeof opt === 'object' ? opt.value : opt;
+}
+
+/** Narrow an option to what a human should read. */
+export function optionLabel(opt: SettingOption): string {
+  return typeof opt === 'object' ? opt.label : String(opt);
 }
 
 export const SETTING_DEFINITIONS: SettingDefinition[] = [
-  { key: 'editor.fontSize', type: 'number', min: 10, max: 30, category: 'Editor', label: 'Font Size', description: 'Controls the font size in pixels.' },
+  { key: 'editor.fontSize', type: 'range', min: 10, max: 30, step: 1, unit: 'px', category: 'Editor', label: 'Font Size', description: 'Controls the font size in pixels.' },
   { key: 'editor.tabSize', type: 'select', options: [2, 4, 8], category: 'Editor', label: 'Tab Size', description: 'The number of spaces a tab is equal to.' },
   { key: 'editor.wordWrap', type: 'select', options: ['off', 'on', 'wordWrapColumn'], category: 'Editor', label: 'Word Wrap', description: 'Controls how lines should wrap.' },
   { key: 'editor.minimap', type: 'boolean', category: 'Editor', label: 'Minimap', description: 'Controls whether the minimap is shown.' },
@@ -31,16 +58,19 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
   { key: 'editor.bracketPairColorization', type: 'boolean', category: 'Editor', label: 'Bracket Pair Colorization', description: 'Controls whether bracket pair colorization is enabled.' },
   { key: 'editor.renderWhitespace', type: 'select', options: ['none', 'boundary', 'selection', 'all'], category: 'Editor', label: 'Render Whitespace', description: 'Controls how whitespace characters are rendered.' },
   { key: 'editor.autoSave', type: 'select', options: ['off', 'afterDelay', 'onFocusChange'], category: 'Editor', label: 'Auto Save', description: 'Controls auto save of editors.' },
-  { key: 'editor.autoSaveDelay', type: 'number', min: 100, max: 10000, category: 'Editor', label: 'Auto Save Delay', description: 'Controls the delay in ms after which an editor is saved automatically.' },
+  { key: 'editor.autoSaveDelay', type: 'range', min: 100, max: 10000, step: 100, unit: 'ms', category: 'Editor', label: 'Auto Save Delay', description: 'Controls the delay after which an editor is saved automatically.' },
   { key: 'editor.betterComments', type: 'boolean', category: 'Editor', label: 'Better Comments', description: 'Highlight tagged comments (// !, // ?, // *, // //, // TODO:, // FIXME:, // HACK:, // NOTE:) with distinct colors.' },
   { key: 'explorer.autoReveal', type: 'boolean', category: 'Editor', label: 'Auto Reveal Active File', description: 'Automatically expand and select the active file in the Explorer when you switch tabs (manual "Reveal Active File in Explorer" always works regardless of this setting).' },
-  { key: 'terminal.fontSize', type: 'number', min: 8, max: 30, category: 'Terminal', label: 'Font Size', description: 'Controls the font size of the terminal.' },
-  { key: 'terminal.fontFamily', type: 'select', options: [
-      'ui-monospace, SFMono-Regular, Menlo, Monaco, \'Cascadia Mono\', \'Courier New\', monospace',
-      'Menlo, Monaco, monospace',
-      'Monaco, monospace',
-      "'Courier New', monospace",
-    ], category: 'Terminal', label: 'Font Family', description: 'Controls the font family of the terminal. System fonts only — web fonts cause cell-measurement issues in xterm.' },
+  { key: 'terminal.fontSize', type: 'range', min: 8, max: 30, step: 1, unit: 'px', category: 'Terminal', label: 'Font Size', description: 'Controls the font size of the terminal.' },
+  { key: 'terminal.fontFamily', type: 'font', options: [
+      { value: 'ui-monospace, SFMono-Regular, Menlo, Monaco, \'Cascadia Mono\', \'Courier New\', monospace', label: 'System Monospace' },
+      { value: 'Menlo, Monaco, monospace', label: 'Menlo' },
+      { value: 'Monaco, monospace', label: 'Monaco' },
+      { value: "'Cascadia Mono', 'Cascadia Code', monospace", label: 'Cascadia Mono' },
+      { value: "'Consolas', monospace", label: 'Consolas' },
+      { value: "'JetBrains Mono', monospace", label: 'JetBrains Mono' },
+      { value: "'Courier New', monospace", label: 'Courier New' },
+    ], category: 'Terminal', label: 'Font Family', description: 'System fonts only — web fonts break xterm\'s cell measurement. Each option is previewed in its own face; one not installed on your machine falls back to the next in its stack.' },
   { key: 'terminal.cursorBlink', type: 'boolean', category: 'Terminal', label: 'Cursor Blink', description: 'Controls whether the terminal cursor blinks.' },
   { key: 'ai.inlineSuggestions.enabled', type: 'boolean', category: 'AI', label: 'Inline suggestions (Tab)', description: 'Ghost-text code suggestions as you type. Accept with Tab.' },
   { key: 'ai.checkpoints.enabled', type: 'boolean', category: 'AI', label: 'Checkpoints', description: 'Snapshot files before the AI writes to them, so you can restore a turn (and everything after it) from the chat timeline.' },

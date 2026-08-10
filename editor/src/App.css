@@ -5995,3 +5995,104 @@ html, body, #root {
   opacity: 0.75;
   transition: background var(--motion-base) var(--ease-out);
 }
+
+/* ── Settings: font picker, range, terminal preview ──────────────────────
+   The font control was a native <select> over raw CSS stacks, so its label
+   was the stack itself. Seeing the face is also the only way to tell whether
+   a font is installed — a missing one silently falls through its stack. */
+.settings-font-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-width: 180px;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: border-color var(--motion-fast) var(--ease-out);
+}
+.settings-font-trigger:hover { border-color: var(--accent); }
+.settings-font-trigger-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.settings-font-menu {
+  z-index: 3200;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: var(--space-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-container-highest);
+  box-shadow: var(--shadow-3);
+  animation: app-tooltip-in var(--motion-fast) var(--ease-out);
+}
+
+.settings-font-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+.settings-font-option:hover { background: var(--hover); }
+.settings-font-option.is-selected { color: var(--accent); }
+.settings-font-option-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.settings-font-option-name { font-size: var(--text-sm); }
+.settings-font-option-sample {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  letter-spacing: 0.04em;
+}
+
+.settings-range { display: flex; align-items: center; gap: var(--space-2); }
+.settings-range-slider { width: 120px; accent-color: var(--accent); cursor: pointer; }
+.settings-range-number { width: 68px; }
+.settings-range-unit { font-size: var(--text-xs); color: var(--text-secondary); }
+
+.settings-terminal-preview {
+  margin: 0 0 var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--bg-primary);
+}
+.settings-terminal-preview-chrome {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  background: var(--bg-sidebar);
+  border-bottom: 1px solid var(--border);
+}
+.settings-terminal-preview-dot {
+  width: 8px; height: 8px;
+  border-radius: var(--radius-full);
+  background: var(--success);
+}
+.settings-terminal-preview-title {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.settings-terminal-preview-body {
+  margin: 0;
+  padding: var(--space-3);
+  color: var(--text-primary);
+  line-height: 1.5;
+  white-space: pre;
+  overflow-x: auto;
+}
+.settings-terminal-preview-prompt { color: var(--accent); }
+.settings-terminal-preview-ok { color: var(--success); }
+.settings-terminal-preview-err { color: var(--error-text); }
