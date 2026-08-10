@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { Plus, X, Eraser, Trash2, SquareSplitHorizontal } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { Allotment } from 'allotment';
@@ -33,12 +33,23 @@ function RichTerminalPanel({ isVisible }: RichTerminalPanelProps) {
   const splitTerminal = useTerminalStore((s) => s.splitTerminal);
   const workspacePath = useWorkspaceStore((s) => s.workspacePath);
 
-  // Auto-spawn the first session on first reveal of the terminal tab (not on
-  // mount — see isVisible doc above).
+  // Auto-spawn the first session on first REVEAL of the terminal tab (not on
+  // mount — see isVisible doc above), and only once per reveal.
+  //
+  // Keyed on `groups.length` this fired again the moment the user closed their
+  // last terminal, instantly respawning a shell — the panel could not be
+  // emptied, and "close" appeared not to work. Auto-spawn is about arriving at
+  // an empty panel, not about it becoming empty.
+  const spawnedForThisReveal = useRef(false);
   useEffect(() => {
-    if (isVisible && groups.length === 0 && workspacePath) {
-      createTerminal(workspacePath);
+    if (!isVisible) {
+      spawnedForThisReveal.current = false;
+      return;
     }
+    if (spawnedForThisReveal.current) return;
+    if (groups.length > 0 || !workspacePath) return;
+    spawnedForThisReveal.current = true;
+    createTerminal(workspacePath);
   }, [isVisible, groups.length, workspacePath, createTerminal]);
 
   // Tab switches (clicking a tab, closing the active tab/pane, splitting)

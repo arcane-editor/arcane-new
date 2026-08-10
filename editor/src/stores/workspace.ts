@@ -23,6 +23,8 @@ import { useGitStore } from './git';
 import { useUiStore } from './ui';
 import { useProjectContextStore } from './project-context';
 import { useTerminalStore } from './terminal';
+import { useUnityStore } from './unity';
+import { useUnitySceneStore } from './unity-scene';
 import { useAiStore } from './ai';
 import { useGraphifyStore } from './graphify';
 import { useSearchStore } from './search';
@@ -894,6 +896,12 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     await invoke('stop_file_watcher').catch((err) => {
       console.warn('[Workspace] stop_file_watcher failed:', err);
     });
+
+    // Drop the previous project's Unity state. Console history and the last
+    // compile report used to survive the switch, so project A's errors were
+    // presented as project B's.
+    useUnityStore.getState().resetForWorkspaceChange();
+    useUnitySceneStore.getState().reset();
 
     // Kill terminals from the previous workspace — their cwd is stale and
     // they shouldn't bleed into the new project's terminal panel.

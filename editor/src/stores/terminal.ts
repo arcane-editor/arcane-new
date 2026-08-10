@@ -45,6 +45,13 @@ function pickGroups(g: GroupsState): GroupsState {
   return { groups: g.groups, activeGroupId: g.activeGroupId, activeTerminalId: g.activeTerminalId };
 }
 
+/**
+ * True while the FIRST terminal of a session is being spawned. See
+ * `createTerminal` — two callers racing on an empty list is what produced two
+ * tabs from one keypress.
+ */
+let firstSpawnInFlight = false;
+
 export const useTerminalStore = create<TerminalState>((set, get) => ({
   terminals: [],
   groups: [],
@@ -52,6 +59,15 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   activeTerminalId: null,
 
   createTerminal: async (cwd: string, shell?: string) => {
+    // `terminal_spawn` is async, so two callers that both saw an empty list —
+    // the toggle command and the panel's auto-spawn effect, on the very first
+    // reveal — would each spawn a shell and the user would get two tabs from
+    // one keypress. The first spawn is the only one that can race this way, so
+    // that is the one gated.
+    if (firstSpawnInFlight && get().terminals.length === 0) return null;
+    const isFirst = get().terminals.length === 0;
+    if (isFirst) firstSpawnInFlight = true;
+
     let id: number;
     try {
       id = await invoke<number>('terminal_spawn', {
@@ -61,8 +77,11 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
         cols: 80,
       });
     } catch (err) {
+      firstSpawnInFlight = false;
       notify.error(`Failed to spawn terminal: ${err}`);
       return null;
+    } finally {
+      if (isFirst) firstSpawnInFlight = false;
     }
 
     const shellName = (shell ?? detect_shell_name()).split('/').pop() ?? 'terminal';

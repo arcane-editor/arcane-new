@@ -641,13 +641,11 @@ function App() {
         const ui = useUiStore.getState();
         const wasVisible = ui.bottomPanelVisible;
         ui.toggleBottomPanel();
-        if (!wasVisible) {
-          const termStore = useTerminalStore.getState();
-          const wp = useWorkspaceStore.getState().workspacePath;
-          if (termStore.terminals.length === 0 && wp) {
-            termStore.createTerminal(wp);
-          }
-        }
+        // Deliberately does NOT spawn. RichTerminalPanel auto-spawns on reveal
+        // and is the single owner of that; both doing it meant one keypress
+        // produced two shells, because terminal_spawn is async and each saw an
+        // empty list. Revealing the panel is enough.
+        if (!wasVisible) ui.setActiveBottomTab('terminal');
       },
     },
     {

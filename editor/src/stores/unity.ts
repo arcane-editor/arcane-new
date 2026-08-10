@@ -63,6 +63,14 @@ interface UnityState {
   sendStop: () => Promise<void>;
   sendStep: () => Promise<void>;
   clearLogs: () => void;
+  /**
+   * Drop everything that belongs to the project being left.
+   *
+   * Console history and the last compile report survived a workspace switch,
+   * so project A's errors and stack traces were shown as project B's — and
+   * clicking one navigated into a file that is not in the open project.
+   */
+  resetForWorkspaceChange: () => void;
   /** Reconcile the UI against the backend's actual connection state. */
   syncStatus: () => Promise<void>;
   setupListeners: () => Promise<void>;
@@ -176,6 +184,18 @@ export const useUnityStore = create<UnityState>((set, get) => ({
   },
 
   clearLogs: () => set({ logs: [] }),
+
+  resetForWorkspaceChange: () =>
+    set({
+      logs: [],
+      lastCompilation: null,
+      playState: 'Stopped',
+      isCompiling: false,
+      projectInfo: null,
+      packageStale: false,
+      // `connected` and the listeners are owned by the IPC lifecycle, which
+      // setWorkspace restarts separately — clearing them here would race it.
+    }),
 
   syncStatus: async () => {
     let status: { connected: boolean; running: boolean };

@@ -29,6 +29,43 @@ namespace Arcane.Bridge
         {
             _client = client;
             RpcDispatcher.Register("runTests", RunTests);
+            EnsureCallbacks();
+        }
+
+        /// <summary>
+        /// Register the TestRunnerApi callbacks, creating them if needed.
+        /// </summary>
+        /// <remarks>
+        /// This MUST happen at load time, not lazily inside RunTests.
+        ///
+        /// Entering Play Mode performs a domain reload with default project
+        /// settings. That fires beforeAssemblyReload, which calls Shutdown(),
+        /// which unregisters the callbacks and nulls them. Creating them only
+        /// inside RunTests meant that after the reload nothing re-registered
+        /// them — so a PlayMode run's testStarted / testFinished / runFinished
+        /// never reached the IDE. The tests really ran in Unity while Arcane's
+        /// Tests panel sat at "Running 0/12" forever, with no way to clear it,
+        /// because run.active is only ever set false by the runFinished branch.
+        ///
+        /// Register() runs again after every domain reload, so doing it here
+        /// is what makes the post-reload half of a PlayMode run observable.
+        /// </remarks>
+        private static void EnsureCallbacks()
+        {
+            if (_api != null && _callbacks != null) return;
+            try
+            {
+                _api = UnityEngine.ScriptableObject.CreateInstance<TestRunnerApi>();
+                _callbacks = new BridgeTestCallbacks(_client);
+                _api.RegisterCallbacks(_callbacks);
+            }
+            catch
+            {
+                // A failure here must not take the whole bridge down with it;
+                // the Tests panel degrades to "not available" instead.
+                _api = null;
+                _callbacks = null;
+            }
         }
 
         public static void Tick() { /* TestRunnerApi fires callbacks on the main thread; nothing to pump. */ }
@@ -50,11 +87,15 @@ namespace Arcane.Bridge
             string mode = p["mode"].AsStringOr("EditMode");
             string filter = p["filter"].AsString;
 
+            // Normally already registered by Register(); this covers a bridge
+            // that reconnected without a domain reload in between.
+            EnsureCallbacks();
             if (_api == null)
             {
-                _api = UnityEngine.ScriptableObject.CreateInstance<TestRunnerApi>();
-                _callbacks = new BridgeTestCallbacks(_client);
-                _api.RegisterCallbacks(_callbacks);
+                var err = JsonValue.NewObject();
+                err["ok"] = false;
+                err["reason"] = "Unity's test runner is unavailable.";
+                return err;
             }
 
             var f = new Filter
