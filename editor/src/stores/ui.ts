@@ -10,7 +10,9 @@ export type DiffViewMode = 'semantic' | 'text';
 /** How the Source Control panel groups changed files: flat list, or by folder. */
 export type ScmViewMode = 'list' | 'tree';
 export type RightSidebarView = 'ai-panel' | 'unity-inspector';
-export type BottomPanelTab = 'terminal' | 'problems' | 'output' | 'unity-console';
+// 'output' removed: the tab existed and was selectable, but nothing in the
+// codebase could ever write to it — it rendered a permanent "No output".
+export type BottomPanelTab = 'terminal' | 'problems' | 'unity-console';
 export type LspStatus = 'idle' | 'starting' | 'indexing' | 'ready' | 'error';
 
 // DiagnosticSource is defined in ../types and re-exported here for consumers

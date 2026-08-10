@@ -41,7 +41,6 @@ function BottomPanel() {
     { id: 'terminal', label: 'Terminal' },
     ...(isUnityProject ? [{ id: 'unity-console' as BottomPanelTab, label: 'Unity Console' }] : []),
     { id: 'problems', label: 'Problems' },
-    { id: 'output', label: 'Output' },
   ];
 
   // The stored active tab may be one that isn't available in the current
@@ -102,9 +101,6 @@ function BottomPanel() {
         </div>
         {effectiveTab === 'unity-console' && <UnityConsolePanel />}
         {effectiveTab === 'problems' && <ProblemsPanel />}
-        {effectiveTab === 'output' && (
-          <div className="panel-stub">No output</div>
-        )}
       </div>
     </div>
   );

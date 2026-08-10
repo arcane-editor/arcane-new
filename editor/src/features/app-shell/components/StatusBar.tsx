@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { AlertCircle, AlertTriangle, Boxes, CheckCircle, Circle, GitBranch, LoaderCircle } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { openPath } from '@tauri-apps/plugin-opener';
@@ -16,6 +16,7 @@ import { TelemetryStatusItem } from '../../unity-telemetry';
 import { UnityBridgeStatusItem } from '../../unity-bridge';
 import { InlineSuggestStatusItem } from '../../inline-suggest';
 import { detectLanguage } from '../../../utils/language-detect';
+import { getDocumentInfo } from '../../editor';
 
 async function openLspTrace() {
   try {
@@ -37,8 +38,15 @@ function StatusBar() {
   const cursorPosition = useUiStore((s) => s.cursorPosition);
   const diagnosticCounts = useUiStore((s) => s.diagnosticCounts);
   const isUnityProject = useProjectContextStore((s) => s.isUnityProject);
-  const unityConnected = useUnityStore((s) => s.connected);
   const unityCompiling = useUnityStore((s) => s.isCompiling);
+
+  // Recomputed on file switch and on every cursor move. cursorPosition already
+  // updates on edits and tab switches, so it is the cheapest correct trigger:
+  // Monaco owns indentation/EOL and there is no store mirror of them.
+  const docInfo = useMemo(
+    () => getDocumentInfo(activeFilePath),
+    [activeFilePath, cursorPosition],
+  );
   const isGitRepo = useGitStore((s) => s.isGitRepo);
   const branch = useGitStore((s) => s.branch);
   const credits = useAuthStore((s) => s.credits);
@@ -190,20 +198,17 @@ function StatusBar() {
           </span>
         )}
 
-        <span className="status-bar-item">Spaces: 4</span>
-        <span className="status-bar-item">UTF-8</span>
-        <span className="status-bar-item">LF</span>
+        {/* Derived from the live Monaco model. These were the literals
+            `Spaces: 4` / `UTF-8` / `LF`, which said Spaces on a tab-indented
+            file and LF on a CRLF one. Encoding is gone entirely: the backend
+            reads and writes UTF-8 only, so the value could never vary. */}
+        {docInfo && (
+          <>
+            <span className="status-bar-item">{docInfo.indent}</span>
+            <span className="status-bar-item">{docInfo.eol}</span>
+          </>
+        )}
 
-        <span className="status-bar-item" title={unityConnected ? 'Connected to Unity' : 'Disconnected from Unity'}>
-          <span style={{
-            display: 'inline-block',
-            width: 8,
-            height: 8,
-            borderRadius: '50%',
-            background: unityConnected ? 'var(--success)' : 'var(--error-text)',
-          }} />
-          <span>{unityConnected ? 'Connected' : 'Disconnected'}</span>
-        </span>
 
         {!workspacePath && (
           <span className="status-bar-item">No folder open</span>
