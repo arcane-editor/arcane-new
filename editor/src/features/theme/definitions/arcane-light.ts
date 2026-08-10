@@ -64,6 +64,12 @@ const arcaneLight: ThemeDefinition = {
     'info': '#3A6680',
     'info-bg': 'rgba(58, 102, 128, 0.08)',
     'success': '#4F6B3A',
+    // Unity semantics, in Light's own ink — burnt umber for what the engine
+    // calls, slate for engine types, iron-rust for what reaches the Inspector.
+    'unity-lifecycle': '#8A5A12',
+    'unity-engine-type': '#2F5A73',
+    'unity-inspector': '#8F3324',
+    'unity-inspector-rail': 'rgba(143, 51, 36, 0.06)',
     'modal-backdrop': 'rgba(42, 38, 34, 0.30)',
     'modal-shadow': '0 8px 32px rgba(42, 38, 34, 0.12), 0 0 0 1px rgba(42, 38, 34, 0.06)',
     'scrollbar-thumb': 'rgba(42, 38, 34, 0.16)',

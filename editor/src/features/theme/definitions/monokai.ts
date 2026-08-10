@@ -50,6 +50,12 @@ const monokai: ThemeDefinition = {
     'info': '#66d9ef',
     'info-bg': 'rgba(102, 217, 239, 0.12)',
     'success': '#a6e22e',
+    // Unity semantics, derived from this theme's own warning / info /
+    // error-border so no new palette decisions are made on its behalf.
+    'unity-lifecycle': '#e6db74',
+    'unity-engine-type': '#66d9ef',
+    'unity-inspector': '#f92672',
+    'unity-inspector-rail': 'rgba(249, 38, 114, 0.06)',
     'modal-backdrop': 'rgba(39, 40, 34, 0.65)',
     'modal-shadow': '0 8px 24px rgba(0, 0, 0, 0.55)',
     'scrollbar-thumb': 'rgba(166, 226, 46, 0.20)',

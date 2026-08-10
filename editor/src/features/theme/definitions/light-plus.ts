@@ -50,6 +50,12 @@ const lightPlus: ThemeDefinition = {
     'info': '#316bcd',
     'info-bg': 'rgba(49, 107, 205, 0.10)',
     'success': '#388a34',
+    // Unity semantics, derived from this theme's own warning / info /
+    // error-border so no new palette decisions are made on its behalf.
+    'unity-lifecycle': '#bf8803',
+    'unity-engine-type': '#316bcd',
+    'unity-inspector': '#cc3333',
+    'unity-inspector-rail': 'rgba(204, 51, 51, 0.06)',
     'modal-backdrop': 'rgba(0, 0, 0, 0.18)',
     'modal-shadow': '0 8px 24px rgba(0, 0, 0, 0.16)',
     'scrollbar-thumb': 'rgba(0, 0, 0, 0.16)',

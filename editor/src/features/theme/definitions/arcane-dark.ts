@@ -68,6 +68,12 @@ const arcaneDark: ThemeDefinition = {
     'info': '#7B9CB5',
     'info-bg': 'rgba(123, 156, 181, 0.10)',
     'success': '#7DA66B',
+    // Unity semantics. Gold is absent from `monaco.rules` now; this is where
+    // it comes back — on the handful of methods per file the engine calls.
+    'unity-lifecycle': '#E8C97D',
+    'unity-engine-type': '#8FBEDA',
+    'unity-inspector': '#D4879A',
+    'unity-inspector-rail': 'rgba(212, 135, 154, 0.05)',
     'modal-backdrop': 'rgba(8, 7, 14, 0.55)',
     'modal-shadow': '0 16px 48px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.06)',
     'scrollbar-thumb': 'rgba(255, 255, 255, 0.10)',

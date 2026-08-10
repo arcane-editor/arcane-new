@@ -50,6 +50,12 @@ const darkPlus: ThemeDefinition = {
     'info': '#75beff',
     'info-bg': 'rgba(117, 190, 255, 0.12)',
     'success': '#73c991',
+    // Unity semantics, derived from this theme's own warning / info /
+    // error-border so no new palette decisions are made on its behalf.
+    'unity-lifecycle': '#cca700',
+    'unity-engine-type': '#75beff',
+    'unity-inspector': '#cc3333',
+    'unity-inspector-rail': 'rgba(204, 51, 51, 0.06)',
     'modal-backdrop': 'rgba(0, 0, 0, 0.55)',
     'modal-shadow': '0 8px 24px rgba(0, 0, 0, 0.45)',
     'scrollbar-thumb': 'rgba(255, 255, 255, 0.10)',

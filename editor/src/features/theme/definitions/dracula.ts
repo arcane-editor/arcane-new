@@ -50,6 +50,12 @@ const dracula: ThemeDefinition = {
     'info': '#8be9fd',
     'info-bg': 'rgba(139, 233, 253, 0.12)',
     'success': '#50fa7b',
+    // Unity semantics, derived from this theme's own warning / info /
+    // error-border so no new palette decisions are made on its behalf.
+    'unity-lifecycle': '#f1fa8c',
+    'unity-engine-type': '#8be9fd',
+    'unity-inspector': '#ff5555',
+    'unity-inspector-rail': 'rgba(255, 85, 85, 0.06)',
     'modal-backdrop': 'rgba(33, 34, 44, 0.65)',
     'modal-shadow': '0 8px 24px rgba(0, 0, 0, 0.55)',
     'scrollbar-thumb': 'rgba(189, 147, 249, 0.20)',

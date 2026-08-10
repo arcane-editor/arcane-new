@@ -57,6 +57,9 @@ export interface UiColors {
   'scrollbar-thumb': string;
   'scrollbar-thumb-hover': string;
   'focus-ring': string;
+  /** Tints the line behind an Inspector-facing field. Composited over the
+   *  editor background, so it must stay translucent. */
+  'unity-inspector-rail': string;
 
   // ── CONTENT (alpha free) ──────────────────────────────────────────
   'text-primary': string;
@@ -87,6 +90,15 @@ export interface UiColors {
   'warning': string;
   'info': string;
   'success': string;
+  /** A method the engine calls — Awake, Update, OnTriggerEnter. Gold in the
+   *  Arcane themes: this is the accent's one job inside the editor. */
+  'unity-lifecycle': string;
+  /** A UnityEngine type — MonoBehaviour, Vector3, Time — as distinct from a
+   *  type the user wrote. */
+  'unity-engine-type': string;
+  /** An attribute that surfaces a field in the Inspector — [SerializeField],
+   *  [Header], [Range]. */
+  'unity-inspector': string;
   'button-primary-bg': string;
   'button-primary-text': string;
   'button-primary-hover': string;
