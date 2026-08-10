@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { notify } from '../../../stores/notifications';
 
 function isMetaFile(path: string): boolean {
   return path.endsWith('.meta');
@@ -30,12 +31,34 @@ export async function readMetaGuid(path: string): Promise<string | null> {
   }
 }
 
-/** Rename the companion .meta file alongside a renamed asset (silently fails if none exists). */
+/**
+ * Rename the companion `.meta` alongside a renamed asset.
+ *
+ * A missing sidecar is fine and silent — plenty of files have none. Any OTHER
+ * failure is not: the asset has already been renamed, so a meta left behind
+ * orphans the asset's GUID and every scene and prefab reference to it. That
+ * was previously swallowed by the same catch as "no meta here", on the
+ * assumption that absence is the only way this can fail.
+ */
 export async function coRenameMeta(oldPath: string, newPath: string): Promise<void> {
   if (isMetaFile(oldPath)) return;
+  const from = getMetaPath(oldPath);
+
+  let exists = false;
   try {
-    await invoke('rename_path', { oldPath: getMetaPath(oldPath), newPath: getMetaPath(newPath) });
+    exists = await invoke<boolean>('path_exists', { path: from });
   } catch {
-    // .meta file doesn't exist — that's fine
+    // Cannot tell — attempt the rename and let its own error decide.
+    exists = true;
+  }
+  if (!exists) return;
+
+  try {
+    await invoke('rename_path', { oldPath: from, newPath: getMetaPath(newPath) });
+  } catch (err) {
+    notify.error(
+      `Renamed the asset but not its .meta — Unity will treat it as a new file and ` +
+        `references to it may break. ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
 }

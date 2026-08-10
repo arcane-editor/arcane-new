@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 import { dapClient } from '../features/debugger';
 import { useWorkspaceStore } from './workspace';
-import { useNotificationsStore } from './notifications';
+import { useNotificationsStore, notify } from './notifications';
 import { useUnityStore } from './unity';
 import { bridgeRpc } from '../features/unity-bridge';
 
@@ -305,8 +305,14 @@ async function syncBreakpointsForFile(file: string, list: Breakpoint[]): Promise
       source: { path: file, name: file.split('/').pop() },
       breakpoints: list.map((b) => ({ line: b.line, condition: b.condition, hitCondition: b.hitCondition })),
     });
-  } catch {
-    /* ignore */
+  } catch (err) {
+    // A breakpoint the adapter never received is indistinguishable, in the
+    // gutter, from one it accepted — the user sets it, sees the red dot, runs,
+    // and it simply never hits. Say so rather than reporting success.
+    notify.error(
+      `Could not set breakpoints in ${file.split('/').pop() ?? file}: ` +
+        (err instanceof Error ? err.message : String(err)),
+    );
   }
 }
 
