@@ -192,6 +192,58 @@ describe.each(themes.map((t) => [t.id, t] as const))('%s', (_id, theme) => {
   });
 });
 
+// ─── syntax contrast ─────────────────────────────────────────────────
+//
+// The `ui` contrast tests above have existed for a while. `monaco.rules` and
+// `monaco.colors` never had any, which is how `comment` sat at 2.72:1 in
+// arcane-dark and 2.75:1 in arcane-light through a green suite — roughly 40%
+// of a typical C# file rendered below the AA floor.
+//
+// Enforced for the Arcane themes ONLY. The other four are faithful ports and
+// their palettes are upstream's decision, not ours; an audit at the time of
+// writing found monokai with 11 rules under 4.5:1 (its signature #F92672 sits
+// at 3.93) and dracula's canonical comment blue #6272A4 at 3.03. Holding them
+// to AA would mean not shipping Monokai or Dracula.
+const CONTRAST_ENFORCED = new Set(['arcane-dark']);
+
+const enforced = themes.filter((t) => CONTRAST_ENFORCED.has(t.id));
+
+describe.each(enforced.map((t) => [t.id, t] as const))('%s syntax contrast', (_id, theme) => {
+  const bg = theme.monaco.colors['editor.background'];
+
+  it('declares an editor background to measure against', () => {
+    expect(parseColor(bg)).not.toBeNull();
+  });
+
+  // `monaco.rules` foregrounds are bare hex with no leading '#'.
+  it('every syntax rule clears WCAG AA on the editor background', () => {
+    const failures = theme.monaco.rules
+      .filter((r) => r.foreground)
+      .map((r) => [r.token, `#${r.foreground!.replace(/^#/, '')}`] as const)
+      .map(([token, fg]) => [token, fg, contrast(fg, bg)] as const)
+      .filter(([, , ratio]) => ratio < 4.5)
+      .map(([token, fg, ratio]) => `${token}=${fg} ${ratio.toFixed(2)}`);
+    expect([...new Set(failures)]).toEqual([]);
+  });
+
+  // Line numbers are supporting UI, not body copy: 3:1, not 4.5:1.
+  it('line numbers clear the 3:1 non-text floor', () => {
+    const failures: string[] = [];
+    for (const key of ['editorLineNumber.foreground', 'editorLineNumber.activeForeground']) {
+      const fg = theme.monaco.colors[key];
+      if (!fg) continue;
+      const ratio = contrast(fg, bg);
+      if (ratio < 3) failures.push(`${key}=${fg} ${ratio.toFixed(2)}`);
+    }
+    expect(failures).toEqual([]);
+  });
+
+  it('terminal text clears WCAG AA on the terminal background', () => {
+    const ratio = contrast(theme.terminal.foreground, theme.terminal.background);
+    expect(ratio).toBeGreaterThanOrEqual(4.5);
+  });
+});
+
 // ─── stylesheet references must resolve ──────────────────────────────
 
 function sourceFiles(dir: string, out: string[] = []): string[] {

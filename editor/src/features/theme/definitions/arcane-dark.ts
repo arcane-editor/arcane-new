@@ -79,59 +79,63 @@ const arcaneDark: ThemeDefinition = {
     base: 'vs-dark',
     inherit: true,
     rules: [
-      // --- Original 16 rules ---
-      { token: 'comment', foreground: '5C5965', fontStyle: 'italic' },
-      { token: 'keyword', foreground: 'D4B062' },
-      { token: 'string', foreground: '7DA66B' },
-      { token: 'number', foreground: 'E8C97D' },
-      { token: 'type', foreground: '7B9CB5' },
-      { token: 'function', foreground: 'E8C97D' },
-      { token: 'variable', foreground: 'E2E0DA' },
-      { token: 'constant', foreground: 'E8C97D' },
-      { token: 'parameter', foreground: 'C9C5B8' },
-      { token: 'property', foreground: '7B9CB5' },
-      { token: 'tag', foreground: 'C97A8A' },
-      { token: 'attribute.name', foreground: 'D4B062' },
-      { token: 'attribute.value', foreground: '7DA66B' },
-      { token: 'delimiter', foreground: '7E7B86' },
-      { token: 'operator', foreground: 'D4B062' },
-      { token: 'regexp', foreground: '7DA66B' },
+      // Six roles, each with its own hue. Gold is deliberately absent: it is
+      // the chrome accent, and it used to resolve eight of these tokens at
+      // once, which is why `public` and `Awake` were nearly the same colour.
+      // It returns only via the Unity decoration layer, on the ~4 identifiers
+      // per file the engine actually calls.
+      { token: 'comment', foreground: '827E94', fontStyle: 'italic' },
+      { token: 'keyword', foreground: 'C79BE0' },
+      { token: 'string', foreground: '8FBE7A' },
+      { token: 'number', foreground: 'E0A76B' },
+      { token: 'type', foreground: '8FBEDA' },
+      { token: 'function', foreground: '7FD1C4' },
+      { token: 'variable', foreground: 'DCD9E4' },
+      { token: 'constant', foreground: 'E0A76B' },
+      { token: 'parameter', foreground: 'C6C2CE' },
+      { token: 'property', foreground: '8FBEDA' },
+      { token: 'tag', foreground: 'D4879A' },
+      { token: 'attribute.name', foreground: 'D4879A' },
+      { token: 'attribute.value', foreground: '8FBE7A' },
+      { token: 'delimiter', foreground: '8B8798' },
+      { token: 'operator', foreground: 'C79BE0' },
+      { token: 'regexp', foreground: '8FBE7A' },
 
       // --- Keywords & Storage ---
-      { token: 'keyword.control', foreground: 'D4B062', fontStyle: 'italic' },
-      { token: 'keyword.operator.new', foreground: 'D4B062' },
-      { token: 'keyword.operator.expression', foreground: 'D4B062' },
-      { token: 'storage', foreground: 'D4B062' },
-      { token: 'storage.type', foreground: '7B9CB5' },
-      { token: 'storage.modifier', foreground: 'D4B062' },
+      { token: 'keyword.control', foreground: 'C79BE0', fontStyle: 'italic' },
+      { token: 'keyword.operator.new', foreground: 'C79BE0' },
+      { token: 'keyword.operator.expression', foreground: 'C79BE0' },
+      { token: 'storage', foreground: 'C79BE0' },
+      { token: 'storage.type', foreground: '8FBEDA' },
+      { token: 'storage.modifier', foreground: 'C79BE0' },
 
       // --- Variables & Constants ---
-      { token: 'variable.language', foreground: 'C97A8A', fontStyle: 'italic' },
-      { token: 'variable.other.constant', foreground: 'E8C97D' },
-      { token: 'constant.language', foreground: 'D4B062' },
+      { token: 'variable.language', foreground: 'D4879A', fontStyle: 'italic' },
+      { token: 'variable.other.constant', foreground: 'E0A76B' },
+      { token: 'constant.language', foreground: 'C79BE0' },
 
       // --- Entities & Support ---
-      { token: 'entity.name.function', foreground: 'E8C97D' },
-      { token: 'entity.name.class', foreground: '7B9CB5' },
-      { token: 'entity.name.type', foreground: '7B9CB5' },
-      { token: 'support.function', foreground: 'E8C97D' },
-      { token: 'support.class', foreground: '7B9CB5' },
-      { token: 'support.type', foreground: '7B9CB5' },
+      { token: 'entity.name.function', foreground: '7FD1C4' },
+      { token: 'entity.name.class', foreground: '8FBEDA' },
+      { token: 'entity.name.type', foreground: '8FBEDA' },
+      { token: 'support.function', foreground: '7FD1C4' },
+      { token: 'support.class', foreground: '8FBEDA' },
+      { token: 'support.type', foreground: '8FBEDA' },
 
       // --- JSX/TSX ---
-      { token: 'entity.name.tag', foreground: 'C97A8A' },
-      { token: 'support.class.component', foreground: '7B9CB5' },
+      { token: 'entity.name.tag', foreground: 'D4879A' },
+      { token: 'support.class.component', foreground: '8FBEDA' },
 
       // --- Punctuation & Delimiters ---
-      { token: 'meta.brace.round', foreground: '7E7B86' },
-      { token: 'meta.brace.square', foreground: '7E7B86' },
-      { token: 'meta.brace.curly', foreground: 'D4B062' },
-      { token: 'punctuation.separator', foreground: '7E7B86' },
-      { token: 'string.template', foreground: '7DA66B' },
-      { token: 'punctuation.definition.template-expression', foreground: 'D4B062' },
+      { token: 'meta.brace.round', foreground: '8B8798' },
+      { token: 'meta.brace.square', foreground: '8B8798' },
+      { token: 'meta.brace.curly', foreground: 'C79BE0' },
+      { token: 'punctuation.separator', foreground: '8B8798' },
+      { token: 'string.template', foreground: '8FBE7A' },
+      { token: 'punctuation.definition.template-expression', foreground: 'C79BE0' },
 
       // --- Decorators ---
-      { token: 'meta.decorator', foreground: 'C97A8A' },
+      { token: 'meta.decorator', foreground: 'D4879A' },
     ],
     colors: {
       'editor.background': '#13121A',
@@ -144,7 +148,10 @@ const arcaneDark: ThemeDefinition = {
       'editor.wordHighlightBackground': 'rgba(212, 176, 98, 0.10)',
       'editor.findMatchBackground': 'rgba(212, 176, 98, 0.30)',
       'editor.findMatchHighlightBackground': 'rgba(212, 176, 98, 0.14)',
-      'editorLineNumber.foreground': '#3A3845',
+      // #3A3845 was 1.62:1 — effectively invisible. #656274 is 3.06:1, the
+      // right floor for supporting UI rather than body copy. The active one
+      // stays gold: it is one of the moments the accent should own.
+      'editorLineNumber.foreground': '#656274',
       'editorLineNumber.activeForeground': '#D4B062',
       'editorIndentGuide.background': '#22202C',
       'editorIndentGuide.activeBackground': '#3A3845',
