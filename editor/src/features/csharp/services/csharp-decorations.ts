@@ -1,112 +1,99 @@
 import { LIFECYCLE_METHOD_NAMES, UNITY_LIFECYCLE_METHODS } from './lifecycle-db';
-import { getThemeColor } from '../../theme';
+import { UNITY_API_NAMES } from '../../../data/unity-api-names';
 
-type MonacoEditor = import('monaco-editor').editor.IStandaloneCodeEditor;
-type MonacoModule = typeof import('monaco-editor');
+export type UnityDecorationKind = 'lifecycle' | 'engine-type' | 'inspector-attribute';
 
-let decorationIds: string[] = [];
-
-// Regex to match C# method definitions like: void Update() or private void Awake()
-const METHOD_REGEX = /(?:(?:private|protected|public|internal|static|virtual|override|sealed|abstract)\s+)*(?:void|IEnumerator)\s+(\w+)\s*\(/gm;
-
-// Regex to match [SerializeField] attribute
-const SERIALIZE_FIELD_REGEX = /\[SerializeField\]/g;
-
-// Regex to match public fields (simplified)
-const PUBLIC_FIELD_REGEX = /^\s*public\s+\w[\w<>,\s\[\]]*\s+\w+\s*[;=]/gm;
-
-// Convert a `#RRGGBB` hex from the theme to a `#RRGGBBAA` string with the given alpha.
-// Falls back to the input if the color is already non-hex (rgba/var/etc.).
-function withAlpha(color: string, alpha: number): string {
-  if (!color.startsWith('#') || color.length !== 7) return color;
-  const aa = Math.round(Math.max(0, Math.min(1, alpha)) * 255).toString(16).padStart(2, '0');
-  return `${color}${aa}`;
+export interface UnityDecoration {
+  /** 1-based, matching Monaco. */
+  line: number;
+  /** 1-based, matching Monaco. */
+  startColumn: number;
+  endColumn: number;
+  kind: UnityDecorationKind;
+  hover?: string;
 }
 
-export function applyCSharpDecorations(
-  editor: MonacoEditor,
-  monaco: MonacoModule,
-): void {
-  const model = editor.getModel();
-  if (!model) return;
+// Attributes that put a field in the Inspector. [Header] and [Range] only
+// render when the field itself is serialized, but they always accompany one,
+// so marking them keeps the block visually contiguous.
+const INSPECTOR_ATTRS =
+  /\[\s*(SerializeField|Header|Range|Tooltip|Space|TextArea|Multiline|HideInInspector)\b/g;
 
-  const uri = model.uri.toString();
-  if (!uri.endsWith('.cs')) {
-    clearDecorations(editor);
-    return;
-  }
+// A method declaration: optional modifiers, then a return type, then a name.
+// Regex, not a parser — see the note on false positives below.
+const METHOD_DECL =
+  /(?:(?:private|protected|public|internal|static|virtual|override|sealed|abstract)\s+)*(?:void|IEnumerator)\s+(\w+)\s*\(/g;
 
-  const text = model.getValue();
-  const newDecorations: import('monaco-editor').editor.IModelDeltaDecoration[] = [];
+const IDENTIFIER = /\b([A-Z]\w*)\b/g;
 
-  const lifecycleRulerColor = withAlpha(getThemeColor('info'), 0.27);
-  const serializeRulerColor = withAlpha(getThemeColor('success'), 0.27);
+// `kind: 'type'` only — the list also carries methods and properties, and C#
+// method names are capitalised, so an unfiltered set would paint
+// `GetComponent` as a type.
+//
+// This list is a fallback COMPLETION list, not an exhaustive Unity type index:
+// `CharacterController`, for one, is absent. Engine-type colouring therefore
+// has false negatives — a real Unity type that is missing here renders as a
+// user type. That is a quiet, acceptable degradation for a highlight; widening
+// it means growing the data file, not changing this function.
+const ENGINE_NAMES: ReadonlySet<string> = new Set(
+  UNITY_API_NAMES.filter((n) => n.kind === 'type').map((n) => n.name),
+);
 
-  // Find lifecycle methods
-  let match: RegExpExecArray | null;
-  METHOD_REGEX.lastIndex = 0;
-  while ((match = METHOD_REGEX.exec(text)) !== null) {
-    const methodName = match[1];
-    if (LIFECYCLE_METHOD_NAMES.has(methodName)) {
-      const pos = model.getPositionAt(match.index);
-      const methodInfo = UNITY_LIFECYCLE_METHODS.find((m) => m.name === methodName);
+/**
+ * Classify the Unity-meaningful spans in a C# source file.
+ *
+ * Pure and synchronous so it can be unit-tested without Monaco or a DOM, and
+ * so the editor never flickers waiting on a language server.
+ *
+ * KNOWN LIMITATION: this is regex-based, not a parser. A user-defined
+ * `void Update()` on a class that does not derive from MonoBehaviour is
+ * coloured as a lifecycle method. That is acceptable for a highlight; it would
+ * not be acceptable for a diagnostic.
+ */
+export function computeUnityDecorations(text: string): UnityDecoration[] {
+  const out: UnityDecoration[] = [];
 
-      newDecorations.push({
-        range: new monaco.Range(pos.lineNumber, 1, pos.lineNumber, 1),
-        options: {
-          isWholeLine: true,
-          className: 'unity-lifecycle-line',
-          glyphMarginClassName: 'unity-lifecycle-glyph',
-          glyphMarginHoverMessage: {
-            value: `**Unity ${methodInfo?.category ?? 'Lifecycle'}**: \`${methodName}\`\n\n${methodInfo?.description ?? ''}`,
-          },
-          overviewRuler: {
-            color: lifecycleRulerColor,
-            position: monaco.editor.OverviewRulerLane.Left,
-          },
-        },
+  text.split('\n').forEach((lineText, i) => {
+    const line = i + 1;
+
+    INSPECTOR_ATTRS.lastIndex = 0;
+    for (let m = INSPECTOR_ATTRS.exec(lineText); m; m = INSPECTOR_ATTRS.exec(lineText)) {
+      out.push({
+        line,
+        startColumn: m.index + 1,
+        endColumn: m.index + m[0].length + 1,
+        kind: 'inspector-attribute',
       });
     }
-  }
 
-  // Find [SerializeField] attributes
-  SERIALIZE_FIELD_REGEX.lastIndex = 0;
-  while ((match = SERIALIZE_FIELD_REGEX.exec(text)) !== null) {
-    const pos = model.getPositionAt(match.index);
-    newDecorations.push({
-      range: new monaco.Range(pos.lineNumber, 1, pos.lineNumber, 1),
-      options: {
-        isWholeLine: true,
-        className: 'unity-serialize-field-line',
-        overviewRuler: {
-          color: serializeRulerColor,
-          position: monaco.editor.OverviewRulerLane.Right,
-        },
-      },
-    });
-  }
+    METHOD_DECL.lastIndex = 0;
+    for (let m = METHOD_DECL.exec(lineText); m; m = METHOD_DECL.exec(lineText)) {
+      if (!LIFECYCLE_METHOD_NAMES.has(m[1])) continue;
+      const info = UNITY_LIFECYCLE_METHODS.find((x) => x.name === m[1]);
+      const start = m.index + m[0].lastIndexOf(m[1]);
+      out.push({
+        line,
+        startColumn: start + 1,
+        endColumn: start + m[1].length + 1,
+        kind: 'lifecycle',
+        hover: `**Unity ${info?.category ?? 'Lifecycle'}**: \`${m[1]}\`\n\n${info?.description ?? ''}`,
+      });
+    }
 
-  // Find public fields
-  PUBLIC_FIELD_REGEX.lastIndex = 0;
-  while ((match = PUBLIC_FIELD_REGEX.exec(text)) !== null) {
-    const pos = model.getPositionAt(match.index);
-    newDecorations.push({
-      range: new monaco.Range(pos.lineNumber, 1, pos.lineNumber, 1),
-      options: {
-        isWholeLine: true,
-        after: {
-          content: ' [Inspector]',
-          inlineClassName: 'unity-inspector-hint',
-        },
-      },
-    });
-  }
+    IDENTIFIER.lastIndex = 0;
+    for (let m = IDENTIFIER.exec(lineText); m; m = IDENTIFIER.exec(lineText)) {
+      if (!ENGINE_NAMES.has(m[1])) continue;
+      const startColumn = m.index + 1;
+      // A lifecycle mark on the same span wins — it is the more specific fact.
+      if (out.some((d) => d.line === line && d.startColumn === startColumn)) continue;
+      out.push({
+        line,
+        startColumn,
+        endColumn: m.index + m[1].length + 1,
+        kind: 'engine-type',
+      });
+    }
+  });
 
-  decorationIds = editor.deltaDecorations(decorationIds, newDecorations);
-}
-
-export function clearDecorations(editor: MonacoEditor): void {
-  if (decorationIds.length > 0) {
-    decorationIds = editor.deltaDecorations(decorationIds, []);
-  }
+  return out;
 }
