@@ -74,6 +74,92 @@ pub fn unique_destination(dest_dir: &Path, file_name: &str) -> Result<PathBuf, S
     ))
 }
 
+/// Unity's sidecar suffix.
+const META_SUFFIX: &str = ".meta";
+
+/// A fresh 32-hex-character Unity GUID.
+///
+/// Copying a `.meta` verbatim duplicates its GUID, and two assets claiming one
+/// GUID is a collision Unity resolves by reassigning one of them at random —
+/// silently breaking whichever references it lost. Regenerating keeps the
+/// import settings (which is why the meta is worth copying at all) while
+/// giving the copy its own identity.
+///
+/// Not cryptographic, and does not need to be: it only has to be unique within
+/// one project. Derived from the clock, the destination path, and a
+/// monotonically increasing counter so a batch copy in the same nanosecond
+/// still produces distinct values.
+fn fresh_guid(seed_path: &Path) -> String {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0);
+    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+
+    let mut h1 = DefaultHasher::new();
+    (nanos, n, seed_path).hash(&mut h1);
+    let mut h2 = DefaultHasher::new();
+    (n, seed_path, nanos.rotate_left(17)).hash(&mut h2);
+
+    format!("{:016x}{:016x}", h1.finish(), h2.finish())
+}
+
+/// Rewrite the `guid:` line of a `.meta`'s contents.
+///
+/// Returns the input unchanged when there is no guid line — a malformed meta
+/// is Unity's problem to report, and refusing to copy it would lose the user's
+/// import settings over a formatting detail.
+pub fn rewrite_meta_guid(contents: &str, guid: &str) -> String {
+    let mut out = String::with_capacity(contents.len());
+    let mut replaced = false;
+    for line in contents.lines() {
+        if !replaced && line.trim_start().starts_with("guid:") {
+            let indent = &line[..line.len() - line.trim_start().len()];
+            out.push_str(indent);
+            out.push_str("guid: ");
+            out.push_str(guid);
+            replaced = true;
+        } else {
+            out.push_str(line);
+        }
+        out.push('\n');
+    }
+    out
+}
+
+/// Copy `<src>.meta` to `<dest>.meta` with a fresh GUID, if the sidecar exists.
+///
+/// Called as part of copying the asset itself so the pair can never separate.
+/// Copying them as two independent operations is what broke: on a name
+/// collision `Player.cs` becomes `Player 2.cs` while `Player.cs.meta` becomes
+/// `Player.cs 2.meta` — because the rename splits at the LAST dot — leaving the
+/// copy with no meta and an orphan meta beside it.
+fn copy_meta_sidecar(src: &Path, dest: &Path) -> std::io::Result<()> {
+    let src_meta = PathBuf::from(format!("{}{}", src.to_string_lossy(), META_SUFFIX));
+    if !src_meta.is_file() {
+        return Ok(());
+    }
+    let dest_meta = PathBuf::from(format!("{}{}", dest.to_string_lossy(), META_SUFFIX));
+
+    match fs::read_to_string(&src_meta) {
+        Ok(text) => fs::write(&dest_meta, rewrite_meta_guid(&text, &fresh_guid(dest))),
+        // Not UTF-8 (shouldn't happen for a meta): copy verbatim rather than
+        // dropping it, so import settings still survive.
+        Err(_) => fs::copy(&src_meta, &dest_meta).map(|_| ()),
+    }
+}
+
+/// True when this path is itself a Unity sidecar.
+pub fn is_meta_path(path: &str) -> bool {
+    path.to_ascii_lowercase().ends_with(META_SUFFIX)
+}
+
 /// True when `dest_dir` is `src` itself or lives underneath it.
 ///
 /// Copying a directory into its own subtree recurses until the disk fills, so
@@ -118,6 +204,14 @@ pub fn copy_path(src: String, dest_dir: String) -> Result<String, String> {
         fs::copy(src_path, &dest).map_err(|e| e.to_string())?;
     }
 
+    // Carry the Unity sidecar with its asset. Done here, not by a second
+    // copy_path call, because only this function knows the name the asset
+    // actually got after collision handling. Skipped when the source IS a
+    // meta — the caller is copying the sidecar deliberately.
+    if !is_meta_path(&src) {
+        copy_meta_sidecar(src_path, &dest).map_err(|e| e.to_string())?;
+    }
+
     Ok(path_util::to_ui_path(dest))
 }
 
@@ -137,6 +231,105 @@ mod tests {
         ));
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+#[test]
+    fn rewrite_meta_guid_replaces_only_the_first_guid_line() {
+        let meta = "fileFormatVersion: 2\nguid: 1111111111111111111111111111aaaa\nMonoImporter:\n  guid: nested\n";
+        let out = rewrite_meta_guid(meta, "beef0000000000000000000000000000");
+        assert!(out.contains("guid: beef0000000000000000000000000000"));
+        // A nested guid (e.g. a script reference) must be left alone.
+        assert!(out.contains("  guid: nested"));
+        assert!(!out.contains("1111111111111111111111111111aaaa"));
+    }
+
+    #[test]
+    fn rewrite_meta_guid_leaves_a_meta_without_a_guid_alone() {
+        assert_eq!(rewrite_meta_guid("fileFormatVersion: 2\n", "x"), "fileFormatVersion: 2\n");
+    }
+
+    #[test]
+    fn fresh_guid_is_32_hex_chars_and_does_not_repeat() {
+        let a = fresh_guid(Path::new("/a/Player.cs"));
+        let b = fresh_guid(Path::new("/a/Player.cs"));
+        assert_eq!(a.len(), 32);
+        assert!(a.chars().all(|c| c.is_ascii_hexdigit()));
+        assert_ne!(a, b, "a batch copy must not reuse a GUID");
+    }
+
+    /// The bug: two independent copies renamed the pair apart, because the
+    /// rename splits at the LAST dot — `Player.cs.meta` became
+    /// `Player.cs 2.meta` while the asset became `Player 2.cs`.
+    #[test]
+    fn a_colliding_copy_keeps_its_meta_paired() {
+        let dir = tmp_dir("meta-collide");
+        let src_dir = dir.join("src");
+        let dst_dir = dir.join("dst");
+        fs::create_dir_all(&src_dir).unwrap();
+        fs::create_dir_all(&dst_dir).unwrap();
+
+        fs::write(src_dir.join("Player.cs"), b"class Player {}").unwrap();
+        fs::write(
+            src_dir.join("Player.cs.meta"),
+            b"fileFormatVersion: 2\nguid: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+        )
+        .unwrap();
+        // Force the collision.
+        fs::write(dst_dir.join("Player.cs"), b"other").unwrap();
+
+        let written = copy_path(
+            src_dir.join("Player.cs").to_string_lossy().to_string(),
+            dst_dir.to_string_lossy().to_string(),
+        )
+        .unwrap();
+
+        assert!(written.ends_with("Player 2.cs"), "got {written}");
+        assert!(dst_dir.join("Player 2.cs.meta").is_file(), "sidecar must follow the asset's new name");
+        assert!(!dst_dir.join("Player.cs 2.meta").exists(), "the old broken name must not appear");
+
+        let copied_meta = fs::read_to_string(dst_dir.join("Player 2.cs.meta")).unwrap();
+        assert!(
+            !copied_meta.contains("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+            "the copy must not duplicate the original GUID"
+        );
+    }
+
+    #[test]
+    fn an_asset_with_no_meta_copies_without_inventing_one() {
+        let dir = tmp_dir("meta-absent");
+        let src_dir = dir.join("src");
+        let dst_dir = dir.join("dst");
+        fs::create_dir_all(&src_dir).unwrap();
+        fs::create_dir_all(&dst_dir).unwrap();
+        fs::write(src_dir.join("notes.txt"), b"hi").unwrap();
+
+        copy_path(
+            src_dir.join("notes.txt").to_string_lossy().to_string(),
+            dst_dir.to_string_lossy().to_string(),
+        )
+        .unwrap();
+
+        assert!(dst_dir.join("notes.txt").is_file());
+        assert!(!dst_dir.join("notes.txt.meta").exists());
+    }
+
+    #[test]
+    fn copying_a_meta_directly_does_not_recurse_into_a_meta_meta() {
+        let dir = tmp_dir("meta-direct");
+        let src_dir = dir.join("src");
+        let dst_dir = dir.join("dst");
+        fs::create_dir_all(&src_dir).unwrap();
+        fs::create_dir_all(&dst_dir).unwrap();
+        fs::write(src_dir.join("Player.cs.meta"), b"guid: aaaa\n").unwrap();
+
+        copy_path(
+            src_dir.join("Player.cs.meta").to_string_lossy().to_string(),
+            dst_dir.to_string_lossy().to_string(),
+        )
+        .unwrap();
+
+        assert!(dst_dir.join("Player.cs.meta").is_file());
+        assert!(!dst_dir.join("Player.cs.meta.meta").exists());
     }
 
     #[test]

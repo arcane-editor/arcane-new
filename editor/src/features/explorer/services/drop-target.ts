@@ -169,7 +169,20 @@ export async function copyIntoDir(
   const copied: string[] = [];
   const errors: string[] = [];
 
-  for (const src of paths) {
+  // A `.meta` whose asset is also in this batch is skipped: `copy_path` carries
+  // the sidecar with its asset, because only it knows the name the asset got
+  // after collision handling. Copying them independently is what separated the
+  // pair — the rename splits at the last dot, so `Player.cs` became
+  // `Player 2.cs` while `Player.cs.meta` became `Player.cs 2.meta`, leaving the
+  // copy with no meta and an orphan meta beside it.
+  const assets = new Set(paths.map((p) => p.toLowerCase()));
+  const toCopy = paths.filter((p) => {
+    const lower = p.toLowerCase();
+    if (!lower.endsWith('.meta')) return true;
+    return !assets.has(lower.slice(0, -'.meta'.length));
+  });
+
+  for (const src of toCopy) {
     try {
       const written = await invoke<string>('copy_path', { src, destDir });
       copied.push(written);

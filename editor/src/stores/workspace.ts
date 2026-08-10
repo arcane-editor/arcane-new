@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listenScoped } from '../utils/tauri-listener';
 import type { FileEntry, TreeNode, OpenFile, DiffInfo } from '../types';
 import { initMonaco, disposeModelForPath } from '../features/editor';
+import { applySaveResult } from '../utils/save-outcome';
 import {
   lspManager,
   registerLspProviders,
@@ -1217,6 +1218,15 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       if (ctx) syncDocumentClose(ctx.client, path);
     }
 
+    // Diagnostics are keyed by document URI and nothing cleared them on close,
+    // so the Problems panel and the status-bar error count kept reporting files
+    // that are closed — or deleted — with no way to make them go away.
+    // Cleared under both keys: providers store some diagnostics by document
+    // URI and some by raw path (TabBar reads both), so clearing one alone
+    // leaves the other reporting a file that is no longer open.
+    useUiStore.getState().clearFileDiagnostics(fileUri(path));
+    useUiStore.getState().clearFileDiagnostics(path);
+
     // Free the Monaco model — AFTER didClose, so the server is told about a
     // document that still exists. Left alive, the orphan keeps whatever the
     // user typed (including changes discarded at the "Close Anyway" prompt),
@@ -1287,22 +1297,25 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     const { openFiles } = get();
     const file = openFiles.find((f) => f.path === path);
     if (!file) return;
+    // Snapshot what actually goes to disk. The user can keep typing during the
+    // write — easily hundreds of ms on a large file — and those keystrokes are
+    // NOT in this payload.
+    const written = file.content;
     try {
-      await invoke('write_file', { path, contents: file.content });
+      await invoke('write_file', { path, contents: written });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       notify.error(`Failed to save ${file.name}: ${msg}`);
       throw err;
     }
-    set((state) => ({
-      openFiles: state.openFiles.map((f) =>
-        f.path === path ? { ...f, isDirty: false } : f,
-      ),
-    }));
+    // Clean only if the buffer still matches what was written. Clearing
+    // unconditionally marked mid-write keystrokes as saved; the watcher then
+    // saw the disk change, found the tab clean, and reloaded over them.
+    set((state) => ({ openFiles: applySaveResult(state.openFiles, path, written) }));
 
     // Notify the right LSP about the save.
     const ctx = getRunningClientForFile(file.name);
-    if (ctx) syncDocumentSave(ctx.client, path, file.content);
+    if (ctx) syncDocumentSave(ctx.client, path, written);
 
     // Refresh git status after save
     const { workspacePath } = get();
