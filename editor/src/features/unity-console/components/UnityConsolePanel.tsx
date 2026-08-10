@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, useDeferredValue } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo, useDeferredValue } from 'react';
 import { Search, Trash2, ArrowDown, ArrowUpRight, Sparkles } from 'lucide-react';
 import { useUnityStore } from '../../../stores/unity';
 import { useWorkspaceStore } from '../../../stores/workspace';
@@ -87,20 +87,37 @@ function UnityConsolePanel() {
   // Filter logs — defer the text filter so rapid typing doesn't block reconciliation
   const deferredFilter = useDeferredValue(filter);
   const needle = deferredFilter.toLowerCase();
-  const filteredLogs = logs.filter((entry) => {
-    if (!showLog && entry.logType === 'Log') return false;
-    if (!showWarning && entry.logType === 'Warning') return false;
-    if (!showError && (entry.logType === 'Error' || entry.logType === 'Assert' || entry.logType === 'Exception')) return false;
-    if (needle && !entry.message.toLowerCase().includes(needle)) return false;
-    return true;
-  });
 
-  const collapsed = collapseEntries(filteredLogs);
+  // Memoized because the store caps `logs` at 10,000 and Unity delivers a
+  // batch every 100ms during play mode. Unmemoized this ran FIVE full passes
+  // over all 10,000 rows — one filter, one collapse, three counts — on every
+  // render, i.e. fifty thousand operations ten times a second, on the main
+  // thread, which is what froze the window under ordinary logging.
+  const collapsed = useMemo(() => {
+    const filteredLogs = logs.filter((entry) => {
+      if (!showLog && entry.logType === 'Log') return false;
+      if (!showWarning && entry.logType === 'Warning') return false;
+      if (!showError && (entry.logType === 'Error' || entry.logType === 'Assert' || entry.logType === 'Exception')) return false;
+      if (needle && !entry.message.toLowerCase().includes(needle)) return false;
+      return true;
+    });
+    return collapseEntries(filteredLogs);
+  }, [logs, showLog, showWarning, showError, needle]);
 
-  // Count by type
-  const logCount = logs.filter((e) => e.logType === 'Log').length;
-  const warnCount = logs.filter((e) => e.logType === 'Warning').length;
-  const errCount = logs.filter((e) => e.logType === 'Error' || e.logType === 'Assert' || e.logType === 'Exception').length;
+  // Counts are over the unfiltered list, so they depend only on `logs` —
+  // typing in the filter box must not re-count.
+  const { logCount, warnCount, errCount } = useMemo(() => {
+    let l = 0;
+    let w = 0;
+    let e = 0;
+    // One pass instead of three.
+    for (const entry of logs) {
+      if (entry.logType === 'Log') l++;
+      else if (entry.logType === 'Warning') w++;
+      else if (entry.logType === 'Error' || entry.logType === 'Assert' || entry.logType === 'Exception') e++;
+    }
+    return { logCount: l, warnCount: w, errCount: e };
+  }, [logs]);
 
   const handleFrameClick = (filePath: string) => {
     const fileName = filePath.split('/').pop() ?? filePath;

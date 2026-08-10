@@ -140,8 +140,87 @@ pub fn apply_extra_excludes(b: &mut WalkBuilder, root: &str, extra_excludes: &[S
     }
 }
 
+/// Directories a Unity project rewrites continuously and that nothing in the
+/// UI ever shows.
+///
+/// Matched only as the FIRST path segment below the workspace root, so a user's
+/// own `Assets/Library/` or `Assets/Scripts/Temp/` is untouched.
+pub const UNITY_CHURN_DIRS: &[&str] = &["Library", "Temp", "Logs", "obj", "Build", "Builds"];
+
+/// True when `path` sits inside a directory Unity rewrites constantly.
+///
+/// The file watcher watches the workspace root recursively with no filtering,
+/// so while a Unity project is open — which is all the time — importing an
+/// asset, entering play mode, or simply having the editor focused rewrites
+/// hundreds of files under `Library/`. Every one of those woke the debounce
+/// task, which re-ran `git status` over the whole repo and refreshed the file
+/// tree. `.gitignore` already keeps these out of the index and the tree, so the
+/// events were pure waste, and they ran for the entire session.
+///
+/// Both arguments are expected in UI form (`/` separators) — see `path_util`.
+pub fn is_unity_churn_path(path: &str, workspace_root: &str) -> bool {
+    let root = workspace_root.trim_end_matches('/');
+    let Some(rest) = path.strip_prefix(root) else {
+        return false;
+    };
+    let rest = rest.trim_start_matches('/');
+    let Some(first) = rest.split('/').next() else {
+        return false;
+    };
+    // A file directly at the root (no separator after it) is not a churn dir.
+    if first == rest {
+        return false;
+    }
+    UNITY_CHURN_DIRS.contains(&first)
+}
+
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    #[test]
+    fn unity_churn_dirs_are_filtered_at_the_root() {
+        let root = "/Users/me/Game";
+        for dir in UNITY_CHURN_DIRS {
+            assert!(
+                is_unity_churn_path(&format!("{root}/{dir}/x/y.dat"), root),
+                "{dir} should be filtered"
+            );
+        }
+    }
+
+    #[test]
+    fn assets_are_never_filtered() {
+        let root = "/Users/me/Game";
+        assert!(!is_unity_churn_path(&format!("{root}/Assets/Scripts/Player.cs"), root));
+        assert!(!is_unity_churn_path(&format!("{root}/ProjectSettings/Tags.asset"), root));
+        assert!(!is_unity_churn_path(&format!("{root}/Packages/manifest.json"), root));
+    }
+
+    /// The name only means "churn" directly below the root. A user's own
+    /// Assets/Library or Assets/Scripts/Temp is real project content.
+    #[test]
+    fn the_name_only_counts_as_the_first_segment() {
+        let root = "/Users/me/Game";
+        assert!(!is_unity_churn_path(&format!("{root}/Assets/Library/Shader.cs"), root));
+        assert!(!is_unity_churn_path(&format!("{root}/Assets/Scripts/Temp/A.cs"), root));
+    }
+
+    #[test]
+    fn a_file_at_the_root_named_like_a_churn_dir_is_kept() {
+        let root = "/Users/me/Game";
+        assert!(!is_unity_churn_path(&format!("{root}/Library"), root));
+    }
+
+    #[test]
+    fn a_path_outside_the_workspace_is_not_filtered() {
+        assert!(!is_unity_churn_path("/elsewhere/Library/x", "/Users/me/Game"));
+    }
+
+    #[test]
+    fn a_trailing_slash_on_the_root_is_tolerated() {
+        assert!(is_unity_churn_path("/Users/me/Game/Library/x", "/Users/me/Game/"));
+    }
     use super::*;
     use std::collections::HashSet;
     use std::fs;

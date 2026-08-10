@@ -622,6 +622,10 @@ pub async fn start_file_watcher(
         .as_ref()
         .map(crate::path_util::to_ui_path);
 
+    // Own copy for the debounce task, which needs the root to recognise
+    // Unity's churn directories; `ws_path` itself is moved into the watcher.
+    let ws_root_for_filter = ws_path.clone();
+
     // Debounce channel: collect events, emit after 500ms quiet period
     let (event_tx, mut event_rx) = mpsc::channel::<Event>(256);
 
@@ -670,6 +674,18 @@ pub async fn start_file_watcher(
                                 // normalize separators internally, so they are
                                 // unaffected. See `path_util`.
                                 let path_str = crate::path_util::to_ui_path(path);
+                                // Unity rewrites Library/ and Temp/ constantly
+                                // — importing an asset, entering play mode, or
+                                // just having the editor focused touches
+                                // hundreds of files. Each one used to wake the
+                                // debounce task, which re-ran `git status` over
+                                // the whole repo and refreshed the file tree,
+                                // for the entire time a project was open.
+                                // .gitignore already keeps these out of both,
+                                // so the work was pure waste.
+                                if crate::walk_policy::is_unity_churn_path(&path_str, &ws_root_for_filter) {
+                                    continue;
+                                }
                                 let inside_dot_git =
                                     is_inside_dot_git(&path_str, linked_git_dir_str.as_deref());
                                 if is_git_state_path(&path_str)
