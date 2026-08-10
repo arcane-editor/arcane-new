@@ -54,6 +54,8 @@ Editor-to-sidebar contrast rises **1.02:1 → 1.9:1**.
 
 **`bg-tab-active` deliberately equals `bg-primary`.** The active tab becomes continuous with its content, so it can no longer be marked by a fill difference. It gets a 2px `--accent` top rule instead — the same device `.activity-bar-icon.active` already uses as a 3px left rail.
 
+**`index.html` must be updated too.** Its anti-FOUC bootstrap hardcodes a `THEMES` map duplicating each theme's `bg-primary` (`'arcane-dark': ['dark', '#13121A']`) because the bundle has not loaded yet. Left stale, every cold start flashes the old canvas before `applyCssVariables` corrects it.
+
 **`border` is unchanged.** The shell regions never used it — `.activity-bar`, `.title-bar`, `.sidebar`, `.status-bar`, `.tab-bar` and `.breadcrumbs` declare a background and no border. All 84 `var(--border)` references are controls, inputs, cards and inner dividers, and they still need a hairline.
 
 ## 2. Code palette
@@ -126,12 +128,28 @@ Token coloring for identifiers uses `inlineClassName` decorations; the existing 
 
 ## 6. Testing
 
-Extend `theme-contract.test.ts` with a Monaco contrast block, run across all six themes via the existing `describe.each`:
+Extend `theme-contract.test.ts` with a Monaco contrast block:
 
 - every `monaco.rules[].foreground` clears **4.5:1** against `monaco.colors['editor.background']`
-- `editorLineNumber.foreground` clears **3:1** against `editor.background`
-- `editorLineNumber.activeForeground` clears **3:1** against `editor.background`
+- `editorLineNumber.foreground` and `editorLineNumber.activeForeground` clear **3:1** against `editor.background`
 - terminal `foreground` clears **4.5:1** against terminal `background`
+
+**Enforced for `arcane-dark` and `arcane-light` only,** via an explicit theme-id allowlist in the test.
+
+This exemption is deliberate, not a loophole. An audit of the current definitions shows the rule is unshippable across all six:
+
+| Theme | `monaco.rules` under 4.5:1 |
+|---|---|
+| arcane-dark | comment `#5C5965` **2.72**, `#7E7B86` delimiters/braces **4.49** |
+| arcane-light | comment `#A09584` **2.75**, `#A8632A` functions **4.38** |
+| monokai | **11 rules** — `#F92672` **3.93**, comment `#75715E` **3.03** |
+| dracula | comment `#6272A4` **3.03** |
+| light-plus | `attribute.name` `#FF0000` **4.00** |
+| dark-plus | none |
+
+`#F92672` is Monokai's signature pink and `#6272A4` is Dracula's canonical comment color. Forcing them to AA would contradict section 5's promise that the four ports stay faithful to their originals — their contrast is upstream's decision, not ours. The allowlist and this reasoning belong in a comment in the test.
+
+Line numbers currently fail in both Arcane themes (`1.62` dark, `1.74` light) and pass in all four ports.
 
 The existing WCAG helpers (`parseColor`, `relativeLuminance`, `contrast`) are reused; `monaco.rules` foregrounds are bare hex without `#` and need prefixing before parsing.
 
@@ -142,5 +160,5 @@ The existing class-invariant tests cover the four new tokens automatically, sinc
 ## Risks
 
 - **Arcane Light's syntax roles are specified by threshold, not by value.** The test enforces the floor, but the hue choices are made during implementation and should get a visual check before merge.
-- **`bg-tab-active` fusing with `bg-primary`** means the tab strip relies entirely on the accent rule to show which tab is active. If the rule is missed on any tab state (dirty, preview, pinned), the active tab becomes unmarked.
+- ~~**`bg-tab-active` fusing with `bg-primary`** leaves the tab strip relying on an accent rule that may be missed on some tab states.~~ **Resolved:** `App.css:586` already defines `.tab.active::after` as a 2px `var(--accent)` top rule with a glow, keyed on `.active` alone, so every tab state inherits it. No new CSS is needed for this.
 - **`csharp-decorations.ts` uses regex, not a parser.** `METHOD_REGEX` will color a user-defined `void Update()` on a non-`MonoBehaviour` class as a lifecycle method. Acceptable for a highlight; it would not be acceptable for a diagnostic.
