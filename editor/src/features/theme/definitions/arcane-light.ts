@@ -36,6 +36,10 @@ const arcaneLight: ThemeDefinition = {
     'border': 'rgba(42, 38, 34, 0.08)',
     'accent': '#A8632A',
     'accent-secondary': '#7A4318',
+    // AI composer mode accents (CONTENT class).
+    'mode-ask': '#3A6680',
+    'mode-agent': '#A8632A',
+    'mode-plan': '#6E4E8F',
     // Opaque per the fill-token contract in types.ts — see arcane-dark.
     'hover': '#EEEAE0',
     'selected': '#EEE4D5',

@@ -25,6 +25,10 @@ const darkPlus: ThemeDefinition = {
     'border': '#3c3c3c',
     'accent': '#007acc',
     'accent-secondary': '#3399dd',
+    // AI composer mode accents (CONTENT class).
+    'mode-ask': '#75beff',
+    'mode-agent': '#007acc',
+    'mode-plan': '#c586c0',
     'hover': '#2a2d2e',
     'selected': '#094771',
     'git-modified': '#e2c08d',

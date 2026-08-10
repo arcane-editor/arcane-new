@@ -25,6 +25,10 @@ const lightPlus: ThemeDefinition = {
     'border': '#e5e5e5',
     'accent': '#007acc',
     'accent-secondary': '#33aadd',
+    // AI composer mode accents (CONTENT class).
+    'mode-ask': '#316bcd',
+    'mode-agent': '#007acc',
+    'mode-plan': '#8e44ad',
     'hover': '#e8e8e8',
     'selected': '#cce5ff',
     'git-modified': '#895503',

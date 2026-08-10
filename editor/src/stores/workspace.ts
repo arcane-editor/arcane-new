@@ -14,6 +14,8 @@ import {
   resetDocumentVersions,
   forgetDocument,
   fileUri,
+  markCsharpProjectLoaded,
+  resetCsharpProjectLoaded,
   type LspClient,
 } from '../features/lsp';
 import { useGitStore } from './git';
@@ -371,6 +373,13 @@ async function runLspStart(
 
   if (language === 'csharp') {
     releasePriorLspAttempt();
+    // Close the C# diagnostics gate before the server exists, so a pull
+    // scheduled by a model created during startup is held rather than answered
+    // from a workspace whose references haven't loaded. Covers restarts too
+    // (crash recovery, Unity csproj hot-reload) — both rebuild the project
+    // graph and both come through here. Reopened by the load-finished marker
+    // below, or by the gate's own failsafe.
+    resetCsharpProjectLoaded();
   }
 
   const client = lspManager.client(language);
@@ -434,6 +443,11 @@ async function runLspStart(
         solutionLoadFinished = true;
         useUiStore.getState().setLspProgress(null);
         useUiStore.getState().setLspStatus('ready');
+        // Roslyn now has its reference set, so a diagnostic report finally
+        // means something. Opening the gate re-pulls every open C# model
+        // (providers.ts), which is what replaces the whole-file CS0518
+        // cascade a mid-load pull would otherwise have left on screen.
+        markCsharpProjectLoaded();
       }
     });
 

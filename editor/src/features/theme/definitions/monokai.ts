@@ -25,6 +25,10 @@ const monokai: ThemeDefinition = {
     'border': '#3b3a32',
     'accent': '#a6e22e',
     'accent-secondary': '#f92672',
+    // AI composer mode accents (CONTENT class).
+    'mode-ask': '#66d9ef',
+    'mode-agent': '#a6e22e',
+    'mode-plan': '#fd971f',
     'hover': '#3e3d32',
     'selected': '#49483e',
     'git-modified': '#e6db74',

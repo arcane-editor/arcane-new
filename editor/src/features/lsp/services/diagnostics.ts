@@ -25,6 +25,7 @@
 
 import { fileUri, syncDocumentOpen, syncDocumentClose } from './document-sync';
 import { lspManager } from './manager';
+import { whenCsharpProjectLoaded } from './project-readiness';
 
 /** Best-effort cap: never let a diagnostics fetch block the agent tool loop. */
 const DIAGNOSTICS_TIMEOUT_MS = 4000;
@@ -125,7 +126,16 @@ export async function requestFileDiagnostics(
   try {
     epoch = syncDocumentOpen(client, absPath, content, 'csharp');
 
-    const pull = delay(OPEN_SETTLE_MS, undefined).then(() =>
+    // Wait for the settle delay AND for csharp-ls to have a project graph.
+    // Pulling before that returns a CS0518 cascade over the whole file (see
+    // `project-readiness.ts`) — which for the agent is worse than no answer,
+    // since it would spend a turn "fixing" errors that do not exist. Still
+    // bounded by DIAGNOSTICS_TIMEOUT_MS below, so a project that never loads
+    // degrades to `[]` rather than blocking the tool loop.
+    const pull = Promise.all([
+      delay(OPEN_SETTLE_MS, undefined),
+      whenCsharpProjectLoaded(),
+    ]).then(() =>
       client
         .request<RawDiagnosticReport | null>('textDocument/diagnostic', {
           textDocument: { uri },

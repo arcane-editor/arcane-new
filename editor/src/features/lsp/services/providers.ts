@@ -19,6 +19,7 @@ import { CSHARP_KEYWORDS } from '../data/csharp-keywords';
 import { UNITY_API_NAMES } from '../data/unity-api-names';
 import { getOpenDocumentUris, pathFromFileUri, syncDocumentOpen } from './document-sync';
 import { lspManager } from './manager';
+import { isCsharpProjectLoaded, onCsharpProjectLoaded } from './project-readiness';
 import { LSP_BACKED_MONACO_LANGUAGES } from '../../../utils/language-detect';
 import { setPendingNavigation } from '../../../utils/editor-navigation';
 
@@ -765,6 +766,12 @@ export function registerLspProviders(monaco: Monaco): () => void {
     const csharpClient = lspManager.client('csharp');
     if (!csharpClient.isRunning()) return;
 
+    // Hold everything until csharp-ls has a project graph. Answers from before
+    // that point are a CS0518 cascade over the whole file, not a real report —
+    // see `project-readiness.ts`. Dropping the pull is safe rather than lossy:
+    // the gate-opened handler below re-pulls every open C# model.
+    if (!isCsharpProjectLoaded()) return;
+
     try {
       const previousResultId = lastResultIds.get(uri);
       const params: { textDocument: { uri: string }; previousResultId?: string } = {
@@ -803,17 +810,42 @@ export function registerLspProviders(monaco: Monaco): () => void {
     pullTimers.set(uri, t);
   }
 
+  /** Drop everything keyed by `uri`. Safe to call for an unwatched uri. */
+  function forgetPullState(uri: string): void {
+    const t = pullTimers.get(uri);
+    if (t) {
+      clearTimeout(t);
+      pullTimers.delete(uri);
+    }
+    lastResultIds.delete(uri);
+  }
+
   function watchModel(model: editor.ITextModel): void {
     if (model.getLanguageId() !== 'csharp') return;
     const uri = model.uri.toString();
 
-    // Initial pull (small delay to let didOpen reach the server first).
+    // Initial pull (small delay to let didOpen reach the server first). Gated
+    // on project readiness inside `pullDiagnostics`; if the project is still
+    // loading this is dropped and the gate-opened handler re-pulls instead.
     schedulePull(uri, 300);
 
     const sub = model.onDidChangeContent(() => {
       schedulePull(uri, 500);
     });
     disposables.push(sub);
+
+    // Closing a tab disposes the model (`disposeModelForPath`) but Monaco keys
+    // markers by resource URI, not by model instance — so without this the
+    // squiggles outlive the model and reattach the moment the file is reopened.
+    // Paired with dropping `lastResultIds`, since a retained resultId makes the
+    // next pull answer `kind: "unchanged"` and never repaint those stale
+    // markers. Together these are what made a bad report survive a close and
+    // reopen, leaving an app restart as the only way out.
+    const disposeSub = model.onWillDispose(() => {
+      forgetPullState(uri);
+      monaco.editor.setModelMarkers(model, 'lsp', []);
+    });
+    disposables.push(disposeSub);
 
     const langSub = model.onDidChangeLanguage((e) => {
       if (e.newLanguage !== 'csharp') {
@@ -830,6 +862,23 @@ export function registerLspProviders(monaco: Monaco): () => void {
   for (const m of monaco.editor.getModels()) watchModel(m);
   const createSub = monaco.editor.onDidCreateModel((m: editor.ITextModel) => watchModel(m));
   disposables.push(createSub);
+
+  // The project graph just became usable (or csharp-ls restarted and rebuilt
+  // it). Every C# model on screen is now showing either nothing — its initial
+  // pull was dropped by the gate — or a report computed against the previous
+  // graph. Re-pull all of them.
+  //
+  // `lastResultIds` is cleared first, and deliberately so: the cached ids were
+  // issued by the old graph, and sending one back invites `kind: "unchanged"`,
+  // which is exactly how a wrong report used to become permanent. Forcing a
+  // full report costs one round trip per open file, once per server lifetime.
+  const readyUnsub = onCsharpProjectLoaded(() => {
+    lastResultIds.clear();
+    for (const m of monaco.editor.getModels()) {
+      if (m.getLanguageId() === 'csharp') schedulePull(m.uri.toString(), 300);
+    }
+  });
+  disposables.push({ dispose: readyUnsub });
 
   // Stash the diagnostic-application handle on the disposer closure so
   // `attachClientToProviders` (a sibling export, called per-client by the

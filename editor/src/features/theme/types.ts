@@ -77,6 +77,18 @@ export interface UiColors {
   'ghost-border': string;
   'accent': string;
   'accent-secondary': string;
+  /** Per-mode accents for the AI composer (Ask / Agent / Plan).
+   *
+   *  The active mode was legible only by reading the pill's label, so it was
+   *  easy to send an editing request believing you were in Ask. These colour
+   *  the pill, the selected menu row and a composer hairline, making the mode
+   *  readable at a glance.
+   *
+   *  CONTENT class: used as foreground and as a hairline, never as a surface,
+   *  so they must clear the same contrast rules as other content colours. */
+  'mode-ask': string;
+  'mode-agent': string;
+  'mode-plan': string;
   'primary-light': string;
   'git-modified': string;
   'git-added': string;

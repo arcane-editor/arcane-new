@@ -25,6 +25,10 @@ const dracula: ThemeDefinition = {
     'border': '#44475a',
     'accent': '#bd93f9',
     'accent-secondary': '#ff79c6',
+    // AI composer mode accents (CONTENT class).
+    'mode-ask': '#8be9fd',
+    'mode-agent': '#bd93f9',
+    'mode-plan': '#ffb86c',
     'hover': '#44475a',
     'selected': '#44475a',
     'git-modified': '#8be9fd',

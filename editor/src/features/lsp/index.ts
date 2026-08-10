@@ -13,6 +13,14 @@ export {
 } from './services/document-sync';
 export { registerLspProviders, attachClientToProviders } from './services/providers';
 export {
+  isCsharpProjectLoaded,
+  markCsharpProjectLoaded,
+  resetCsharpProjectLoaded,
+  onCsharpProjectLoaded,
+  whenCsharpProjectLoaded,
+  CSHARP_READINESS_FAILSAFE_MS,
+} from './services/project-readiness';
+export {
   requestFileDiagnostics,
   type FileDiag,
   type FileDiagSeverity,

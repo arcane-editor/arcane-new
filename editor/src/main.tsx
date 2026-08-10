@@ -1,5 +1,6 @@
 import '@fontsource-variable/instrument-sans/index.css';
 import '@fontsource-variable/geist-mono/index.css';
+import './styles/tokens.css';
 import './App.css';
 import React from "react";
 import ReactDOM from "react-dom/client";

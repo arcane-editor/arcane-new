@@ -39,6 +39,10 @@ const arcaneDark: ThemeDefinition = {
     'border': 'rgba(255, 255, 255, 0.05)',
     'accent': '#D4B062',
     'accent-secondary': '#E8C97D',
+    // AI composer mode accents (CONTENT class).
+    'mode-ask': '#7B9CB5',
+    'mode-agent': '#D4B062',
+    'mode-plan': '#A88BC4',
     // Opaque per the FILL contract in types.ts — a fill replaces a row's
     // background outright, so it has to hide what it covers. Both sit one and
     // two steps up the surface ramp respectively, which is what keeps them
