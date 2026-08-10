@@ -1,4 +1,4 @@
-import { useRef, useState, useEffect, useMemo } from 'react';
+import { useRef, useState, useEffect, useMemo, useCallback } from 'react';
 import { Tree, NodeRendererProps, TreeApi } from 'react-arborist';
 import {
   ChevronRight,
@@ -474,9 +474,15 @@ function ExplorerPanel() {
     }
   }
 
-  // Wrap NodeRenderer to inject extra props
-  function BoundNodeRenderer(props: NodeRendererProps<TreeNode>) {
-    return (
+  // Wrap NodeRenderer to inject extra props.
+  //
+  // Memoized because react-arborist takes this as its row component. A new
+  // function identity every render is a NEW component type to React, which
+  // unmounts and remounts every visible row — losing DOM state (an in-progress
+  // rename's input focus and caret among it) and re-running each row's effects
+  // on any panel re-render, of which the git watcher drives many.
+  const BoundNodeRenderer = useCallback(
+    (props: NodeRendererProps<TreeNode>) => (
       <NodeRenderer
         {...props}
         renamingNodeId={renamingNodeId}
@@ -484,8 +490,9 @@ function ExplorerPanel() {
         setContextMenu={setContextMenu}
         renamePath={renamePath}
       />
-    );
-  }
+    ),
+    [renamingNodeId, renamePath],
+  );
 
   return (
     <div className="sidebar">

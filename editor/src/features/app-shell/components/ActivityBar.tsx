@@ -32,11 +32,17 @@ function ActivityBar() {
   const hierarchyEnabled = useSettingsStore((s) => s.getSetting('unity.hierarchyPanel.enabled') !== false);
   const testRunnerEnabled = useSettingsStore((s) => s.getSetting('unity.testRunner.enabled') !== false);
 
-  // Narrow selector: only re-render when changed file count changes
+  // Narrow selector: only re-render when the changed-file count changes.
+  //
+  // Counted in a single pass with a reused Set rather than building two
+  // intermediate arrays. This selector runs on EVERY git store write — and the
+  // file watcher drives those continuously in a Unity project — so allocating
+  // two arrays and a Set each time was pure garbage on a hot path.
   const changedCount = useGitStore((s) => {
-    const allChanges = [...s.stagedFiles, ...s.unstagedFiles].map((f) => f.path);
-    const uniquePaths = new Set(allChanges);
-    return uniquePaths.size;
+    const seen = new Set<string>();
+    for (const f of s.stagedFiles) seen.add(f.path);
+    for (const f of s.unstagedFiles) seen.add(f.path);
+    return seen.size;
   });
 
   // Read the chord back out of the registry rather than writing it here. The

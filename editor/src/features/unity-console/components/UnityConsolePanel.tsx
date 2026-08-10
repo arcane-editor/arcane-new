@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback, useMemo, useDeferredValue } from 'react';
 import { Search, Trash2, ArrowDown, ArrowUpRight, Sparkles } from 'lucide-react';
+import { useVirtualizer, type Virtualizer } from '@tanstack/react-virtual';
 import { useUnityStore } from '../../../stores/unity';
 import { useWorkspaceStore } from '../../../stores/workspace';
 import { useUiStore } from '../../../stores/ui';
@@ -69,12 +70,18 @@ function UnityConsolePanel() {
   const [autoScroll, setAutoScroll] = useState(true);
 
   const scrollRef = useRef<HTMLDivElement>(null);
+  // The auto-scroll effect runs before `virtualizer`/`collapsed` are in scope
+  // (hook order), so it reads them through refs kept in sync below.
+  const virtualizerRef = useRef<Virtualizer<HTMLDivElement, Element> | null>(null);
+  const collapsedCountRef = useRef(0);
 
-  // Auto-scroll to bottom
+  // Auto-scroll to bottom. Setting scrollTop = scrollHeight is not enough once
+  // rows are windowed: the rows near the end may not be mounted yet, so the
+  // measured height is short and the view lands above the newest line.
   useEffect(() => {
-    if (autoScroll && scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
+    if (!autoScroll) return;
+    if (collapsedCountRef.current === 0) return;
+    virtualizerRef.current?.scrollToIndex(collapsedCountRef.current - 1, { align: 'end' });
   }, [logs.length, autoScroll]);
 
   const handleScroll = useCallback(() => {
@@ -103,6 +110,23 @@ function UnityConsolePanel() {
     });
     return collapseEntries(filteredLogs);
   }, [logs, showLog, showWarning, showError, needle]);
+
+  // Virtualized: Unity emits thousands of lines in a play session and the
+  // store caps at 10,000. Rendering every row built ~10k DOM subtrees, each
+  // with its own click handler and possible stack-frame children, which is
+  // what made scrolling the console stutter regardless of the filter cost.
+  //
+  // Dynamic measurement rather than a fixed row height: a row expands to show
+  // parsed stack frames, so its height is not knowable up front.
+  const virtualizer = useVirtualizer({
+    count: collapsed.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 20,
+    overscan: 12,
+  });
+
+  virtualizerRef.current = virtualizer;
+  collapsedCountRef.current = collapsed.length;
 
   // Counts are over the unfiltered list, so they depend only on `logs` —
   // typing in the filter box must not re-count.
@@ -236,8 +260,23 @@ function UnityConsolePanel() {
         onScroll={handleScroll}
         style={{ flex: 1, overflowY: 'auto', fontFamily: 'var(--font-mono)', fontSize: 12 }}
       >
-        {collapsed.map((item, idx) => (
-          <div key={idx}>
+        <div style={{ height: virtualizer.getTotalSize(), position: 'relative', width: '100%' }}>
+        {virtualizer.getVirtualItems().map((virtualRow) => {
+          const item = collapsed[virtualRow.index];
+          const idx = virtualRow.index;
+          return (
+          <div
+            key={virtualRow.key}
+            data-index={virtualRow.index}
+            ref={virtualizer.measureElement}
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100%',
+              transform: `translateY(${virtualRow.start}px)`,
+            }}
+          >
             <div
               onClick={() => setExpandedIdx(expandedIdx === idx ? null : idx)}
               style={{
@@ -366,7 +405,9 @@ function UnityConsolePanel() {
               </div>
             )}
           </div>
-        ))}
+          );
+        })}
+        </div>
 
         {collapsed.length === 0 && (
           <div style={{
