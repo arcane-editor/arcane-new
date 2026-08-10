@@ -11,14 +11,19 @@ const arcaneLight: ThemeDefinition = {
   name: 'Arcane Light',
   type: 'light',
   ui: {
-    'bg-primary': '#FAF7F0',
+    // Recessed Chrome, mirrored: the editor is the brightest plane and the
+    // chrome steps down away from it. Same principle as Arcane Dark — the
+    // luminance step is the separator, so no region needs a border.
+    'bg-primary': '#FCFAF3',
     'bg-sidebar': '#F2EDE0',
-    'bg-titlebar': '#EFE9DA',
+    'bg-titlebar': '#EBE4D3',
+    // Equal to `bg-primary`: the active tab reads as continuous with its
+    // content, marked by `.tab.active::after`'s accent rule instead.
     'bg-tab-active': '#FCFAF3',
     'bg-tab-inactive': '#F2EDE0',
-    'bg-statusbar': '#EFE9DA',
-    'bg-activity-bar': '#EFE9DA',
-    'bg-breadcrumbs': '#FAF7F0',
+    'bg-statusbar': '#EBE4D3',
+    'bg-activity-bar': '#E7DFCC',
+    'bg-breadcrumbs': '#F2EDE0',
     'bg-input': '#FCFAF3',
     'text-primary': '#2A2622',
     'text-secondary': '#6B6358',
@@ -26,7 +31,7 @@ const arcaneLight: ThemeDefinition = {
     'text-breadcrumb': '#857C6E',
     'text-breadcrumb-active': '#2A2622',
     'text-on-dark': '#2A2622',
-    // on #EFE9DA vellum
+    // on #EBE4D3 vellum
     'statusbar-fg': '#2A2622',
     'border': 'rgba(42, 38, 34, 0.08)',
     'accent': '#A8632A',
@@ -48,8 +53,10 @@ const arcaneLight: ThemeDefinition = {
     'editor-error-btn-hover': '#7A2A1E',
     'folder-icon': '#857C6E',
     'surface-container-high': '#F2EDE0',
-    'surface-container-highest': '#EFE9DA',
-    'surface-bright': '#FCFAF3',
+    'surface-container-highest': '#EBE4D3',
+    // The editor is now the brightest vellum, so a raised surface has to go
+    // past it toward paper-white to still read as raised.
+    'surface-bright': '#FFFFFF',
     'primary-light': '#7A4318',
     'ghost-border': 'rgba(168, 99, 42, 0.20)',
     'warning': '#9E7A1C',
@@ -76,62 +83,66 @@ const arcaneLight: ThemeDefinition = {
     base: 'vs',
     inherit: true,
     rules: [
-      // --- Original 16 rules ---
-      { token: 'comment', foreground: 'A09584', fontStyle: 'italic' },
-      { token: 'keyword', foreground: '7A4318' },
-      { token: 'string', foreground: '4F6B3A' },
-      { token: 'number', foreground: '7A4318' },
-      { token: 'type', foreground: '3A6680' },
-      { token: 'function', foreground: 'A8632A' },
+      // The same six-role structure as Arcane Dark, in Light's own ink. Not a
+      // darkened copy of the dark palette: this stays iron-gall and sienna on
+      // vellum. The sienna accent (#A8632A) is gone from the code — it was
+      // resolving five function-ish tokens at 4.38:1 while also being the
+      // chrome accent, the same double duty gold was doing in the dark theme.
+      { token: 'comment', foreground: '776D61', fontStyle: 'italic' },
+      { token: 'keyword', foreground: '6B3A7A' },
+      { token: 'string', foreground: '415C2F' },
+      { token: 'number', foreground: '8A4A16' },
+      { token: 'type', foreground: '2F5A73' },
+      { token: 'function', foreground: '1F6459' },
       { token: 'variable', foreground: '2A2622' },
-      { token: 'constant', foreground: '7A4318' },
-      { token: 'parameter', foreground: '5C5448' },
-      { token: 'property', foreground: '3A6680' },
-      { token: 'tag', foreground: '9E3A2C' },
-      { token: 'attribute.name', foreground: 'A8632A' },
-      { token: 'attribute.value', foreground: '4F6B3A' },
+      { token: 'constant', foreground: '8A4A16' },
+      { token: 'parameter', foreground: '4A443C' },
+      { token: 'property', foreground: '2F5A73' },
+      { token: 'tag', foreground: '8F3324' },
+      { token: 'attribute.name', foreground: '8F3324' },
+      { token: 'attribute.value', foreground: '415C2F' },
       { token: 'delimiter', foreground: '6B6358' },
-      { token: 'operator', foreground: '7A4318' },
-      { token: 'regexp', foreground: '4F6B3A' },
+      { token: 'operator', foreground: '6B3A7A' },
+      { token: 'regexp', foreground: '415C2F' },
 
       // --- Keywords & Storage ---
-      { token: 'keyword.control', foreground: '7A4318', fontStyle: 'italic' },
-      { token: 'keyword.operator.new', foreground: '7A4318' },
-      { token: 'keyword.operator.expression', foreground: '7A4318' },
-      { token: 'storage', foreground: '7A4318' },
-      { token: 'storage.type', foreground: '3A6680' },
-      { token: 'storage.modifier', foreground: '7A4318' },
+      { token: 'keyword.control', foreground: '6B3A7A', fontStyle: 'italic' },
+      { token: 'keyword.operator.new', foreground: '6B3A7A' },
+      { token: 'keyword.operator.expression', foreground: '6B3A7A' },
+      { token: 'storage', foreground: '6B3A7A' },
+      { token: 'storage.type', foreground: '2F5A73' },
+      { token: 'storage.modifier', foreground: '6B3A7A' },
 
       // --- Variables & Constants ---
-      { token: 'variable.language', foreground: '9E3A2C', fontStyle: 'italic' },
-      { token: 'variable.other.constant', foreground: '7A4318' },
-      { token: 'constant.language', foreground: '7A4318' },
+      { token: 'variable.language', foreground: '8F3324', fontStyle: 'italic' },
+      { token: 'variable.other.constant', foreground: '8A4A16' },
+      { token: 'constant.language', foreground: '6B3A7A' },
 
       // --- Entities & Support ---
-      { token: 'entity.name.function', foreground: 'A8632A' },
-      { token: 'entity.name.class', foreground: '3A6680' },
-      { token: 'entity.name.type', foreground: '3A6680' },
-      { token: 'support.function', foreground: 'A8632A' },
-      { token: 'support.class', foreground: '3A6680' },
-      { token: 'support.type', foreground: '3A6680' },
+      { token: 'entity.name.function', foreground: '1F6459' },
+      { token: 'entity.name.class', foreground: '2F5A73' },
+      { token: 'entity.name.type', foreground: '2F5A73' },
+      { token: 'support.function', foreground: '1F6459' },
+      { token: 'support.class', foreground: '2F5A73' },
+      { token: 'support.type', foreground: '2F5A73' },
 
       // --- JSX/TSX ---
-      { token: 'entity.name.tag', foreground: '9E3A2C' },
-      { token: 'support.class.component', foreground: '3A6680' },
+      { token: 'entity.name.tag', foreground: '8F3324' },
+      { token: 'support.class.component', foreground: '2F5A73' },
 
       // --- Punctuation & Delimiters ---
       { token: 'meta.brace.round', foreground: '6B6358' },
       { token: 'meta.brace.square', foreground: '6B6358' },
-      { token: 'meta.brace.curly', foreground: 'A8632A' },
+      { token: 'meta.brace.curly', foreground: '6B3A7A' },
       { token: 'punctuation.separator', foreground: '6B6358' },
-      { token: 'string.template', foreground: '4F6B3A' },
-      { token: 'punctuation.definition.template-expression', foreground: '7A4318' },
+      { token: 'string.template', foreground: '415C2F' },
+      { token: 'punctuation.definition.template-expression', foreground: '6B3A7A' },
 
       // --- Decorators ---
-      { token: 'meta.decorator', foreground: '9E3A2C' },
+      { token: 'meta.decorator', foreground: '8F3324' },
     ],
     colors: {
-      'editor.background': '#FAF7F0',
+      'editor.background': '#FCFAF3',
       'editor.foreground': '#2A2622',
       'editorCursor.foreground': '#A8632A',
       'editor.lineHighlightBackground': '#F2EDE0',
@@ -141,7 +152,7 @@ const arcaneLight: ThemeDefinition = {
       'editor.wordHighlightBackground': 'rgba(168, 99, 42, 0.08)',
       'editor.findMatchBackground': 'rgba(168, 99, 42, 0.25)',
       'editor.findMatchHighlightBackground': 'rgba(168, 99, 42, 0.12)',
-      'editorLineNumber.foreground': '#C5BDAE',
+      'editorLineNumber.foreground': '#948B7E',
       'editorLineNumber.activeForeground': '#A8632A',
       'editorIndentGuide.background': '#E5DECD',
       'editorIndentGuide.activeBackground': '#C5BDAE',
@@ -155,20 +166,20 @@ const arcaneLight: ThemeDefinition = {
       'editorHoverWidget.border': '#E5DECD',
       'editorBracketMatch.background': 'rgba(168, 99, 42, 0.12)',
       'editorBracketMatch.border': '#A8632A',
-      'editorGutter.background': '#FAF7F0',
+      'editorGutter.background': '#FCFAF3',
       'editorGutter.modifiedBackground': '#9E7A1C',
       'editorGutter.addedBackground': '#4F6B3A',
       'editorGutter.deletedBackground': '#9E3A2C',
       'scrollbarSlider.background': 'rgba(42, 38, 34, 0.10)',
       'scrollbarSlider.hoverBackground': 'rgba(42, 38, 34, 0.20)',
       'scrollbarSlider.activeBackground': 'rgba(42, 38, 34, 0.30)',
-      'minimap.background': '#FAF7F0',
+      'minimap.background': '#FCFAF3',
       'minimapSlider.background': 'rgba(42, 38, 34, 0.08)',
       'minimapSlider.hoverBackground': 'rgba(42, 38, 34, 0.18)',
     },
   },
   terminal: {
-    background: '#FAF7F0',
+    background: '#FCFAF3',
     foreground: '#2A2622',
     cursor: '#A8632A',
     cursorAccent: '#FCFAF3',

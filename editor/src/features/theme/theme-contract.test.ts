@@ -228,7 +228,7 @@ describe.each(themes.map((t) => [t.id, t] as const))('%s', (_id, theme) => {
 // writing found monokai with 11 rules under 4.5:1 (its signature #F92672 sits
 // at 3.93) and dracula's canonical comment blue #6272A4 at 3.03. Holding them
 // to AA would mean not shipping Monokai or Dracula.
-const CONTRAST_ENFORCED = new Set(['arcane-dark']);
+const CONTRAST_ENFORCED = new Set(['arcane-dark', 'arcane-light']);
 
 const enforced = themes.filter((t) => CONTRAST_ENFORCED.has(t.id));
 
