@@ -6096,3 +6096,92 @@ html, body, #root {
 .settings-terminal-preview-prompt { color: var(--accent); }
 .settings-terminal-preview-ok { color: var(--success); }
 .settings-terminal-preview-err { color: var(--error-text); }
+
+/* ── Motion ──────────────────────────────────────────────────────────────
+   Applied where motion carries meaning — state changes and things arriving —
+   never as decoration. Everything below goes through the duration and easing
+   tokens, so `prefers-reduced-motion` collapses all of it at once.
+
+   Modals animated before this; sidebars, panels, tabs and tree rows did not,
+   which is why the shell felt abrupt next to the dialogs. */
+
+.activity-bar-icon {
+  transition:
+    color var(--motion-fast) var(--ease-out),
+    background var(--motion-fast) var(--ease-out);
+}
+
+/* The active-view marker slides rather than jumping between icons. */
+.activity-bar-icon::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 2px;
+  height: 0;
+  border-radius: 0 var(--radius-full) var(--radius-full) 0;
+  background: var(--accent);
+  opacity: 0;
+  transform: translateY(-50%);
+  transition:
+    height var(--motion-base) var(--ease-out),
+    opacity var(--motion-fast) var(--ease-out);
+}
+.activity-bar-icon.active::before {
+  height: 22px;
+  opacity: 1;
+}
+
+.tab {
+  transition:
+    background var(--motion-fast) var(--ease-out),
+    color var(--motion-fast) var(--ease-out);
+}
+
+/* Tree and list rows: hover should feel immediate, so fast rather than base.
+   Class names verified against the JSX — a selector that matches nothing is
+   worse than no rule, because it reads as covered. */
+.tree-node,
+.scm-file-item {
+  transition: background var(--motion-fast) var(--ease-out);
+}
+
+/* Buttons and icon buttons across the shell. */
+.explorer-action-btn,
+.title-bar-btn,
+.scm-file-action-btn,
+.settings-reset-btn {
+  transition:
+    background var(--motion-fast) var(--ease-out),
+    color var(--motion-fast) var(--ease-out),
+    opacity var(--motion-fast) var(--ease-out);
+}
+
+/* Panels and sidebars arriving. Opacity + a short travel reads as the panel
+   coming from its own edge, which tells the user where it went when closed. */
+@keyframes app-panel-in-left {
+  from { opacity: 0; transform: translateX(-8px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes app-panel-in-bottom {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+
+.sidebar { animation: app-panel-in-left var(--motion-base) var(--ease-out); }
+.bottom-panel { animation: app-panel-in-bottom var(--motion-base) var(--ease-out); }
+/* No right-side rule: there is no `.right-sidebar` element — RightSidebarPanel
+   renders AiChatPanel directly, and `.ai-panel` already has its own entry
+   animation (ai-panel-drop-in). */
+
+/* Focus rings. Keyboard users previously got whatever the UA drew, which on
+   a dark theme is frequently invisible. */
+.activity-bar-icon:focus-visible,
+.title-bar-btn:focus-visible,
+.explorer-action-btn:focus-visible,
+.tab:focus-visible,
+.settings-font-trigger:focus-visible,
+.ai-panel-mode-pill:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
