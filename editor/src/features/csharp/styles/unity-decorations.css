@@ -1,0 +1,39 @@
+/*
+ * Unity semantic decorations.
+ *
+ * Colours come from the active theme via the `--unity-*` contract tokens, so
+ * all six themes get these for free and none of them can drift.
+ *
+ * `!important` is required, not decorative: Monaco paints its own tokenizer
+ * colour inline on the same span, and an inline style outranks a class rule.
+ * `better-comments.css` does the same thing for the same reason.
+ */
+
+.unity-lifecycle-name {
+  color: var(--unity-lifecycle) !important;
+  font-weight: 600;
+}
+
+.unity-engine-type-name {
+  color: var(--unity-engine-type) !important;
+}
+
+.unity-inspector-attr {
+  color: var(--unity-inspector) !important;
+}
+
+/* Whole-line marker: this field reaches the Inspector. */
+.unity-inspector-line {
+  background: var(--unity-inspector-rail);
+  box-shadow: inset 2px 0 0 var(--unity-inspector);
+}
+
+/* Gutter glyph on methods the engine calls. */
+.unity-lifecycle-glyph::after {
+  content: '▸';
+  display: block;
+  color: var(--unity-lifecycle);
+  font-size: 11px;
+  line-height: inherit;
+  text-align: center;
+}

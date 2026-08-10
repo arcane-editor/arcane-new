@@ -31,6 +31,7 @@ import {
   isInputActionsFile,
   SceneDiffViewer,
 } from '../../unity-asset-viewer';
+import { attachUnityDecorations } from '../../csharp';
 import { initTestCodeLens } from '../../unity-test-runner';
 import { attachBreakpointGutter } from '../../debugger';
 import { registerInlineSuggestProvider } from '../../inline-suggest';
@@ -339,6 +340,10 @@ function EditorPanel() {
           editor.onDidDispose(unbindShortcuts);
 
           registerBetterComments(editor, monaco);
+          // Unity semantic colouring: lifecycle methods, engine types, and
+          // Inspector-facing attributes. Self-gates per model on `.cs`, and
+          // rebinds on model swap, so it survives file switches.
+          attachUnityDecorations(editor, monaco);
           // Debugger breakpoint gutter (Unity projects; self-gates otherwise).
           attachBreakpointGutter(editor, monaco);
           // Git changed-lines gutter (vs HEAD); disposed alongside this

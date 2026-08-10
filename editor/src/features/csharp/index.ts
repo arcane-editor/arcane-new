@@ -1,3 +1,5 @@
+import './styles/unity-decorations.css';
+
 export { default as DotnetMissingModal } from './components/DotnetMissingModal';
 export { NewScriptModal } from './components/NewScriptModal';
 export {
@@ -10,6 +12,10 @@ export {
 } from './data/templates';
 export { offerClassRenameSync } from './services/class-rename-sync';
 export { classifyFile, sortFilesByPriority, FilePriority } from './services/FileClassifier';
-export { computeUnityDecorations } from './services/csharp-decorations';
+export {
+  attachUnityDecorations,
+  disposeUnityDecorations,
+  computeUnityDecorations,
+} from './services/csharp-decorations';
 export type { UnityDecoration, UnityDecorationKind } from './services/csharp-decorations';
 export { UNITY_LIFECYCLE_METHODS, LIFECYCLE_METHOD_NAMES } from './services/lifecycle-db';

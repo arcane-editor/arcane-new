@@ -1,3 +1,4 @@
+import type { Monaco } from '@monaco-editor/react';
 import { LIFECYCLE_METHOD_NAMES, UNITY_LIFECYCLE_METHODS } from './lifecycle-db';
 import { UNITY_API_NAMES } from '../../../data/unity-api-names';
 
@@ -96,4 +97,92 @@ export function computeUnityDecorations(text: string): UnityDecoration[] {
   });
 
   return out;
+}
+
+// ─── attach layer ────────────────────────────────────────────────────
+
+type MonacoEditor = import('monaco-editor').editor.IStandaloneCodeEditor;
+type Model = import('monaco-editor').editor.ITextModel;
+
+interface State {
+  collection: import('monaco-editor').editor.IEditorDecorationsCollection;
+  contentDispose: import('monaco-editor').IDisposable;
+  modelDispose: import('monaco-editor').IDisposable;
+  scheduled: ReturnType<typeof setTimeout> | null;
+}
+
+// Per-editor, so a diff view or split editor cannot clobber its neighbour.
+const STATES = new WeakMap<MonacoEditor, State>();
+
+const CLASS_BY_KIND: Record<UnityDecorationKind, string> = {
+  'lifecycle': 'unity-lifecycle-name',
+  'engine-type': 'unity-engine-type-name',
+  'inspector-attribute': 'unity-inspector-attr',
+};
+
+function refresh(editor: MonacoEditor, monaco: Monaco, state: State): void {
+  const model = editor.getModel();
+  if (!model || !model.uri.toString().endsWith('.cs')) {
+    state.collection.set([]);
+    return;
+  }
+  state.collection.set(
+    computeUnityDecorations(model.getValue()).map((d) => ({
+      range: new monaco.Range(d.line, d.startColumn, d.line, d.endColumn),
+      options: {
+        inlineClassName: CLASS_BY_KIND[d.kind],
+        ...(d.kind === 'lifecycle'
+          ? {
+              glyphMarginClassName: 'unity-lifecycle-glyph',
+              glyphMarginHoverMessage: { value: d.hover ?? '' },
+            }
+          : {}),
+        ...(d.kind === 'inspector-attribute'
+          ? { isWholeLine: true, className: 'unity-inspector-line' }
+          : {}),
+      },
+    })),
+  );
+}
+
+export function attachUnityDecorations(editor: MonacoEditor, monaco: Monaco): void {
+  if (STATES.has(editor)) return;
+  const state: State = {
+    collection: editor.createDecorationsCollection([]),
+    contentDispose: { dispose: () => {} },
+    modelDispose: { dispose: () => {} },
+    scheduled: null,
+  };
+
+  const schedule = () => {
+    if (state.scheduled) clearTimeout(state.scheduled);
+    state.scheduled = setTimeout(() => refresh(editor, monaco, state), 150);
+  };
+
+  function bindModel(model: Model | null) {
+    state.contentDispose.dispose();
+    if (!model) {
+      state.collection.set([]);
+      return;
+    }
+    state.contentDispose = model.onDidChangeContent(schedule);
+    refresh(editor, monaco, state);
+  }
+
+  bindModel(editor.getModel());
+  // The editor instance is reused across file switches — it just swaps its
+  // model — so without this the decorations would be from the previous file.
+  state.modelDispose = editor.onDidChangeModel(() => bindModel(editor.getModel()));
+  editor.onDidDispose(() => disposeUnityDecorations(editor));
+  STATES.set(editor, state);
+}
+
+export function disposeUnityDecorations(editor: MonacoEditor): void {
+  const state = STATES.get(editor);
+  if (!state) return;
+  if (state.scheduled) clearTimeout(state.scheduled);
+  state.contentDispose.dispose();
+  state.modelDispose.dispose();
+  state.collection.clear();
+  STATES.delete(editor);
 }
