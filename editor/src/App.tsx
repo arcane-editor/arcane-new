@@ -20,6 +20,7 @@ import {
   layoutPersister,
   verticalPersister,
   widthsForRestore,
+  CoachMarks,
 } from './features/app-shell';
 import { EditorPanel, Breadcrumbs, EditorErrorBoundary } from './features/editor';
 import {
@@ -32,7 +33,6 @@ import {
   consumePendingGotoForWorkspace,
 } from './features/project';
 import { AiChatPanel, MaximizedAiOverlay, restoreLatestSessionForWorkspace } from './features/ai-panel';
-import CoachMarks from './features/app-shell/components/CoachMarks';
 import {
   focusTerminalById,
   handleTerminalDrop,
