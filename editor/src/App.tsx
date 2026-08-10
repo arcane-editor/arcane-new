@@ -33,6 +33,7 @@ import {
   consumePendingGotoForWorkspace,
 } from './features/project';
 import { AiChatPanel, MaximizedAiOverlay, restoreLatestSessionForWorkspace } from './features/ai-panel';
+import TooltipHost from './components/TooltipHost';
 import {
   focusTerminalById,
   handleTerminalDrop,
@@ -1510,6 +1511,7 @@ function App() {
       {unityPicker && (
         <UnityAssetPickerModal mode={unityPicker} onClose={() => setUnityPicker(null)} />
       )}
+      <TooltipHost />
       <CoachMarks />
       {aiPanelMaximized && (
         <MaximizedAiOverlay>

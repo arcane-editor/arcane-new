@@ -6,6 +6,7 @@ import { openProjectInNewWindow, routePendingGotoToProjectWindow } from './featu
 import { listenScoped, safeUnlisten } from './utils/tauri-listener';
 import { formatRelativeDate } from './utils/date';
 import { Folder, FolderOpen } from 'lucide-react';
+import TooltipHost from './components/TooltipHost';
 
 const ERROR_DISMISS_MS = 6000;
 
@@ -167,6 +168,7 @@ function WelcomeApp() {
       color: 'var(--text-primary)',
       fontFamily: 'var(--font-display)',
     }}>
+      <TooltipHost />
       <div data-tauri-drag-region style={{ height: 28, flexShrink: 0 }} />
       <div style={{
         flex: 1,
