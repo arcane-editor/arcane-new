@@ -11,15 +11,23 @@ const arcaneDark: ThemeDefinition = {
   name: 'Arcane Dark',
   type: 'dark',
   ui: {
-    'bg-primary': '#13121A',
-    'bg-sidebar': '#100F14',
-    'bg-titlebar': '#0E0D11',
-    'bg-tab-active': '#1A1922',
-    'bg-tab-inactive': '#100F14',
-    'bg-statusbar': '#0E0D11',
-    'bg-activity-bar': '#0E0D11',
-    'bg-breadcrumbs': '#13121A',
-    'bg-input': '#1F1E28',
+    // Recessed Chrome: chrome sinks, the editor is the brightest plane. The
+    // luminance step IS the separator — editor-to-sidebar goes from 1.02:1 to
+    // 1.9:1 — so no region needs a border. `border` below is untouched: the
+    // shell regions never used it, and its 84 references are all controls.
+    'bg-primary': '#16151F',
+    'bg-sidebar': '#0F0E16',
+    'bg-titlebar': '#0B0A10',
+    // Equal to `bg-primary` on purpose: the active tab reads as continuous
+    // with its content. `.tab.active::after` in App.css already draws a 2px
+    // accent top rule, keyed on `.active` alone, so every tab state keeps a
+    // marker without a fill difference.
+    'bg-tab-active': '#16151F',
+    'bg-tab-inactive': '#0F0E16',
+    'bg-statusbar': '#0B0A10',
+    'bg-activity-bar': '#08070C',
+    'bg-breadcrumbs': '#0F0E16',
+    'bg-input': '#1C1A26',
     'text-primary': '#E2E0DA',
     'text-secondary': '#7E7B86',
     'text-active': '#F4F2EC',
@@ -31,13 +39,12 @@ const arcaneDark: ThemeDefinition = {
     'border': 'rgba(255, 255, 255, 0.05)',
     'accent': '#D4B062',
     'accent-secondary': '#E8C97D',
-    // Opaque per the fill-token contract in types.ts. These are the exact
-    // composites of the translucent values they replace — rgba(255,255,255,.04)
-    // and rgba(212,176,98,.10) blended over `bg-sidebar`/`bg-primary` — so the
-    // Arcane look is unchanged while the token now means the same thing here as
-    // it does in the four VS Code-derived themes.
-    'hover': '#1B1A20',
-    'selected': '#25201E',
+    // Opaque per the FILL contract in types.ts — a fill replaces a row's
+    // background outright, so it has to hide what it covers. Both sit one and
+    // two steps up the surface ramp respectively, which is what keeps them
+    // legible against the darker chrome as well as against the editor.
+    'hover': '#1C1A26',
+    'selected': '#252034',
     'git-modified': '#E0B048',
     'git-added': '#7DA66B',
     'git-deleted': '#C97A8A',
@@ -51,9 +58,9 @@ const arcaneDark: ThemeDefinition = {
     'editor-error-btn': '#C97A8A',
     'editor-error-btn-hover': '#D89AA5',
     'folder-icon': '#7E7B86',
-    'surface-container-high': '#1A1922',
-    'surface-container-highest': '#22202C',
-    'surface-bright': '#2A2836',
+    'surface-container-high': '#1C1A26',
+    'surface-container-highest': '#242232',
+    'surface-bright': '#2E2B3C',
     'primary-light': '#E8C97D',
     'ghost-border': 'rgba(212, 176, 98, 0.18)',
     'warning': '#E0B048',
@@ -138,11 +145,11 @@ const arcaneDark: ThemeDefinition = {
       { token: 'meta.decorator', foreground: 'D4879A' },
     ],
     colors: {
-      'editor.background': '#13121A',
+      'editor.background': '#16151F',
       'editor.foreground': '#E2E0DA',
       'editorCursor.foreground': '#D4B062',
-      'editor.lineHighlightBackground': '#1A1922',
-      'editor.lineHighlightBorder': '#1A1922',
+      'editor.lineHighlightBackground': '#1C1A26',
+      'editor.lineHighlightBorder': '#1C1A26',
       'editor.selectionBackground': 'rgba(212, 176, 98, 0.20)',
       'editor.selectionHighlightBackground': 'rgba(212, 176, 98, 0.12)',
       'editor.wordHighlightBackground': 'rgba(212, 176, 98, 0.10)',
@@ -153,37 +160,37 @@ const arcaneDark: ThemeDefinition = {
       // stays gold: it is one of the moments the accent should own.
       'editorLineNumber.foreground': '#656274',
       'editorLineNumber.activeForeground': '#D4B062',
-      'editorIndentGuide.background': '#22202C',
-      'editorIndentGuide.activeBackground': '#3A3845',
-      'editorWidget.background': '#1A1922',
+      'editorIndentGuide.background': '#242232',
+      'editorIndentGuide.activeBackground': '#3E3B4C',
+      'editorWidget.background': '#1C1A26',
       'editorWidget.foreground': '#E2E0DA',
-      'editorWidget.border': '#22202C',
-      'editorSuggestWidget.background': '#1A1922',
-      'editorSuggestWidget.border': '#22202C',
+      'editorWidget.border': '#242232',
+      'editorSuggestWidget.background': '#1C1A26',
+      'editorSuggestWidget.border': '#242232',
       'editorSuggestWidget.selectedBackground': 'rgba(212, 176, 98, 0.15)',
-      'editorHoverWidget.background': '#1A1922',
-      'editorHoverWidget.border': '#22202C',
+      'editorHoverWidget.background': '#1C1A26',
+      'editorHoverWidget.border': '#242232',
       'editorBracketMatch.background': 'rgba(212, 176, 98, 0.15)',
       'editorBracketMatch.border': '#D4B062',
-      'editorGutter.background': '#13121A',
+      'editorGutter.background': '#16151F',
       'editorGutter.modifiedBackground': '#E0B048',
       'editorGutter.addedBackground': '#7DA66B',
       'editorGutter.deletedBackground': '#C97A8A',
       'scrollbarSlider.background': 'rgba(255, 255, 255, 0.08)',
       'scrollbarSlider.hoverBackground': 'rgba(255, 255, 255, 0.15)',
       'scrollbarSlider.activeBackground': 'rgba(255, 255, 255, 0.22)',
-      'minimap.background': '#13121A',
+      'minimap.background': '#16151F',
       'minimapSlider.background': 'rgba(255, 255, 255, 0.08)',
       'minimapSlider.hoverBackground': 'rgba(255, 255, 255, 0.18)',
     },
   },
   terminal: {
-    background: '#13121A',
+    background: '#16151F',
     foreground: '#E2E0DA',
     cursor: '#D4B062',
-    cursorAccent: '#0E0D11',
+    cursorAccent: '#0B0A10',
     selectionBackground: 'rgba(212, 176, 98, 0.25)',
-    black: '#1A1922',
+    black: '#1C1A26',
     red: '#C97A8A',
     green: '#7DA66B',
     yellow: '#D4B062',

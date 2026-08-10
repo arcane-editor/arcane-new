@@ -10,7 +10,9 @@
 
 Arcane Dark reads as competent but flat. Four measured causes:
 
-1. **No elevation ladder.** `bg-primary` `#13121A`, `bg-sidebar` `#100F14` and `bg-titlebar` `#0E0D11` sit within ~2% luminance of each other. Editor-to-sidebar contrast is **1.02:1**. Twelve surface tokens exist; they carry effectively one value.
+1. **No elevation ladder.** `bg-primary` `#13121A`, `bg-sidebar` `#100F14` and `bg-titlebar` `#0E0D11` sit within ~2% luminance of each other. Editor-to-sidebar separation is **ΔL\* 0.96** — at the threshold of perceptibility. Twelve surface tokens exist; they carry effectively one value.
+
+   **On the metric:** surface separation is measured in CIE L\*, not WCAG contrast ratio. WCAG's ratio is built for text legibility and saturates near black — its `+0.05` flare constant dominates when both luminances are under 0.01, so it reports ~1.0 for any two dark surfaces regardless of how different they look. It is the right tool for section 2 and the wrong one here.
 2. **Comments fail WCAG AA and dominate the frame.** `comment` `#5C5965` on `#13121A` is **2.74:1**. `editorLineNumber.foreground` `#3A3845` is **1.63:1**. Arcane Light has the same bug: `#A09584` on `#FAF7F0` is **2.75:1**.
 3. **Gold carries eight syntax roles.** `keyword`, `number`, `function`, `constant`, `operator`, `meta.brace.curly`, `storage.modifier` and `attribute.name` all resolve to `#D4B062`/`#E8C97D`. `public` and `Awake` differ by one small step.
 4. **The brand accent owns nothing the user looks at.** Gold appears on the cursor, active line number and avatar. The loudest colored elements are a green connected dot and a red error mark.
@@ -50,7 +52,7 @@ Arcane Dark `ui` values only. No new tokens, no CSS changes.
 
 `monaco.colors` follows: `editor.background` and `editorGutter.background` → `#16151F`, `editor.lineHighlightBackground`/`Border` → `#1C1A26`, `editorWidget.background`/`editorSuggestWidget.background`/`editorHoverWidget.background` → `#1C1A26`, widget borders → `#242232`, `minimap.background` → `#16151F`. Terminal `background` → `#16151F`.
 
-Editor-to-sidebar contrast rises **1.02:1 → 1.9:1**.
+Editor-to-sidebar separation rises **ΔL\* 0.96 → 2.99**, and editor-to-activity-bar **1.5 → 5.19**. ΔL\* ≈ 1 is barely perceptible; ≈ 3 is a clearly visible step.
 
 **`bg-tab-active` deliberately equals `bg-primary`.** The active tab becomes continuous with its content, so it can no longer be marked by a fill difference. It gets a 2px `--accent` top rule instead — the same device `.activity-bar-icon.active` already uses as a 3px left rail.
 

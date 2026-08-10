@@ -61,6 +61,30 @@ function contrast(fg: string, bg: string): number {
   return (hi + 0.05) / (lo + 0.05);
 }
 
+/** CIE L* — perceptual lightness, 0 (black) to 100 (white). */
+function lightness(color: string): number {
+  const c = parseColor(color);
+  if (!c) return NaN;
+  const y = relativeLuminance(c);
+  const f = y > 0.008856 ? Math.cbrt(y) : 7.787 * y + 16 / 116;
+  return 116 * f - 16;
+}
+
+/**
+ * Perceptual distance between two SURFACES.
+ *
+ * Deliberately not `contrast()`. WCAG's ratio is built for text legibility and
+ * saturates near black — its +0.05 flare constant dominates once both
+ * luminances are under ~0.01, so it reports ≈1.0 for any two dark surfaces no
+ * matter how different they look. That is precisely the regime a dark IDE's
+ * chrome lives in, and it is why a ramp of twelve tokens carrying effectively
+ * one value passed every check for so long. ΔL* ≈ 1 is at the threshold of
+ * perceptibility; ≈ 3 is a clearly visible step.
+ */
+function surfaceStep(a: string, b: string): number {
+  return Math.abs(lightness(a) - lightness(b));
+}
+
 // ─── the contract, parsed out of types.ts ────────────────────────────
 
 type TokenClass = 'SURFACE' | 'FILL' | 'OVERLAY' | 'CONTENT' | 'SHADOWS';
@@ -241,6 +265,24 @@ describe.each(enforced.map((t) => [t.id, t] as const))('%s syntax contrast', (_i
   it('terminal text clears WCAG AA on the terminal background', () => {
     const ratio = contrast(theme.terminal.foreground, theme.terminal.background);
     expect(ratio).toBeGreaterThanOrEqual(4.5);
+  });
+
+  // The elevation ladder. Arcane Dark once had twelve surface tokens whose
+  // values sat within ~2% luminance of each other, so the whole window read as
+  // one flat sheet and every region boundary depended on a 5%-white hairline.
+  // These regions carry no border by design — the step IS the separator — so
+  // if the step collapses there is nothing left to see.
+  it('keeps a visible step between adjacent shell surfaces', () => {
+    const pairs = [
+      ['bg-primary', 'bg-sidebar'],
+      ['bg-sidebar', 'bg-activity-bar'],
+      ['bg-primary', 'bg-titlebar'],
+    ] as const;
+    const failures = pairs
+      .map(([a, b]) => [a, b, surfaceStep(theme.ui[a], theme.ui[b])] as const)
+      .filter(([, , step]) => step < 1.5)
+      .map(([a, b, step]) => `${a}↔${b} ΔL*=${step.toFixed(2)}`);
+    expect(failures).toEqual([]);
   });
 });
 
