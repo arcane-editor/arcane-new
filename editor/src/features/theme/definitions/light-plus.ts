@@ -51,14 +51,12 @@ const lightPlus: ThemeDefinition = {
     'info-bg': 'rgba(49, 107, 205, 0.10)',
     'success': '#388a34',
     // Unity semantics, derived from this theme's own warning / info /
-    // text-secondary so no new palette decisions are made on its behalf.
-    // Inspector deliberately does NOT use error-border: a serialized field
-    // is a healthy field, and error-coloured a file full of them reads as a
-    // list of problems.
+    // accent so no new palette decisions are made on its behalf. Inspector is
+    // the RAIL colour, not a text colour — see arcane-dark for why.
     'unity-lifecycle': '#bf8803',
     'unity-engine-type': '#316bcd',
-    'unity-inspector': '#717171',
-    'unity-inspector-rail': 'rgba(113, 113, 113, 0.05)',
+    'unity-inspector': '#007acc',
+    'unity-inspector-rail': 'rgba(0, 122, 204, 0.06)',
     'modal-backdrop': 'rgba(0, 0, 0, 0.18)',
     'modal-shadow': '0 8px 24px rgba(0, 0, 0, 0.16)',
     'scrollbar-thumb': 'rgba(0, 0, 0, 0.16)',

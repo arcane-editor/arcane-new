@@ -68,9 +68,9 @@ const arcaneLight: ThemeDefinition = {
     // calls, slate for engine types, iron-rust for what reaches the Inspector.
     'unity-lifecycle': '#8A5A12',
     'unity-engine-type': '#2F5A73',
-    // Muted slate-plum, deliberately not the iron-rust used for errors.
-    'unity-inspector': '#6E667E',
-    'unity-inspector-rail': 'rgba(110, 102, 126, 0.05)',
+    // The rail, not a text colour — see arcane-dark.
+    'unity-inspector': '#A8632A',
+    'unity-inspector-rail': 'rgba(168, 99, 42, 0.06)',
     'modal-backdrop': 'rgba(42, 38, 34, 0.30)',
     'modal-shadow': '0 8px 32px rgba(42, 38, 34, 0.12), 0 0 0 1px rgba(42, 38, 34, 0.06)',
     'scrollbar-thumb': 'rgba(42, 38, 34, 0.16)',
@@ -105,10 +105,10 @@ const arcaneLight: ThemeDefinition = {
       { token: 'constant', foreground: '8A4A16' },
       { token: 'parameter', foreground: '4A443C' },
       { token: 'property', foreground: '2F5A73' },
-      // `tag` keeps the iron-rust for JSX/HTML; C# attributes move off it so a
-      // file full of them stops reading as a column of errors.
+      // `tag` keeps the iron-rust for JSX/HTML; C# attributes take the type
+      // colour, because that is what they are — see arcane-dark.
       { token: 'tag', foreground: '8F3324' },
-      { token: 'attribute.name', foreground: '6E667E' },
+      { token: 'attribute.name', foreground: '2F5A73' },
       { token: 'attribute.value', foreground: '415C2F' },
       { token: 'delimiter', foreground: '6B6358' },
       { token: 'operator', foreground: '6B3A7A' },
@@ -148,7 +148,7 @@ const arcaneLight: ThemeDefinition = {
       { token: 'punctuation.definition.template-expression', foreground: '6B3A7A' },
 
       // --- Decorators ---
-      { token: 'meta.decorator', foreground: '6E667E' },
+      { token: 'meta.decorator', foreground: '2F5A73' },
     ],
     colors: {
       'editor.background': '#FCFAF3',

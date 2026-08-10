@@ -72,15 +72,15 @@ const arcaneDark: ThemeDefinition = {
     // it comes back — on the handful of methods per file the engine calls.
     'unity-lifecycle': '#E8C97D',
     'unity-engine-type': '#8FBEDA',
-    // Quiet lavender-grey, NOT rose. "This field reaches the Inspector" is a
-    // neutral fact about a healthy field, and a real .cs file has six or seven
-    // of them — coloured anywhere near `error-text` (#D89AA5) the file reads
-    // as a list of problems. Low chroma keeps it legible without competing
-    // with the six syntax roles.
-    'unity-inspector': '#A79FB8',
-    // A whisper, not a band. See `.unity-inspector-line`: the marking is the
-    // 2px rail; this only groups consecutive fields.
-    'unity-inspector-rail': 'rgba(167, 159, 184, 0.045)',
+    // The rail, not a text colour. Rose read as an error (ΔE 5.2 from
+    // `error-border`) and lavender-grey read as a comment (ΔE 26 from it, but
+    // the same low-chroma violet family) — the six syntax roles leave no hue
+    // spare, so Inspector-ness stops competing for one and becomes structural.
+    // The accent ties it to the gold lifecycle glyph: both mark Unity's
+    // surface of your class.
+    'unity-inspector': '#D4B062',
+    // A whisper, not a band — this only groups consecutive fields.
+    'unity-inspector-rail': 'rgba(212, 176, 98, 0.055)',
     'modal-backdrop': 'rgba(8, 7, 14, 0.55)',
     'modal-shadow': '0 16px 48px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.06)',
     'scrollbar-thumb': 'rgba(255, 255, 255, 0.10)',
@@ -115,12 +115,13 @@ const arcaneDark: ThemeDefinition = {
       { token: 'parameter', foreground: 'C6C2CE' },
       { token: 'property', foreground: '8FBEDA' },
       // `tag` keeps the rose: pink tags are the convention in JSX/HTML and
-      // there is no error confusion there. C# attributes do NOT — a .cs file
-      // carries six or seven of them and rose sits one step from `error-text`
-      // (#D89AA5), so they read as a column of alarms. They get the quiet
-      // metadata lavender instead.
+      // nothing there looks like an error. C# attributes take the TYPE colour,
+      // because that is what they are — `[SerializeField]` is
+      // `SerializeFieldAttribute`. Rose made a .cs file read as a column of
+      // alarms (one step from `error-text` #D89AA5) and grey made it read as
+      // commented-out. Typing them as types needs no hue the palette lacks.
       { token: 'tag', foreground: 'D4879A' },
-      { token: 'attribute.name', foreground: 'A79FB8' },
+      { token: 'attribute.name', foreground: '8FBEDA' },
       { token: 'attribute.value', foreground: '8FBE7A' },
       { token: 'delimiter', foreground: '8B8798' },
       { token: 'operator', foreground: 'C79BE0' },
@@ -160,7 +161,7 @@ const arcaneDark: ThemeDefinition = {
       { token: 'punctuation.definition.template-expression', foreground: 'C79BE0' },
 
       // --- Decorators ---
-      { token: 'meta.decorator', foreground: 'A79FB8' },
+      { token: 'meta.decorator', foreground: '8FBEDA' },
     ],
     colors: {
       'editor.background': '#16151F',

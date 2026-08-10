@@ -18,23 +18,26 @@
   color: var(--unity-engine-type) !important;
 }
 
-.unity-inspector-attr {
-  color: var(--unity-inspector) !important;
-}
-
 /*
  * Whole-line marker: this field reaches the Inspector.
  *
- * The RAIL is the marking; the background is only there to group consecutive
- * fields into a block, at an alpha low enough to read as a shadow rather than
- * a highlight. An earlier version used a rose fill at 5% and a full-strength
- * rose rail, which striped a real MonoBehaviour — six or seven serialized
- * fields per file — in a colour one step from `error-text`. A healthy field
- * must never look like a diagnostic.
+ * There is no text colour for Inspector attributes on purpose. Two attempts
+ * failed for the same underlying reason — the six syntax roles leave no hue
+ * spare, so anything picked reads as something else: rose landed ΔE 5.2 from
+ * `error-border` and a file of serialized fields looked like a list of
+ * problems; low-chroma lavender-grey landed in the comment family and the
+ * same file looked commented out. Serialized fields are the component's public
+ * surface, so neither reading is acceptable.
+ *
+ * Instead the attribute keeps its true colour — `[SerializeField]` is a
+ * UnityEngine type and is coloured as one — and Inspector-ness becomes
+ * structural: a rail in the margin, in the accent, so it speaks the same
+ * language as the gold lifecycle glyph. The background only groups consecutive
+ * fields and is deliberately too faint to read as a highlight.
  */
 .unity-inspector-line {
   background: var(--unity-inspector-rail);
-  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--unity-inspector) 50%, transparent);
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--unity-inspector) 55%, transparent);
 }
 
 /*

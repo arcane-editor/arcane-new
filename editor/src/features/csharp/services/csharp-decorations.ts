@@ -114,10 +114,14 @@ interface State {
 // Per-editor, so a diff view or split editor cannot clobber its neighbour.
 const STATES = new WeakMap<MonacoEditor, State>();
 
-const CLASS_BY_KIND: Record<UnityDecorationKind, string> = {
+// `inspector-attribute` intentionally has NO inline class. `[SerializeField]`
+// and `[Header]` are UnityEngine types and are already in UNITY_API_NAMES, so
+// the engine-type pass colours them correctly on its own. Inspector-ness is a
+// structural fact and is drawn as the line rail instead of taking a hue the
+// palette has none of: rose read as an error, grey read as a comment.
+const INLINE_CLASS_BY_KIND: Partial<Record<UnityDecorationKind, string>> = {
   'lifecycle': 'unity-lifecycle-name',
   'engine-type': 'unity-engine-type-name',
-  'inspector-attribute': 'unity-inspector-attr',
 };
 
 function refresh(editor: MonacoEditor, monaco: Monaco, state: State): void {
@@ -130,7 +134,7 @@ function refresh(editor: MonacoEditor, monaco: Monaco, state: State): void {
     computeUnityDecorations(model.getValue()).map((d) => ({
       range: new monaco.Range(d.line, d.startColumn, d.line, d.endColumn),
       options: {
-        inlineClassName: CLASS_BY_KIND[d.kind],
+        inlineClassName: INLINE_CLASS_BY_KIND[d.kind],
         ...(d.kind === 'lifecycle'
           ? {
               glyphMarginClassName: 'unity-lifecycle-glyph',

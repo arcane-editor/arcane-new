@@ -96,8 +96,12 @@ export interface UiColors {
   /** A UnityEngine type — MonoBehaviour, Vector3, Time — as distinct from a
    *  type the user wrote. */
   'unity-engine-type': string;
-  /** An attribute that surfaces a field in the Inspector — [SerializeField],
-   *  [Header], [Range]. */
+  /** The RAIL marking a field that surfaces in the Inspector — not a text
+   *  colour. `[SerializeField]` and `[Header]` are UnityEngine types and are
+   *  coloured as such; Inspector-ness is structural, so it is drawn in the
+   *  margin instead of competing for a hue the palette does not have spare.
+   *  Use the theme's accent: together with the gold lifecycle glyph it says
+   *  "this is Unity's surface of your class". */
   'unity-inspector': string;
   'button-primary-bg': string;
   'button-primary-text': string;

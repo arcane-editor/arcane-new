@@ -51,14 +51,12 @@ const dracula: ThemeDefinition = {
     'info-bg': 'rgba(139, 233, 253, 0.12)',
     'success': '#50fa7b',
     // Unity semantics, derived from this theme's own warning / info /
-    // text-secondary so no new palette decisions are made on its behalf.
-    // Inspector deliberately does NOT use error-border: a serialized field
-    // is a healthy field, and error-coloured a file full of them reads as a
-    // list of problems.
+    // accent so no new palette decisions are made on its behalf. Inspector is
+    // the RAIL colour, not a text colour — see arcane-dark for why.
     'unity-lifecycle': '#f1fa8c',
     'unity-engine-type': '#8be9fd',
-    'unity-inspector': '#6272a4',
-    'unity-inspector-rail': 'rgba(98, 114, 164, 0.06)',
+    'unity-inspector': '#bd93f9',
+    'unity-inspector-rail': 'rgba(189, 147, 249, 0.07)',
     'modal-backdrop': 'rgba(33, 34, 44, 0.65)',
     'modal-shadow': '0 8px 24px rgba(0, 0, 0, 0.55)',
     'scrollbar-thumb': 'rgba(189, 147, 249, 0.20)',

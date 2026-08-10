@@ -230,25 +230,30 @@ describe.each(themes.map((t) => [t.id, t] as const))('%s', (_id, theme) => {
     expect(r).toBeGreaterThanOrEqual(4.5);
   });
 
-  // A serialized field is a HEALTHY field. The first version of this feature
-  // painted `unity-inspector` #D4879A while `error-border` was #C97A8A — ΔE 5.2,
-  // which is under the threshold where two colours are tellable apart at all —
-  // and put it on a tinted whole-line band. A real MonoBehaviour carries six or
-  // seven [SerializeField]s, so every file looked like a list of problems.
+  // A serialized field is the component's PUBLIC SURFACE — the thing a
+  // designer tunes. Two attempts got this wrong in opposite directions:
   //
+  //   #D4879A  ΔE 5.2 from `error-border`  → a file of them looked broken
+  //   #A79FB8  in the comment family        → the same file looked switched off
+  //
+  // Both are disqualifying, so the marker is checked against both meanings.
   // Enforced for all six themes: unlike the syntax-contrast rule this is not
   // about fidelity to an upstream palette, it is about our own feature not
-  // impersonating a diagnostic.
-  it('does not colour Inspector fields like errors', () => {
-    const failures: string[] = [];
-    for (const err of ['error-border', 'error-text'] as const) {
-      const d = deltaE(theme.ui['unity-inspector'], theme.ui[err]);
-      if (d < 20) {
-        failures.push(
-          `unity-inspector ${theme.ui['unity-inspector']} vs ${err} ${theme.ui[err]} ΔE=${d.toFixed(1)}`,
-        );
-      }
-    }
+  // impersonating something it is not.
+  it('does not colour the Inspector marker like an error or a comment', () => {
+    const commentRule = theme.monaco.rules.find((r) => r.token === 'comment');
+    const against: Array<[string, string]> = [
+      ['error-border', theme.ui['error-border']],
+      ['error-text', theme.ui['error-text']],
+      ...(commentRule?.foreground
+        ? ([['comment', `#${commentRule.foreground.replace(/^#/, '')}`]] as Array<[string, string]>)
+        : []),
+    ];
+    const marker = theme.ui['unity-inspector'];
+    const failures = against
+      .map(([name, value]) => [name, value, deltaE(marker, value)] as const)
+      .filter(([, , d]) => d < 20)
+      .map(([name, value, d]) => `unity-inspector ${marker} vs ${name} ${value} ΔE=${d.toFixed(1)}`);
     expect(failures).toEqual([]);
   });
 

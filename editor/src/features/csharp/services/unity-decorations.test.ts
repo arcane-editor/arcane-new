@@ -65,6 +65,15 @@ describe('computeUnityDecorations', () => {
     expect(lines).toEqual([6, 7]);
   });
 
+  // The inspector mark is line-level only — it carries no text colour. The
+  // attribute name is a UnityEngine type and must be coloured as one, so the
+  // engine-type pass has to reach inside the brackets.
+  it('also types the attribute name itself as an engine type', () => {
+    const names = kinds('engine-type').map(textOf);
+    expect(names).toContain('SerializeField');
+    expect(names).toContain('Header');
+  });
+
   it('attaches lifecycle hover text describing when the engine calls it', () => {
     expect(kinds('lifecycle')[0].hover).toContain('Awake');
   });
