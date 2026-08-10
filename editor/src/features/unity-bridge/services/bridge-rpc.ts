@@ -26,9 +26,40 @@ export interface EditorState {
   activeScenes: string[];
 }
 
+/** A project script backing a MonoBehaviour, resolved by the Unity bridge. */
+export interface ComponentScript {
+  /** Project-relative, e.g. `Assets/Scripts/PlayerController.cs`. */
+  path: string;
+  guid: string;
+}
+
 export interface HierarchyComponent {
   type: string;
+  /**
+   * Present only for MonoBehaviours whose source lives under `Assets/`.
+   *
+   * Absent for every built-in component (Transform, Rigidbody, …) and for
+   * package scripts, which are read-only. Its absence across an ENTIRE
+   * hierarchy means the installed Unity package predates this field — see
+   * `hierarchyHasScriptIdentity`.
+   */
+  script?: ComponentScript;
   [key: string]: unknown;
+}
+
+export interface ProjectScene {
+  name: string;
+  /** Project-relative, e.g. `Assets/Scenes/Main.unity`. */
+  path: string;
+  guid: string;
+  /** True when Unity currently has this scene open. */
+  loaded: boolean;
+}
+
+/** A bridge call the editor refused, with a reason fit to show a user. */
+export interface RpcRefusal {
+  ok: false;
+  reason: string;
 }
 
 export interface HierarchyNode {
@@ -80,6 +111,16 @@ export const bridgeRpc = {
   getProjectAssets: (query: string, type?: string) =>
     rpc<{ assets: ProjectAsset[] }>('getProjectAssets', { query, type }),
   refreshAssets: () => rpc<{ ok: boolean }>('refreshAssets'),
+  /** Every scene under `Assets/`, flagged with whether Unity has it open. */
+  listScenes: () => rpc<{ scenes: ProjectScene[] }>('listScenes'),
+  /**
+   * Ask Unity to open a scene. Resolves with `{ ok: false, reason }` when the
+   * editor refuses (play mode, compiling, or the user cancelled the
+   * save-changes prompt) — a refusal is not an error and must not be surfaced
+   * as one.
+   */
+  openScene: (path: string, mode: 'single' | 'additive' = 'single') =>
+    rpc<{ ok: boolean; reason?: string }>('openScene', { path, mode }),
   generateSolution: () => rpc<{ ok: boolean }>('generateSolution'),
   executeMenuItem: (path: string) => rpc<{ ok: boolean }>('executeMenuItem', { path }),
   openAsset: (target: { guid?: string; path?: string }) => rpc<{ ok: boolean }>('openAsset', target),

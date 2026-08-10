@@ -211,15 +211,16 @@ namespace Arcane.Bridge
 
         private static void OnBeforeAssemblyReload()
         {
-            // A domain reload is imminent: dispose cleanly so the socket fd and
-            // worker thread don't leak. The static ctor re-runs after the reload
-            // and reconnects automatically.
-            Shutdown();
+            // A domain reload is imminent: dispose cleanly so the journal handles
+            // and worker thread don't leak. The static ctor re-runs after the
+            // reload and resumes the SAME session mid-stream, which is why this is
+            // announced as `reloading` and not as a disconnect.
+            Shutdown(StopReason.Reload);
         }
 
         private static void OnQuitting()
         {
-            Shutdown();
+            Shutdown(StopReason.Quit);
             // Editor is closing — clear the session markers so the next launch
             // cold-starts and handshakes afresh rather than resuming a dead session.
             SessionState.EraseBool(SessionConnectedKey);
@@ -229,10 +230,17 @@ namespace Arcane.Bridge
             SessionState.EraseString(SessionEpochKey);
         }
 
-        private static void Shutdown()
+        private static void Shutdown(StopReason reason)
         {
             try
             {
+                // FIRST, before anything else: release any bridge worker blocked in
+                // EnqueueAndWait. The pump is removed two lines below, so a waiter
+                // left in place would sit out its full timeout, _client.Stop()'s
+                // Join would fail, and the journals would never be closed — handing
+                // the next AppDomain a file the old worker can still write to.
+                MainThreadDispatcher.BeginShutdown();
+
                 EditorApplication.update -= Pump;
                 AssemblyReloadEvents.beforeAssemblyReload -= OnBeforeAssemblyReload;
                 EditorApplication.quitting -= OnQuitting;
@@ -259,7 +267,7 @@ namespace Arcane.Bridge
                         _client.ReadEpoch.ToString(CultureInfo.InvariantCulture));
 
                     _client.ConnectionStateChanged -= OnConnectionStateChanged;
-                    _client.Stop();
+                    _client.Stop(reason);
                     _client = null;
                 }
             }

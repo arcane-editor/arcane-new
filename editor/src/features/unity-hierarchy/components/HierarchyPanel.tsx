@@ -1,36 +1,49 @@
-import { useEffect, useState, useCallback } from 'react';
-import { ChevronRight, ChevronDown, RefreshCw, Box, Plug, Unplug } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { ChevronRight, ChevronDown, RefreshCw, Box, FileCode2, Unplug, Layers } from 'lucide-react';
 import { useUnitySceneStore } from '../../../stores/unity-scene';
 import { useUnityStore } from '../../../stores/unity';
-import type { HierarchyNode } from '../../unity-bridge';
-import { openScriptForType } from '../services/open-script';
+import { useWorkspaceStore } from '../../../stores/workspace';
+import { notify } from '../../../stores/notifications';
+import { bridgeRpc, type HierarchyNode, type ProjectScene } from '../../unity-bridge';
+import Tooltip from '../../../components/Tooltip';
+import { hierarchyHasScriptIdentity, scriptsOf, type ScriptComponent } from '../services/hierarchy-scripts';
 
-const ROW: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: 4,
-  height: 22,
-  fontSize: 13,
-  cursor: 'pointer',
-  whiteSpace: 'nowrap',
-  color: 'var(--text-primary)',
-};
+/** Open a project script by its exact asset path. */
+function useOpenScript() {
+  const workspacePath = useWorkspaceStore((s) => s.workspacePath);
+  return useCallback(
+    (script: ScriptComponent['script']) => {
+      if (!workspacePath) return;
+      // `script.path` is project-relative (`Assets/Scripts/Player.cs`) and comes
+      // from AssetDatabase, so it is exact. This replaces a fuzzy filename
+      // search that guessed `<TypeName>.cs` — which could not distinguish a
+      // package script from a project one, broke whenever a file name differed
+      // from its class, and (because of a malformed invoke) never actually
+      // opened anything at all.
+      const abs = `${workspacePath}/${script.path}`;
+      const name = script.path.split('/').pop() ?? script.path;
+      void useWorkspaceStore.getState().openFile(abs, name);
+    },
+    [workspacePath],
+  );
+}
 
-function ComponentRow({ type, depth }: { type: string; depth: number }) {
+function ScriptRow({ script, type, depth }: { script: ScriptComponent['script']; type: string; depth: number }) {
+  const open = useOpenScript();
   return (
-    <div
-      style={{ ...ROW, paddingLeft: depth * 14 + 26, color: 'var(--text-secondary)' }}
-      title={`Open ${type}.cs (if it's a script)`}
+    <button
+      type="button"
+      className="hierarchy-row hierarchy-row--script"
+      style={{ paddingLeft: depth * 14 + 26 }}
       onClick={(e) => {
         e.stopPropagation();
-        void openScriptForType(type);
+        open(script);
       }}
-      onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--hover)')}
-      onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+      title={script.path}
     >
-      <Plug size={12} style={{ flexShrink: 0, opacity: 0.7 }} />
-      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{type}</span>
-    </div>
+      <FileCode2 size={12} className="hierarchy-row-icon" />
+      <span className="hierarchy-row-label">{type}</span>
+    </button>
   );
 }
 
@@ -42,38 +55,34 @@ interface NodeRowProps {
 }
 
 function NodeRow({ node, depth, expanded, toggle }: NodeRowProps) {
-  const hasDetail = node.children.length > 0 || node.components.length > 0;
+  const scripts = scriptsOf(node);
+  const hasDetail = node.children.length > 0 || scripts.length > 0;
   const isOpen = expanded.has(node.instanceId);
+
   return (
     <>
       <div
-        style={{ ...ROW, paddingLeft: depth * 14 + 4, opacity: node.active ? 1 : 0.5 }}
+        className={`hierarchy-row${node.active ? '' : ' hierarchy-row--inactive'}`}
+        style={{ paddingLeft: depth * 14 + 4 }}
         onClick={() => hasDetail && toggle(node.instanceId)}
-        onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--hover)')}
-        onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
         title={`${node.name}  [tag: ${node.tag}, layer: ${node.layer}]`}
       >
         {hasDetail ? (
-          isOpen ? (
-            <ChevronDown size={12} style={{ flexShrink: 0 }} />
-          ) : (
-            <ChevronRight size={12} style={{ flexShrink: 0 }} />
-          )
+          isOpen ? <ChevronDown size={12} className="hierarchy-row-chevron" />
+                 : <ChevronRight size={12} className="hierarchy-row-chevron" />
         ) : (
-          <span style={{ width: 12, flexShrink: 0 }} />
+          <span className="hierarchy-row-chevron" />
         )}
-        <Box size={13} style={{ flexShrink: 0, color: 'var(--accent, #4ec9b0)' }} />
-        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{node.name}</span>
-        {node.components.length > 0 && (
-          <span style={{ fontSize: 10, color: 'var(--text-secondary)', marginLeft: 'auto', paddingRight: 6 }}>
-            {node.components.length}
-          </span>
-        )}
+        <Box size={13} className="hierarchy-row-icon hierarchy-row-icon--object" />
+        <span className="hierarchy-row-label">{node.name}</span>
+        {/* Counts scripts, not components: a "12" that meant twelve built-ins
+            told the user nothing they could act on. */}
+        {scripts.length > 0 && <span className="hierarchy-row-count">{scripts.length}</span>}
       </div>
       {isOpen && (
         <>
-          {node.components.map((c, i) => (
-            <ComponentRow key={`c${i}`} type={c.type} depth={depth + 1} />
+          {scripts.map((c, i) => (
+            <ScriptRow key={`s${i}`} script={c.script} type={c.type} depth={depth + 1} />
           ))}
           {node.children.map((ch) => (
             <NodeRow key={ch.instanceId} node={ch} depth={depth + 1} expanded={expanded} toggle={toggle} />
@@ -84,16 +93,45 @@ function NodeRow({ node, depth, expanded, toggle }: NodeRowProps) {
   );
 }
 
+/** Scene picker across every scene in the project, not just the loaded ones. */
+function ScenePicker({ scenes, onOpen }: { scenes: ProjectScene[]; onOpen: (s: ProjectScene) => void }) {
+  if (scenes.length === 0) return null;
+  return (
+    <div className="hierarchy-scene-picker">
+      <Layers size={12} className="hierarchy-scene-picker-icon" />
+      <select
+        className="hierarchy-scene-select"
+        aria-label="Scene"
+        value={scenes.find((s) => s.loaded)?.path ?? ''}
+        onChange={(e) => {
+          const next = scenes.find((s) => s.path === e.target.value);
+          if (next && !next.loaded) onOpen(next);
+        }}
+      >
+        {scenes.map((s) => (
+          <option key={s.guid} value={s.path}>
+            {s.name}
+            {s.loaded ? ' — open' : ''}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
 /**
- * Live scene hierarchy mirroring the connected Unity Editor (F-4.3). Read-only
- * tree; clicking a component opens its script. Degrades to a clear empty state
- * when Unity isn't connected.
+ * Live scene hierarchy mirroring the connected Unity Editor.
+ *
+ * Shows the project scripts on each GameObject — not its every component —
+ * and opens them by their exact asset path. A scene picker lists every scene
+ * in the project so switching no longer means alt-tabbing to Unity.
  */
 export function HierarchyPanel() {
   const hierarchy = useUnitySceneStore((s) => s.hierarchy);
   const loading = useUnitySceneStore((s) => s.loading);
   const connected = useUnityStore((s) => s.connected);
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  const [scenes, setScenes] = useState<ProjectScene[]>([]);
 
   useEffect(() => {
     const store = useUnitySceneStore.getState();
@@ -101,6 +139,27 @@ export function HierarchyPanel() {
     void store.refresh();
     return () => store.teardownListeners();
   }, []);
+
+  // Scene list follows the connection and re-reads whenever the loaded scene
+  // changes, so the picker's "— open" marker cannot go stale.
+  useEffect(() => {
+    if (!connected) {
+      setScenes([]);
+      return;
+    }
+    let cancelled = false;
+    void bridgeRpc
+      .listScenes()
+      .then((r) => {
+        if (!cancelled) setScenes(r.scenes ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setScenes([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [connected, hierarchy]);
 
   const toggle = useCallback((id: number) => {
     setExpanded((prev) => {
@@ -111,66 +170,78 @@ export function HierarchyPanel() {
     });
   }, []);
 
+  const handleOpenScene = useCallback(async (scene: ProjectScene) => {
+    try {
+      const res = await bridgeRpc.openScene(scene.path);
+      if (!res.ok) {
+        // A refusal is a decision Unity made (play mode, compiling, or the
+        // user cancelling its save prompt) — report it as information, not
+        // as a failure.
+        notify.info(res.reason ?? 'Unity declined to change scene.');
+        return;
+      }
+      void useUnitySceneStore.getState().refresh();
+    } catch (err) {
+      notify.error(`Could not open scene: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }, []);
+
+  // Decided across the whole hierarchy: an older Unity package sends no script
+  // identity at all, which per-GameObject looks identical to "no scripts here".
+  const packageIsOutdated = useMemo(
+    () => hierarchy !== null && hierarchy.scenes.length > 0 && !hierarchyHasScriptIdentity(hierarchy),
+    [hierarchy],
+  );
+
   return (
     <div className="sidebar">
       <div className="explorer-header">
         <span className="explorer-header-title">Hierarchy</span>
         <div className="explorer-header-actions">
-          <button
-            className="explorer-action-btn"
-            title="Refresh Hierarchy"
-            onClick={() => void useUnitySceneStore.getState().refresh()}
-          >
-            <RefreshCw size={14} className={loading ? 'spin' : ''} />
-          </button>
+          <Tooltip label="Refresh Hierarchy" side="bottom">
+            <button
+              className="explorer-action-btn"
+              onClick={() => void useUnitySceneStore.getState().refresh()}
+            >
+              <RefreshCw size={14} className={loading ? 'spin' : ''} />
+            </button>
+          </Tooltip>
         </div>
       </div>
+
+      {connected && <ScenePicker scenes={scenes} onOpen={handleOpenScene} />}
+
       <div className="sidebar-tree" style={{ overflow: 'auto' }}>
         {!connected ? (
-          <div
-            style={{
-              padding: 16,
-              color: 'var(--text-secondary)',
-              fontSize: 12,
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              gap: 8,
-              textAlign: 'center',
-            }}
-          >
+          <div className="hierarchy-empty">
             <Unplug size={20} />
             <div>Unity Editor not connected.</div>
-            <div style={{ opacity: 0.8 }}>
+            <div className="hierarchy-empty-hint">
               Open this project in Unity with the bridge installed to mirror its live hierarchy here.
             </div>
           </div>
         ) : !hierarchy ? (
-          <div style={{ padding: 12, color: 'var(--text-secondary)', fontSize: 12 }}>Loading…</div>
+          <div className="hierarchy-note">Loading…</div>
         ) : hierarchy.scenes.length === 0 ? (
-          <div style={{ padding: 12, color: 'var(--text-secondary)', fontSize: 12 }}>No open scenes.</div>
+          <div className="hierarchy-note">No open scenes.</div>
         ) : (
           <>
+            {packageIsOutdated && (
+              <div className="hierarchy-note hierarchy-note--warning">
+                Update the Arcane Unity package to see scripts here — the installed
+                version does not report which components are project scripts.
+              </div>
+            )}
             {hierarchy.scenes.map((scene) => (
               <div key={scene.path || scene.name}>
-                <div
-                  style={{
-                    fontSize: 11,
-                    textTransform: 'uppercase',
-                    letterSpacing: 0.5,
-                    color: 'var(--text-secondary)',
-                    padding: '6px 8px 2px',
-                  }}
-                >
-                  {scene.name}
-                </div>
+                <div className="hierarchy-scene-label">{scene.name}</div>
                 {scene.roots.map((r) => (
                   <NodeRow key={r.instanceId} node={r} depth={0} expanded={expanded} toggle={toggle} />
                 ))}
               </div>
             ))}
             {hierarchy.truncated && (
-              <div style={{ padding: '6px 8px', fontSize: 11, color: 'var(--warning)' }}>
+              <div className="hierarchy-note hierarchy-note--warning">
                 Hierarchy truncated (large scene).
               </div>
             )}

@@ -7,6 +7,8 @@ export type {
   EditorState,
   HierarchyNode,
   HierarchyComponent,
+  ComponentScript,
+  ProjectScene,
   SceneHierarchy,
   SelectionObject,
   ProjectAsset,

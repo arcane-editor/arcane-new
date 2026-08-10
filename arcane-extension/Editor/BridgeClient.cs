@@ -30,6 +30,15 @@ using UnityEngine;
 
 namespace Arcane.Bridge
 {
+    /// <summary>Why the bridge is stopping — decides what the IDE is told.</summary>
+    internal enum StopReason
+    {
+        /// <summary>Domain reload: the session resumes in the next AppDomain.</summary>
+        Reload,
+        /// <summary>The editor is closing: the session is over.</summary>
+        Quit,
+    }
+
     internal sealed class BridgeClient
     {
         private const int PollActiveMs = 25;
@@ -56,7 +65,8 @@ namespace Arcane.Bridge
         private string _ideSessionId;    // the IDE session we handshook against
         private long _restoreOffset = -1;
         private long _restoreEpoch;
-        private bool _handshakeSent;
+        /// <summary>Set by Stop() before clearing _running; read by the worker as it unwinds.</summary>
+        private StopReason _stopReason = StopReason.Quit;
         private bool _warnedUnwritable;
         private bool _warnedProtocol;
 
@@ -118,40 +128,60 @@ namespace Arcane.Bridge
         }
 
         /// <summary>
-        /// Stop the worker and close the journals. Called on beforeAssemblyReload
-        /// and EditorApplication.quitting.
+        /// Stop the worker and close the journals.
+        ///
+        /// The reason decides what the IDE is told, and the two cases are not
+        /// interchangeable. A domain reload tears this AppDomain down and rebuilds
+        /// it seconds later against the SAME session — announcing a disconnect for
+        /// that dropped in-flight RPCs and drove a visible reconnect on every
+        /// script recompile, which the journal transport exists to avoid.
         /// </summary>
-        public void Stop()
+        public void Stop(StopReason reason)
         {
+            // Publish the reason BEFORE clearing _running: the worker writes the
+            // farewell itself on its way out, and _running (volatile) is what
+            // orders the two writes.
+            //
+            // The farewell CANNOT be written from here. WorkerLoop closes the
+            // journals as it unwinds, and Join() by definition returns only after
+            // that has happened — so a farewell appended after the join always
+            // found a disposed writer and silently wrote nothing. That is why the
+            // pre-existing clean-quit `disconnect` never actually reached the IDE.
+            _stopReason = reason;
             _running = false;
             _sendSignal.Set(); // wake the worker so it observes _running == false
 
-            bool joined = true;
             var w = _worker;
             _worker = null;
             if (w != null && w.IsAlive)
             {
-                try { joined = w.Join(1500); } catch { joined = false; }
+                try { w.Join(1500); } catch { /* worker is wedged; its handles die with the AppDomain */ }
             }
 
-            // Best-effort clean close so the IDE sees a disconnect immediately
-            // rather than waiting out the heartbeat timeout. Only safe once the
-            // worker has actually joined — it owns the writer otherwise.
-            if (joined)
+            // A reload keeps the session: reporting "disconnected" here would fire
+            // ConnectionStateChanged and re-log the reconnect on every recompile.
+            if (reason != StopReason.Reload) SetConnected(false);
+        }
+
+        /// <summary>
+        /// Tell the IDE why the journal is about to go quiet. Runs on the WORKER
+        /// thread as it unwinds, because the worker owns the writer.
+        ///
+        /// `reloading` is what keeps a recompile from looking like a death: the
+        /// IDE widens its liveness deadline instead of dropping the session.
+        /// Without it the only signal is silence, and silence past PEER_DEAD_MS
+        /// is indistinguishable from Unity crashing.
+        /// </summary>
+        private void WriteFarewell()
+        {
+            if (_writer == null) return;
+            try
             {
-                try
-                {
-                    if (_writer != null)
-                    {
-                        _writer.Append(Protocol.Envelope(MsgType.Disconnect, JsonValue.NewObject()).Serialize());
-                        _writer.Flush();
-                    }
-                }
-                catch { /* the IDE falls back to the heartbeat timeout */ }
-
-                CloseJournals();
+                string type = _stopReason == StopReason.Reload ? MsgType.Reloading : MsgType.Disconnect;
+                _writer.Append(Protocol.Envelope(type, JsonValue.NewObject()).Serialize());
+                _writer.Flush();
             }
-            SetConnected(false);
+            catch { /* the IDE falls back to the heartbeat timeout */ }
         }
 
         // ── Public send API (thread-safe) ────────────────────────────────────
@@ -178,51 +208,61 @@ namespace Arcane.Bridge
 
         private void WorkerLoop()
         {
-            while (_running)
+            // try/finally, and `break` rather than `return`, so EVERY exit path
+            // runs the farewell before the journals close. The farewell has to
+            // happen here because this thread owns the writer — see Stop().
+            try
             {
-                try
+                while (_running)
                 {
-                    BridgeDiscovery disc;
-                    if (!Discovery.TryResolve(_projectRoot, out disc))
+                    try
                     {
-                        // No IDE has this project open. Not an error — just wait.
-                        SetConnected(false);
+                        BridgeDiscovery disc;
+                        if (!Discovery.TryResolve(_projectRoot, out disc))
+                        {
+                            // No IDE has this project open. Not an error — just wait.
+                            SetConnected(false);
+                            CloseJournals();
+                            if (!SleepInterruptible(DiscoveryPollMs)) break;
+                            continue;
+                        }
+
+                        if (disc.ProtocolVersion > Discovery.ProtocolVersion)
+                        {
+                            WarnOnce(ref _warnedProtocol,
+                                "[ArcaneBridge] The Arcane IDE speaks bridge protocol v" +
+                                disc.ProtocolVersion + " but this package speaks v" +
+                                Discovery.ProtocolVersion + ". Update the com.arcane.editor package.");
+                            if (!SleepInterruptible(DiscoveryPollMs)) break;
+                            continue;
+                        }
+
+                        if (!EnsureSession(disc))
+                        {
+                            if (!SleepInterruptible(DiscoveryPollMs)) break;
+                            continue;
+                        }
+
+                        RunSession();
+                    }
+                    catch (ThreadInterruptedException)
+                    {
+                        // shutting down
+                    }
+                    catch (Exception e)
+                    {
+                        if (_running) Debug.LogWarning("[ArcaneBridge] journal error: " + e.Message);
                         CloseJournals();
-                        if (!SleepInterruptible(DiscoveryPollMs)) return;
-                        continue;
+                        SetConnected(false);
+                        if (!SleepInterruptible(DiscoveryPollMs)) break;
                     }
-
-                    if (disc.ProtocolVersion > Discovery.ProtocolVersion)
-                    {
-                        WarnOnce(ref _warnedProtocol,
-                            "[ArcaneBridge] The Arcane IDE speaks bridge protocol v" +
-                            disc.ProtocolVersion + " but this package speaks v" +
-                            Discovery.ProtocolVersion + ". Update the com.arcane.editor package.");
-                        if (!SleepInterruptible(DiscoveryPollMs)) return;
-                        continue;
-                    }
-
-                    if (!EnsureSession(disc))
-                    {
-                        if (!SleepInterruptible(DiscoveryPollMs)) return;
-                        continue;
-                    }
-
-                    RunSession();
-                }
-                catch (ThreadInterruptedException)
-                {
-                    // shutting down
-                }
-                catch (Exception e)
-                {
-                    if (_running) Debug.LogWarning("[ArcaneBridge] journal error: " + e.Message);
-                    CloseJournals();
-                    SetConnected(false);
-                    if (!SleepInterruptible(DiscoveryPollMs)) return;
                 }
             }
-            CloseJournals();
+            finally
+            {
+                WriteFarewell();
+                CloseJournals();
+            }
         }
 
         /// <summary>
@@ -263,20 +303,24 @@ namespace Arcane.Bridge
 
             if (freshHandshake)
             {
-                _unitySessionId = Guid.NewGuid().ToString("N");
-                _ideSessionId = disc.IdeSessionId;
+                string unityId = Guid.NewGuid().ToString("N");
                 // Safe to truncate: the IDE writes nothing until connection_init
                 // echoes its session id back, so nothing of ours is live in here.
                 _writer.Truncate();
                 DrainOutbox();
-                _handshakeSent = false;
-            }
 
-            if (!_handshakeSent)
-            {
-                SendConnectionInit();
-                _handshakeSent = true;
+                // Commit the ids ONLY once the handshake is actually queued.
+                // Committing first and failing to send would make the next attempt
+                // compute freshHandshake == false and resume a session the IDE has
+                // never heard of.
+                if (!SendConnectionInit(unityId, disc.IdeSessionId)) return false;
+                _unitySessionId = unityId;
+                _ideSessionId = disc.IdeSessionId;
             }
+            // A warm resume — same IDE session, new AppDomain after a domain
+            // reload — deliberately does NOT re-announce. The IDE never dropped
+            // us, and building the payload needs a main-thread round trip at the
+            // exact moment the main thread is busiest.
 
             SetConnected(true);
             return true;
@@ -340,7 +384,10 @@ namespace Arcane.Bridge
         private bool FlushOutbox()
         {
             bool wrote = false;
-            while (true)
+            // `_running` is re-checked every iteration, not just on entry: a worker
+            // that outlives its Stop() must never append to a journal the next
+            // AppDomain has already claimed as its own.
+            while (_running)
             {
                 string line;
                 lock (_sendLock)
@@ -376,12 +423,15 @@ namespace Arcane.Bridge
                 _writer.Dispose();
                 _writer = null;
             }
-            _handshakeSent = false;
         }
 
         // ── Outbound builders ────────────────────────────────────────────────
 
-        private void SendConnectionInit()
+        /// <returns>
+        /// false when the handshake could not be built — the caller must NOT commit
+        /// the session ids, so the next attempt retries as a fresh handshake.
+        /// </returns>
+        private bool SendConnectionInit(string unitySessionId, string ideSessionId)
         {
             // The payload reads PlayerSettings/Application → must run on the main
             // thread. Marshal it, then queue.
@@ -390,6 +440,12 @@ namespace Arcane.Bridge
             {
                 payload = MainThreadDispatcher.EnqueueAndWait(_connectionInitPayloadFactory, 6000);
             }
+            catch (OperationCanceledException)
+            {
+                // Teardown began while we were waiting. Announcing now would write
+                // into a journal the next AppDomain is about to take over.
+                return false;
+            }
             catch (Exception e)
             {
                 Debug.LogWarning("[ArcaneBridge] failed to build connection_init payload: " + e.Message);
@@ -397,9 +453,10 @@ namespace Arcane.Bridge
             }
             // The handshake: the IDE writes nothing back until it sees its own
             // session id echoed here, which is what closes the startup race.
-            payload["unitySessionId"] = _unitySessionId ?? "";
-            payload["ideSessionId"] = _ideSessionId ?? "";
+            payload["unitySessionId"] = unitySessionId ?? "";
+            payload["ideSessionId"] = ideSessionId ?? "";
             Send(Protocol.Envelope(MsgType.ConnectionInit, payload));
+            return true;
         }
 
         private void EnqueueHeartbeat()

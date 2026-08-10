@@ -13,6 +13,7 @@
 //
 // MUST run on the main thread (scene + GameObject access). Callers marshal it.
 
+using System;
 using System.Collections.Generic;
 using UnityEditor;
 using UnityEditor.SceneManagement;
@@ -81,8 +82,16 @@ namespace Arcane.Bridge
 
             budget.Add(go.name);
 
-            // Shallow component list: type names only (the deep property dump lives
-            // in getGameObject). Missing scripts surface as null components.
+            // Shallow component list: type name, plus asset identity for the
+            // ones that are project scripts (the deep property dump lives in
+            // getGameObject). Missing scripts surface as MissingComponent.
+            //
+            // Resolving the script here is what lets the IDE tell a user's
+            // PlayerController from Unity's Rigidbody. Without it the frontend
+            // only received a bare type NAME and had to guess by fuzzy-searching
+            // for "<TypeName>.cs" — which silently found nothing for every
+            // built-in component, and broke for any script whose file name does
+            // not match its class.
             var components = JsonValue.NewArray();
             var comps = go.GetComponents<Component>();
             foreach (var c in comps)
@@ -98,6 +107,7 @@ namespace Arcane.Bridge
                     string typeName = c.GetType().Name;
                     compObj["type"] = typeName;
                     budget.Add(typeName);
+                    AddScriptIdentity(c, compObj, budget);
                 }
                 components.Add(compObj);
             }
@@ -114,6 +124,44 @@ namespace Arcane.Bridge
             node["children"] = children;
 
             return node;
+        }
+
+
+        /// <summary>
+        /// Attach `script: { path, guid }` when this component is a MonoBehaviour
+        /// whose source lives under `Assets/`.
+        /// </summary>
+        /// <remarks>
+        /// Unity requires a MonoBehaviour's file name to equal its class name,
+        /// but that is not enough to locate it: two assemblies can define the
+        /// same class name, a package can ship a script with the same name as a
+        /// project one, and the fuzzy filename search this replaces could not
+        /// distinguish any of them. MonoScript.FromMonoBehaviour is exact.
+        ///
+        /// Restricted to `Assets/`: package and built-in scripts are read-only
+        /// to the user, so offering to open them in the editor is a dead end.
+        /// </remarks>
+        private static void AddScriptIdentity(Component c, JsonValue compObj, Budget budget)
+        {
+            var mb = c as MonoBehaviour;
+            if (mb == null) return;
+
+            MonoScript ms;
+            try { ms = MonoScript.FromMonoBehaviour(mb); }
+            catch { return; }
+            if (ms == null) return;
+
+            string path = AssetDatabase.GetAssetPath(ms);
+            if (string.IsNullOrEmpty(path)) return;
+            // `Assets/` only — case-sensitively, since Unity always emits this
+            // prefix exactly and a looser check would admit `AssetsFoo/`.
+            if (!path.StartsWith("Assets/", StringComparison.Ordinal)) return;
+
+            var script = JsonValue.NewObject();
+            script["path"] = path;
+            script["guid"] = AssetDatabase.AssetPathToGUID(path) ?? "";
+            compObj["script"] = script;
+            budget.Add(path);
         }
 
         private static string SafeTag(GameObject go)

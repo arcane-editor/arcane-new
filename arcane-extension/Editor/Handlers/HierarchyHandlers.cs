@@ -6,6 +6,8 @@
 //   getSceneHierarchy  → { scenes:[{name,path,roots[]}], truncated }
 //   getGameObject      → full component list with serialized property values
 //   findReferencesToScript → { gameObjects:[{scene,path,instanceId}] } for a guid
+//   listScenes         → { scenes:[{name,path,guid,loaded}] } — every scene in Assets/
+//   openScene          → { ok } | error — opens a scene, honouring unsaved changes
 //
 // Push:
 //   hierarchy_changed { } on EditorApplication.hierarchyChanged (debounced ~250ms).
@@ -14,6 +16,7 @@ using System;
 using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
+using UnityEditor.SceneManagement;
 using UnityEngine.SceneManagement;
 
 namespace Arcane.Bridge
@@ -39,6 +42,8 @@ namespace Arcane.Bridge
             RpcDispatcher.Register("getSceneHierarchy", GetSceneHierarchy);
             RpcDispatcher.Register("getGameObject", GetGameObject);
             RpcDispatcher.Register("findReferencesToScript", FindReferencesToScript);
+            RpcDispatcher.Register("listScenes", ListScenes);
+            RpcDispatcher.Register("openScene", OpenScene);
             InstallHierarchyHook();
         }
 
@@ -47,6 +52,119 @@ namespace Arcane.Bridge
         private static JsonValue GetSceneHierarchy(JsonValue p)
         {
             return HierarchySerializer.SerializeLoadedScenes();
+        }
+
+
+        // ── listScenes ───────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Every scene asset under `Assets/`, flagged with whether it is
+        /// currently loaded.
+        /// </summary>
+        /// <remarks>
+        /// The Hierarchy panel could only ever show what Unity already had
+        /// open, so switching scenes meant alt-tabbing to Unity. This is the
+        /// list behind the panel's scene picker.
+        ///
+        /// `Assets/` only: package scenes are read-only and opening one is
+        /// never what a user means from a project scene switcher.
+        /// </remarks>
+        private static JsonValue ListScenes(JsonValue p)
+        {
+            var loaded = new HashSet<string>(StringComparer.Ordinal);
+            for (int i = 0; i < SceneManager.sceneCount; i++)
+            {
+                Scene s = SceneManager.GetSceneAt(i);
+                if (s.IsValid() && !string.IsNullOrEmpty(s.path)) loaded.Add(s.path);
+            }
+
+            var scenes = JsonValue.NewArray();
+            foreach (string guid in AssetDatabase.FindAssets("t:Scene", new[] { "Assets" }))
+            {
+                string path = AssetDatabase.GUIDToAssetPath(guid);
+                if (string.IsNullOrEmpty(path)) continue;
+
+                var obj = JsonValue.NewObject();
+                obj["name"] = System.IO.Path.GetFileNameWithoutExtension(path);
+                obj["path"] = path;
+                obj["guid"] = guid;
+                obj["loaded"] = loaded.Contains(path);
+                scenes.Add(obj);
+            }
+
+            var result = JsonValue.NewObject();
+            result["scenes"] = scenes;
+            return result;
+        }
+
+        // ── openScene ────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Open a scene in the Unity Editor. `mode` is "single" (default) or
+        /// "additive".
+        /// </summary>
+        /// <remarks>
+        /// Refused during play mode and compilation. Changing the open scene
+        /// while entering/exiting play mode loses state Unity cannot recover,
+        /// and during a compile the domain is about to reload underneath us —
+        /// both are cases where a silent failure would look like the IDE
+        /// ignoring the click.
+        ///
+        /// SaveCurrentModifiedScenesIfUserWantsTo is Unity's own prompt, so an
+        /// unsaved scene raises the dialog the user already knows rather than
+        /// this bridge inventing one. It returns false when they cancel, which
+        /// is reported as a refusal, not an error.
+        /// </remarks>
+        private static JsonValue OpenScene(JsonValue p)
+        {
+            string path = p != null && p["path"] != null ? p["path"].AsString() : null;
+            if (string.IsNullOrEmpty(path))
+            {
+                return Refused("openScene requires a 'path'.");
+            }
+            if (EditorApplication.isPlayingOrWillChangePlaymode || EditorApplication.isPlaying)
+            {
+                return Refused("Unity is in Play Mode. Exit Play Mode to change scenes.");
+            }
+            if (EditorApplication.isCompiling)
+            {
+                return Refused("Unity is compiling. Try again once the compile finishes.");
+            }
+
+            string modeStr = p["mode"] != null ? p["mode"].AsString() : "single";
+            var mode = string.Equals(modeStr, "additive", StringComparison.OrdinalIgnoreCase)
+                ? OpenSceneMode.Additive
+                : OpenSceneMode.Single;
+
+            // Only the single-scene path replaces what is open, so only it can
+            // discard unsaved work.
+            if (mode == OpenSceneMode.Single &&
+                !EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo())
+            {
+                return Refused("Cancelled — the open scene has unsaved changes.");
+            }
+
+            try
+            {
+                EditorSceneManager.OpenScene(path, mode);
+            }
+            catch (Exception e)
+            {
+                return Refused("Could not open scene: " + e.Message);
+            }
+
+            var ok = JsonValue.NewObject();
+            ok["ok"] = true;
+            return ok;
+        }
+
+        /// <summary>A refusal the UI can show verbatim, distinct from a crash.</summary>
+        private static JsonValue Refused(string reason)
+        {
+            var o = JsonValue.NewObject();
+            o["ok"] = false;
+            o["reason"] = reason;
+            return o;
         }
 
         // ── getGameObject ────────────────────────────────────────────────────

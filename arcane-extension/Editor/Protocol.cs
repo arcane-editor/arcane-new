@@ -18,8 +18,19 @@ namespace Arcane.Bridge
         public const string ConnectionInit = "connection_init";
         public const string Heartbeat = "heartbeat";
         /// <summary>Clean shutdown. With no socket to close, this is what saves the
-        /// IDE from waiting out the heartbeat timeout when Unity quits.</summary>
+        /// IDE from waiting out the heartbeat timeout when Unity quits. Sent ONLY
+        /// when the editor is really going away — never for a domain reload, which
+        /// resumes the same session mid-stream.</summary>
         public const string Disconnect = "disconnect";
+        /// <summary>
+        /// A domain reload is starting: this AppDomain is about to be torn down and
+        /// the journal will go quiet, but the session survives and resumes at its
+        /// persisted offset. The IDE widens its liveness deadline instead of
+        /// declaring a disconnect, which is what keeps a recompile from dropping
+        /// the connection. Additive — an IDE that does not know this type ignores
+        /// it and simply falls back to the heartbeat timeout.
+        /// </summary>
+        public const string Reloading = "reloading";
         public const string Log = "log";
         public const string LogBatch = "log_batch";
         public const string PlaystateChanged = "playstate_changed";

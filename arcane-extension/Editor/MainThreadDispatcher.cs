@@ -27,13 +27,31 @@ namespace Arcane.Bridge
     {
         private static readonly ConcurrentQueue<Action> Queue = new ConcurrentQueue<Action>();
 
+        /// <summary>
+        /// Signalled once teardown starts, so blocked EnqueueAndWait callers stop
+        /// waiting for a pump that will never tick again.
+        ///
+        /// This is load-bearing, not tidiness. The bridge worker calls
+        /// EnqueueAndWait to build connection_init, and a domain reload begins by
+        /// removing the pump — so without this the worker sits out the full
+        /// timeout, BridgeClient.Stop()'s Join(1500) fails, and the journals are
+        /// never closed. The next AppDomain then opens its own writer on a file
+        /// the old worker can still append to: two writers on one journal, which
+        /// is the single invariant the whole transport rests on.
+        /// </summary>
+        private static readonly ManualResetEventSlim Cancelled = new ManualResetEventSlim(false);
+
         // Captured when the pump is installed (which happens on the main thread).
         private static int _mainThreadId = -1;
 
-        /// <summary>Record the main-thread id. Call once from the bootstrap.</summary>
+        /// <summary>
+        /// Record the main-thread id and clear any cancellation left by the
+        /// previous AppDomain. Call once from the bootstrap.
+        /// </summary>
         public static void CaptureMainThread()
         {
             _mainThreadId = Thread.CurrentThread.ManagedThreadId;
+            Cancelled.Reset();
         }
 
         public static bool IsMainThread =>
@@ -77,25 +95,50 @@ namespace Arcane.Bridge
 
             T result = default;
             Exception captured = null;
-            using (var done = new ManualResetEventSlim(false))
-            {
-                Queue.Enqueue(() =>
-                {
-                    try { result = fn(); }
-                    catch (Exception e) { captured = e; }
-                    finally { done.Set(); }
-                });
+            var done = new ManualResetEventSlim(false);
 
-                if (!done.Wait(timeoutMs))
-                    throw new TimeoutException("Main-thread RPC handler timed out after " + timeoutMs + "ms");
-            }
+            Queue.Enqueue(() =>
+            {
+                try { result = fn(); }
+                catch (Exception e) { captured = e; }
+                finally { done.Set(); }
+            });
+
+            // Wake on completion, on shutdown, or on the timeout — whichever
+            // lands first.
+            int signalled = WaitHandle.WaitAny(
+                new WaitHandle[] { done.WaitHandle, Cancelled.WaitHandle }, timeoutMs);
+
+            if (signalled == 1)
+                throw new OperationCanceledException("[ArcaneBridge] shutting down");
+            if (signalled == WaitHandle.WaitTimeout)
+                throw new TimeoutException("Main-thread RPC handler timed out after " + timeoutMs + "ms");
+
+            // Only release the handle once the queued action is provably finished
+            // with it. On the cancel and timeout paths that action is still in the
+            // queue and would Set() a disposed handle on the next pump, so those
+            // are left to the GC — a stray allocation beats an ObjectDisposedException
+            // thrown out of the editor's update loop.
+            done.Dispose();
 
             if (captured != null)
                 throw captured;
             return result;
         }
 
-        /// <summary>Clear pending work (used on shutdown so nothing runs post-dispose).</summary>
+        /// <summary>
+        /// Begin teardown: release every blocked <see cref="EnqueueAndWait"/>
+        /// caller, then drop pending work so nothing runs post-dispose. Must be
+        /// called BEFORE stopping the bridge client, so its worker can observe
+        /// the stop and be joined.
+        /// </summary>
+        public static void BeginShutdown()
+        {
+            Cancelled.Set();
+            while (Queue.TryDequeue(out _)) { }
+        }
+
+        /// <summary>Drop pending work without cancelling waiters (test helper).</summary>
         public static void Clear()
         {
             while (Queue.TryDequeue(out _)) { }
