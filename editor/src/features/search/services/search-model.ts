@@ -17,7 +17,7 @@
 //     `cancelled` distinguishing a superseded/stopped run from one that ran
 //     to completion.
 
-import type { FileSearchResult, SearchMatch } from '../../../types';
+import type { FileSearchResult } from '../../../types';
 
 /** The streaming-relevant slice of the search store's state. */
 export interface StreamState {
@@ -161,38 +161,4 @@ export function autoSearchAction(debouncedQuery: string): AutoSearchAction {
   if (debouncedQuery.length >= MIN_AUTO_SEARCH_CHARS) return 'search';
   if (debouncedQuery.length === 0) return 'clear';
   return 'idle';
-}
-
-/** A single virtualized row in the flattened search results list (Task B4). */
-export type SearchRow =
-  | { kind: 'file'; file: FileSearchResult; collapsed: boolean }
-  | { kind: 'match'; filePath: string; match: SearchMatch };
-
-/**
- * Flattens the tree-shaped `results` (files, each holding a list of matches)
- * into a single flat row list suitable for a virtualizer, which needs a
- * fixed, index-addressable item count rather than nested arrays.
- *
- * - Every file contributes exactly one `'file'` row, in the given order.
- * - A file's matches contribute one `'match'` row each, immediately after
- *   its file row, UNLESS the file's path is in `collapsed` — in which case
- *   its match rows are omitted entirely (collapse hides them, it doesn't
- *   just visually fold them).
- * - `collapsed` on the emitted file row mirrors membership in the `collapsed`
- *   set so the renderer doesn't need to re-check the set per row.
- * - Per-file `truncated` (and any other `FileSearchResult` fields) flow
- *   through unchanged via the `file` reference on the row.
- */
-export function flattenRows(results: FileSearchResult[], collapsed: Set<string>): SearchRow[] {
-  const rows: SearchRow[] = [];
-  for (const file of results) {
-    const isCollapsed = collapsed.has(file.path);
-    rows.push({ kind: 'file', file, collapsed: isCollapsed });
-    if (!isCollapsed) {
-      for (const match of file.matches) {
-        rows.push({ kind: 'match', filePath: file.path, match });
-      }
-    }
-  }
-  return rows;
 }

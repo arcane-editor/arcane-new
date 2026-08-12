@@ -2,7 +2,7 @@ import { useUiStore } from '../../../stores/ui';
 import { useProjectContextStore } from '../../../stores/project-context';
 import { ExplorerPanel } from '../../explorer';
 import { SourceControlPanel } from '../../git';
-import { SearchPanel } from '../../search';
+import { SearchOutlinePanel } from '../../search';
 import { SceneContextPanel } from '../../unity-context';
 import { HierarchyPanel } from '../../unity-hierarchy';
 import { TestPanel } from '../../unity-test-runner';
@@ -17,7 +17,7 @@ function SidebarPanel() {
     case 'explorer':
       return <ExplorerPanel />;
     case 'search':
-      return <SearchPanel />;
+      return <SearchOutlinePanel />;
     case 'source-control':
       return <SourceControlPanel />;
     case 'scene-context':

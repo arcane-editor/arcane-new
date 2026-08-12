@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useSearchStore } from '../../../stores/search';
 import { useWorkspaceStore } from '../../../stores/workspace';
@@ -95,6 +95,22 @@ function ExcerptList({ sessionId }: ExcerptListProps) {
     (excerptId: string) => update(sessionId, { activeExcerptId: excerptId }),
     [sessionId, update],
   );
+
+  // The outline panel (sidebar) dispatches this to scroll the tab to an
+  // excerpt the user clicked there. `onFocusExcerpt` (above) is the reverse
+  // direction: it writes `activeExcerptId`, which the outline reads back to
+  // style the matching row — so this listener only needs to handle scroll.
+  useEffect(() => {
+    function onReveal(event: Event) {
+      const detail = (event as CustomEvent<{ sessionId: string; excerptId: string }>).detail;
+      if (detail.sessionId !== sessionId) return;
+      const filePath = detail.excerptId.slice(0, detail.excerptId.lastIndexOf(':'));
+      const index = blocks.findIndex((b) => b.file.path === filePath);
+      if (index >= 0) virtualizer.scrollToIndex(index, { align: 'center' });
+    }
+    window.addEventListener('search-reveal-excerpt', onReveal);
+    return () => window.removeEventListener('search-reveal-excerpt', onReveal);
+  }, [blocks, sessionId, virtualizer]);
 
   // Excerpt ids are `${filePath}:${startLine}`; `lastIndexOf(':')` still
   // finds the right split on Windows, where an absolute path contributes

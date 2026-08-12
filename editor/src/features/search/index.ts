@@ -1,17 +1,15 @@
-export { default as SearchPanel } from './components/SearchPanel';
+export { default as SearchOutlinePanel } from './components/SearchOutlinePanel';
 export { default as SearchResultsTab } from './components/SearchResultsTab';
 export {
   parseGlobList,
   applyBatch,
   applyComplete,
-  flattenRows,
   autoSearchAction,
   MIN_AUTO_SEARCH_CHARS,
   type AutoSearchAction,
   type StreamState,
   type SearchBatchPayload,
   type SearchCompletePayload,
-  type SearchRow,
 } from './services/search-model';
 export {
   createSession,

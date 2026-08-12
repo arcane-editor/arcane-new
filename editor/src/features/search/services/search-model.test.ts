@@ -3,7 +3,6 @@ import {
   parseGlobList,
   applyBatch,
   applyComplete,
-  flattenRows,
   autoSearchAction,
   MIN_AUTO_SEARCH_CHARS,
   type StreamState,
@@ -254,78 +253,6 @@ describe('applyComplete', () => {
       expect(next.truncated).toBe(true);
     },
   );
-});
-
-describe('flattenRows', () => {
-  it('returns an empty array for no results', () => {
-    expect(flattenRows([], new Set())).toEqual([]);
-  });
-
-  it('emits one file row followed by one match row per match, for an uncollapsed file', () => {
-    const f = file('a.ts', 2);
-    const rows = flattenRows([f], new Set());
-    expect(rows).toEqual([
-      { kind: 'file', file: f, collapsed: false },
-      { kind: 'match', filePath: 'a.ts', match: f.matches[0] },
-      { kind: 'match', filePath: 'a.ts', match: f.matches[1] },
-    ]);
-  });
-
-  it('collapsed files: emits only the file row (marked collapsed), no match rows', () => {
-    const f = file('a.ts', 3);
-    const rows = flattenRows([f], new Set(['a.ts']));
-    expect(rows).toEqual([{ kind: 'file', file: f, collapsed: true }]);
-  });
-
-  it('preserves the order of files as given, interleaving each file matches directly after it', () => {
-    const a = file('a.ts', 1);
-    const b = file('b.ts', 2);
-    const c = file('c.ts', 1);
-    const rows = flattenRows([a, b, c], new Set());
-    expect(rows.map((r) => (r.kind === 'file' ? `file:${r.file.path}` : `match:${r.filePath}:${r.match.lineNumber}`))).toEqual([
-      'file:a.ts',
-      'match:a.ts:1',
-      'file:b.ts',
-      'match:b.ts:1',
-      'match:b.ts:2',
-      'file:c.ts',
-      'match:c.ts:1',
-    ]);
-  });
-
-  it('mixed collapse state: only the collapsed file skips its match rows, others keep theirs', () => {
-    const a = file('a.ts', 2);
-    const b = file('b.ts', 2);
-    const rows = flattenRows([a, b], new Set(['b.ts']));
-    expect(rows).toEqual([
-      { kind: 'file', file: a, collapsed: false },
-      { kind: 'match', filePath: 'a.ts', match: a.matches[0] },
-      { kind: 'match', filePath: 'a.ts', match: a.matches[1] },
-      { kind: 'file', file: b, collapsed: true },
-    ]);
-  });
-
-  it('a collapsed-set entry for a path not present in results has no effect', () => {
-    const a = file('a.ts', 1);
-    const rows = flattenRows([a], new Set(['nonexistent.ts']));
-    expect(rows).toEqual([
-      { kind: 'file', file: a, collapsed: false },
-      { kind: 'match', filePath: 'a.ts', match: a.matches[0] },
-    ]);
-  });
-
-  it('propagates a per-file truncated flag onto the file row (row count/shape otherwise unaffected)', () => {
-    const f = file('a.ts', 1, { truncated: true });
-    const rows = flattenRows([f], new Set());
-    expect(rows[0]).toEqual({ kind: 'file', file: f, collapsed: false });
-    expect((rows[0] as { kind: 'file'; file: FileSearchResult }).file.truncated).toBe(true);
-  });
-
-  it('a file with zero matches still emits its file row and nothing else', () => {
-    const f = file('empty.ts', 0);
-    const rows = flattenRows([f], new Set());
-    expect(rows).toEqual([{ kind: 'file', file: f, collapsed: false }]);
-  });
 });
 
 describe('autoSearchAction', () => {
