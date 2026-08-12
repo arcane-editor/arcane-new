@@ -153,6 +153,30 @@ describe('buildExcerpts', () => {
     expect(line6.matches).toEqual([]);
     expect(excerpts[0].matchCount).toBe(2);
   });
+
+  it('does not attach a trimmed highlight to text supplied by a merged middle window, three windows deep', () => {
+    // Same bug, one hop further along a merge chain. A(5) and B(8) merge
+    // first; B's OWN `after` context (not a fresh window's context) supplies
+    // the full, untrimmed text for line 9. THEN C(9) — whose own match line
+    // is 9, preview-trimmed with lineStart: 500 — merges into the combined
+    // A+B window. Line 9's rendered text must stay B's untrimmed context
+    // text, C's highlight must be dropped (its offsets are into C's trimmed
+    // window, not this text), and matchCount must still count all three.
+    const file: FileSearchResult = {
+      path: '/w/a.ts',
+      matches: [
+        match(5, 'hit-a', [], ['line6-ctx']),
+        match(8, 'hit-b', ['line7-ctx'], ['full untrimmed line nine']),
+        { ...match(9, 'trimmed-c-window'), lineStart: 500, matchStart: 2, matchEnd: 9 },
+      ],
+    };
+    const excerpts = buildExcerpts(file);
+    expect(excerpts).toHaveLength(1);
+    const line9 = excerpts[0].lines.find((l) => l.lineNumber === 9)!;
+    expect(line9.text).toBe('full untrimmed line nine');
+    expect(line9.matches).toEqual([]);
+    expect(excerpts[0].matchCount).toBe(3);
+  });
 });
 
 describe('excerptId', () => {

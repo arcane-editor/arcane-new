@@ -88,7 +88,17 @@ function absorb(target: Window, next: Window): void {
   target.matchCount += next.matchCount;
 
   for (const [lineNumber, text] of next.text) {
-    if (!target.text.has(lineNumber)) target.text.set(lineNumber, text);
+    if (!target.text.has(lineNumber)) {
+      target.text.set(lineNumber, text);
+      // Every line that gets text must get an origin alongside it — not just
+      // a window's own match line — otherwise a line adopted here as context
+      // (from THIS window's before/after) has no recorded origin, and a
+      // later window's match landing on that same line falls through to the
+      // "first arrival" branch below and wrongly attaches its (possibly
+      // trimmed) ranges to this (possibly untrimmed) text. Context lines are
+      // never preview-trimmed, so their origin is always 0.
+      target.origin.set(lineNumber, next.origin.get(lineNumber) ?? 0);
+    }
   }
   for (const [lineNumber, ranges] of next.ranges) {
     const incomingOrigin = next.origin.get(lineNumber) ?? 0;
@@ -102,8 +112,21 @@ function absorb(target: Window, next: Window): void {
     // matches on one line can describe DIFFERENT windows of that line. Only
     // ranges from the window whose text we are actually rendering can be
     // highlighted; the rest stay in matchCount so the tally is still honest.
+    //
+    // Equal origins mean these ranges were computed against the very text
+    // now stored for this line, so they are valid to attach whether or not
+    // any ranges were attached to it yet — a line can have text and an
+    // origin (set above, or by windowFor) without ever having had a range,
+    // if it has so far only been seen as context. Get-or-set instead of an
+    // asserted `.push`, since `target.ranges` is not guaranteed to already
+    // hold an entry here.
     if (existingOrigin === incomingOrigin) {
-      target.ranges.get(lineNumber)!.push(...ranges);
+      const existingRanges = target.ranges.get(lineNumber);
+      if (existingRanges) {
+        existingRanges.push(...ranges);
+      } else {
+        target.ranges.set(lineNumber, [...ranges]);
+      }
     }
   }
 }
