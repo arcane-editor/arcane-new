@@ -64,6 +64,56 @@ fn default_max_total_matches() -> usize {
 fn default_max_matches_per_file() -> usize {
     200
 }
+fn default_context_lines() -> usize {
+    2
+}
+
+/// Byte ranges of each line in `content`, terminators excluded. Built once
+/// per file and shared by every match in it.
+fn line_ranges(content: &[u8]) -> Vec<(usize, usize)> {
+    let mut ranges = Vec::new();
+    let mut start = 0usize;
+    for (i, b) in content.iter().enumerate() {
+        if *b == b'\n' {
+            let mut end = i;
+            if end > start && content[end - 1] == b'\r' {
+                end -= 1;
+            }
+            ranges.push((start, end));
+            start = i + 1;
+        }
+    }
+    if start < content.len() {
+        ranges.push((start, content.len()));
+    }
+    ranges
+}
+
+/// `count` lines of context on one side of `line_number` (1-based). Clamped
+/// at both file boundaries. Invalid UTF-8 lines are skipped rather than
+/// lossily converted, matching how the searcher already ends a file's scan on
+/// an encoding error.
+fn context_lines_at(
+    content: &[u8],
+    ranges: &[(usize, usize)],
+    line_number: usize,
+    count: usize,
+    before: bool,
+) -> Vec<String> {
+    if count == 0 || line_number == 0 {
+        return Vec::new();
+    }
+    let idx = line_number - 1;
+    let (lo, hi) = if before {
+        (idx.saturating_sub(count), idx)
+    } else {
+        ((idx + 1).min(ranges.len()), (idx + 1 + count).min(ranges.len()))
+    };
+    ranges[lo..hi]
+        .iter()
+        .filter_map(|(s, e)| std::str::from_utf8(&content[*s..*e]).ok().map(str::to_string))
+        .collect()
+}
 
 /// Frontend-managed cancellation cursor, keyed by window label AND session
 /// id — mirrors `lsp.rs`/`file_scanner::FileWatcherState`/
@@ -144,6 +194,10 @@ pub struct ContentSearchOptions {
     pub max_total_matches: Option<usize>,
     /// See `max_total_matches`; resolved to `default_max_matches_per_file()`.
     pub max_matches_per_file: Option<usize>,
+    /// Lines of context to include either side of each match. `None` and an
+    /// explicit JSON `null` both mean "use the default" — same `Option`
+    /// treatment as `max_total_matches` above, and for the same reason.
+    pub context_lines: Option<usize>,
 }
 
 /// A single match within a line. Field names serialize to camelCase so the
@@ -162,6 +216,11 @@ pub struct ContentSearchMatch {
     /// UTF-16 offset in the original line where `line_content` begins
     /// (0 when the line was not trimmed).
     pub line_start: usize,
+    /// Up to `context_lines` lines immediately preceding `line_number`, in
+    /// file order. Line terminators stripped; never preview-trimmed.
+    pub before: Vec<String>,
+    /// Up to `context_lines` lines immediately following `line_number`.
+    pub after: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -214,6 +273,7 @@ struct Engine {
     file_extensions: Option<Vec<String>>,
     max_total_matches: usize,
     max_matches_per_file: usize,
+    context_lines: usize,
     threads: usize,
 }
 
@@ -254,6 +314,7 @@ impl Engine {
                 .max_matches_per_file
                 .unwrap_or_else(default_max_matches_per_file)
                 .max(1),
+            context_lines: options.context_lines.unwrap_or_else(default_context_lines),
             threads,
         })
     }
@@ -369,9 +430,18 @@ pub fn search_file(
     path: &str,
     content: &[u8],
     max_matches_per_file: usize,
+    context_lines: usize,
 ) -> ContentFileResult {
     let mut matches: Vec<ContentSearchMatch> = Vec::new();
     let mut truncated = false;
+
+    // Built once per file; empty when context is off so a zero-context search
+    // pays nothing for this.
+    let ranges = if context_lines > 0 {
+        line_ranges(content)
+    } else {
+        Vec::new()
+    };
 
     let sink = UTF8(|line_number, line| {
         // The UTF8 sink hands us the line including its terminator.
@@ -398,6 +468,8 @@ pub fn search_file(
                 match_start: ms16,
                 match_end: me16,
                 line_start: line_start16,
+                before: context_lines_at(content, &ranges, line_number as usize, context_lines, true),
+                after: context_lines_at(content, &ranges, line_number as usize, context_lines, false),
             });
             true
         });
@@ -481,6 +553,7 @@ fn process_and_send(
         &abs_path,
         &content,
         engine.max_matches_per_file,
+        engine.context_lines,
     );
     if result.matches.is_empty() {
         return WalkState::Continue;
@@ -855,6 +928,7 @@ mod tests {
             file_extensions: None,
             max_total_matches: Some(default_max_total_matches()),
             max_matches_per_file: Some(default_max_matches_per_file()),
+            context_lines: None,
         }
     }
 
@@ -916,7 +990,7 @@ mod tests {
 
     fn search_one(matcher: &RegexMatcher, content: &str, cap: usize) -> ContentFileResult {
         let mut searcher = build_searcher();
-        search_file(&mut searcher, matcher, "/tmp/x", content.as_bytes(), cap)
+        search_file(&mut searcher, matcher, "/tmp/x", content.as_bytes(), cap, 0)
     }
 
     fn literal_matcher(query: &str, case_sensitive: bool, whole_word: bool) -> RegexMatcher {
@@ -925,6 +999,75 @@ mod tests {
             .word(whole_word)
             .build(&regex::escape(query))
             .unwrap()
+    }
+
+    // ── search_file: context lines ──────────────────────────────────────
+
+    fn search_one_ctx(m: &RegexMatcher, content: &str, context: usize) -> ContentFileResult {
+        let mut searcher = build_searcher();
+        search_file(&mut searcher, m, "/tmp/f", content.as_bytes(), 200, context)
+    }
+
+    #[test]
+    fn context_lines_are_captured_both_sides() {
+        let m = literal_matcher("needle", false, false);
+        let r = search_one_ctx(&m, "a\nb\nneedle\nc\nd\n", 2);
+        assert_eq!(r.matches.len(), 1);
+        assert_eq!(r.matches[0].line_number, 3);
+        assert_eq!(r.matches[0].before, vec!["a".to_string(), "b".to_string()]);
+        assert_eq!(r.matches[0].after, vec!["c".to_string(), "d".to_string()]);
+    }
+
+    #[test]
+    fn context_clamps_at_start_of_file() {
+        let m = literal_matcher("needle", false, false);
+        let r = search_one_ctx(&m, "needle\nb\nc\n", 2);
+        assert!(r.matches[0].before.is_empty());
+        assert_eq!(r.matches[0].after, vec!["b".to_string(), "c".to_string()]);
+    }
+
+    #[test]
+    fn context_clamps_at_end_of_file() {
+        let m = literal_matcher("needle", false, false);
+        let r = search_one_ctx(&m, "a\nb\nneedle\n", 2);
+        assert_eq!(r.matches[0].before, vec!["a".to_string(), "b".to_string()]);
+        assert!(r.matches[0].after.is_empty());
+    }
+
+    #[test]
+    fn context_strips_crlf_terminators() {
+        let m = literal_matcher("needle", false, false);
+        let r = search_one_ctx(&m, "a\r\nneedle\r\nc\r\n", 1);
+        assert_eq!(r.matches[0].before, vec!["a".to_string()]);
+        assert_eq!(r.matches[0].after, vec!["c".to_string()]);
+    }
+
+    #[test]
+    fn zero_context_yields_no_context_lines() {
+        let m = literal_matcher("needle", false, false);
+        let r = search_one_ctx(&m, "a\nneedle\nc\n", 0);
+        assert!(r.matches[0].before.is_empty());
+        assert!(r.matches[0].after.is_empty());
+    }
+
+    #[test]
+    fn context_lines_are_not_preview_trimmed() {
+        // A long context line stays whole: trimming is a match-window concern,
+        // and there is no match on a context line to centre a window on.
+        let m = literal_matcher("needle", false, false);
+        let long = "x".repeat(600);
+        let content = format!("{}\nneedle\n", long);
+        let r = search_one_ctx(&m, &content, 1);
+        assert_eq!(r.matches[0].before[0].chars().count(), 600);
+    }
+
+    #[test]
+    fn two_matches_on_adjacent_lines_each_carry_their_own_context() {
+        let m = literal_matcher("needle", false, false);
+        let r = search_one_ctx(&m, "a\nneedle\nneedle\nb\n", 1);
+        assert_eq!(r.matches.len(), 2);
+        assert_eq!(r.matches[0].after, vec!["needle".to_string()]);
+        assert_eq!(r.matches[1].before, vec!["needle".to_string()]);
     }
 
     // ── build_globset ───────────────────────────────────────────────────
@@ -1080,7 +1223,7 @@ mod tests {
         let mut content = Vec::from(&b"\x00binary blob "[..]);
         content.extend_from_slice(b"secret here\n");
         let mut searcher = build_searcher();
-        let r = search_file(&mut searcher, &m, "/tmp/bin", &content, 200);
+        let r = search_file(&mut searcher, &m, "/tmp/bin", &content, 200, 0);
         assert!(r.matches.is_empty(), "binary file should yield no matches");
     }
 

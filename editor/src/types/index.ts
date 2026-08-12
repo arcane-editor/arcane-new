@@ -232,6 +232,11 @@ export interface SearchMatch {
    * editor column of a match is `lineStart + matchStart`.
    */
   lineStart?: number;
+  /** Context lines immediately preceding `lineNumber`, in file order.
+   *  Absent when the search ran with zero context. */
+  before?: string[];
+  /** Context lines immediately following `lineNumber`. */
+  after?: string[];
 }
 
 export interface FileSearchResult {
