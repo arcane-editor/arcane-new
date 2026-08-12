@@ -140,19 +140,22 @@ git commit -m "refactor: extract isVirtualPath, reserve the search:// scheme"
 
 ---
 
-### Task 2: Session model
+### Task 2: Session model and per-session cancellation
 
 The store holds one global search. Two search tabs cannot share one `query` field, so the store becomes session-keyed. This task introduces the pure session reducers and rewires the store around a single default session — the existing `SearchPanel` keeps working, unchanged, throughout.
+
+The Rust cancellation cursor changes in the same task, not a later one. It is keyed by window label, so a search started in one tab supersedes a search still running in another — the second tab keeps partial results with no error and no sign anything was cut short. Multiple sessions make that reachable. The two halves must land together regardless: `check:invoke` compares the frontend payload against the command signature, so a `sessionId` on one side and not the other fails the gate in either order.
 
 **Files:**
 - Create: `src/features/search/services/search-session.ts`
 - Create: `src/features/search/services/search-session.test.ts`
 - Modify: `src/features/search/index.ts`
 - Modify: `src/stores/search.ts`
+- Modify: `src-tauri/src/search.rs` (`ContentSearchState`, `start_content_search`, `cancel_content_search`)
 
 **Interfaces:**
 - Consumes: `StreamState`, `applyBatch`, `applyComplete` from `search-model.ts` (unchanged).
-- Produces: `SearchSession`, `SearchOptionsState`, `createSession(id)`, `sessionForSearchId(sessions, searchId)`, `patchSession(sessions, id, patch)`.
+- Produces: `SearchSession`, `SearchOptionsState`, `createSession(id)`, `sessionForSearchId(sessions, searchId)`, `patchSession(sessions, id, patch)`; `start_content_search(app, state, window, search_id, session_id, options)` and `cancel_content_search(state, window, search_id, session_id)` — frontend payloads gain `sessionId: string`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -247,7 +250,7 @@ export interface SearchSession extends StreamState, SearchOptionsState {
   id: string;
   query: string;
   searchError: string | null;
-  /** Most-recent-first, capped at HISTORY_LIMIT by pushQuery (Task 7). */
+  /** Most-recent-first, capped at HISTORY_LIMIT by pushQuery (Task 6). */
   history: string[];
   /** -1 = the input holds a live (unsubmitted) query. */
   historyIndex: number;
@@ -374,8 +377,8 @@ interface SearchState {
 const DEFAULT_SESSION_ID = 'search://1';
 
 // Monotonic per window, per the backend contract: a higher id supersedes a
-// lower one. Task 5 makes the backend cursor per-session so two tabs can run
-// concurrently; the counter stays global because ids must stay unique.
+// lower one. The backend cursor is per-session (below), so two tabs run
+// concurrently; this counter stays global because ids must stay unique.
 let searchGeneration = 0;
 let listenersPromise: Promise<void> | null = null;
 
@@ -563,17 +566,154 @@ In `src/features/search/components/SearchPanel.tsx`, replace the per-field selec
   const setExcludePattern = (p: string) => update(sessionId, { excludePattern: p });
 ```
 
-Then update the two call sites in the component body: `search(workspacePath)` → `search(sessionId, workspacePath)` and `clearResults()` → `clearResults(sessionId)`. This component is deleted in Task 12; it is kept working here so this task ships independently.
+Then update the two call sites in the component body: `search(workspacePath)` → `search(sessionId, workspacePath)` and `clearResults()` → `clearResults(sessionId)`. This component is deleted in Task 11; it is kept working here so this task ships independently.
 
-- [ ] **Step 8: Verify and commit**
+- [ ] **Step 8: Write the failing Rust tests**
 
-Run: `bun test src && bunx tsc --noEmit`
-Expected: PASS. (`check:invoke` will fail until Task 5 — that is why the full `verify` gate lands there.)
+Add to `mod tests` in `src-tauri/src/search.rs`:
+
+```rust
+    #[test]
+    fn cursors_are_independent_per_session() {
+        let state = ContentSearchState::new();
+        let a = state.cursor("main", "search://1");
+        let b = state.cursor("main", "search://2");
+        a.store(5, Ordering::SeqCst);
+        assert_eq!(b.load(Ordering::SeqCst), 0, "sessions must not share a cursor");
+    }
+
+    #[test]
+    fn same_session_returns_the_same_cursor() {
+        let state = ContentSearchState::new();
+        let a = state.cursor("main", "search://1");
+        a.store(7, Ordering::SeqCst);
+        assert_eq!(state.cursor("main", "search://1").load(Ordering::SeqCst), 7);
+    }
+
+    #[test]
+    fn drop_window_clears_every_session_of_that_window_only() {
+        let state = ContentSearchState::new();
+        state.cursor("main", "search://1").store(3, Ordering::SeqCst);
+        state.cursor("other", "search://1").store(4, Ordering::SeqCst);
+        state.drop_window("main");
+        assert_eq!(state.cursor("main", "search://1").load(Ordering::SeqCst), 0);
+        assert_eq!(state.cursor("other", "search://1").load(Ordering::SeqCst), 4);
+    }
+
+    #[test]
+    fn options_deserialize_from_the_frontend_payload_verbatim() {
+        // Raw JSON, exactly as stores/search.ts sends it. A typed test would
+        // not have caught the `null` vs missing-key distinction that bit
+        // max_total_matches, so this asserts against the literal payload.
+        let json = r#"{
+            "workspacePath": "/w",
+            "query": "foo",
+            "isRegex": false,
+            "caseSensitive": false,
+            "wholeWord": false,
+            "includePatterns": [],
+            "excludePatterns": [],
+            "includeIgnored": true,
+            "contextLines": null,
+            "fileExtensions": null,
+            "maxTotalMatches": null,
+            "maxMatchesPerFile": null
+        }"#;
+        let opts: ContentSearchOptions = serde_json::from_str(json).expect("payload must deserialize");
+        assert_eq!(opts.query, "foo");
+        assert!(opts.include_ignored);
+        assert_eq!(opts.context_lines, None);
+        let engine = Engine::build(&opts).expect("engine must build");
+        assert_eq!(engine.context_lines, 2, "null contextLines resolves to the default");
+    }
+```
+
+- [ ] **Step 9: Run the Rust tests and watch them fail**
+
+Run: `cd src-tauri && cargo test --lib cursors_are_independent`
+Expected: FAIL to compile — `cursor` takes one argument.
+
+- [ ] **Step 10: Implement the per-session cursor**
+
+In `src-tauri/src/search.rs`, change the cursor key from `label` to a composite. The map type and the existing `lock_recover` poisoning behaviour stay exactly as they are — only the key derivation changes:
+
+```rust
+/// Key for the per-run cancellation cursor: window label AND session id.
+/// Keying by window alone let a search in one tab supersede a search still
+/// running in another, truncating it to partial results with no error and no
+/// sign anything was cut short. NUL is the separator because it cannot occur
+/// in a window label or a `search://n` id.
+fn cursor_key(label: &str, session_id: &str) -> String {
+    format!("{}\u{0}{}", label, session_id)
+}
+
+impl ContentSearchState {
+    /// Returns this window+session's cancellation cursor, creating a fresh
+    /// `Arc<AtomicU64>` (starting at 0) the first time the pair is seen. The
+    /// returned `Arc` is cloned into the search's worker/emitter threads so
+    /// `cancel_content_search`, or a newer `start_content_search` for the
+    /// same pair, can advance it out from under them.
+    pub fn cursor(&self, label: &str, session_id: &str) -> Arc<AtomicU64> {
+        let mut map = lock_recover(&self.0);
+        map.entry(cursor_key(label, session_id)).or_default().clone()
+    }
+
+    /// Drop every session cursor belonging to this window. Called from
+    /// `WindowEvent::Destroyed` cleanup in `lib.rs` — idempotent, and a no-op
+    /// if the window never started a search. In-flight workers hold their own
+    /// `Arc` clone, so this does not cancel them; it only stops the entries
+    /// occupying the map after the window is gone.
+    pub fn drop_window(&self, label: &str) {
+        let prefix = format!("{}\u{0}", label);
+        let mut map = lock_recover(&self.0);
+        map.retain(|k, _| !k.starts_with(&prefix));
+    }
+}
+```
+
+Then thread `session_id: String` through both commands:
+
+```rust
+#[tauri::command(async)]
+pub fn start_content_search(
+    app: AppHandle,
+    state: State<'_, ContentSearchState>,
+    window: Window,
+    search_id: u64,
+    session_id: String,
+    options: ContentSearchOptions,
+) -> Result<(), String> {
+```
+
+with the body's `state.cursor(window.label())` becoming `state.cursor(window.label(), &session_id)`, and the same for:
+
+```rust
+#[tauri::command]
+pub fn cancel_content_search(
+    state: State<'_, ContentSearchState>,
+    window: Window,
+    search_id: u64,
+    session_id: String,
+) {
+```
+
+- [ ] **Step 11: Run the Rust tests and watch them pass**
+
+Run: `cd src-tauri && cargo test --lib`
+Expected: PASS.
+
+- [ ] **Step 12: Verify and commit**
+
+Both halves of the `sessionId` change are now in place, so the full gate applies.
+
+Run: `bun run verify`
+Expected: PASS — `check:invoke` in particular, which is the reason these two halves are one task.
 
 ```bash
-git add src/features/search src/stores/search.ts
-git commit -m "refactor(search): make the search store session-keyed"
+git add src/features/search src/stores/search.ts src-tauri/src/search.rs
+git commit -m "refactor(search): session-keyed store with per-session cancellation"
 ```
+
 
 ---
 
@@ -961,166 +1101,7 @@ git commit -m "feat(search): add includeIgnored to content search"
 
 ---
 
-### Task 5: Per-session cancellation cursor
-
-The cancellation cursor is keyed by window label, so a search started in one tab silently truncates a search still running in another — partial results, no error, exactly the failure class this repo keeps hitting. Keying the cursor by window **and** session makes tabs independent.
-
-**Files:**
-- Modify: `src-tauri/src/search.rs` (`ContentSearchState`, `start_content_search`, `cancel_content_search`)
-
-**Interfaces:**
-- Consumes: nothing.
-- Produces: `start_content_search(app, state, window, search_id, session_id, options)` and `cancel_content_search(state, window, search_id, session_id)` — frontend payloads gain `sessionId: string`.
-
-- [ ] **Step 1: Write the failing tests**
-
-Add to `mod tests` in `src-tauri/src/search.rs`:
-
-```rust
-    #[test]
-    fn cursors_are_independent_per_session() {
-        let state = ContentSearchState::new();
-        let a = state.cursor("main", "search://1");
-        let b = state.cursor("main", "search://2");
-        a.store(5, Ordering::SeqCst);
-        assert_eq!(b.load(Ordering::SeqCst), 0, "sessions must not share a cursor");
-    }
-
-    #[test]
-    fn same_session_returns_the_same_cursor() {
-        let state = ContentSearchState::new();
-        let a = state.cursor("main", "search://1");
-        a.store(7, Ordering::SeqCst);
-        assert_eq!(state.cursor("main", "search://1").load(Ordering::SeqCst), 7);
-    }
-
-    #[test]
-    fn drop_window_clears_every_session_of_that_window_only() {
-        let state = ContentSearchState::new();
-        state.cursor("main", "search://1").store(3, Ordering::SeqCst);
-        state.cursor("other", "search://1").store(4, Ordering::SeqCst);
-        state.drop_window("main");
-        assert_eq!(state.cursor("main", "search://1").load(Ordering::SeqCst), 0);
-        assert_eq!(state.cursor("other", "search://1").load(Ordering::SeqCst), 4);
-    }
-
-    #[test]
-    fn options_deserialize_from_the_frontend_payload_verbatim() {
-        // Raw JSON, exactly as stores/search.ts sends it. A typed test would
-        // not have caught the `null` vs missing-key distinction that bit
-        // max_total_matches, so this asserts against the literal payload.
-        let json = r#"{
-            "workspacePath": "/w",
-            "query": "foo",
-            "isRegex": false,
-            "caseSensitive": false,
-            "wholeWord": false,
-            "includePatterns": [],
-            "excludePatterns": [],
-            "includeIgnored": true,
-            "contextLines": null,
-            "fileExtensions": null,
-            "maxTotalMatches": null,
-            "maxMatchesPerFile": null
-        }"#;
-        let opts: ContentSearchOptions = serde_json::from_str(json).expect("payload must deserialize");
-        assert_eq!(opts.query, "foo");
-        assert!(opts.include_ignored);
-        assert_eq!(opts.context_lines, None);
-        let engine = Engine::build(&opts).expect("engine must build");
-        assert_eq!(engine.context_lines, 2, "null contextLines resolves to the default");
-    }
-```
-
-- [ ] **Step 2: Run and watch it fail**
-
-Run: `cd src-tauri && cargo test --lib cursors_are_independent`
-Expected: FAIL to compile — `cursor` takes one argument.
-
-- [ ] **Step 3: Implement**
-
-In `src-tauri/src/search.rs`, change the cursor key from `label` to a composite. The map type and the existing `lock_recover` poisoning behaviour stay exactly as they are — only the key derivation changes:
-
-```rust
-/// Key for the per-run cancellation cursor: window label AND session id.
-/// Keying by window alone let a search in one tab supersede a search still
-/// running in another, truncating it to partial results with no error and no
-/// sign anything was cut short. NUL is the separator because it cannot occur
-/// in a window label or a `search://n` id.
-fn cursor_key(label: &str, session_id: &str) -> String {
-    format!("{}\u{0}{}", label, session_id)
-}
-
-impl ContentSearchState {
-    /// Returns this window+session's cancellation cursor, creating a fresh
-    /// `Arc<AtomicU64>` (starting at 0) the first time the pair is seen. The
-    /// returned `Arc` is cloned into the search's worker/emitter threads so
-    /// `cancel_content_search`, or a newer `start_content_search` for the
-    /// same pair, can advance it out from under them.
-    pub fn cursor(&self, label: &str, session_id: &str) -> Arc<AtomicU64> {
-        let mut map = lock_recover(&self.0);
-        map.entry(cursor_key(label, session_id)).or_default().clone()
-    }
-
-    /// Drop every session cursor belonging to this window. Called from
-    /// `WindowEvent::Destroyed` cleanup in `lib.rs` — idempotent, and a no-op
-    /// if the window never started a search. In-flight workers hold their own
-    /// `Arc` clone, so this does not cancel them; it only stops the entries
-    /// occupying the map after the window is gone.
-    pub fn drop_window(&self, label: &str) {
-        let prefix = format!("{}\u{0}", label);
-        let mut map = lock_recover(&self.0);
-        map.retain(|k, _| !k.starts_with(&prefix));
-    }
-}
-```
-
-Then thread `session_id: String` through both commands:
-
-```rust
-#[tauri::command(async)]
-pub fn start_content_search(
-    app: AppHandle,
-    state: State<'_, ContentSearchState>,
-    window: Window,
-    search_id: u64,
-    session_id: String,
-    options: ContentSearchOptions,
-) -> Result<(), String> {
-```
-
-with the body's `state.cursor(window.label())` becoming `state.cursor(window.label(), &session_id)`, and the same for:
-
-```rust
-#[tauri::command]
-pub fn cancel_content_search(
-    state: State<'_, ContentSearchState>,
-    window: Window,
-    search_id: u64,
-    session_id: String,
-) {
-```
-
-- [ ] **Step 4: Run and watch it pass**
-
-Run: `cd src-tauri && cargo test --lib`
-Expected: PASS.
-
-- [ ] **Step 5: Run the full gate — this is where Task 2's payload becomes valid**
-
-Run: `bun run verify`
-Expected: PASS, including `check:invoke` (which was failing since Task 2 because `sessionId`, `includeIgnored` and `contextLines` had no Rust counterpart).
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add src-tauri/src/search.rs
-git commit -m "fix(search): key the cancellation cursor per session, not per window"
-```
-
----
-
-### Task 6: `excerpt-model` — matches to merged excerpts
+### Task 5: `excerpt-model` — matches to merged excerpts
 
 The piece that makes results read like a file rather than a list: two matches four lines apart become one continuous excerpt instead of two boxes repeating the same code.
 
@@ -1473,7 +1454,7 @@ git commit -m "feat(search): fold matches into merged excerpt ranges"
 
 ---
 
-### Task 7: Query history and search settings
+### Task 6: Query history and search settings
 
 **Files:**
 - Create: `src/features/search/services/query-history.ts`
@@ -1686,7 +1667,7 @@ git commit -m "feat(search): query history ring, smartcase, and search settings"
 
 ---
 
-### Task 8: `search://` tab plumbing
+### Task 7: `search://` tab plumbing
 
 Opens the tab and routes it to a placeholder view. Nothing renders results yet — this task exists so tab lifecycle can be reviewed on its own, before any rendering complexity lands on top of it.
 
@@ -1792,7 +1773,7 @@ export { default as SearchResultsTab } from './components/SearchResultsTab';
 
 - [ ] **Step 6: Verify by hand**
 
-There is no command bound to this yet (Task 13 adds it), so drive it from the devtools console. Run `bun run tauri dev`, open devtools, and evaluate:
+There is no command bound to this yet (Task 12 adds it), so drive it from the devtools console. Run `bun run tauri dev`, open devtools, and evaluate:
 
 ```js
 window.__ARCANE_TEST_OPEN_SEARCH__ = () => useWorkspaceStore.getState().openSearchTab({ query: 'test' });
@@ -1814,7 +1795,7 @@ git commit -m "feat(search): open results in a search:// tab"
 
 ---
 
-### Task 9: The query bar
+### Task 8: The query bar
 
 **Files:**
 - Create: `src/features/search/components/SearchQueryBar.tsx`
@@ -1822,7 +1803,7 @@ git commit -m "feat(search): open results in a search:// tab"
 - Modify: `src/App.css`
 
 **Interfaces:**
-- Consumes: `useSearchStore` (Task 2), `pushQuery`/`historyStep` (Task 7), `useDebouncedValue` (`src/hooks`), `autoSearchAction` (existing `search-model`).
+- Consumes: `useSearchStore` (Task 2), `pushQuery`/`historyStep` (Task 6), `useDebouncedValue` (`src/hooks`), `autoSearchAction` (existing `search-model`).
 - Produces: `<SearchQueryBar sessionId={...} />`.
 
 - [ ] **Step 1: Implement the component**
@@ -2087,7 +2068,7 @@ git commit -m "feat(search): query bar in the results tab"
 
 ---
 
-### Task 10: Excerpt rendering
+### Task 9: Excerpt rendering
 
 **Files:**
 - Create: `src/features/search/services/highlight.ts`
@@ -2099,7 +2080,7 @@ git commit -m "feat(search): query bar in the results tab"
 - Modify: `src/App.css`
 
 **Interfaces:**
-- Consumes: `buildExcerpts`, `Excerpt`, `ExcerptLine` (Task 6); `detectLanguage` (`src/utils/language-detect`); `getFileIcon` (`src/utils/file-icons`).
+- Consumes: `buildExcerpts`, `Excerpt`, `ExcerptLine` (Task 5); `detectLanguage` (`src/utils/language-detect`); `getFileIcon` (`src/utils/file-icons`).
 - Produces: `excerptRowKey(excerpt, line)`, `colorizeLine(text, monacoId)`, `<ExcerptList sessionId={...} />`.
 
 - [ ] **Step 1: Write the failing test for the pure part**
@@ -2335,7 +2316,7 @@ Syntax colouring via `monaco.editor.colorize` is added in a follow-up commit ins
 
 Create `src/features/search/components/ExcerptList.tsx`:
 
-Tasks 11 and 12 add to this file, so the import line already carries the hooks they need.
+Tasks 10 and 11 add to this file, so the import line already carries the hooks they need.
 
 ```tsx
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -2417,7 +2398,7 @@ function ExcerptList({ sessionId }: ExcerptListProps) {
     [sessionId, update],
   );
 
-  // Expansion is wired in Task 11; the handler exists here so the block's
+  // Expansion is wired in Task 10; the handler exists here so the block's
   // props are stable across both tasks.
   const expand = useCallback(() => undefined, []);
 
@@ -2659,7 +2640,7 @@ git commit -m "feat(search): render results as syntax-highlighted excerpts"
 
 ---
 
-### Task 11: Excerpt expansion
+### Task 10: Excerpt expansion
 
 **Files:**
 - Create: `src/features/search/services/file-lines.ts`
@@ -2668,7 +2649,7 @@ git commit -m "feat(search): render results as syntax-highlighted excerpts"
 - Modify: `src/features/search/index.ts`
 
 **Interfaces:**
-- Consumes: `applyExpansion` (Task 6), `invoke('read_file', { path })`.
+- Consumes: `applyExpansion` (Task 5), `invoke('read_file', { path })`.
 - Produces: `splitLines(content)`, `readFileLines(path)` (cached), `clearFileLineCache()`.
 
 - [ ] **Step 1: Write the failing test**
@@ -2772,7 +2753,7 @@ In `ExcerptList.tsx`, hold the read lines in component state and apply the sessi
   );
 ```
 
-(`EXPAND_STEP`, `useState` and the `readFileLines` / `applyExpansion` imports were already added in Task 10.) Then apply the expansion inside the `blocks` memo:
+(`EXPAND_STEP`, `useState` and the `readFileLines` / `applyExpansion` imports were already added in Task 9.) Then apply the expansion inside the `blocks` memo:
 
 ```tsx
         excerpts: buildExcerpts(file).map((excerpt) => {
@@ -2803,7 +2784,7 @@ git commit -m "feat(search): expand excerpt context from the real file"
 
 ---
 
-### Task 12: The outline panel
+### Task 11: The outline panel
 
 The sidebar stops being the search UI and becomes the compact index of the active session, synced both ways with the tab.
 
@@ -2985,7 +2966,7 @@ git commit -m "feat(search): sidebar becomes a synced results outline"
 
 ---
 
-### Task 13: Commands, keybindings, and Search in Folder
+### Task 12: Commands, keybindings, and Search in Folder
 
 **Files:**
 - Modify: `src/App.tsx` (command registry)
@@ -2993,7 +2974,7 @@ git commit -m "feat(search): sidebar becomes a synced results outline"
 - Verify: `src-tauri/src/menu.rs`
 
 **Interfaces:**
-- Consumes: `openSearchTab` (Task 8), `useSearchStore` (Task 2).
+- Consumes: `openSearchTab` (Task 7), `useSearchStore` (Task 2).
 - Produces: commands `search.openTab`, `search.newTab`, `search.useSelection`, `search.toggleCase`, `search.toggleWholeWord`, `search.toggleRegex`, `search.nextMatch`, `search.previousMatch`.
 
 - [ ] **Step 1: Check the native menu first**
@@ -3217,7 +3198,7 @@ Run: `bun run tauri dev`.
 Expected, each checked individually:
 - `mod+shift+f` with a word selected opens a search tab pre-filled with that word; pressing it again focuses the same tab and selects the query text.
 - Clicking an excerpt then pressing `alt+enter` opens that file at that match; `shift+enter` reveals five more lines below it.
-- "New Search" from the palette opens a second, independent tab; running a search in it does not stop the first tab's results from being complete (this is what Task 5 bought).
+- "New Search" from the palette opens a second, independent tab; running a search in it does not stop the first tab's results from being complete (this is what the per-session cursor in Task 2 bought).
 - `mod+alt+c` / `mod+alt+w` / `mod+alt+x` flip the toggles and re-run the search.
 - `mod+e` with a different selection replaces the query.
 - Right-click a folder in the explorer → "Search in Folder" opens a tab scoped to it.
@@ -3246,7 +3227,7 @@ Not in scope here, per the spec's phasing:
 
 ## Final manual verification
 
-Run once after Task 13, in a real Unity project, before calling Phase 1 done:
+Run once after Task 12, in a real Unity project, before calling Phase 1 done:
 
 - [ ] Search a common identifier; results stream in with context, syntax coloured.
 - [ ] Expand context up and down on an excerpt at the very top of a file and at the very bottom — it clamps rather than throwing.
