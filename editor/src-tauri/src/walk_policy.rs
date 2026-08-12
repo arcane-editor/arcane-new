@@ -431,6 +431,19 @@ mod include_ignored_tests {
             .collect()
     }
 
+    /// Like `walked_names`, but keeps the full path instead of just the bare
+    /// file name — needed to prove the walker never *descends into* `.git` at
+    /// all (a bare-name check can't distinguish "no file named X" from "a
+    /// file named X exists deeper in the tree but wasn't yielded").
+    fn walked_paths(root: &str, opts: WalkOptions) -> Vec<PathBuf> {
+        policy_walker_with(root, opts)
+            .build()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
+            .map(|e| e.path().to_path_buf())
+            .collect()
+    }
+
     #[test]
     fn gitignored_file_is_skipped_by_default() {
         let dir = fixture();
@@ -449,13 +462,37 @@ mod include_ignored_tests {
         assert!(names.contains(&"secret.txt".to_string()));
     }
 
+    /// ALWAYS_HIDDEN (`.git`, `.DS_Store`) must stay hidden even under
+    /// `include_ignored: true` — that flag only relaxes gitignore, never the
+    /// always-hidden filter. `include_ignored: true` is deliberate here: it's
+    /// the case where gitignore is NOT doing the hiding, so any file this
+    /// walk fails to surface can only be explained by `filter_entry`'s
+    /// ALWAYS_HIDDEN check. Both entries below are real files the walk would
+    /// otherwise reach: `.DS_Store` sits at the root next to `plain.txt`, and
+    /// `.git/config` sits one level inside the directory the walker would
+    /// have to descend into to find it — so this pins both "don't yield the
+    /// entry itself" and "don't descend into it" in one test.
     #[test]
     fn always_hidden_entries_stay_hidden_even_with_include_ignored() {
         let dir = fixture();
-        let names = walked_names(
-            dir.path().to_str().unwrap(),
+        let root = dir.path();
+        fs::write(root.join(".DS_Store"), "binary junk").unwrap();
+        fs::write(root.join(".git").join("config"), "[core]\n").unwrap();
+
+        let paths = walked_paths(
+            root.to_str().unwrap(),
             WalkOptions { include_ignored: true },
         );
-        assert!(!names.iter().any(|n| n == ".DS_Store"));
+
+        assert!(
+            !paths.iter().any(|p| p.file_name().map(|n| n == ".DS_Store").unwrap_or(false)),
+            "paths = {:?}",
+            paths
+        );
+        assert!(
+            !paths.iter().any(|p| p.components().any(|c| c.as_os_str() == ".git")),
+            "paths = {:?}",
+            paths
+        );
     }
 }
