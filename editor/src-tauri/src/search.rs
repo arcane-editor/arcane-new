@@ -89,11 +89,22 @@ fn line_ranges(content: &[u8]) -> Vec<(usize, usize)> {
     ranges
 }
 
+/// Placeholder text for a context line whose bytes are not valid UTF-8. Must
+/// never be dropped instead of substituted: the frontend derives every
+/// context line's line number purely from `before`/`after` ARRAY LENGTH, not
+/// from any number attached to the line itself (`excerpt-model.ts`'s
+/// `windowFor` computes `start = match.lineNumber - before.length`). Dropping
+/// one undecodable line would silently shift the line number of every other
+/// context line in the excerpt.
+const UNDECODABLE_CONTEXT_LINE: &str = "<binary line>";
+
 /// `count` lines of context on one side of `line_number` (1-based). Clamped
-/// at both file boundaries. Invalid UTF-8 lines are skipped rather than
-/// lossily converted — unlike the sink, which ends the whole file's scan on
-/// an encoding error, this only drops the one bad line and keeps going, since
-/// a single corrupt context line shouldn't cost the rest of the excerpt.
+/// at both file boundaries. A line whose bytes are not valid UTF-8 is
+/// replaced with `UNDECODABLE_CONTEXT_LINE` rather than dropped, so the
+/// returned `Vec`'s length always equals `hi - lo` — unlike the sink, which
+/// ends the whole file's scan on an encoding error, this keeps going past a
+/// single corrupt context line without desynchronizing the rest of the
+/// excerpt's line numbers.
 fn context_lines_at(
     content: &[u8],
     ranges: &[(usize, usize)],
@@ -112,7 +123,11 @@ fn context_lines_at(
     };
     ranges[lo..hi]
         .iter()
-        .filter_map(|(s, e)| std::str::from_utf8(&content[*s..*e]).ok().map(str::to_string))
+        .map(|(s, e)| {
+            std::str::from_utf8(&content[*s..*e])
+                .map(str::to_string)
+                .unwrap_or_else(|_| UNDECODABLE_CONTEXT_LINE.to_string())
+        })
         .collect()
 }
 
@@ -1113,6 +1128,36 @@ mod tests {
         let r = search_one_ctx(&m, "a\r\n\r\nneedle\r\n\r\nc\r\n", 2);
         assert_eq!(r.matches[0].before, vec!["a".to_string(), "".to_string()]);
         assert_eq!(r.matches[0].after, vec!["".to_string(), "c".to_string()]);
+    }
+
+    #[test]
+    fn context_line_with_invalid_utf8_is_replaced_not_dropped() {
+        // Line 2 is a single invalid UTF-8 byte (a bare continuation byte --
+        // it cannot start or complete any valid sequence), simulating a
+        // Latin-1 file with no NUL byte (so binary detection doesn't skip
+        // it). The matched line itself ("needle") is plain ASCII, so the
+        // search sink finds it fine -- only the CONTEXT read, which walks
+        // `content` directly rather than through the sink, ever sees the bad
+        // byte. If that line were dropped instead of replaced, `before`
+        // would come back with length 1 instead of 2, and per
+        // `excerpt-model.ts`'s `start = match.lineNumber - before.length`,
+        // every line in the rendered excerpt -- including the match's own
+        // displayed position -- would be numbered one line too high.
+        let m = literal_matcher("needle", false, false);
+        let mut content: Vec<u8> = Vec::new();
+        content.extend_from_slice(b"a\n");
+        content.push(0x80); // invalid standalone UTF-8 continuation byte
+        content.extend_from_slice(b"\nb\nneedle\nc\n");
+        let mut searcher = build_searcher();
+        let r = search_file(&mut searcher, &m, "/tmp/f", &content, 200, 2);
+        assert_eq!(r.matches.len(), 1);
+        assert_eq!(r.matches[0].line_number, 4, "match line number must not shift");
+        assert_eq!(
+            r.matches[0].before,
+            vec!["<binary line>".to_string(), "b".to_string()],
+            "the undecodable line must be replaced, not dropped, so `before.length` stays 2"
+        );
+        assert_eq!(r.matches[0].after, vec!["c".to_string()]);
     }
 
     #[test]

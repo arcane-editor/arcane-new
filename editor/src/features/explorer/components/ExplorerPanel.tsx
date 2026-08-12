@@ -611,7 +611,11 @@ function ExplorerPanel() {
           onSearchInFolder={
             contextMenu.isDir
               ? () => {
-                  const relative = toRelativePath(contextMenu.path, workspacePath);
+                  // Mirror stores/search.ts's own root selection: for Unity
+                  // projects the backend search root is assetsRootPath, not
+                  // workspacePath, so the include glob must be relative to
+                  // the SAME root or it can never match a candidate path.
+                  const relative = toRelativePath(contextMenu.path, assetsRootPath ?? workspacePath);
                   useWorkspaceStore.getState().openSearchTab({ includePattern: `${relative}/**` });
                 }
               : undefined
