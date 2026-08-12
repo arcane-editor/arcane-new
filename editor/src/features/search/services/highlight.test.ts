@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { splitByMatches, excerptRowKey } from './highlight';
+import { splitByMatches, excerptRowKey, stripTrailingBreak } from './highlight';
 
 describe('splitByMatches', () => {
   it('returns one plain segment for a line with no matches', () => {
@@ -51,6 +51,36 @@ describe('splitByMatches', () => {
       { text: ' ', isMatch: false },
       { text: 'cd', isMatch: true },
     ]);
+  });
+});
+
+describe('stripTrailingBreak', () => {
+  // Monaco's `colorize` pushes a `<br/>` after every line it renders,
+  // including the last — see `_colorize`/`_fakeColorize` in
+  // monaco-editor/esm/vs/editor/standalone/browser/colorizer.js, both of
+  // which do `html.push('<br/>')` unconditionally inside their loop. For a
+  // single source line, that trailing break has nothing to close: dropped
+  // into `dangerouslySetInnerHTML` it renders as a second, empty line box.
+  it('removes exactly one trailing <br/>', () => {
+    expect(stripTrailingBreak('<span class="mtk1">foo</span><br/>')).toBe(
+      '<span class="mtk1">foo</span>',
+    );
+  });
+
+  it('leaves a string with no trailing <br/> unchanged', () => {
+    expect(stripTrailingBreak('<span class="mtk1">foo</span>')).toBe(
+      '<span class="mtk1">foo</span>',
+    );
+  });
+
+  it('strips only the trailing occurrence, not an interior one', () => {
+    expect(stripTrailingBreak('<span>a</span><br/><span>b</span><br/>')).toBe(
+      '<span>a</span><br/><span>b</span>',
+    );
+  });
+
+  it('handles an empty string', () => {
+    expect(stripTrailingBreak('')).toBe('');
   });
 });
 

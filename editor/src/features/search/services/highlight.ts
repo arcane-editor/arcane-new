@@ -13,6 +13,22 @@ export function excerptRowKey(filePath: string, lineNumber: number): string {
   return `${filePath}#${lineNumber}`;
 }
 
+const TRAILING_BREAK = '<br/>';
+
+/**
+ * Monaco's `colorize` appends a `<br/>` after every line it renders,
+ * including the last one — `_colorize`/`_fakeColorize` in
+ * `monaco-editor/esm/vs/editor/standalone/browser/colorizer.js` both do
+ * `html.push('<br/>')` unconditionally at the bottom of their loop. Fed
+ * straight into `dangerouslySetInnerHTML` for a single source line, that
+ * trailing break has nothing to close and renders as a second, empty line
+ * box beneath the real one. Only the TRAILING occurrence is stripped; an
+ * interior one (were multi-line text ever passed in) is left alone.
+ */
+export function stripTrailingBreak(html: string): string {
+  return html.endsWith(TRAILING_BREAK) ? html.slice(0, -TRAILING_BREAK.length) : html;
+}
+
 /**
  * Splits a line into alternating plain and matched segments. Ranges are
  * UTF-16 offsets into `text`; out-of-range ends are clamped and zero-width

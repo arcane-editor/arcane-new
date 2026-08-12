@@ -14,6 +14,14 @@ export interface ExcerptLine {
   text: string;
   /** Empty for pure context lines. */
   matches: MatchRange[];
+  /** UTF-16 offset in the ORIGINAL (pre-trim) file line at which `text`
+   *  begins — mirrors `SearchMatch.lineStart`. 0 unless the backend
+   *  preview-trimmed this line around one of its matches; always 0 for a
+   *  pure context line, which is never preview-trimmed. The real editor
+   *  column for a match in `matches` is `lineStart + match.start + 1`
+   *  (1-based) — `match.start` alone is an offset into the possibly-trimmed
+   *  `text`, not into the real file line. */
+  lineStart: number;
 }
 
 export interface Excerpt {
@@ -158,7 +166,12 @@ export function buildExcerpts(file: FileSearchResult): Excerpt[] {
     for (let lineNumber = w.start; lineNumber <= w.end; lineNumber++) {
       const text = w.text.get(lineNumber);
       if (text === undefined) continue;
-      lines.push({ lineNumber, text, matches: w.ranges.get(lineNumber) ?? [] });
+      lines.push({
+        lineNumber,
+        text,
+        matches: w.ranges.get(lineNumber) ?? [],
+        lineStart: w.origin.get(lineNumber) ?? 0,
+      });
     }
     return {
       id: excerptId(file.path, w.start),
@@ -189,7 +202,7 @@ export function applyExpansion(
   for (let lineNumber = startLine; lineNumber <= endLine; lineNumber++) {
     const known = existing.get(lineNumber);
     lines.push(
-      known ?? { lineNumber, text: fileLines[lineNumber - 1] ?? '', matches: [] },
+      known ?? { lineNumber, text: fileLines[lineNumber - 1] ?? '', matches: [], lineStart: 0 },
     );
   }
 

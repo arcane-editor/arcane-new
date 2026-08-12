@@ -3,7 +3,7 @@ import { ChevronDown, ChevronRight } from 'lucide-react';
 import { getFileIcon } from '../../../utils/file-icons';
 import { detectLanguage } from '../../../utils/language-detect';
 import { getMonacoInstance } from '../../../utils/monaco-instance';
-import { splitByMatches } from '../services/highlight';
+import { splitByMatches, stripTrailingBreak } from '../services/highlight';
 import type { Excerpt, MatchRange } from '../services/excerpt-model';
 
 interface FileExcerptBlockProps {
@@ -21,19 +21,28 @@ interface FileExcerptBlockProps {
 
 /** Colorized HTML per (languageId, text). Search results repeat lines across
  *  excerpts constantly, and colorize is an async tokenizer pass, so without a
- *  cache scrolling re-tokenizes the same lines on every virtualization pass. */
+ *  cache scrolling re-tokenizes the same lines on every virtualization pass.
+ *  Values are stored already stripped of Monaco's trailing `<br/>` (see
+ *  `stripTrailingBreak`), so every reader gets clean HTML for free. */
 const colorCache = new Map<string, string>();
 
+interface ColorizedResult {
+  /** The (monacoId, text) key this HTML was actually computed for. */
+  key: string;
+  html: string;
+}
+
 function useColorizedLine(text: string, monacoId: string): string | null {
-  const [html, setHtml] = useState<string | null>(
-    () => colorCache.get(`${monacoId}\u0000${text}`) ?? null,
-  );
+  const key = `${monacoId} ${text}`;
+  const [result, setResult] = useState<ColorizedResult | null>(() => {
+    const cached = colorCache.get(key);
+    return cached === undefined ? null : { key, html: cached };
+  });
 
   useEffect(() => {
-    const key = `${monacoId}\u0000${text}`;
     const cached = colorCache.get(key);
     if (cached !== undefined) {
-      setHtml(cached);
+      setResult({ key, html: cached });
       return;
     }
     // Go through the lazily-initialized singleton, not a static `import * as
@@ -49,10 +58,11 @@ function useColorizedLine(text: string, monacoId: string): string | null {
     let cancelled = false;
     monacoInstance.editor
       .colorize(text, monacoId, { tabSize: 4 })
-      .then((result) => {
+      .then((raw) => {
+        const html = stripTrailingBreak(raw);
         if (colorCache.size > 5000) colorCache.clear();
-        colorCache.set(key, result);
-        if (!cancelled) setHtml(result);
+        colorCache.set(key, html);
+        if (!cancelled) setResult({ key, html });
       })
       .catch(() => {
         // Unknown language or a tokenizer error: plain text is a fine result.
@@ -60,20 +70,37 @@ function useColorizedLine(text: string, monacoId: string): string | null {
     return () => {
       cancelled = true;
     };
-  }, [text, monacoId]);
+  }, [text, monacoId, key]);
 
-  return html;
+  // `result` may still hold the PREVIOUS (text, monacoId) pair's HTML: the
+  // `cancelled` flag above only prevents a stale async write from landing —
+  // it does nothing about a stale READ of state nobody has updated yet. A
+  // row whose `text` prop changes while Monaco is unavailable (the effect
+  // above returns immediately, before ever calling `setResult`) would
+  // otherwise go on rendering the OLD text's colorized HTML forever. Only
+  // hand back HTML that was actually computed for the CURRENT key.
+  return result?.key === key ? result.html : null;
 }
 
 interface ExcerptLineRowProps {
   lineNumber: number;
   text: string;
   matches: MatchRange[];
+  /** UTF-16 offset into the REAL file line at which `text` begins — 0 unless
+   *  the backend preview-trimmed this line. See `ExcerptLine.lineStart`. */
+  lineStart: number;
   monacoId: string;
   onOpen: (lineNumber: number, column: number) => void;
 }
 
-function ExcerptLineRow({ lineNumber, text, matches, monacoId, onOpen }: ExcerptLineRowProps) {
+function ExcerptLineRow({
+  lineNumber,
+  text,
+  matches,
+  lineStart,
+  monacoId,
+  onOpen,
+}: ExcerptLineRowProps) {
   const isMatchLine = matches.length > 0;
   // Only context lines go through colorize: a match line needs exact UTF-16
   // offsets for its <mark>, and those cannot survive tokenization into HTML.
@@ -85,7 +112,11 @@ function ExcerptLineRow({ lineNumber, text, matches, monacoId, onOpen }: Excerpt
   return (
     <div
       className={`search-excerpt-line${isMatchLine ? ' is-match' : ''}`}
-      onDoubleClick={() => onOpen(lineNumber, (matches[0]?.start ?? 0) + 1)}
+      // The real editor column is `lineStart + matchStart`, not `matchStart`
+      // alone (src/types/index.ts, SearchMatch.lineStart): a long line gets
+      // preview-trimmed around its match, so `matches[0].start` is an offset
+      // into the TRIMMED text this row renders, not into the real file line.
+      onDoubleClick={() => onOpen(lineNumber, lineStart + (matches[0]?.start ?? 0) + 1)}
     >
       <span className="search-excerpt-gutter">{lineNumber}</span>
       <code className="search-excerpt-code">
@@ -159,6 +190,7 @@ function FileExcerptBlock({
                 lineNumber={line.lineNumber}
                 text={line.text}
                 matches={line.matches}
+                lineStart={line.lineStart}
                 monacoId={monacoId}
                 onOpen={(lineNumber, column) => onOpenExcerpt(filePath, lineNumber, column)}
               />

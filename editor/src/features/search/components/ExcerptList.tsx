@@ -42,10 +42,23 @@ function ExcerptList({ sessionId }: ExcerptListProps) {
     [blocks],
   );
 
+  // Keyed on the block's file path, not the default (index): `search()`
+  // REPLACES `results` wholesale on a new query's first batch, so index 0
+  // goes from one file to a completely different one between queries. The
+  // virtualizer's measurement cache is keyed by whatever getItemKey returns
+  // (index by default), so an index-keyed cache would serve the PREVIOUS
+  // query's measured height for every off-screen row at that index until it
+  // happens to scroll into view and get remeasured.
+  const getItemKey = useCallback(
+    (index: number) => blocks[index]?.file.path ?? index,
+    [blocks],
+  );
+
   const virtualizer = useVirtualizer({
     count: blocks.length,
     getScrollElement: () => scrollRef.current,
     estimateSize,
+    getItemKey,
     overscan: 4,
   });
 

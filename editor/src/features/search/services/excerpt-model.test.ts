@@ -89,6 +89,34 @@ describe('buildExcerpts', () => {
     expect(ex.matchCount).toBe(2);
   });
 
+  it('carries a preview-trimmed match line\'s lineStart onto its ExcerptLine', () => {
+    // The real editor column for a match is `lineStart + matchStart`, not
+    // `matchStart` alone (src/types/index.ts, SearchMatch.lineStart) — a long
+    // line gets preview-trimmed around its match, so matchStart is an offset
+    // into the TRIMMED text, not the real file line. buildExcerpts must carry
+    // that offset through onto the rendered ExcerptLine so a consumer can
+    // reconstruct the real column.
+    const file: FileSearchResult = {
+      path: '/w/a.ts',
+      matches: [{ ...match(3, 'trimmed window'), lineStart: 250, matchStart: 2, matchEnd: 9 }],
+    };
+    const [ex] = buildExcerpts(file);
+    const line = ex.lines.find((l) => l.lineNumber === 3)!;
+    expect(line.lineStart).toBe(250);
+  });
+
+  it('gives every line lineStart 0 when nothing was preview-trimmed', () => {
+    // Context lines (before/after) are never preview-trimmed by the backend,
+    // and a match line with the default lineStart (0) means the same. Every
+    // line in an ordinary, untruncated excerpt must read back as untrimmed.
+    const file: FileSearchResult = {
+      path: '/w/a.ts',
+      matches: [match(3, 'hit', ['a', 'b'], ['c', 'd'])],
+    };
+    const [ex] = buildExcerpts(file);
+    expect(ex.lines.every((l) => l.lineStart === 0)).toBe(true);
+  });
+
   it('handles a match with no context at all', () => {
     const file: FileSearchResult = { path: '/w/a.ts', matches: [match(1, 'hit')] };
     const [ex] = buildExcerpts(file);
