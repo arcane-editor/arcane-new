@@ -2730,20 +2730,6 @@ html, body, #root {
 
 /* ==================== Search Panel ==================== */
 
-.search-panel {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  background: var(--bg-sidebar);
-}
-
-.search-input-area {
-  padding: 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
 .search-input-row {
   display: flex;
   align-items: center;
@@ -2785,8 +2771,7 @@ html, body, #root {
   border-bottom-color: var(--accent);
 }
 
-.search-toggle-group,
-.search-toggles {
+.search-toggle-group {
   display: flex;
   align-items: center;
   gap: 2px;
@@ -2821,18 +2806,11 @@ html, body, #root {
   border-color: var(--accent);
 }
 
-.search-filter-inputs,
-.search-filters {
+.search-filter-inputs {
   display: flex;
   flex-direction: column;
   gap: 4px;
   padding: 0;
-}
-
-.search-filter-label {
-  font-size: 11px;
-  color: var(--text-secondary);
-  margin-bottom: 2px;
 }
 
 .search-filter-input {
@@ -2909,13 +2887,6 @@ html, body, #root {
    distinct instead of reading as an ordinary result count. */
 .search-summary-error {
   color: var(--error-text);
-}
-
-.search-file-truncated {
-  font-size: 11px;
-  color: var(--warning, #d7ba7d);
-  margin-left: 4px;
-  flex-shrink: 0;
 }
 
 .search-file-chevron {
