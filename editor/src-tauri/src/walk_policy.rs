@@ -45,25 +45,40 @@ pub fn is_env_file(name: &str) -> bool {
     name == ".env" || name.starts_with(".env.")
 }
 
+/// Per-call overrides to the D3 walk policy.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct WalkOptions {
+    /// Walk files excluded by .gitignore / global gitignore / .git/info/exclude.
+    /// `ALWAYS_HIDDEN` is unaffected — `.git` and `.DS_Store` stay hidden.
+    pub include_ignored: bool,
+}
+
 /// Builds a `WalkBuilder` configured per the D3 policy: dotfiles visible,
-/// gitignore respected, `ALWAYS_HIDDEN` entries pruned (directories among
-/// them are not descended into).
+/// gitignore respected unless `opts.include_ignored`, `ALWAYS_HIDDEN` entries
+/// pruned (directories among them are not descended into).
 ///
 /// Does not walk the tree — call `.build()` on the returned builder, or feed
 /// it into `apply_extra_excludes` first to layer on caller-supplied exclude
 /// globs.
-pub fn policy_walker(root: &str) -> WalkBuilder {
+pub fn policy_walker_with(root: &str, opts: WalkOptions) -> WalkBuilder {
     let mut builder = WalkBuilder::new(root);
+    let respect_ignore = !opts.include_ignored;
     builder
         .hidden(false)
-        .git_ignore(true)
-        .git_global(true)
-        .git_exclude(true)
+        .git_ignore(respect_ignore)
+        .git_global(respect_ignore)
+        .git_exclude(respect_ignore)
         .filter_entry(|entry| {
             let name = entry.file_name().to_string_lossy();
             !is_always_hidden(&name)
         });
     builder
+}
+
+/// The default policy: gitignore respected. Existing callers (explorer tree,
+/// quick-open, file index) keep this behaviour untouched.
+pub fn policy_walker(root: &str) -> WalkBuilder {
+    policy_walker_with(root, WalkOptions::default())
 }
 
 /// Reads the immediate children of `root` (no recursion) and returns the
@@ -388,5 +403,59 @@ mod tests {
             .map(|e| e.file_name().to_string_lossy().to_string())
             .collect();
         assert!(names.contains("keep.txt"), "names = {:?}", names);
+    }
+}
+
+#[cfg(test)]
+mod include_ignored_tests {
+    use super::*;
+    use std::fs;
+
+    fn fixture() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::write(root.join(".gitignore"), "secret.txt\n").unwrap();
+        fs::write(root.join("secret.txt"), "hidden").unwrap();
+        fs::write(root.join("plain.txt"), "visible").unwrap();
+        // `ignore` only applies .gitignore inside a git repo.
+        fs::create_dir(root.join(".git")).unwrap();
+        dir
+    }
+
+    fn walked_names(root: &str, opts: WalkOptions) -> Vec<String> {
+        policy_walker_with(root, opts)
+            .build()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .collect()
+    }
+
+    #[test]
+    fn gitignored_file_is_skipped_by_default() {
+        let dir = fixture();
+        let names = walked_names(dir.path().to_str().unwrap(), WalkOptions::default());
+        assert!(names.contains(&"plain.txt".to_string()));
+        assert!(!names.contains(&"secret.txt".to_string()));
+    }
+
+    #[test]
+    fn include_ignored_reveals_the_gitignored_file() {
+        let dir = fixture();
+        let names = walked_names(
+            dir.path().to_str().unwrap(),
+            WalkOptions { include_ignored: true },
+        );
+        assert!(names.contains(&"secret.txt".to_string()));
+    }
+
+    #[test]
+    fn always_hidden_entries_stay_hidden_even_with_include_ignored() {
+        let dir = fixture();
+        let names = walked_names(
+            dir.path().to_str().unwrap(),
+            WalkOptions { include_ignored: true },
+        );
+        assert!(!names.iter().any(|n| n == ".DS_Store"));
     }
 }

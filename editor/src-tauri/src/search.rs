@@ -182,6 +182,11 @@ pub struct ContentSearchOptions {
     pub include_patterns: Vec<String>,
     #[serde(default)]
     pub exclude_patterns: Vec<String>,
+    /// Walk files excluded by .gitignore / global gitignore / .git/info/exclude
+    /// (see `walk_policy::WalkOptions`). Defaults to `false` — a missing key
+    /// (older callers) behaves exactly as before this field existed.
+    #[serde(default)]
+    pub include_ignored: bool,
     #[serde(default)]
     pub file_extensions: Option<Vec<String>>,
     /// `number | null` on the frontend: an explicit JSON `null` and a
@@ -275,6 +280,7 @@ struct Engine {
     max_total_matches: usize,
     max_matches_per_file: usize,
     context_lines: usize,
+    include_ignored: bool,
     threads: usize,
 }
 
@@ -316,6 +322,7 @@ impl Engine {
                 .unwrap_or_else(default_max_matches_per_file)
                 .max(1),
             context_lines: options.context_lines.unwrap_or_else(default_context_lines),
+            include_ignored: options.include_ignored,
             threads,
         })
     }
@@ -646,9 +653,12 @@ fn run_walk(
     tx: Sender<ContentFileResult>,
 ) {
     let ws_prefix = with_trailing_slash(&engine.workspace_path);
-    let walker = walk_policy::policy_walker(&engine.workspace_path)
-        .threads(engine.threads)
-        .build_parallel();
+    let walker = walk_policy::policy_walker_with(
+        &engine.workspace_path,
+        walk_policy::WalkOptions { include_ignored: engine.include_ignored },
+    )
+    .threads(engine.threads)
+    .build_parallel();
 
     // Owned clones moved into the `mkf` closure (must be `Send`; a plain
     // `&Sender` is not `Send`, so ownership is required).
@@ -928,6 +938,7 @@ mod tests {
             whole_word: false,
             include_patterns: vec![],
             exclude_patterns: vec![],
+            include_ignored: false,
             file_extensions: None,
             max_total_matches: Some(default_max_total_matches()),
             max_matches_per_file: Some(default_max_matches_per_file()),
@@ -1384,6 +1395,45 @@ mod tests {
         let engine = Engine::build(&opts).expect("engine should build");
         assert_eq!(engine.max_total_matches, default_max_total_matches());
         assert_eq!(engine.max_matches_per_file, default_max_matches_per_file());
+    }
+
+    // Regression test: a typed Rust struct literal builds `ContentSearchOptions`
+    // directly and so can't catch a field-name mismatch (camelCase drift) or a
+    // nullability mismatch (explicit JSON `null` vs. a missing key) at the
+    // invoke boundary with the frontend. This crosses that boundary for real —
+    // the JSON below is the literal options object `stores/search.ts`'s
+    // `search()` passes to `invoke('start_content_search', ...)`, field for
+    // field, including the explicit `null`s it sends for `contextLines` (and
+    // the other optional caps).
+    #[test]
+    fn options_deserialize_from_the_frontend_payload_verbatim() {
+        let json = r#"{
+            "workspacePath": "/tmp/ws",
+            "query": "needle",
+            "isRegex": false,
+            "caseSensitive": false,
+            "wholeWord": false,
+            "includePatterns": [],
+            "excludePatterns": [],
+            "includeIgnored": true,
+            "contextLines": null,
+            "fileExtensions": null,
+            "maxTotalMatches": null,
+            "maxMatchesPerFile": null
+        }"#;
+
+        let opts: ContentSearchOptions =
+            serde_json::from_str(json).expect("frontend payload shape must deserialize");
+        assert!(opts.include_ignored, "includeIgnored: true must deserialize to true");
+        assert_eq!(opts.context_lines, None, "explicit null must deserialize to None");
+
+        let engine = Engine::build(&opts).expect("engine should build");
+        assert!(engine.include_ignored, "Engine must carry include_ignored through");
+        assert_eq!(
+            engine.context_lines,
+            default_context_lines(),
+            "explicit null contextLines must resolve to the default of 2"
+        );
     }
 
     // ── engine end-to-end: basic streaming ──────────────────────────────
