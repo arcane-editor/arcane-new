@@ -159,7 +159,36 @@ function ExcerptList({ sessionId }: ExcerptListProps) {
   const expand = useCallback(
     async (excerptId: string, direction: 'up' | 'down') => {
       const filePath = excerptId.slice(0, excerptId.lastIndexOf(':'));
+      // Snapshot taken from the LIVE store, not from the `session` variable
+      // closed over by this callback: `useCallback`'s deps below don't list
+      // `activeSearchId`, and at least one store transition (`clearResults`)
+      // changes `activeSearchId` without touching `expanded` — the one dep
+      // that IS listed — so a closure that hasn't been recreated could read a
+      // `session.activeSearchId` that was already stale before this function
+      // even started. `useSearchStore.getState()` sidesteps that: it reflects
+      // the actual current store regardless of which render created this
+      // closure.
+      const searchIdAtRequest = useSearchStore.getState().sessions[sessionId]?.activeSearchId;
       const lines = fileLines[filePath] ?? (await readFileLines(filePath));
+      // If a NEW search started (or the session was cleared) while
+      // `readFileLines` was in flight, the reset effect above already wiped
+      // `fileLines` for this reason. `lines` here was read against content as
+      // of the PREVIOUS search's file-line cache and must not repopulate
+      // `fileLines[filePath]` after that wipe: if the new results reuse this
+      // same file path, the NEXT `expand()` call would see a truthy
+      // `fileLines[filePath]`, skip `readFileLines` entirely, and silently
+      // serve stale content — the original staleness bug reopened through
+      // this narrower window. Bailing out of the whole call (not just the
+      // cache write) also skips the `expanded` patch below: the `excerptId`
+      // this call was for almost certainly doesn't exist in the new result
+      // set, and even in the coincidental case it does (same file, same
+      // start line, different match), applying an "already expanded" flag
+      // with no matching `fileLines` entry to back it would just leave a
+      // silently inert entry until the user re-triggers expand — better to
+      // discard the stale request outright.
+      if (useSearchStore.getState().sessions[sessionId]?.activeSearchId !== searchIdAtRequest) {
+        return;
+      }
       setFileLines((prev) => (prev[filePath] ? prev : { ...prev, [filePath]: lines }));
 
       const current = session?.expanded[excerptId] ?? { up: 0, down: 0 };

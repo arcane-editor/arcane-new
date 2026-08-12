@@ -899,6 +899,16 @@ function App() {
       label: 'Use Selection for Find',
       category: 'Search',
       keybinding: 'mod+e',
+      // On mac, Cmd+E is Monaco's own `actions.findWithSelection` default
+      // (monaco-editor/esm/.../findController.js). Bridging this into Monaco
+      // via addCommand would consume the key unconditionally (bind-shortcuts.ts's
+      // `when()` guard only skips OUR handler, it can't hand the key back to
+      // Monaco's own binding), silently replacing Find-with-Selection with a
+      // no-op whenever no search tab is open (`update` on a missing session is
+      // a no-op — see patchSession). The document-level hotkey
+      // (KeyboardShortcutManager, enableOnFormTags/enableOnContentEditable) is
+      // enough to reach this from inside the editor.
+      skipMonacoBridge: true,
       handler: () => {
         const query = selectionSeedQuery();
         if (!query) return;
@@ -911,6 +921,11 @@ function App() {
       label: 'Toggle Match Case',
       category: 'Search',
       keybinding: 'mod+alt+c',
+      // Monaco's own `toggleFindCaseSensitive` is bound to Cmd+Alt+C on mac
+      // with `precondition: undefined` — active whenever the editor has
+      // focus, not just while the find widget is open. Same shadowing risk
+      // as search.useSelection above: skip the Monaco bridge.
+      skipMonacoBridge: true,
       handler: () => {
         const { activeSessionId, sessions, update } = useSearchStore.getState();
         update(activeSessionId, { caseSensitive: !sessions[activeSessionId]?.caseSensitive });
@@ -921,6 +936,9 @@ function App() {
       label: 'Toggle Match Whole Word',
       category: 'Search',
       keybinding: 'mod+alt+w',
+      // Same as search.toggleCase: Monaco's `toggleFindWholeWord` owns
+      // Cmd+Alt+W on mac whenever the editor has focus.
+      skipMonacoBridge: true,
       handler: () => {
         const { activeSessionId, sessions, update } = useSearchStore.getState();
         update(activeSessionId, { wholeWord: !sessions[activeSessionId]?.wholeWord });

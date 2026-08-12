@@ -322,6 +322,11 @@ describe('summaryFor', () => {
     expect(summaryFor(s)).toBe('1 in 1 file…');
   });
 
+  it('pluralises correctly for zero streamed files (before the first batch arrives)', () => {
+    const s = session({ isSearching: true, results: [] });
+    expect(summaryFor(s)).toBe('0 in 0 files…');
+  });
+
   // 3. Completed with results: the settled totals from the backend, not a
   // recount of `results` (which may be capped/truncated).
   it('shows the settled totals once a search with results completes', () => {
@@ -355,6 +360,32 @@ describe('summaryFor', () => {
   // merely long enough but has never been submitted.
   it('shows "No results" for a completed search with zero results', () => {
     const s = session({ isSearching: false, results: [], query: 'nomatch', activeSearchId: 3 });
+    expect(summaryFor(s)).toBe('No results');
+  });
+
+  // Isolates the MIN_AUTO_SEARCH_CHARS length check from the activeSearchId
+  // check next to it: both of these sessions have an active search (id 3,
+  // non-null) — only the query LENGTH differs. Without the length check,
+  // both would fall through to 'No results', so the first case alone proves
+  // the length guard is doing something (see the mutation check recorded in
+  // the Task 12 fix-round report).
+  it('is empty for an active search whose query is still shorter than the minimum', () => {
+    const s = session({
+      isSearching: false,
+      results: [],
+      query: 'x'.repeat(MIN_AUTO_SEARCH_CHARS - 1),
+      activeSearchId: 3,
+    });
+    expect(summaryFor(s)).toBe('');
+  });
+
+  it('shows "No results" for that same active search once the query reaches the minimum length', () => {
+    const s = session({
+      isSearching: false,
+      results: [],
+      query: 'x'.repeat(MIN_AUTO_SEARCH_CHARS),
+      activeSearchId: 3,
+    });
     expect(summaryFor(s)).toBe('No results');
   });
 
