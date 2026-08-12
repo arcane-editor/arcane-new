@@ -1,0 +1,160 @@
+// Folds a file's flat match list into the excerpt ranges the results tab
+// renders. Pure — no Monaco, no store, no Tauri — so it is bun-testable.
+import type { FileSearchResult, SearchMatch } from '../../../types';
+
+export interface MatchRange {
+  /** UTF-16 offset within the line's rendered `text`. */
+  start: number;
+  end: number;
+}
+
+export interface ExcerptLine {
+  /** 1-based line number in the real file. */
+  lineNumber: number;
+  text: string;
+  /** Empty for pure context lines. */
+  matches: MatchRange[];
+}
+
+export interface Excerpt {
+  /** `${filePath}:${startLine}` — stable across re-renders of one result set. */
+  id: string;
+  filePath: string;
+  startLine: number;
+  endLine: number;
+  lines: ExcerptLine[];
+  /** Matches inside this excerpt, including any whose highlight could not be
+   *  rendered (see the trimming note in `buildExcerpts`). */
+  matchCount: number;
+}
+
+export interface Expansion {
+  up: number;
+  down: number;
+}
+
+export function excerptId(filePath: string, startLine: number): string {
+  return `${filePath}:${startLine}`;
+}
+
+interface Window {
+  start: number;
+  end: number;
+  /** lineNumber -> text, from context lines and match lines alike. */
+  text: Map<number, string>;
+  /** lineNumber -> highlight ranges. */
+  ranges: Map<number, MatchRange[]>;
+  /** lineNumber -> the lineStart the rendered text belongs to. */
+  origin: Map<number, number>;
+  matchCount: number;
+}
+
+function windowFor(match: SearchMatch): Window {
+  const before = match.before ?? [];
+  const after = match.after ?? [];
+  const start = match.lineNumber - before.length;
+  const end = match.lineNumber + after.length;
+
+  const text = new Map<number, string>();
+  before.forEach((line, i) => text.set(start + i, line));
+  text.set(match.lineNumber, match.lineContent);
+  after.forEach((line, i) => text.set(match.lineNumber + 1 + i, line));
+
+  return {
+    start,
+    end,
+    text,
+    ranges: new Map([[match.lineNumber, [{ start: match.matchStart, end: match.matchEnd }]]]),
+    origin: new Map([[match.lineNumber, match.lineStart ?? 0]]),
+    matchCount: 1,
+  };
+}
+
+function absorb(target: Window, next: Window): void {
+  target.start = Math.min(target.start, next.start);
+  target.end = Math.max(target.end, next.end);
+  target.matchCount += next.matchCount;
+
+  for (const [lineNumber, text] of next.text) {
+    if (!target.text.has(lineNumber)) target.text.set(lineNumber, text);
+  }
+  for (const [lineNumber, ranges] of next.ranges) {
+    const incomingOrigin = next.origin.get(lineNumber) ?? 0;
+    const existingOrigin = target.origin.get(lineNumber);
+    if (existingOrigin === undefined) {
+      target.origin.set(lineNumber, incomingOrigin);
+      target.ranges.set(lineNumber, [...ranges]);
+      continue;
+    }
+    // A long line is preview-trimmed around each match independently, so two
+    // matches on one line can describe DIFFERENT windows of that line. Only
+    // ranges from the window whose text we are actually rendering can be
+    // highlighted; the rest stay in matchCount so the tally is still honest.
+    if (existingOrigin === incomingOrigin) {
+      target.ranges.get(lineNumber)!.push(...ranges);
+    }
+  }
+}
+
+/**
+ * Builds this file's excerpts, merging matches whose context windows touch or
+ * overlap so adjacent hits render as one continuous run of code rather than
+ * two boxes repeating the same lines. Input order is assumed ascending by
+ * line, which is the order the backend's sink emits.
+ */
+export function buildExcerpts(file: FileSearchResult): Excerpt[] {
+  const windows: Window[] = [];
+  for (const match of file.matches) {
+    const next = windowFor(match);
+    const current = windows[windows.length - 1];
+    // `<= current.end + 1` merges touching windows too, not just overlapping
+    // ones — a one-line gap between excerpts is noise, not separation.
+    if (current && next.start <= current.end + 1) {
+      absorb(current, next);
+    } else {
+      windows.push(next);
+    }
+  }
+
+  return windows.map((w) => {
+    const lines: ExcerptLine[] = [];
+    for (let lineNumber = w.start; lineNumber <= w.end; lineNumber++) {
+      const text = w.text.get(lineNumber);
+      if (text === undefined) continue;
+      lines.push({ lineNumber, text, matches: w.ranges.get(lineNumber) ?? [] });
+    }
+    return {
+      id: excerptId(file.path, w.start),
+      filePath: file.path,
+      startLine: w.start,
+      endLine: w.end,
+      lines,
+      matchCount: w.matchCount,
+    };
+  });
+}
+
+/**
+ * Re-renders an excerpt with `up`/`down` extra lines taken from the real file
+ * contents, clamped at both boundaries. Highlight ranges on existing lines are
+ * preserved; revealed lines are pure context.
+ */
+export function applyExpansion(
+  excerpt: Excerpt,
+  fileLines: string[],
+  expansion: Expansion,
+): Excerpt {
+  const startLine = Math.max(1, excerpt.startLine - expansion.up);
+  const endLine = Math.min(fileLines.length, excerpt.endLine + expansion.down);
+
+  const existing = new Map(excerpt.lines.map((l) => [l.lineNumber, l]));
+  const lines: ExcerptLine[] = [];
+  for (let lineNumber = startLine; lineNumber <= endLine; lineNumber++) {
+    const known = existing.get(lineNumber);
+    lines.push(
+      known ?? { lineNumber, text: fileLines[lineNumber - 1] ?? '', matches: [] },
+    );
+  }
+
+  return { ...excerpt, startLine, endLine, lines };
+}

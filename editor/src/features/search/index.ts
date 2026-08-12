@@ -20,3 +20,12 @@ export {
   type SearchSessions,
   type SearchOptionsState,
 } from './services/search-session';
+export {
+  buildExcerpts,
+  applyExpansion,
+  excerptId,
+  type Excerpt,
+  type ExcerptLine,
+  type MatchRange,
+  type Expansion,
+} from './services/excerpt-model';
