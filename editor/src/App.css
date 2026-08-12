@@ -3027,6 +3027,37 @@ html, body, #root {
   color: inherit;
 }
 
+.search-tab {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.search-tab-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-sidebar);
+}
+
+.search-tab-body {
+  flex: 1;
+  overflow: auto;
+  position: relative;
+  outline: none;
+}
+
+.search-tab-count {
+  margin-left: auto;
+  padding-left: 10px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
 /* ==================== Problems Panel ==================== */
 
 .problems-panel {
