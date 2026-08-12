@@ -61,6 +61,15 @@ mock.module('../features/auth', () => ({
   cancelBrowserLogin: () => {
     cancelBrowserLoginCalls++;
   },
+  // Not exercised by any test in this file (the store never calls it), but
+  // `mock.module` replaces the specifier's ENTIRE export surface for the
+  // rest of the `bun test` process — same reasoning as the `@tauri-apps/api/event`
+  // note below. Omitting it left it absent from '../features/auth' for any
+  // later file (in the same process) that imports the real barrel and
+  // expects `reopenBrowser` to exist, which surfaced as an
+  // order-dependent "Export named 'reopenBrowser' not found" failure
+  // elsewhere in the suite.
+  reopenBrowser: async () => false,
   resumeFromColdStart: async (handlers: BrowserLoginHandlers) => {
     coldStartCalls++;
     capturedColdStartHandlers = handlers;

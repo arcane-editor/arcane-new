@@ -791,6 +791,26 @@ async function fetchDiffContents(
   return { originalContent, modifiedContent, bothFailed, detail };
 }
 
+/**
+ * Keeps the search store's `activeSessionId` pointed at whichever `search://`
+ * tab is now the active editor tab — Task 11's results sidebar renders
+ * whichever session that id names, so a stale id would show one tab's
+ * results while a different search tab is on screen. `openSearchTab` already
+ * does this for a newly-created tab; this covers every other way a search
+ * tab can become active (a TabBar click via `setActiveFile`, or `closeFile`
+ * falling back to the next tab when the active one closes).
+ *
+ * Never creates a session — only `ensureSession` does that. Every open
+ * `search://` tab already has one (created in `openSearchTab`, torn down in
+ * `closeFile` at the same moment the tab itself closes), so by the time a
+ * tab can become active here, its session is guaranteed to already exist.
+ * No-ops for a non-search (or null) path.
+ */
+function syncActiveSearchSession(path: string | null): void {
+  if (!path || !path.startsWith('search://')) return;
+  useSearchStore.getState().setActiveSession(path);
+}
+
 interface WorkspaceState {
   workspacePath: string | null;
   assetsRootPath: string | null;
@@ -1274,6 +1294,14 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         : [path, ...state.recentlyClosed.filter((p) => p !== path)].slice(0, 20);
       return { openFiles, activeFilePath, recentlyClosed };
     });
+
+    // If closing the active tab fell back to a different search:// tab (e.g.
+    // closing a regular file left a search tab as the last one open), the
+    // search store's active session must follow it — see
+    // `syncActiveSearchSession`. No-ops otherwise (including when the closed
+    // tab itself was the search tab: `closeSession` above already retargets
+    // `activeSessionId` on its own terms).
+    syncActiveSearchSession(get().activeFilePath);
   },
 
   popRecentlyClosed: () => {
@@ -1286,6 +1314,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
   setActiveFile: (path: string) => {
     set({ activeFilePath: path });
+    syncActiveSearchSession(path);
   },
 
   reorderTabs: (fromPath: string, toPath: string) => {
@@ -1546,8 +1575,13 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   },
 
   openSearchTab: (seed) => {
-    // Ids are monotonic per run and never reused, so a closed tab's session
-    // can be dropped without a later tab colliding with it.
+    // The probe below only checks currently-OPEN tabs, so a closed id CAN be
+    // handed out again — this only guarantees no collision with a LIVE tab,
+    // not that ids are never reused. Reuse is safe today only because of a
+    // property of `closeSession` (not enforced here): closing a tab always
+    // leaves that id's entry either absent from `sessions` or freshly blank
+    // (see `syncActiveSearchSession` and the closeFile branch above), so a
+    // later tab that reuses the id never inherits stale results.
     const used = get().openFiles.filter((f) => f.path.startsWith('search://')).length;
     let n = used + 1;
     while (get().openFiles.some((f) => f.path === `search://${n}`)) n += 1;
