@@ -178,7 +178,7 @@ function FileExcerptBlock({
           >
             <button
               className="search-excerpt-expand"
-              title="Expand context above (Shift+Enter)"
+              title="Expand context above"
               onClick={() => onExpand(excerpt.id, 'up')}
             >
               ⌃
@@ -198,7 +198,7 @@ function FileExcerptBlock({
 
             <button
               className="search-excerpt-expand"
-              title="Expand context below"
+              title="Expand context below (Shift+Enter)"
               onClick={() => onExpand(excerpt.id, 'down')}
             >
               ⌄

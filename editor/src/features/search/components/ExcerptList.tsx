@@ -127,6 +127,29 @@ function ExcerptList({ sessionId }: ExcerptListProps) {
     return () => window.removeEventListener('search-reveal-excerpt', onReveal);
   }, [blocks, sessionId, virtualizer]);
 
+  // Belt-and-suspenders for the listener above: when the outline panel
+  // reveals an excerpt in a tab that ISN'T the active editor tab yet, that
+  // reveal has to activate the tab first — which mounts this component for
+  // the FIRST time on a later render. `SearchOutlinePanel.reveal()` uses
+  // `flushSync` around the activation so the 'search-reveal-excerpt' listener
+  // above is registered before the event dispatches, but `activeExcerptId` is
+  // already sitting in the store (set synchronously, before activation) even
+  // if that ordering were ever wrong for some other caller — so on mount,
+  // reconcile the scroll position with whatever excerpt is already marked
+  // active. Runs once per mount (not on every `activeExcerptId` change, which
+  // would re-center the view on every ordinary click inside an already-open
+  // tab, fighting the user's own scrolling).
+  const didRevealOnMount = useRef(false);
+  useEffect(() => {
+    if (didRevealOnMount.current) return;
+    didRevealOnMount.current = true;
+    const activeId = session?.activeExcerptId;
+    if (!activeId) return;
+    const filePath = activeId.slice(0, activeId.lastIndexOf(':'));
+    const index = blocks.findIndex((b) => b.file.path === filePath);
+    if (index >= 0) virtualizer.scrollToIndex(index, { align: 'center' });
+  }, [blocks, session?.activeExcerptId, virtualizer]);
+
   // Excerpt ids are `${filePath}:${startLine}`; `lastIndexOf(':')` finds the
   // right split regardless of how many colons the path itself contains — a
   // Windows drive letter (`D:/...`), a UNC/NTFS alternate-data-stream colon,
@@ -153,10 +176,45 @@ function ExcerptList({ sessionId }: ExcerptListProps) {
     [fileLines, session?.expanded, sessionId, update],
   );
 
+  // These act on the active excerpt, so they belong to the tab rather than
+  // the global command registry — a document-level hotkey would fire while
+  // the user is typing in the query input above. Never `stopPropagation`
+  // here: React listens on `#root`, below the `document` listener
+  // react-hotkeys-hook uses, so doing that would kill every app hotkey for
+  // as long as this container holds focus.
+  const onKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
+      const activeId = session?.activeExcerptId;
+      if (!activeId) return;
+
+      if (e.key === 'Enter' && e.altKey) {
+        e.preventDefault();
+        const filePath = activeId.slice(0, activeId.lastIndexOf(':'));
+        const block = blocks.find((b) => b.file.path === filePath);
+        const excerpt = block?.excerpts.find((ex) => ex.id === activeId);
+        const line = excerpt?.lines.find((l) => l.matches.length > 0);
+        // Column mirrors the double-click handler in FileExcerptBlock:
+        // `lineStart + match.start`, not `match.start` alone — a long line is
+        // preview-trimmed around its match, so `match.start` by itself is an
+        // offset into the TRIMMED text this row renders, not the real file line.
+        if (line) {
+          openExcerpt(filePath, line.lineNumber, line.lineStart + (line.matches[0]?.start ?? 0) + 1);
+        }
+        return;
+      }
+
+      if (e.key === 'Enter' && e.shiftKey) {
+        e.preventDefault();
+        void expand(activeId, 'down');
+      }
+    },
+    [blocks, expand, openExcerpt, session?.activeExcerptId],
+  );
+
   if (!session) return null;
 
   return (
-    <div className="search-tab-body" ref={scrollRef}>
+    <div className="search-tab-body" ref={scrollRef} tabIndex={0} onKeyDown={onKeyDown}>
       <div style={{ height: `${virtualizer.getTotalSize()}px`, width: '100%', position: 'relative' }}>
         {virtualizer.getVirtualItems().map((item) => {
           const block = blocks[item.index];

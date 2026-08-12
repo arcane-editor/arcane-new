@@ -18,6 +18,7 @@
 //     to completion.
 
 import type { FileSearchResult } from '../../../types';
+import type { SearchSession } from './search-session';
 
 /** The streaming-relevant slice of the search store's state. */
 export interface StreamState {
@@ -161,4 +162,41 @@ export function autoSearchAction(debouncedQuery: string): AutoSearchAction {
   if (debouncedQuery.length >= MIN_AUTO_SEARCH_CHARS) return 'search';
   if (debouncedQuery.length === 0) return 'clear';
   return 'idle';
+}
+
+function pluralize(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? '' : 's'}`;
+}
+
+/**
+ * The query bar's status text (the "N in M files…" counter), as a pure
+ * function of one session. Pulled out of SearchQueryBar.tsx so its five
+ * states are directly bun-testable — this repo has no RTL, so logic left
+ * inline in a component cannot be tested at all.
+ *
+ * State precedence (first match wins):
+ *   1. `searchError` set — surface it verbatim.
+ *   2. `isSearching` — live count of batches accumulated so far, since the
+ *      store's totals only land on `search-complete`.
+ *   3. Completed with results — the settled totals from the backend.
+ *   4. Query long enough to have auto-searched, but zero results — "No results".
+ *   5. Otherwise (query too short / never searched) — empty string.
+ */
+export function summaryFor(session: SearchSession): string {
+  if (session.searchError) return session.searchError;
+
+  if (session.isSearching) {
+    const streamed = session.results.reduce((sum, f) => sum + f.matches.length, 0);
+    return `${streamed} in ${pluralize(session.results.length, 'file')}…`;
+  }
+
+  if (session.results.length > 0) {
+    return `${session.totalMatches} in ${pluralize(session.fileCount, 'file')}${session.truncated ? ' (capped)' : ''}`;
+  }
+
+  if (session.query.length >= MIN_AUTO_SEARCH_CHARS && session.activeSearchId !== null) {
+    return 'No results';
+  }
+
+  return '';
 }

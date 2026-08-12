@@ -18,7 +18,7 @@ interface ActivityItem {
 
 const SIDEBAR_ITEMS: ActivityItem[] = [
   { id: 'explorer', icon: Files, label: 'Explorer', commandId: 'view.explorer' },
-  { id: 'search', icon: Search, label: 'Search', commandId: 'search.focus' },
+  { id: 'search', icon: Search, label: 'Search', commandId: 'search.openTab' },
   { id: 'source-control', icon: GitBranch, label: 'Source Control', commandId: 'view.sourceControl' },
 ];
 

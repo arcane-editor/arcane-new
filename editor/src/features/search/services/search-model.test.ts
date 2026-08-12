@@ -4,9 +4,11 @@ import {
   applyBatch,
   applyComplete,
   autoSearchAction,
+  summaryFor,
   MIN_AUTO_SEARCH_CHARS,
   type StreamState,
 } from './search-model';
+import { createSession, type SearchSession } from './search-session';
 import type { FileSearchResult } from '../../../types';
 
 function file(path: string, matchCount = 1, extra: Partial<FileSearchResult> = {}): FileSearchResult {
@@ -288,5 +290,87 @@ describe('autoSearchAction', () => {
     expect(MIN_AUTO_SEARCH_CHARS).toBe(3);
     expect(autoSearchAction('x'.repeat(MIN_AUTO_SEARCH_CHARS - 1))).toBe('idle');
     expect(autoSearchAction('x'.repeat(MIN_AUTO_SEARCH_CHARS))).toBe('search');
+  });
+});
+
+function session(overrides: Partial<SearchSession> = {}): SearchSession {
+  return { ...createSession('search://1'), ...overrides };
+}
+
+describe('summaryFor', () => {
+  // 1. Error takes precedence over everything else, including a truthy query
+  // or in-flight search flag left over from before the error landed.
+  it('surfaces the search error verbatim when one is set', () => {
+    const s = session({ searchError: 'ripgrep exited with code 2', isSearching: true, query: 'todo' });
+    expect(summaryFor(s)).toBe('ripgrep exited with code 2');
+  });
+
+  // 2. Streaming: a live count derived from the batches accumulated so far,
+  // not the (still-zero) settled totals — those only land on search-complete.
+  it('shows a live streamed count while searching', () => {
+    const s = session({
+      isSearching: true,
+      results: [file('a.ts', 2), file('b.ts', 1)],
+      totalMatches: 0,
+      fileCount: 0,
+    });
+    expect(summaryFor(s)).toBe('3 in 2 files…');
+  });
+
+  it('pluralises correctly while streaming with exactly one file', () => {
+    const s = session({ isSearching: true, results: [file('a.ts', 1)] });
+    expect(summaryFor(s)).toBe('1 in 1 file…');
+  });
+
+  // 3. Completed with results: the settled totals from the backend, not a
+  // recount of `results` (which may be capped/truncated).
+  it('shows the settled totals once a search with results completes', () => {
+    const s = session({
+      isSearching: false,
+      results: [file('a.ts', 5)],
+      totalMatches: 12,
+      fileCount: 4,
+    });
+    expect(summaryFor(s)).toBe('12 in 4 files');
+  });
+
+  it('pluralises correctly for a completed one-file result', () => {
+    const s = session({ isSearching: false, results: [file('a.ts', 1)], totalMatches: 1, fileCount: 1 });
+    expect(summaryFor(s)).toBe('1 in 1 file');
+  });
+
+  it('appends "(capped)" when the completed search was truncated', () => {
+    const s = session({
+      isSearching: false,
+      results: [file('a.ts', 1)],
+      totalMatches: 500,
+      fileCount: 50,
+      truncated: true,
+    });
+    expect(summaryFor(s)).toBe('500 in 50 files (capped)');
+  });
+
+  // 4. No results: only once a search has actually run (activeSearchId set)
+  // for a query long enough to have auto-searched — not for a query that's
+  // merely long enough but has never been submitted.
+  it('shows "No results" for a completed search with zero results', () => {
+    const s = session({ isSearching: false, results: [], query: 'nomatch', activeSearchId: 3 });
+    expect(summaryFor(s)).toBe('No results');
+  });
+
+  // 5. Empty: nothing has searched yet, or the query is below the auto-search
+  // threshold — no status text at all.
+  it('is empty for a fresh session that has never searched', () => {
+    expect(summaryFor(session())).toBe('');
+  });
+
+  it('is empty for a query too short to have auto-searched, even with no results', () => {
+    const s = session({ isSearching: false, results: [], query: 'ab', activeSearchId: null });
+    expect(summaryFor(s)).toBe('');
+  });
+
+  it('is empty when the query is long enough but no search has ever run', () => {
+    const s = session({ isSearching: false, results: [], query: 'longenough', activeSearchId: null });
+    expect(summaryFor(s)).toBe('');
   });
 });

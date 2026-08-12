@@ -3,7 +3,7 @@ import { Search, EyeOff } from 'lucide-react';
 import { useSearchStore } from '../../../stores/search';
 import { useWorkspaceStore } from '../../../stores/workspace';
 import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
-import { autoSearchAction } from '../services/search-model';
+import { autoSearchAction, summaryFor } from '../services/search-model';
 import { pushQuery, historyStep } from '../services/query-history';
 
 interface SearchQueryBarProps {
@@ -26,6 +26,18 @@ function SearchQueryBar({ sessionId }: SearchQueryBarProps) {
     inputRef.current?.focus();
     inputRef.current?.select();
   }, [sessionId]);
+
+  // `search.openTab` dispatches this when the tab already exists — bringing
+  // an existing tab forward doesn't remount this component (no `sessionId`
+  // change), so the mount-focus effect above wouldn't fire again.
+  useEffect(() => {
+    function onFocus() {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    }
+    window.addEventListener('search-focus-query', onFocus);
+    return () => window.removeEventListener('search-focus-query', onFocus);
+  }, []);
 
   // Auto-search off the DEBOUNCED value only. Depending on anything that
   // changes identity per keystroke re-runs this per character and fires a
@@ -79,19 +91,7 @@ function SearchQueryBar({ sessionId }: SearchQueryBarProps) {
   const toggle = (key: 'isRegex' | 'caseSensitive' | 'wholeWord' | 'includeIgnored') =>
     update(sessionId, { [key]: !session[key] } as Partial<typeof session>);
 
-  // While streaming, the store's totals only land on search-complete, so a
-  // live count has to be derived from the batches accumulated so far —
-  // otherwise the counter sits frozen at the previous search's totals.
-  const streamed = session.results.reduce((sum, f) => sum + f.matches.length, 0);
-  const summary = session.searchError
-    ? session.searchError
-    : session.isSearching
-      ? `${streamed} in ${session.results.length} files…`
-      : session.results.length > 0
-        ? `${session.totalMatches} in ${session.fileCount} files${session.truncated ? ' (capped)' : ''}`
-        : session.query.length >= 3 && session.activeSearchId !== null
-          ? 'No results'
-          : '';
+  const summary = summaryFor(session);
 
   return (
     <div className="search-tab-bar">

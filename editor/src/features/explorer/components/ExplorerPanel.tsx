@@ -608,6 +608,14 @@ function ExplorerPanel() {
               console.error('[Explorer] Failed to reveal item:', err);
             });
           }}
+          onSearchInFolder={
+            contextMenu.isDir
+              ? () => {
+                  const relative = toRelativePath(contextMenu.path, workspacePath);
+                  useWorkspaceStore.getState().openSearchTab({ includePattern: `${relative}/**` });
+                }
+              : undefined
+          }
           onClose={() => setContextMenu(null)}
         />
       )}

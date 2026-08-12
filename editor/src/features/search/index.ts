@@ -5,6 +5,7 @@ export {
   applyBatch,
   applyComplete,
   autoSearchAction,
+  summaryFor,
   MIN_AUTO_SEARCH_CHARS,
   type AutoSearchAction,
   type StreamState,
