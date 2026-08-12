@@ -82,6 +82,12 @@ function ensureListeners(): Promise<void> {
     ])
       .then(() => undefined)
       .catch((err) => {
+        // Reset, not left pointing at the rejected promise: every future
+        // `search()` awaits this same promise, so a permanent failure here
+        // would wedge the store — no search could ever run again, forever,
+        // even if whatever transient condition caused the listen() calls to
+        // reject has since cleared. Resetting to `null` means the NEXT call
+        // gets a fresh attempt instead.
         listenersPromise = null;
         throw err;
       });
@@ -167,6 +173,11 @@ export const useSearchStore = create<SearchState>((set, get) => ({
           excludePatterns: parseGlobList(session.excludePattern),
           includeIgnored: session.includeIgnored,
           contextLines: settings['search.contextLines'],
+          // Always `null` (no filter), deliberately: an earlier version sent
+          // `isUnity ? ['cs'] : null`, which made shaders, `.asmdef`,
+          // `.uxml`, and Unity's YAML assets (scenes, prefabs, materials)
+          // unsearchable in a Unity project — exactly the files someone
+          // debugging a Unity project is often looking for.
           fileExtensions: null,
           maxTotalMatches: null,
           maxMatchesPerFile: null,

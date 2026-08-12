@@ -112,9 +112,26 @@ function absorb(target: Window, next: Window): void {
     const incomingOrigin = next.origin.get(lineNumber) ?? 0;
     const existingOrigin = target.origin.get(lineNumber);
     if (existingOrigin === undefined) {
-      target.origin.set(lineNumber, incomingOrigin);
-      target.ranges.set(lineNumber, [...ranges]);
-      continue;
+      // Provably unreachable, not just unlikely: `next.ranges`'s keys are
+      // always a subset of `next.text`'s keys (every line `windowFor` gives
+      // a range also gets an entry in `text`), and the text loop above —
+      // which gives EVERY line in `next.text` an origin, whether or not it
+      // was already in `target` — always runs before this one. So by the
+      // time this line executes, `target.origin` must already hold an entry
+      // for every key in `next.ranges`.
+      //
+      // This is also the exact site whose regression would silently
+      // reintroduce the wrong-highlight bug that took three fix rounds
+      // (`45ad0c1`, `a91f3fd`) to pin down: the old first-arrival branch
+      // here attached a match's ranges to whatever text happened to be
+      // stored for the line, with no check that the ranges were computed
+      // against THAT text. Throwing turns a future regression of the
+      // subset invariant into a loud failure instead of a silent
+      // mis-highlight.
+      throw new Error(
+        `excerpt-model.absorb: no origin recorded for line ${lineNumber}, but it has ranges — ` +
+          'the text loop above should have set one for every line in next.ranges',
+      );
     }
     // A long line is preview-trimmed around each match independently, so two
     // matches on one line can describe DIFFERENT windows of that line. Only

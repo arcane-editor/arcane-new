@@ -3,13 +3,19 @@
 // bun-testable — see `search-model.test.ts` for the semantics this module
 // documents and locks in.
 //
-// Backend contract (Task B2, `src-tauri/src/search.rs`):
-//   - `start_content_search({ searchId, options })` — searchId is a frontend
-//     monotonic counter; a newer id automatically supersedes/cancels any
-//     older in-flight run.
-//   - `cancel_content_search({ searchId })` — advances the backend's cursor
-//     without starting a new run (pass an id strictly greater than the run
-//     you want to stop).
+// Backend contract (`src-tauri/src/search.rs`):
+//   - `start_content_search({ searchId, sessionId, options })` — `searchId`
+//     is a frontend monotonic counter, `sessionId` is the owning tab's path
+//     (`search://N`). The cancellation cursor is keyed by (window, session),
+//     so a newer id supersedes/cancels an older in-flight run only WITHIN
+//     the same session — two search tabs run fully concurrently. `options`
+//     carries every `ContentSearchOptions` field, notably `contextLines`
+//     (lines of context either side of a match; see `ContentSearchMatch`'s
+//     `before`/`after`) and `includeIgnored` (walk files .gitignore would
+//     otherwise exclude).
+//   - `cancel_content_search({ searchId, sessionId })` — advances that
+//     session's cursor without starting a new run (pass an id strictly
+//     greater than the run you want to stop).
 //   - `search-results-batch` events stream `{ searchId, results }` as files
 //     are matched.
 //   - Exactly one `search-complete` event `{ searchId, totalMatches,
