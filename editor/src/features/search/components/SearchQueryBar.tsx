@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef } from 'react';
 import { Search, EyeOff } from 'lucide-react';
 import { useSearchStore } from '../../../stores/search';
 import { useWorkspaceStore } from '../../../stores/workspace';
+import { useSettingsStore } from '../../../stores/settings';
 import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
 import { autoSearchAction, summaryFor, searchSignature } from '../services/search-model';
 import { pushQuery, historyStep } from '../services/query-history';
@@ -16,6 +17,14 @@ function SearchQueryBar({ sessionId }: SearchQueryBarProps) {
   const search = useSearchStore((s) => s.search);
   const clearResults = useSearchStore((s) => s.clearResults);
   const workspacePath = useWorkspaceStore((s) => s.workspacePath);
+  // Settings, not session fields, but `search()` reads both fresh on every
+  // call and folds them into `searchedSignature` — so the auto-search
+  // effect must react to them too, or a settings change made while this
+  // tab was unmounted would look "already searched" on the next remount
+  // and silently fail to take effect until the user pressed Enter (M3,
+  // final re-review).
+  const useSmartcase = useSettingsStore((s) => s.settings['search.useSmartcase']);
+  const contextLines = useSettingsStore((s) => s.settings['search.contextLines']);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const debouncedQuery = useDebouncedValue(session?.query ?? '', 300);
@@ -51,7 +60,9 @@ function SearchQueryBar({ sessionId }: SearchQueryBarProps) {
   // `searchedSignature` comparison below is what tells them apart: it's
   // stamped on the session the moment a search actually runs, so an
   // unchanged remount matches it and is skipped, while a genuine change to
-  // the query or any option produces a different signature and still runs.
+  // the query, any session-owned option, OR the useSmartcase/contextLines
+  // SETTINGS (read fresh by search() on every call, so they belong in the
+  // signature too) produces a different signature and still runs.
   useEffect(() => {
     const action = autoSearchAction(debouncedQuery);
     if (action === 'search') {
@@ -63,6 +74,8 @@ function SearchQueryBar({ sessionId }: SearchQueryBarProps) {
         includeIgnored: session?.includeIgnored ?? false,
         includePattern: session?.includePattern ?? '',
         excludePattern: session?.excludePattern ?? '',
+        useSmartcase,
+        contextLines,
       });
       if (session?.searchedSignature === signature) return;
       if (workspacePath) search(sessionId, workspacePath);
@@ -81,6 +94,8 @@ function SearchQueryBar({ sessionId }: SearchQueryBarProps) {
     session?.includeIgnored,
     session?.includePattern,
     session?.excludePattern,
+    useSmartcase,
+    contextLines,
   ]);
 
   const runNow = useCallback(() => {

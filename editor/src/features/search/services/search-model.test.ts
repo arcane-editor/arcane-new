@@ -304,6 +304,8 @@ function signatureInput(overrides: Partial<SearchSignatureInput> = {}): SearchSi
     includeIgnored: false,
     includePattern: '',
     excludePattern: '',
+    useSmartcase: true,
+    contextLines: 2,
     ...overrides,
   };
 }
@@ -336,6 +338,23 @@ describe('searchSignature', () => {
     const base = searchSignature(signatureInput());
     expect(searchSignature(signatureInput({ includePattern: 'Assets/**' }))).not.toBe(base);
     expect(searchSignature(signatureInput({ excludePattern: '**/Editor/**' }))).not.toBe(base);
+  });
+
+  // M3 (final re-review): useSmartcase/contextLines are SETTINGS, not
+  // session fields, but search() reads both fresh on every call
+  // (resolveCaseSensitive's third argument; the contextLines backend
+  // option) — so a settings change alone, with the query and every
+  // session-owned option held constant, must still produce a different
+  // signature, or the auto-search gate would wrongly treat a remount after
+  // a settings change as "already searched".
+  it('changes when the useSmartcase setting toggles', () => {
+    const base = searchSignature(signatureInput());
+    expect(searchSignature(signatureInput({ useSmartcase: false }))).not.toBe(base);
+  });
+
+  it('changes when the contextLines setting changes', () => {
+    const base = searchSignature(signatureInput());
+    expect(searchSignature(signatureInput({ contextLines: 5 }))).not.toBe(base);
   });
 
   it('does not let a value shifted across the query/pattern boundary collide', () => {

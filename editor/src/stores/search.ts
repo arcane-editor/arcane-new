@@ -115,6 +115,15 @@ export const useSearchStore = create<SearchState>((set, get) => ({
       return;
     }
 
+    // Read before the signature is stamped, not after: `search()` reads
+    // BOTH of these fresh from the settings store on every call
+    // (`resolveCaseSensitive`'s third argument below, and the `contextLines`
+    // backend option), so the signature must be computed from the SAME
+    // settings values this call is actually about to use — not from
+    // whatever the settings store holds later, after `ensureListeners()`
+    // and other awaits have had a chance to run.
+    const settings = useSettingsStore.getState().settings;
+
     const gen = ++searchGeneration;
     // Previous results stay visible until the first batch replaces them.
     // `expanded`/`activeExcerptId` are cleared here too, not just the file-line
@@ -132,10 +141,21 @@ export const useSearchStore = create<SearchState>((set, get) => ({
         searchError: null,
         expanded: {},
         activeExcerptId: null,
-        // Stamped from the pre-invoke `session` snapshot — the same query/
-        // option values `SearchQueryBar`'s auto-search effect will compare
-        // its own freshly computed signature against on a later remount.
-        searchedSignature: searchSignature(session),
+        // Stamped from the pre-invoke `session` snapshot AND the settings
+        // read above — the same query/option/settings values
+        // `SearchQueryBar`'s auto-search effect will compare its own
+        // freshly computed signature against on a later remount.
+        searchedSignature: searchSignature({
+          query: session.query,
+          isRegex: session.isRegex,
+          caseSensitive: session.caseSensitive,
+          wholeWord: session.wholeWord,
+          includeIgnored: session.includeIgnored,
+          includePattern: session.includePattern,
+          excludePattern: session.excludePattern,
+          useSmartcase: settings['search.useSmartcase'],
+          contextLines: settings['search.contextLines'],
+        }),
       }),
     }));
 
@@ -148,7 +168,6 @@ export const useSearchStore = create<SearchState>((set, get) => ({
       const assetsRootPath = useWorkspaceStore.getState().assetsRootPath;
       const searchRoot = isUnity && assetsRootPath ? assetsRootPath : workspacePath;
 
-      const settings = useSettingsStore.getState().settings;
       const caseSensitive = resolveCaseSensitive(
         session.query,
         session.caseSensitive,

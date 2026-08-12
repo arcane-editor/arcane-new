@@ -121,11 +121,18 @@ function ExcerptList({ sessionId }: ExcerptListProps) {
   // Silently no-ops if the element still isn't there (e.g. the file scrolled
   // past overscan) — the file-level scroll from `scrollToIndex` already put
   // the user in the right neighbourhood.
+  //
+  // `excerptId` is `${filePath}:${startLine}` — a real filesystem path, not
+  // a token this code controls — so it's run through `CSS.escape` before
+  // being interpolated into the attribute selector (M2, final re-review): an
+  // unescaped double quote in the path would throw inside this rAF, and a
+  // literal backslash (any Windows path) would silently fail to match,
+  // degrading to the file-level `scrollToIndex` above with no sign why.
   const scrollToExcerptElement = useCallback((excerptId: string) => {
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         const el = scrollRef.current?.querySelector<HTMLElement>(
-          `[data-excerpt-id="${excerptId}"]`,
+          `[data-excerpt-id="${CSS.escape(excerptId)}"]`,
         );
         el?.scrollIntoView({ block: 'center' });
       });
@@ -168,6 +175,19 @@ function ExcerptList({ sessionId }: ExcerptListProps) {
   // active. Runs once per mount (not on every `activeExcerptId` change, which
   // would re-center the view on every ordinary click inside an already-open
   // tab, fighting the user's own scrolling).
+  //
+  // Deliberately does NOT un-collapse the target file, unlike the listener
+  // above (M1, final re-review): this path also fires on an ORDINARY remount
+  // — switching to a file tab and back — because A3 preserves
+  // `activeExcerptId` across it. Before A3, a remount always re-searched and
+  // wiped `activeExcerptId`, so this branch could only ever fire right after
+  // a genuine cross-tab reveal, when un-collapsing was exactly what was
+  // wanted. Now it fires on every ordinary remount too, and unconditionally
+  // un-collapsing here would silently re-expand a file the user deliberately
+  // collapsed after clicking an excerpt inside it. Scrolling to the
+  // (possibly collapsed) file block is still correct either way; only the
+  // sub-element scroll silently no-ops if the file is collapsed and the
+  // excerpt isn't actually rendered.
   const didRevealOnMount = useRef(false);
   useEffect(() => {
     if (didRevealOnMount.current) return;
@@ -175,10 +195,6 @@ function ExcerptList({ sessionId }: ExcerptListProps) {
     const activeId = session?.activeExcerptId;
     if (!activeId) return;
     const filePath = activeId.slice(0, activeId.lastIndexOf(':'));
-    const collapsedFiles = session?.collapsedFiles ?? [];
-    if (collapsedFiles.includes(filePath)) {
-      update(sessionId, { collapsedFiles: collapsedFiles.filter((p) => p !== filePath) });
-    }
     const index = blocks.findIndex((b) => b.file.path === filePath);
     if (index >= 0) virtualizer.scrollToIndex(index, { align: 'center' });
     scrollToExcerptElement(activeId);

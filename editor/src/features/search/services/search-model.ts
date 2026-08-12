@@ -170,7 +170,14 @@ export function autoSearchAction(debouncedQuery: string): AutoSearchAction {
   return 'idle';
 }
 
-/** Every session field that changes what `search()` sends to the backend. */
+/** Every session field, PLUS every settings value, that changes what
+ *  `search()` sends to the backend. `useSmartcase`/`contextLines` are
+ *  settings (`stores/settings.ts`'s `search.useSmartcase`/
+ *  `search.contextLines`), not session fields — `search()` reads them fresh
+ *  from the settings store on every call (`resolveCaseSensitive`'s third
+ *  argument, and the `contextLines` option sent to the backend), so a
+ *  settings change alone, with the query and every session-owned option
+ *  unchanged, must still produce a different signature. */
 export interface SearchSignatureInput {
   query: string;
   isRegex: boolean;
@@ -179,6 +186,8 @@ export interface SearchSignatureInput {
   includeIgnored: boolean;
   includePattern: string;
   excludePattern: string;
+  useSmartcase: boolean;
+  contextLines: number;
 }
 
 /**
@@ -211,6 +220,8 @@ export function searchSignature(input: SearchSignatureInput): string {
     input.includeIgnored,
     input.includePattern,
     input.excludePattern,
+    input.useSmartcase,
+    input.contextLines,
   ].join('\u0000');
 }
 
