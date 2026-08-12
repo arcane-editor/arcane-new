@@ -193,6 +193,12 @@ export interface SettingsSchema {
   'unity.shader.completions': boolean;
   'unity.packages.manifestIntelligence': boolean;
   'unity.index.enabled': boolean;
+  /** Lines of context rendered either side of a match in the search tab. */
+  'search.contextLines': number;
+  /** Populate a new search from the editor's selection / word under cursor. */
+  'search.seedQueryFromCursor': 'selection' | 'always' | 'never';
+  /** Lowercase query = case-insensitive; any uppercase = case-sensitive. */
+  'search.useSmartcase': boolean;
 }
 
 /**

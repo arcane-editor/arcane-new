@@ -54,6 +54,9 @@ const DEFAULT_SETTINGS: SettingsSchema = {
   'unity.shader.completions': true,
   'unity.packages.manifestIntelligence': true,
   'unity.index.enabled': true,
+  'search.contextLines': 2,
+  'search.seedQueryFromCursor': 'selection',
+  'search.useSmartcase': true,
 };
 
 interface SettingsState {

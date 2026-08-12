@@ -29,3 +29,10 @@ export {
   type MatchRange,
   type Expansion,
 } from './services/excerpt-model';
+export {
+  pushQuery,
+  historyStep,
+  resolveCaseSensitive,
+  HISTORY_LIMIT,
+  type HistoryPosition,
+} from './services/query-history';

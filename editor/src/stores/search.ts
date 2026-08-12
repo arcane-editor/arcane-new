@@ -8,6 +8,7 @@ import {
   createSession,
   patchSession,
   sessionForSearchId,
+  resolveCaseSensitive,
   type SearchSessions,
   type SearchSession,
   type StreamState,
@@ -16,6 +17,7 @@ import {
 } from '../features/search';
 import { useProjectContextStore } from './project-context';
 import { useWorkspaceStore } from './workspace';
+import { useSettingsStore } from './settings';
 
 interface SearchState {
   sessions: SearchSessions;
@@ -125,6 +127,13 @@ export const useSearchStore = create<SearchState>((set, get) => ({
       const assetsRootPath = useWorkspaceStore.getState().assetsRootPath;
       const searchRoot = isUnity && assetsRootPath ? assetsRootPath : workspacePath;
 
+      const settings = useSettingsStore.getState().settings;
+      const caseSensitive = resolveCaseSensitive(
+        session.query,
+        session.caseSensitive,
+        settings['search.useSmartcase'],
+      );
+
       await invoke('start_content_search', {
         searchId: gen,
         sessionId: id,
@@ -132,12 +141,12 @@ export const useSearchStore = create<SearchState>((set, get) => ({
           workspacePath: searchRoot,
           query: session.query,
           isRegex: session.isRegex,
-          caseSensitive: session.caseSensitive,
+          caseSensitive,
           wholeWord: session.wholeWord,
           includePatterns: parseGlobList(session.includePattern),
           excludePatterns: parseGlobList(session.excludePattern),
           includeIgnored: session.includeIgnored,
-          contextLines: null,
+          contextLines: settings['search.contextLines'],
           fileExtensions: null,
           maxTotalMatches: null,
           maxMatchesPerFile: null,
