@@ -138,6 +138,7 @@ html, body, #root {
 
 /* Title Bar */
 .title-bar {
+  position: relative;
   height: 31px;
   background: var(--bg-titlebar);
   display: flex;
@@ -145,6 +146,31 @@ html, body, #root {
   padding: 0 12px;
   -webkit-app-region: drag;
   user-select: none;
+  flex-shrink: 0;
+}
+
+/* The bar was a flat slab with no edge, so the tab bar read as floating inside
+   it rather than sitting under it. A hairline closes the bottom and a 1px
+   highlight lights the top, which is what makes 31px of chrome look deliberate
+   instead of unfinished. Pointer-events off: the whole bar is a drag region. */
+.title-bar::before,
+.title-bar::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  pointer-events: none;
+}
+
+.title-bar::before {
+  top: 0;
+  background: color-mix(in srgb, var(--text-primary) 6%, transparent);
+}
+
+.title-bar::after {
+  bottom: 0;
+  background: var(--border);
 }
 
 /* Room for macOS's close/minimize/zoom buttons, which the window overlays on
@@ -199,6 +225,7 @@ html, body, #root {
   flex: 1;
   display: flex;
   align-items: center;
+  min-width: 0;
 }
 
 .title-bar-right {
@@ -211,10 +238,21 @@ html, body, #root {
   display: flex;
   align-items: center;
   gap: 4px;
-  -webkit-app-region: no-drag;
+}
+
+/* Hairline between the two right-hand clusters: "act on the workspace"
+   (search, settings) and "who you are" (avatar). They were one undifferentiated
+   run of three round-ish shapes. */
+.title-bar-divider {
+  width: 1px;
+  height: 14px;
+  margin: 0 7px 0 5px;
+  background: var(--border);
+  flex-shrink: 0;
 }
 
 .title-bar-app-name {
+  position: relative;
   font-family: var(--font-display);
   font-size: 12px;
   font-weight: 600;
@@ -222,6 +260,22 @@ html, body, #root {
   letter-spacing: 2px;
   text-transform: uppercase;
   padding-left: 2px;
+  /* The wordmark is the only place the brand speaks, and it was doing it on a
+     black field with nothing around it. A gold hairline gives it a right edge
+     to sit against, and the bloom is what "arcane" is supposed to feel like. */
+  padding-right: 13px;
+  text-shadow: 0 0 16px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+.title-bar-app-name::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 1px;
+  height: 11px;
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
 :root[data-theme="arcane-light"] .title-bar-app-name {
@@ -229,9 +283,13 @@ html, body, #root {
   text-shadow: 0 0 12px color-mix(in srgb, var(--accent) 25%, transparent);
 }
 
+:root[data-theme="arcane-light"] .title-bar-app-name::after {
+  background: color-mix(in srgb, var(--text-on-dark) 22%, transparent);
+}
+
 .title-bar-btn {
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -239,14 +297,20 @@ html, body, #root {
   border: none;
   color: var(--text-secondary);
   cursor: pointer;
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   -webkit-app-region: no-drag;
-  transition: color 150ms ease, background 150ms ease;
+  transition:
+    color var(--motion-fast) var(--ease-out),
+    background var(--motion-fast) var(--ease-out);
 }
 
 .title-bar-btn:hover {
   color: var(--text-primary);
   background: var(--hover-overlay);
+}
+
+.title-bar-btn:active {
+  background: color-mix(in srgb, var(--text-primary) 9%, transparent);
 }
 
 /* In Arcane Light the titlebar is dark — adjust button text contrast */
@@ -256,9 +320,6 @@ html, body, #root {
 :root[data-theme="arcane-light"] .title-bar-btn:hover {
   color: var(--text-on-dark);
   background: color-mix(in srgb, var(--text-on-dark) 10%, transparent);
-}
-:root[data-theme="arcane-light"] .connection-label {
-  color: color-mix(in srgb, var(--text-on-dark) 70%, transparent);
 }
 :root[data-theme="arcane-light"] .activity-bar-icon {
   color: color-mix(in srgb, var(--text-on-dark) 50%, transparent);
@@ -285,7 +346,6 @@ html, body, #root {
   justify-content: center;
   cursor: pointer;
   -webkit-app-region: no-drag;
-  margin-left: 4px;
   flex-shrink: 0;
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent);
   transition: box-shadow 150ms ease, transform 150ms ease;
@@ -309,7 +369,6 @@ html, body, #root {
   font-weight: 600;
   cursor: pointer;
   -webkit-app-region: no-drag;
-  margin-left: 4px;
   flex-shrink: 0;
   white-space: nowrap;
   transition: background 150ms ease, border-color 150ms ease;
@@ -320,47 +379,170 @@ html, body, #root {
   border-color: var(--accent);
 }
 
-.title-bar-connection {
+/* ── Unity deck ──────────────────────────────────────────────────────
+   Transport + link state as ONE recessed instrument rather than three loose
+   glyphs and a pill floating beside them. The well is what tells you the
+   controls are a set; the divider is what tells you the state belongs to them.
+   Everything here is sized off a 22px capsule so it clears a 31px bar. */
+.unity-deck {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 11px;
-  color: var(--text-secondary);
-  padding: 3px 10px;
-  border-radius: 4px;
+  height: 22px;
+  padding: 0 2px;
+  border-radius: var(--radius-md);
   background: var(--hover-overlay);
-  margin-left: 8px;
+  box-shadow: inset 0 0 0 1px var(--ghost-border);
   -webkit-app-region: no-drag;
+  transition: box-shadow var(--motion-base) var(--ease-out);
 }
 
-:root[data-theme="arcane-light"] .title-bar-connection {
-  color: color-mix(in srgb, var(--text-on-dark) 65%, transparent);
-  background: color-mix(in srgb, var(--text-on-dark) 8%, transparent);
+.unity-deck__transport {
+  display: flex;
+  align-items: center;
+  gap: 1px;
 }
 
-.connection-dot {
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
+.unity-deck__btn {
+  width: 22px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition:
+    color var(--motion-fast) var(--ease-out),
+    background var(--motion-fast) var(--ease-out),
+    box-shadow var(--motion-fast) var(--ease-out);
+}
+
+.unity-deck__btn:hover:not(:disabled) {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 10%, transparent);
+}
+
+.unity-deck__btn:disabled {
+  opacity: 0.32;
+  cursor: default;
+}
+
+/* Play mode is the one state in this app where you can lose real work by not
+   noticing it, so it gets the accent outright — the only filled control in the
+   chrome — plus a bloom that reads from the far side of the screen. */
+.unity-deck__btn--live,
+.unity-deck__btn--live:hover:not(:disabled) {
+  background: var(--accent);
+  color: var(--button-primary-text);
+  box-shadow: 0 0 12px -2px color-mix(in srgb, var(--accent) 75%, transparent);
+}
+
+.unity-deck__btn--live:hover:not(:disabled) {
+  background: var(--accent-secondary);
+}
+
+.unity-deck__btn--active {
+  color: var(--warning);
+  background: var(--warning-bg);
+}
+
+.unity-deck__divider {
+  width: 1px;
+  height: 12px;
+  margin: 0 5px;
+  background: var(--ghost-border);
   flex-shrink: 0;
 }
 
-.connection-dot.connected {
-  background: var(--success);
-  box-shadow: 0 0 6px color-mix(in srgb, var(--success) 60%, transparent);
-}
-
-.connection-dot.disconnected {
-  background: var(--error-text);
-  box-shadow: 0 0 6px color-mix(in srgb, var(--error-text) 50%, transparent);
-}
-
-.connection-label {
-  font-size: 11px;
+.unity-deck__status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-right: 7px;
+  /* 10px, not the old 11px: this label sat at the same weight as the wordmark
+     and won, so the eye landed on "CONNECTED" before anything else. */
+  font-size: 10px;
   font-weight: 600;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.09em;
   text-transform: uppercase;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  cursor: default;
+}
+
+.unity-deck__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-secondary);
+  flex-shrink: 0;
+  transition: background var(--motion-base) var(--ease-out);
+}
+
+/* A halo ring rather than a blur: the old 6px glow bled into the label. */
+.unity-deck[data-status="connected"] .unity-deck__dot {
+  background: var(--success);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 16%, transparent);
+}
+
+/* Only the state that wants something from you moves. */
+.unity-deck[data-status="disconnected"] .unity-deck__dot {
+  background: var(--error-text);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--error-text) 16%, transparent);
+  animation: unity-deck-breathe 2.4s var(--ease-in-out) infinite;
+}
+
+.unity-deck[data-status="disconnected"] {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--error-text) 30%, transparent);
+}
+
+.unity-deck[data-status="disconnected"] .unity-deck__status-label {
+  color: var(--error-text);
+}
+
+.unity-deck[data-status="compiling"] .unity-deck__status-label {
+  color: var(--warning);
+}
+
+.unity-deck__spinner {
+  color: var(--warning);
+  flex-shrink: 0;
+  animation: unity-deck-spin 900ms linear infinite;
+}
+
+@keyframes unity-deck-breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+@keyframes unity-deck-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Arcane Light keeps a dark title bar, so the deck's contents are on-dark. */
+:root[data-theme="arcane-light"] .unity-deck {
+  background: color-mix(in srgb, var(--text-on-dark) 8%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text-on-dark) 12%, transparent);
+}
+
+:root[data-theme="arcane-light"] .unity-deck__btn {
+  color: color-mix(in srgb, var(--text-on-dark) 60%, transparent);
+}
+
+:root[data-theme="arcane-light"] .unity-deck__btn:hover:not(:disabled) {
+  color: var(--text-on-dark);
+  background: color-mix(in srgb, var(--text-on-dark) 12%, transparent);
+}
+
+:root[data-theme="arcane-light"] .unity-deck__divider {
+  background: color-mix(in srgb, var(--text-on-dark) 14%, transparent);
+}
+
+:root[data-theme="arcane-light"] .unity-deck__status {
+  color: color-mix(in srgb, var(--text-on-dark) 70%, transparent);
 }
 
 /* Sidebar */

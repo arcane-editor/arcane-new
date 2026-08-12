@@ -290,6 +290,10 @@ function EditorPanel() {
               renderSideBySide: true,
               automaticLayout: true,
               minimap: { enabled: false },
+              overviewRulerLanes: 0,
+              overviewRulerBorder: false,
+              hideCursorInOverviewRuler: true,
+              scrollbar: { useShadows: false },
               fontSize: editorFontSize,
               fontFamily: "'Geist Mono Variable', 'Geist Mono', 'JetBrains Mono', 'SF Mono', Menlo, Monaco, 'Courier New', monospace",
               fontLigatures: true,
@@ -442,6 +446,20 @@ function EditorPanel() {
           lineNumbers: editorLineNumbers,
           scrollBeyondLastLine: false,
           automaticLayout: true,
+          // The decorations overview ruler is the red strip down the right edge.
+          // When a project fails to resolve, csharp-ls marks nearly every line,
+          // the per-marker ticks merge, and it renders as one solid red bar the
+          // full height of the file — alarming, unactionable, and covering the
+          // scrollbar. Errors are still reported by the squiggle, the gutter and
+          // the Problems panel, which are the surfaces you can actually click.
+          overviewRulerLanes: 0,
+          overviewRulerBorder: false,
+          hideCursorInOverviewRuler: true,
+          scrollbar: {
+            verticalScrollbarSize: 10,
+            horizontalScrollbarSize: 10,
+            useShadows: false,
+          },
           wordWrap: editorWordWrap,
           tabSize: editorTabSize,
           cursorBlinking: editorCursorBlinking,
