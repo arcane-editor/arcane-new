@@ -826,6 +826,10 @@ interface WorkspaceState {
     origPath?: string | null,
   ) => Promise<void>;
   openCommitDiffTab: (hash: string, filePath: string, title: string) => Promise<void>;
+  /** Opens a new search tab and returns its path (`search://<n>`). `seed`
+   *  pre-fills the query and/or the include glob — used by "Search in Folder"
+   *  and by seeding from the editor selection. */
+  openSearchTab: (seed?: { query?: string; includePattern?: string }) => string;
   /**
    * Re-read both sides of every open staged/unstaged diff tab. Called on
    * `git-state-changed` (stage, unstage, commit, checkout) and when a watched
@@ -1226,6 +1230,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   },
 
   closeFile: (path: string) => {
+    if (path.startsWith('search://')) {
+      useSearchStore.getState().closeSession(path);
+    }
+
     // Notify the LSP server for this file's language before removing.
     const file = get().openFiles.find((f) => f.path === path);
     if (file) {
@@ -1535,6 +1543,31 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       };
       return { openFiles: [...state.openFiles, file], activeFilePath: diffPath };
     });
+  },
+
+  openSearchTab: (seed) => {
+    // Ids are monotonic per run and never reused, so a closed tab's session
+    // can be dropped without a later tab colliding with it.
+    const used = get().openFiles.filter((f) => f.path.startsWith('search://')).length;
+    let n = used + 1;
+    while (get().openFiles.some((f) => f.path === `search://${n}`)) n += 1;
+    const path = `search://${n}`;
+
+    const search = useSearchStore.getState();
+    search.ensureSession(path);
+    if (seed?.query !== undefined || seed?.includePattern !== undefined) {
+      search.update(path, {
+        ...(seed.query !== undefined ? { query: seed.query } : {}),
+        ...(seed.includePattern !== undefined ? { includePattern: seed.includePattern } : {}),
+      });
+    }
+    search.setActiveSession(path);
+
+    set((state) => ({
+      openFiles: [...state.openFiles, { path, name: 'Search', content: '', isDirty: false }],
+      activeFilePath: path,
+    }));
+    return path;
   },
 
   refreshTree: async () => {

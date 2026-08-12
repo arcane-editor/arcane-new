@@ -1,4 +1,5 @@
 export { default as SearchPanel } from './components/SearchPanel';
+export { default as SearchResultsTab } from './components/SearchResultsTab';
 export {
   parseGlobList,
   applyBatch,
