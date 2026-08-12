@@ -24,6 +24,21 @@ function ExcerptList({ sessionId }: ExcerptListProps) {
 
   const [fileLines, setFileLines] = useState<Record<string, string[]>>({});
 
+  // This component-local cache shadows the module-level one `search()`
+  // clears via `clearFileLineCache()` (stores/search.ts) — that call alone
+  // does NOT reach here, so without this effect an excerpt expanded before a
+  // re-search (or a tab switch) would keep rendering the pre-edit/pre-switch
+  // lines forever (Fix round 1, Finding 1). `session?.activeSearchId` only
+  // changes at the instant a NEW search actually starts (`search()` sets it
+  // once, synchronously, before the invoke) — not per streamed batch, not
+  // per expand click — so this cannot fire mid-expansion of the search
+  // currently on screen. `sessionId` is included too so switching to a
+  // DIFFERENT tab also drops the cache, even in the edge case where neither
+  // session has searched yet and both have `activeSearchId: null`.
+  useEffect(() => {
+    setFileLines({});
+  }, [sessionId, session?.activeSearchId]);
+
   const blocks = useMemo(
     () =>
       (session?.results ?? []).map((file) => ({
@@ -112,11 +127,12 @@ function ExcerptList({ sessionId }: ExcerptListProps) {
     return () => window.removeEventListener('search-reveal-excerpt', onReveal);
   }, [blocks, sessionId, virtualizer]);
 
-  // Excerpt ids are `${filePath}:${startLine}`; `lastIndexOf(':')` still
-  // finds the right split on Windows, where an absolute path contributes
-  // exactly one earlier colon (the drive letter, e.g. `D:/...`) — Windows
-  // paths cannot contain `:` anywhere else, so that colon is never the last
-  // one once `:${startLine}` is appended.
+  // Excerpt ids are `${filePath}:${startLine}`; `lastIndexOf(':')` finds the
+  // right split regardless of how many colons the path itself contains — a
+  // Windows drive letter (`D:/...`), a UNC/NTFS alternate-data-stream colon,
+  // or even a literal `:` in a POSIX filename. `startLine` is always
+  // digits-only, so the colon `excerptId` appends is always the RIGHTMOST
+  // colon in the string, no matter what came before it.
   const expand = useCallback(
     async (excerptId: string, direction: 'up' | 'down') => {
       const filePath = excerptId.slice(0, excerptId.lastIndexOf(':'));

@@ -110,12 +110,21 @@ export const useSearchStore = create<SearchState>((set, get) => ({
 
     const gen = ++searchGeneration;
     // Previous results stay visible until the first batch replaces them.
+    // `expanded`/`activeExcerptId` are cleared here too, not just the file-line
+    // cache below: both name excerpts from the PREVIOUS result set by id
+    // (`path:startLine`), and a new search can produce an excerpt that reuses
+    // one of those ids for entirely different content (same file, same start
+    // line, different surrounding matches) — without this it would silently
+    // inherit the old up/down counts and render pre-expanded, or `active`
+    // would point at an excerpt that no longer exists.
     set((s) => ({
       sessions: patchSession(s.sessions, id, {
         isSearching: true,
         activeSearchId: gen,
         receivedFirstBatch: false,
         searchError: null,
+        expanded: {},
+        activeExcerptId: null,
       }),
     }));
 
