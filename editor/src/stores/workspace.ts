@@ -1295,12 +1295,15 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       return { openFiles, activeFilePath, recentlyClosed };
     });
 
-    // If closing the active tab fell back to a different search:// tab (e.g.
-    // closing a regular file left a search tab as the last one open), the
-    // search store's active session must follow it — see
-    // `syncActiveSearchSession`. No-ops otherwise (including when the closed
-    // tab itself was the search tab: `closeSession` above already retargets
-    // `activeSessionId` on its own terms).
+    // Covers two cases, both real: (1) closing the active tab fell back to a
+    // DIFFERENT search:// tab (e.g. closing a regular file left a search tab
+    // as the last one open) — activeSessionId must follow it, and nothing
+    // above set that up. (2) the closed tab itself was the search tab:
+    // `closeSession` above already retargeted `activeSessionId`, but to an
+    // ARBITRARY surviving session (`Object.keys(next)[0]`) that need not
+    // match whichever tab is actually active now — this call corrects that
+    // to the real one whenever the real one is also a search tab. No-ops
+    // only when the tab that ends up active isn't a search tab at all.
     syncActiveSearchSession(get().activeFilePath);
   },
 
@@ -1578,9 +1581,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     // The probe below only checks currently-OPEN tabs, so a closed id CAN be
     // handed out again — this only guarantees no collision with a LIVE tab,
     // not that ids are never reused. Reuse is safe today only because of a
-    // property of `closeSession` (not enforced here): closing a tab always
-    // leaves that id's entry either absent from `sessions` or freshly blank
-    // (see `syncActiveSearchSession` and the closeFile branch above), so a
+    // property of `closeSession` (in stores/search.ts, not enforced here):
+    // closing a tab always leaves that id's entry either absent from
+    // `sessions` or freshly blank (the recreated-default-session case), so a
     // later tab that reuses the id never inherits stale results.
     const used = get().openFiles.filter((f) => f.path.startsWith('search://')).length;
     let n = used + 1;
@@ -1711,6 +1714,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         : state.activeFilePath;
       return { openFiles, activeFilePath };
     });
+    // Same fallback-to-last-remaining-tab shape as closeFile — the newly
+    // active tab can be a search:// one, so the search store's active
+    // session must follow it here too (see `syncActiveSearchSession`).
+    syncActiveSearchSession(get().activeFilePath);
     await get().refreshTree();
   },
 

@@ -55,12 +55,14 @@ function extractBody(source: string, startMarker: string, endMarker: string): st
 const openSearchTabBody = extractBody(WORKSPACE_SOURCE, 'openSearchTab: (seed) => {', '\n  refreshTree:');
 const closeFileBody = extractBody(WORKSPACE_SOURCE, 'closeFile: (path: string) => {', '\n  popRecentlyClosed:');
 const setActiveFileBody = extractBody(WORKSPACE_SOURCE, 'setActiveFile: (path: string) => {', '\n  reorderTabs:');
+const deletePathBody = extractBody(WORKSPACE_SOURCE, 'deletePath: async (path: string) => {', '\n  restartLsp:');
 const syncActiveSearchSessionBody = extractBody(
   WORKSPACE_SOURCE,
   'function syncActiveSearchSession(path: string | null): void {',
   '\n\ninterface WorkspaceState',
 );
 const closeSessionBody = extractBody(SEARCH_STORE_SOURCE, 'closeSession: (id) => {', "\n}));");
+const ensureSessionBody = extractBody(SEARCH_STORE_SOURCE, 'ensureSession: (id) =>', '\n\n  setActiveSession:');
 
 describe('openSearchTab (source text — see file header)', () => {
   // Required behaviour 1: "openSearchTab() twice yields search://1 then
@@ -73,6 +75,22 @@ describe('openSearchTab (source text — see file header)', () => {
     );
     expect(openSearchTabBody).toMatch(/let n = used \+ 1;/);
     expect(openSearchTabBody).toContain('`search://${n}`');
+  });
+
+  // `used + 1` alone is not enough: with tabs search://1..3 open and
+  // search://2 closed, `used` (a COUNT, 2) plus 1 gives `search://3` again —
+  // colliding with the tab that's already there — unless something re-probes
+  // for a live collision and keeps incrementing. That's this while loop; it
+  // must run between computing `n` and freezing `path`.
+  it('re-probes for a collision with a currently-open tab before freezing the path', () => {
+    const nAssignIdx = openSearchTabBody.indexOf('let n = used + 1;');
+    const loopIdx = openSearchTabBody.indexOf(
+      "while (get().openFiles.some((f) => f.path === `search://${n}`)) n += 1;",
+    );
+    const pathAssignIdx = openSearchTabBody.indexOf('const path = `search://${n}`;');
+    expect(nAssignIdx).toBeGreaterThan(-1);
+    expect(loopIdx).toBeGreaterThan(nAssignIdx);
+    expect(pathAssignIdx).toBeGreaterThan(loopIdx);
   });
 
   it('calls ensureSession with that freshly-computed path, giving each tab its own session entry', () => {
@@ -123,26 +141,29 @@ describe('openSearchTab (source text — see file header)', () => {
   });
 
   // Required behaviour 3: "An unseeded openSearchTab() leaves an existing
-  // session's fields untouched." Checked by confirming `update(` is
-  // reachable ONLY through the `seed?.query !== undefined ||
-  // seed?.includePattern !== undefined` guard — when `seed` is omitted
-  // entirely (both are `undefined`), that condition is false and `update`
-  // is never called at all, for ANY session, by construction.
-  it('gates the only update(...) call behind a seed-provided check, so an unseeded call cannot touch any session', () => {
-    const guardIdx = openSearchTabBody.indexOf(
-      "if (seed?.query !== undefined || seed?.includePattern !== undefined) {",
+  // session's fields untouched." This requires the `update(` call to be
+  // NESTED inside the `seed?.query !== undefined || seed?.includePattern
+  // !== undefined` guard, not merely textually AFTER it — an `if (...) { }`
+  // followed by an unconditional `update(...)` below the closing brace would
+  // satisfy an order check while running on every call, seeded or not. The
+  // verbatim block below only matches if `search.update(path, {...})` and
+  // its closing `});` sit BETWEEN the guard's `{` and its matching `}` —
+  // move the call below that `}` and this literal stops appearing in the
+  // source at all, which is what makes this a nesting check and not an
+  // ordering check.
+  it('nests the only update(...) call inside the seed-provided guard, so an unseeded call cannot touch any session', () => {
+    expect(openSearchTabBody).toContain(
+      "if (seed?.query !== undefined || seed?.includePattern !== undefined) {\n" +
+        "      search.update(path, {\n" +
+        "        ...(seed.query !== undefined ? { query: seed.query } : {}),\n" +
+        "        ...(seed.includePattern !== undefined ? { includePattern: seed.includePattern } : {}),\n" +
+        "      });\n" +
+        "    }",
     );
-    const updateIdx = openSearchTabBody.indexOf('search.update(path,');
-    const setActiveIdx = openSearchTabBody.indexOf('search.setActiveSession(path);');
-    expect(guardIdx).toBeGreaterThan(-1);
-    expect(updateIdx).toBeGreaterThan(guardIdx);
     // ...and the ONLY update(...) call in the whole action body is this one
     // (no second, unconditional call elsewhere that would defeat the guard).
+    const updateIdx = openSearchTabBody.indexOf('search.update(path,');
     expect(openSearchTabBody.indexOf('search.update(', updateIdx + 1)).toBe(-1);
-    // setActiveSession runs after the guarded block either way — it doesn't
-    // touch session fields (query/includePattern etc.), only which id is
-    // "active", so this ordering doesn't compromise the untouched-fields claim.
-    expect(setActiveIdx).toBeGreaterThan(updateIdx);
   });
 });
 
@@ -189,6 +210,21 @@ describe('closeFile (source text — see file header)', () => {
   });
 });
 
+describe('ensureSession (source text — see file header)', () => {
+  // Required behaviour 3 also depends on this, on the OTHER side of the same
+  // coin: `ensureSession` must be create-IF-ABSENT, not create-always — an
+  // `ensureSession` that unconditionally overwrites would silently reset a
+  // reused id's session on every later `openSearchTab()` call, which is
+  // exactly what "leaves an existing session's fields untouched" rules out.
+  // Pinned the same way `closeSession`'s delete is pinned above: read the
+  // literal guard, not just call it and hope.
+  it('only creates a session when one is absent (search.ts source)', () => {
+    expect(ensureSessionBody).toContain(
+      's.sessions[id] ? s : { sessions: { ...s.sessions, [id]: createSession(id) } }',
+    );
+  });
+});
+
 describe('setActiveFile (source text — see file header)', () => {
   // Finding 3: a TabBar click (setActiveFile) landing on a search:// tab
   // must resync activeSessionId — this is the path `tab.next`/`tab.prev`
@@ -200,6 +236,23 @@ describe('setActiveFile (source text — see file header)', () => {
     const syncIdx = setActiveFileBody.indexOf('syncActiveSearchSession(path);');
     expect(setIdx).toBeGreaterThan(-1);
     expect(syncIdx).toBeGreaterThan(setIdx);
+  });
+});
+
+describe('deletePath (source text — see file header)', () => {
+  // Fix round 2, Item 1: deleting the active file falls back to
+  // `openFiles[openFiles.length - 1]`, exactly like closeFile's fallback —
+  // and that fallback tab can be a search:// one. A full sweep of every
+  // `activeFilePath` assignment site in this file found this as the one
+  // other place (besides setActiveFile and closeFile) that can land on an
+  // already-open search tab; `openFile`, `renamePath`, and the diff-tab
+  // sites cannot produce a search path, and `setWorkspace` nulls
+  // `activeFilePath` outright.
+  it('resyncs activeSessionId after its fallback-to-last-remaining-tab branch', () => {
+    const setCallIdx = deletePathBody.indexOf('set((state) => {');
+    const syncIdx = deletePathBody.indexOf('syncActiveSearchSession(get().activeFilePath);');
+    expect(setCallIdx).toBeGreaterThan(-1);
+    expect(syncIdx).toBeGreaterThan(setCallIdx);
   });
 });
 
