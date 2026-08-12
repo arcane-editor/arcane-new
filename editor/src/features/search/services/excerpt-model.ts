@@ -56,16 +56,28 @@ function windowFor(match: SearchMatch): Window {
   const end = match.lineNumber + after.length;
 
   const text = new Map<number, string>();
-  before.forEach((line, i) => text.set(start + i, line));
+  const origin = new Map<number, number>();
+  // Context lines are never preview-trimmed by the backend, so their origin
+  // is always 0 (the whole, untrimmed line). Recording that here — not just
+  // for the match line — is what lets `absorb` notice when a later match's
+  // trimmed window lands on a line this window already saw as context.
+  before.forEach((line, i) => {
+    text.set(start + i, line);
+    origin.set(start + i, 0);
+  });
   text.set(match.lineNumber, match.lineContent);
-  after.forEach((line, i) => text.set(match.lineNumber + 1 + i, line));
+  origin.set(match.lineNumber, match.lineStart ?? 0);
+  after.forEach((line, i) => {
+    text.set(match.lineNumber + 1 + i, line);
+    origin.set(match.lineNumber + 1 + i, 0);
+  });
 
   return {
     start,
     end,
     text,
     ranges: new Map([[match.lineNumber, [{ start: match.matchStart, end: match.matchEnd }]]]),
-    origin: new Map([[match.lineNumber, match.lineStart ?? 0]]),
+    origin,
     matchCount: 1,
   };
 }
@@ -107,8 +119,10 @@ export function buildExcerpts(file: FileSearchResult): Excerpt[] {
   for (const match of file.matches) {
     const next = windowFor(match);
     const current = windows[windows.length - 1];
-    // `<= current.end + 1` merges touching windows too, not just overlapping
-    // ones — a one-line gap between excerpts is noise, not separation.
+    // `next.start <= current.end + 1` merges windows that overlap or sit
+    // exactly adjacent (their ranges touch with no line between them). A
+    // genuine one-line gap (next.start === current.end + 2) does NOT merge —
+    // it stays two excerpts.
     if (current && next.start <= current.end + 1) {
       absorb(current, next);
     } else {

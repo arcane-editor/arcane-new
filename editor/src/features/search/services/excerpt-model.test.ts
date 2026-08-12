@@ -103,6 +103,56 @@ describe('buildExcerpts', () => {
     const file: FileSearchResult = { path: '/w/a.ts', matches: [] };
     expect(buildExcerpts(file)).toEqual([]);
   });
+
+  it('merges matches exactly 5 lines apart (context 2 either side) into one excerpt', () => {
+    // Windows are [L-2, L+2] with 2 lines of context either side. Two windows
+    // merge iff next.start <= current.end + 1, i.e. L2 - 2 <= L1 + 2 + 1,
+    // i.e. L2 <= L1 + 5 — this test sits exactly on that boundary.
+    const file: FileSearchResult = {
+      path: '/w/a.ts',
+      matches: [
+        match(10, 'hit', ['a', 'b'], ['c', 'd']),
+        match(15, 'hit', ['e', 'f'], ['g', 'h']),
+      ],
+    };
+    expect(buildExcerpts(file)).toHaveLength(1);
+  });
+
+  it('keeps matches exactly 6 lines apart (context 2 either side) as separate excerpts', () => {
+    // One line further than the boundary above: next.start (14) is no
+    // longer <= current.end + 1 (13), so the windows do not merge.
+    const file: FileSearchResult = {
+      path: '/w/a.ts',
+      matches: [
+        match(10, 'hit', ['a', 'b'], ['c', 'd']),
+        match(16, 'hit', ['e', 'f'], ['g', 'h']),
+      ],
+    };
+    expect(buildExcerpts(file)).toHaveLength(2);
+  });
+
+  it('does not attach a trimmed match window highlight to a neighbouring context line carrying the untrimmed text', () => {
+    // Match A's `after` context for line 6 carries the FULL, untrimmed line
+    // (the backend never trims context lines). Match B IS line 6, and the
+    // backend preview-trimmed ITS window around its own match (lineStart:
+    // 400). When the two windows merge, the rendered text for line 6 must
+    // stay the untrimmed context text, and B's highlight range — which is an
+    // offset into B's trimmed window, not into this text — must be dropped,
+    // even though it still counts toward matchCount.
+    const file: FileSearchResult = {
+      path: '/w/a.ts',
+      matches: [
+        match(5, 'hit-a', [], ['full untrimmed line six']),
+        { ...match(6, 'trimmed window'), lineStart: 400, matchStart: 2, matchEnd: 9 },
+      ],
+    };
+    const excerpts = buildExcerpts(file);
+    expect(excerpts).toHaveLength(1);
+    const line6 = excerpts[0].lines.find((l) => l.lineNumber === 6)!;
+    expect(line6.text).toBe('full untrimmed line six');
+    expect(line6.matches).toEqual([]);
+    expect(excerpts[0].matchCount).toBe(2);
+  });
 });
 
 describe('excerptId', () => {
