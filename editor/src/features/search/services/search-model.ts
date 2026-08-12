@@ -164,6 +164,50 @@ export function autoSearchAction(debouncedQuery: string): AutoSearchAction {
   return 'idle';
 }
 
+/** Every session field that changes what `search()` sends to the backend. */
+export interface SearchSignatureInput {
+  query: string;
+  isRegex: boolean;
+  caseSensitive: boolean;
+  wholeWord: boolean;
+  includeIgnored: boolean;
+  includePattern: string;
+  excludePattern: string;
+}
+
+/**
+ * A stable string capturing every input `search()` actually acts on. The
+ * store stamps this onto `session.searchedSignature` the moment it kicks off
+ * a real search; the query bar's auto-search effect recomputes it from the
+ * live (debounced query + current toggles) values and skips calling
+ * `search()` again when the two already match.
+ *
+ * This is what makes a component REMOUNT safe: `SearchResultsTab` is only
+ * mounted while its tab is active, so switching back to an already-searched
+ * tab re-runs the mount-time effect with `useDebouncedValue` seeded
+ * immediately (no delay on first render) — without this check that always
+ * looked like "the query changed" and re-triggered a full workspace scan,
+ * which also wiped `expanded`/`activeExcerptId` for no reason. An ACTUAL
+ * edit to the query or any option still produces a different signature, so
+ * it is never skipped.
+ *
+ * NUL-joined, mirroring `search.rs`'s `cursor_key` -- a byte that cannot
+ * appear in any of these fields, so no combination of values can collide
+ * with a different set of them the way plain concatenation could (query
+ * "a" + include-pattern "b" colliding with query "ab" + pattern "").
+ */
+export function searchSignature(input: SearchSignatureInput): string {
+  return [
+    input.query,
+    input.isRegex,
+    input.caseSensitive,
+    input.wholeWord,
+    input.includeIgnored,
+    input.includePattern,
+    input.excludePattern,
+  ].join('\u0000');
+}
+
 function pluralize(count: number, noun: string): string {
   return `${count} ${noun}${count === 1 ? '' : 's'}`;
 }

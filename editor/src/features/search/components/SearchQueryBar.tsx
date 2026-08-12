@@ -3,7 +3,7 @@ import { Search, EyeOff } from 'lucide-react';
 import { useSearchStore } from '../../../stores/search';
 import { useWorkspaceStore } from '../../../stores/workspace';
 import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
-import { autoSearchAction, summaryFor } from '../services/search-model';
+import { autoSearchAction, summaryFor, searchSignature } from '../services/search-model';
 import { pushQuery, historyStep } from '../services/query-history';
 
 interface SearchQueryBarProps {
@@ -42,9 +42,29 @@ function SearchQueryBar({ sessionId }: SearchQueryBarProps) {
   // Auto-search off the DEBOUNCED value only. Depending on anything that
   // changes identity per keystroke re-runs this per character and fires a
   // full workspace scan for each one — see the comment on autoSearchAction.
+  //
+  // This effect also fires on every MOUNT, including a remount: this tab's
+  // content (`SearchResultsTab`) only renders while it is the active tab, so
+  // switching away and back unmounts and remounts it, and `useDebouncedValue`
+  // seeds its state with the current value with no delay on first render —
+  // so a mount with an unchanged query looks identical to a real edit. The
+  // `searchedSignature` comparison below is what tells them apart: it's
+  // stamped on the session the moment a search actually runs, so an
+  // unchanged remount matches it and is skipped, while a genuine change to
+  // the query or any option produces a different signature and still runs.
   useEffect(() => {
     const action = autoSearchAction(debouncedQuery);
     if (action === 'search') {
+      const signature = searchSignature({
+        query: debouncedQuery,
+        isRegex: session?.isRegex ?? false,
+        caseSensitive: session?.caseSensitive ?? false,
+        wholeWord: session?.wholeWord ?? false,
+        includeIgnored: session?.includeIgnored ?? false,
+        includePattern: session?.includePattern ?? '',
+        excludePattern: session?.excludePattern ?? '',
+      });
+      if (session?.searchedSignature === signature) return;
       if (workspacePath) search(sessionId, workspacePath);
     } else if (action === 'clear') {
       clearResults(sessionId);

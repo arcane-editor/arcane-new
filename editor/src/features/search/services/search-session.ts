@@ -27,6 +27,12 @@ export interface SearchSession extends StreamState, SearchOptionsState {
   /** Excerpt id -> extra context lines revealed above/below. */
   expanded: Record<string, { up: number; down: number }>;
   activeExcerptId: string | null;
+  /** `searchSignature()` of the query+options combination this session last
+   *  actually searched (or attempted to), `null` if it never has. Lets the
+   *  query bar's auto-search effect tell an unchanged remount (switching
+   *  tabs back) apart from a real edit — see `searchSignature`'s doc comment
+   *  in `search-model.ts` for why that distinction matters. */
+  searchedSignature: string | null;
 }
 
 export type SearchSessions = Record<string, SearchSession>;
@@ -54,6 +60,7 @@ export function createSession(id: string): SearchSession {
     collapsedFiles: [],
     expanded: {},
     activeExcerptId: null,
+    searchedSignature: null,
   };
 }
 

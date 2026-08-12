@@ -6,11 +6,13 @@ export {
   applyComplete,
   autoSearchAction,
   summaryFor,
+  searchSignature,
   MIN_AUTO_SEARCH_CHARS,
   type AutoSearchAction,
   type StreamState,
   type SearchBatchPayload,
   type SearchCompletePayload,
+  type SearchSignatureInput,
 } from './services/search-model';
 export {
   createSession,

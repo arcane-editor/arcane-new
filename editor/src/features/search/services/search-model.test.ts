@@ -5,8 +5,10 @@ import {
   applyComplete,
   autoSearchAction,
   summaryFor,
+  searchSignature,
   MIN_AUTO_SEARCH_CHARS,
   type StreamState,
+  type SearchSignatureInput,
 } from './search-model';
 import { createSession, type SearchSession } from './search-session';
 import type { FileSearchResult } from '../../../types';
@@ -290,6 +292,59 @@ describe('autoSearchAction', () => {
     expect(MIN_AUTO_SEARCH_CHARS).toBe(3);
     expect(autoSearchAction('x'.repeat(MIN_AUTO_SEARCH_CHARS - 1))).toBe('idle');
     expect(autoSearchAction('x'.repeat(MIN_AUTO_SEARCH_CHARS))).toBe('search');
+  });
+});
+
+function signatureInput(overrides: Partial<SearchSignatureInput> = {}): SearchSignatureInput {
+  return {
+    query: 'todo',
+    isRegex: false,
+    caseSensitive: false,
+    wholeWord: false,
+    includeIgnored: false,
+    includePattern: '',
+    excludePattern: '',
+    ...overrides,
+  };
+}
+
+describe('searchSignature', () => {
+  // The query bar's auto-search effect gates a remount's search on this
+  // being byte-identical to what it computes from the live debounced query
+  // and toggles (A3 fix) — so it must be a pure, order-stable function of
+  // every field `search()` sends to the backend.
+  it('is identical for two calls with the same input', () => {
+    expect(searchSignature(signatureInput())).toBe(searchSignature(signatureInput()));
+  });
+
+  it('changes when the query changes', () => {
+    expect(searchSignature(signatureInput({ query: 'todo' }))).not.toBe(
+      searchSignature(signatureInput({ query: 'fixme' })),
+    );
+  });
+
+  it.each(['isRegex', 'caseSensitive', 'wholeWord', 'includeIgnored'] as const)(
+    'changes when %s toggles',
+    (key) => {
+      const base = searchSignature(signatureInput());
+      const toggled = searchSignature(signatureInput({ [key]: true }));
+      expect(toggled).not.toBe(base);
+    },
+  );
+
+  it('changes when includePattern or excludePattern changes', () => {
+    const base = searchSignature(signatureInput());
+    expect(searchSignature(signatureInput({ includePattern: 'Assets/**' }))).not.toBe(base);
+    expect(searchSignature(signatureInput({ excludePattern: '**/Editor/**' }))).not.toBe(base);
+  });
+
+  it('does not let a value shifted across the query/pattern boundary collide', () => {
+    // Plain concatenation would make query "a" + includePattern "b" equal
+    // query "ab" + includePattern "" — exactly the kind of false-negative
+    // that would make the auto-search gate wrongly skip a real search.
+    const a = searchSignature(signatureInput({ query: 'a', includePattern: 'b' }));
+    const b = searchSignature(signatureInput({ query: 'ab', includePattern: '' }));
+    expect(a).not.toBe(b);
   });
 });
 

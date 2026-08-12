@@ -10,6 +10,7 @@ import {
   sessionForSearchId,
   resolveCaseSensitive,
   clearFileLineCache,
+  searchSignature,
   type SearchSessions,
   type SearchSession,
   type StreamState,
@@ -125,6 +126,10 @@ export const useSearchStore = create<SearchState>((set, get) => ({
         searchError: null,
         expanded: {},
         activeExcerptId: null,
+        // Stamped from the pre-invoke `session` snapshot — the same query/
+        // option values `SearchQueryBar`'s auto-search effect will compare
+        // its own freshly computed signature against on a later remount.
+        searchedSignature: searchSignature(session),
       }),
     }));
 
@@ -199,6 +204,10 @@ export const useSearchStore = create<SearchState>((set, get) => ({
         activeSearchId: null,
         receivedFirstBatch: false,
         activeExcerptId: null,
+        // Must not survive a clear: otherwise re-typing the exact same query
+        // later would look "already searched" to the auto-search gate and
+        // silently skip a search that never actually ran.
+        searchedSignature: null,
       }),
     }));
   },
