@@ -36,6 +36,11 @@ export {
   type LineSegment,
 } from './services/highlight';
 export {
+  splitLines,
+  readFileLines,
+  clearFileLineCache,
+} from './services/file-lines';
+export {
   pushQuery,
   historyStep,
   resolveCaseSensitive,

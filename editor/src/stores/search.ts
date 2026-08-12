@@ -9,6 +9,7 @@ import {
   patchSession,
   sessionForSearchId,
   resolveCaseSensitive,
+  clearFileLineCache,
   type SearchSessions,
   type SearchSession,
   type StreamState,
@@ -134,6 +135,11 @@ export const useSearchStore = create<SearchState>((set, get) => ({
         settings['search.useSmartcase'],
       );
 
+      // Dropped here, not just on session creation: stale lines from a
+      // PREVIOUS search must never splice into results computed against a
+      // file that has since changed. Sits right before the invoke so no
+      // early return above it can start a search while skipping this.
+      clearFileLineCache();
       await invoke('start_content_search', {
         searchId: gen,
         sessionId: id,

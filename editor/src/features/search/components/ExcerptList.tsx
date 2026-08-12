@@ -1,13 +1,16 @@
-import { useCallback, useMemo, useRef } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useSearchStore } from '../../../stores/search';
 import { useWorkspaceStore } from '../../../stores/workspace';
-import { buildExcerpts } from '../services/excerpt-model';
+import { buildExcerpts, applyExpansion } from '../services/excerpt-model';
+import { readFileLines } from '../services/file-lines';
 import FileExcerptBlock from './FileExcerptBlock';
 
 const LINE_HEIGHT = 18;
 const HEADER_HEIGHT = 26;
 const EXPANDER_HEIGHT = 12;
+/** Real lines revealed per ⌃/⌄ click. */
+const EXPAND_STEP = 5;
 
 interface ExcerptListProps {
   sessionId: string;
@@ -19,14 +22,20 @@ function ExcerptList({ sessionId }: ExcerptListProps) {
   const workspacePath = useWorkspaceStore((s) => s.workspacePath);
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  const [fileLines, setFileLines] = useState<Record<string, string[]>>({});
+
   const blocks = useMemo(
     () =>
       (session?.results ?? []).map((file) => ({
         file,
-        excerpts: buildExcerpts(file),
+        excerpts: buildExcerpts(file).map((excerpt) => {
+          const expansion = session?.expanded[excerpt.id];
+          const lines = fileLines[file.path];
+          return expansion && lines ? applyExpansion(excerpt, lines, expansion) : excerpt;
+        }),
         collapsed: (session?.collapsedFiles ?? []).includes(file.path),
       })),
-    [session?.results, session?.collapsedFiles],
+    [session?.results, session?.collapsedFiles, fileLines, session?.expanded],
   );
 
   // Estimated from the excerpt shape rather than a constant: blocks differ by
@@ -87,9 +96,30 @@ function ExcerptList({ sessionId }: ExcerptListProps) {
     [sessionId, update],
   );
 
-  // Expansion is wired in Task 10; the handler exists here so the block's
-  // props are stable across both tasks.
-  const expand = useCallback(() => undefined, []);
+  // Excerpt ids are `${filePath}:${startLine}`; `lastIndexOf(':')` still
+  // finds the right split on Windows, where an absolute path contributes
+  // exactly one earlier colon (the drive letter, e.g. `D:/...`) — Windows
+  // paths cannot contain `:` anywhere else, so that colon is never the last
+  // one once `:${startLine}` is appended.
+  const expand = useCallback(
+    async (excerptId: string, direction: 'up' | 'down') => {
+      const filePath = excerptId.slice(0, excerptId.lastIndexOf(':'));
+      const lines = fileLines[filePath] ?? (await readFileLines(filePath));
+      setFileLines((prev) => (prev[filePath] ? prev : { ...prev, [filePath]: lines }));
+
+      const current = session?.expanded[excerptId] ?? { up: 0, down: 0 };
+      update(sessionId, {
+        expanded: {
+          ...(session?.expanded ?? {}),
+          [excerptId]: {
+            up: current.up + (direction === 'up' ? EXPAND_STEP : 0),
+            down: current.down + (direction === 'down' ? EXPAND_STEP : 0),
+          },
+        },
+      });
+    },
+    [fileLines, session?.expanded, sessionId, update],
+  );
 
   if (!session) return null;
 
