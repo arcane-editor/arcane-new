@@ -1089,15 +1089,32 @@ mod tests {
     fn context_captures_blank_lines_as_empty_strings() {
         // Blank lines are the single most common context line in real source;
         // dropping them (instead of returning "") would collapse the excerpt
-        // and misrepresent the file. CRLF endings are used deliberately: a
-        // blank CRLF-only line is exactly the case where the CR-strip in
-        // `line_ranges` (`content[end - 1] == b'\r'`) could underflow if the
-        // `end > start` guard were ever removed, so this also pins that the
-        // guard stays in place.
+        // and misrepresent the file. This pins that a blank line comes back
+        // as "" at its correct position in before/after, and that CRLF
+        // terminators are stripped from context lines the same as from the
+        // matched line itself. NOTE: this does NOT exercise the `end > start`
+        // underflow guard in `line_ranges` -- in a CRLF blank line the `\r`
+        // byte itself sits between `start` and the `\n`, so `end > start` is
+        // trivially true here and the guarded branch is never reached. See
+        // `line_ranges_guards_against_underflow_on_a_leading_blank_line` for
+        // the case that actually pins the guard.
         let m = literal_matcher("needle", false, false);
         let r = search_one_ctx(&m, "a\r\n\r\nneedle\r\n\r\nc\r\n", 2);
         assert_eq!(r.matches[0].before, vec!["a".to_string(), "".to_string()]);
         assert_eq!(r.matches[0].after, vec!["".to_string(), "c".to_string()]);
+    }
+
+    #[test]
+    fn line_ranges_guards_against_underflow_on_a_leading_blank_line() {
+        // A BARE-LF blank line with zero bytes before the terminator -- e.g.
+        // a file that starts with "\n" -- is the case that actually needs
+        // the `end > start` guard in `line_ranges`: for that first line,
+        // `end == start == 0`, so without the guard `content[end - 1]` is
+        // `content[0usize - 1]`, which panics ("attempt to subtract with
+        // overflow") rather than underflowing silently. Verified by mutation
+        // (see the fix report): deleting the guard makes this test panic
+        // with exactly that message; restoring it makes this test pass.
+        assert_eq!(line_ranges(b"\nx\n"), vec![(0, 0), (1, 2)]);
     }
 
     #[test]
