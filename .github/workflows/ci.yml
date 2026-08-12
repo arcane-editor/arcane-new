@@ -57,6 +57,18 @@ jobs:
       - name: JS tests
         run: cd editor && bun test src scripts
 
+      # Separate step, mirroring `bun run verify`'s own ordering (JS tests,
+      # THEN test:isolated, THEN Rust tests): these are deliberately excluded
+      # from `bun test src scripts` above (see e.g. search-tab-lifecycle.exec.ts
+      # and search-invalidation.exec.ts's file headers) because `mock.module`
+      # mutates Bun's module registry for the rest of whatever process runs
+      # it, so each needs its own process. Without this step CI had zero
+      # coverage of search:// tab lifecycle and cross-session search
+      # invalidation — the exact behaviour a green `bun test src` gave no
+      # signal on.
+      - name: JS tests (isolated processes)
+        run: cd editor && bun run test:isolated
+
       # verify:intellisense is deliberately NOT run here. It needs a real Unity
       # install, and its skip semantics (ARCANE_INTELLISENSE_E2E=required) make
       # a CI skip indistinguishable from a pass — which is precisely the failure

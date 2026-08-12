@@ -43,7 +43,7 @@ describe('commandBeatsShell', () => {
     const cases: Array<[string, string]> = [
       ['view.toggleMaximizedPanel', 'mod+shift+j'],
       ['palette.commands', 'mod+shift+p'],
-      ['search.focus', 'mod+shift+f'],
+      ['search.openTab', 'mod+shift+f'],
       ['tab.next', 'mod+alt+right'],
       ['tab.prev', 'mod+alt+left'],
       ['editor.formatDocument', 'shift+alt+f'],

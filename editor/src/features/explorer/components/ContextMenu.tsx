@@ -1,4 +1,4 @@
-import { FilePlus, FolderPlus, FileCode, Pencil, Trash2, Copy, FolderSymlink } from 'lucide-react';
+import { FilePlus, FolderPlus, FileCode, Pencil, Trash2, Copy, FolderSymlink, Search } from 'lucide-react';
 import { isMac } from '../../../utils/platform';
 import { useClampedMenuPosition } from '../../../hooks/useClampedMenuPosition';
 
@@ -18,6 +18,8 @@ interface ContextMenuProps {
   onCopyRelativePath?: () => void;
   /** Reveals the item in the OS file manager (shown when provided). */
   onRevealInOs?: () => void;
+  /** Opens a search tab scoped to this directory (shown when provided). */
+  onSearchInFolder?: () => void;
   onClose: () => void;
 }
 
@@ -32,6 +34,7 @@ function ContextMenu({
   onCopyPath,
   onCopyRelativePath,
   onRevealInOs,
+  onSearchInFolder,
   onClose,
 }: ContextMenuProps) {
   // Keeps the menu on screen when opened near a viewport edge — without this,
@@ -103,6 +106,18 @@ function ContextMenu({
           >
             <FileCode size={14} style={{ marginRight: 8, flexShrink: 0 }} />
             New C# Script…
+          </button>
+        )}
+        {onSearchInFolder && (
+          <button
+            className="context-menu-item"
+            onClick={() => handleItem(onSearchInFolder)}
+            style={menuItemStyle}
+            onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--hover)')}
+            onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+          >
+            <Search size={14} style={{ marginRight: 8, flexShrink: 0 }} />
+            Search in Folder
           </button>
         )}
         <div style={{ borderTop: '1px solid var(--border)', margin: '4px 0' }} />

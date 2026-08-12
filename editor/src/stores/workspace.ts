@@ -4,6 +4,7 @@ import { listenScoped } from '../utils/tauri-listener';
 import type { FileEntry, TreeNode, OpenFile, DiffInfo } from '../types';
 import { initMonaco, disposeModelForPath } from '../features/editor';
 import { applySaveResult } from '../utils/save-outcome';
+import { isVirtualPath } from '../utils/virtual-path';
 import {
   lspManager,
   registerLspProviders,
@@ -474,7 +475,7 @@ async function runLspStart(
     a.path === activeFilePath ? -1 : b.path === activeFilePath ? 1 : 0,
   );
   for (const file of sorted) {
-    if (file.path.startsWith('diff://') || file.path.startsWith('auth://')) continue;
+    if (isVirtualPath(file.path)) continue;
     const info = detectLanguage(file.name);
     if (info.lspServerKey === language && info.lspLanguageId) {
       forgetDocument(file.path);
@@ -790,6 +791,26 @@ async function fetchDiffContents(
   return { originalContent, modifiedContent, bothFailed, detail };
 }
 
+/**
+ * Keeps the search store's `activeSessionId` pointed at whichever `search://`
+ * tab is now the active editor tab — Task 11's results sidebar renders
+ * whichever session that id names, so a stale id would show one tab's
+ * results while a different search tab is on screen. `openSearchTab` already
+ * does this for a newly-created tab; this covers every other way a search
+ * tab can become active (a TabBar click via `setActiveFile`, or `closeFile`
+ * falling back to the next tab when the active one closes).
+ *
+ * Never creates a session — only `ensureSession` does that. Every open
+ * `search://` tab already has one (created in `openSearchTab`, torn down in
+ * `closeFile` at the same moment the tab itself closes), so by the time a
+ * tab can become active here, its session is guaranteed to already exist.
+ * No-ops for a non-search (or null) path.
+ */
+function syncActiveSearchSession(path: string | null): void {
+  if (!path || !path.startsWith('search://')) return;
+  useSearchStore.getState().setActiveSession(path);
+}
+
 interface WorkspaceState {
   workspacePath: string | null;
   assetsRootPath: string | null;
@@ -825,6 +846,10 @@ interface WorkspaceState {
     origPath?: string | null,
   ) => Promise<void>;
   openCommitDiffTab: (hash: string, filePath: string, title: string) => Promise<void>;
+  /** Opens a new search tab and returns its path (`search://<n>`). `seed`
+   *  pre-fills the query and/or the include glob — used by "Search in Folder"
+   *  and by seeding from the editor selection. */
+  openSearchTab: (seed?: { query?: string; includePattern?: string }) => string;
   /**
    * Re-read both sides of every open staged/unstaged diff tab. Called on
    * `git-state-changed` (stage, unstage, commit, checkout) and when a watched
@@ -918,7 +943,13 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     useProjectContextStore.getState().reset();
     useAiStore.getState().resetConversation();
     useGraphifyStore.getState().reset();
-    useSearchStore.getState().clearResults();
+    {
+      const { sessions, clearResults } = useSearchStore.getState();
+      // Every open search tab's results belong to the workspace being left —
+      // clear each session rather than just the default one now that search
+      // is session-keyed (one search per tab).
+      Object.keys(sessions).forEach((id) => clearResults(id));
+    }
 
     set({ isLoadingTree: true });
 
@@ -1219,6 +1250,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   },
 
   closeFile: (path: string) => {
+    if (path.startsWith('search://')) {
+      useSearchStore.getState().closeSession(path);
+    }
+
     // Notify the LSP server for this file's language before removing.
     const file = get().openFiles.find((f) => f.path === path);
     if (file) {
@@ -1253,12 +1288,23 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       }
       // Track for "Reopen Closed Tab" — skip virtual paths since they
       // require special re-open logic we don't have.
-      const isVirtual = path.startsWith('diff://') || path.startsWith('auth://');
+      const isVirtual = isVirtualPath(path);
       const recentlyClosed = isVirtual
         ? state.recentlyClosed
         : [path, ...state.recentlyClosed.filter((p) => p !== path)].slice(0, 20);
       return { openFiles, activeFilePath, recentlyClosed };
     });
+
+    // Covers two cases, both real: (1) closing the active tab fell back to a
+    // DIFFERENT search:// tab (e.g. closing a regular file left a search tab
+    // as the last one open) — activeSessionId must follow it, and nothing
+    // above set that up. (2) the closed tab itself was the search tab:
+    // `closeSession` above already retargeted `activeSessionId`, but to an
+    // ARBITRARY surviving session (`Object.keys(next)[0]`) that need not
+    // match whichever tab is actually active now — this call corrects that
+    // to the real one whenever the real one is also a search tab. No-ops
+    // only when the tab that ends up active isn't a search tab at all.
+    syncActiveSearchSession(get().activeFilePath);
   },
 
   popRecentlyClosed: () => {
@@ -1271,6 +1317,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
   setActiveFile: (path: string) => {
     set({ activeFilePath: path });
+    syncActiveSearchSession(path);
   },
 
   reorderTabs: (fromPath: string, toPath: string) => {
@@ -1345,7 +1392,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     const { openFiles } = get();
     const file = openFiles.find((f) => f.path === path);
     if (!file) return;
-    if (path.startsWith('diff://') || path.startsWith('auth://')) return;
+    if (isVirtualPath(path)) return;
     let content: string;
     try {
       content = await invoke<string>('read_file', { path });
@@ -1530,6 +1577,36 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     });
   },
 
+  openSearchTab: (seed) => {
+    // The probe below only checks currently-OPEN tabs, so a closed id CAN be
+    // handed out again — this only guarantees no collision with a LIVE tab,
+    // not that ids are never reused. Reuse is safe today only because of a
+    // property of `closeSession` (in stores/search.ts, not enforced here):
+    // closing a tab always leaves that id's entry either absent from
+    // `sessions` or freshly blank (the recreated-default-session case), so a
+    // later tab that reuses the id never inherits stale results.
+    const used = get().openFiles.filter((f) => f.path.startsWith('search://')).length;
+    let n = used + 1;
+    while (get().openFiles.some((f) => f.path === `search://${n}`)) n += 1;
+    const path = `search://${n}`;
+
+    const search = useSearchStore.getState();
+    search.ensureSession(path);
+    if (seed?.query !== undefined || seed?.includePattern !== undefined) {
+      search.update(path, {
+        ...(seed.query !== undefined ? { query: seed.query } : {}),
+        ...(seed.includePattern !== undefined ? { includePattern: seed.includePattern } : {}),
+      });
+    }
+    search.setActiveSession(path);
+
+    set((state) => ({
+      openFiles: [...state.openFiles, { path, name: 'Search', content: '', isDirty: false }],
+      activeFilePath: path,
+    }));
+    return path;
+  },
+
   refreshTree: async () => {
     const { workspacePath, assetsRootPath, tree: oldTree } = get();
     const rootPath = assetsRootPath ?? workspacePath;
@@ -1637,6 +1714,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         : state.activeFilePath;
       return { openFiles, activeFilePath };
     });
+    // Same fallback-to-last-remaining-tab shape as closeFile — the newly
+    // active tab can be a search:// one, so the search store's active
+    // session must follow it here too (see `syncActiveSearchSession`).
+    syncActiveSearchSession(get().activeFilePath);
     await get().refreshTree();
   },
 

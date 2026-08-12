@@ -95,6 +95,10 @@ describe('shouldPersistTab (A4: commit-diff tabs excluded from persistence)', ()
     // path segment — commit tabs must be excluded regardless of hash value.
     expect(shouldPersistTab('diff://commit/staged/Assets/Foo.cs')).toBe(false);
   });
+
+  it('never persists search tabs', () => {
+    expect(shouldPersistTab('search://1')).toBe(false);
+  });
 });
 
 describe('migrateRecents (legacy Windows paths in recents.json)', () => {

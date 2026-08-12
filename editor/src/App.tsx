@@ -69,6 +69,7 @@ import { checkReleaseChannel } from './config/api';
 import { useCommandsStore } from './stores/commands';
 import { listenScoped } from './utils/tauri-listener';
 import { useWorkspaceStore } from './stores/workspace';
+import { useSearchStore } from './stores/search';
 import { useUiStore } from './stores/ui';
 import { useTerminalStore } from './stores/terminal';
 import { useGitStore } from './stores/git';
@@ -94,7 +95,37 @@ import {
 import { useRecentsStore } from './stores/recents';
 import { confirmCloseDirty } from './utils/dirty-guard';
 import { safeUnlisten } from './utils/tauri-listener';
+import { getMonacoInstance } from './utils/monaco-instance';
 import type { Command } from './types';
+
+/** The editor selection, when the seed setting allows it. Returns '' when
+ *  there is nothing to seed with, so callers can treat it as falsy. */
+function selectionSeedQuery(): string {
+  const mode = useSettingsStore.getState().settings['search.seedQueryFromCursor'];
+  if (mode === 'never') return '';
+
+  // There is no "active editor" accessor in this codebase; Monaco's own
+  // registry is the source of truth. Prefer the focused editor, falling back
+  // to the only one open.
+  const monaco = getMonacoInstance();
+  const editors = monaco?.editor.getEditors() ?? [];
+  const editor = editors.find((e) => e.hasTextFocus()) ?? editors[0];
+  const selection = editor?.getSelection();
+  const model = editor?.getModel();
+  if (!editor || !selection || !model) return '';
+
+  if (selection.isEmpty()) {
+    if (mode !== 'always') return '';
+    const position = editor.getPosition();
+    if (!position) return '';
+    return model.getWordAtPosition(position)?.word ?? '';
+  }
+  // A multi-line selection is a range to search within, not a query — Zed
+  // treats it that way too. Seeding with it would produce a query that
+  // matches nothing.
+  if (selection.startLineNumber !== selection.endLineNumber) return '';
+  return model.getValueInRange(selection);
+}
 
 function App() {
   const workspacePath = useWorkspaceStore((s) => s.workspacePath);
@@ -836,13 +867,91 @@ function App() {
       handler: () => setPaletteMode('files'),
     },
     {
-      id: 'search.focus',
-      label: 'Search',
-      category: 'View',
+      id: 'search.openTab',
+      label: 'Search in Files',
+      category: 'Search',
       keybinding: 'mod+shift+f',
       handler: () => {
-        useUiStore.getState().setActiveSidebarView('search');
-        useUiStore.getState().setSidebarVisible(true);
+        const workspace = useWorkspaceStore.getState();
+        const existing = workspace.openFiles.find((f) => f.path.startsWith('search://'));
+        const seededQuery = selectionSeedQuery();
+        if (existing) {
+          workspace.setActiveFile(existing.path);
+          useSearchStore.getState().setActiveSession(existing.path);
+          if (seededQuery) useSearchStore.getState().update(existing.path, { query: seededQuery });
+          window.dispatchEvent(new CustomEvent('search-focus-query'));
+          return;
+        }
+        workspace.openSearchTab(seededQuery ? { query: seededQuery } : undefined);
+      },
+    },
+    {
+      id: 'search.newTab',
+      label: 'New Search',
+      category: 'Search',
+      handler: () => {
+        const seededQuery = selectionSeedQuery();
+        useWorkspaceStore.getState().openSearchTab(seededQuery ? { query: seededQuery } : undefined);
+      },
+    },
+    {
+      id: 'search.useSelection',
+      label: 'Use Selection for Find',
+      category: 'Search',
+      keybinding: 'mod+e',
+      // On mac, Cmd+E is Monaco's own `actions.findWithSelection` default
+      // (monaco-editor/esm/.../findController.js). Bridging this into Monaco
+      // via addCommand would consume the key unconditionally (bind-shortcuts.ts's
+      // `when()` guard only skips OUR handler, it can't hand the key back to
+      // Monaco's own binding), silently replacing Find-with-Selection with a
+      // no-op whenever no search tab is open (`update` on a missing session is
+      // a no-op — see patchSession). The document-level hotkey
+      // (KeyboardShortcutManager, enableOnFormTags/enableOnContentEditable) is
+      // enough to reach this from inside the editor.
+      skipMonacoBridge: true,
+      handler: () => {
+        const query = selectionSeedQuery();
+        if (!query) return;
+        const { activeSessionId, update } = useSearchStore.getState();
+        update(activeSessionId, { query });
+      },
+    },
+    {
+      id: 'search.toggleCase',
+      label: 'Toggle Match Case',
+      category: 'Search',
+      keybinding: 'mod+alt+c',
+      // Monaco's own `toggleFindCaseSensitive` is bound to Cmd+Alt+C on mac
+      // with `precondition: undefined` — active whenever the editor has
+      // focus, not just while the find widget is open. Same shadowing risk
+      // as search.useSelection above: skip the Monaco bridge.
+      skipMonacoBridge: true,
+      handler: () => {
+        const { activeSessionId, sessions, update } = useSearchStore.getState();
+        update(activeSessionId, { caseSensitive: !sessions[activeSessionId]?.caseSensitive });
+      },
+    },
+    {
+      id: 'search.toggleWholeWord',
+      label: 'Toggle Match Whole Word',
+      category: 'Search',
+      keybinding: 'mod+alt+w',
+      // Same as search.toggleCase: Monaco's `toggleFindWholeWord` owns
+      // Cmd+Alt+W on mac whenever the editor has focus.
+      skipMonacoBridge: true,
+      handler: () => {
+        const { activeSessionId, sessions, update } = useSearchStore.getState();
+        update(activeSessionId, { wholeWord: !sessions[activeSessionId]?.wholeWord });
+      },
+    },
+    {
+      id: 'search.toggleRegex',
+      label: 'Toggle Regular Expression',
+      category: 'Search',
+      keybinding: 'mod+alt+x',
+      handler: () => {
+        const { activeSessionId, sessions, update } = useSearchStore.getState();
+        update(activeSessionId, { isRegex: !sessions[activeSessionId]?.isRegex });
       },
     },
     {

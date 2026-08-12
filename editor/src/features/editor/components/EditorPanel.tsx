@@ -37,6 +37,7 @@ import { attachBreakpointGutter } from '../../debugger';
 import { registerInlineSuggestProvider } from '../../inline-suggest';
 import { MarkdownPreview, PlanDocumentView, isMarkdownPath, isPlanPath, type PlanNote } from '../../markdown-preview';
 import { planController } from '../../ai-panel';
+import { SearchResultsTab } from '../../search';
 import { fileUri } from '../../lsp';
 
 const detectLanguage = getMonacoLanguageId;
@@ -132,6 +133,10 @@ function EditorPanel() {
   const activeFile = openFiles.find((f) => f.path === activeFilePath);
   if (!activeFile) {
     return <WelcomeScreen />;
+  }
+
+  if (activeFile.path.startsWith('search://')) {
+    return <SearchResultsTab sessionId={activeFile.path} />;
   }
 
   const activeLanguage = detectLanguage(activeFile.name);

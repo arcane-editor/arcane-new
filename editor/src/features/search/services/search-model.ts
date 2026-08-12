@@ -3,13 +3,19 @@
 // bun-testable — see `search-model.test.ts` for the semantics this module
 // documents and locks in.
 //
-// Backend contract (Task B2, `src-tauri/src/search.rs`):
-//   - `start_content_search({ searchId, options })` — searchId is a frontend
-//     monotonic counter; a newer id automatically supersedes/cancels any
-//     older in-flight run.
-//   - `cancel_content_search({ searchId })` — advances the backend's cursor
-//     without starting a new run (pass an id strictly greater than the run
-//     you want to stop).
+// Backend contract (`src-tauri/src/search.rs`):
+//   - `start_content_search({ searchId, sessionId, options })` — `searchId`
+//     is a frontend monotonic counter, `sessionId` is the owning tab's path
+//     (`search://N`). The cancellation cursor is keyed by (window, session),
+//     so a newer id supersedes/cancels an older in-flight run only WITHIN
+//     the same session — two search tabs run fully concurrently. `options`
+//     carries every `ContentSearchOptions` field, notably `contextLines`
+//     (lines of context either side of a match; see `ContentSearchMatch`'s
+//     `before`/`after`) and `includeIgnored` (walk files .gitignore would
+//     otherwise exclude).
+//   - `cancel_content_search({ searchId, sessionId })` — advances that
+//     session's cursor without starting a new run (pass an id strictly
+//     greater than the run you want to stop).
 //   - `search-results-batch` events stream `{ searchId, results }` as files
 //     are matched.
 //   - Exactly one `search-complete` event `{ searchId, totalMatches,
@@ -17,7 +23,8 @@
 //     `cancelled` distinguishing a superseded/stopped run from one that ran
 //     to completion.
 
-import type { FileSearchResult, SearchMatch } from '../../../types';
+import type { FileSearchResult } from '../../../types';
+import type { SearchSession } from './search-session';
 
 /** The streaming-relevant slice of the search store's state. */
 export interface StreamState {
@@ -163,36 +170,94 @@ export function autoSearchAction(debouncedQuery: string): AutoSearchAction {
   return 'idle';
 }
 
-/** A single virtualized row in the flattened search results list (Task B4). */
-export type SearchRow =
-  | { kind: 'file'; file: FileSearchResult; collapsed: boolean }
-  | { kind: 'match'; filePath: string; match: SearchMatch };
+/** Every session field, PLUS every settings value, that changes what
+ *  `search()` sends to the backend. `useSmartcase`/`contextLines` are
+ *  settings (`stores/settings.ts`'s `search.useSmartcase`/
+ *  `search.contextLines`), not session fields — `search()` reads them fresh
+ *  from the settings store on every call (`resolveCaseSensitive`'s third
+ *  argument, and the `contextLines` option sent to the backend), so a
+ *  settings change alone, with the query and every session-owned option
+ *  unchanged, must still produce a different signature. */
+export interface SearchSignatureInput {
+  query: string;
+  isRegex: boolean;
+  caseSensitive: boolean;
+  wholeWord: boolean;
+  includeIgnored: boolean;
+  includePattern: string;
+  excludePattern: string;
+  useSmartcase: boolean;
+  contextLines: number;
+}
 
 /**
- * Flattens the tree-shaped `results` (files, each holding a list of matches)
- * into a single flat row list suitable for a virtualizer, which needs a
- * fixed, index-addressable item count rather than nested arrays.
+ * A stable string capturing every input `search()` actually acts on. The
+ * store stamps this onto `session.searchedSignature` the moment it kicks off
+ * a real search; the query bar's auto-search effect recomputes it from the
+ * live (debounced query + current toggles) values and skips calling
+ * `search()` again when the two already match.
  *
- * - Every file contributes exactly one `'file'` row, in the given order.
- * - A file's matches contribute one `'match'` row each, immediately after
- *   its file row, UNLESS the file's path is in `collapsed` — in which case
- *   its match rows are omitted entirely (collapse hides them, it doesn't
- *   just visually fold them).
- * - `collapsed` on the emitted file row mirrors membership in the `collapsed`
- *   set so the renderer doesn't need to re-check the set per row.
- * - Per-file `truncated` (and any other `FileSearchResult` fields) flow
- *   through unchanged via the `file` reference on the row.
+ * This is what makes a component REMOUNT safe: `SearchResultsTab` is only
+ * mounted while its tab is active, so switching back to an already-searched
+ * tab re-runs the mount-time effect with `useDebouncedValue` seeded
+ * immediately (no delay on first render) — without this check that always
+ * looked like "the query changed" and re-triggered a full workspace scan,
+ * which also wiped `expanded`/`activeExcerptId` for no reason. An ACTUAL
+ * edit to the query or any option still produces a different signature, so
+ * it is never skipped.
+ *
+ * NUL-joined, mirroring `search.rs`'s `cursor_key` -- a byte that cannot
+ * appear in any of these fields, so no combination of values can collide
+ * with a different set of them the way plain concatenation could (query
+ * "a" + include-pattern "b" colliding with query "ab" + pattern "").
  */
-export function flattenRows(results: FileSearchResult[], collapsed: Set<string>): SearchRow[] {
-  const rows: SearchRow[] = [];
-  for (const file of results) {
-    const isCollapsed = collapsed.has(file.path);
-    rows.push({ kind: 'file', file, collapsed: isCollapsed });
-    if (!isCollapsed) {
-      for (const match of file.matches) {
-        rows.push({ kind: 'match', filePath: file.path, match });
-      }
-    }
+export function searchSignature(input: SearchSignatureInput): string {
+  return [
+    input.query,
+    input.isRegex,
+    input.caseSensitive,
+    input.wholeWord,
+    input.includeIgnored,
+    input.includePattern,
+    input.excludePattern,
+    input.useSmartcase,
+    input.contextLines,
+  ].join('\u0000');
+}
+
+function pluralize(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? '' : 's'}`;
+}
+
+/**
+ * The query bar's status text (the "N in M files…" counter), as a pure
+ * function of one session. Pulled out of SearchQueryBar.tsx so its five
+ * states are directly bun-testable — this repo has no RTL, so logic left
+ * inline in a component cannot be tested at all.
+ *
+ * State precedence (first match wins):
+ *   1. `searchError` set — surface it verbatim.
+ *   2. `isSearching` — live count of batches accumulated so far, since the
+ *      store's totals only land on `search-complete`.
+ *   3. Completed with results — the settled totals from the backend.
+ *   4. Query long enough to have auto-searched, but zero results — "No results".
+ *   5. Otherwise (query too short / never searched) — empty string.
+ */
+export function summaryFor(session: SearchSession): string {
+  if (session.searchError) return session.searchError;
+
+  if (session.isSearching) {
+    const streamed = session.results.reduce((sum, f) => sum + f.matches.length, 0);
+    return `${streamed} in ${pluralize(session.results.length, 'file')}…`;
   }
-  return rows;
+
+  if (session.results.length > 0) {
+    return `${session.totalMatches} in ${pluralize(session.fileCount, 'file')}${session.truncated ? ' (capped)' : ''}`;
+  }
+
+  if (session.query.length >= MIN_AUTO_SEARCH_CHARS && session.activeSearchId !== null) {
+    return 'No results';
+  }
+
+  return '';
 }

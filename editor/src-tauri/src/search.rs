@@ -64,38 +64,115 @@ fn default_max_total_matches() -> usize {
 fn default_max_matches_per_file() -> usize {
     200
 }
+fn default_context_lines() -> usize {
+    2
+}
 
-/// Frontend-managed cancellation cursor, keyed by window label — mirrors
-/// `lsp.rs`/`file_scanner::FileWatcherState`/`file_index::FileIndexState` so
-/// a search started in one window can never cancel or race another window's
-/// in-flight search. Each label's cursor holds the id of that window's most
-/// recent search; any worker whose id differs from its window's cursor
-/// quits. Managed in `lib.rs` via `.manage(ContentSearchState::new())`.
+/// Byte ranges of each line in `content`, terminators excluded. Built once
+/// per file and shared by every match in it.
+fn line_ranges(content: &[u8]) -> Vec<(usize, usize)> {
+    let mut ranges = Vec::new();
+    let mut start = 0usize;
+    for (i, b) in content.iter().enumerate() {
+        if *b == b'\n' {
+            let mut end = i;
+            if end > start && content[end - 1] == b'\r' {
+                end -= 1;
+            }
+            ranges.push((start, end));
+            start = i + 1;
+        }
+    }
+    if start < content.len() {
+        ranges.push((start, content.len()));
+    }
+    ranges
+}
+
+/// Placeholder text for a context line whose bytes are not valid UTF-8. Must
+/// never be dropped instead of substituted: the frontend derives every
+/// context line's line number purely from `before`/`after` ARRAY LENGTH, not
+/// from any number attached to the line itself (`excerpt-model.ts`'s
+/// `windowFor` computes `start = match.lineNumber - before.length`). Dropping
+/// one undecodable line would silently shift the line number of every other
+/// context line in the excerpt.
+const UNDECODABLE_CONTEXT_LINE: &str = "<binary line>";
+
+/// `count` lines of context on one side of `line_number` (1-based). Clamped
+/// at both file boundaries. A line whose bytes are not valid UTF-8 is
+/// replaced with `UNDECODABLE_CONTEXT_LINE` rather than dropped, so the
+/// returned `Vec`'s length always equals `hi - lo` — unlike the sink, which
+/// ends the whole file's scan on an encoding error, this keeps going past a
+/// single corrupt context line without desynchronizing the rest of the
+/// excerpt's line numbers.
+fn context_lines_at(
+    content: &[u8],
+    ranges: &[(usize, usize)],
+    line_number: usize,
+    count: usize,
+    before: bool,
+) -> Vec<String> {
+    if count == 0 || line_number == 0 {
+        return Vec::new();
+    }
+    let idx = line_number - 1;
+    let (lo, hi) = if before {
+        (idx.saturating_sub(count), idx)
+    } else {
+        ((idx + 1).min(ranges.len()), (idx + 1 + count).min(ranges.len()))
+    };
+    ranges[lo..hi]
+        .iter()
+        .map(|(s, e)| {
+            std::str::from_utf8(&content[*s..*e])
+                .map(str::to_string)
+                .unwrap_or_else(|_| UNDECODABLE_CONTEXT_LINE.to_string())
+        })
+        .collect()
+}
+
+/// Frontend-managed cancellation cursor, keyed by window label AND session
+/// id — mirrors `lsp.rs`/`file_scanner::FileWatcherState`/
+/// `file_index::FileIndexState`'s per-window isolation, extended with a
+/// per-session dimension so two search tabs in the same window don't share a
+/// cursor either. Each (window, session) pair's cursor holds the id of that
+/// pair's most recent search; any worker whose id differs from its pair's
+/// cursor quits. Managed in `lib.rs` via `.manage(ContentSearchState::new())`.
 pub struct ContentSearchState(Mutex<HashMap<String, Arc<AtomicU64>>>);
+
+/// Key for the per-run cancellation cursor: window label AND session id.
+/// Keying by window alone let a search in one tab supersede a search still
+/// running in another, truncating it to partial results with no error and no
+/// sign anything was cut short. NUL is the separator because it cannot occur
+/// in a window label or a `search://n` id.
+fn cursor_key(label: &str, session_id: &str) -> String {
+    format!("{}\u{0}{}", label, session_id)
+}
 
 impl ContentSearchState {
     pub fn new() -> Self {
         Self(Mutex::new(HashMap::new()))
     }
 
-    /// Returns `label`'s cancellation cursor, creating a fresh
-    /// `Arc<AtomicU64>` (starting at 0) the first time this window is seen.
-    /// The returned `Arc` is cloned into the search's worker/emitter threads
-    /// so `cancel_content_search`/a newer `start_content_search` call for
-    /// this same label can advance it out from under them.
-    pub fn cursor(&self, label: &str) -> Arc<AtomicU64> {
+    /// Returns this window+session's cancellation cursor, creating a fresh
+    /// `Arc<AtomicU64>` (starting at 0) the first time the pair is seen. The
+    /// returned `Arc` is cloned into the search's worker/emitter threads so
+    /// `cancel_content_search`, or a newer `start_content_search` for the
+    /// same pair, can advance it out from under them.
+    pub fn cursor(&self, label: &str, session_id: &str) -> Arc<AtomicU64> {
         let mut map = lock_recover(&self.0);
-        map.entry(label.to_string()).or_default().clone()
+        map.entry(cursor_key(label, session_id)).or_default().clone()
     }
 
-    /// Drop this window's cursor, if any. Called from `WindowEvent::Destroyed`
-    /// cleanup in `lib.rs` — idempotent, a no-op if the window never started
-    /// a search. Any in-flight worker threads already hold their own `Arc`
-    /// clone of the cursor, so this doesn't cancel them; it only lets the
-    /// window's entry stop occupying the map after the window is gone.
+    /// Drop every session cursor belonging to this window. Called from
+    /// `WindowEvent::Destroyed` cleanup in `lib.rs` — idempotent, and a no-op
+    /// if the window never started a search. In-flight workers hold their own
+    /// `Arc` clone, so this does not cancel them; it only stops the entries
+    /// occupying the map after the window is gone.
     pub fn drop_window(&self, label: &str) {
+        let prefix = format!("{}\u{0}", label);
         let mut map = lock_recover(&self.0);
-        map.remove(label);
+        map.retain(|k, _| !k.starts_with(&prefix));
     }
 }
 
@@ -120,6 +197,11 @@ pub struct ContentSearchOptions {
     pub include_patterns: Vec<String>,
     #[serde(default)]
     pub exclude_patterns: Vec<String>,
+    /// Walk files excluded by .gitignore / global gitignore / .git/info/exclude
+    /// (see `walk_policy::WalkOptions`). Defaults to `false` — a missing key
+    /// (older callers) behaves exactly as before this field existed.
+    #[serde(default)]
+    pub include_ignored: bool,
     #[serde(default)]
     pub file_extensions: Option<Vec<String>>,
     /// `number | null` on the frontend: an explicit JSON `null` and a
@@ -133,6 +215,10 @@ pub struct ContentSearchOptions {
     pub max_total_matches: Option<usize>,
     /// See `max_total_matches`; resolved to `default_max_matches_per_file()`.
     pub max_matches_per_file: Option<usize>,
+    /// Lines of context to include either side of each match. `None` and an
+    /// explicit JSON `null` both mean "use the default" — same `Option`
+    /// treatment as `max_total_matches` above, and for the same reason.
+    pub context_lines: Option<usize>,
 }
 
 /// A single match within a line. Field names serialize to camelCase so the
@@ -151,6 +237,11 @@ pub struct ContentSearchMatch {
     /// UTF-16 offset in the original line where `line_content` begins
     /// (0 when the line was not trimmed).
     pub line_start: usize,
+    /// Up to `context_lines` lines immediately preceding `line_number`, in
+    /// file order. Line terminators stripped; never preview-trimmed.
+    pub before: Vec<String>,
+    /// Up to `context_lines` lines immediately following `line_number`.
+    pub after: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -203,6 +294,8 @@ struct Engine {
     file_extensions: Option<Vec<String>>,
     max_total_matches: usize,
     max_matches_per_file: usize,
+    context_lines: usize,
+    include_ignored: bool,
     threads: usize,
 }
 
@@ -243,6 +336,8 @@ impl Engine {
                 .max_matches_per_file
                 .unwrap_or_else(default_max_matches_per_file)
                 .max(1),
+            context_lines: options.context_lines.unwrap_or_else(default_context_lines),
+            include_ignored: options.include_ignored,
             threads,
         })
     }
@@ -349,18 +444,29 @@ fn build_searcher() -> Searcher {
 }
 
 /// Searches a single file's `content` with `matcher`, returning up to
-/// `max_matches_per_file` matches (with `truncated` set if capped). Pure and
-/// AppHandle-free for direct unit testing. `searcher` is reused across files by
-/// each worker; `path` is copied verbatim into the result.
+/// `max_matches_per_file` matches (with `truncated` set if capped), each
+/// carrying up to `context_lines` lines of surrounding context on either
+/// side (0 disables context entirely). Pure and AppHandle-free for direct
+/// unit testing. `searcher` is reused across files by each worker; `path` is
+/// copied verbatim into the result.
 pub fn search_file(
     searcher: &mut Searcher,
     matcher: &RegexMatcher,
     path: &str,
     content: &[u8],
     max_matches_per_file: usize,
+    context_lines: usize,
 ) -> ContentFileResult {
     let mut matches: Vec<ContentSearchMatch> = Vec::new();
     let mut truncated = false;
+
+    // Built once per file; empty when context is off so a zero-context search
+    // pays nothing for this.
+    let ranges = if context_lines > 0 {
+        line_ranges(content)
+    } else {
+        Vec::new()
+    };
 
     let sink = UTF8(|line_number, line| {
         // The UTF8 sink hands us the line including its terminator.
@@ -387,6 +493,8 @@ pub fn search_file(
                 match_start: ms16,
                 match_end: me16,
                 line_start: line_start16,
+                before: context_lines_at(content, &ranges, line_number as usize, context_lines, true),
+                after: context_lines_at(content, &ranges, line_number as usize, context_lines, false),
             });
             true
         });
@@ -470,6 +578,7 @@ fn process_and_send(
         &abs_path,
         &content,
         engine.max_matches_per_file,
+        engine.context_lines,
     );
     if result.matches.is_empty() {
         return WalkState::Continue;
@@ -559,9 +668,12 @@ fn run_walk(
     tx: Sender<ContentFileResult>,
 ) {
     let ws_prefix = with_trailing_slash(&engine.workspace_path);
-    let walker = walk_policy::policy_walker(&engine.workspace_path)
-        .threads(engine.threads)
-        .build_parallel();
+    let walker = walk_policy::policy_walker_with(
+        &engine.workspace_path,
+        walk_policy::WalkOptions { include_ignored: engine.include_ignored },
+    )
+    .threads(engine.threads)
+    .build_parallel();
 
     // Owned clones moved into the `mkf` closure (must be `Send`; a plain
     // `&Sender` is not `Send`, so ownership is required).
@@ -776,8 +888,9 @@ fn emit_event(app: &AppHandle, label: &str, event: ContentEvent) {
 ///
 /// `window` is auto-injected by Tauri (no frontend invoke change needed —
 /// same precedent as `terminal.rs`'s `terminal_spawn`); the cancellation
-/// cursor is keyed by `window.label()` so a search started in one window
-/// can't be cancelled by, or race, another window's search.
+/// cursor is keyed by `window.label()` AND `session_id` so a search started
+/// in one window/tab can't be cancelled by, or race, another window's or
+/// another tab's search.
 ///
 /// `#[tauri::command(async)]` keeps even the (small) validation off the UI
 /// thread.
@@ -787,11 +900,12 @@ pub fn start_content_search(
     state: State<'_, ContentSearchState>,
     window: Window,
     search_id: u64,
+    session_id: String,
     options: ContentSearchOptions,
 ) -> Result<(), String> {
     let engine = Engine::build(&options)?;
     let label = window.label().to_string();
-    let latest = state.cursor(&label);
+    let latest = state.cursor(&label, &session_id);
     // This search becomes the current one; any older run's workers now see a
     // mismatched id and quit.
     latest.store(search_id, Ordering::SeqCst);
@@ -805,14 +919,20 @@ pub fn start_content_search(
 }
 
 /// Cancels any in-flight search older than `search_id` for the calling
-/// window by advancing its cursor. To cancel a run with id `k` without
-/// starting a new one, pass a `search_id` strictly greater than `k` (e.g. the
-/// frontend's next counter tick); workers whose id no longer equals the
-/// cursor quit, and the run still emits `search-complete` with
-/// `cancelled: true`. Only the calling window's cursor is touched.
+/// window+session by advancing its cursor. To cancel a run with id `k`
+/// without starting a new one, pass a `search_id` strictly greater than `k`
+/// (e.g. the frontend's next counter tick); workers whose id no longer
+/// equals the cursor quit, and the run still emits `search-complete` with
+/// `cancelled: true`. Only the calling window's `session_id` cursor is
+/// touched.
 #[tauri::command]
-pub fn cancel_content_search(state: State<'_, ContentSearchState>, window: Window, search_id: u64) {
-    let latest = state.cursor(window.label());
+pub fn cancel_content_search(
+    state: State<'_, ContentSearchState>,
+    window: Window,
+    search_id: u64,
+    session_id: String,
+) {
+    let latest = state.cursor(window.label(), &session_id);
     latest.fetch_max(search_id, Ordering::SeqCst);
 }
 
@@ -833,9 +953,11 @@ mod tests {
             whole_word: false,
             include_patterns: vec![],
             exclude_patterns: vec![],
+            include_ignored: false,
             file_extensions: None,
             max_total_matches: Some(default_max_total_matches()),
             max_matches_per_file: Some(default_max_matches_per_file()),
+            context_lines: None,
         }
     }
 
@@ -897,7 +1019,7 @@ mod tests {
 
     fn search_one(matcher: &RegexMatcher, content: &str, cap: usize) -> ContentFileResult {
         let mut searcher = build_searcher();
-        search_file(&mut searcher, matcher, "/tmp/x", content.as_bytes(), cap)
+        search_file(&mut searcher, matcher, "/tmp/x", content.as_bytes(), cap, 0)
     }
 
     fn literal_matcher(query: &str, case_sensitive: bool, whole_word: bool) -> RegexMatcher {
@@ -906,6 +1028,158 @@ mod tests {
             .word(whole_word)
             .build(&regex::escape(query))
             .unwrap()
+    }
+
+    // ── search_file: context lines ──────────────────────────────────────
+
+    fn search_one_ctx(m: &RegexMatcher, content: &str, context: usize) -> ContentFileResult {
+        let mut searcher = build_searcher();
+        search_file(&mut searcher, m, "/tmp/f", content.as_bytes(), 200, context)
+    }
+
+    #[test]
+    fn context_lines_are_captured_both_sides() {
+        let m = literal_matcher("needle", false, false);
+        let r = search_one_ctx(&m, "a\nb\nneedle\nc\nd\n", 2);
+        assert_eq!(r.matches.len(), 1);
+        assert_eq!(r.matches[0].line_number, 3);
+        assert_eq!(r.matches[0].before, vec!["a".to_string(), "b".to_string()]);
+        assert_eq!(r.matches[0].after, vec!["c".to_string(), "d".to_string()]);
+    }
+
+    #[test]
+    fn context_clamps_at_start_of_file() {
+        let m = literal_matcher("needle", false, false);
+        let r = search_one_ctx(&m, "needle\nb\nc\n", 2);
+        assert!(r.matches[0].before.is_empty());
+        assert_eq!(r.matches[0].after, vec!["b".to_string(), "c".to_string()]);
+    }
+
+    #[test]
+    fn context_clamps_at_end_of_file() {
+        let m = literal_matcher("needle", false, false);
+        let r = search_one_ctx(&m, "a\nb\nneedle\n", 2);
+        assert_eq!(r.matches[0].before, vec!["a".to_string(), "b".to_string()]);
+        assert!(r.matches[0].after.is_empty());
+    }
+
+    #[test]
+    fn context_strips_crlf_terminators() {
+        let m = literal_matcher("needle", false, false);
+        let r = search_one_ctx(&m, "a\r\nneedle\r\nc\r\n", 1);
+        assert_eq!(r.matches[0].before, vec!["a".to_string()]);
+        assert_eq!(r.matches[0].after, vec!["c".to_string()]);
+    }
+
+    #[test]
+    fn zero_context_yields_no_context_lines() {
+        let m = literal_matcher("needle", false, false);
+        let r = search_one_ctx(&m, "a\nneedle\nc\n", 0);
+        assert!(r.matches[0].before.is_empty());
+        assert!(r.matches[0].after.is_empty());
+    }
+
+    #[test]
+    fn context_lines_are_not_preview_trimmed() {
+        // A long context line stays whole: trimming is a match-window concern,
+        // and there is no match on a context line to centre a window on.
+        let m = literal_matcher("needle", false, false);
+        let long = "x".repeat(600);
+        let content = format!("{}\nneedle\n", long);
+        let r = search_one_ctx(&m, &content, 1);
+        assert_eq!(r.matches[0].before[0].chars().count(), 600);
+    }
+
+    #[test]
+    fn two_matches_on_adjacent_lines_each_carry_their_own_context() {
+        let m = literal_matcher("needle", false, false);
+        let r = search_one_ctx(&m, "a\nneedle\nneedle\nb\n", 1);
+        assert_eq!(r.matches.len(), 2);
+        assert_eq!(r.matches[0].after, vec!["needle".to_string()]);
+        assert_eq!(r.matches[1].before, vec!["needle".to_string()]);
+    }
+
+    #[test]
+    fn context_line_survives_missing_trailing_newline() {
+        // Real files very often lack a final newline. `line_ranges`'s
+        // post-loop `if start < content.len()` is what captures that last,
+        // terminator-less line -- without it, the final line of the file
+        // would silently vanish from every excerpt that needs it as context.
+        let m = literal_matcher("needle", false, false);
+        let r = search_one_ctx(&m, "a\nneedle\nc", 1); // no trailing "\n" after "c"
+        assert_eq!(r.matches[0].before, vec!["a".to_string()]);
+        assert_eq!(r.matches[0].after, vec!["c".to_string()]);
+    }
+
+    #[test]
+    fn context_captures_blank_lines_as_empty_strings() {
+        // Blank lines are the single most common context line in real source;
+        // dropping them (instead of returning "") would collapse the excerpt
+        // and misrepresent the file. This pins that a blank line comes back
+        // as "" at its correct position in before/after, and that CRLF
+        // terminators are stripped from context lines the same as from the
+        // matched line itself. NOTE: this does NOT exercise the `end > start`
+        // underflow guard in `line_ranges` -- in a CRLF blank line the `\r`
+        // byte itself sits between `start` and the `\n`, so `end > start` is
+        // trivially true here and the guarded branch is never reached. See
+        // `line_ranges_guards_against_underflow_on_a_leading_blank_line` for
+        // the case that actually pins the guard.
+        let m = literal_matcher("needle", false, false);
+        let r = search_one_ctx(&m, "a\r\n\r\nneedle\r\n\r\nc\r\n", 2);
+        assert_eq!(r.matches[0].before, vec!["a".to_string(), "".to_string()]);
+        assert_eq!(r.matches[0].after, vec!["".to_string(), "c".to_string()]);
+    }
+
+    #[test]
+    fn context_line_with_invalid_utf8_is_replaced_not_dropped() {
+        // Line 2 is a single invalid UTF-8 byte (a bare continuation byte --
+        // it cannot start or complete any valid sequence), simulating a
+        // Latin-1 file with no NUL byte (so binary detection doesn't skip
+        // it). The matched line itself ("needle") is plain ASCII, so the
+        // search sink finds it fine -- only the CONTEXT read, which walks
+        // `content` directly rather than through the sink, ever sees the bad
+        // byte. If that line were dropped instead of replaced, `before`
+        // would come back with length 1 instead of 2, and per
+        // `excerpt-model.ts`'s `start = match.lineNumber - before.length`,
+        // every line in the rendered excerpt -- including the match's own
+        // displayed position -- would be numbered one line too high.
+        let m = literal_matcher("needle", false, false);
+        let mut content: Vec<u8> = Vec::new();
+        content.extend_from_slice(b"a\n");
+        content.push(0x80); // invalid standalone UTF-8 continuation byte
+        content.extend_from_slice(b"\nb\nneedle\nc\n");
+        let mut searcher = build_searcher();
+        let r = search_file(&mut searcher, &m, "/tmp/f", &content, 200, 2);
+        assert_eq!(r.matches.len(), 1);
+        assert_eq!(r.matches[0].line_number, 4, "match line number must not shift");
+        assert_eq!(
+            r.matches[0].before,
+            vec!["<binary line>".to_string(), "b".to_string()],
+            "the undecodable line must be replaced, not dropped, so `before.length` stays 2"
+        );
+        assert_eq!(r.matches[0].after, vec!["c".to_string()]);
+    }
+
+    #[test]
+    fn line_ranges_guards_against_underflow_on_a_leading_blank_line() {
+        // A BARE-LF blank line with zero bytes before the terminator -- e.g.
+        // a file that starts with "\n" -- is the case that actually needs
+        // the `end > start` guard in `line_ranges`: for that first line,
+        // `end == start == 0`, so without the guard `content[end - 1]` is
+        // `content[0usize - 1]`, which panics ("attempt to subtract with
+        // overflow") rather than underflowing silently. Verified by mutation
+        // (see the fix report): deleting the guard makes this test panic
+        // with exactly that message; restoring it makes this test pass.
+        assert_eq!(line_ranges(b"\nx\n"), vec![(0, 0), (1, 2)]);
+    }
+
+    #[test]
+    fn line_ranges_empty_content_yields_empty_vec() {
+        // An empty file can't be reached through a match (there is nothing to
+        // match), so this exercises `line_ranges` directly: both the scan
+        // loop and the post-loop trailing-line push must no-op on it rather
+        // than fabricating a spurious single empty line.
+        assert!(line_ranges(b"").is_empty());
     }
 
     // ── build_globset ───────────────────────────────────────────────────
@@ -1061,7 +1335,7 @@ mod tests {
         let mut content = Vec::from(&b"\x00binary blob "[..]);
         content.extend_from_slice(b"secret here\n");
         let mut searcher = build_searcher();
-        let r = search_file(&mut searcher, &m, "/tmp/bin", &content, 200);
+        let r = search_file(&mut searcher, &m, "/tmp/bin", &content, 200, 0);
         assert!(r.matches.is_empty(), "binary file should yield no matches");
     }
 
@@ -1166,6 +1440,45 @@ mod tests {
         let engine = Engine::build(&opts).expect("engine should build");
         assert_eq!(engine.max_total_matches, default_max_total_matches());
         assert_eq!(engine.max_matches_per_file, default_max_matches_per_file());
+    }
+
+    // Regression test: a typed Rust struct literal builds `ContentSearchOptions`
+    // directly and so can't catch a field-name mismatch (camelCase drift) or a
+    // nullability mismatch (explicit JSON `null` vs. a missing key) at the
+    // invoke boundary with the frontend. This crosses that boundary for real —
+    // the JSON below is the literal options object `stores/search.ts`'s
+    // `search()` passes to `invoke('start_content_search', ...)`, field for
+    // field, including the explicit `null`s it sends for `contextLines` (and
+    // the other optional caps).
+    #[test]
+    fn options_deserialize_from_the_frontend_payload_verbatim() {
+        let json = r#"{
+            "workspacePath": "/tmp/ws",
+            "query": "needle",
+            "isRegex": false,
+            "caseSensitive": false,
+            "wholeWord": false,
+            "includePatterns": [],
+            "excludePatterns": [],
+            "includeIgnored": true,
+            "contextLines": null,
+            "fileExtensions": null,
+            "maxTotalMatches": null,
+            "maxMatchesPerFile": null
+        }"#;
+
+        let opts: ContentSearchOptions =
+            serde_json::from_str(json).expect("frontend payload shape must deserialize");
+        assert!(opts.include_ignored, "includeIgnored: true must deserialize to true");
+        assert_eq!(opts.context_lines, None, "explicit null must deserialize to None");
+
+        let engine = Engine::build(&opts).expect("engine should build");
+        assert!(engine.include_ignored, "Engine must carry include_ignored through");
+        assert_eq!(
+            engine.context_lines,
+            default_context_lines(),
+            "explicit null contextLines must resolve to the default of 2"
+        );
     }
 
     // ── engine end-to-end: basic streaming ──────────────────────────────
@@ -1331,7 +1644,7 @@ mod tests {
     #[test]
     fn cancel_advances_latest_monotonically() {
         let state = ContentSearchState::new();
-        let latest = state.cursor("test");
+        let latest = state.cursor("test", "search://1");
         latest.store(5, Ordering::SeqCst);
         // fetch_max: a lower id does not regress latest.
         latest.fetch_max(3, Ordering::SeqCst);
@@ -1339,9 +1652,9 @@ mod tests {
         // A higher id advances it (cancelling run 5).
         latest.fetch_max(9, Ordering::SeqCst);
         assert_eq!(latest.load(Ordering::SeqCst), 9);
-        // The cursor fetched again for the same label is the same one --
-        // `cursor` returns a clone of the same Arc, not a fresh one.
-        assert_eq!(state.cursor("test").load(Ordering::SeqCst), 9);
+        // The cursor fetched again for the same label+session is the same one
+        // -- `cursor` returns a clone of the same Arc, not a fresh one.
+        assert_eq!(state.cursor("test", "search://1").load(Ordering::SeqCst), 9);
     }
 
     // ── ContentSearchState: per-label independence (multi-window) ───────
@@ -1354,8 +1667,8 @@ mod tests {
     #[test]
     fn two_labels_get_independent_cursors() {
         let state = ContentSearchState::new();
-        let cursor_a = state.cursor("window-a");
-        let cursor_b = state.cursor("window-b");
+        let cursor_a = state.cursor("window-a", "search://1");
+        let cursor_b = state.cursor("window-b", "search://1");
 
         cursor_a.store(7, Ordering::SeqCst);
 
@@ -1371,16 +1684,49 @@ mod tests {
     #[test]
     fn drop_window_removes_only_that_labels_cursor() {
         let state = ContentSearchState::new();
-        let cursor_a = state.cursor("window-a");
+        let cursor_a = state.cursor("window-a", "search://1");
         cursor_a.store(42, Ordering::SeqCst);
-        let _cursor_b = state.cursor("window-b");
+        let _cursor_b = state.cursor("window-b", "search://1");
 
         state.drop_window("window-a");
 
-        // A fresh `cursor("window-a")` call after drop must start over at 0
-        // rather than resurrecting the old Arc's value.
-        assert_eq!(state.cursor("window-a").load(Ordering::SeqCst), 0);
+        // A fresh `cursor("window-a", ...)` call after drop must start over
+        // at 0 rather than resurrecting the old Arc's value.
+        assert_eq!(state.cursor("window-a", "search://1").load(Ordering::SeqCst), 0);
         // window-b is untouched.
-        assert_eq!(state.cursor("window-b").load(Ordering::SeqCst), 0);
+        assert_eq!(state.cursor("window-b", "search://1").load(Ordering::SeqCst), 0);
+    }
+
+    // ── ContentSearchState: per-session independence (Task 2) ───────────
+    //
+    // Two search tabs in the same window must not share a cursor: starting a
+    // search in tab B must not be able to supersede/cancel a search still
+    // running in tab A.
+
+    #[test]
+    fn cursors_are_independent_per_session() {
+        let state = ContentSearchState::new();
+        let a = state.cursor("main", "search://1");
+        let b = state.cursor("main", "search://2");
+        a.store(5, Ordering::SeqCst);
+        assert_eq!(b.load(Ordering::SeqCst), 0, "sessions must not share a cursor");
+    }
+
+    #[test]
+    fn same_session_returns_the_same_cursor() {
+        let state = ContentSearchState::new();
+        let a = state.cursor("main", "search://1");
+        a.store(7, Ordering::SeqCst);
+        assert_eq!(state.cursor("main", "search://1").load(Ordering::SeqCst), 7);
+    }
+
+    #[test]
+    fn drop_window_clears_every_session_of_that_window_only() {
+        let state = ContentSearchState::new();
+        state.cursor("main", "search://1").store(3, Ordering::SeqCst);
+        state.cursor("other", "search://1").store(4, Ordering::SeqCst);
+        state.drop_window("main");
+        assert_eq!(state.cursor("main", "search://1").load(Ordering::SeqCst), 0);
+        assert_eq!(state.cursor("other", "search://1").load(Ordering::SeqCst), 4);
     }
 }
