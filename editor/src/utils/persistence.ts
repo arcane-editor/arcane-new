@@ -432,7 +432,13 @@ export type RestorePlan =
  * write these tabs out in the first place.
  */
 export function shouldPersistTab(path: string): boolean {
-  return !path.startsWith('auth://') && !path.startsWith('diff://commit/');
+  return (
+    !path.startsWith('auth://') &&
+    !path.startsWith('diff://commit/') &&
+    // Search tabs hold a live query and streamed results, neither of which
+    // survives a restart in any useful form.
+    !path.startsWith('search://')
+  );
 }
 
 export function planFileRestore(entry: PersistedOpenFile): RestorePlan {

@@ -4,6 +4,7 @@ import { listenScoped } from '../utils/tauri-listener';
 import type { FileEntry, TreeNode, OpenFile, DiffInfo } from '../types';
 import { initMonaco, disposeModelForPath } from '../features/editor';
 import { applySaveResult } from '../utils/save-outcome';
+import { isVirtualPath } from '../utils/virtual-path';
 import {
   lspManager,
   registerLspProviders,
@@ -474,7 +475,7 @@ async function runLspStart(
     a.path === activeFilePath ? -1 : b.path === activeFilePath ? 1 : 0,
   );
   for (const file of sorted) {
-    if (file.path.startsWith('diff://') || file.path.startsWith('auth://')) continue;
+    if (isVirtualPath(file.path)) continue;
     const info = detectLanguage(file.name);
     if (info.lspServerKey === language && info.lspLanguageId) {
       forgetDocument(file.path);
@@ -1253,7 +1254,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       }
       // Track for "Reopen Closed Tab" — skip virtual paths since they
       // require special re-open logic we don't have.
-      const isVirtual = path.startsWith('diff://') || path.startsWith('auth://');
+      const isVirtual = isVirtualPath(path);
       const recentlyClosed = isVirtual
         ? state.recentlyClosed
         : [path, ...state.recentlyClosed.filter((p) => p !== path)].slice(0, 20);
@@ -1345,7 +1346,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     const { openFiles } = get();
     const file = openFiles.find((f) => f.path === path);
     if (!file) return;
-    if (path.startsWith('diff://') || path.startsWith('auth://')) return;
+    if (isVirtualPath(path)) return;
     let content: string;
     try {
       content = await invoke<string>('read_file', { path });
