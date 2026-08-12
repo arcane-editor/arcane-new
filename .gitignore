@@ -88,3 +88,10 @@ gitCommand.md
 
 # Local dev build output (installers pulled from CI artifacts)
 dev/
+
+# ── Agent scratch ────────────────────────────────────────────────────────────
+# Isolated worktrees created for a single piece of work, and the per-plan
+# execution ledgers/briefs/review packages that go with them. Both are
+# scratch: the branch history is the record, not these directories.
+.claude/worktrees/
+.superpowers/
