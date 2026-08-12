@@ -246,6 +246,13 @@ standing rule in CLAUDE.md.
 built from memory already in hand — no `SearcherBuilder` context configuration,
 no sink rework, and a pure function that unit-tests without a filesystem.
 
+**Per-session cancellation.** The cancellation cursor is keyed by window
+label, so a search started in one tab supersedes a search still running in
+another — the second tab keeps whatever partial results it had, with no error
+and no indication anything was cut short. Multiple search tabs make this
+reachable, so the cursor is keyed by window **and** session, and both search
+commands take a `sessionId`.
+
 **Options.** `ContentSearchOptions` gains `contextLines` and `includeIgnored`.
 `includeIgnored` requires `walk_policy` to accept an options struct rather than
 growing a second entry point, and the explorer and quick-open callers must come
