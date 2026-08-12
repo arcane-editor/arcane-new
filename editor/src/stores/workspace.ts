@@ -919,7 +919,13 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     useProjectContextStore.getState().reset();
     useAiStore.getState().resetConversation();
     useGraphifyStore.getState().reset();
-    useSearchStore.getState().clearResults();
+    {
+      const { sessions, clearResults } = useSearchStore.getState();
+      // Every open search tab's results belong to the workspace being left —
+      // clear each session rather than just the default one now that search
+      // is session-keyed (one search per tab).
+      Object.keys(sessions).forEach((id) => clearResults(id));
+    }
 
     set({ isLoadingTree: true });
 

@@ -65,37 +65,48 @@ fn default_max_matches_per_file() -> usize {
     200
 }
 
-/// Frontend-managed cancellation cursor, keyed by window label — mirrors
-/// `lsp.rs`/`file_scanner::FileWatcherState`/`file_index::FileIndexState` so
-/// a search started in one window can never cancel or race another window's
-/// in-flight search. Each label's cursor holds the id of that window's most
-/// recent search; any worker whose id differs from its window's cursor
-/// quits. Managed in `lib.rs` via `.manage(ContentSearchState::new())`.
+/// Frontend-managed cancellation cursor, keyed by window label AND session
+/// id — mirrors `lsp.rs`/`file_scanner::FileWatcherState`/
+/// `file_index::FileIndexState`'s per-window isolation, extended with a
+/// per-session dimension so two search tabs in the same window don't share a
+/// cursor either. Each (window, session) pair's cursor holds the id of that
+/// pair's most recent search; any worker whose id differs from its pair's
+/// cursor quits. Managed in `lib.rs` via `.manage(ContentSearchState::new())`.
 pub struct ContentSearchState(Mutex<HashMap<String, Arc<AtomicU64>>>);
+
+/// Key for the per-run cancellation cursor: window label AND session id.
+/// Keying by window alone let a search in one tab supersede a search still
+/// running in another, truncating it to partial results with no error and no
+/// sign anything was cut short. NUL is the separator because it cannot occur
+/// in a window label or a `search://n` id.
+fn cursor_key(label: &str, session_id: &str) -> String {
+    format!("{}\u{0}{}", label, session_id)
+}
 
 impl ContentSearchState {
     pub fn new() -> Self {
         Self(Mutex::new(HashMap::new()))
     }
 
-    /// Returns `label`'s cancellation cursor, creating a fresh
-    /// `Arc<AtomicU64>` (starting at 0) the first time this window is seen.
-    /// The returned `Arc` is cloned into the search's worker/emitter threads
-    /// so `cancel_content_search`/a newer `start_content_search` call for
-    /// this same label can advance it out from under them.
-    pub fn cursor(&self, label: &str) -> Arc<AtomicU64> {
+    /// Returns this window+session's cancellation cursor, creating a fresh
+    /// `Arc<AtomicU64>` (starting at 0) the first time the pair is seen. The
+    /// returned `Arc` is cloned into the search's worker/emitter threads so
+    /// `cancel_content_search`, or a newer `start_content_search` for the
+    /// same pair, can advance it out from under them.
+    pub fn cursor(&self, label: &str, session_id: &str) -> Arc<AtomicU64> {
         let mut map = lock_recover(&self.0);
-        map.entry(label.to_string()).or_default().clone()
+        map.entry(cursor_key(label, session_id)).or_default().clone()
     }
 
-    /// Drop this window's cursor, if any. Called from `WindowEvent::Destroyed`
-    /// cleanup in `lib.rs` — idempotent, a no-op if the window never started
-    /// a search. Any in-flight worker threads already hold their own `Arc`
-    /// clone of the cursor, so this doesn't cancel them; it only lets the
-    /// window's entry stop occupying the map after the window is gone.
+    /// Drop every session cursor belonging to this window. Called from
+    /// `WindowEvent::Destroyed` cleanup in `lib.rs` — idempotent, and a no-op
+    /// if the window never started a search. In-flight workers hold their own
+    /// `Arc` clone, so this does not cancel them; it only stops the entries
+    /// occupying the map after the window is gone.
     pub fn drop_window(&self, label: &str) {
+        let prefix = format!("{}\u{0}", label);
         let mut map = lock_recover(&self.0);
-        map.remove(label);
+        map.retain(|k, _| !k.starts_with(&prefix));
     }
 }
 
@@ -776,8 +787,9 @@ fn emit_event(app: &AppHandle, label: &str, event: ContentEvent) {
 ///
 /// `window` is auto-injected by Tauri (no frontend invoke change needed —
 /// same precedent as `terminal.rs`'s `terminal_spawn`); the cancellation
-/// cursor is keyed by `window.label()` so a search started in one window
-/// can't be cancelled by, or race, another window's search.
+/// cursor is keyed by `window.label()` AND `session_id` so a search started
+/// in one window/tab can't be cancelled by, or race, another window's or
+/// another tab's search.
 ///
 /// `#[tauri::command(async)]` keeps even the (small) validation off the UI
 /// thread.
@@ -787,11 +799,12 @@ pub fn start_content_search(
     state: State<'_, ContentSearchState>,
     window: Window,
     search_id: u64,
+    session_id: String,
     options: ContentSearchOptions,
 ) -> Result<(), String> {
     let engine = Engine::build(&options)?;
     let label = window.label().to_string();
-    let latest = state.cursor(&label);
+    let latest = state.cursor(&label, &session_id);
     // This search becomes the current one; any older run's workers now see a
     // mismatched id and quit.
     latest.store(search_id, Ordering::SeqCst);
@@ -805,14 +818,20 @@ pub fn start_content_search(
 }
 
 /// Cancels any in-flight search older than `search_id` for the calling
-/// window by advancing its cursor. To cancel a run with id `k` without
-/// starting a new one, pass a `search_id` strictly greater than `k` (e.g. the
-/// frontend's next counter tick); workers whose id no longer equals the
-/// cursor quit, and the run still emits `search-complete` with
-/// `cancelled: true`. Only the calling window's cursor is touched.
+/// window+session by advancing its cursor. To cancel a run with id `k`
+/// without starting a new one, pass a `search_id` strictly greater than `k`
+/// (e.g. the frontend's next counter tick); workers whose id no longer
+/// equals the cursor quit, and the run still emits `search-complete` with
+/// `cancelled: true`. Only the calling window's `session_id` cursor is
+/// touched.
 #[tauri::command]
-pub fn cancel_content_search(state: State<'_, ContentSearchState>, window: Window, search_id: u64) {
-    let latest = state.cursor(window.label());
+pub fn cancel_content_search(
+    state: State<'_, ContentSearchState>,
+    window: Window,
+    search_id: u64,
+    session_id: String,
+) {
+    let latest = state.cursor(window.label(), &session_id);
     latest.fetch_max(search_id, Ordering::SeqCst);
 }
 
@@ -1331,7 +1350,7 @@ mod tests {
     #[test]
     fn cancel_advances_latest_monotonically() {
         let state = ContentSearchState::new();
-        let latest = state.cursor("test");
+        let latest = state.cursor("test", "search://1");
         latest.store(5, Ordering::SeqCst);
         // fetch_max: a lower id does not regress latest.
         latest.fetch_max(3, Ordering::SeqCst);
@@ -1339,9 +1358,9 @@ mod tests {
         // A higher id advances it (cancelling run 5).
         latest.fetch_max(9, Ordering::SeqCst);
         assert_eq!(latest.load(Ordering::SeqCst), 9);
-        // The cursor fetched again for the same label is the same one --
-        // `cursor` returns a clone of the same Arc, not a fresh one.
-        assert_eq!(state.cursor("test").load(Ordering::SeqCst), 9);
+        // The cursor fetched again for the same label+session is the same one
+        // -- `cursor` returns a clone of the same Arc, not a fresh one.
+        assert_eq!(state.cursor("test", "search://1").load(Ordering::SeqCst), 9);
     }
 
     // ── ContentSearchState: per-label independence (multi-window) ───────
@@ -1354,8 +1373,8 @@ mod tests {
     #[test]
     fn two_labels_get_independent_cursors() {
         let state = ContentSearchState::new();
-        let cursor_a = state.cursor("window-a");
-        let cursor_b = state.cursor("window-b");
+        let cursor_a = state.cursor("window-a", "search://1");
+        let cursor_b = state.cursor("window-b", "search://1");
 
         cursor_a.store(7, Ordering::SeqCst);
 
@@ -1371,16 +1390,49 @@ mod tests {
     #[test]
     fn drop_window_removes_only_that_labels_cursor() {
         let state = ContentSearchState::new();
-        let cursor_a = state.cursor("window-a");
+        let cursor_a = state.cursor("window-a", "search://1");
         cursor_a.store(42, Ordering::SeqCst);
-        let _cursor_b = state.cursor("window-b");
+        let _cursor_b = state.cursor("window-b", "search://1");
 
         state.drop_window("window-a");
 
-        // A fresh `cursor("window-a")` call after drop must start over at 0
-        // rather than resurrecting the old Arc's value.
-        assert_eq!(state.cursor("window-a").load(Ordering::SeqCst), 0);
+        // A fresh `cursor("window-a", ...)` call after drop must start over
+        // at 0 rather than resurrecting the old Arc's value.
+        assert_eq!(state.cursor("window-a", "search://1").load(Ordering::SeqCst), 0);
         // window-b is untouched.
-        assert_eq!(state.cursor("window-b").load(Ordering::SeqCst), 0);
+        assert_eq!(state.cursor("window-b", "search://1").load(Ordering::SeqCst), 0);
+    }
+
+    // ── ContentSearchState: per-session independence (Task 2) ───────────
+    //
+    // Two search tabs in the same window must not share a cursor: starting a
+    // search in tab B must not be able to supersede/cancel a search still
+    // running in tab A.
+
+    #[test]
+    fn cursors_are_independent_per_session() {
+        let state = ContentSearchState::new();
+        let a = state.cursor("main", "search://1");
+        let b = state.cursor("main", "search://2");
+        a.store(5, Ordering::SeqCst);
+        assert_eq!(b.load(Ordering::SeqCst), 0, "sessions must not share a cursor");
+    }
+
+    #[test]
+    fn same_session_returns_the_same_cursor() {
+        let state = ContentSearchState::new();
+        let a = state.cursor("main", "search://1");
+        a.store(7, Ordering::SeqCst);
+        assert_eq!(state.cursor("main", "search://1").load(Ordering::SeqCst), 7);
+    }
+
+    #[test]
+    fn drop_window_clears_every_session_of_that_window_only() {
+        let state = ContentSearchState::new();
+        state.cursor("main", "search://1").store(3, Ordering::SeqCst);
+        state.cursor("other", "search://1").store(4, Ordering::SeqCst);
+        state.drop_window("main");
+        assert_eq!(state.cursor("main", "search://1").load(Ordering::SeqCst), 0);
+        assert_eq!(state.cursor("other", "search://1").load(Ordering::SeqCst), 4);
     }
 }

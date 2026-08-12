@@ -12,3 +12,11 @@ export {
   type SearchCompletePayload,
   type SearchRow,
 } from './services/search-model';
+export {
+  createSession,
+  patchSession,
+  sessionForSearchId,
+  type SearchSession,
+  type SearchSessions,
+  type SearchOptionsState,
+} from './services/search-session';

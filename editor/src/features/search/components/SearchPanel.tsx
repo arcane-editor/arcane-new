@@ -21,27 +21,34 @@ function plural(count: number): string {
 }
 
 function SearchPanel() {
-  const query = useSearchStore((s) => s.query);
-  const setQuery = useSearchStore((s) => s.setQuery);
-  const isRegex = useSearchStore((s) => s.isRegex);
-  const toggleRegex = useSearchStore((s) => s.toggleRegex);
-  const caseSensitive = useSearchStore((s) => s.caseSensitive);
-  const toggleCaseSensitive = useSearchStore((s) => s.toggleCaseSensitive);
-  const wholeWord = useSearchStore((s) => s.wholeWord);
-  const toggleWholeWord = useSearchStore((s) => s.toggleWholeWord);
-  const includePattern = useSearchStore((s) => s.includePattern);
-  const setIncludePattern = useSearchStore((s) => s.setIncludePattern);
-  const excludePattern = useSearchStore((s) => s.excludePattern);
-  const setExcludePattern = useSearchStore((s) => s.setExcludePattern);
-  const results = useSearchStore((s) => s.results);
-  const totalMatches = useSearchStore((s) => s.totalMatches);
-  const fileCount = useSearchStore((s) => s.fileCount);
-  const truncated = useSearchStore((s) => s.truncated);
-  const isSearching = useSearchStore((s) => s.isSearching);
-  const activeSearchId = useSearchStore((s) => s.activeSearchId);
-  const searchError = useSearchStore((s) => s.searchError);
+  const sessionId = useSearchStore((s) => s.activeSessionId);
+  const session = useSearchStore((s) => s.sessions[s.activeSessionId]);
+  const update = useSearchStore((s) => s.update);
   const search = useSearchStore((s) => s.search);
   const clearResults = useSearchStore((s) => s.clearResults);
+
+  const {
+    query,
+    isRegex,
+    caseSensitive,
+    wholeWord,
+    includePattern,
+    excludePattern,
+    results,
+    totalMatches,
+    fileCount,
+    truncated,
+    isSearching,
+    activeSearchId,
+    searchError,
+  } = session;
+
+  const setQuery = (q: string) => update(sessionId, { query: q });
+  const toggleRegex = () => update(sessionId, { isRegex: !isRegex });
+  const toggleCaseSensitive = () => update(sessionId, { caseSensitive: !caseSensitive });
+  const toggleWholeWord = () => update(sessionId, { wholeWord: !wholeWord });
+  const setIncludePattern = (p: string) => update(sessionId, { includePattern: p });
+  const setExcludePattern = (p: string) => update(sessionId, { excludePattern: p });
 
   const workspacePath = useWorkspaceStore((s) => s.workspacePath);
 
@@ -66,11 +73,11 @@ function SearchPanel() {
 
   const triggerSearch = useCallback(() => {
     if (workspacePath && query) {
-      search(workspacePath);
+      search(sessionId, workspacePath);
     } else if (!query) {
-      clearResults();
+      clearResults(sessionId);
     }
-  }, [workspacePath, query, search, clearResults]);
+  }, [workspacePath, query, search, clearResults, sessionId]);
 
   // Auto-search when the debounced query settles; clear on empty.
   //
@@ -87,11 +94,11 @@ function SearchPanel() {
   useEffect(() => {
     const action = autoSearchAction(debouncedQuery);
     if (action === 'search') {
-      if (workspacePath) search(workspacePath);
+      if (workspacePath) search(sessionId, workspacePath);
     } else if (action === 'clear') {
-      clearResults();
+      clearResults(sessionId);
     }
-  }, [debouncedQuery, isRegex, caseSensitive, wholeWord, includePattern, excludePattern, workspacePath, search, clearResults]);
+  }, [debouncedQuery, isRegex, caseSensitive, wholeWord, includePattern, excludePattern, workspacePath, search, clearResults, sessionId]);
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key === 'Enter') {
