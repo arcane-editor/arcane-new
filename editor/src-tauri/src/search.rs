@@ -91,8 +91,9 @@ fn line_ranges(content: &[u8]) -> Vec<(usize, usize)> {
 
 /// `count` lines of context on one side of `line_number` (1-based). Clamped
 /// at both file boundaries. Invalid UTF-8 lines are skipped rather than
-/// lossily converted, matching how the searcher already ends a file's scan on
-/// an encoding error.
+/// lossily converted — unlike the sink, which ends the whole file's scan on
+/// an encoding error, this only drops the one bad line and keeps going, since
+/// a single corrupt context line shouldn't cost the rest of the excerpt.
 fn context_lines_at(
     content: &[u8],
     ranges: &[(usize, usize)],
@@ -421,9 +422,11 @@ fn build_searcher() -> Searcher {
 }
 
 /// Searches a single file's `content` with `matcher`, returning up to
-/// `max_matches_per_file` matches (with `truncated` set if capped). Pure and
-/// AppHandle-free for direct unit testing. `searcher` is reused across files by
-/// each worker; `path` is copied verbatim into the result.
+/// `max_matches_per_file` matches (with `truncated` set if capped), each
+/// carrying up to `context_lines` lines of surrounding context on either
+/// side (0 disables context entirely). Pure and AppHandle-free for direct
+/// unit testing. `searcher` is reused across files by each worker; `path` is
+/// copied verbatim into the result.
 pub fn search_file(
     searcher: &mut Searcher,
     matcher: &RegexMatcher,
@@ -1068,6 +1071,42 @@ mod tests {
         assert_eq!(r.matches.len(), 2);
         assert_eq!(r.matches[0].after, vec!["needle".to_string()]);
         assert_eq!(r.matches[1].before, vec!["needle".to_string()]);
+    }
+
+    #[test]
+    fn context_line_survives_missing_trailing_newline() {
+        // Real files very often lack a final newline. `line_ranges`'s
+        // post-loop `if start < content.len()` is what captures that last,
+        // terminator-less line -- without it, the final line of the file
+        // would silently vanish from every excerpt that needs it as context.
+        let m = literal_matcher("needle", false, false);
+        let r = search_one_ctx(&m, "a\nneedle\nc", 1); // no trailing "\n" after "c"
+        assert_eq!(r.matches[0].before, vec!["a".to_string()]);
+        assert_eq!(r.matches[0].after, vec!["c".to_string()]);
+    }
+
+    #[test]
+    fn context_captures_blank_lines_as_empty_strings() {
+        // Blank lines are the single most common context line in real source;
+        // dropping them (instead of returning "") would collapse the excerpt
+        // and misrepresent the file. CRLF endings are used deliberately: a
+        // blank CRLF-only line is exactly the case where the CR-strip in
+        // `line_ranges` (`content[end - 1] == b'\r'`) could underflow if the
+        // `end > start` guard were ever removed, so this also pins that the
+        // guard stays in place.
+        let m = literal_matcher("needle", false, false);
+        let r = search_one_ctx(&m, "a\r\n\r\nneedle\r\n\r\nc\r\n", 2);
+        assert_eq!(r.matches[0].before, vec!["a".to_string(), "".to_string()]);
+        assert_eq!(r.matches[0].after, vec!["".to_string(), "c".to_string()]);
+    }
+
+    #[test]
+    fn line_ranges_empty_content_yields_empty_vec() {
+        // An empty file can't be reached through a match (there is nothing to
+        // match), so this exercises `line_ranges` directly: both the scan
+        // loop and the post-loop trailing-line push must no-op on it rather
+        // than fabricating a spurious single empty line.
+        assert!(line_ranges(b"").is_empty());
     }
 
     // ── build_globset ───────────────────────────────────────────────────
