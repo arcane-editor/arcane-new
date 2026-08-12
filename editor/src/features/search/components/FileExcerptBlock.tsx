@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight } from 'lucide-react';
 import { getFileIcon } from '../../../utils/file-icons';
 import { detectLanguage } from '../../../utils/language-detect';
 import { getMonacoInstance } from '../../../utils/monaco-instance';
+import { useThemeStore } from '../../../stores/theme';
 import { splitByMatches, stripTrailingBreak } from '../services/highlight';
 import type { Excerpt, MatchRange } from '../services/excerpt-model';
 
@@ -19,21 +20,30 @@ interface FileExcerptBlockProps {
   onExpand: (excerptId: string, direction: 'up' | 'down') => void;
 }
 
-/** Colorized HTML per (languageId, text). Search results repeat lines across
- *  excerpts constantly, and colorize is an async tokenizer pass, so without a
- *  cache scrolling re-tokenizes the same lines on every virtualization pass.
- *  Values are stored already stripped of Monaco's trailing `<br/>` (see
- *  `stripTrailingBreak`), so every reader gets clean HTML for free. */
+/** Colorized HTML per (themeId, languageId, text). Search results repeat
+ *  lines across excerpts constantly, and colorize is an async tokenizer
+ *  pass, so without a cache scrolling re-tokenizes the same lines on every
+ *  virtualization pass. Values are stored already stripped of Monaco's
+ *  trailing `<br/>` (see `stripTrailingBreak`), so every reader gets clean
+ *  HTML for free.
+ *
+ *  Keyed on `themeId` too, not just `(monacoId, text)`: `colorize()` emits
+ *  `mtkN` CSS classes, and Monaco regenerates what colour each `mtkN` maps to
+ *  per theme — the class names themselves don't change when the theme
+ *  switches, only the stylesheet behind them. Without the theme in the key,
+ *  a line colourized under the old theme and a line colourized fresh under
+ *  the new one would sit on screen together, one still resolving its
+ *  `mtkN` classes to the OLD theme's palette. */
 const colorCache = new Map<string, string>();
 
 interface ColorizedResult {
-  /** The (monacoId, text) key this HTML was actually computed for. */
+  /** The (themeId, monacoId, text) key this HTML was actually computed for. */
   key: string;
   html: string;
 }
 
-function useColorizedLine(text: string, monacoId: string): string | null {
-  const key = `${monacoId} ${text}`;
+function useColorizedLine(text: string, monacoId: string, themeId: string): string | null {
+  const key = `${themeId} ${monacoId} ${text}`;
   const [result, setResult] = useState<ColorizedResult | null>(() => {
     const cached = colorCache.get(key);
     return cached === undefined ? null : { key, html: cached };
@@ -70,7 +80,7 @@ function useColorizedLine(text: string, monacoId: string): string | null {
     return () => {
       cancelled = true;
     };
-  }, [text, monacoId, key]);
+  }, [text, monacoId, themeId, key]);
 
   // `result` may still hold the PREVIOUS (text, monacoId) pair's HTML: the
   // `cancelled` flag above only prevents a stale async write from landing —
@@ -101,13 +111,14 @@ function ExcerptLineRow({
   monacoId,
   onOpen,
 }: ExcerptLineRowProps) {
+  const activeThemeId = useThemeStore((s) => s.activeThemeId);
   const isMatchLine = matches.length > 0;
   // Only context lines go through colorize: a match line needs exact UTF-16
   // offsets for its <mark>, and those cannot survive tokenization into HTML.
   // useColorizedLine is still called unconditionally (with '' for match
   // lines) because a hook cannot be called conditionally; colorizing an
   // empty string is cheap and its result is discarded below.
-  const colorized = useColorizedLine(isMatchLine ? '' : text, monacoId);
+  const colorized = useColorizedLine(isMatchLine ? '' : text, monacoId, activeThemeId);
 
   return (
     <div
@@ -173,6 +184,11 @@ function FileExcerptBlock({
         excerpts.map((excerpt) => (
           <div
             key={excerpt.id}
+            // Lets ExcerptList's reveal handler find and scroll to this exact
+            // excerpt within its (virtualized, per-FILE) block once the
+            // block has mounted — the virtualizer itself only knows how to
+            // scroll to a block index, not a sub-element inside one.
+            data-excerpt-id={excerpt.id}
             className={`search-excerpt${activeExcerptId === excerpt.id ? ' active' : ''}`}
             onMouseDown={() => onFocusExcerpt(excerpt.id)}
           >

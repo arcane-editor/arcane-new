@@ -111,6 +111,27 @@ function ExcerptList({ sessionId }: ExcerptListProps) {
     [sessionId, update],
   );
 
+  // Scrolls the already-mounted (or just-scrolled-to) block for `excerptId`'s
+  // file until that exact excerpt is in view. The virtualizer only knows how
+  // to scroll to a block INDEX (one file = one virtualized row), not to a
+  // sub-element inside one, so this is a second, DOM-level pass on top of it:
+  // it waits a couple of frames for `scrollToIndex`'s own scroll (and any
+  // collapse-state re-render growing the block) to land, then finds the
+  // element `FileExcerptBlock` tags with `data-excerpt-id` and centers it.
+  // Silently no-ops if the element still isn't there (e.g. the file scrolled
+  // past overscan) — the file-level scroll from `scrollToIndex` already put
+  // the user in the right neighbourhood.
+  const scrollToExcerptElement = useCallback((excerptId: string) => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const el = scrollRef.current?.querySelector<HTMLElement>(
+          `[data-excerpt-id="${excerptId}"]`,
+        );
+        el?.scrollIntoView({ block: 'center' });
+      });
+    });
+  }, []);
+
   // The outline panel (sidebar) dispatches this to scroll the tab to an
   // excerpt the user clicked there. `onFocusExcerpt` (above) is the reverse
   // direction: it writes `activeExcerptId`, which the outline reads back to
@@ -120,12 +141,20 @@ function ExcerptList({ sessionId }: ExcerptListProps) {
       const detail = (event as CustomEvent<{ sessionId: string; excerptId: string }>).detail;
       if (detail.sessionId !== sessionId) return;
       const filePath = detail.excerptId.slice(0, detail.excerptId.lastIndexOf(':'));
+      // A collapsed file's block renders only its header — scrolling to it
+      // would land on a header with nothing highlighted underneath, reading
+      // as broken outline sync. Un-collapse it as part of the reveal.
+      const collapsedFiles = session?.collapsedFiles ?? [];
+      if (collapsedFiles.includes(filePath)) {
+        update(sessionId, { collapsedFiles: collapsedFiles.filter((p) => p !== filePath) });
+      }
       const index = blocks.findIndex((b) => b.file.path === filePath);
       if (index >= 0) virtualizer.scrollToIndex(index, { align: 'center' });
+      scrollToExcerptElement(detail.excerptId);
     }
     window.addEventListener('search-reveal-excerpt', onReveal);
     return () => window.removeEventListener('search-reveal-excerpt', onReveal);
-  }, [blocks, sessionId, virtualizer]);
+  }, [blocks, scrollToExcerptElement, session?.collapsedFiles, sessionId, update, virtualizer]);
 
   // Belt-and-suspenders for the listener above: when the outline panel
   // reveals an excerpt in a tab that ISN'T the active editor tab yet, that
@@ -146,8 +175,14 @@ function ExcerptList({ sessionId }: ExcerptListProps) {
     const activeId = session?.activeExcerptId;
     if (!activeId) return;
     const filePath = activeId.slice(0, activeId.lastIndexOf(':'));
+    const collapsedFiles = session?.collapsedFiles ?? [];
+    if (collapsedFiles.includes(filePath)) {
+      update(sessionId, { collapsedFiles: collapsedFiles.filter((p) => p !== filePath) });
+    }
     const index = blocks.findIndex((b) => b.file.path === filePath);
     if (index >= 0) virtualizer.scrollToIndex(index, { align: 'center' });
+    scrollToExcerptElement(activeId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on mount only, see comment above
   }, [blocks, session?.activeExcerptId, virtualizer]);
 
   // Excerpt ids are `${filePath}:${startLine}`; `lastIndexOf(':')` finds the

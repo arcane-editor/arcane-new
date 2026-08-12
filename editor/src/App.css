@@ -2904,6 +2904,13 @@ html, body, #root {
   box-sizing: border-box;
 }
 
+/* `summaryFor` surfaces `session.searchError` (e.g. an invalid regex)
+   verbatim through the same element — this makes that case visually
+   distinct instead of reading as an ordinary result count. */
+.search-summary-error {
+  color: var(--error-text);
+}
+
 .search-file-truncated {
   font-size: 11px;
   color: var(--warning, #d7ba7d);
@@ -2996,6 +3003,17 @@ html, body, #root {
   outline: none;
 }
 
+/* This container is `tabIndex={0}` and solely owns shift+enter/alt+enter
+   (expand context / open in split) — with the global `*:focus-visible` ring
+   suppressed above unconditionally, there was no visible sign it could ever
+   hold keyboard focus at all. `-2px` (inset), like `.hierarchy-row`, since a
+   positive offset on a scrollable panel this size would just get clipped. */
+.search-tab-body:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+  border-radius: 3px;
+}
+
 .search-tab-count {
   margin-left: auto;
   padding-left: 10px;
@@ -3045,6 +3063,19 @@ html, body, #root {
 }
 
 .search-excerpt-code {
+  /* Without these, this flex item's default `min-width: auto` refuses to
+     shrink below its content's intrinsic width — the line's full unwrapped
+     (white-space: pre) text — so `overflow`/`text-overflow` above never
+     engage: the box just grows past its container instead of ellipsizing.
+     That overflow then gives `.search-tab-body` (overflow: auto) a real
+     scrollWidth, producing a horizontal scrollbar sized to whichever line is
+     currently the widest — which changes as virtualization swaps rows in and
+     out — while `width: 100%` elements like `.search-excerpt-file-header`
+     stay sized to the ORIGINAL container width and visibly detach from the
+     scrolled content. Matches `.search-match-content`, the equivalent cell
+     in the (non-virtualized) old search panel, which already does this. */
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
