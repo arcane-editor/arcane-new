@@ -1,5 +1,6 @@
 import { useSearchStore } from '../../../stores/search';
 import SearchQueryBar from './SearchQueryBar';
+import ExcerptList from './ExcerptList';
 
 interface SearchResultsTabProps {
   sessionId: string;
@@ -12,7 +13,7 @@ function SearchResultsTab({ sessionId }: SearchResultsTabProps) {
   return (
     <div className="search-tab">
       <SearchQueryBar sessionId={sessionId} />
-      <div className="search-tab-body" />
+      <ExcerptList sessionId={sessionId} />
     </div>
   );
 }

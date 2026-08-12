@@ -3058,6 +3058,65 @@ html, body, #root {
   white-space: nowrap;
 }
 
+/* ==================== Search Results Tab: excerpts ==================== */
+
+.search-excerpt-file-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  height: 26px;
+  padding: 0 10px;
+  background: var(--bg-sidebar);
+  border: none;
+  border-top: 1px solid var(--border);
+  color: var(--text-primary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.search-excerpt-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-height: 18px;
+  line-height: 18px;
+  padding: 0 10px;
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  white-space: pre;
+}
+
+.search-excerpt-line.is-match {
+  background: var(--hover-overlay, transparent);
+}
+
+.search-excerpt-gutter {
+  min-width: 40px;
+  text-align: right;
+  color: var(--text-secondary);
+  user-select: none;
+}
+
+.search-excerpt-code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.search-excerpt.active {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.search-excerpt-expand {
+  width: 100%;
+  height: 12px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 10px;
+  cursor: pointer;
+}
+
 /* ==================== Problems Panel ==================== */
 
 .problems-panel {

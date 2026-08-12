@@ -31,6 +31,11 @@ export {
   type Expansion,
 } from './services/excerpt-model';
 export {
+  splitByMatches,
+  excerptRowKey,
+  type LineSegment,
+} from './services/highlight';
+export {
   pushQuery,
   historyStep,
   resolveCaseSensitive,
