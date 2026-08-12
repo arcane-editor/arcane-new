@@ -29,9 +29,16 @@ import path from 'node:path';
  * fix to a pre-existing incomplete mock in `auth.test.ts`, left in place)
  * made the full suite pass clean at 1307/1307 again. That is a real bug
  * surface in bun 1.2.11's `mock.module`/`mock.restore()` interaction, not a
- * bug in the store code — but it makes real execution too fragile for a
- * PERMANENT test in this suite, so this file was rewritten to avoid
- * `mock.module` entirely. Full elimination trail and exact commands are in
+ * bug in the store code — but it makes real execution too fragile to share
+ * `bun test src`'s ONE process with everything else. It is NOT too fragile
+ * for a permanent test outright: `search-tab-lifecycle.exec.ts` (this
+ * file's real-execution companion, named so `bun test src`'s glob never
+ * picks it up) does exactly that real execution, permanently, in its OWN
+ * process via `bun run test:isolated` — where its `mock.module` calls can
+ * never collide with `review-core.test.ts` or anything else. This file
+ * carries the always-collected, zero-risk structural coverage; the `.exec.ts`
+ * sibling carries the real-execution coverage on top of it. Full elimination
+ * trail and exact commands for the original single-process attempt are in
  * the fix-round section of task-7-report.md.
  *
  * Every behaviour below is checked by reading `workspace.ts`'s (and, once,
