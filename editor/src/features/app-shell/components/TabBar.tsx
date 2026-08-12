@@ -7,6 +7,7 @@ import { useCommandsStore } from '../../../stores/commands';
 import { getFileIcon } from '../../../utils/file-icons';
 import { confirmCloseDirty } from '../../../utils/dirty-guard';
 import { toRelativePath } from '../../../utils/relative-path';
+import { isVirtualPath } from '../../../utils/virtual-path';
 import { isMac } from '../../../utils/platform';
 import { ARCANE_FILE_MIME, serializeFileDrag } from '../../../utils/drag-mime';
 import { useClampedMenuPosition } from '../../../hooks/useClampedMenuPosition';
@@ -24,15 +25,22 @@ interface TabContextMenu {
 /**
  * Resolves the real, on-disk filesystem path backing a tab so it can be
  * copied or revealed in the OS file manager. Returns null for tabs that
- * have no real underlying file (e.g. `auth://` virtual tabs) or when a
- * `diff://` tab's target can't be resolved because no workspace is open.
+ * have no real underlying file (e.g. `auth://`/`search://` virtual tabs) or
+ * when a `diff://` tab's target can't be resolved because no workspace is
+ * open.
+ *
+ * `file.diff` is checked BEFORE `isVirtualPath`, not after: `diff://` is
+ * also a virtual scheme (it names no real on-disk file by itself), but a
+ * diff tab's `.diff.filePath` DOES resolve to one, via `workspacePath` —
+ * checking virtualness first would wrongly return null for every diff tab
+ * instead of its real target.
  */
 function resolveRealPath(file: OpenFile | undefined, workspacePath: string | null): string | null {
   if (!file) return null;
-  if (file.path.startsWith('auth://')) return null;
   if (file.diff) {
     return workspacePath ? `${workspacePath}/${file.diff.filePath}` : null;
   }
+  if (isVirtualPath(file.path)) return null;
   return file.path;
 }
 
