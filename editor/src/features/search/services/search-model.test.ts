@@ -306,6 +306,7 @@ function signatureInput(overrides: Partial<SearchSignatureInput> = {}): SearchSi
     excludePattern: '',
     useSmartcase: true,
     contextLines: 2,
+    includeUnityAssets: false,
     ...overrides,
   };
 }
@@ -364,6 +365,24 @@ describe('searchSignature', () => {
     const a = searchSignature(signatureInput({ query: 'a', includePattern: 'b' }));
     const b = searchSignature(signatureInput({ query: 'ab', includePattern: '' }));
     expect(a).not.toBe(b);
+  });
+
+  it('changes when includeUnityAssets flips, so the toggle re-runs the search', () => {
+    const base = {
+      query: 'foo',
+      isRegex: false,
+      caseSensitive: false,
+      wholeWord: false,
+      includeIgnored: false,
+      includePattern: '',
+      excludePattern: '',
+      useSmartcase: true,
+      contextLines: 2,
+      includeUnityAssets: false,
+    };
+    expect(searchSignature(base)).not.toBe(
+      searchSignature({ ...base, includeUnityAssets: true }),
+    );
   });
 });
 

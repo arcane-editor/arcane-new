@@ -10,6 +10,13 @@
 // The list is short because the search root for a Unity project is already
 // `assetsRootPath`: Library/, Temp/, obj/, *.csproj and *.sln sit outside it
 // and were never being searched.
+//
+// Matching is CASE-SENSITIVE: the backend builds these globs with the Rust
+// `globset` crate's `Glob::new`, which has no case-insensitive option, so
+// `**/*.prefab` does not match a file named `Foo.Prefab`. Unity itself always
+// writes these extensions lowercase, so this is a non-issue for
+// Unity-generated files — it only lets a user-renamed file with different
+// casing slip through the filter.
 
 /** Unity's YAML asset formats, plus the .meta sidecar every asset carries.
  *  All are text, so the backend's binary detection does not skip them — they
@@ -32,6 +39,9 @@ export const UNITY_NOISE_EXTENSIONS = [
   'fontsettings',
   'physicMaterial',
   'physicsMaterial2D',
+  'shadervariants',
+  'mask',
+  'lighting',
 ] as const;
 
 /** Exclude globs for the above, in the form the backend's globset expects

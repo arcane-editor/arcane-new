@@ -11,6 +11,7 @@ import {
   resolveCaseSensitive,
   clearFileLineCache,
   searchSignature,
+  unityNoiseExcludes,
   type SearchSessions,
   type SearchSession,
   type StreamState,
@@ -155,6 +156,7 @@ export const useSearchStore = create<SearchState>((set, get) => ({
           excludePattern: session.excludePattern,
           useSmartcase: settings['search.useSmartcase'],
           contextLines: settings['search.contextLines'],
+          includeUnityAssets: session.includeUnityAssets,
         }),
       }),
     }));
@@ -174,6 +176,15 @@ export const useSearchStore = create<SearchState>((set, get) => ({
         settings['search.useSmartcase'],
       );
 
+      // Unity's YAML assets and .meta sidecars are excluded unless the tab
+      // asks for them. Appended to the user's own excludes rather than sent as
+      // `fileExtensions`, which the backend ANDs with the include glob — that
+      // form cannot be widened by any pattern the user types.
+      const excludePatterns = [
+        ...parseGlobList(session.excludePattern),
+        ...(isUnity && !session.includeUnityAssets ? unityNoiseExcludes() : []),
+      ];
+
       // Dropped here, not just on session creation: stale lines from a
       // PREVIOUS search must never splice into results computed against a
       // file that has since changed. Sits right before the invoke so no
@@ -189,7 +200,7 @@ export const useSearchStore = create<SearchState>((set, get) => ({
           caseSensitive,
           wholeWord: session.wholeWord,
           includePatterns: parseGlobList(session.includePattern),
-          excludePatterns: parseGlobList(session.excludePattern),
+          excludePatterns,
           includeIgnored: session.includeIgnored,
           contextLines: settings['search.contextLines'],
           // Always `null` (no filter), deliberately: an earlier version sent

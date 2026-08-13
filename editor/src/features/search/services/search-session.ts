@@ -12,6 +12,10 @@ export interface SearchOptionsState {
   includeIgnored: boolean;
   includePattern: string;
   excludePattern: string;
+  /** Search Unity's YAML assets (.unity/.prefab/.asset/…) and .meta sidecars.
+   *  Off by default: in a Unity project they bury code hits under walls of
+   *  serialized YAML. Only consulted for Unity projects. */
+  includeUnityAssets: boolean;
 }
 
 export interface SearchSession extends StreamState, SearchOptionsState {
@@ -47,6 +51,7 @@ export function createSession(id: string): SearchSession {
     includeIgnored: false,
     includePattern: '',
     excludePattern: '',
+    includeUnityAssets: false,
     results: [] as FileSearchResult[],
     totalMatches: 0,
     fileCount: 0,

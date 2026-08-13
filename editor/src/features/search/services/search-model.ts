@@ -188,6 +188,10 @@ export interface SearchSignatureInput {
   excludePattern: string;
   useSmartcase: boolean;
   contextLines: number;
+  /** Whether Unity's YAML assets and .meta files are in scope. Included here
+   *  because `search()` folds it into the exclude list on every call, exactly
+   *  like the other scope options. */
+  includeUnityAssets: boolean;
 }
 
 /**
@@ -218,6 +222,7 @@ export function searchSignature(input: SearchSignatureInput): string {
     input.caseSensitive,
     input.wholeWord,
     input.includeIgnored,
+    input.includeUnityAssets,
     input.includePattern,
     input.excludePattern,
     input.useSmartcase,

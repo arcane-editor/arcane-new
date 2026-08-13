@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Search, EyeOff, SlidersHorizontal } from 'lucide-react';
+import { Search, EyeOff, SlidersHorizontal, Boxes } from 'lucide-react';
 import { useSearchStore } from '../../../stores/search';
 import { useWorkspaceStore } from '../../../stores/workspace';
 import { useSettingsStore } from '../../../stores/settings';
@@ -77,6 +77,7 @@ function SearchQueryBar({ sessionId }: SearchQueryBarProps) {
         excludePattern: session?.excludePattern ?? '',
         useSmartcase,
         contextLines,
+        includeUnityAssets: session?.includeUnityAssets ?? false,
       });
       if (session?.searchedSignature === signature) return;
       if (workspacePath) search(sessionId, workspacePath);
@@ -97,6 +98,7 @@ function SearchQueryBar({ sessionId }: SearchQueryBarProps) {
     session?.excludePattern,
     useSmartcase,
     contextLines,
+    session?.includeUnityAssets,
   ]);
 
   const runNow = useCallback(() => {
@@ -124,8 +126,9 @@ function SearchQueryBar({ sessionId }: SearchQueryBarProps) {
     }
   }
 
-  const toggle = (key: 'isRegex' | 'caseSensitive' | 'wholeWord' | 'includeIgnored') =>
-    update(sessionId, { [key]: !session[key] } as Partial<typeof session>);
+  const toggle = (
+    key: 'isRegex' | 'caseSensitive' | 'wholeWord' | 'includeIgnored' | 'includeUnityAssets',
+  ) => update(sessionId, { [key]: !session[key] } as Partial<typeof session>);
 
   const summary = summaryFor(session);
 
@@ -191,6 +194,16 @@ function SearchQueryBar({ sessionId }: SearchQueryBarProps) {
               onClick={() => toggle('includeIgnored')}
             >
               <EyeOff size={13} />
+            </button>
+            <button
+              type="button"
+              className={`search-toggle-btn${session.includeUnityAssets ? ' active' : ''}`}
+              title="Search scenes, prefabs and .meta files"
+              aria-pressed={session.includeUnityAssets}
+              aria-label="Search Unity assets"
+              onClick={() => toggle('includeUnityAssets')}
+            >
+              <Boxes size={13} />
             </button>
             <button
               type="button"
