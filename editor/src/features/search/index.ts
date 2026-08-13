@@ -49,6 +49,7 @@ export {
   type HistoryPosition,
 } from './services/query-history';
 export { unityNoiseExcludes, UNITY_NOISE_EXTENSIONS } from './services/unity-scope';
+export { SearchModelRegistry } from './services/model-ownership';
 export { offsetWithinLine, columnFor } from './services/caret-offset';
 export {
   complementRanges,
