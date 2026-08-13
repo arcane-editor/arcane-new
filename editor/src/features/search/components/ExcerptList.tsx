@@ -370,22 +370,19 @@ function ExcerptList({ sessionId }: ExcerptListProps) {
       // Alt+Enter itself when its own find widget is open (select all
       // matches), and even when it doesn't, "open the file" while the
       // user's focus and cursor are inside a live editor is that editor's
-      // call, not this container's.
+      // call, not this container's — `openActiveExcerpt` below already
+      // reads the hydrated cursor for exactly this case when focus is on
+      // the container instead.
       if ((e.target as HTMLElement).closest('.search-excerpt-hydrated')) return;
 
       const activeId = session?.activeExcerptId;
       if (!activeId) return;
 
-      if (e.key === 'Enter' && !e.altKey && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
+      // Enter and Alt+Enter both just open the active excerpt — one branch
+      // for both, since neither has a distinct meaning here.
+      if (e.key === 'Enter' && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
         e.preventDefault();
         openActiveExcerpt();
-        return;
-      }
-
-      if (e.key === 'Enter' && e.altKey) {
-        e.preventDefault();
-        openActiveExcerpt();
-        return;
       }
     },
     [openActiveExcerpt, session?.activeExcerptId],
@@ -412,7 +409,7 @@ function ExcerptList({ sessionId }: ExcerptListProps) {
             <>
               <p className="search-empty-title">Search across every file in this project</p>
               <p className="search-empty-hint">
-                Results appear as you type. Press <kbd>⌥⏎</kbd> on a result to open it.
+                Results appear as you type. Press <kbd>⏎</kbd> on a result to open it.
               </p>
             </>
           )}

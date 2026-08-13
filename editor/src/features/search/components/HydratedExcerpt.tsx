@@ -159,11 +159,11 @@ function HydratedExcerpt({
       // endLine` makes `{1,S-1}` and `{E+1,L}` overlap and merge into full
       // coverage, and `startLine > lineCount` clamps `{1,S-1}` to `{1,L}`
       // with no second range pushed at all. Neither shape is producible by
-      // `buildExcerpts`/`applyExpansion` against the model THEY scanned, but
-      // this component can end up hydrating a DIFFERENT model than the one
-      // that was scanned: a tab's model with unsaved deletions (shorter than
-      // `startLine`), or a file truncated on disk between the search scan
-      // and an `expand` click clamping `endLine` under `startLine`. Either
+      // `buildExcerpts` against the model IT scanned, but this component can
+      // end up hydrating a DIFFERENT model than the one that was scanned: a
+      // tab's model with unsaved deletions (shorter than `startLine`), or a
+      // file truncated on disk between the search scan and this (lazily
+      // virtualized) block actually scrolling into view and hydrating. Either
       // shape then hits Monaco's own `!hasVisibleLine` fallback
       // (viewModelLines.js, ViewModelLinesFromProjectedModel.setHiddenAreas)
       // which SILENTLY REVEALS THE ENTIRE FILE instead of erroring —
@@ -211,6 +211,13 @@ function HydratedExcerpt({
       });
 
       editor.onDidChangeModelContent(() => {
+        // Fires for every writer of this model, and every excerpt of this
+        // file has its own listener on the SAME shared model — without this
+        // guard, one keystroke fires `onFirstEdit` (and its full-text
+        // `didChange` notification to csharp-ls) once per excerpt of the
+        // file instead of once. Only the editor actually being typed into
+        // should report the edit.
+        if (!editor!.hasTextFocus()) return;
         onFirstEdit(filePath, model!.getValue());
       });
     }
@@ -229,14 +236,15 @@ function HydratedExcerpt({
       // now editing in a tab.
     };
     // `excerpt` itself is deliberately NOT a dependency: `ExcerptList`
-    // rebuilds every excerpt object on every render (streaming batches,
-    // expand/collapse anywhere in the list, `fileLines` updates), so
-    // depending on the object identity would tear down and remount every
-    // mounted editor on unrelated churn elsewhere in the results list —
-    // losing cursor/selection on every keystroke of a streaming search. Only
-    // the primitives this effect actually reads off `excerpt` are listed, so
-    // a re-render that produces an equivalent excerpt (same lines, same
-    // range) does not remount the editor.
+    // rebuilds every excerpt object on every render (streaming batches
+    // replacing `session.results`, or a file block's collapsed state
+    // toggling elsewhere in the list), so depending on the object identity
+    // would tear down and remount every mounted editor on unrelated churn
+    // elsewhere in the results list — losing cursor/selection on every
+    // keystroke of a streaming search. Only the primitives this effect
+    // actually reads off `excerpt` are listed, so a re-render that produces
+    // an equivalent excerpt (same lines, same range) does not remount the
+    // editor.
   }, [
     filePath,
     excerpt.id,
