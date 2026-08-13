@@ -46,10 +46,10 @@ interface HydratedExcerptProps {
   onEditorMount: (excerptId: string, editorInstance: MonacoEditorNs.IStandaloneCodeEditor) => void;
   onEditorUnmount: (excerptId: string) => void;
   /** Opens `filePath` at a real (1-based) line/column. Wired to a Monaco
-   *  action bound to Alt+Enter (NOT plain Enter — that still means "insert
-   *  a newline" inside a live editor) on this excerpt's own editor — see
-   *  the `addAction` call below for why that, and not the results list's
-   *  own keydown handler, has to be the one to own this now. */
+   *  action bound to Alt+Enter and Cmd/Ctrl+Enter (NOT plain Enter — that
+   *  still means "insert a newline" inside a live editor) on this excerpt's
+   *  own editor — see the `addAction` call below for why that, and not the
+   *  results list's own keydown handler, has to be the one to own this now. */
   onOpenExcerpt: (filePath: string, lineNumber: number, column: number) => void;
 }
 
@@ -211,15 +211,15 @@ function HydratedExcerpt({
       // THIS editor, not the results list's container. `ExcerptList`'s own
       // keydown handler deliberately ignores every key that originates
       // inside a hydrated excerpt (Task A1, so typing survives), which means
-      // Alt+Enter reaching this editor previously had nothing bound to it
-      // and did nothing — no keyboard route to "open the file" existed once
-      // focus was inside a hydrated excerpt, which is the ordinary case.
-      // This editor now owns that gesture directly: open at the real cursor
-      // when it's inside this excerpt's visible range, else fall back to
-      // the match start — a freshly re-hydrated editor that was never
-      // actually clicked into (switching to a file tab and back preserves
-      // `activeExcerptId` across the remount) defaults its cursor to the
-      // model's (1,1), which is usually outside the excerpt.
+      // Alt+Enter / Cmd+Enter reaching this editor previously had nothing
+      // bound to them and did nothing — no keyboard route to "open the file"
+      // existed once focus was inside a hydrated excerpt, which is the
+      // ordinary case. This editor now owns that gesture directly: open at
+      // the real cursor when it's inside this excerpt's visible range, else
+      // fall back to the match start — a freshly re-hydrated editor that was
+      // never actually clicked into (switching to a file tab and back
+      // preserves `activeExcerptId` across the remount) defaults its cursor
+      // to the model's (1,1), which is usually outside the excerpt.
       //
       // PLAIN Enter is deliberately NOT bound here, unlike the list's own
       // handler. Inside a live editor, `editorTextFocus` (needed so this
@@ -231,9 +231,11 @@ function HydratedExcerpt({
       // and a live editor have different correct answers for the same key:
       // outside a hydrated excerpt (a cold block, or focus on the bare
       // container) plain Enter still opens, unchanged, in
-      // `ExcerptList.openActiveExcerpt`; inside one, only Alt+Enter does —
-      // matching Zed's `editor::OpenExcerpts` binding and this feature's own
-      // spec. Do not add plain Enter back here for symmetry with the list.
+      // `ExcerptList.openActiveExcerpt`; inside one, only Alt+Enter and
+      // Cmd/Ctrl+Enter do — Alt+Enter matching Zed's `editor::OpenExcerpts`
+      // binding and this feature's own spec, Cmd/Ctrl+Enter matching the
+      // owner's own reported chord. Do not add plain Enter back here for
+      // symmetry with the list.
       //
       // `precondition: 'editorTextFocus'` scopes this to the PLAIN text
       // area: Monaco's own widgets (rename confirm, suggest accept, find
@@ -245,7 +247,22 @@ function HydratedExcerpt({
         id: 'search-excerpt.open-at-cursor',
         label: 'Open File at Cursor',
         precondition: 'editorTextFocus',
-        keybindings: [monaco.KeyMod.Alt | monaco.KeyCode.Enter],
+        // `KeyMod.CtrlCmd` is Monaco's platform-correct modifier (Cmd on
+        // macOS, Ctrl elsewhere) — never hand-roll a platform check here.
+        // Binding the chord is not just "which key opens the file": Monaco's
+        // `StandaloneKeybindingService` resolves every keydown against the
+        // registered keybindings (including ones added dynamically via
+        // `addAction`, same as the core ones) and calls `preventDefault()` /
+        // `stopPropagation()` on the native event iff a command resolves for
+        // it (`_doDispatch`'s `shouldPreventDefault`, consumed in
+        // `standaloneServices.js`'s KEY_DOWN listener). With nothing bound to
+        // Cmd+Enter, that resolve comes back `NoMatchingKb`, so Monaco never
+        // calls `preventDefault()` — the keystroke falls through to the
+        // hidden textarea's native Enter-inserts-a-newline behavior, which is
+        // exactly the "opens the file AND inserts a newline" bug. Registering
+        // the keybinding makes OUR command the one that resolves, so
+        // `preventDefault()` fires before that native path ever runs.
+        keybindings: [monaco.KeyMod.Alt | monaco.KeyCode.Enter, monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter],
         run: (ed) => {
           const position = ed.getPosition();
           const target =

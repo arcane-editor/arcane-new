@@ -7,6 +7,7 @@ import { disposeModelForPath } from '../../editor';
 import { buildExcerpts, matchStartPosition, positionWithinExcerpt } from '../services/excerpt-model';
 import { hotSet } from '../services/hot-blocks';
 import { SearchModelRegistry } from '../services/model-ownership';
+import { openExcerptAt } from '../services/open-excerpt';
 import FileExcerptBlock from './FileExcerptBlock';
 
 export const LINE_HEIGHT = 18;
@@ -197,13 +198,12 @@ function ExcerptList({ sessionId }: ExcerptListProps) {
     [session?.collapsedFiles, sessionId, update],
   );
 
-  const openExcerpt = useCallback(async (filePath: string, lineNumber: number, column: number) => {
-    const fileName = filePath.split('/').pop() || '';
-    await useWorkspaceStore.getState().openFile(filePath, fileName);
-    window.dispatchEvent(
-      new CustomEvent('navigate-to-line', { detail: { line: lineNumber, column } }),
-    );
-  }, []);
+  // `openExcerptAt` is a module-level function (never re-created), so
+  // handing it straight to `FileExcerptBlock`/`HydratedExcerpt` gives them an
+  // even more stable identity than a `useCallback([])` wrapper would — see
+  // `HydratedExcerpt`'s mount effect for why identity churn on
+  // `onOpenExcerpt` matters (it would remount every hot editor).
+  const openExcerpt = openExcerptAt;
 
   const focusExcerpt = useCallback(
     (excerptId: string) => update(sessionId, { activeExcerptId: excerptId }),

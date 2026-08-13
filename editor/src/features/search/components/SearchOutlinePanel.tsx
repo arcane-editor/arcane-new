@@ -4,7 +4,8 @@ import { flushSync } from 'react-dom';
 import { useSearchStore } from '../../../stores/search';
 import { useWorkspaceStore } from '../../../stores/workspace';
 import { getFileIcon } from '../../../utils/file-icons';
-import { buildExcerpts } from '../services/excerpt-model';
+import { buildExcerpts, matchStartPosition, type Excerpt } from '../services/excerpt-model';
+import { openExcerptAt } from '../services/open-excerpt';
 import { summaryFor } from '../services/search-model';
 
 /** Matches `.search-outline-file-header`'s box height (padding 4px top/bottom
@@ -95,6 +96,24 @@ function SearchOutlinePanel() {
     );
   }
 
+  // Opens the file at this excerpt's match and moves focus there — same
+  // `openExcerptAt` path the results tab's Cmd+Enter/Alt+Enter/double-click
+  // use, so cursor placement and focus behave identically no matter which
+  // surface the user opened the match from. There is no live Monaco cursor
+  // to prefer here (an outline row is never a hydrated editor, just a
+  // summary), so this always targets `matchStartPosition` — the excerpt's
+  // first matching line and its real-file match column, matching what the
+  // results tab does for its own match-start open.
+  //
+  // Called AFTER `reveal()`, not before: `reveal()` activates and scrolls
+  // THIS session's results tab via a synchronous `flushSync`, and running
+  // `openExcerptAt` first would just have that undo the file switch by
+  // reactivating the search tab out from under it.
+  function openMatch(filePath: string, excerpt: Excerpt) {
+    const target = matchStartPosition(excerpt);
+    if (target) void openExcerptAt(filePath, target.lineNumber, target.column);
+  }
+
   return (
     <div className="sidebar">
       <div className="sidebar-header">SEARCH RESULTS</div>
@@ -129,7 +148,10 @@ function SearchOutlinePanel() {
                     <button
                       key={excerpt.id}
                       className={`search-outline-row${session.activeExcerptId === excerpt.id ? ' active' : ''}`}
-                      onClick={() => reveal(excerpt.id)}
+                      onClick={() => {
+                        reveal(excerpt.id);
+                        openMatch(file.path, excerpt);
+                      }}
                     >
                       <span className="search-match-line">{excerpt.startLine}</span>
                       <span className="search-match-content">
