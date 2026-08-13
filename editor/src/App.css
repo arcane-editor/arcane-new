@@ -3356,6 +3356,19 @@ html, body, #root {
   overflow: hidden;
 }
 
+/* The construction options in `HydratedExcerpt` (fontSize, fontFamily,
+   lineDecorationsWidth, padding) get it visually close to the cold rows
+   around it, but Monaco still paints its OWN theme background per editor
+   instance by default — every hydrated excerpt would show a different
+   background than its cold neighbours and the list's own surface. Force
+   every background layer transparent so it sits on the list underneath it
+   instead. */
+.search-excerpt-hydrated .monaco-editor,
+.search-excerpt-hydrated .monaco-editor-background,
+.search-excerpt-hydrated .monaco-editor .margin {
+  background-color: transparent;
+}
+
 /* ==================== Search Sidebar: outline ==================== */
 
 .search-outline {

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
+import type { editor as MonacoEditorNs } from 'monaco-editor';
 import { useSearchStore } from '../../../stores/search';
 import { useWorkspaceStore } from '../../../stores/workspace';
 import { disposeModelForPath } from '../../editor';
@@ -33,6 +34,22 @@ function ExcerptList({ sessionId }: ExcerptListProps) {
   // excerpt id, because a model belongs to a file and eviction disposes at
   // that granularity — every excerpt of a hot file is hot.
   const [hot, setHot] = useState<string[]>([]);
+  // Live Monaco editor instances for currently-hydrated excerpts, keyed by
+  // excerpt id. `HydratedExcerpt` registers itself here on mount and clears
+  // itself on unmount (Task B1) — this is what lets `openActiveExcerpt` read
+  // the REAL editor cursor instead of falling back to a caret probe. Plain
+  // `useRef`, not store state: this is imperative, per-mount wiring with no
+  // reason to trigger a render of its own.
+  const hydratedEditorsRef = useRef(new Map<string, MonacoEditorNs.IStandaloneCodeEditor>());
+  const registerHydratedEditor = useCallback(
+    (excerptId: string, editorInstance: MonacoEditorNs.IStandaloneCodeEditor) => {
+      hydratedEditorsRef.current.set(excerptId, editorInstance);
+    },
+    [],
+  );
+  const unregisterHydratedEditor = useCallback((excerptId: string) => {
+    hydratedEditorsRef.current.delete(excerptId);
+  }, []);
 
   const blocks = useMemo(
     () =>
@@ -304,12 +321,24 @@ function ExcerptList({ sessionId }: ExcerptListProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on mount only, see comment above
   }, [blocks, session?.activeExcerptId, virtualizer]);
 
-  // Shared by plain Enter and alt+enter — both open the active excerpt at its
-  // match start; there is no click point for either path.
+  // Shared by plain Enter and alt+enter — both open the active excerpt.
+  // Per the owner's ask ("go to the file and the location where the cursor
+  // was"), a HYDRATED excerpt's real Monaco cursor is a better source of
+  // truth than a caret probe over static text, so prefer it when one is
+  // live; otherwise fall back to the match-start position the cold render
+  // uses (there is no cursor to read when nothing is mounted).
   const openActiveExcerpt = useCallback(() => {
     const activeId = session?.activeExcerptId;
     if (!activeId) return;
     const filePath = activeId.slice(0, activeId.lastIndexOf(':'));
+
+    const hydrated = hydratedEditorsRef.current.get(activeId);
+    const position = hydrated?.getPosition();
+    if (position) {
+      openExcerpt(filePath, position.lineNumber, position.column);
+      return;
+    }
+
     const block = blocks.find((b) => b.file.path === filePath);
     const excerpt = block?.excerpts.find((ex) => ex.id === activeId);
     const line = excerpt?.lines.find((l) => l.matches.length > 0);
@@ -429,6 +458,8 @@ function ExcerptList({ sessionId }: ExcerptListProps) {
                 }
                 registry={registryRef.current}
                 onFirstEdit={onFirstEdit}
+                onEditorMount={registerHydratedEditor}
+                onEditorUnmount={unregisterHydratedEditor}
               />
             </div>
           );

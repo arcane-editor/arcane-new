@@ -1,12 +1,32 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import type { IDisposable } from 'monaco-editor';
+import type { editor as MonacoEditorNs, IDisposable } from 'monaco-editor';
 import { getMonacoInstance } from '../../../utils/monaco-instance';
+import { initMonaco } from '../../editor';
 import { fileUri } from '../../lsp';
 import { detectLanguage } from '../../../utils/language-detect';
 import { applyHiddenAreas } from '../services/hidden-areas';
 import type { SearchModelRegistry } from '../services/model-ownership';
 import type { Excerpt } from '../services/excerpt-model';
+
+// Cold rows render at 12px `var(--font-mono)` with a 40px right-aligned
+// gutter and no vertical padding (`.search-excerpt-line` /
+// `.search-excerpt-gutter`, App.css). Mirrored here the same way
+// `ExcerptList`'s `LINE_HEIGHT` mirrors `line-height: 18px`, so a hydrated
+// excerpt doesn't visibly change size or x-position relative to the cold
+// rows around it as blocks hydrate.
+const EXCERPT_FONT_SIZE = 12;
+const EXCERPT_GUTTER_WIDTH = 40;
+
+/** Reads the real `--font-mono` value out of the page instead of hardcoding
+ *  a guess that can drift from `App.css` — this is the exact stack the cold
+ *  rows render with. `undefined` (Monaco's own default) if unavailable,
+ *  which only happens outside a browser. */
+function excerptFontFamily(): string | undefined {
+  if (typeof window === 'undefined') return undefined;
+  const value = getComputedStyle(document.documentElement).getPropertyValue('--font-mono').trim();
+  return value || undefined;
+}
 
 interface HydratedExcerptProps {
   filePath: string;
@@ -14,9 +34,17 @@ interface HydratedExcerptProps {
   registry: SearchModelRegistry;
   lineHeight: number;
   onFirstEdit: (filePath: string, content: string) => void;
-  /** Called when this excerpt cannot be hydrated — no Monaco, or the internal
-   *  hidden-areas API is gone. The parent falls back to the cold render. */
+  /** Called when this excerpt cannot be hydrated — the internal hidden-areas
+   *  API is gone, the range isn't sane against the model, or the backing
+   *  model got disposed out from under it. The parent falls back to the
+   *  cold render. NOT called merely because Monaco hasn't finished loading
+   *  yet — that case retries instead (Task B2). */
   onUnavailable: () => void;
+  /** Registers/clears this excerpt's live editor instance with the list, so
+   *  `openActiveExcerpt` (Enter/alt+Enter) can read its real cursor position
+   *  instead of a caret probe. See `ExcerptList`. */
+  onEditorMount: (excerptId: string, editorInstance: MonacoEditorNs.IStandaloneCodeEditor) => void;
+  onEditorUnmount: (excerptId: string) => void;
 }
 
 function HydratedExcerpt({
@@ -26,35 +54,58 @@ function HydratedExcerpt({
   lineHeight,
   onFirstEdit,
   onUnavailable,
+  onEditorMount,
+  onEditorUnmount,
 }: HydratedExcerptProps) {
   const hostRef = useRef<HTMLDivElement>(null);
+  // Best guess before Monaco exists to measure anything; synced to Monaco's
+  // own content height once it does, and kept in sync as the user types
+  // (Task B4 — see the comment at the `onDidContentSizeChange` subscription
+  // below for why a frozen height is actively wrong, not just cosmetic).
+  const [height, setHeight] = useState(() => excerpt.lines.length * lineHeight);
 
   useEffect(() => {
-    const monaco = getMonacoInstance();
     const host = hostRef.current;
-    if (!monaco || !host) {
+    if (!host) {
       onUnavailable();
       return;
     }
 
     let disposed = false;
-    let editor: ReturnType<typeof monaco.editor.create> | null = null;
+    let editor: MonacoEditorNs.IStandaloneCodeEditor | null = null;
     let modelDisposeListener: IDisposable | null = null;
+    let contentSizeListener: IDisposable | null = null;
 
     async function mount() {
-      const uri = monaco!.Uri.parse(fileUri(filePath));
-      let model = monaco!.editor.getModel(uri);
+      // `main.tsx` kicks off `initMonaco()` fire-and-forget so first paint
+      // isn't blocked on it — a session restored straight onto a search tab
+      // mounts every visible excerpt before Monaco is necessarily ready.
+      // That is "not ready YET", not "can't be hydrated": await the same
+      // singleton loader (idempotent — resolves to the in-flight or
+      // already-created instance) instead of latching cold forever.
+      let monaco = getMonacoInstance();
+      if (!monaco) {
+        monaco = await initMonaco().catch(() => null);
+        if (disposed) return;
+      }
+      if (!monaco) {
+        onUnavailable();
+        return;
+      }
+
+      const uri = monaco.Uri.parse(fileUri(filePath));
+      let model = monaco.editor.getModel(uri);
       if (!model) {
         // No tab backs this file, so search creates the model and owns it.
         // Re-check after the await: another excerpt of the same file may have
         // created it while this read was in flight.
         const content = await invoke<string>('read_file', { path: filePath });
         if (disposed) return;
-        const existing = monaco!.editor.getModel(uri);
+        const existing = monaco.editor.getModel(uri);
         if (existing) {
           model = existing;
         } else {
-          model = monaco!.editor.createModel(content, detectLanguage(filePath).monacoId, uri);
+          model = monaco.editor.createModel(content, detectLanguage(filePath).monacoId, uri);
           registry.claim(filePath);
         }
       }
@@ -72,7 +123,7 @@ function HydratedExcerpt({
         onUnavailable();
       });
 
-      editor = monaco!.editor.create(host!, {
+      editor = monaco.editor.create(host!, {
         model,
         lineNumbers: 'on',
         minimap: { enabled: false },
@@ -88,6 +139,16 @@ function HydratedExcerpt({
         scrollbar: { vertical: 'hidden', horizontal: 'auto', handleMouseWheel: false },
         automaticLayout: true,
         lineHeight,
+        // Match the cold row this editor replaces (`.search-excerpt-line` /
+        // `.search-excerpt-gutter`, App.css) so nothing visibly jumps in
+        // size or x-position as blocks hydrate. The editor's own theme
+        // background is overridden transparent in App.css
+        // (`.search-excerpt-hydrated`) so it sits on the list's surface
+        // instead of painting a different background per excerpt.
+        fontSize: EXCERPT_FONT_SIZE,
+        fontFamily: excerptFontFamily(),
+        lineDecorationsWidth: EXCERPT_GUTTER_WIDTH,
+        padding: { top: 0, bottom: 0 },
       });
 
       // One excerpt, so one visible range: everything else in the file hides.
@@ -135,6 +196,20 @@ function HydratedExcerpt({
         return;
       }
 
+      onEditorMount(excerpt.id, editor);
+
+      // Sync the host to Monaco's own measurement immediately, then keep
+      // syncing. The scrollbar is hidden and wheel is disabled (the results
+      // list owns scrolling), but Monaco still scrolls PROGRAMMATICALLY to
+      // keep the cursor in view — with a host frozen at the React-estimated
+      // height, pressing Enter on the last visible line scrolls the
+      // excerpt's own FIRST line out of the fixed window, silently showing
+      // the wrong lines rather than merely hiding the new one.
+      setHeight(editor.getContentHeight());
+      contentSizeListener = editor.onDidContentSizeChange(() => {
+        setHeight(editor!.getContentHeight());
+      });
+
       editor.onDidChangeModelContent(() => {
         onFirstEdit(filePath, model!.getValue());
       });
@@ -144,7 +219,9 @@ function HydratedExcerpt({
 
     return () => {
       disposed = true;
+      contentSizeListener?.dispose();
       modelDisposeListener?.dispose();
+      if (editor) onEditorUnmount(excerpt.id);
       editor?.dispose();
       // The MODEL is not disposed here: eviction and search-tab close own that
       // decision, via the registry. Disposing on unmount would destroy a model
@@ -160,15 +237,20 @@ function HydratedExcerpt({
     // the primitives this effect actually reads off `excerpt` are listed, so
     // a re-render that produces an equivalent excerpt (same lines, same
     // range) does not remount the editor.
-  }, [filePath, excerpt.startLine, excerpt.endLine, registry, lineHeight, onFirstEdit, onUnavailable]);
+  }, [
+    filePath,
+    excerpt.id,
+    excerpt.startLine,
+    excerpt.endLine,
+    registry,
+    lineHeight,
+    onFirstEdit,
+    onUnavailable,
+    onEditorMount,
+    onEditorUnmount,
+  ]);
 
-  return (
-    <div
-      className="search-excerpt-hydrated"
-      ref={hostRef}
-      style={{ height: `${excerpt.lines.length * lineHeight}px` }}
-    />
-  );
+  return <div className="search-excerpt-hydrated" ref={hostRef} style={{ height: `${height}px` }} />;
 }
 
 export default HydratedExcerpt;

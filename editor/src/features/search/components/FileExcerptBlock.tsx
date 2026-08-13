@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
+import type { editor as MonacoEditorNs } from 'monaco-editor';
 import { getFileIcon } from '../../../utils/file-icons';
 import { detectLanguage } from '../../../utils/language-detect';
 import { getMonacoInstance } from '../../../utils/monaco-instance';
@@ -26,6 +27,11 @@ interface FileExcerptBlockProps {
   hotExcerptIds: string[];
   registry: SearchModelRegistry;
   onFirstEdit: (filePath: string, content: string) => void;
+  /** Registers/clears a hydrated excerpt's live editor instance with the
+   *  list, so `openActiveExcerpt` (Enter/alt+Enter) can read its real cursor
+   *  position instead of a caret probe. See `ExcerptList`. */
+  onEditorMount: (excerptId: string, editorInstance: MonacoEditorNs.IStandaloneCodeEditor) => void;
+  onEditorUnmount: (excerptId: string) => void;
 }
 
 /** Colorized HTML per (themeId, languageId, text). Search results repeat
@@ -237,6 +243,8 @@ function FileExcerptBlock({
   hotExcerptIds,
   registry,
   onFirstEdit,
+  onEditorMount,
+  onEditorUnmount,
 }: FileExcerptBlockProps) {
   const fileName = filePath.split('/').pop() || filePath;
   const monacoId = detectLanguage(fileName).monacoId;
@@ -305,6 +313,8 @@ function FileExcerptBlock({
                 lineHeight={LINE_HEIGHT}
                 onFirstEdit={onFirstEdit}
                 onUnavailable={onUnavailableFor(excerpt.id)}
+                onEditorMount={onEditorMount}
+                onEditorUnmount={onEditorUnmount}
               />
             ) : (
               excerpt.lines.map((line) => (
