@@ -49,3 +49,4 @@ export {
   type HistoryPosition,
 } from './services/query-history';
 export { unityNoiseExcludes, UNITY_NOISE_EXTENSIONS } from './services/unity-scope';
+export { offsetWithinLine, columnFor } from './services/caret-offset';
