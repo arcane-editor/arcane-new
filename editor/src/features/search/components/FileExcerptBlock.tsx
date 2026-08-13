@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ChevronDown, ChevronRight, ChevronUp } from 'lucide-react';
 import { getFileIcon } from '../../../utils/file-icons';
 import { detectLanguage } from '../../../utils/language-detect';
 import { getMonacoInstance } from '../../../utils/monaco-instance';
 import { useThemeStore } from '../../../stores/theme';
 import { splitByMatches, stripTrailingBreak } from '../services/highlight';
+import { offsetWithinLine, columnFor } from '../services/caret-offset';
 import type { Excerpt, MatchRange } from '../services/excerpt-model';
 
 interface FileExcerptBlockProps {
@@ -92,6 +93,52 @@ function useColorizedLine(text: string, monacoId: string, themeId: string): stri
   return result?.key === key ? result.html : null;
 }
 
+/** Character offset within `lineEl`'s text for a viewport point, or null when
+ *  the browser exposes neither caret API or reports a node outside the line.
+ *  Callers fall back to the match start. */
+function offsetFromPoint(lineEl: HTMLElement, x: number, y: number): number | null {
+  const doc = lineEl.ownerDocument;
+  let node: Node | null = null;
+  let nodeOffset = 0;
+
+  const withRange = (doc as Document & {
+    caretRangeFromPoint?: (x: number, y: number) => Range | null;
+  }).caretRangeFromPoint;
+  const withPosition = (doc as Document & {
+    caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
+  }).caretPositionFromPoint;
+
+  if (typeof withRange === 'function') {
+    const range = withRange.call(doc, x, y);
+    if (range) {
+      node = range.startContainer;
+      nodeOffset = range.startOffset;
+    }
+  } else if (typeof withPosition === 'function') {
+    const position = withPosition.call(doc, x, y);
+    if (position) {
+      node = position.offsetNode;
+      nodeOffset = position.offset;
+    }
+  }
+  if (!node || !lineEl.contains(node)) return null;
+
+  // Text nodes in document order — the same order their lengths must be
+  // summed in. `acceptNode` is not needed: the walker only yields text nodes.
+  const walker = doc.createTreeWalker(lineEl, NodeFilter.SHOW_TEXT);
+  const texts: string[] = [];
+  let hitIndex = -1;
+  let current = walker.nextNode();
+  while (current) {
+    if (current === node) hitIndex = texts.length;
+    texts.push(current.textContent ?? '');
+    current = walker.nextNode();
+  }
+  if (hitIndex === -1) return null;
+
+  return offsetWithinLine(texts, hitIndex, nodeOffset);
+}
+
 interface ExcerptLineRowProps {
   lineNumber: number;
   text: string;
@@ -119,15 +166,31 @@ function ExcerptLineRow({
   // lines) because a hook cannot be called conditionally; colorizing an
   // empty string is cheap and its result is discarded below.
   const colorized = useColorizedLine(isMatchLine ? '' : text, monacoId, activeThemeId);
+  const rowRef = useRef<HTMLDivElement>(null);
+
+  function openAtPoint(e: React.MouseEvent<HTMLDivElement>) {
+    const fallback = columnFor(lineStart, matches[0]?.start ?? 0);
+    if (!rowRef.current) {
+      onOpen(lineNumber, fallback);
+      return;
+    }
+    const offset = offsetFromPoint(rowRef.current, e.clientX, e.clientY);
+    onOpen(lineNumber, offset === null ? fallback : columnFor(lineStart, offset));
+  }
 
   return (
     <div
+      ref={rowRef}
       className={`search-excerpt-line${isMatchLine ? ' is-match' : ''}`}
-      // The real editor column is `lineStart + matchStart`, not `matchStart`
-      // alone (src/types/index.ts, SearchMatch.lineStart): a long line gets
-      // preview-trimmed around its match, so `matches[0].start` is an offset
-      // into the TRIMMED text this row renders, not into the real file line.
-      onDoubleClick={() => onOpen(lineNumber, lineStart + (matches[0]?.start ?? 0) + 1)}
+      onClick={(e) => {
+        // Mod+click opens; a plain click still only selects the excerpt, so a
+        // long result list stays scannable without bouncing to files.
+        if (e.metaKey || e.ctrlKey) {
+          e.preventDefault();
+          openAtPoint(e);
+        }
+      }}
+      onDoubleClick={(e) => openAtPoint(e)}
     >
       <span className="search-excerpt-gutter">{lineNumber}</span>
       <code className="search-excerpt-code">
@@ -199,7 +262,7 @@ function FileExcerptBlock({
               aria-label="Expand context above"
               onClick={() => onExpand(excerpt.id, 'up')}
             >
-              <ChevronUp size={12} aria-hidden="true" />
+              <ChevronUp size={10} aria-hidden="true" />
             </button>
 
             {excerpt.lines.map((line) => (
@@ -221,7 +284,7 @@ function FileExcerptBlock({
               aria-label="Expand context below"
               onClick={() => onExpand(excerpt.id, 'down')}
             >
-              <ChevronDown size={12} aria-hidden="true" />
+              <ChevronDown size={10} aria-hidden="true" />
             </button>
           </div>
         ))}

@@ -256,6 +256,24 @@ function ExcerptList({ sessionId }: ExcerptListProps) {
     [fileLines, session?.expanded, sessionId, update],
   );
 
+  // Shared by plain Enter and alt+enter — both open the active excerpt at its
+  // match start; there is no click point for either path.
+  const openActiveExcerpt = useCallback(() => {
+    const activeId = session?.activeExcerptId;
+    if (!activeId) return;
+    const filePath = activeId.slice(0, activeId.lastIndexOf(':'));
+    const block = blocks.find((b) => b.file.path === filePath);
+    const excerpt = block?.excerpts.find((ex) => ex.id === activeId);
+    const line = excerpt?.lines.find((l) => l.matches.length > 0);
+    // Column mirrors the double-click handler in FileExcerptBlock:
+    // `lineStart + match.start`, not `match.start` alone — a long line is
+    // preview-trimmed around its match, so `match.start` by itself is an
+    // offset into the TRIMMED text this row renders, not the real file line.
+    if (line) {
+      openExcerpt(filePath, line.lineNumber, line.lineStart + (line.matches[0]?.start ?? 0) + 1);
+    }
+  }, [blocks, openExcerpt, session?.activeExcerptId]);
+
   // These act on the active excerpt, so they belong to the tab rather than
   // the global command registry — a document-level hotkey would fire while
   // the user is typing in the query input above. Never `stopPropagation`
@@ -267,19 +285,15 @@ function ExcerptList({ sessionId }: ExcerptListProps) {
       const activeId = session?.activeExcerptId;
       if (!activeId) return;
 
+      if (e.key === 'Enter' && !e.altKey && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
+        e.preventDefault();
+        openActiveExcerpt();
+        return;
+      }
+
       if (e.key === 'Enter' && e.altKey) {
         e.preventDefault();
-        const filePath = activeId.slice(0, activeId.lastIndexOf(':'));
-        const block = blocks.find((b) => b.file.path === filePath);
-        const excerpt = block?.excerpts.find((ex) => ex.id === activeId);
-        const line = excerpt?.lines.find((l) => l.matches.length > 0);
-        // Column mirrors the double-click handler in FileExcerptBlock:
-        // `lineStart + match.start`, not `match.start` alone — a long line is
-        // preview-trimmed around its match, so `match.start` by itself is an
-        // offset into the TRIMMED text this row renders, not the real file line.
-        if (line) {
-          openExcerpt(filePath, line.lineNumber, line.lineStart + (line.matches[0]?.start ?? 0) + 1);
-        }
+        openActiveExcerpt();
         return;
       }
 
@@ -288,7 +302,7 @@ function ExcerptList({ sessionId }: ExcerptListProps) {
         void expand(activeId, 'down');
       }
     },
-    [blocks, expand, openExcerpt, session?.activeExcerptId],
+    [expand, openActiveExcerpt, session?.activeExcerptId],
   );
 
   if (!session) return null;

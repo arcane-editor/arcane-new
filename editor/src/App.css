@@ -3304,6 +3304,7 @@ html, body, #root {
   font-family: var(--font-mono, monospace);
   font-size: 12px;
   white-space: pre;
+  cursor: text;
 }
 
 .search-excerpt-line.is-match {
