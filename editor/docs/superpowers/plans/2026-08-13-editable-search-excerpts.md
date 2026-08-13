@@ -637,15 +637,10 @@ In `src/App.css`, add to `.search-excerpt-line`:
   cursor: text;
 ```
 
-and after it:
-
-```css
-/* A result line is a link to its source under the platform's modifier — the
-   same affordance Monaco uses for go-to-definition. */
-.search-excerpt-line:hover .search-excerpt-code {
-  text-decoration-color: transparent;
-}
-```
+That is the whole CSS change. Do not add a hover rule: the affordance is
+carried by the line's tooltip and by `cursor: text` reading as selectable
+content, and a modifier-held underline would need document-level keydown and
+keyup listeners that this task does not budget for.
 
 - [ ] **Step 5: Verify and commit**
 
@@ -1488,11 +1483,30 @@ In `ExcerptList.tsx`, add the handler passed to `FileExcerptBlock` as `onFirstEd
     // treating it as disposable.
     registryRef.current.transfer(filePath);
     workspace.openFileInBackground(filePath, content);
-    setEditedPaths((prev) => (prev.includes(filePath) ? prev : [...prev, filePath]));
-  }, []);
+
+    const search = useSearchStore.getState();
+    const edited = search.sessions[sessionId]?.editedPaths ?? [];
+    if (!edited.includes(filePath)) {
+      search.update(sessionId, { editedPaths: [...edited, filePath] });
+    }
+  }, [sessionId]);
 ```
 
-with `const [editedPaths, setEditedPaths] = useState<string[]>([]);` beside the other state. `editedPaths` is what Task 11's save-all writes.
+`editedPaths` lives on the session, not in component state: the query bar
+renders the modified count from it and Task 11's save-all reads it, and this
+component unmounts every time the user switches away from the results tab —
+component state would lose the set on the next tab switch.
+
+Add the field in `src/features/search/services/search-session.ts`:
+
+```ts
+  /** Files this results tab has edited, in first-edit order. Drives the
+   *  modified count and save-all. Deliberately NOT part of `searchSignature`:
+   *  editing a file is not a reason to re-run the search. */
+  editedPaths: string[];
+```
+
+with `editedPaths: [],` in `createSession`.
 
 - [ ] **Step 3: Write the isolated behaviour test**
 
@@ -1597,19 +1611,23 @@ In `ExcerptList.tsx`:
       const detail = (event as CustomEvent<{ sessionId: string }>).detail;
       if (detail.sessionId !== sessionId) return;
       const workspace = useWorkspaceStore.getState();
-      for (const path of editedPaths) {
+      const search = useSearchStore.getState();
+      // Read from the live store rather than a closed-over value: this handler
+      // is registered once per sessionId, and an edit made after registration
+      // would be missing from a captured array.
+      for (const path of search.sessions[sessionId]?.editedPaths ?? []) {
         void workspace.saveFile(path);
       }
-      setEditedPaths([]);
+      search.update(sessionId, { editedPaths: [] });
     }
     window.addEventListener('search-save-all', onSaveAll);
     return () => window.removeEventListener('search-save-all', onSaveAll);
-  }, [sessionId, editedPaths]);
+  }, [sessionId]);
 ```
 
 - [ ] **Step 3: Surface the count**
 
-`editedPaths` lives in `ExcerptList`, but the count belongs in the tab's header beside the result count. Lift it to the session so both can read it: add `editedPaths: string[]` to `SearchSession` (default `[]`) in `search-session.ts`, replace the local `useState` from Task 10 with `update(sessionId, { editedPaths: [...] })`, and render it in `SearchQueryBar` after the existing count:
+`session.editedPaths` already exists and is written by Task 10. Render it in `SearchQueryBar` after the existing count:
 
 ```tsx
         {session.editedPaths.length > 0 && (
