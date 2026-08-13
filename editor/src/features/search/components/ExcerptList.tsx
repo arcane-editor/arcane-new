@@ -223,11 +223,15 @@ function ExcerptList({ sessionId }: ExcerptListProps) {
   // so it reads `editedPaths` fresh at the moment the event fires rather than
   // a value closed over here at registration time, and so it's directly
   // testable in the isolated store harness without a mounted component.
+  // `saveAllEdited` resolves once every save has settled and never rejects
+  // itself (it awaits via `Promise.allSettled`, and writes any failed path
+  // back into `editedPaths` rather than throwing) — `void` here is a
+  // deliberate fire-and-forget, not a swallowed error path.
   useEffect(() => {
     function onSaveAll(event: Event) {
       const detail = (event as CustomEvent<{ sessionId: string }>).detail;
       if (detail.sessionId !== sessionId) return;
-      useSearchStore.getState().saveAllEdited(sessionId);
+      void useSearchStore.getState().saveAllEdited(sessionId);
     }
     window.addEventListener('search-save-all', onSaveAll);
     return () => window.removeEventListener('search-save-all', onSaveAll);

@@ -7,7 +7,8 @@ import { describe, it, expect, afterAll, mock } from 'bun:test';
  * without stealing focus from the results tab mid-keystroke — and (Task 11)
  * `stores/search.ts`'s `saveAllEdited`, the action behind a results tab's
  * `mod+s`: save every file THIS session's `editedPaths` names, and only
- * those, then clear the list.
+ * those, leaving a path in the list if (and only if) its save failed
+ * (fix round 1, Finding 1).
  *
  * Deliberately `.exec.ts`, not `.test.ts` — same reason as the sibling
  * `search-invalidation.exec.ts` (see that file's header): `mock.module`
@@ -23,6 +24,13 @@ import * as realWindow from '@tauri-apps/api/window';
  *  written to disk and with what contents, without a real filesystem. */
 const writeFileCalls: Array<{ path: string; contents: string }> = [];
 
+/** Paths in this set make the mocked `write_file` reject instead of
+ *  succeeding — the harness for fix round 1's Finding 2 (a save that fails
+ *  must stay in `editedPaths`, not just one that never runs). Tests add a
+ *  path before calling `saveAllEdited` and remove it in a `finally`, so a
+ *  failure in one test can't leak into the next. */
+const failingWritePaths = new Set<string>();
+
 mock.module('@tauri-apps/api/core', () => ({
   ...realCore,
   // `openFileInBackground` itself never invokes anything — it's a pure
@@ -33,8 +41,12 @@ mock.module('@tauri-apps/api/core', () => ({
   // file). Anything else is a sign a test reached further than intended.
   invoke: async (cmd: string, args?: Record<string, unknown>) => {
     if (cmd === 'write_file') {
+      const path = args?.path as string;
+      if (failingWritePaths.has(path)) {
+        throw new Error(`simulated write failure for ${path}`);
+      }
       writeFileCalls.push({
-        path: args?.path as string,
+        path,
         contents: args?.contents as string,
       });
       return undefined;
@@ -199,10 +211,12 @@ describe('saveAllEdited — REAL execution (own process, see file header)', () =
     });
 
     const before = writeFileCalls.length;
-    useSearchStore.getState().saveAllEdited(id);
-    // Each save is fire-and-forget (`void`) inside the action, so give its
-    // microtask a turn before asserting on the write it queued.
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    // `saveAllEdited` now genuinely resolves once every save has settled
+    // (fix round 1, Finding 1 — it used to clear `editedPaths` synchronously
+    // right after firing the saves, before any of them finished), so
+    // awaiting it directly is both correct and sufficient — no more
+    // `setTimeout(0)` guess at how many microtasks the writes need.
+    await useSearchStore.getState().saveAllEdited(id);
 
     const written = writeFileCalls.slice(before);
     expect(written).toEqual([
@@ -219,13 +233,19 @@ describe('saveAllEdited — REAL execution (own process, see file header)', () =
   });
 
   it('reads editedPaths fresh at call time, not a value captured earlier', async () => {
-    // Mirrors the real caller: `ExcerptList`'s listener is registered once
-    // per session id and must see edits made after that registration, not
-    // just whatever was in the session the moment the listener was set up.
-    // `saveAllEdited` takes only the session id (never `editedPaths` itself),
-    // so this is a structural guarantee — this test exercises it for real by
-    // adding a second edit strictly AFTER the session already held one, then
-    // confirming the later addition is included in the very next call.
+    // NOTE (fix round 1 review): this test is weaker than its name claims.
+    // `saveAllEdited(id)` reads `editedPaths` via `get()` INSIDE the action
+    // by construction — there is no parameter for a caller to capture a
+    // stale value into in the first place, so this cannot fail even if a
+    // future edit accidentally reintroduced a captured-array bug elsewhere.
+    // The actual risk the brief was worried about — `ExcerptList`'s
+    // `useEffect` closing over a stale `editedPaths` at LISTENER
+    // REGISTRATION time — lives in a React component this repo's test
+    // harness cannot mount (no RTL, and it transitively needs a live
+    // Monaco instance), so that risk stays genuinely untested by automation.
+    // Kept as a regression guard on `saveAllEdited`'s own contract (it must
+    // still pick up an edit added between two calls), not as proof of the
+    // closure property.
     const { useWorkspaceStore } = await import('./workspace');
     const { useSearchStore } = await import('./search');
     const id = 'search://save-all-live-read';
@@ -242,8 +262,7 @@ describe('saveAllEdited — REAL execution (own process, see file header)', () =
     });
 
     const before = writeFileCalls.length;
-    useSearchStore.getState().saveAllEdited(id);
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await useSearchStore.getState().saveAllEdited(id);
 
     const writtenPaths = writeFileCalls.slice(before).map((c) => c.path);
     expect(writtenPaths).toContain('/w/save-live-1.txt');
@@ -267,8 +286,7 @@ describe('saveAllEdited — REAL execution (own process, see file header)', () =
     useSearchStore.getState().update(id, { editedPaths: ['/w/save-only-this.txt'] });
 
     const before = writeFileCalls.length;
-    useSearchStore.getState().saveAllEdited(id);
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await useSearchStore.getState().saveAllEdited(id);
 
     const writtenPaths = writeFileCalls.slice(before).map((c) => c.path);
     expect(writtenPaths).toEqual(['/w/save-only-this.txt']);
@@ -286,11 +304,66 @@ describe('saveAllEdited — REAL execution (own process, see file header)', () =
     useSearchStore.getState().ensureSession(id);
 
     const before = writeFileCalls.length;
-    expect(() => useSearchStore.getState().saveAllEdited(id)).not.toThrow();
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await expect(useSearchStore.getState().saveAllEdited(id)).resolves.toBeUndefined();
 
     expect(writeFileCalls.length).toBe(before);
     expect(useSearchStore.getState().sessions[id]?.editedPaths).toEqual([]);
+
+    useSearchStore.getState().closeSession(id);
+  });
+
+  // Fix round 1, Finding 1 & Finding 2: a REJECTED save (disk full,
+  // permissions, the file locked by Unity) must leave its path in
+  // `editedPaths` — the modified-count badge is the one signal that
+  // something still needs saving, and the old unconditional clear destroyed
+  // it exactly when it mattered most. One unwritable file must also not
+  // block the others in the same batch from saving.
+  it('leaves a failed save in editedPaths, saves the rest anyway, and produces no unhandled rejection', async () => {
+    const { useWorkspaceStore } = await import('./workspace');
+    const { useSearchStore } = await import('./search');
+    const id = 'search://save-all-partial-failure';
+    useSearchStore.getState().ensureSession(id);
+
+    useWorkspaceStore.getState().openFileInBackground('/w/save-fail.txt', 'will fail');
+    useWorkspaceStore.getState().openFileInBackground('/w/save-ok.txt', 'will succeed');
+    useSearchStore.getState().update(id, {
+      editedPaths: ['/w/save-fail.txt', '/w/save-ok.txt'],
+    });
+
+    // Detects the exact regression Finding 1 called out: `void saveFile(...)`
+    // with nothing awaiting or `.catch`ing it left each rejection unhandled,
+    // which `main.tsx`'s global `unhandledrejection` listener turned into a
+    // SECOND, generic toast stacked on top of `saveFile`'s own. Node/Bun
+    // fire `unhandledRejection` on a microtask AFTER the promise settles, so
+    // this listener has to stay registered past the `await` below, not just
+    // during it.
+    const unhandled: unknown[] = [];
+    const onUnhandledRejection = (reason: unknown) => unhandled.push(reason);
+    process.on('unhandledRejection', onUnhandledRejection);
+
+    failingWritePaths.add('/w/save-fail.txt');
+    try {
+      await useSearchStore.getState().saveAllEdited(id);
+      // One more tick for a same-turn `unhandledRejection` to have fired,
+      // if the fix regressed and one of the saves went unhandled again.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    } finally {
+      failingWritePaths.delete('/w/save-fail.txt');
+      process.off('unhandledRejection', onUnhandledRejection);
+    }
+
+    expect(useSearchStore.getState().sessions[id]?.editedPaths).toEqual(['/w/save-fail.txt']);
+    expect(unhandled).toEqual([]);
+
+    const state = useWorkspaceStore.getState();
+    // The failed file is still dirty — nothing pretends it saved.
+    expect(state.openFiles.find((f) => f.path === '/w/save-fail.txt')?.isDirty).toBe(true);
+    // The other file in the same batch was not blocked by the failure.
+    expect(state.openFiles.find((f) => f.path === '/w/save-ok.txt')?.isDirty).toBe(false);
+    expect(
+      writeFileCalls.some((c) => c.path === '/w/save-ok.txt' && c.contents === 'will succeed'),
+    ).toBe(true);
+    expect(writeFileCalls.some((c) => c.path === '/w/save-fail.txt')).toBe(false);
 
     useSearchStore.getState().closeSession(id);
   });

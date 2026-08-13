@@ -30,9 +30,10 @@ interface SearchState {
   search: (id: string, workspacePath: string) => Promise<void>;
   clearResults: (id: string) => void;
   closeSession: (id: string) => void;
-  /** Saves every file session `id` has edited (`editedPaths`) and clears the
-   *  list — see the doc comment on the implementation below. */
-  saveAllEdited: (id: string) => void;
+  /** Saves every file session `id` has edited (`editedPaths`), leaving any
+   *  path whose save failed in the list — see the doc comment on the
+   *  implementation below. */
+  saveAllEdited: (id: string) => Promise<void>;
 }
 
 const DEFAULT_SESSION_ID = 'search://1';
@@ -266,18 +267,40 @@ export const useSearchStore = create<SearchState>((set, get) => ({
   // this action — not by a caller who captured `editedPaths` earlier — so an
   // edit made after `ExcerptList`'s listener was registered is still picked
   // up: that listener is registered once per session id and lives for as
-  // long as the tab does, well past any single edit. Mirrors `App.tsx`'s
-  // single-file `file.save`: each write is fire-and-forget (`void`), not
-  // awaited — a failed write already surfaces via `notify.error` inside
-  // `saveFile` itself, and awaiting here would hold up clearing
-  // `editedPaths` (and so the modified count) for files that DID save while
-  // one is slow or erroring.
-  saveAllEdited: (id) => {
+  // long as the tab does, well past any single edit.
+  //
+  // Fix round 1, Finding 1: the first version of this cleared `editedPaths`
+  // unconditionally right after firing the saves, so a REJECTED save (disk
+  // full, permissions, the file locked by Unity) still lost its place in the
+  // list — the modified-count badge disappeared even though nothing was
+  // written and the tab was still dirty. `Promise.allSettled` (not
+  // `Promise.all`) is required, not just "await instead of void": one
+  // unwritable file must not abort — or even delay past its own
+  // rejection — the other saves in the batch. `saveFile` already shows its
+  // own error toast and re-throws, so nothing here needs to surface a
+  // message; it only needs to keep `editedPaths` honest. `allSettled` also
+  // attaches its own reaction to every input promise, which is what stops a
+  // rejected `saveFile()` from ALSO reaching `main.tsx`'s global
+  // `unhandledrejection` handler and duplicating that toast — the earlier
+  // `void saveFile(path)` (no `.catch`, nothing awaiting it) left each
+  // rejection with no handler at all.
+  //
+  // The write-back re-reads `sessions[id].editedPaths` from `get()` AGAIN,
+  // after the awaits — not the `paths` snapshot taken before them — and
+  // removes only the paths just confirmed saved. A path added mid-flight
+  // (the user edits a different excerpt in this tab while these saves are
+  // still in the air) is not in `succeeded`, so it survives untouched
+  // instead of being clobbered by writing back a stale array.
+  saveAllEdited: async (id) => {
     const paths = get().sessions[id]?.editedPaths ?? [];
-    for (const path of paths) {
-      void useWorkspaceStore.getState().saveFile(path);
-    }
-    get().update(id, { editedPaths: [] });
+    const results = await Promise.allSettled(
+      paths.map((path) => useWorkspaceStore.getState().saveFile(path)),
+    );
+    const succeeded = new Set(
+      paths.filter((_, i) => results[i]?.status === 'fulfilled'),
+    );
+    const current = get().sessions[id]?.editedPaths ?? [];
+    get().update(id, { editedPaths: current.filter((p) => !succeeded.has(p)) });
   },
 }));
 
