@@ -206,9 +206,9 @@ export interface SearchSignatureInput {
  * tab re-runs the mount-time effect with `useDebouncedValue` seeded
  * immediately (no delay on first render) — without this check that always
  * looked like "the query changed" and re-triggered a full workspace scan,
- * which also wiped `expanded`/`activeExcerptId` for no reason. An ACTUAL
- * edit to the query or any option still produces a different signature, so
- * it is never skipped.
+ * which also wiped `activeExcerptId` for no reason. An ACTUAL edit to the
+ * query or any option still produces a different signature, so it is never
+ * skipped.
  *
  * NUL-joined, mirroring `search.rs`'s `cursor_key` -- a byte that cannot
  * appear in any of these fields, so no combination of values can collide

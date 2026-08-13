@@ -24,23 +24,16 @@ export {
 } from './services/search-session';
 export {
   buildExcerpts,
-  applyExpansion,
   excerptId,
   type Excerpt,
   type ExcerptLine,
   type MatchRange,
-  type Expansion,
 } from './services/excerpt-model';
 export {
   splitByMatches,
   excerptRowKey,
   type LineSegment,
 } from './services/highlight';
-export {
-  splitLines,
-  readFileLines,
-  clearFileLineCache,
-} from './services/file-lines';
 export {
   pushQuery,
   historyStep,

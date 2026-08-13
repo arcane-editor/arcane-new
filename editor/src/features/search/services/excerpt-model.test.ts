@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { buildExcerpts, applyExpansion, excerptId } from './excerpt-model';
+import { buildExcerpts, excerptId } from './excerpt-model';
 import type { FileSearchResult } from '../../../types';
 
 function match(lineNumber: number, lineContent: string, before: string[] = [], after: string[] = []) {
@@ -210,49 +210,5 @@ describe('buildExcerpts', () => {
 describe('excerptId', () => {
   it('is stable for a file and start line', () => {
     expect(excerptId('/w/a.ts', 12)).toBe('/w/a.ts:12');
-  });
-});
-
-describe('applyExpansion', () => {
-  const fileLines = ['l1', 'l2', 'l3', 'l4', 'l5', 'l6', 'l7'];
-
-  it('reveals lines above and below from the real file', () => {
-    const file: FileSearchResult = { path: '/w/a.ts', matches: [match(4, 'l4')] };
-    const [ex] = buildExcerpts(file);
-    const grown = applyExpansion(ex, fileLines, { up: 2, down: 1 });
-    expect(grown.startLine).toBe(2);
-    expect(grown.endLine).toBe(5);
-    expect(grown.lines.map((l) => l.text)).toEqual(['l2', 'l3', 'l4', 'l5']);
-  });
-
-  it('clamps at both file boundaries', () => {
-    const file: FileSearchResult = { path: '/w/a.ts', matches: [match(1, 'l1')] };
-    const [ex] = buildExcerpts(file);
-    const grown = applyExpansion(ex, fileLines, { up: 5, down: 99 });
-    expect(grown.startLine).toBe(1);
-    expect(grown.endLine).toBe(7);
-  });
-
-  it('preserves match highlight ranges on the match line', () => {
-    const file: FileSearchResult = { path: '/w/a.ts', matches: [match(4, 'l4')] };
-    const [ex] = buildExcerpts(file);
-    const grown = applyExpansion(ex, fileLines, { up: 1, down: 0 });
-    expect(grown.lines.find((l) => l.lineNumber === 4)!.matches).toEqual([{ start: 0, end: 3 }]);
-  });
-
-  it('is a no-op when expansion is zero', () => {
-    // The renderer calls applyExpansion on every excerpt that has any
-    // expansion state at all, including { up: 0, down: 0 }; that call must
-    // not corrupt the excerpt's lines (e.g. by dropping highlight ranges or
-    // re-deriving text from fileLines instead of reusing the known lines).
-    const file: FileSearchResult = {
-      path: '/w/a.ts',
-      matches: [match(4, 'l4', ['l2', 'l3'], ['l5', 'l6'])],
-    };
-    const [ex] = buildExcerpts(file);
-    const grown = applyExpansion(ex, fileLines, { up: 0, down: 0 });
-    expect(grown.startLine).toBe(ex.startLine);
-    expect(grown.endLine).toBe(ex.endLine);
-    expect(grown.lines).toEqual(ex.lines);
   });
 });

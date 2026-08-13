@@ -36,11 +36,6 @@ export interface Excerpt {
   matchCount: number;
 }
 
-export interface Expansion {
-  up: number;
-  down: number;
-}
-
 export function excerptId(filePath: string, startLine: number): string {
   return `${filePath}:${startLine}`;
 }
@@ -199,29 +194,4 @@ export function buildExcerpts(file: FileSearchResult): Excerpt[] {
       matchCount: w.matchCount,
     };
   });
-}
-
-/**
- * Re-renders an excerpt with `up`/`down` extra lines taken from the real file
- * contents, clamped at both boundaries. Highlight ranges on existing lines are
- * preserved; revealed lines are pure context.
- */
-export function applyExpansion(
-  excerpt: Excerpt,
-  fileLines: string[],
-  expansion: Expansion,
-): Excerpt {
-  const startLine = Math.max(1, excerpt.startLine - expansion.up);
-  const endLine = Math.min(fileLines.length, excerpt.endLine + expansion.down);
-
-  const existing = new Map(excerpt.lines.map((l) => [l.lineNumber, l]));
-  const lines: ExcerptLine[] = [];
-  for (let lineNumber = startLine; lineNumber <= endLine; lineNumber++) {
-    const known = existing.get(lineNumber);
-    lines.push(
-      known ?? { lineNumber, text: fileLines[lineNumber - 1] ?? '', matches: [], lineStart: 0 },
-    );
-  }
-
-  return { ...excerpt, startLine, endLine, lines };
 }

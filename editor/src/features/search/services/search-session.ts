@@ -28,8 +28,6 @@ export interface SearchSession extends StreamState, SearchOptionsState {
   /** -1 = the input holds a live (unsubmitted) query. */
   historyIndex: number;
   collapsedFiles: string[];
-  /** Excerpt id -> extra context lines revealed above/below. */
-  expanded: Record<string, { up: number; down: number }>;
   activeExcerptId: string | null;
   /** `searchSignature()` of the query+options combination this session last
    *  actually searched (or attempted to), `null` if it never has. Lets the
@@ -63,7 +61,6 @@ export function createSession(id: string): SearchSession {
     history: [],
     historyIndex: -1,
     collapsedFiles: [],
-    expanded: {},
     activeExcerptId: null,
     searchedSignature: null,
   };

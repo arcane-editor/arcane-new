@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ChevronDown, ChevronRight, ChevronUp } from 'lucide-react';
+import { ChevronDown, ChevronRight } from 'lucide-react';
 import { getFileIcon } from '../../../utils/file-icons';
 import { detectLanguage } from '../../../utils/language-detect';
 import { getMonacoInstance } from '../../../utils/monaco-instance';
@@ -21,7 +21,6 @@ interface FileExcerptBlockProps {
   onToggleCollapse: (filePath: string) => void;
   onOpenExcerpt: (filePath: string, lineNumber: number, column: number) => void;
   onFocusExcerpt: (excerptId: string) => void;
-  onExpand: (excerptId: string, direction: 'up' | 'down') => void;
   /** Excerpt ids to render as live Monaco editors instead of the plain
    *  read-only rows. Every excerpt of a hot file is hot — see `ExcerptList`. */
   hotExcerptIds: string[];
@@ -235,7 +234,6 @@ function FileExcerptBlock({
   onToggleCollapse,
   onOpenExcerpt,
   onFocusExcerpt,
-  onExpand,
   hotExcerptIds,
   registry,
   onFirstEdit,
@@ -299,16 +297,6 @@ function FileExcerptBlock({
             className={`search-excerpt${activeExcerptId === excerpt.id ? ' active' : ''}`}
             onMouseDown={() => onFocusExcerpt(excerpt.id)}
           >
-            <button
-              type="button"
-              className="search-excerpt-divider search-excerpt-divider-top"
-              title="Expand context above"
-              aria-label="Expand context above"
-              onClick={() => onExpand(excerpt.id, 'up')}
-            >
-              <ChevronUp size={10} aria-hidden="true" />
-            </button>
-
             {hotExcerptIds.includes(excerpt.id) && !coldFallback.includes(excerpt.id) ? (
               <HydratedExcerpt
                 filePath={filePath}
@@ -331,16 +319,6 @@ function FileExcerptBlock({
                 />
               ))
             )}
-
-            <button
-              type="button"
-              className="search-excerpt-divider search-excerpt-divider-bottom"
-              title="Expand context below (Shift+Enter)"
-              aria-label="Expand context below"
-              onClick={() => onExpand(excerpt.id, 'down')}
-            >
-              <ChevronDown size={10} aria-hidden="true" />
-            </button>
           </div>
         ))}
     </div>

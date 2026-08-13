@@ -3,17 +3,13 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { useSearchStore } from '../../../stores/search';
 import { useWorkspaceStore } from '../../../stores/workspace';
 import { disposeModelForPath } from '../../editor';
-import { buildExcerpts, applyExpansion } from '../services/excerpt-model';
-import { readFileLines } from '../services/file-lines';
+import { buildExcerpts } from '../services/excerpt-model';
 import { hotSet } from '../services/hot-blocks';
 import { SearchModelRegistry } from '../services/model-ownership';
 import FileExcerptBlock from './FileExcerptBlock';
 
 export const LINE_HEIGHT = 18;
 const HEADER_HEIGHT = 26;
-const EXPANDER_HEIGHT = 10;
-/** Real lines revealed per ⌃/⌄ click. */
-const EXPAND_STEP = 5;
 /** Blocks kept as live Monaco editors at once: the visible set plus enough
  *  recently-visible ones that scrolling back a few rows doesn't re-mount.
  *  See `hotSet`. */
@@ -38,35 +34,14 @@ function ExcerptList({ sessionId }: ExcerptListProps) {
   // that granularity — every excerpt of a hot file is hot.
   const [hot, setHot] = useState<string[]>([]);
 
-  const [fileLines, setFileLines] = useState<Record<string, string[]>>({});
-
-  // This component-local cache shadows the module-level one `search()`
-  // clears via `clearFileLineCache()` (stores/search.ts) — that call alone
-  // does NOT reach here, so without this effect an excerpt expanded before a
-  // re-search (or a tab switch) would keep rendering the pre-edit/pre-switch
-  // lines forever (Fix round 1, Finding 1). `session?.activeSearchId` only
-  // changes at the instant a NEW search actually starts (`search()` sets it
-  // once, synchronously, before the invoke) — not per streamed batch, not
-  // per expand click — so this cannot fire mid-expansion of the search
-  // currently on screen. `sessionId` is included too so switching to a
-  // DIFFERENT tab also drops the cache, even in the edge case where neither
-  // session has searched yet and both have `activeSearchId: null`.
-  useEffect(() => {
-    setFileLines({});
-  }, [sessionId, session?.activeSearchId]);
-
   const blocks = useMemo(
     () =>
       (session?.results ?? []).map((file) => ({
         file,
-        excerpts: buildExcerpts(file).map((excerpt) => {
-          const expansion = session?.expanded[excerpt.id];
-          const lines = fileLines[file.path];
-          return expansion && lines ? applyExpansion(excerpt, lines, expansion) : excerpt;
-        }),
+        excerpts: buildExcerpts(file),
         collapsed: (session?.collapsedFiles ?? []).includes(file.path),
       })),
-    [session?.results, session?.collapsedFiles, fileLines, session?.expanded],
+    [session?.results, session?.collapsedFiles],
   );
 
   // Estimated from the excerpt shape rather than a constant: blocks differ by
@@ -77,7 +52,7 @@ function ExcerptList({ sessionId }: ExcerptListProps) {
       if (!block) return HEADER_HEIGHT;
       if (block.collapsed) return HEADER_HEIGHT;
       const lines = block.excerpts.reduce((sum, e) => sum + e.lines.length, 0);
-      return HEADER_HEIGHT + lines * LINE_HEIGHT + block.excerpts.length * EXPANDER_HEIGHT * 2;
+      return HEADER_HEIGHT + lines * LINE_HEIGHT;
     },
     [blocks],
   );
@@ -265,61 +240,6 @@ function ExcerptList({ sessionId }: ExcerptListProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on mount only, see comment above
   }, [blocks, session?.activeExcerptId, virtualizer]);
 
-  // Excerpt ids are `${filePath}:${startLine}`; `lastIndexOf(':')` finds the
-  // right split regardless of how many colons the path itself contains — a
-  // Windows drive letter (`D:/...`), a UNC/NTFS alternate-data-stream colon,
-  // or even a literal `:` in a POSIX filename. `startLine` is always
-  // digits-only, so the colon `excerptId` appends is always the RIGHTMOST
-  // colon in the string, no matter what came before it.
-  const expand = useCallback(
-    async (excerptId: string, direction: 'up' | 'down') => {
-      const filePath = excerptId.slice(0, excerptId.lastIndexOf(':'));
-      // Snapshot taken from the LIVE store, not from the `session` variable
-      // closed over by this callback: `useCallback`'s deps below don't list
-      // `activeSearchId`, and at least one store transition (`clearResults`)
-      // changes `activeSearchId` without touching `expanded` — the one dep
-      // that IS listed — so a closure that hasn't been recreated could read a
-      // `session.activeSearchId` that was already stale before this function
-      // even started. `useSearchStore.getState()` sidesteps that: it reflects
-      // the actual current store regardless of which render created this
-      // closure.
-      const searchIdAtRequest = useSearchStore.getState().sessions[sessionId]?.activeSearchId;
-      const lines = fileLines[filePath] ?? (await readFileLines(filePath));
-      // If a NEW search started (or the session was cleared) while
-      // `readFileLines` was in flight, the reset effect above already wiped
-      // `fileLines` for this reason. `lines` here was read against content as
-      // of the PREVIOUS search's file-line cache and must not repopulate
-      // `fileLines[filePath]` after that wipe: if the new results reuse this
-      // same file path, the NEXT `expand()` call would see a truthy
-      // `fileLines[filePath]`, skip `readFileLines` entirely, and silently
-      // serve stale content — the original staleness bug reopened through
-      // this narrower window. Bailing out of the whole call (not just the
-      // cache write) also skips the `expanded` patch below: the `excerptId`
-      // this call was for almost certainly doesn't exist in the new result
-      // set, and even in the coincidental case it does (same file, same
-      // start line, different match), applying an "already expanded" flag
-      // with no matching `fileLines` entry to back it would just leave a
-      // silently inert entry until the user re-triggers expand — better to
-      // discard the stale request outright.
-      if (useSearchStore.getState().sessions[sessionId]?.activeSearchId !== searchIdAtRequest) {
-        return;
-      }
-      setFileLines((prev) => (prev[filePath] ? prev : { ...prev, [filePath]: lines }));
-
-      const current = session?.expanded[excerptId] ?? { up: 0, down: 0 };
-      update(sessionId, {
-        expanded: {
-          ...(session?.expanded ?? {}),
-          [excerptId]: {
-            up: current.up + (direction === 'up' ? EXPAND_STEP : 0),
-            down: current.down + (direction === 'down' ? EXPAND_STEP : 0),
-          },
-        },
-      });
-    },
-    [fileLines, session?.expanded, sessionId, update],
-  );
-
   // Shared by plain Enter and alt+enter — both open the active excerpt at its
   // match start; there is no click point for either path.
   const openActiveExcerpt = useCallback(() => {
@@ -360,13 +280,8 @@ function ExcerptList({ sessionId }: ExcerptListProps) {
         openActiveExcerpt();
         return;
       }
-
-      if (e.key === 'Enter' && e.shiftKey) {
-        e.preventDefault();
-        void expand(activeId, 'down');
-      }
     },
-    [expand, openActiveExcerpt, session?.activeExcerptId],
+    [openActiveExcerpt, session?.activeExcerptId],
   );
 
   if (!session) return null;
@@ -390,8 +305,7 @@ function ExcerptList({ sessionId }: ExcerptListProps) {
             <>
               <p className="search-empty-title">Search across every file in this project</p>
               <p className="search-empty-hint">
-                Results appear as you type. Press <kbd>⇧⏎</kbd> on a result for more context,
-                or <kbd>⌥⏎</kbd> to open it.
+                Results appear as you type. Press <kbd>⌥⏎</kbd> on a result to open it.
               </p>
             </>
           )}
@@ -432,7 +346,6 @@ function ExcerptList({ sessionId }: ExcerptListProps) {
                 onToggleCollapse={toggleCollapse}
                 onOpenExcerpt={openExcerpt}
                 onFocusExcerpt={focusExcerpt}
-                onExpand={expand}
                 hotExcerptIds={
                   hot.includes(block.file.path) ? block.excerpts.map((e) => e.id) : []
                 }

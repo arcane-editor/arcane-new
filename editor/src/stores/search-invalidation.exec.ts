@@ -2,14 +2,12 @@ import { describe, it, expect, afterAll, mock } from 'bun:test';
 
 /**
  * REAL-EXECUTION test for `stores/search.ts`'s `search` action clearing
- * `expanded` and `activeExcerptId` at the start of a new search (Fix round 1,
- * Finding 2 on the excerpt-expansion task). Both fields name an excerpt from
- * the PREVIOUS result set by id (`path:startLine`); a new search can produce
- * an excerpt that reuses one of those ids for entirely different content
- * (same file, same start line, different surrounding matches), so without
- * this reset a fresh excerpt would silently inherit stale up/down expansion
- * counts and render pre-expanded, or `activeExcerptId` would point at an
- * excerpt that no longer exists.
+ * `activeExcerptId` at the start of a new search (Fix round 1, Finding 2 on
+ * the excerpt-expansion task). That field names an excerpt from the PREVIOUS
+ * result set by id (`path:startLine`); a new search can produce an excerpt
+ * that reuses one of those ids for entirely different content (same file,
+ * same start line, different surrounding matches), so without this reset
+ * `activeExcerptId` would point at an excerpt that no longer exists.
  *
  * Also covers `applyToSession` (`stores/search.ts`) — the module-private
  * function that routes an incoming `search-results-batch`/`search-complete`
@@ -141,24 +139,19 @@ afterAll(() => {
 const { useSearchStore } = await import('./search');
 
 describe('search() invalidation — REAL execution (own process, see file header)', () => {
-  it('clears expanded and activeExcerptId when a new search actually starts (Fix round 1, Finding 2)', async () => {
+  it('clears activeExcerptId when a new search actually starts (Fix round 1, Finding 2)', async () => {
     const id = 'search://invalidation-probe';
     const search = useSearchStore.getState();
     search.ensureSession(id);
     search.update(id, {
       query: 'todo',
-      expanded: { 'some/file.ts:10': { up: 5, down: 10 } },
       activeExcerptId: 'some/file.ts:10',
-    });
-    expect(useSearchStore.getState().sessions[id]?.expanded).toEqual({
-      'some/file.ts:10': { up: 5, down: 10 },
     });
     expect(useSearchStore.getState().sessions[id]?.activeExcerptId).toBe('some/file.ts:10');
 
     await useSearchStore.getState().search(id, '/tmp/workspace');
 
     const after = useSearchStore.getState().sessions[id];
-    expect(after?.expanded).toEqual({});
     expect(after?.activeExcerptId).toBeNull();
 
     search.closeSession(id);

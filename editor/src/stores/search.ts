@@ -9,7 +9,6 @@ import {
   patchSession,
   sessionForSearchId,
   resolveCaseSensitive,
-  clearFileLineCache,
   searchSignature,
   unityNoiseExcludes,
   type SearchSessions,
@@ -127,20 +126,18 @@ export const useSearchStore = create<SearchState>((set, get) => ({
 
     const gen = ++searchGeneration;
     // Previous results stay visible until the first batch replaces them.
-    // `expanded`/`activeExcerptId` are cleared here too, not just the file-line
-    // cache below: both name excerpts from the PREVIOUS result set by id
-    // (`path:startLine`), and a new search can produce an excerpt that reuses
-    // one of those ids for entirely different content (same file, same start
-    // line, different surrounding matches) — without this it would silently
-    // inherit the old up/down counts and render pre-expanded, or `active`
-    // would point at an excerpt that no longer exists.
+    // `activeExcerptId` is cleared here too: it names an excerpt from the
+    // PREVIOUS result set by id (`path:startLine`), and a new search can
+    // produce an excerpt that reuses one of those ids for entirely different
+    // content (same file, same start line, different surrounding matches) —
+    // without this, `active` would point at an excerpt that no longer
+    // exists.
     set((s) => ({
       sessions: patchSession(s.sessions, id, {
         isSearching: true,
         activeSearchId: gen,
         receivedFirstBatch: false,
         searchError: null,
-        expanded: {},
         activeExcerptId: null,
         // Stamped from the pre-invoke `session` snapshot AND the settings
         // read above — the same query/option/settings values
@@ -185,11 +182,6 @@ export const useSearchStore = create<SearchState>((set, get) => ({
         ...(isUnity && !session.includeUnityAssets ? unityNoiseExcludes() : []),
       ];
 
-      // Dropped here, not just on session creation: stale lines from a
-      // PREVIOUS search must never splice into results computed against a
-      // file that has since changed. Sits right before the invoke so no
-      // early return above it can start a search while skipping this.
-      clearFileLineCache();
       await invoke('start_content_search', {
         searchId: gen,
         sessionId: id,
