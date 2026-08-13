@@ -7,6 +7,9 @@ import { useThemeStore } from '../../../stores/theme';
 import { splitByMatches, stripTrailingBreak } from '../services/highlight';
 import { offsetWithinLine, columnFor } from '../services/caret-offset';
 import type { Excerpt, MatchRange } from '../services/excerpt-model';
+import type { SearchModelRegistry } from '../services/model-ownership';
+import HydratedExcerpt from './HydratedExcerpt';
+import { LINE_HEIGHT } from './ExcerptList';
 
 interface FileExcerptBlockProps {
   filePath: string;
@@ -19,6 +22,11 @@ interface FileExcerptBlockProps {
   onOpenExcerpt: (filePath: string, lineNumber: number, column: number) => void;
   onFocusExcerpt: (excerptId: string) => void;
   onExpand: (excerptId: string, direction: 'up' | 'down') => void;
+  /** Excerpt ids to render as live Monaco editors instead of the plain
+   *  read-only rows. Every excerpt of a hot file is hot — see `ExcerptList`. */
+  hotExcerptIds: string[];
+  registry: SearchModelRegistry;
+  onFirstEdit: (filePath: string, content: string) => void;
 }
 
 /** Colorized HTML per (themeId, languageId, text). Search results repeat
@@ -228,9 +236,40 @@ function FileExcerptBlock({
   onOpenExcerpt,
   onFocusExcerpt,
   onExpand,
+  hotExcerptIds,
+  registry,
+  onFirstEdit,
 }: FileExcerptBlockProps) {
   const fileName = filePath.split('/').pop() || filePath;
   const monacoId = detectLanguage(fileName).monacoId;
+  // Excerpts whose hydration reported `onUnavailable()` — no Monaco, the
+  // hidden-areas API is gone, or the range wasn't sane against the model.
+  // These render cold even while their file is otherwise hot.
+  const [coldFallback, setColdFallback] = useState<string[]>([]);
+
+  // `HydratedExcerpt`'s mount effect (Task 8) depends on `onUnavailable` by
+  // reference, so a fresh closure per render would remount every live editor
+  // on unrelated churn elsewhere in the results list — the same class of bug
+  // that effect's excerpt-primitive dependency list was already fixed for
+  // (Task 8 review). A plain `useCallback` can't produce that per-excerpt
+  // closure because this is built inside `excerpts.map()` below, and the
+  // number of excerpts varies across renders — calling a hook a variable
+  // number of times per render breaks the Rules of Hooks. Instead, cache one
+  // stable no-arg closure per excerpt id in a ref: the cache outlives
+  // individual renders, so the SAME excerpt id always gets back the SAME
+  // function object. Stale entries for excerpt ids that stop appearing (a new
+  // search reusing this file's path) just sit unused until this block
+  // unmounts; excerpt ids are cheap and the map is scoped to one file block.
+  const unavailableCallbacks = useRef(new Map<string, () => void>());
+  function onUnavailableFor(excerptId: string): () => void {
+    const cache = unavailableCallbacks.current;
+    const cached = cache.get(excerptId);
+    if (cached) return cached;
+    const fn = () =>
+      setColdFallback((prev) => (prev.includes(excerptId) ? prev : [...prev, excerptId]));
+    cache.set(excerptId, fn);
+    return fn;
+  }
 
   return (
     <div className="search-excerpt-file">
@@ -270,17 +309,28 @@ function FileExcerptBlock({
               <ChevronUp size={10} aria-hidden="true" />
             </button>
 
-            {excerpt.lines.map((line) => (
-              <ExcerptLineRow
-                key={line.lineNumber}
-                lineNumber={line.lineNumber}
-                text={line.text}
-                matches={line.matches}
-                lineStart={line.lineStart}
-                monacoId={monacoId}
-                onOpen={(lineNumber, column) => onOpenExcerpt(filePath, lineNumber, column)}
+            {hotExcerptIds.includes(excerpt.id) && !coldFallback.includes(excerpt.id) ? (
+              <HydratedExcerpt
+                filePath={filePath}
+                excerpt={excerpt}
+                registry={registry}
+                lineHeight={LINE_HEIGHT}
+                onFirstEdit={onFirstEdit}
+                onUnavailable={onUnavailableFor(excerpt.id)}
               />
-            ))}
+            ) : (
+              excerpt.lines.map((line) => (
+                <ExcerptLineRow
+                  key={line.lineNumber}
+                  lineNumber={line.lineNumber}
+                  text={line.text}
+                  matches={line.matches}
+                  lineStart={line.lineStart}
+                  monacoId={monacoId}
+                  onOpen={(lineNumber, column) => onOpenExcerpt(filePath, lineNumber, column)}
+                />
+              ))
+            )}
 
             <button
               type="button"

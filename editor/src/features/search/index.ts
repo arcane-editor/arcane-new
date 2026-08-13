@@ -57,3 +57,4 @@ export {
   applyHiddenAreas,
   type LineRange,
 } from './services/hidden-areas';
+export { hotSet } from './services/hot-blocks';

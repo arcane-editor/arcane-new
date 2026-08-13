@@ -2,15 +2,22 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useSearchStore } from '../../../stores/search';
 import { useWorkspaceStore } from '../../../stores/workspace';
+import { disposeModelForPath } from '../../editor';
 import { buildExcerpts, applyExpansion } from '../services/excerpt-model';
 import { readFileLines } from '../services/file-lines';
+import { hotSet } from '../services/hot-blocks';
+import { SearchModelRegistry } from '../services/model-ownership';
 import FileExcerptBlock from './FileExcerptBlock';
 
-const LINE_HEIGHT = 18;
+export const LINE_HEIGHT = 18;
 const HEADER_HEIGHT = 26;
 const EXPANDER_HEIGHT = 10;
 /** Real lines revealed per ⌃/⌄ click. */
 const EXPAND_STEP = 5;
+/** Blocks kept as live Monaco editors at once: the visible set plus enough
+ *  recently-visible ones that scrolling back a few rows doesn't re-mount.
+ *  See `hotSet`. */
+const HOT_BLOCK_CAP = 8;
 
 interface ExcerptListProps {
   sessionId: string;
@@ -21,6 +28,15 @@ function ExcerptList({ sessionId }: ExcerptListProps) {
   const update = useSearchStore((s) => s.update);
   const workspacePath = useWorkspaceStore((s) => s.workspacePath);
   const scrollRef = useRef<HTMLDivElement>(null);
+  // One registry per mounted results tab, tracking which file models THIS
+  // tab's hydration created (vs. ones a real editor tab already owns) — see
+  // `SearchModelRegistry`. `useRef` (not `useMemo`) so identity never changes
+  // across renders even under strict-mode double-invoke.
+  const registryRef = useRef(new SearchModelRegistry());
+  // File paths currently hydrated as live Monaco editors. Keyed by path, not
+  // excerpt id, because a model belongs to a file and eviction disposes at
+  // that granularity — every excerpt of a hot file is hot.
+  const [hot, setHot] = useState<string[]>([]);
 
   const [fileLines, setFileLines] = useState<Record<string, string[]>>({});
 
@@ -85,6 +101,54 @@ function ExcerptList({ sessionId }: ExcerptListProps) {
     getItemKey,
     overscan: 4,
   });
+
+  // Recomputed every render off the virtualizer's own (already memoized by
+  // the library) item list, so the hot-set effect below and the render below
+  // that both see the identical set of currently-visible rows.
+  const virtualItems = virtualizer.getVirtualItems();
+
+  // Promotes newly-visible file blocks to "hot" (live Monaco editor) and
+  // evicts whatever `hotSet` decides has aged out, disposing only the models
+  // THIS tab's hydration created — `registry.release` returns false, and
+  // this correctly skips disposal, for a path an open editor tab owns.
+  useEffect(() => {
+    const keys = blocks.map((block) => block.file.path);
+    const { hot: nextHot, evicted } = hotSet(
+      virtualItems.map((item) => item.index),
+      hot,
+      keys,
+      HOT_BLOCK_CAP,
+    );
+    if (evicted.length) {
+      for (const path of evicted) {
+        if (registryRef.current.release(path)) disposeModelForPath(path);
+      }
+    }
+    if (nextHot.length !== hot.length || nextHot.some((key, i) => key !== hot[i])) {
+      setHot(nextHot);
+    }
+    // `hot` is intentionally absent: this effect writes it, and listing it
+    // would re-run on its own write.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [virtualItems, blocks]);
+
+  // Dispose every model search still owns when the session's search changes
+  // (a new query invalidates every previous excerpt) or this list unmounts
+  // (tab closed). Never disposes a model a real editor tab owns — `release`
+  // (via `releaseAll`) only returns paths search itself claimed.
+  useEffect(() => {
+    const registry = registryRef.current;
+    return () => {
+      for (const path of registry.releaseAll()) disposeModelForPath(path);
+    };
+  }, [session?.activeSearchId]);
+
+  // Stable no-op until Task 10 wires the real "first edit opens a background
+  // tab" behaviour. `[]` deps: an unconditional no-op reads nothing from the
+  // render, so there is nothing that could ever need it to change identity —
+  // and it must not change identity, since `HydratedExcerpt`'s mount effect
+  // (Task 8) depends on it and would otherwise remount on every render.
+  const onFirstEdit = useCallback((_filePath: string, _content: string) => {}, []);
 
   const toggleCollapse = useCallback(
     (filePath: string) => {
@@ -339,7 +403,7 @@ function ExcerptList({ sessionId }: ExcerptListProps) {
   return (
     <div className="search-tab-body" ref={scrollRef} tabIndex={0} onKeyDown={onKeyDown}>
       <div style={{ height: `${virtualizer.getTotalSize()}px`, width: '100%', position: 'relative' }}>
-        {virtualizer.getVirtualItems().map((item) => {
+        {virtualItems.map((item) => {
           const block = blocks[item.index];
           if (!block) return null;
           const relativePath = workspacePath
@@ -369,6 +433,11 @@ function ExcerptList({ sessionId }: ExcerptListProps) {
                 onOpenExcerpt={openExcerpt}
                 onFocusExcerpt={focusExcerpt}
                 onExpand={expand}
+                hotExcerptIds={
+                  hot.includes(block.file.path) ? block.excerpts.map((e) => e.id) : []
+                }
+                registry={registryRef.current}
+                onFirstEdit={onFirstEdit}
               />
             </div>
           );
