@@ -166,21 +166,26 @@ function ExcerptLineRow({
   // lines) because a hook cannot be called conditionally; colorizing an
   // empty string is cheap and its result is discarded below.
   const colorized = useColorizedLine(isMatchLine ? '' : text, monacoId, activeThemeId);
-  const rowRef = useRef<HTMLDivElement>(null);
+  // Scoped to the <code> element, not the row: the row also contains the
+  // gutter's line-number span, and a TreeWalker rooted on the row would yield
+  // the digits as the first text node, shifting every computed offset right
+  // by however many digits the line number has. `.search-excerpt-code`'s
+  // text is exactly what `lineStart` and the match offsets are measured
+  // against.
+  const codeRef = useRef<HTMLElement>(null);
 
   function openAtPoint(e: React.MouseEvent<HTMLDivElement>) {
     const fallback = columnFor(lineStart, matches[0]?.start ?? 0);
-    if (!rowRef.current) {
+    if (!codeRef.current) {
       onOpen(lineNumber, fallback);
       return;
     }
-    const offset = offsetFromPoint(rowRef.current, e.clientX, e.clientY);
+    const offset = offsetFromPoint(codeRef.current, e.clientX, e.clientY);
     onOpen(lineNumber, offset === null ? fallback : columnFor(lineStart, offset));
   }
 
   return (
     <div
-      ref={rowRef}
       className={`search-excerpt-line${isMatchLine ? ' is-match' : ''}`}
       onClick={(e) => {
         // Mod+click opens; a plain click still only selects the excerpt, so a
@@ -193,7 +198,7 @@ function ExcerptLineRow({
       onDoubleClick={(e) => openAtPoint(e)}
     >
       <span className="search-excerpt-gutter">{lineNumber}</span>
-      <code className="search-excerpt-code">
+      <code ref={codeRef} className="search-excerpt-code">
         {isMatchLine || colorized === null ? (
           splitByMatches(text, matches).map((segment, i) =>
             segment.isMatch ? (
