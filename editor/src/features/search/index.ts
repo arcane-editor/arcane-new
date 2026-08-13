@@ -50,3 +50,9 @@ export {
 } from './services/query-history';
 export { unityNoiseExcludes, UNITY_NOISE_EXTENSIONS } from './services/unity-scope';
 export { offsetWithinLine, columnFor } from './services/caret-offset';
+export {
+  complementRanges,
+  canHideAreas,
+  applyHiddenAreas,
+  type LineRange,
+} from './services/hidden-areas';
