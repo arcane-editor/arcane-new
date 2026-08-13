@@ -46,9 +46,10 @@ interface HydratedExcerptProps {
   onEditorMount: (excerptId: string, editorInstance: MonacoEditorNs.IStandaloneCodeEditor) => void;
   onEditorUnmount: (excerptId: string) => void;
   /** Opens `filePath` at a real (1-based) line/column. Wired to a Monaco
-   *  action bound to Enter/Alt+Enter on this excerpt's own editor — see the
-   *  `addAction` call below for why that, and not the results list's own
-   *  keydown handler, has to be the one to own this now. */
+   *  action bound to Alt+Enter (NOT plain Enter — that still means "insert
+   *  a newline" inside a live editor) on this excerpt's own editor — see
+   *  the `addAction` call below for why that, and not the results list's
+   *  own keydown handler, has to be the one to own this now. */
   onOpenExcerpt: (filePath: string, lineNumber: number, column: number) => void;
 }
 
@@ -210,17 +211,30 @@ function HydratedExcerpt({
       // THIS editor, not the results list's container. `ExcerptList`'s own
       // keydown handler deliberately ignores every key that originates
       // inside a hydrated excerpt (Task A1, so typing survives), which means
-      // Enter/Alt+Enter reaching this editor previously had nothing bound to
-      // them and either fell through to Monaco's default (insert a newline)
-      // or did nothing — no keyboard route to "open the file" existed once
+      // Alt+Enter reaching this editor previously had nothing bound to it
+      // and did nothing — no keyboard route to "open the file" existed once
       // focus was inside a hydrated excerpt, which is the ordinary case.
-      // This editor now owns that gesture directly, matching the list's
-      // Enter/Alt+Enter behaviour (`ExcerptList.openActiveExcerpt`): open at
-      // the real cursor when it's inside this excerpt's visible range, else
-      // fall back to the match start — a freshly re-hydrated editor that was
-      // never actually clicked into (switching to a file tab and back
-      // preserves `activeExcerptId` across the remount) defaults its cursor
-      // to the model's (1,1), which is usually outside the excerpt.
+      // This editor now owns that gesture directly: open at the real cursor
+      // when it's inside this excerpt's visible range, else fall back to
+      // the match start — a freshly re-hydrated editor that was never
+      // actually clicked into (switching to a file tab and back preserves
+      // `activeExcerptId` across the remount) defaults its cursor to the
+      // model's (1,1), which is usually outside the excerpt.
+      //
+      // PLAIN Enter is deliberately NOT bound here, unlike the list's own
+      // handler. Inside a live editor, `editorTextFocus` (needed so this
+      // doesn't compete with a widget's own Enter — see below) is true
+      // exactly while the user is TYPING, so binding plain Enter here would
+      // turn every newline into a navigation away from the excerpt — the
+      // exact defect A1 exists to prevent, since the whole point of this
+      // feature is that a result is directly editable. The list's container
+      // and a live editor have different correct answers for the same key:
+      // outside a hydrated excerpt (a cold block, or focus on the bare
+      // container) plain Enter still opens, unchanged, in
+      // `ExcerptList.openActiveExcerpt`; inside one, only Alt+Enter does —
+      // matching Zed's `editor::OpenExcerpts` binding and this feature's own
+      // spec. Do not add plain Enter back here for symmetry with the list.
+      //
       // `precondition: 'editorTextFocus'` scopes this to the PLAIN text
       // area: Monaco's own widgets (rename confirm, suggest accept, find
       // navigate) take focus off the text area onto their own input while
@@ -231,7 +245,7 @@ function HydratedExcerpt({
         id: 'search-excerpt.open-at-cursor',
         label: 'Open File at Cursor',
         precondition: 'editorTextFocus',
-        keybindings: [monaco.KeyCode.Enter, monaco.KeyMod.Alt | monaco.KeyCode.Enter],
+        keybindings: [monaco.KeyMod.Alt | monaco.KeyCode.Enter],
         run: (ed) => {
           const position = ed.getPosition();
           const target =
