@@ -293,6 +293,35 @@ function ExcerptList({ sessionId }: ExcerptListProps) {
 
   if (!session) return null;
 
+  // An empty results list is two different situations, and a blank tab reads
+  // as broken in both. Distinguish "nothing typed yet" from "searched, no
+  // hits" — the store only assigns an activeSearchId once a search has run.
+  if (blocks.length === 0 && !session.isSearching) {
+    const searched = session.activeSearchId !== null;
+    return (
+      <div className="search-tab-body" ref={scrollRef} tabIndex={0} onKeyDown={onKeyDown}>
+        <div className="search-empty">
+          {searched && session.query ? (
+            <>
+              <p className="search-empty-title">No matches for “{session.query}”</p>
+              <p className="search-empty-hint">
+                Try a different term, or widen the search with the ignored-files and path filters.
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="search-empty-title">Search across every file in this project</p>
+              <p className="search-empty-hint">
+                Results appear as you type. Press <kbd>⇧⏎</kbd> on a result for more context,
+                or <kbd>⌥⏎</kbd> to open it.
+              </p>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="search-tab-body" ref={scrollRef} tabIndex={0} onKeyDown={onKeyDown}>
       <div style={{ height: `${virtualizer.getTotalSize()}px`, width: '100%', position: 'relative' }}>

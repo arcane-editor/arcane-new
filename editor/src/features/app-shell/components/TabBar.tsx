@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { X, GitCompare, Copy, FolderSymlink } from 'lucide-react';
+import { X, GitCompare, Copy, FolderSymlink, Search } from 'lucide-react';
 import { revealItemInDir } from '@tauri-apps/plugin-opener';
 import { useWorkspaceStore } from '../../../stores/workspace';
 import { useUiStore, getFlatDiagnosticsForUri } from '../../../stores/ui';
@@ -35,6 +35,13 @@ interface TabContextMenu {
  * checking virtualness first would wrongly return null for every diff tab
  * instead of its real target.
  */
+/** A search results tab. It gets a magnifier rather than a file-type icon —
+ *  `getFileIcon` would resolve its display name ("Search") to the generic
+ *  document glyph, which reads as an untitled text file. */
+function isSearchTab(path: string): boolean {
+  return path.startsWith('search://');
+}
+
 function resolveRealPath(file: OpenFile | undefined, workspacePath: string | null): string | null {
   if (!file) return null;
   if (file.diff) {
@@ -123,7 +130,8 @@ function TabBar() {
               title=""
             >
               <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                {!file.diff && getFileIcon(file.name, 14)}
+                {!file.diff && !isSearchTab(file.path) && getFileIcon(file.name, 14)}
+                {isSearchTab(file.path) && <Search size={13} aria-hidden="true" />}
                 {file.diff && <GitCompare size={12} style={{ opacity: 0.7 }} aria-hidden="true" />}
                 {file.name}
                 {file.isDirty && <span className="dirty-dot"> *</span>}

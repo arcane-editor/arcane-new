@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef } from 'react';
-import { Search, EyeOff } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Search, EyeOff, SlidersHorizontal } from 'lucide-react';
 import { useSearchStore } from '../../../stores/search';
 import { useWorkspaceStore } from '../../../stores/workspace';
 import { useSettingsStore } from '../../../stores/settings';
@@ -27,6 +27,7 @@ function SearchQueryBar({ sessionId }: SearchQueryBarProps) {
   const contextLines = useSettingsStore((s) => s.settings['search.contextLines']);
 
   const inputRef = useRef<HTMLInputElement>(null);
+  const [showFilters, setShowFilters] = useState(false);
   const debouncedQuery = useDebouncedValue(session?.query ?? '', 300);
 
   // Focus on mount: opening a search tab should leave you typing, not
@@ -128,16 +129,23 @@ function SearchQueryBar({ sessionId }: SearchQueryBarProps) {
 
   const summary = summaryFor(session);
 
+  // Filters stay folded until they hold something. They are empty in almost
+  // every search, and two full-width fields sitting open dominated a surface
+  // whose subject is the results below them.
+  const hasFilters = Boolean(session.includePattern || session.excludePattern);
+  const filtersOpen = showFilters || hasFilters;
+
   return (
     <div className="search-tab-bar">
-      <div className="search-input-row">
-        <div className="search-input-wrapper">
-          <Search size={14} className="search-input-icon" />
+      <div className="search-console">
+        <div className={`search-input-wrapper${session.isSearching ? ' is-searching' : ''}`}>
+          <Search size={14} className="search-input-icon" aria-hidden="true" />
           <input
             ref={inputRef}
             className="search-input"
             type="text"
-            placeholder="Search"
+            placeholder="Search all files"
+            aria-label="Search all files"
             value={session.query}
             onChange={(e) => update(sessionId, { query: e.target.value, historyIndex: -1 })}
             onKeyDown={onKeyDown}
@@ -146,60 +154,90 @@ function SearchQueryBar({ sessionId }: SearchQueryBarProps) {
             autoCorrect="off"
             autoCapitalize="off"
           />
+          <div className="search-toggle-group">
+            <button
+              type="button"
+              className={`search-toggle-btn${session.caseSensitive ? ' active' : ''}`}
+              title="Match case (⌥⌘C)"
+              aria-pressed={session.caseSensitive}
+              onClick={() => toggle('caseSensitive')}
+            >
+              Aa
+            </button>
+            <button
+              type="button"
+              className={`search-toggle-btn${session.wholeWord ? ' active' : ''}`}
+              title="Match whole word (⌥⌘W)"
+              aria-pressed={session.wholeWord}
+              onClick={() => toggle('wholeWord')}
+            >
+              ab
+            </button>
+            <button
+              type="button"
+              className={`search-toggle-btn${session.isRegex ? ' active' : ''}`}
+              title="Use regular expression (⌥⌘X)"
+              aria-pressed={session.isRegex}
+              onClick={() => toggle('isRegex')}
+            >
+              .*
+            </button>
+            <span className="search-toggle-divider" aria-hidden="true" />
+            <button
+              type="button"
+              className={`search-toggle-btn${session.includeIgnored ? ' active' : ''}`}
+              title="Search ignored files"
+              aria-pressed={session.includeIgnored}
+              onClick={() => toggle('includeIgnored')}
+            >
+              <EyeOff size={13} />
+            </button>
+            <button
+              type="button"
+              className={`search-toggle-btn${filtersOpen ? ' active' : ''}`}
+              title="Filter by path"
+              aria-pressed={filtersOpen}
+              aria-label="Filter by path"
+              onClick={() => setShowFilters((v) => !v)}
+            >
+              <SlidersHorizontal size={13} />
+            </button>
+          </div>
         </div>
-        <div className="search-toggle-group">
-          <button
-            className={`search-toggle-btn${session.caseSensitive ? ' active' : ''}`}
-            title="Match Case (Alt+Cmd+C)"
-            onClick={() => toggle('caseSensitive')}
-          >
-            Aa
-          </button>
-          <button
-            className={`search-toggle-btn${session.wholeWord ? ' active' : ''}`}
-            title="Match Whole Word (Alt+Cmd+W)"
-            onClick={() => toggle('wholeWord')}
-          >
-            Ab|
-          </button>
-          <button
-            className={`search-toggle-btn${session.isRegex ? ' active' : ''}`}
-            title="Use Regular Expression (Alt+Cmd+X)"
-            onClick={() => toggle('isRegex')}
-          >
-            .*
-          </button>
-          <button
-            className={`search-toggle-btn${session.includeIgnored ? ' active' : ''}`}
-            title="Include Ignored Files"
-            onClick={() => toggle('includeIgnored')}
-          >
-            <EyeOff size={14} />
-          </button>
-        </div>
-        <span className="search-tab-count">{summary}</span>
+
+        <span className="search-tab-count" role="status">
+          {summary}
+        </span>
       </div>
 
-      <div className="search-filter-inputs">
-        <input
-          className="search-filter-input"
-          type="text"
-          placeholder="files to include (e.g. Assets/**, *.cs)"
-          value={session.includePattern}
-          onChange={(e) => update(sessionId, { includePattern: e.target.value })}
-          spellCheck={false}
-          autoComplete="off"
-        />
-        <input
-          className="search-filter-input"
-          type="text"
-          placeholder="files to exclude (e.g. **/Editor/**)"
-          value={session.excludePattern}
-          onChange={(e) => update(sessionId, { excludePattern: e.target.value })}
-          spellCheck={false}
-          autoComplete="off"
-        />
-      </div>
+      {filtersOpen && (
+        <div className="search-console search-filter-row">
+          <label className="search-filter-field">
+            <span className="search-filter-label">include</span>
+            <input
+              className="search-filter-input"
+              type="text"
+              placeholder="Assets/**, *.cs"
+              value={session.includePattern}
+              onChange={(e) => update(sessionId, { includePattern: e.target.value })}
+              spellCheck={false}
+              autoComplete="off"
+            />
+          </label>
+          <label className="search-filter-field">
+            <span className="search-filter-label">exclude</span>
+            <input
+              className="search-filter-input"
+              type="text"
+              placeholder="**/Editor/**"
+              value={session.excludePattern}
+              onChange={(e) => update(sessionId, { excludePattern: e.target.value })}
+              spellCheck={false}
+              autoComplete="off"
+            />
+          </label>
+        </div>
+      )}
     </div>
   );
 }
