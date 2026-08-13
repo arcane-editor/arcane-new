@@ -3339,14 +3339,37 @@ html, body, #root {
   box-shadow: inset 2px 0 0 var(--accent);
 }
 
-.search-excerpt-expand {
+/* Expansion lives on the boundary between excerpts, revealed on hover — a
+   permanently visible control above AND below every excerpt added two rows of
+   chrome per excerpt and buried the code the tab exists to show. */
+.search-excerpt-divider {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   width: 100%;
-  height: 12px;
+  height: 10px;
+  padding: 0;
   border: none;
   background: transparent;
   color: var(--text-secondary);
-  font-size: 10px;
   cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms ease, background-color 120ms ease;
+}
+
+.search-excerpt:hover .search-excerpt-divider,
+.search-excerpt-divider:focus-visible {
+  opacity: 1;
+}
+
+.search-excerpt-divider:hover {
+  background: var(--hover-overlay);
+  color: var(--text-primary);
+}
+
+.search-excerpt-divider:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
 }
 
 /* ==================== Search Sidebar: outline ==================== */

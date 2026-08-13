@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import { ChevronDown, ChevronRight, ChevronUp } from 'lucide-react';
 import { getFileIcon } from '../../../utils/file-icons';
 import { detectLanguage } from '../../../utils/language-detect';
 import { getMonacoInstance } from '../../../utils/monaco-instance';
@@ -193,11 +193,13 @@ function FileExcerptBlock({
             onMouseDown={() => onFocusExcerpt(excerpt.id)}
           >
             <button
-              className="search-excerpt-expand"
+              type="button"
+              className="search-excerpt-divider search-excerpt-divider-top"
               title="Expand context above"
+              aria-label="Expand context above"
               onClick={() => onExpand(excerpt.id, 'up')}
             >
-              ⌃
+              <ChevronUp size={12} aria-hidden="true" />
             </button>
 
             {excerpt.lines.map((line) => (
@@ -213,11 +215,13 @@ function FileExcerptBlock({
             ))}
 
             <button
-              className="search-excerpt-expand"
+              type="button"
+              className="search-excerpt-divider search-excerpt-divider-bottom"
               title="Expand context below (Shift+Enter)"
+              aria-label="Expand context below"
               onClick={() => onExpand(excerpt.id, 'down')}
             >
-              ⌄
+              <ChevronDown size={12} aria-hidden="true" />
             </button>
           </div>
         ))}

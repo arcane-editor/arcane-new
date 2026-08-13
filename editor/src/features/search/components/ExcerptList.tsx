@@ -8,7 +8,7 @@ import FileExcerptBlock from './FileExcerptBlock';
 
 const LINE_HEIGHT = 18;
 const HEADER_HEIGHT = 26;
-const EXPANDER_HEIGHT = 12;
+const EXPANDER_HEIGHT = 10;
 /** Real lines revealed per ⌃/⌄ click. */
 const EXPAND_STEP = 5;
 
