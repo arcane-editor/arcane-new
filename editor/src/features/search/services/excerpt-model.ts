@@ -195,3 +195,33 @@ export function buildExcerpts(file: FileSearchResult): Excerpt[] {
     };
   });
 }
+
+/**
+ * Whether `lineNumber` (a real Monaco cursor position, 1-based) falls inside
+ * this excerpt's visible range. A hydrated editor's `getPosition()` is only
+ * trustworthy as an "open at cursor" target when this holds — a fresh editor
+ * that was never actually clicked into (e.g. re-hydrated after switching
+ * tabs and back, which preserves `activeExcerptId`) defaults its cursor to
+ * the MODEL's (1,1), which is usually outside the excerpt entirely.
+ */
+export function positionWithinExcerpt(excerpt: Excerpt, lineNumber: number): boolean {
+  return lineNumber >= excerpt.startLine && lineNumber <= excerpt.endLine;
+}
+
+/**
+ * The excerpt's first match, as a 1-based (line, column) position — the
+ * fallback "open at" location whenever no live cursor is available or
+ * trusted (see `positionWithinExcerpt`). Column mirrors the double-click
+ * handler in `FileExcerptBlock`: `lineStart + match.start`, not
+ * `match.start` alone — a long line is preview-trimmed around its match, so
+ * `match.start` by itself is an offset into the TRIMMED text a row renders,
+ * not the real file line. `null` only for a pathological excerpt with no
+ * match line at all, which `buildExcerpts` never produces.
+ */
+export function matchStartPosition(
+  excerpt: Excerpt,
+): { lineNumber: number; column: number } | null {
+  const line = excerpt.lines.find((l) => l.matches.length > 0);
+  if (!line) return null;
+  return { lineNumber: line.lineNumber, column: line.lineStart + (line.matches[0]?.start ?? 0) + 1 };
+}

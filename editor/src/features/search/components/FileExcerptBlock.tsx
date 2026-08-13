@@ -315,6 +315,7 @@ function FileExcerptBlock({
                 onUnavailable={onUnavailableFor(excerpt.id)}
                 onEditorMount={onEditorMount}
                 onEditorUnmount={onEditorUnmount}
+                onOpenExcerpt={onOpenExcerpt}
               />
             ) : (
               excerpt.lines.map((line) => (

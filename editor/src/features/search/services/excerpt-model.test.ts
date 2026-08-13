@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { buildExcerpts, excerptId } from './excerpt-model';
+import { buildExcerpts, excerptId, matchStartPosition, positionWithinExcerpt } from './excerpt-model';
 import type { FileSearchResult } from '../../../types';
 
 function match(lineNumber: number, lineContent: string, before: string[] = [], after: string[] = []) {
@@ -210,5 +210,48 @@ describe('buildExcerpts', () => {
 describe('excerptId', () => {
   it('is stable for a file and start line', () => {
     expect(excerptId('/w/a.ts', 12)).toBe('/w/a.ts:12');
+  });
+});
+
+describe('positionWithinExcerpt', () => {
+  const [ex] = buildExcerpts({
+    path: '/w/a.ts',
+    matches: [match(10, 'hit', ['a', 'b'], ['c', 'd'])],
+  }); // startLine 8, endLine 12
+
+  it('is true for the start line, the end line, and everything between', () => {
+    expect(positionWithinExcerpt(ex, ex.startLine)).toBe(true);
+    expect(positionWithinExcerpt(ex, ex.endLine)).toBe(true);
+    expect(positionWithinExcerpt(ex, 10)).toBe(true);
+  });
+
+  it('is false one line outside either edge', () => {
+    expect(positionWithinExcerpt(ex, ex.startLine - 1)).toBe(false);
+    expect(positionWithinExcerpt(ex, ex.endLine + 1)).toBe(false);
+  });
+
+  it('is false for line 1 of a fresh, never-clicked editor when the excerpt starts later — the exact bug this guards against', () => {
+    expect(ex.startLine).toBeGreaterThan(1);
+    expect(positionWithinExcerpt(ex, 1)).toBe(false);
+  });
+});
+
+describe('matchStartPosition', () => {
+  it('returns the match line and a 1-based column offset by lineStart', () => {
+    const [ex] = buildExcerpts({
+      path: '/w/a.ts',
+      matches: [{ ...match(10, 'hit'), lineStart: 5, matchStart: 2, matchEnd: 5 }],
+    });
+    expect(matchStartPosition(ex)).toEqual({ lineNumber: 10, column: 5 + 2 + 1 });
+  });
+
+  it('finds the match line even when it is not the excerpt start (context lines precede it)', () => {
+    const [ex] = buildExcerpts({
+      path: '/w/a.ts',
+      matches: [match(10, 'hit', ['a', 'b'], ['c', 'd'])],
+    });
+    const pos = matchStartPosition(ex);
+    expect(pos?.lineNumber).toBe(10);
+    expect(pos?.column).toBe(0 + 0 + 1);
   });
 });

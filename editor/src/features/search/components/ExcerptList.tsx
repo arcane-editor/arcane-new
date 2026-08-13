@@ -4,7 +4,7 @@ import type { editor as MonacoEditorNs } from 'monaco-editor';
 import { useSearchStore } from '../../../stores/search';
 import { useWorkspaceStore } from '../../../stores/workspace';
 import { disposeModelForPath } from '../../editor';
-import { buildExcerpts } from '../services/excerpt-model';
+import { buildExcerpts, matchStartPosition, positionWithinExcerpt } from '../services/excerpt-model';
 import { hotSet } from '../services/hot-blocks';
 import { SearchModelRegistry } from '../services/model-ownership';
 import FileExcerptBlock from './FileExcerptBlock';
@@ -331,23 +331,26 @@ function ExcerptList({ sessionId }: ExcerptListProps) {
     const activeId = session?.activeExcerptId;
     if (!activeId) return;
     const filePath = activeId.slice(0, activeId.lastIndexOf(':'));
+    const block = blocks.find((b) => b.file.path === filePath);
+    const excerpt = block?.excerpts.find((ex) => ex.id === activeId);
+    if (!excerpt) return;
 
+    // Only trust a hydrated editor's real cursor when it actually falls
+    // inside THIS excerpt's visible range. A freshly re-hydrated editor that
+    // was never clicked into (e.g. switching to a file tab and back, which
+    // preserves `activeExcerptId` across a remount) defaults its cursor to
+    // the model's (1,1) — usually well outside the excerpt — so blindly
+    // trusting `getPosition()` would open line 1 instead of the match.
     const hydrated = hydratedEditorsRef.current.get(activeId);
     const position = hydrated?.getPosition();
-    if (position) {
+    if (position && positionWithinExcerpt(excerpt, position.lineNumber)) {
       openExcerpt(filePath, position.lineNumber, position.column);
       return;
     }
 
-    const block = blocks.find((b) => b.file.path === filePath);
-    const excerpt = block?.excerpts.find((ex) => ex.id === activeId);
-    const line = excerpt?.lines.find((l) => l.matches.length > 0);
-    // Column mirrors the double-click handler in FileExcerptBlock:
-    // `lineStart + match.start`, not `match.start` alone — a long line is
-    // preview-trimmed around its match, so `match.start` by itself is an
-    // offset into the TRIMMED text this row renders, not the real file line.
-    if (line) {
-      openExcerpt(filePath, line.lineNumber, line.lineStart + (line.matches[0]?.start ?? 0) + 1);
+    const target = matchStartPosition(excerpt);
+    if (target) {
+      openExcerpt(filePath, target.lineNumber, target.column);
     }
   }, [blocks, openExcerpt, session?.activeExcerptId]);
 

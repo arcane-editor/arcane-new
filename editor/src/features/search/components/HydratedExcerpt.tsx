@@ -7,7 +7,7 @@ import { fileUri } from '../../lsp';
 import { detectLanguage } from '../../../utils/language-detect';
 import { applyHiddenAreas } from '../services/hidden-areas';
 import type { SearchModelRegistry } from '../services/model-ownership';
-import type { Excerpt } from '../services/excerpt-model';
+import { matchStartPosition, positionWithinExcerpt, type Excerpt } from '../services/excerpt-model';
 
 // Cold rows render at 12px `var(--font-mono)` with a 40px right-aligned
 // gutter and no vertical padding (`.search-excerpt-line` /
@@ -45,6 +45,11 @@ interface HydratedExcerptProps {
    *  instead of a caret probe. See `ExcerptList`. */
   onEditorMount: (excerptId: string, editorInstance: MonacoEditorNs.IStandaloneCodeEditor) => void;
   onEditorUnmount: (excerptId: string) => void;
+  /** Opens `filePath` at a real (1-based) line/column. Wired to a Monaco
+   *  action bound to Enter/Alt+Enter on this excerpt's own editor — see the
+   *  `addAction` call below for why that, and not the results list's own
+   *  keydown handler, has to be the one to own this now. */
+  onOpenExcerpt: (filePath: string, lineNumber: number, column: number) => void;
 }
 
 function HydratedExcerpt({
@@ -56,6 +61,7 @@ function HydratedExcerpt({
   onUnavailable,
   onEditorMount,
   onEditorUnmount,
+  onOpenExcerpt,
 }: HydratedExcerptProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   // Best guess before Monaco exists to measure anything; synced to Monaco's
@@ -75,6 +81,7 @@ function HydratedExcerpt({
     let editor: MonacoEditorNs.IStandaloneCodeEditor | null = null;
     let modelDisposeListener: IDisposable | null = null;
     let contentSizeListener: IDisposable | null = null;
+    let openAction: IDisposable | null = null;
 
     async function mount() {
       // `main.tsx` kicks off `initMonaco()` fire-and-forget so first paint
@@ -198,6 +205,43 @@ function HydratedExcerpt({
 
       onEditorMount(excerpt.id, editor);
 
+      // Clicking a result IS clicking into Monaco — mousedown bubbles up to
+      // `FileExcerptBlock`'s `onFocusExcerpt`, but focus itself lands in
+      // THIS editor, not the results list's container. `ExcerptList`'s own
+      // keydown handler deliberately ignores every key that originates
+      // inside a hydrated excerpt (Task A1, so typing survives), which means
+      // Enter/Alt+Enter reaching this editor previously had nothing bound to
+      // them and either fell through to Monaco's default (insert a newline)
+      // or did nothing — no keyboard route to "open the file" existed once
+      // focus was inside a hydrated excerpt, which is the ordinary case.
+      // This editor now owns that gesture directly, matching the list's
+      // Enter/Alt+Enter behaviour (`ExcerptList.openActiveExcerpt`): open at
+      // the real cursor when it's inside this excerpt's visible range, else
+      // fall back to the match start — a freshly re-hydrated editor that was
+      // never actually clicked into (switching to a file tab and back
+      // preserves `activeExcerptId` across the remount) defaults its cursor
+      // to the model's (1,1), which is usually outside the excerpt.
+      // `precondition: 'editorTextFocus'` scopes this to the PLAIN text
+      // area: Monaco's own widgets (rename confirm, suggest accept, find
+      // navigate) take focus off the text area onto their own input while
+      // open, so this deliberately does not compete with their own
+      // (correct) Enter handling — a dynamically added action's keybinding
+      // outranks every one of those by weight otherwise.
+      openAction = editor.addAction({
+        id: 'search-excerpt.open-at-cursor',
+        label: 'Open File at Cursor',
+        precondition: 'editorTextFocus',
+        keybindings: [monaco.KeyCode.Enter, monaco.KeyMod.Alt | monaco.KeyCode.Enter],
+        run: (ed) => {
+          const position = ed.getPosition();
+          const target =
+            position && positionWithinExcerpt(excerpt, position.lineNumber)
+              ? { lineNumber: position.lineNumber, column: position.column }
+              : matchStartPosition(excerpt);
+          if (target) onOpenExcerpt(filePath, target.lineNumber, target.column);
+        },
+      });
+
       // Sync the host to Monaco's own measurement immediately, then keep
       // syncing. The scrollbar is hidden and wheel is disabled (the results
       // list owns scrolling), but Monaco still scrolls PROGRAMMATICALLY to
@@ -215,9 +259,18 @@ function HydratedExcerpt({
         // file has its own listener on the SAME shared model — without this
         // guard, one keystroke fires `onFirstEdit` (and its full-text
         // `didChange` notification to csharp-ls) once per excerpt of the
-        // file instead of once. Only the editor actually being typed into
-        // should report the edit.
-        if (!editor!.hasTextFocus()) return;
+        // file instead of once. `hasWidgetFocus`, not `hasTextFocus`: a
+        // rename (F2) or code action applied inside this excerpt mutates the
+        // model while ITS OWN widget (the rename input, a peek view) holds
+        // DOM focus, not the text area — `hasTextFocus` would be false for
+        // an edit that is unambiguously this editor's own, silently
+        // dropping it (never opens the background tab, never enters
+        // `editedPaths`, and the model — still search-owned — gets disposed
+        // on the next eviction with no error). `hasWidgetFocus` covers both
+        // the text area and this editor's own widgets, while still being
+        // false for every OTHER excerpt's editor on the same shared model —
+        // which is all the dedup above actually needs.
+        if (!editor!.hasWidgetFocus()) return;
         onFirstEdit(filePath, model!.getValue());
       });
     }
@@ -227,6 +280,7 @@ function HydratedExcerpt({
     return () => {
       disposed = true;
       contentSizeListener?.dispose();
+      openAction?.dispose();
       modelDisposeListener?.dispose();
       if (editor) onEditorUnmount(excerpt.id);
       editor?.dispose();
@@ -256,6 +310,7 @@ function HydratedExcerpt({
     onUnavailable,
     onEditorMount,
     onEditorUnmount,
+    onOpenExcerpt,
   ]);
 
   return <div className="search-excerpt-hydrated" ref={hostRef} style={{ height: `${height}px` }} />;
