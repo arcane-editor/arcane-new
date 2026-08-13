@@ -149,13 +149,18 @@ function ExcerptList({ sessionId }: ExcerptListProps) {
     if (workspace.openFiles.some((f) => f.path === filePath)) {
       // Already a tab — the existing dirty/LSP path owns it.
       workspace.updateFileContent(filePath, content);
-      return;
+    } else {
+      // The tab now owns the model and its unsaved changes, so search must
+      // stop treating it as disposable.
+      registryRef.current.transfer(filePath);
+      workspace.openFileInBackground(filePath, content);
     }
-    // The tab now owns the model and its unsaved changes, so search must stop
-    // treating it as disposable.
-    registryRef.current.transfer(filePath);
-    workspace.openFileInBackground(filePath, content);
 
+    // Record the edit regardless of which branch above ran — the "N
+    // modified" badge and `mod+s`'s `saveAllEdited` both read `editedPaths`,
+    // and neither branch above touches it on its own. Idempotent insert, so
+    // a sibling excerpt or the file's own already-open tab re-firing this
+    // for the same path is a no-op.
     const search = useSearchStore.getState();
     const edited = search.sessions[sessionId]?.editedPaths ?? [];
     if (!edited.includes(filePath)) {
@@ -325,6 +330,20 @@ function ExcerptList({ sessionId }: ExcerptListProps) {
   // as long as this container holds focus.
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLDivElement>) => {
+      // A hydrated excerpt is a real Monaco editor living inside this
+      // container, so its native keydown bubbles up here exactly like any
+      // other key would. Plain Enter has no binding on a bare Monaco
+      // instance (no find/suggest widget open), so nothing upstream stops
+      // it — without this guard `preventDefault` below wins the race and
+      // opens the file instead of letting Monaco insert the newline the
+      // user just typed. Alt+Enter gets the same guard even though it isn't
+      // needed for typing (it never inserts anything): Monaco DOES bind
+      // Alt+Enter itself when its own find widget is open (select all
+      // matches), and even when it doesn't, "open the file" while the
+      // user's focus and cursor are inside a live editor is that editor's
+      // call, not this container's.
+      if ((e.target as HTMLElement).closest('.search-excerpt-hydrated')) return;
+
       const activeId = session?.activeExcerptId;
       if (!activeId) return;
 

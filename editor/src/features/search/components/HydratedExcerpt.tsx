@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import type { IDisposable } from 'monaco-editor';
 import { getMonacoInstance } from '../../../utils/monaco-instance';
 import { fileUri } from '../../lsp';
 import { detectLanguage } from '../../../utils/language-detect';
@@ -38,6 +39,7 @@ function HydratedExcerpt({
 
     let disposed = false;
     let editor: ReturnType<typeof monaco.editor.create> | null = null;
+    let modelDisposeListener: IDisposable | null = null;
 
     async function mount() {
       const uri = monaco!.Uri.parse(fileUri(filePath));
@@ -57,6 +59,18 @@ function HydratedExcerpt({
         }
       }
       if (disposed) return;
+
+      // A background tab (the first edit into a file with no tab yet opens
+      // one — see `ExcerptList.onFirstEdit`) or a real editor tab can close
+      // and dispose this exact model out from under this excerpt at any
+      // time — `stores/workspace.ts`'s `closeFile` does. Before this
+      // feature existed only the active tab's editor ever touched a model,
+      // so that was safe; now a hydrated excerpt can be bound to a model a
+      // background tab owns. Drop to the cold render instead of letting the
+      // next layout pass or keystroke throw against a disposed model.
+      modelDisposeListener = model.onWillDispose(() => {
+        onUnavailable();
+      });
 
       editor = monaco!.editor.create(host!, {
         model,
@@ -130,6 +144,7 @@ function HydratedExcerpt({
 
     return () => {
       disposed = true;
+      modelDisposeListener?.dispose();
       editor?.dispose();
       // The MODEL is not disposed here: eviction and search-tab close own that
       // decision, via the registry. Disposing on unmount would destroy a model
