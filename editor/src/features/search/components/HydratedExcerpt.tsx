@@ -77,10 +77,40 @@ function HydratedExcerpt({
       });
 
       // One excerpt, so one visible range: everything else in the file hides.
+      //
+      // Guard the range before handing it to Monaco. `complementRanges`
+      // assumes `startLine <= endLine <= lineCount`; break that and the
+      // "visible" line can escape BOTH emitted hidden ranges: `startLine >
+      // endLine` makes `{1,S-1}` and `{E+1,L}` overlap and merge into full
+      // coverage, and `startLine > lineCount` clamps `{1,S-1}` to `{1,L}`
+      // with no second range pushed at all. Neither shape is producible by
+      // `buildExcerpts`/`applyExpansion` against the model THEY scanned, but
+      // this component can end up hydrating a DIFFERENT model than the one
+      // that was scanned: a tab's model with unsaved deletions (shorter than
+      // `startLine`), or a file truncated on disk between the search scan
+      // and an `expand` click clamping `endLine` under `startLine`. Either
+      // shape then hits Monaco's own `!hasVisibleLine` fallback
+      // (viewModelLines.js, ViewModelLinesFromProjectedModel.setHiddenAreas)
+      // which SILENTLY REVEALS THE ENTIRE FILE instead of erroring —
+      // `applyHiddenAreas` still returns true, since Monaco's API was
+      // present the whole time. Treat a bad range exactly like the
+      // unavailable-API case, before it ever reaches Monaco.
+      const lineCount = model.getLineCount();
+      const rangeIsSane =
+        excerpt.startLine >= 1 &&
+        excerpt.startLine <= excerpt.endLine &&
+        excerpt.startLine <= lineCount;
+      if (!rangeIsSane) {
+        editor.dispose();
+        editor = null;
+        onUnavailable();
+        return;
+      }
+
       const hidden = applyHiddenAreas(
         editor,
         [{ start: excerpt.startLine, end: excerpt.endLine }],
-        model.getLineCount(),
+        lineCount,
       );
       if (!hidden) {
         // Without hidden areas this editor would show the entire file inside a
@@ -106,7 +136,16 @@ function HydratedExcerpt({
       // another excerpt of the same file is still showing, or one the user is
       // now editing in a tab.
     };
-  }, [filePath, excerpt, registry, lineHeight, onFirstEdit, onUnavailable]);
+    // `excerpt` itself is deliberately NOT a dependency: `ExcerptList`
+    // rebuilds every excerpt object on every render (streaming batches,
+    // expand/collapse anywhere in the list, `fileLines` updates), so
+    // depending on the object identity would tear down and remount every
+    // mounted editor on unrelated churn elsewhere in the results list —
+    // losing cursor/selection on every keystroke of a streaming search. Only
+    // the primitives this effect actually reads off `excerpt` are listed, so
+    // a re-render that produces an equivalent excerpt (same lines, same
+    // range) does not remount the editor.
+  }, [filePath, excerpt.startLine, excerpt.endLine, registry, lineHeight, onFirstEdit, onUnavailable]);
 
   return (
     <div
