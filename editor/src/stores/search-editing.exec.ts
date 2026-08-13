@@ -4,7 +4,10 @@ import { describe, it, expect, afterAll, mock } from 'bun:test';
  * REAL-EXECUTION test for `stores/workspace.ts`'s `openFileInBackground` —
  * the action Task 10 wires up so a search excerpt's first edit joins
  * `openFiles` (dirty state, save, the close guard and LSP sync all apply)
- * without stealing focus from the results tab mid-keystroke.
+ * without stealing focus from the results tab mid-keystroke — and (Task 11)
+ * `stores/search.ts`'s `saveAllEdited`, the action behind a results tab's
+ * `mod+s`: save every file THIS session's `editedPaths` names, and only
+ * those, then clear the list.
  *
  * Deliberately `.exec.ts`, not `.test.ts` — same reason as the sibling
  * `search-invalidation.exec.ts` (see that file's header): `mock.module`
@@ -15,13 +18,27 @@ import * as realCore from '@tauri-apps/api/core';
 import * as realWebviewWindow from '@tauri-apps/api/webviewWindow';
 import * as realWindow from '@tauri-apps/api/window';
 
+/** `saveFile` (`stores/workspace.ts`) writes through this — captured here so
+ *  the `saveAllEdited` tests below can assert exactly which paths were
+ *  written to disk and with what contents, without a real filesystem. */
+const writeFileCalls: Array<{ path: string; contents: string }> = [];
+
 mock.module('@tauri-apps/api/core', () => ({
   ...realCore,
   // `openFileInBackground` itself never invokes anything — it's a pure
-  // `set()` — but `stores/workspace.ts` reaches other invoke calls at
-  // module scope / via other actions this file never calls, so this stub
-  // just fails loudly if something unexpected reaches it.
-  invoke: async (cmd: string) => {
+  // `set()`. `saveFile` (exercised below via `saveAllEdited`) invokes
+  // `write_file` and nothing else, since none of these tests ever set a
+  // `workspacePath`, which is what would additionally reach
+  // `refreshStatus`/`refreshOpenDiffTabs` (git store, unrelated to this
+  // file). Anything else is a sign a test reached further than intended.
+  invoke: async (cmd: string, args?: Record<string, unknown>) => {
+    if (cmd === 'write_file') {
+      writeFileCalls.push({
+        path: args?.path as string,
+        contents: args?.contents as string,
+      });
+      return undefined;
+    }
     throw new Error(`unexpected invoke('${cmd}') call in search-editing.exec`);
   },
 }));
@@ -159,5 +176,122 @@ describe('openFileInBackground — REAL execution (own process, see file header)
     // true, so `syncDocumentChange` no longer early-returns for this path.
     useWorkspaceStore.getState().updateFileContent('/w/d.cs', 'background content v2');
     expect(notified.some((n) => n.method === 'textDocument/didChange')).toBe(true);
+  });
+});
+
+// `.txt` paths throughout (not `.cs`, unlike the suite above): `detectLanguage`
+// gives these no `lspServerKey`, so `saveFile`'s `getRunningClientForFile`
+// lookup is a guaranteed no-op — these tests are about `saveAllEdited`'s own
+// save/clear/isolation behaviour, not LSP sync, and the suite above already
+// leaves the shared `lspManager` csharp client's `running` flag flipped true
+// from an earlier test in this same process.
+describe('saveAllEdited — REAL execution (own process, see file header)', () => {
+  it('saves every path in editedPaths, in order, and clears the list', async () => {
+    const { useWorkspaceStore } = await import('./workspace');
+    const { useSearchStore } = await import('./search');
+    const id = 'search://save-all-basic';
+    useSearchStore.getState().ensureSession(id);
+
+    useWorkspaceStore.getState().openFileInBackground('/w/save-a.txt', 'content a');
+    useWorkspaceStore.getState().openFileInBackground('/w/save-b.txt', 'content b');
+    useSearchStore.getState().update(id, {
+      editedPaths: ['/w/save-a.txt', '/w/save-b.txt'],
+    });
+
+    const before = writeFileCalls.length;
+    useSearchStore.getState().saveAllEdited(id);
+    // Each save is fire-and-forget (`void`) inside the action, so give its
+    // microtask a turn before asserting on the write it queued.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const written = writeFileCalls.slice(before);
+    expect(written).toEqual([
+      { path: '/w/save-a.txt', contents: 'content a' },
+      { path: '/w/save-b.txt', contents: 'content b' },
+    ]);
+
+    const state = useWorkspaceStore.getState();
+    expect(state.openFiles.find((f) => f.path === '/w/save-a.txt')?.isDirty).toBe(false);
+    expect(state.openFiles.find((f) => f.path === '/w/save-b.txt')?.isDirty).toBe(false);
+    expect(useSearchStore.getState().sessions[id]?.editedPaths).toEqual([]);
+
+    useSearchStore.getState().closeSession(id);
+  });
+
+  it('reads editedPaths fresh at call time, not a value captured earlier', async () => {
+    // Mirrors the real caller: `ExcerptList`'s listener is registered once
+    // per session id and must see edits made after that registration, not
+    // just whatever was in the session the moment the listener was set up.
+    // `saveAllEdited` takes only the session id (never `editedPaths` itself),
+    // so this is a structural guarantee — this test exercises it for real by
+    // adding a second edit strictly AFTER the session already held one, then
+    // confirming the later addition is included in the very next call.
+    const { useWorkspaceStore } = await import('./workspace');
+    const { useSearchStore } = await import('./search');
+    const id = 'search://save-all-live-read';
+    useSearchStore.getState().ensureSession(id);
+
+    useWorkspaceStore.getState().openFileInBackground('/w/save-live-1.txt', 'v1');
+    useSearchStore.getState().update(id, { editedPaths: ['/w/save-live-1.txt'] });
+
+    // Time passes; a second excerpt is edited after whatever "registered"
+    // this session's listener would have already captured.
+    useWorkspaceStore.getState().openFileInBackground('/w/save-live-2.txt', 'v2');
+    useSearchStore.getState().update(id, {
+      editedPaths: ['/w/save-live-1.txt', '/w/save-live-2.txt'],
+    });
+
+    const before = writeFileCalls.length;
+    useSearchStore.getState().saveAllEdited(id);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const writtenPaths = writeFileCalls.slice(before).map((c) => c.path);
+    expect(writtenPaths).toContain('/w/save-live-1.txt');
+    expect(writtenPaths).toContain('/w/save-live-2.txt');
+
+    useSearchStore.getState().closeSession(id);
+  });
+
+  it('does not touch a file left dirty in another tab for unrelated reasons', async () => {
+    // The one rule that matters most for Task 11: save-all saves ONLY
+    // `editedPaths`, never sweeps in other dirty tabs.
+    const { useWorkspaceStore } = await import('./workspace');
+    const { useSearchStore } = await import('./search');
+    const id = 'search://save-all-isolation';
+    useSearchStore.getState().ensureSession(id);
+
+    // Dirty for an unrelated reason — never added to this session's
+    // editedPaths, so it must survive save-all untouched.
+    useWorkspaceStore.getState().openFileInBackground('/w/unrelated.txt', 'unrelated edit');
+    useWorkspaceStore.getState().openFileInBackground('/w/save-only-this.txt', 'only this');
+    useSearchStore.getState().update(id, { editedPaths: ['/w/save-only-this.txt'] });
+
+    const before = writeFileCalls.length;
+    useSearchStore.getState().saveAllEdited(id);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const writtenPaths = writeFileCalls.slice(before).map((c) => c.path);
+    expect(writtenPaths).toEqual(['/w/save-only-this.txt']);
+
+    const state = useWorkspaceStore.getState();
+    expect(state.openFiles.find((f) => f.path === '/w/unrelated.txt')?.isDirty).toBe(true);
+    expect(state.openFiles.find((f) => f.path === '/w/save-only-this.txt')?.isDirty).toBe(false);
+
+    useSearchStore.getState().closeSession(id);
+  });
+
+  it('is a no-op — no writes, no throw — for a session with no edits', async () => {
+    const { useSearchStore } = await import('./search');
+    const id = 'search://save-all-empty';
+    useSearchStore.getState().ensureSession(id);
+
+    const before = writeFileCalls.length;
+    expect(() => useSearchStore.getState().saveAllEdited(id)).not.toThrow();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(writeFileCalls.length).toBe(before);
+    expect(useSearchStore.getState().sessions[id]?.editedPaths).toEqual([]);
+
+    useSearchStore.getState().closeSession(id);
   });
 });

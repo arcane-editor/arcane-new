@@ -3242,6 +3242,17 @@ html, body, #root {
   white-space: nowrap;
 }
 
+/* Readout of `session.editedPaths` — appears once a search-tab edit has gone
+   through the dirty/save path, and disappears again once `mod+s` (save-all)
+   clears the list. `--accent`, not `--text-secondary` like the count beside
+   it: this one names unsaved work, not a passive tally. */
+.search-modified-count {
+  flex-shrink: 0;
+  color: var(--accent);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
 /* Empty state. Without it the tab is a full-window void that reads as broken
    rather than as waiting for input. */
 .search-empty {

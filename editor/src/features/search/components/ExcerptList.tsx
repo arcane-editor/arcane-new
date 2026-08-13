@@ -216,6 +216,23 @@ function ExcerptList({ sessionId }: ExcerptListProps) {
     });
   }, []);
 
+  // `App.tsx`'s `file.save` command dispatches this when `mod+s` fires while
+  // this results tab is active — there is no single active file there to
+  // save, so it saves exactly the files THIS tab edited instead. The actual
+  // save/clear logic lives in the store (`saveAllEdited`, `stores/search.ts`)
+  // so it reads `editedPaths` fresh at the moment the event fires rather than
+  // a value closed over here at registration time, and so it's directly
+  // testable in the isolated store harness without a mounted component.
+  useEffect(() => {
+    function onSaveAll(event: Event) {
+      const detail = (event as CustomEvent<{ sessionId: string }>).detail;
+      if (detail.sessionId !== sessionId) return;
+      useSearchStore.getState().saveAllEdited(sessionId);
+    }
+    window.addEventListener('search-save-all', onSaveAll);
+    return () => window.removeEventListener('search-save-all', onSaveAll);
+  }, [sessionId]);
+
   // The outline panel (sidebar) dispatches this to scroll the tab to an
   // excerpt the user clicked there. `onFocusExcerpt` (above) is the reverse
   // direction: it writes `activeExcerptId`, which the outline reads back to

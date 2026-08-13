@@ -221,6 +221,11 @@ function SearchQueryBar({ sessionId }: SearchQueryBarProps) {
         <span className="search-tab-count" role="status">
           {summary}
         </span>
+        {session.editedPaths.length > 0 && (
+          <span className="search-modified-count">
+            {session.editedPaths.length} modified · ⌘S to save
+          </span>
+        )}
       </div>
 
       {filtersOpen && (

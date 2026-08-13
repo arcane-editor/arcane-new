@@ -30,6 +30,9 @@ interface SearchState {
   search: (id: string, workspacePath: string) => Promise<void>;
   clearResults: (id: string) => void;
   closeSession: (id: string) => void;
+  /** Saves every file session `id` has edited (`editedPaths`) and clears the
+   *  list — see the doc comment on the implementation below. */
+  saveAllEdited: (id: string) => void;
 }
 
 const DEFAULT_SESSION_ID = 'search://1';
@@ -255,6 +258,26 @@ export const useSearchStore = create<SearchState>((set, get) => ({
       if (!next[activeSessionId]) next[activeSessionId] = createSession(activeSessionId);
       return { sessions: next, activeSessionId };
     });
+  },
+
+  // Backs the `search-save-all` window event `App.tsx`'s `file.save` command
+  // dispatches when `mod+s` fires while a results tab is active (there is no
+  // single active file there to save). `get()` is read at CALL time, inside
+  // this action — not by a caller who captured `editedPaths` earlier — so an
+  // edit made after `ExcerptList`'s listener was registered is still picked
+  // up: that listener is registered once per session id and lives for as
+  // long as the tab does, well past any single edit. Mirrors `App.tsx`'s
+  // single-file `file.save`: each write is fire-and-forget (`void`), not
+  // awaited — a failed write already surfaces via `notify.error` inside
+  // `saveFile` itself, and awaiting here would hold up clearing
+  // `editedPaths` (and so the modified count) for files that DID save while
+  // one is slow or erroring.
+  saveAllEdited: (id) => {
+    const paths = get().sessions[id]?.editedPaths ?? [];
+    for (const path of paths) {
+      void useWorkspaceStore.getState().saveFile(path);
+    }
+    get().update(id, { editedPaths: [] });
   },
 }));
 

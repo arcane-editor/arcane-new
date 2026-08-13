@@ -826,8 +826,16 @@ function App() {
       category: 'File',
       keybinding: 'mod+s',
       handler: () => {
-        const { activeFilePath, saveFile } = useWorkspaceStore.getState();
-        if (activeFilePath) saveFile(activeFilePath);
+        const activePath = useWorkspaceStore.getState().activeFilePath;
+        if (activePath?.startsWith('search://')) {
+          // A results tab has no single active file. Save exactly the files it
+          // edited — a file left dirty for unrelated reasons is not swept in.
+          window.dispatchEvent(
+            new CustomEvent('search-save-all', { detail: { sessionId: activePath } }),
+          );
+          return;
+        }
+        if (activePath) void useWorkspaceStore.getState().saveFile(activePath);
       },
       when: () => !!useWorkspaceStore.getState().activeFilePath,
     },
