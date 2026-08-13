@@ -3373,6 +3373,11 @@ html, body, #root {
   outline-offset: -2px;
 }
 
+.search-excerpt-hydrated {
+  width: 100%;
+  overflow: hidden;
+}
+
 /* ==================== Search Sidebar: outline ==================== */
 
 .search-outline {
