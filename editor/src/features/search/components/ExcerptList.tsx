@@ -107,16 +107,29 @@ function ExcerptList({ sessionId }: ExcerptListProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [virtualItems, blocks]);
 
-  // Dispose every model search still owns when the session's search changes
-  // (a new query invalidates every previous excerpt) or this list unmounts
-  // (tab closed). Never disposes a model a real editor tab owns — `release`
-  // (via `releaseAll`) only returns paths search itself claimed.
+  // Dispose every model search still owns when this list unmounts — the tab
+  // is closed, or (since `EditorPanel` renders only the active tab) the user
+  // just switched away from it. `[]` deps, deliberately NOT
+  // `session?.activeSearchId`: `search()` bumps that at the START of a new
+  // run while deliberately KEEPING the previous results (and every currently
+  // hydrated editor) on screen until the first batch arrives
+  // (`stores/search.ts`) — an effect keyed on it would tear down every model
+  // search still owns out from under those still-mounted editors, well
+  // before `blocks` (memoised on `session.results`) has any reason to
+  // change, and nothing would ever remount them afterwards (same file path,
+  // same excerpt id, same primitive start/end lines survive a refined query
+  // unchanged, so `HydratedExcerpt`'s effect deps never invalidate). A new
+  // search is not itself a reason to destroy a model a still-visible excerpt
+  // is displaying. Disposal for a file the refined query actually DROPS is
+  // already covered by the hot-set effect above once the batch replaces
+  // `blocks` and evicts it. Never disposes a model a real editor tab owns —
+  // `release` (via `releaseAll`) only returns paths search itself claimed.
   useEffect(() => {
     const registry = registryRef.current;
     return () => {
       for (const path of registry.releaseAll()) disposeModelForPath(path);
     };
-  }, [session?.activeSearchId]);
+  }, []);
 
   // Routes the first real edit to an excerpt into the same dirty/save/LSP
   // path an ordinary editor tab uses — see the design note in the task brief.

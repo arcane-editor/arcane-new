@@ -1260,6 +1260,28 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     set((state) => ({
       openFiles: [...state.openFiles, { path, name, content, isDirty: true }],
     }));
+
+    // Notify (and lazily start) the LSP server for this file's language —
+    // mirrors `openFile`'s own didOpen above. Fire-and-forget rather than
+    // `await`ed: this action's contract is synchronous (the isolated test
+    // asserts `openFiles` already holds the new tab the instant this call
+    // returns), so the async LSP handshake runs after the state write
+    // instead of gating it. Skipping this is not a mere protocol nicety —
+    // `syncDocumentChange`/`syncDocumentSave` (`document-sync.ts`) both
+    // early-return on `!openCounts.has(path)`, which is only ever populated
+    // by a `didOpen`. Without one, every `didChange` and `didSave` for a
+    // file that started life as a background tab would be SILENTLY dropped
+    // for the rest of the session — no error, no stale diagnostics, just
+    // none at all.
+    void ensureLspForFile(name).then((ctx) => {
+      if (!ctx) return;
+      // Read the CURRENT content, not the snapshot closed over by this call:
+      // the user may keep typing while the server is still lazily starting,
+      // and `didOpen`'s text is what establishes the server's baseline — a
+      // stale baseline here would need a further edit to ever self-correct.
+      const current = get().openFiles.find((f) => f.path === path)?.content ?? content;
+      syncDocumentOpen(ctx.client, path, current, ctx.lspLanguageId);
+    });
   },
 
   closeFile: (path: string) => {

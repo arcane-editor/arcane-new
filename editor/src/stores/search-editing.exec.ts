@@ -123,4 +123,41 @@ describe('openFileInBackground — REAL execution (own process, see file header)
     expect(matches).toHaveLength(1);
     expect(matches[0].content).toBe('first');
   });
+
+  // Fix round 1, Finding 2: `openFileInBackground` must send `didOpen`, or
+  // every later `didChange`/`didSave` for that file is silently dropped by
+  // `document-sync.ts`'s `openCounts` guard forever. Exercising this for
+  // real (rather than asserting on a mock) means getting `ensureLspForFile`
+  // (private to `workspace.ts`) to see a "running" client without spawning a
+  // real server — `lspManager`/`document-sync.ts` are NOT mocked anywhere in
+  // this file (unlike the Tauri/editor modules above), so this reaches into
+  // the one real `LspClient` instance the store itself will look up for a
+  // `.cs` file and flips its private `running` flag directly. That's real
+  // execution of `document-sync.ts`'s actual `openCounts` map, not a
+  // simulation of it — the thing Finding 2 asked to be confirmed.
+  it('sends didOpen so a later edit/save is not silently dropped by the LSP openCounts guard', async () => {
+    const { useWorkspaceStore } = await import('./workspace');
+    const { lspManager, getOpenDocumentUris } = await import('../features/lsp');
+
+    const client = lspManager.client('csharp');
+    (client as unknown as { running: boolean }).running = true;
+    const notified: Array<{ method: string; params: unknown }> = [];
+    client.notify = (method: string, params: unknown) => {
+      notified.push({ method, params });
+    };
+
+    useWorkspaceStore.getState().openFileInBackground('/w/d.cs', 'background content');
+    // The didOpen dispatch is fire-and-forget, scheduled after the
+    // synchronous `openFiles` write (see the comment in `workspace.ts`) —
+    // give its microtask a turn.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(notified.some((n) => n.method === 'textDocument/didOpen')).toBe(true);
+    expect(getOpenDocumentUris().has('file:///w/d.cs')).toBe(true);
+
+    // Confirms the actual claim in Finding 2: `openCounts.has(path)` is now
+    // true, so `syncDocumentChange` no longer early-returns for this path.
+    useWorkspaceStore.getState().updateFileContent('/w/d.cs', 'background content v2');
+    expect(notified.some((n) => n.method === 'textDocument/didChange')).toBe(true);
+  });
 });
