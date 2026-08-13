@@ -48,3 +48,4 @@ export {
   HISTORY_LIMIT,
   type HistoryPosition,
 } from './services/query-history';
+export { unityNoiseExcludes, UNITY_NOISE_EXTENSIONS } from './services/unity-scope';
