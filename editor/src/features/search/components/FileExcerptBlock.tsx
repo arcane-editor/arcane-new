@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import type { editor as MonacoEditorNs } from 'monaco-editor';
 import { getFileIcon } from '../../../utils/file-icons';
@@ -7,6 +7,7 @@ import { getMonacoInstance } from '../../../utils/monaco-instance';
 import { useThemeStore } from '../../../stores/theme';
 import { splitByMatches, stripTrailingBreak } from '../services/highlight';
 import { offsetWithinLine, columnFor } from '../services/caret-offset';
+import { insertMatchMarks } from '../services/match-highlight';
 import type { Excerpt, MatchRange } from '../services/excerpt-model';
 import type { SearchModelRegistry } from '../services/model-ownership';
 import HydratedExcerpt from './HydratedExcerpt';
@@ -173,12 +174,27 @@ function ExcerptLineRow({
 }: ExcerptLineRowProps) {
   const activeThemeId = useThemeStore((s) => s.activeThemeId);
   const isMatchLine = matches.length > 0;
-  // Only context lines go through colorize: a match line needs exact UTF-16
-  // offsets for its <mark>, and those cannot survive tokenization into HTML.
-  // useColorizedLine is still called unconditionally (with '' for match
-  // lines) because a hook cannot be called conditionally; colorizing an
-  // empty string is cheap and its result is discarded below.
-  const colorized = useColorizedLine(isMatchLine ? '' : text, monacoId, activeThemeId);
+  // Every line goes through colorize now, match lines included. A match
+  // line's <mark> offsets are computed by walking the colorized HTML's text
+  // nodes (see `insertMatchMarks`) rather than by skipping tokenization, so
+  // the one line in a search result most worth reading — the line that
+  // actually matched — no longer renders in the app's plain foreground
+  // colour while every context line around it gets full syntax colour.
+  const colorized = useColorizedLine(text, monacoId, activeThemeId);
+  // `insertMatchMarks` re-parses `colorized` on every call, so this only
+  // needs to happen when either input actually changes, not on every
+  // unrelated re-render this row takes (theme store selector churn,
+  // sibling excerpts mounting, etc).
+  const markedHtml = useMemo(() => {
+    if (colorized === null || !isMatchLine) return colorized;
+    try {
+      return insertMatchMarks(colorized, matches);
+    } catch {
+      // Malformed/unexpected HTML shape: fall back to the plain-text
+      // renderer below rather than showing nothing.
+      return null;
+    }
+  }, [colorized, isMatchLine, matches]);
   // Scoped to the <code> element, not the row: the row also contains the
   // gutter's line-number span, and a TreeWalker rooted on the row would yield
   // the digits as the first text node, shifting every computed offset right
@@ -212,7 +228,7 @@ function ExcerptLineRow({
     >
       <span className="search-excerpt-gutter">{lineNumber}</span>
       <code ref={codeRef} className="search-excerpt-code">
-        {isMatchLine || colorized === null ? (
+        {markedHtml === null ? (
           splitByMatches(text, matches).map((segment, i) =>
             segment.isMatch ? (
               <mark key={i} className="search-match-highlight">
@@ -223,7 +239,7 @@ function ExcerptLineRow({
             ),
           )
         ) : (
-          <span dangerouslySetInnerHTML={{ __html: colorized }} />
+          <span dangerouslySetInnerHTML={{ __html: markedHtml }} />
         )}
       </code>
     </div>
