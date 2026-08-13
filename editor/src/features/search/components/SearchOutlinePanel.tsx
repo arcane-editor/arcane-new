@@ -139,11 +139,28 @@ function SearchOutlinePanel() {
                 }}
               >
                 <div className="search-outline-file">
-                  <div className="search-outline-file-header" title={file.relativePath}>
+                  <button
+                    type="button"
+                    className="search-outline-file-header"
+                    title={file.relativePath}
+                    onClick={() => {
+                      // Open the file at its first match — same target the
+                      // first match row itself would use. `reveal()` runs
+                      // before `openMatch()` for the same reason it does on
+                      // the row's own click handler below: it activates this
+                      // session's results tab synchronously, and opening the
+                      // file first would just have that reactivate the
+                      // search tab out from under the switch.
+                      const firstExcerpt = file.excerpts[0];
+                      if (!firstExcerpt) return;
+                      reveal(firstExcerpt.id);
+                      openMatch(file.path, firstExcerpt);
+                    }}
+                  >
                     <span className="search-file-icon">{getFileIcon(file.name, 14)}</span>
                     <span className="search-file-name">{file.name}</span>
                     <span className="search-file-count">{file.matchCount}</span>
-                  </div>
+                  </button>
                   {file.excerpts.map((excerpt) => (
                     <button
                       key={excerpt.id}

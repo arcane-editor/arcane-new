@@ -3380,9 +3380,19 @@ html, body, #root {
   display: flex;
   align-items: center;
   gap: 6px;
+  width: 100%;
   padding: 4px 10px;
+  border: none;
+  background: transparent;
+  font: inherit;
   font-size: 12px;
+  text-align: left;
   color: var(--text-primary);
+  cursor: pointer;
+}
+
+.search-outline-file-header:hover {
+  background: var(--hover);
 }
 
 .search-outline-row {
