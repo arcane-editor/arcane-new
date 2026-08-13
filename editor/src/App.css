@@ -3171,6 +3171,51 @@ html, body, #root {
   flex-shrink: 0;
 }
 
+/* "Open File", Zed-style: right-aligned in the header row, quiet until the
+   row is worth noticing. `opacity`, not `display` — the results list is
+   virtualized and a height change on hover/focus would jitter it — so the
+   hidden state still occupies its box, just invisible. Precedent for this
+   exact pattern: `.tab-close`, `.ai-history-actions`,
+   `.scm-worktree-actions`. */
+.search-file-open-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  margin-left: auto;
+  padding: 2px 8px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: none;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms ease, background-color 120ms ease, color 120ms ease;
+}
+
+.search-excerpt-file-header:hover .search-file-open-btn,
+.search-file-open-btn:focus-visible {
+  opacity: 1;
+}
+
+.search-file-open-btn:hover {
+  background: var(--hover-overlay);
+  color: var(--text-primary);
+}
+
+.search-file-open-chip {
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg-input);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 400;
+}
+
 .search-match-line {
   color: var(--text-secondary);
   font-size: 12px;
@@ -3298,10 +3343,28 @@ html, body, #root {
   height: 26px;
   padding: 0 10px;
   background: var(--bg-sidebar);
-  border: none;
   border-top: 1px solid var(--border);
   color: var(--text-primary);
   font-size: 12px;
+}
+
+/* The collapse toggle. `flex: 1` so it keeps absorbing the row's slack the
+   same way `.search-file-path` did when the whole header was one button —
+   the filename/path area stays a generous click target — while pushing the
+   match count and the (mostly hidden) open button against the right edge. */
+.search-excerpt-file-collapse {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
   cursor: pointer;
 }
 

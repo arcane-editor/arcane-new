@@ -4,10 +4,12 @@ import type { editor as MonacoEditorNs } from 'monaco-editor';
 import { getFileIcon } from '../../../utils/file-icons';
 import { detectLanguage } from '../../../utils/language-detect';
 import { getMonacoInstance } from '../../../utils/monaco-instance';
+import { isMac } from '../../../utils/platform';
 import { useThemeStore } from '../../../stores/theme';
 import { splitByMatches, stripTrailingBreak } from '../services/highlight';
 import { offsetWithinLine, columnFor } from '../services/caret-offset';
 import { insertMatchMarks } from '../services/match-highlight';
+import { matchStartPosition } from '../services/excerpt-model';
 import type { Excerpt, MatchRange } from '../services/excerpt-model';
 import type { SearchModelRegistry } from '../services/model-ownership';
 import HydratedExcerpt from './HydratedExcerpt';
@@ -264,6 +266,23 @@ function FileExcerptBlock({
 }: FileExcerptBlockProps) {
   const fileName = filePath.split('/').pop() || filePath;
   const monacoId = detectLanguage(fileName).monacoId;
+  // Cmd+Enter on mac, Ctrl+Enter elsewhere — the chord `openActiveExcerpt`
+  // (ExcerptList) actually binds first (alongside alt+Enter). Shown, not
+  // "Enter" alone, per the owner's Zed reference screenshot.
+  const openChord = isMac() ? '⌘⏎' : 'Ctrl+⏎';
+
+  // Opens this file at its first excerpt's first matching line and real
+  // match column — exactly what `SearchOutlinePanel`'s own file-header click
+  // opens (`matchStartPosition`) — through the same `onOpenExcerpt` prop
+  // every other open gesture in this block already routes through, so there
+  // is only ever one path that actually opens a file from search results.
+  function handleOpenFile() {
+    const firstExcerpt = excerpts[0];
+    if (!firstExcerpt) return;
+    const target = matchStartPosition(firstExcerpt);
+    if (!target) return;
+    onOpenExcerpt(filePath, target.lineNumber, target.column);
+  }
   // Excerpts whose hydration reported `onUnavailable()` — no Monaco, the
   // hidden-areas API is gone, or the range wasn't sane against the model.
   // These render cold even while their file is otherwise hot.
@@ -295,19 +314,34 @@ function FileExcerptBlock({
 
   return (
     <div className="search-excerpt-file">
-      <button
-        className="search-excerpt-file-header"
-        onClick={() => onToggleCollapse(filePath)}
-        title={filePath}
-      >
-        <span className="search-file-chevron">
-          {collapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
-        </span>
-        <span className="search-file-icon">{getFileIcon(fileName, 14)}</span>
-        <span className="search-file-name">{fileName}</span>
-        <span className="search-file-path">{relativePath !== fileName ? relativePath : ''}</span>
+      {/* A plain container, not a button: it hosts two SIBLING buttons
+          (collapse, open) rather than nesting one inside the other, which
+          HTML disallows and which would also make the open button's click
+          bubble into the collapse toggle. */}
+      <div className="search-excerpt-file-header" title={filePath}>
+        <button
+          type="button"
+          className="search-excerpt-file-collapse"
+          onClick={() => onToggleCollapse(filePath)}
+        >
+          <span className="search-file-chevron">
+            {collapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+          </span>
+          <span className="search-file-icon">{getFileIcon(fileName, 14)}</span>
+          <span className="search-file-name">{fileName}</span>
+          <span className="search-file-path">{relativePath !== fileName ? relativePath : ''}</span>
+        </button>
         <span className="search-file-count">{matchCount}</span>
-      </button>
+        <button
+          type="button"
+          className="search-file-open-btn"
+          title="Open File"
+          onClick={handleOpenFile}
+        >
+          <span className="search-file-open-label">Open File</span>
+          <span className="search-file-open-chip">{openChord}</span>
+        </button>
+      </div>
 
       {!collapsed &&
         excerpts.map((excerpt) => (
