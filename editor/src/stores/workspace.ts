@@ -827,6 +827,11 @@ interface WorkspaceState {
   setAssetsRoot: (assetsPath: string) => Promise<void>;
   loadChildren: (parentPath: string) => Promise<TreeNode[]>;
   openFile: (path: string, name: string) => Promise<void>;
+  /** Adds a file to `openFiles` WITHOUT activating it. Used when a search
+   *  excerpt is first edited: the file must join `openFiles` so dirty state,
+   *  save, the close guard and LSP sync all apply, but stealing focus from the
+   *  results tab mid-keystroke would be hostile. No-op if already open. */
+  openFileInBackground: (path: string, content: string) => void;
   closeFile: (path: string) => void;
   setActiveFile: (path: string) => void;
   reorderTabs: (fromPath: string, toPath: string) => void;
@@ -1247,6 +1252,14 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     if (ctx) {
       syncDocumentOpen(ctx.client, path, content, ctx.lspLanguageId);
     }
+  },
+
+  openFileInBackground: (path, content) => {
+    if (get().openFiles.some((f) => f.path === path)) return;
+    const name = path.split('/').pop() || path;
+    set((state) => ({
+      openFiles: [...state.openFiles, { path, name, content, isDirty: true }],
+    }));
   },
 
   closeFile: (path: string) => {

@@ -118,12 +118,37 @@ function ExcerptList({ sessionId }: ExcerptListProps) {
     };
   }, [session?.activeSearchId]);
 
-  // Stable no-op until Task 10 wires the real "first edit opens a background
-  // tab" behaviour. `[]` deps: an unconditional no-op reads nothing from the
-  // render, so there is nothing that could ever need it to change identity —
-  // and it must not change identity, since `HydratedExcerpt`'s mount effect
-  // (Task 8) depends on it and would otherwise remount on every render.
-  const onFirstEdit = useCallback((_filePath: string, _content: string) => {}, []);
+  // Routes the first real edit to an excerpt into the same dirty/save/LSP
+  // path an ordinary editor tab uses — see the design note in the task brief.
+  // Fires for ANY writer of the shared Monaco model (this excerpt, a sibling
+  // excerpt of the same file, or the file's own already-open tab), not just
+  // the excerpt whose editor instance is reporting it — `openFiles.some(...)`
+  // is what makes that safe: once the file is a tab, every subsequent event
+  // (regardless of which editor produced it) just routes through the
+  // existing `updateFileContent`, and `registryRef.current.transfer` /
+  // `openFileInBackground` only run once, on the transition into "is a tab".
+  // `[sessionId]` deps: reads nothing else from the render, so identity only
+  // needs to change if the tab itself changes — and it must otherwise stay
+  // stable, since `HydratedExcerpt`'s mount effect (Task 8) depends on it and
+  // would otherwise remount every hot editor on unrelated re-renders.
+  const onFirstEdit = useCallback((filePath: string, content: string) => {
+    const workspace = useWorkspaceStore.getState();
+    if (workspace.openFiles.some((f) => f.path === filePath)) {
+      // Already a tab — the existing dirty/LSP path owns it.
+      workspace.updateFileContent(filePath, content);
+      return;
+    }
+    // The tab now owns the model and its unsaved changes, so search must stop
+    // treating it as disposable.
+    registryRef.current.transfer(filePath);
+    workspace.openFileInBackground(filePath, content);
+
+    const search = useSearchStore.getState();
+    const edited = search.sessions[sessionId]?.editedPaths ?? [];
+    if (!edited.includes(filePath)) {
+      search.update(sessionId, { editedPaths: [...edited, filePath] });
+    }
+  }, [sessionId]);
 
   const toggleCollapse = useCallback(
     (filePath: string) => {

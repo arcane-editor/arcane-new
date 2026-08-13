@@ -35,6 +35,10 @@ export interface SearchSession extends StreamState, SearchOptionsState {
    *  tabs back) apart from a real edit — see `searchSignature`'s doc comment
    *  in `search-model.ts` for why that distinction matters. */
   searchedSignature: string | null;
+  /** Files this results tab has edited, in first-edit order. Drives the
+   *  modified count and save-all. Deliberately NOT part of `searchSignature`:
+   *  editing a file is not a reason to re-run the search. */
+  editedPaths: string[];
 }
 
 export type SearchSessions = Record<string, SearchSession>;
@@ -63,6 +67,7 @@ export function createSession(id: string): SearchSession {
     collapsedFiles: [],
     activeExcerptId: null,
     searchedSignature: null,
+    editedPaths: [],
   };
 }
 
