@@ -6,16 +6,21 @@
 //
 // Unit model: internal accounting is in integer MICRO-USD of *estimated model
 // cost*. A user-facing "credit" is $0.01 of that cost. Included credits per
-// plan are sized so that, after Dodo fees and a SAFETY_BUFFER, a fully-spent
-// plan still breaks even (see plan).
+// plan are sized so that $1 of price buys exactly $1 of credits; margin comes
+// entirely from MARGIN at debit time.
 
 export const CREDIT_USD = 0.01;                 // 1 credit = $0.01 of model cost
 export const MICRO_PER_USD = 1_000_000;
 export const MICRO_PER_CREDIT = Math.round(CREDIT_USD * MICRO_PER_USD); // 10,000
-// Cushions the included-credit sizing against under-estimated neuron costs,
-// the currently-metered-but-uncertain endpoints, and refunds/disputes.
-// Consumed by the tier-grant sizing / pricing, NOT by per-request debit.
-export const SAFETY_BUFFER = 1.3;
+
+/** Cloudflare's fee on prepaid AI Gateway credits (5%). Applied to every AI
+ *  request because gateway credits fund both Workers AI and third-party spend. */
+export const GATEWAY_FEE = 1.05;
+
+/** Platform markup, applied per request at debit time. This is where margin
+ *  lives — NOT in grant sizing. A model price change moves debits with it, so
+ *  margin holds without anyone re-deriving a buffer. */
+export const MARGIN = 2.0;
 
 export interface Tier {
     id: string;
@@ -27,23 +32,46 @@ export interface Tier {
     order: number;
 }
 
-// Cursor-style ladder. Grants are illustrative (≥ break-even); Ultra is capped
-// at break-even, NOT Cursor's below-cost 20× — see the plan's caveat.
+// Grants are exactly priceUsd * 100 — "$20 buys $20 of credits". Margin comes
+// entirely from MARGIN at debit time.
 // `satisfies` keeps the literal key types so TIERS.free etc. are never
 // `undefined` (the codebase runs with noUncheckedIndexedAccess).
 export const TIERS = {
     free:    { id: 'free',    name: 'Free',  priceUsd: 0,   monthlyCredits: 150,    order: 0 },
-    pro:     { id: 'pro',     name: 'Pro',   priceUsd: 20,  monthlyCredits: 1400,   dodoProductVar: 'DODO_PRODUCT_PRO',     order: 1 },
-    proplus: { id: 'proplus', name: 'Pro+',  priceUsd: 50,  monthlyCredits: 3600,   dodoProductVar: 'DODO_PRODUCT_PROPLUS', order: 2 },
-    ultra:   { id: 'ultra',   name: 'Ultra', priceUsd: 200, monthlyCredits: 16000,  dodoProductVar: 'DODO_PRODUCT_ULTRA',   order: 3 },
+    pro:     { id: 'pro',     name: 'Pro',   priceUsd: 20,  monthlyCredits: 2000,   dodoProductVar: 'DODO_PRODUCT_PRO',     order: 1 },
+    proplus: { id: 'proplus', name: 'Pro+',  priceUsd: 50,  monthlyCredits: 5000,   dodoProductVar: 'DODO_PRODUCT_PROPLUS', order: 2 },
+    ultra:   { id: 'ultra',   name: 'Ultra', priceUsd: 200, monthlyCredits: 20000,  dodoProductVar: 'DODO_PRODUCT_ULTRA',   order: 3 },
 } satisfies Record<string, Tier>;
 
 export type TierId = keyof typeof TIERS;
 
-/** Daily inline (tab) completion allowance per plan — abuse ceilings, not
- *  billing: inline completions never debit credits (2026-08-03 design). */
+/** Which effort tiers each plan may request. Deep Think and Max are paid. */
+export const ALLOWED_TIERS: Record<TierId, readonly string[]> = {
+    free:    ['low'],
+    pro:     ['low', 'mid', 'high'],
+    proplus: ['low', 'mid', 'high'],
+    ultra:   ['low', 'mid', 'high'],
+};
+
+/** Legacy wire value `super` is an alias of `high`. */
+export function isTierAllowed(planId: string, tier: string): boolean {
+    const plan = (isTierId(planId) ? planId : 'free') as TierId;
+    const normalized = tier === 'super' ? 'high' : tier;
+    return ALLOWED_TIERS[plan].includes(normalized);
+}
+
+/** Monthly inline spend ceiling in micro-USD of REAL cost (no margin — inline
+ *  is free to the user). Free $1; paid plans 10% of plan price. */
+export const INLINE_MONTHLY_MICRO_CEILING: Record<TierId, number> = {
+    free: 1_000_000, pro: 2_000_000, proplus: 5_000_000, ultra: 20_000_000,
+};
+
+/** Daily suggestion caps, derived from the monthly budget / 30 and rounded to
+ *  a clean number. These ration the budget across the month; the micro-USD
+ *  ceiling above is the hard backstop, because a request count does not bound
+ *  cost — cost scales with context size. */
 export const INLINE_DAILY_CAP: Record<TierId, number> = {
-    free: 300, pro: 4000, proplus: 10000, ultra: 10000,
+    free: 600, pro: 1200, proplus: 3000, ultra: 12000,
 };
 
 export interface TopupPack {
@@ -53,11 +81,13 @@ export interface TopupPack {
     dodoProductVar: string;
 }
 
-// One-time credit packs (priced for ~10% net profit over buffered cost + Dodo
-// one-time fee — see plan). Illustrative until real costs land.
+// NOTE: the pack ids and their DODO_PRODUCT_TOPUP_* env vars are LIVE
+// provisioned Dodo products — the id no longer matches the credit count, and
+// renaming would orphan them. Credits follow the price x 100 rule; the id is
+// an internal reference only. Renaming is an owner-gated ops follow-up.
 export const TOPUP_PACKS: TopupPack[] = [
-    { id: 'topup_1000', credits: 1000, priceUsd: 16, dodoProductVar: 'DODO_PRODUCT_TOPUP_1000' },
-    { id: 'topup_5000', credits: 5000, priceUsd: 75, dodoProductVar: 'DODO_PRODUCT_TOPUP_5000' },
+    { id: 'topup_1000', credits: 1600, priceUsd: 16, dodoProductVar: 'DODO_PRODUCT_TOPUP_1000' },
+    { id: 'topup_5000', credits: 7500, priceUsd: 75, dodoProductVar: 'DODO_PRODUCT_TOPUP_5000' },
 ];
 
 export function isTierId(x: string): boolean {
