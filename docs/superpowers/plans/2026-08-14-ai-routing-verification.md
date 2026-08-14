@@ -38,8 +38,18 @@
 
 ## Billing
 
-- [ ] Create Dodo products for the renamed top-up packs (`topup_1600`,
-      `topup_7500`) and set `DODO_PRODUCT_TOPUP_1600` / `_7500`.
+- [ ] **Top-up pack Dodo products — do NOT create new ones by default.** The
+      plan originally called for renaming `topup_1000`/`topup_5000` to
+      `topup_1600`/`topup_7500` and creating matching Dodo products under
+      `DODO_PRODUCT_TOPUP_1600` / `_7500`. That was deliberately reversed
+      during implementation (Ruling 2 — see "Top-up pack ids intentionally
+      kept" under **Billing / cost** below): the pack ids and their
+      `DODO_PRODUCT_TOPUP_1000` / `DODO_PRODUCT_TOPUP_5000` env vars are
+      unchanged and still point at the live provisioned Dodo products — only
+      the `credits` each pack pays out changed (1000→1600 for $16, 5000→7500
+      for $75). No Dodo Dashboard action is required for launch. Only
+      provision `topup_1600`/`topup_7500` products if the owner later
+      chooses to do a cosmetic Dodo-side rename.
 - [ ] Confirm existing subscribers receive the new grant at renewal, not
       immediately.
 
