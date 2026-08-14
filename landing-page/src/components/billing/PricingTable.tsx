@@ -139,8 +139,14 @@ export default function PricingTable({ variant = 'page' }: PricingTableProps) {
                                 <p className="text-sm text-foreground/80 font-mono">
                                     {t.monthlyCredits.toLocaleString()} credits/mo
                                 </p>
-                                <p className="text-muted-foreground text-xs mt-3 mb-6 min-h-[2.5rem]">
+                                <p className="text-muted-foreground text-xs mt-3 min-h-[2.5rem]">
                                     {TAGLINES[t.id] ?? ""}
+                                </p>
+                                {/* Effort-tier access isn't in the API's PlanTier shape (it's a
+                                    routing concept, not a billing one) — this mirrors the server's
+                                    ALLOWED_TIERS, which only ever grants "low" to Free. */}
+                                <p className="text-foreground/70 text-xs font-mono mb-6">
+                                    {isFree ? "Standard" : "Standard, Deep Think, Max"}
                                 </p>
 
                                 {/* mt-auto, not mt-6: the grid stretches every card to the
