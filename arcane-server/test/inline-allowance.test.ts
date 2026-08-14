@@ -22,7 +22,8 @@ describe('checkInlineAllowance', () => {
     });
 
     it('caps are per spec', () => {
-        expect(INLINE_DAILY_CAP).toEqual({ free: 300, pro: 4000, proplus: 10000, ultra: 10000 });
+        // Task 2: each plan's monthly inline budget divided by 30.
+        expect(INLINE_DAILY_CAP).toEqual({ free: 600, pro: 1200, proplus: 3000, ultra: 12000 });
     });
 
     it('allows under the cap, rejects over it with inline_quota + resetAt', async () => {

@@ -67,7 +67,9 @@ describe('billing webhook', () => {
         });
         expect(res.status).toBe(200);
         const row = await getUserBillingRow(env.arcane_db, u.id);
-        expect(row!.topup_credits_micro).toBe(creditsToMicro(1000));
+        // topup_1000's pack id is unchanged (maps to a live Dodo product) but its
+        // credit grant was bumped to 1600 (Task 2) — 16,000,000 micro-USD.
+        expect(row!.topup_credits_micro).toBe(creditsToMicro(1600));
     });
 
     it('subscription.cancelled downgrades to free (top-up credits preserved)', async () => {
