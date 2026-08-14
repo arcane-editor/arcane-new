@@ -3,13 +3,13 @@
 // barrel is a valid import target, and importing the barrel here would be a
 // cross-feature cycle), so the tier union is duplicated here instead.
 // keep in sync with Effort in ai-panel/services/types.ts
-type Tier = 'low' | 'mid' | 'high' | 'super';
+type Tier = 'low' | 'mid' | 'high';
 
 const MAX_CHARS = 1024;
 
 /** Higher-effort tiers get a bigger graph-snapshot slice of the prompt budget. */
 export function graphSnapshotBudget(effort: Tier): number {
-  return effort === 'high' || effort === 'super' ? 4096 : MAX_CHARS;
+  return effort === 'high' ? 4096 : MAX_CHARS;
 }
 
 /** Truncate `text` to `maxChars`, appending an ellipsis when it overflows. */
