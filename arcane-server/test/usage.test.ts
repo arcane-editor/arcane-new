@@ -101,3 +101,30 @@ describe('recordUsage', () => {
         expect(log?.fallback_model).toBe('@cf/qwen/qwen2.5-coder-32b-instruct');
     });
 });
+
+import { billedMicro } from '../src/lib/usage.ts';
+
+describe('billedMicro', () => {
+    it('applies gateway fee and margin to the list cost', () => {
+        // glm-5.2, 10k fresh + 20k cached + 2k out = $0.028 list
+        // 0.028 * 1.05 * 2.0 = $0.0588 -> 58800 micro
+        expect(billedMicro('@cf/zai-org/glm-5.2', 30_000, 2_000, 20_000)).toBe(58_800);
+    });
+
+    it('rounds to an integer micro-USD', () => {
+        const micro = billedMicro('openai/gpt-5.6-luna', 8_000, 800, 0);
+        expect(Number.isInteger(micro)).toBe(true);
+        // 0.00256 * 2.10 = 0.005376 -> 5376
+        expect(micro).toBe(5_376);
+    });
+
+    it('is 0 for an unknown model so it is never debited', () => {
+        expect(billedMicro('nope/nope', 1_000, 1_000, 0)).toBe(0);
+    });
+
+    it('charges long-context rates above the cliff', () => {
+        const below = billedMicro('xai/grok-4.6', 200_000, 1_000, 0);
+        const above = billedMicro('xai/grok-4.6', 200_001, 1_000, 0);
+        expect(above).toBeGreaterThan(below * 1.9);
+    });
+});

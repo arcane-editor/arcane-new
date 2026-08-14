@@ -6,7 +6,19 @@
 // $0, under-counting real cost and (later) credit consumption.
 import { estimateCost } from './costs.ts';
 import { upsertUsagePeriod, createRequestLog, getCurrentPeriodStart, getNextPeriodStart, debitCredits } from './db.ts';
-import { usdToMicro } from '../config/tiers.ts';
+import { usdToMicro, GATEWAY_FEE, MARGIN } from '../config/tiers.ts';
+
+/**
+ * What the user is charged, in integer micro-USD: the model's list cost,
+ * uplifted by Cloudflare's gateway fee and the platform margin. Exported so
+ * the arithmetic is testable independently of D1.
+ */
+export function billedMicro(
+    model: string, inputTokens: number, outputTokens: number, cachedTokens = 0,
+): number {
+    const list = estimateCost(model, inputTokens, outputTokens, cachedTokens);
+    return usdToMicro(list * GATEWAY_FEE * MARGIN);
+}
 
 // Optional per-request telemetry (chat harness counters — see migration 0011).
 // Non-chat routes pass at most `taskType`.
@@ -35,8 +47,8 @@ export interface UsageExtras {
  * logged, never thrown) so a metering/debit failure can't break the AI response
  * the user already received. Cost is `estimateCost(model, in, out)`; a model
  * missing from the catalog costs $0 (logged upstream as a bug) and is not
- * debited. Debit uses the RAW estimate — the SAFETY_BUFFER lives in tier-grant
- * sizing, not here, so per-request spend stays intuitive.
+ * debited. Debit is `estimateCost x GATEWAY_FEE x MARGIN` — margin lives here, per
+ * request, so an upstream price change moves it automatically.
  */
 export async function recordUsage(
     db: D1Database,
@@ -47,8 +59,9 @@ export async function recordUsage(
     durationMs: number,
     extras: UsageExtras = {},
 ): Promise<void> {
-    const cost = estimateCost(model, inputTokens, outputTokens);
-    const micro = usdToMicro(cost);
+    const cachedTokens = extras.cachedInputTokens ?? 0;
+    const cost = estimateCost(model, inputTokens, outputTokens, cachedTokens);
+    const micro = billedMicro(model, inputTokens, outputTokens, cachedTokens);
     const periodStart = getCurrentPeriodStart();
     const { skipDebit, ...logExtras } = extras;
     await Promise.all([
