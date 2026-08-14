@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { env } from 'cloudflare:test';
-import { incrementInlineUsage } from '../src/lib/db.ts';
+import { incrementInlineUsage, addInlineSpend } from '../src/lib/db.ts';
 import { seedPasswordUser } from './helpers.ts';
-import { checkInlineAllowance, utcDateKey, nextUtcMidnight } from '../src/lib/inline-allowance.ts';
-import { INLINE_DAILY_CAP } from '../src/config/tiers.ts';
+import { checkInlineAllowance, utcDateKey, nextUtcMidnight, utcMonthKey, nextUtcMonth } from '../src/lib/inline-allowance.ts';
+import { INLINE_DAILY_CAP, INLINE_MONTHLY_MICRO_CEILING } from '../src/config/tiers.ts';
 
 describe('incrementInlineUsage', () => {
     it('starts at 1, increments atomically, and is per-day', async () => {
@@ -43,5 +43,52 @@ describe('checkInlineAllowance', () => {
             expect(over.code).toBe('inline_quota');
             expect(Date.parse(over.resetAt)).toBeGreaterThan(Date.now());
         }
+    });
+});
+
+describe('utcMonthKey', () => {
+    it('formats as YYYY-MM', () => {
+        expect(utcMonthKey(new Date('2026-08-14T23:59:59Z'))).toBe('2026-08');
+    });
+});
+
+describe('monthly ceiling', () => {
+    const NOW = new Date('2026-08-14T12:00:00Z');
+
+    it('allows a user under budget', async () => {
+        const user = await seedPasswordUser('inline-ceiling-under@test.dev', 'password123');
+        const r = await checkInlineAllowance(env.arcane_db, user.id, NOW);
+        expect(r.ok).toBe(true);
+    });
+
+    it('blocks with 402 once the month budget is spent', async () => {
+        const user = await seedPasswordUser('inline-ceiling-over@test.dev', 'password123');
+        await addInlineSpend(env.arcane_db, user.id, utcMonthKey(NOW), INLINE_MONTHLY_MICRO_CEILING.free);
+        const r = await checkInlineAllowance(env.arcane_db, user.id, NOW);
+        expect(r.ok).toBe(false);
+        if (!r.ok) {
+            expect(r.status).toBe(402);
+            expect(r.code).toBe('inline_budget_exhausted');
+            expect(r.resetAt).toBe(nextUtcMonth(NOW));
+        }
+    });
+
+    it('the ceiling is checked before the daily counter is incremented', async () => {
+        // A user at their monthly ceiling must not have a daily slot consumed.
+        const user = await seedPasswordUser('inline-ceiling-order@test.dev', 'password123');
+        await addInlineSpend(env.arcane_db, user.id, utcMonthKey(NOW), INLINE_MONTHLY_MICRO_CEILING.free);
+        const first = await checkInlineAllowance(env.arcane_db, user.id, NOW);
+        const second = await checkInlineAllowance(env.arcane_db, user.id, NOW);
+        expect(first.ok).toBe(false);
+        expect(second.ok).toBe(false);
+
+        const dailyRow = await env.arcane_db.prepare(
+            'SELECT count FROM inline_usage WHERE user_id = ? AND usage_date = ?'
+        ).bind(user.id, utcDateKey(NOW)).first<{ count: number }>();
+        expect(dailyRow).toBeNull();
+    });
+
+    it('nextUtcMonth rolls the year over in December', () => {
+        expect(nextUtcMonth(new Date('2026-12-31T23:00:00Z'))).toBe('2027-01-01T00:00:00.000Z');
     });
 });
