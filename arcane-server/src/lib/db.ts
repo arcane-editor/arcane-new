@@ -610,3 +610,27 @@ export async function incrementInlineUsage(db: D1Database, userId: number, usage
     `).bind(userId, usageDate).first<{ count: number }>();
     return row?.count ?? 1;
 }
+
+// --- Inline completion monthly spend ceiling (migration 0019) ---
+
+/** Add to this month's inline (tab) spend, in integer micro-USD of REAL cost,
+ *  and return the new cumulative total. A daily request-count cap alone
+ *  cannot bound cost because cost scales with FIM context size — this is the
+ *  hard monthly backstop that does. */
+export async function addInlineSpend(
+    db: D1Database, userId: number, monthKey: string, micro: number,
+): Promise<number> {
+    const row = await db.prepare(`
+        INSERT INTO inline_spend (user_id, month_key, spend_micro) VALUES (?1, ?2, ?3)
+        ON CONFLICT(user_id, month_key) DO UPDATE SET spend_micro = spend_micro + ?3
+        RETURNING spend_micro
+    `).bind(userId, monthKey, micro).first<{ spend_micro: number }>();
+    return row?.spend_micro ?? 0;
+}
+
+export async function getInlineSpend(db: D1Database, userId: number, monthKey: string): Promise<number> {
+    const row = await db.prepare(
+        'SELECT spend_micro FROM inline_spend WHERE user_id = ?1 AND month_key = ?2'
+    ).bind(userId, monthKey).first<{ spend_micro: number }>();
+    return row?.spend_micro ?? 0;
+}
