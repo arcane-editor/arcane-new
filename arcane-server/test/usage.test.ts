@@ -65,12 +65,13 @@ describe('recordUsage', () => {
             "UPDATE users SET plan = 'pro', plan_credits_micro = ?, plan_period_end = '2099-01-01T00:00:00.000Z' WHERE id = ?"
         ).bind(5_000_000, user.id).run();
 
-        const model = '@cf/moonshotai/kimi-k2.7-code';
+        const model = '@cf/zai-org/glm-5.2';
         const inTok = 20_000, outTok = 1_000;
         await recordUsage(env.arcane_db, user.id, model, inTok, outTok, 10);
 
         const r = await getUserBillingRow(env.arcane_db, user.id);
-        expect(r!.plan_credits_micro).toBe(5_000_000 - usdToMicro(estimateCost(model, inTok, outTok)));
+        expect(r!.plan_credits_micro).toBe(5_000_000 - billedMicro(model, inTok, outTok));
+        expect(r!.plan_credits_micro).toBeLessThan(5_000_000);
     });
 
     it('skipDebit meters tokens without touching the credit balance', async () => {
