@@ -48,9 +48,8 @@ describe('getEffectiveReasoningLevel (pure escalation state)', () => {
     expect(getEffectiveReasoningLevel('mid', 2, () => {})).toBe('high');
   });
 
-  it('is a no-op for high and super — nothing stronger to escalate to', () => {
+  it('is a no-op for high — nothing stronger to escalate to', () => {
     expect(getEffectiveReasoningLevel('high', 5, () => {})).toBe('high');
-    expect(getEffectiveReasoningLevel('super', 5, () => {})).toBe('super');
     expect(isEscalated()).toBe(false);
   });
 
@@ -112,7 +111,7 @@ describe('withTurnEscalation', () => {
     expect(notices).toEqual(['mid']);
   });
 
-  it('is a no-op for high/super effort even over the repair threshold', () => {
+  it('is a no-op for high effort even over the repair threshold', () => {
     const { streamFn, calls } = recordingStreamFn();
     const escalated = withTurnEscalation(streamFn, () => ({ getRepairCount: () => 4 }));
 

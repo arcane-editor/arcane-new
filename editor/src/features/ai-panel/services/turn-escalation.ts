@@ -36,12 +36,12 @@ import type { Effort } from './types';
 import { getRepairCount, recordEscalation } from './turn-telemetry';
 import { useSettingsStore } from '../../../stores/settings';
 
-const KNOWN_EFFORTS: readonly Effort[] = ['low', 'mid', 'high', 'super'];
+const KNOWN_EFFORTS: readonly Effort[] = ['low', 'mid', 'high'];
 
 /** Repair count (turn-telemetry's `repairCount`, already counting the gate sentinels) at which a send escalates. */
 const ESCALATION_THRESHOLD = 2;
 
-/** low -> mid, mid -> high. `high`/`super` have no stronger tier to escalate to (no-op). */
+/** low -> mid, mid -> high. `high` has no stronger tier to escalate to (no-op). */
 const NEXT_TIER: Partial<Record<Effort, Effort>> = { low: 'mid', mid: 'high' };
 
 export interface TurnEscalationConfig {

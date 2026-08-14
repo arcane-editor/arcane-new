@@ -106,7 +106,7 @@ describe('withTurnGovernor', () => {
   });
 
   it('uses the default per-effort cap table when no override is given', () => {
-    expect(DEFAULT_TURN_CAPS).toEqual({ low: 10, mid: 16, high: 20, super: 20 });
+    expect(DEFAULT_TURN_CAPS).toEqual({ low: 10, mid: 16, high: 20 });
 
     const { streamFn, calls } = recordingStreamFn();
     const governed = withTurnGovernor(streamFn);

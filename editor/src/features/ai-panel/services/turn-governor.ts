@@ -35,14 +35,13 @@
 import type { Context, Message, StreamFn, StreamOptions } from './vendor/types';
 import type { Effort } from './types';
 
-const KNOWN_EFFORTS: readonly Effort[] = ['low', 'mid', 'high', 'super'];
+const KNOWN_EFFORTS: readonly Effort[] = ['low', 'mid', 'high'];
 
 /** Per-effort LLM-call cap (P3.2). */
 export const DEFAULT_TURN_CAPS: Record<Effort, number> = {
   low: 10,
   mid: 16,
   high: 20,
-  super: 20,
 };
 
 export interface TurnGovernorConfig {
