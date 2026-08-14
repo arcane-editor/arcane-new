@@ -11,8 +11,14 @@ import { useConnectivityStore } from '../../../stores/connectivity';
 import { useInlineSuggestStore, type InlineSuggestStatus } from '../../../stores/inline-suggest';
 
 const DEBOUNCE_MS = 250;
-const PREFIX_CHARS = 4000;
-const SUFFIX_CHARS = 2000;
+// Must stay numerically in sync with the server's FIM_MAX_PREFIX_CHARS /
+// FIM_MAX_SUFFIX_CHARS (arcane-server/src/lib/fim.ts) — ~600 tokens total.
+// The server re-clamps defensively (it never trusts the client), so a stale
+// value here doesn't break anything server-side, but it does mean requests
+// are either needlessly truncated further than necessary or send more chars
+// than the server will ever bill/use, wasting bytes on the wire for no gain.
+export const FIM_MAX_PREFIX_CHARS = 1600;
+export const FIM_MAX_SUFFIX_CHARS = 800;
 
 const cache = createSuggestCache();
 const breaker = createCircuitBreaker();
@@ -23,7 +29,16 @@ function gateStatus(gate: { enabled: boolean; loggedIn: boolean; online: boolean
     if (!gate.enabled) return 'disabled';
     if (!gate.loggedIn) return 'signed-out';
     if (!gate.online) return 'offline';
-    if (gate.quotaActive) return 'quota';
+    // gate.quotaActive is a single boolean (gating.ts's InlineGate stays a
+    // pure yes/no gate), but the store already knows WHICH pause is in force
+    // — quota (daily) vs budget-exhausted (monthly) — since it's the same
+    // store that set quotaActive true in the first place. Re-read it here so
+    // the status bar keeps the specific, correct copy instead of collapsing
+    // both into 'quota'.
+    if (gate.quotaActive) {
+        const live = useInlineSuggestStore.getState().status;
+        return live === 'budget-exhausted' ? 'budget-exhausted' : 'quota';
+    }
     if (!gate.breakerAllows) return 'backoff';
     return 'active';
 }
@@ -35,6 +50,9 @@ function handleFailure(result: Extract<InlineResult, { ok: false }>): void {
             return; // superseded — not a failure
         case 'quota':
             store.setStatus('quota', result.resetAt ?? null);
+            return;
+        case 'budget':
+            store.setStatus('budget-exhausted', result.resetAt ?? null);
             return;
         case 'auth':
             store.setStatus('signed-out');
@@ -83,8 +101,8 @@ export function registerInlineSuggestProvider(monaco: Monaco): IDisposable | und
 
             const fullText = model.getValue();
             const offset = model.getOffsetAt(position);
-            const prefix = fullText.slice(Math.max(0, offset - PREFIX_CHARS), offset);
-            const suffix = fullText.slice(offset, offset + SUFFIX_CHARS);
+            const prefix = fullText.slice(Math.max(0, offset - FIM_MAX_PREFIX_CHARS), offset);
+            const suffix = fullText.slice(offset, offset + FIM_MAX_SUFFIX_CHARS);
             const path = model.uri.path;
             const range = new monaco.Range(
                 position.lineNumber, position.column, position.lineNumber, position.column,

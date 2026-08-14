@@ -28,11 +28,15 @@ describe('inline client', () => {
         expect(called).toBe(false);
     });
 
-    it('maps statuses: 401→auth, 429→quota(+resetAt), 500→server', async () => {
+    it('maps statuses: 401→auth, 429→quota(+resetAt), 402→budget(+resetAt), 500→server', async () => {
         const mk = (status: number, body: unknown) => clientWith(async () => ok(body, status));
         expect(await mk(401, {}).fetchCompletion(REQ)).toEqual({ ok: false, reason: 'auth' });
         const quota = await mk(429, { code: 'inline_quota', resetAt: '2099-01-01T00:00:00.000Z' }).fetchCompletion(REQ);
         expect(quota).toEqual({ ok: false, reason: 'quota', resetAt: '2099-01-01T00:00:00.000Z' });
+        // 402 inline_budget_exhausted — the monthly spend ceiling, distinct from
+        // the 429 daily-count quota above (same {error,code,resetAt} shape).
+        const budget = await mk(402, { code: 'inline_budget_exhausted', resetAt: '2099-02-01T00:00:00.000Z' }).fetchCompletion(REQ);
+        expect(budget).toEqual({ ok: false, reason: 'budget', resetAt: '2099-02-01T00:00:00.000Z' });
         expect(await mk(500, {}).fetchCompletion(REQ)).toEqual({ ok: false, reason: 'server' });
     });
 

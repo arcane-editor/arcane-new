@@ -13,7 +13,7 @@ export interface InlineRequest {
 
 export type InlineResult =
     | { ok: true; text: string }
-    | { ok: false; reason: 'aborted' | 'offline' | 'auth' | 'quota' | 'server' | 'timeout'; resetAt?: string };
+    | { ok: false; reason: 'aborted' | 'offline' | 'auth' | 'quota' | 'budget' | 'server' | 'timeout'; resetAt?: string };
 
 interface InlineClientConfig {
     fetchImpl?: typeof fetch;
@@ -60,6 +60,13 @@ export function createInlineClient(cfg: InlineClientConfig = {}) {
             if (res.status === 429) {
                 const body = (await res.json().catch(() => ({}))) as { resetAt?: string };
                 return { ok: false, reason: 'quota', ...(body.resetAt ? { resetAt: body.resetAt } : {}) };
+            }
+            if (res.status === 402) {
+                // inline_budget_exhausted — the monthly spend ceiling (distinct
+                // from the 429 daily request-count quota above). Same
+                // {error,code,resetAt} body shape.
+                const body = (await res.json().catch(() => ({}))) as { resetAt?: string };
+                return { ok: false, reason: 'budget', ...(body.resetAt ? { resetAt: body.resetAt } : {}) };
             }
             if (!res.ok) return { ok: false, reason: 'server' };
             const body = (await res.json().catch(() => null)) as { text?: unknown } | null;
