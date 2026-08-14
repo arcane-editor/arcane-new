@@ -28,6 +28,56 @@ namespace Arcane.Editor
 
         public static bool IsInstallingPackage => _packageInstallRequested;
 
+        /// True while a deferred Sync is already queued, so bursts coalesce.
+        private static bool _syncScheduled;
+
+        /// <summary>
+        /// Queue a <see cref="Sync"/> for the next editor tick instead of running
+        /// it now.
+        /// </summary>
+        /// <remarks>
+        /// Every caller of this reaches us from a Unity callback that can fire
+        /// while the editor is still assembling itself:
+        ///
+        ///   - <c>Initialize</c> runs from <c>CodeEditor.Register</c> inside this
+        ///     assembly's <c>InitializeOnLoad</c> static constructor, i.e. during
+        ///     <c>EditorAssemblies.ProcessInitializeOnLoadAttributes</c>.
+        ///   - <c>SyncIfNeeded</c> runs from asset postprocessing.
+        ///
+        /// The IDE package's generator is not built to be driven at those
+        /// moments: its <c>Sync()</c> resolves AssetPostprocessor callbacks
+        /// through <c>TypeCache</c>, which Unity has not finished populating
+        /// while it is still processing InitializeOnLoad attributes. It threw
+        /// NullReferenceException every time, three callers in a row tripped the
+        /// failure threshold, and the user got a red console error on every
+        /// domain reload while project generation silently never happened.
+        ///
+        /// delayCall runs after the reload settles, which is the first moment
+        /// the generator's own dependencies are actually there.
+        /// </remarks>
+        public static void ScheduleSync()
+        {
+            if (_syncScheduled) return;
+            _syncScheduled = true;
+            EditorApplication.delayCall += RunScheduledSync;
+        }
+
+        private static void RunScheduledSync()
+        {
+            // A compile or import still in flight means the same half-built
+            // pipeline, so wait for a later tick rather than burn an attempt.
+            // _syncScheduled stays true here, which keeps this the only pending
+            // callback instead of stacking one per re-queue.
+            if (EditorApplication.isCompiling || EditorApplication.isUpdating)
+            {
+                EditorApplication.delayCall += RunScheduledSync;
+                return;
+            }
+
+            _syncScheduled = false;
+            Sync();
+        }
+
         private static readonly (string assemblyName, string typeName)[] Candidates =
         {
             ("Unity.VSCode.Editor", "VSCodeEditor.ProjectGeneration"),

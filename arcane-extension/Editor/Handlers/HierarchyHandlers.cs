@@ -117,7 +117,7 @@ namespace Arcane.Bridge
         /// </remarks>
         private static JsonValue OpenScene(JsonValue p)
         {
-            string path = p != null && p["path"] != null ? p["path"].AsString() : null;
+            string path = p != null && p["path"] != null ? p["path"].AsString : null;
             if (string.IsNullOrEmpty(path))
             {
                 return Refused("openScene requires a 'path'.");
@@ -131,7 +131,7 @@ namespace Arcane.Bridge
                 return Refused("Unity is compiling. Try again once the compile finishes.");
             }
 
-            string modeStr = p["mode"] != null ? p["mode"].AsString() : "single";
+            string modeStr = p["mode"] != null ? p["mode"].AsString : "single";
             var mode = string.Equals(modeStr, "additive", StringComparison.OrdinalIgnoreCase)
                 ? OpenSceneMode.Additive
                 : OpenSceneMode.Single;
@@ -205,7 +205,16 @@ namespace Arcane.Bridge
             if (p["instanceId"].IsNumber)
             {
                 int id = p["instanceId"].AsInt;
+                // Unity 6.3 renamed instance ids to entity ids and deprecated the
+                // int overload. EntityIdToObject does not exist below 6.3, so this
+                // has to be a version guard rather than a straight swap — the
+                // package still supports 2021.3. `int` converts to EntityId
+                // implicitly, so the argument is unchanged.
+#if UNITY_6000_3_OR_NEWER
+                var obj = EditorUtility.EntityIdToObject(id);
+#else
                 var obj = EditorUtility.InstanceIDToObject(id);
+#endif
                 if (obj is GameObject go) return go;
                 if (obj is Component comp) return comp.gameObject;
                 return null;

@@ -7,10 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- A domain reload no longer looks like a disconnect. The bridge announces a new
+  `reloading` message before tearing down its AppDomain, so the IDE widens its
+  liveness deadline instead of dropping the session, and a script recompile no
+  longer cancels in-flight requests.
+- The farewell message (`disconnect` on quit, `reloading` on reload) is now
+  actually written. It was emitted after joining the worker thread — which by
+  definition returns only once that thread has closed the journals — so it had
+  always been appended to a disposed writer and silently discarded.
+- Teardown can no longer strand the worker thread. A worker blocked building the
+  handshake payload is released as soon as shutdown begins, instead of waiting
+  out its full timeout and leaving the journals open for the next AppDomain to
+  double-write.
+
 ### Changed
 - Consolidated the live IDE bridge into this package. The Editor assembly now hosts
   the Unix-domain-socket bridge (`Arcane.Bridge`) that the current Arcane IDE speaks to,
   replacing the legacy length-prefixed IPC client.
+- A warm resume after a domain reload no longer re-announces `connection_init`;
+  the session resumes mid-stream as the journal transport intends.
 
 ### Added
 - Live scene-hierarchy mirror, play-mode telemetry (FPS / memory / GC), debugger-endpoint

@@ -6,3 +6,9 @@ deploy-prod.sh
 .DS_Store
 .arcane-dev-path
 *.tgz
+
+# Cloudflare Wrangler cache — holds the account id/name, not package content.
+# This file exists, so npm ignores .gitignore entirely: the rule has to live
+# here or `npm pack` ships .wrangler/cache/wrangler-account.json to every user
+# who imports the tarball.
+.wrangler/

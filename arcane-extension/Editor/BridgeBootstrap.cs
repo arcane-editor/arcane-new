@@ -22,6 +22,7 @@ using System;
 using System.Diagnostics;
 using System.Globalization;
 using UnityEditor;
+using UnityEditor.Build;
 using UnityEditor.Compilation;
 using UnityEngine;
 using Debug = UnityEngine.Debug;
@@ -173,7 +174,11 @@ namespace Arcane.Bridge
             {
                 BuildTargetGroup group = BuildPipeline.GetBuildTargetGroup(
                     EditorUserBuildSettings.activeBuildTarget);
-                ScriptingImplementation impl = PlayerSettings.GetScriptingBackend(group);
+                // NamedBuildTarget, not the BuildTargetGroup overload: that one is
+                // obsolete from Unity 6. NamedBuildTarget exists since 2021.2, below
+                // this package's 2021.3 floor, so no version guard is needed.
+                ScriptingImplementation impl = PlayerSettings.GetScriptingBackend(
+                    NamedBuildTarget.FromBuildTargetGroup(group));
                 return impl == ScriptingImplementation.IL2CPP ? "IL2CPP" : "Mono";
             }
             catch

@@ -154,8 +154,11 @@ namespace Arcane.Editor
         {
             _installPath = editorInstallation;
 
-            // Generate project files when Arcane is selected as the external editor
-            ArcaneProjectGeneration.Sync();
+            // Generate project files when Arcane is selected as the external editor.
+            // Deferred, not immediate: Unity calls this from CodeEditor.Register in
+            // our InitializeOnLoad static constructor, which is too early for the
+            // IDE package's generator to run. See ArcaneProjectGeneration.ScheduleSync.
+            ArcaneProjectGeneration.ScheduleSync();
         }
 
         private static bool HasScriptChanges(string[] assets)
@@ -180,7 +183,7 @@ namespace Arcane.Editor
         public void SyncAll()
         {
             // Generate .sln/.csproj files via the installed IDE package (reflection).
-            ArcaneProjectGeneration.Sync();
+            ArcaneProjectGeneration.ScheduleSync();
         }
 
         public void SyncIfNeeded(string[] addedAssets, string[] deletedAssets, string[] movedAssets,
@@ -190,7 +193,9 @@ namespace Arcane.Editor
             if (HasScriptChanges(addedAssets) || HasScriptChanges(deletedAssets)
                 || HasScriptChanges(movedAssets) || HasScriptChanges(importedAssets))
             {
-                ArcaneProjectGeneration.Sync();
+                // Deferred + coalesced: a single import can call this many times,
+                // and each Sync regenerates every .csproj in the project.
+                ArcaneProjectGeneration.ScheduleSync();
             }
         }
 

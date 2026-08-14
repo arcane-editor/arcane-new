@@ -26,7 +26,12 @@ namespace Arcane.Bridge
     {
         // Set true to emit { "entries": [...] }; false emits a bare [...] array.
         // The current IDE frontend requires the bare array (false).
-        private const bool WrapInEntriesObject = false;
+        //
+        // static readonly, not const: as a const the compiler folds the value away
+        // and reports the wrap branch as unreachable (CS0162). readonly keeps both
+        // branches compiled, so the alternative wire format stays type-checked
+        // rather than quietly rotting until someone flips the flag.
+        private static readonly bool WrapInEntriesObject = false;
 
         private const int MaxBatch = 50;
         private const double FlushIntervalSeconds = 0.1; // ~100ms
