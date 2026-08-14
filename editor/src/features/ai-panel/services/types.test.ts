@@ -2,11 +2,16 @@ import { describe, it, expect } from 'bun:test';
 import { TIER_CONTEXT_WINDOWS, coerceAgentKind } from './types';
 
 describe('TIER_CONTEXT_WINDOWS', () => {
-  it('matches min(primary, fallback) for each tier\'s model lineup', () => {
-    expect(TIER_CONTEXT_WINDOWS.low).toBe(32768);    // min(MiniMax-M3 200k, qwen2.5-coder fallback 32k)
-    expect(TIER_CONTEXT_WINDOWS.mid).toBe(200000);   // glm-5.2, no fallback
-    expect(TIER_CONTEXT_WINDOWS.high).toBe(200000);  // min(kimi-k3 256k, glm-5.2 fallback 200k)
-    expect(TIER_CONTEXT_WINDOWS.super).toBe(200000); // alias of high
+  // These are PRICING cliffs, not model windows. Exceeding them reprices the
+  // entire request, so compaction must treat them as hard limits.
+  it('encodes each tier usable window', () => {
+    expect(TIER_CONTEXT_WINDOWS.low).toBe(272_000);   // luna reprices above this
+    expect(TIER_CONTEXT_WINDOWS.mid).toBe(262_144);   // glm-5.2, flat pricing
+    expect(TIER_CONTEXT_WINDOWS.high).toBe(200_000);  // grok-4.6 reprices above this
+  });
+
+  it('has no super tier', () => {
+    expect('super' in TIER_CONTEXT_WINDOWS).toBe(false);
   });
 });
 

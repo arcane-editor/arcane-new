@@ -4,10 +4,10 @@
 
 export type ChatMode = 'ask' | 'agent' | 'plan';
 
-// Maps 1:1 to the server's `reasoningLevel` (low|mid|high|super). The backend
+// Maps 1:1 to the server's `reasoningLevel` (low|mid|high). The backend
 // alone decides which concrete model each level uses — the editor never sends a
-// model id. 'super' is the "Extra High" tier.
-export type Effort = 'low' | 'mid' | 'high' | 'super';
+// model id.
+export type Effort = 'low' | 'mid' | 'high';
 
 /**
  * Which agent backend the panel is talking to. Only 'arcane' remains — the
@@ -75,30 +75,21 @@ export type Attachment =
     };
 
 /**
- * Context window per tier — must track arcane-server config/plans.ts
- * (`INTENSITY_CONFIG`) + services/llm-router.ts (`fallbackModelFor`) +
- * lib/costs.ts (`MODEL_CATALOG`).
+ * Usable context per tier, in tokens.
  *
- * low/high/super route to EXTERNAL providers (MiniMax/Moonshot) that each
- * have a same-tier Workers AI fallback model (`fallbackModelFor`) the server
- * silently switches to on a provider outage; mid stays on the Workers AI
- * binding directly and has no fallback. Because a request can land on
- * EITHER the primary or the fallback model, the window recorded here must be
- * min(primary window, fallback window) — using the primary's larger window
- * would let compaction leave in more context than the fallback model can
- * actually accept, hard-failing the request the moment a tier fails over:
- *   low   → primary custom-minimax/MiniMax-M3 (200k),
- *           fallback @cf/qwen/qwen2.5-coder-32b-instruct (32k) → min = 32768
- *   mid   → @cf/zai-org/glm-5.2 (200k), no fallback             → 200000
- *   high  → primary custom-moonshot/kimi-k3 (256k),
- *           fallback @cf/zai-org/glm-5.2 (200k)                 → min = 200000
- *   super → alias of high                                       → min = 200000
- * Compaction previously assumed 32k for every tier, eliding context the big
- * models actually have room for.
+ * These are PRICING cliffs, not model windows. Two of the three models reprice
+ * the ENTIRE request once input crosses a threshold — a 200,001-token Max
+ * request costs double a 200,000-token one — so the economic limit is lower
+ * than the model's advertised window and compaction must respect it:
+ *   low  → openai/gpt-5.6-luna, window 1,050,000, reprices above 272,000
+ *   mid  → @cf/zai-org/glm-5.2, window 262,144, FLAT pricing (no cliff)
+ *   high → xai/grok-4.6,        window 500,000,   reprices above 200,000
+ *
+ * Note Max has the SMALLEST usable window. Deep Think is the correct tier for
+ * genuinely large-context work despite sitting lower on the ladder.
  */
 export const TIER_CONTEXT_WINDOWS: Record<Effort, number> = {
-  low: 32768,
-  mid: 200000,
-  high: 200000,
-  super: 200000,
+  low: 272_000,
+  mid: 262_144,
+  high: 200_000,
 };
