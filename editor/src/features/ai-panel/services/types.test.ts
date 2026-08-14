@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { TIER_CONTEXT_WINDOWS, coerceAgentKind } from './types';
+import { TIER_CONTEXT_WINDOWS, coerceAgentKind, coerceEffort } from './types';
 
 describe('TIER_CONTEXT_WINDOWS', () => {
   // These are PRICING cliffs, not model windows. Exceeding them reprices the
@@ -34,5 +34,29 @@ describe('coerceAgentKind (persisted-session migration)', () => {
     expect(coerceAgentKind(null)).toBe('arcane');
     expect(coerceAgentKind(42)).toBe('arcane');
     expect(coerceAgentKind({})).toBe('arcane');
+  });
+});
+
+describe('coerceEffort (persisted-session migration)', () => {
+  it('passes through every live tier', () => {
+    expect(coerceEffort('low')).toBe('low');
+    expect(coerceEffort('mid')).toBe('mid');
+    expect(coerceEffort('high')).toBe('high');
+  });
+
+  it('coerces the removed "super" tier to "low"', () => {
+    expect(coerceEffort('super')).toBe('low');
+  });
+
+  it('coerces any unknown / future level to "low"', () => {
+    expect(coerceEffort('max')).toBe('low');
+    expect(coerceEffort('ultra')).toBe('low');
+  });
+
+  it('coerces missing / non-string values to "low" (never crashes)', () => {
+    expect(coerceEffort(undefined)).toBe('low');
+    expect(coerceEffort(null)).toBe('low');
+    expect(coerceEffort(42)).toBe('low');
+    expect(coerceEffort({})).toBe('low');
   });
 });

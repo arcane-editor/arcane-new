@@ -24,6 +24,7 @@ import {
   type ToolCall,
   type TurnError,
   type VerifiedCardData,
+  coerceEffort,
   resetWriteApprovalSession,
   resolvePendingQuestion,
 } from '../features/ai-panel';
@@ -449,7 +450,7 @@ export const useAiStore = create<AiState>((set, get) => ({
   authNotice: null,
   verificationRequired: false,
   mode: 'agent',
-  effort: 'high',
+  effort: 'low',
   sessionId: null,
   selectedAgent: 'arcane',
   arcanePlan: null,
@@ -728,7 +729,11 @@ export const useAiStore = create<AiState>((set, get) => ({
       verificationRequired: false,
       sessionId: session.id,
       mode: session.mode ?? 'agent',
-      effort: session.effort ?? 'high',
+      // A session saved before Free-tier gating existed can carry a
+      // now-invalid level ('super' was a real removed tier, 'high' is no
+      // longer safe to auto-restore) — coerce rather than pass it through,
+      // same treatment `agentKind` gets just below.
+      effort: coerceEffort(session.effort),
       // agentKind is coerced to a live kind on load (see session-persistence);
       // old non-Arcane sessions restore as read-only Arcane transcripts.
       selectedAgent: session.agentKind ?? 'arcane',

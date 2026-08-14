@@ -30,6 +30,20 @@ export function coerceAgentKind(value: unknown): AgentKind {
   return KNOWN_AGENT_KINDS.includes(value as AgentKind) ? (value as AgentKind) : 'arcane';
 }
 
+/**
+ * Coerce a persisted `effort` value (an arbitrary string read off disk) to a
+ * live `Effort`. Older sessions may carry a now-removed level (e.g. the
+ * former `'super'` tier) or `'high'` from before Free-tier gating existed;
+ * anything that isn't a currently-supported level falls back to `'low'` —
+ * the server's own `DEFAULT_INTENSITY` and the only level every plan can
+ * use. Pure function.
+ */
+const KNOWN_EFFORTS: readonly Effort[] = ['low', 'mid', 'high'];
+
+export function coerceEffort(value: unknown): Effort {
+  return KNOWN_EFFORTS.includes(value as Effort) ? (value as Effort) : 'low';
+}
+
 export type Attachment =
   | {
       kind: 'file';

@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { buildSessionData, parseSessionData } from './session-persistence';
 import type { SaveSessionInput, SessionData } from './session-persistence';
 import type { AiMessage, ArcanePlanEntry } from '../../../stores/ai';
@@ -68,3 +70,32 @@ describe('buildSessionData / parseSessionData — arcanePlan round-trip (T9)', (
     expect(json).toContain('Add CoinPickup component');
   });
 });
+
+// `stores/ai.ts` can't be imported here to assert on its live state: its
+// module graph (the ai-panel barrel's `AiChatPanel`/`MaximizedAiOverlay`
+// exports, plus `stores/workspace.ts`) transitively touches `document` at
+// module-eval time, fatal under plain `bun test` (see arcane-stream.test.ts's
+// header for the same chain). Worse, `arcane-stream.test.ts` (same directory,
+// loaded in the same process) permanently `mock.module`'s `stores/ai` itself
+// with no restore, and Bun's module mocks are process-global — so once that
+// file has run, EVERY later `import('../../../stores/ai')` anywhere in the
+// suite silently resolves to that file's stub instead of the real store,
+// regardless of load order tricks. A source-text assertion sidesteps both
+// problems entirely (same technique `keybinding-parity.test.ts` uses for a
+// similarly import-hostile cross-cutting check) and is exactly as precise:
+// it fails the instant the literal default or the coercion call site changes.
+const AI_STORE_SRC = readFileSync(path.resolve(import.meta.dir, '../../../stores/ai.ts'), 'utf8');
+
+describe('stores/ai — default effort + restore coercion', () => {
+  it('defaults effort to "low" (Standard) — the only tier every plan can use, including Free', () => {
+    expect(AI_STORE_SRC).toMatch(/\beffort:\s*'low',/);
+  });
+
+  it('restores a persisted effort through coerceEffort, never passing the raw value through', () => {
+    expect(AI_STORE_SRC).toMatch(/effort:\s*coerceEffort\(session\.effort\)/);
+  });
+});
+
+// coerceEffort itself (services/types.ts) is unit-tested directly in
+// types.test.ts, including `coerceEffort('super') === 'low'` — the exact
+// migration case this restore call site depends on.

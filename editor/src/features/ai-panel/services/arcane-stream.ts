@@ -237,7 +237,7 @@ async function doStream(
     metadata: {
       taskType,
       mode: currentMode,
-      reasoningLevel: options.reasoning ?? 'mid',
+      reasoningLevel: options.reasoning ?? 'low',
       telemetry: nextTurnTelemetry(),
     },
   });
