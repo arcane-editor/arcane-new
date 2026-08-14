@@ -1,53 +1,127 @@
-// Workers AI model catalog — used for (a) the soft hourly USD spend cap and
-// (b) clamping max output tokens per model.
+// Model catalog for the AI tier ladder. Rates are VENDOR LIST PRICES verified
+// 2026-08-13 (see the design doc). Two things make this non-trivial:
 //
-// Cloudflare bills Workers AI in "neurons", not per-token USD. The USD figures
-// below are APPROXIMATE blended rates (derived from published Workers AI
-// pricing) so the existing cost_usd / hourly-cap machinery keeps working with
-// no DB migration. The $1/hr cap is therefore a *soft* limit, not exact
-// accounting. Adjust these as real per-model neuron rates are confirmed.
+//  1. Cached input. Every frontier model prices a cache hit far below a fresh
+//     token (glm-5.2: $0.26 vs $1.40). `estimateCost` bills them separately.
+//  2. Long-context repricing. Some models reprice the ENTIRE request once the
+//     input crosses a threshold — a cliff, not a gradient. A 200,001-token
+//     Grok request costs double a 200,000-token one.
+//
+// `@cf/*` ids bill as Workers AI; everything else bills as a third-party model
+// through AI Gateway unified billing. Third-party rates are set by the SERVING
+// provider and are dashboard-only — confirm them before trusting these numbers.
 
-interface ModelInfo {
-    provider: 'workers-ai' | 'minimax' | 'moonshot';
+export interface LongContextRates {
+    /** Total input tokens above which the whole request reprices. */
+    thresholdTokens: number;
     inputCostPer1M: number;
     outputCostPer1M: number;
+    cachedInputCostPer1M: number;
+}
+
+export interface ModelInfo {
+    route: 'workers-ai' | 'unified';
+    inputCostPer1M: number;
+    outputCostPer1M: number;
+    cachedInputCostPer1M: number;
     contextWindow: number;
     maxOutput: number;
-    tier: 'fast' | 'standard' | 'premium';
+    longContext?: LongContextRates;
 }
 
 export const MODEL_CATALOG: Record<string, ModelInfo> = {
-    // low — MiniMax M3 via AI Gateway custom provider. ⚠️ Prices below are
-    // provisional — confirm against MiniMax's pricing page during the manual
-    // setup (runbook) and adjust; wrong prices skew credit debits.
-    'custom-minimax/MiniMax-M3':  { provider: 'minimax',  inputCostPer1M: 0.40, outputCostPer1M: 2.20, contextWindow: 200000, maxOutput: 32000, tier: 'fast' },
-    // high/super — Kimi 3 via AI Gateway custom provider. Same price caveat.
-    'custom-moonshot/kimi-k3':    { provider: 'moonshot', inputCostPer1M: 0.60, outputCostPer1M: 2.50, contextWindow: 256000, maxOutput: 32000, tier: 'premium' },
-    // inline — Qwen2.5-Coder 32B (native Workers AI, code-specialized)
-    '@cf/qwen/qwen2.5-coder-32b-instruct': { provider: 'workers-ai', inputCostPer1M: 0.30, outputCostPer1M: 1.20, contextWindow: 32768, maxOutput: 8192, tier: 'fast' },
-    // mid — GLM-5.2 (Zhipu / Z.AI)
-    '@cf/zai-org/glm-5.2':                 { provider: 'workers-ai', inputCostPer1M: 0.60, outputCostPer1M: 2.20, contextWindow: 200000, maxOutput: 32000, tier: 'premium' },
-    // legacy/fallback — Kimi K2.7 Code (Moonshot). Retained for backward compatibility.
-    '@cf/moonshotai/kimi-k2.7-code':       { provider: 'workers-ai', inputCostPer1M: 0.60, outputCostPer1M: 2.40, contextWindow: 256000, maxOutput: 32000, tier: 'standard' },
-    // embeddings — BGE Small (384-dim). Input-only cost; embeddings never
-    // generate, so outputCostPer1M/maxOutput are 0. Rate is a real published
-    // Workers AI figure: 1841 neurons/1M × $0.011/1000 ≈ $0.020/1M. Without this
-    // entry estimateCost() returns 0 for every embeddings/unity-search call,
-    // silently under-counting real neuron spend.
-    '@cf/baai/bge-small-en-v1.5':          { provider: 'workers-ai', inputCostPer1M: 0.02, outputCostPer1M: 0.00, contextWindow: 512, maxOutput: 0, tier: 'fast' },
+    // Standard — day-to-day coding. Coding Agent Index #6.
+    'openai/gpt-5.6-luna': {
+        route: 'unified',
+        inputCostPer1M: 0.20, outputCostPer1M: 1.20, cachedInputCostPer1M: 0.02,
+        contextWindow: 1_050_000, maxOutput: 128_000,
+        // Above 272k input OpenAI reprices at $0.40/$1.80. The long-context
+        // CACHED rate is not published; 0.04 mirrors the 2x input scaling and
+        // is the conservative assumption. Verify before relying on it.
+        longContext: {
+            thresholdTokens: 272_000,
+            inputCostPer1M: 0.40, outputCostPer1M: 1.80, cachedInputCostPer1M: 0.04,
+        },
+    },
+    // Deep Think — extended reasoning. Terminal-Bench 2.1 leader (81.0%).
+    // Flat pricing: the only tier with no long-context cliff, which makes it
+    // the correct choice for genuinely large-context work.
+    '@cf/zai-org/glm-5.2': {
+        route: 'workers-ai',
+        inputCostPer1M: 1.40, outputCostPer1M: 4.40, cachedInputCostPer1M: 0.26,
+        contextWindow: 262_144, maxOutput: 32_000,
+    },
+    // Max — frontier intelligence. Above 200k the whole request reprices.
+    'xai/grok-4.6': {
+        route: 'unified',
+        // No sub-threshold cached rate is published; charging cache hits at the
+        // full input rate over-estimates, which is the safe direction.
+        inputCostPer1M: 2.00, outputCostPer1M: 6.00, cachedInputCostPer1M: 2.00,
+        contextWindow: 500_000, maxOutput: 64_000,
+        longContext: {
+            thresholdTokens: 200_000,
+            inputCostPer1M: 4.00, outputCostPer1M: 12.00, cachedInputCostPer1M: 1.00,
+        },
+    },
+    // Inline (tab) completions.
+    '@cf/zai-org/glm-4.7-flash': {
+        route: 'workers-ai',
+        inputCostPer1M: 0.06, outputCostPer1M: 0.40, cachedInputCostPer1M: 0.06,
+        contextWindow: 131_072, maxOutput: 8_192,
+    },
+    // Documented rollback for inline if glm-4.7-flash's reasoning tokens make
+    // tab latency unusable. FIM-trained, 8.4x more expensive per suggestion.
+    '@cf/qwen/qwen2.5-coder-32b-instruct': {
+        route: 'workers-ai',
+        inputCostPer1M: 0.66, outputCostPer1M: 1.00, cachedInputCostPer1M: 0.66,
+        contextWindow: 32_768, maxOutput: 8_192,
+    },
+    // Embeddings. Input-only; embeddings never generate.
+    '@cf/baai/bge-small-en-v1.5': {
+        route: 'workers-ai',
+        inputCostPer1M: 0.02, outputCostPer1M: 0.00, cachedInputCostPer1M: 0.02,
+        contextWindow: 512, maxOutput: 0,
+    },
 };
 
-// Fallback used when a model isn't in the catalog (e.g. an id that was renamed
-// upstream) so output isn't clamped to 0.
 const DEFAULT_MAX_OUTPUT = 8192;
+const DEFAULT_CONTEXT_WINDOW = 32768;
 
 export function getMaxOutput(model: string): number {
     return MODEL_CATALOG[model]?.maxOutput ?? DEFAULT_MAX_OUTPUT;
 }
 
-export function estimateCost(model: string, inputTokens: number, outputTokens: number): number {
+export function getContextWindow(model: string): number {
+    return MODEL_CATALOG[model]?.contextWindow ?? DEFAULT_CONTEXT_WINDOW;
+}
+
+/**
+ * Estimated list cost in USD for one request.
+ *
+ * `inputTokens` is the TOTAL prompt size and is inclusive of `cachedTokens`;
+ * the fresh portion is `inputTokens - cachedTokens`. When a model defines
+ * `longContext` and `inputTokens` exceeds its threshold, the entire request —
+ * fresh, cached and output alike — bills at the long-context rates.
+ *
+ * An unknown model costs 0 (and is therefore never debited).
+ */
+export function estimateCost(
+    model: string,
+    inputTokens: number,
+    outputTokens: number,
+    cachedTokens = 0,
+): number {
     const info = MODEL_CATALOG[model];
     if (!info) return 0;
-    return (inputTokens / 1_000_000) * info.inputCostPer1M
-         + (outputTokens / 1_000_000) * info.outputCostPer1M;
+
+    const rates = info.longContext && inputTokens > info.longContext.thresholdTokens
+        ? info.longContext
+        : info;
+
+    const cached = Math.min(Math.max(cachedTokens, 0), Math.max(inputTokens, 0));
+    const fresh = Math.max(inputTokens, 0) - cached;
+
+    return (fresh / 1_000_000) * rates.inputCostPer1M
+         + (cached / 1_000_000) * rates.cachedInputCostPer1M
+         + (Math.max(outputTokens, 0) / 1_000_000) * rates.outputCostPer1M;
 }
