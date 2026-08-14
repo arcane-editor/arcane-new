@@ -2,28 +2,24 @@ import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import type { ChatCompletionRequest, AppEnv } from '../types.ts';
 import { streamCompletion } from '../services/llm-router.ts';
-import { getIntensityConfig } from '../config/plans.ts';
+import { getIntensityConfig, DEFAULT_INTENSITY } from '../config/plans.ts';
+import { isTierAllowed } from '../config/tiers.ts';
 import { checkAiBudget } from '../lib/credits.ts';
+import { getUserBillingRow } from '../lib/db.ts';
 import { recordUsage } from '../lib/usage.ts';
 import { logChatError } from '../lib/log.ts';
 import type { AuthPayload } from '../middleware/auth.ts';
 
 export const chatRouter = new Hono<AppEnv>();
 
-function resolveModelFromRequest(body: ChatCompletionRequest): string {
+function resolveModelForTier(tier: string): string {
     // Model choice is 100% backend: the editor sends an abstract reasoningLevel
-    // and we map it to a concrete Workers AI model id here.
-    const intensity = body.metadata?.reasoningLevel;
-    if (intensity) {
-        const config = getIntensityConfig(intensity);
-        if (config) {
-            return config.model;
-        }
-    }
-
-    // Safe fallback so a missing/garbage level never sends a non-catalog id
-    // to the gateway. (The editor never sends a raw model id anymore.)
-    return getIntensityConfig('mid')!.model;
+    // (here, already resolved to `tier`) and we map it to a concrete Workers
+    // AI model id here.
+    //
+    // Safe fallback so a garbage level never sends a non-catalog id to the
+    // gateway. (The editor never sends a raw model id anymore.)
+    return getIntensityConfig(tier)?.model ?? getIntensityConfig(DEFAULT_INTENSITY)!.model;
 }
 
 // Chat metering keeps its own thin wrapper so the two call sites below stay
@@ -40,14 +36,32 @@ function logUsage(
 chatRouter.post('/v1/chat/completions', async (c) => {
     const body = await c.req.json<ChatCompletionRequest>();
     const user = c.get('user') as AuthPayload;
+    const userId = parseInt(user.sub);
+
+    // Effort-tier gate: Deep Think ('mid') and Max ('high'/'super') are paid
+    // features. This is the single place the requested tier is resolved —
+    // both the gate and model resolution below consume it, so a free user
+    // sending no level can never be gated on one tier and billed/resolved on
+    // another. Runs before checkAiBudget/the model call so a rejected
+    // request costs nothing.
+    const requestedTier = body.metadata?.reasoningLevel ?? DEFAULT_INTENSITY;
+    const billing = await getUserBillingRow(c.env.arcane_db, userId);
+    const plan = billing?.plan ?? 'free';
+    if (!isTierAllowed(plan, requestedTier)) {
+        return c.json({
+            error: 'Deep Think and Max are available on paid plans.',
+            code: 'tier_not_available',
+            requiredPlan: 'pro',
+        }, 403);
+    }
 
     // Credit balance + anti-abuse hourly cap. 402 = out of credits (upgrade /
     // top up); 429 = short-window rate limit.
-    const budget = await checkAiBudget(c.env.arcane_db, parseInt(user.sub));
+    const budget = await checkAiBudget(c.env.arcane_db, userId);
     if (!budget.ok) return c.json({ error: budget.error, code: budget.code }, budget.status);
 
     // Resolve model
-    const model = resolveModelFromRequest(body);
+    const model = resolveModelForTier(requestedTier);
     if (c.env.ENVIRONMENT === 'development') {
         console.log(`[chat] user=${user.sub} requested="${body.model}" resolved="${model}"`);
     }
