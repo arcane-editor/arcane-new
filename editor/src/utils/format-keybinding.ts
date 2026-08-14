@@ -12,6 +12,13 @@ const NAMED_KEY_LABELS: Record<string, string> = {
   bracketleft: '[',
   bracketright: ']',
   backquote: '`',
+  // Arrow keys are the clearest case of the rule above: the glyph is literally
+  // what is printed on the key, and "⌘⌥Right" reads as a word where "⌘⌥→"
+  // reads as a key.
+  left: '←',
+  right: '→',
+  up: '↑',
+  down: '↓',
 };
 
 /**

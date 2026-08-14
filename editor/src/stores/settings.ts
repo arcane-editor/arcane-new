@@ -57,6 +57,7 @@ const DEFAULT_SETTINGS: SettingsSchema = {
   'search.contextLines': 2,
   'search.seedQueryFromCursor': 'selection',
   'search.useSmartcase': true,
+  'window.zoomLevel': 0,
 };
 
 interface SettingsState {

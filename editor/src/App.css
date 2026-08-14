@@ -3849,6 +3849,15 @@ html, body, #root {
   gap: 8px;
 }
 
+/* Send and Stop must survive any panel width, so the right group never shrinks
+   and the left one absorbs the squeeze. */
+.ai-panel-composer-toolbar-right { flex-shrink: 0; }
+
+.ai-panel-composer-toolbar-left {
+  min-width: 0;
+  overflow: hidden;
+}
+
 /* ---- Mode pill + dropdown menu ---- */
 .ai-panel-mode-pill {
   display: inline-flex;
@@ -4040,6 +4049,23 @@ html, body, #root {
   letter-spacing: 0.6px;
 }
 
+/* The chord that drives the bars, stated rather than hidden behind a hover.
+   It is on screen permanently, so it is pitched below the level label it sits
+   beside: same size, no fill, no border, and a dimmer ink. It should be
+   findable when looked for and ignorable when not. Loose tracking keeps ←→
+   from fusing into one mark at this size. */
+.ai-panel-effort-chord {
+  /* A full step, not a half: at 4px the chord fused with the level label into
+     one run of text, and they say different kinds of thing. */
+  margin-left: var(--space-2);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 1;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  color: color-mix(in srgb, var(--text-secondary) 65%, transparent);
+}
+
 /* ---- Toolbar icon button (image attach, etc.) ---- */
 .ai-panel-icon-btn {
   display: inline-flex;
@@ -4095,6 +4121,222 @@ html, body, #root {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+/* ----------------------------------------------------------------
+   AI Panel: empty state (before the first message)
+
+   Centred in the scroll area rather than pinned to either end. Bottom-
+   anchored read as sediment that had settled above the composer, and
+   top-anchored leaves the whole lower half empty; centring splits the
+   leftover height and makes the panel look composed at any size.
+   Left-aligned and capped in width so it holds its shape in a narrow
+   sidebar and does not sprawl when the panel is maximised.
+---------------------------------------------------------------- */
+.ai-panel-messages.is-empty {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.ai-panel-empty {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  max-width: 420px;
+  padding: var(--space-4) var(--space-1) var(--space-3);
+}
+
+/* Each block fades up in sequence — one short orchestrated entrance rather
+   than scattered effects. tokens.css collapses animation-duration globally
+   under prefers-reduced-motion, so this needs no separate opt-out. */
+.ai-panel-empty > * {
+  animation: ai-empty-rise var(--motion-slow) var(--ease-out) backwards;
+}
+.ai-panel-empty > :nth-child(2) { animation-delay: 60ms; }
+.ai-panel-empty > :nth-child(3) { animation-delay: 120ms; }
+
+@keyframes ai-empty-rise {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* ---- Grounding line: what the assistant is actually looking at ---- */
+.ai-panel-empty-grounding {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: var(--text-xs-lh);
+  color: var(--text-secondary);
+  /* Folder names and Unity versions are both unbounded — wrap rather than
+     run past the edge of a narrow panel. */
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ai-panel-empty-dot {
+  flex-shrink: 0;
+  width: 5px;
+  height: 5px;
+  border-radius: var(--radius-full);
+  background: var(--text-secondary);
+}
+
+.ai-panel-empty-dot[data-status='ready'] { background: var(--success); }
+.ai-panel-empty-dot[data-status='error'] { background: var(--error-border); }
+.ai-panel-empty-dot[data-status='building'] {
+  background: var(--warning);
+  animation: ai-empty-pulse 1.6s var(--ease-in-out) infinite;
+}
+
+@keyframes ai-empty-pulse {
+  50% { opacity: 0.3; }
+}
+
+.ai-panel-empty-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.ai-panel-empty-eyebrow {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--text-secondary) 75%, transparent);
+}
+
+/* ---- Mode column: ordered by how much each mode may touch ----
+   All three rules stay visible so the escalation is readable at rest; the
+   active row is the only one at full strength. The gap is load-bearing: at
+   1px the two dim rules abutted into one unbroken vertical line that read
+   as a stray artefact rather than three rungs. */
+.ai-panel-empty-modes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.ai-panel-empty-mode[data-mode='ask'] { --mode-accent: var(--mode-ask); }
+.ai-panel-empty-mode[data-mode='agent'] { --mode-accent: var(--mode-agent); }
+.ai-panel-empty-mode[data-mode='plan'] { --mode-accent: var(--mode-plan); }
+
+.ai-panel-empty-mode {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 1px var(--space-2);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-left: 2px solid color-mix(in srgb, var(--mode-accent) 28%, transparent);
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  cursor: pointer;
+  transition:
+    background var(--motion-fast) var(--ease-out),
+    border-color var(--motion-fast) var(--ease-out);
+}
+
+.ai-panel-empty-mode:hover {
+  background: color-mix(in srgb, var(--mode-accent) 7%, transparent);
+  border-left-color: color-mix(in srgb, var(--mode-accent) 60%, transparent);
+}
+
+.ai-panel-empty-mode.is-active {
+  background: color-mix(in srgb, var(--mode-accent) 10%, transparent);
+  border-left-color: var(--mode-accent);
+}
+
+.ai-panel-empty-mode-icon {
+  grid-row: 1;
+  grid-column: 1;
+  color: color-mix(in srgb, var(--mode-accent) 55%, var(--text-secondary));
+}
+
+.ai-panel-empty-mode.is-active .ai-panel-empty-mode-icon { color: var(--mode-accent); }
+
+.ai-panel-empty-mode-label {
+  grid-row: 1;
+  grid-column: 2;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.ai-panel-empty-mode.is-active .ai-panel-empty-mode-label { color: var(--mode-accent); }
+
+.ai-panel-empty-mode-desc {
+  grid-row: 2;
+  grid-column: 2;
+  font-size: var(--text-sm);
+  line-height: var(--text-sm-lh);
+  color: var(--text-secondary);
+}
+
+.ai-panel-empty-mode.is-active .ai-panel-empty-mode-desc { color: var(--text-primary); }
+
+/* ---- Starters: a first draft for the composer, not a send ---- */
+.ai-panel-empty-starters {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+/* A full-width bordered box of grey text reads as an empty input, which is
+   the last thing a suggestion should look like next to a real one. The
+   leading arrow and near-primary text make these read as things to press. */
+.ai-panel-empty-starter {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: baseline;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  text-align: left;
+  font-size: var(--text-sm);
+  line-height: var(--text-sm-lh);
+  color: color-mix(in srgb, var(--text-primary) 78%, var(--text-secondary));
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition:
+    background var(--motion-fast) var(--ease-out),
+    border-color var(--motion-fast) var(--ease-out),
+    color var(--motion-fast) var(--ease-out);
+}
+
+.ai-panel-empty-starter::before {
+  content: '→';
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: color-mix(in srgb, var(--accent) 70%, transparent);
+  transition: transform var(--motion-fast) var(--ease-out);
+}
+
+.ai-panel-empty-starter:hover {
+  background: var(--hover);
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+  color: var(--text-primary);
+}
+
+.ai-panel-empty-starter:hover::before { transform: translateX(2px); }
+
+.ai-panel-empty-mode:focus-visible,
+.ai-panel-empty-starter:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 .ai-jump-to-bottom {
@@ -6434,21 +6676,10 @@ html, body, #root {
 .ai-panel-mode-menu-item.is-selected { box-shadow: inset 2px 0 0 var(--mode-accent); }
 .ai-panel-mode-menu-item .ai-panel-mode-menu-check { color: var(--mode-accent); }
 
-/* A hairline above the composer, so the mode is readable while typing without
-   looking away at the pill. */
-.ai-panel-composer[data-mode='ask'] { --mode-accent: var(--mode-ask); }
-.ai-panel-composer[data-mode='agent'] { --mode-accent: var(--mode-agent); }
-.ai-panel-composer[data-mode='plan'] { --mode-accent: var(--mode-plan); }
-.ai-panel-composer::before {
-  content: '';
-  display: block;
-  height: 2px;
-  margin: 0 0 var(--space-1);
-  border-radius: var(--radius-full);
-  background: linear-gradient(90deg, var(--mode-accent), transparent 70%);
-  opacity: 0.75;
-  transition: background var(--motion-base) var(--ease-out);
-}
+/* The composer had a 2px mode-coloured gradient rule across its top edge, to
+   make the mode readable while typing. It read as a stray progress bar, and
+   the job it was doing is done properly by the empty state's mode column
+   (EmptyState.tsx) plus the pill, which carries its own --mode-accent. */
 
 /* ── Settings: font picker, range, terminal preview ──────────────────────
    The font control was a native <select> over raw CSS stacks, so its label

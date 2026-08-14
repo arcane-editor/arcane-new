@@ -169,6 +169,7 @@ try {
       textDocument: {
         completion: { contextSupport: true, completionItem: { snippetSupport: true } },
         hover: { contentFormat: ['markdown', 'plaintext'] },
+        diagnostic: { dynamicRegistration: false, relatedDocumentSupport: false },
       },
       workspace: { configuration: true, workspaceFolders: true },
     },
@@ -241,8 +242,48 @@ try {
     fail('hover over `MonoBehaviour` resolved nothing', `    got: ${hoverText.slice(0, 200)}`);
   }
 
+  // Corelib integrity — the assertion the two above cannot make.
+  //
+  // Completion and hover answer out of the explicitly referenced UnityEngine
+  // assemblies, so they keep working even when the project declares TWO
+  // corelibs: the netstandard 2.1 set the generator supplies, plus an implicit
+  // mscorlib that MSBuild pulls out of `FrameworkPathOverride` whenever
+  // `NoStdLib` is false. In that state Roslyn cannot place `System.Object` or
+  // `System.Void`, so every file in the project reports CS0518/CS0433 on
+  // nearly every line and the editor is unusable — while this script printed
+  // PASS, because nothing here had ever looked at a diagnostic.
+  //
+  // Codes, not counts: the probe's trailing `transform.` is deliberately
+  // incomplete and legitimately produces syntax errors. Only corelib failures
+  // are disqualifying.
+  const diagnostics = await request('textDocument/diagnostic', {
+    textDocument: { uri: uriOf(probeFile) },
+  });
+  if (diagnostics.error) {
+    fail(
+      'csharp-ls refused `textDocument/diagnostic`',
+      `    ${JSON.stringify(diagnostics.error)}\n` +
+        '  The editor pulls diagnostics over this exact request — if it does not\n' +
+        '  answer, no C# error or warning can ever reach Monaco.',
+    );
+  }
+  const CORELIB_CODES = new Set(['CS0518', 'CS0433']);
+  const corelib = (diagnostics.result?.items ?? []).filter((d) =>
+    CORELIB_CODES.has(String(d.code ?? '')),
+  );
+  if (corelib.length) {
+    fail(
+      `csharp-ls reports ${corelib.length} corelib error(s) — the project declares more than one corelib`,
+      corelib.slice(0, 5).map((d) => `    ${d.code}: ${d.message}`).join('\n') +
+        '\n  Check <NoStdLib> in the generated .arcane.csproj (unity.rs): with the\n' +
+        '  netstandard reference set AND FrameworkPathOverride both present, it must\n' +
+        '  be true, or MSBuild adds a second mscorlib on top of netstandard.',
+    );
+  }
+
   console.log(`  completions ${labels.length} on \`transform.\` (position, rotation, localScale present)`);
-  console.log('  hover       MonoBehaviour resolves\n');
+  console.log('  hover       MonoBehaviour resolves');
+  console.log('  corelib     no CS0518/CS0433 — exactly one corelib in the project\n');
   console.log('  PASS  C# IntelliSense is working end to end\n');
   server.kill();
   process.exit(0);

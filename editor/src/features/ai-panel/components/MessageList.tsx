@@ -31,6 +31,7 @@ import QuestionBlock from './QuestionBlock';
 import VerifiedCard from './VerifiedCard';
 import CheckpointRow from './CheckpointRow';
 import ErrorBlock from './ErrorBlock';
+import EmptyState from './EmptyState';
 
 // Matches UnityConsolePanel's "close enough to the bottom" threshold shape
 // (that one uses 30px); a slightly wider 40px band here since chat bubbles
@@ -200,7 +201,17 @@ function MessageList() {
 
   return (
     <div className="ai-panel-messages-wrap">
-      <div className="ai-panel-messages" ref={scrollRef} onScroll={handleScroll}>
+      <div
+        className={`ai-panel-messages${messages.length === 0 ? ' is-empty' : ''}`}
+        ref={scrollRef}
+        onScroll={handleScroll}
+      >
+        {messages.length === 0 && <EmptyState />}
+        {/* The content wrapper stays mounted even with nothing in it: the
+            ResizeObserver effect below binds to `contentRef` once, on a
+            `[scheduleStick]` dep that never changes, so unmounting this for
+            the empty state would leave the observer unbound for the rest of
+            the session and break autoscroll from the first message on. */}
         <div ref={contentRef} className="ai-panel-messages-content">
           {messages.map((msg, idx) => {
             if (msg.role === 'user') currentUserMessageId = msg.id;

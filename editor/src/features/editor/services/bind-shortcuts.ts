@@ -31,25 +31,31 @@ export function bindGlobalShortcutsToMonaco(
       // the same chord (e.g. terminal.focusNext/PreviousPane vs. non-mac
       // fold/unfold on mod+shift+bracketleft/right).
       if (cmd.skipMonacoBridge) continue;
-      const tag = `${cmd.id}|${cmd.keybinding}`;
-      if (registered.has(tag)) continue;
-      const bitfield = parseHotkeyToMonaco(cmd.keybinding, monaco);
-      if (bitfield === null) {
-        if (import.meta.env.DEV) console.warn('[Shortcuts] Unparseable keybinding, not bound in editor:', cmd.keybinding, cmd.id);
-        continue;
+      // Alias chords are bridged too, or a command would answer only its
+      // primary chord while the editor has focus (e.g. view.zoomIn on
+      // mod+shift+equal) — the exact inconsistency this bridge exists to stop.
+      for (const chord of [cmd.keybinding, ...(cmd.extraKeybindings ?? [])]) {
+        if (!chord) continue;
+        const tag = `${cmd.id}|${chord}`;
+        if (registered.has(tag)) continue;
+        const bitfield = parseHotkeyToMonaco(chord, monaco);
+        if (bitfield === null) {
+          if (import.meta.env.DEV) console.warn('[Shortcuts] Unparseable keybinding, not bound in editor:', chord, cmd.id);
+          continue;
+        }
+        const cmdId = cmd.id;
+        editor.addCommand(
+          bitfield,
+          () => {
+            const live = useCommandsStore.getState().commands.get(cmdId);
+            if (!live) return;
+            if (live.when && !live.when()) return;
+            live.handler();
+          },
+          '!findWidgetVisible'
+        );
+        registered.add(tag);
       }
-      const cmdId = cmd.id;
-      editor.addCommand(
-        bitfield,
-        () => {
-          const live = useCommandsStore.getState().commands.get(cmdId);
-          if (!live) return;
-          if (live.when && !live.when()) return;
-          live.handler();
-        },
-        '!findWidgetVisible'
-      );
-      registered.add(tag);
     }
   };
 

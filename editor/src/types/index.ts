@@ -87,6 +87,17 @@ export interface Command {
   label: string;
   category: string;
   keybinding?: string;
+  /**
+   * Additional chords that run the same command, beyond the one `keybinding`
+   * advertises. Only `keybinding` is shown in the palette and mirrored in the
+   * native menu — these are aliases for the same gesture typed differently.
+   *
+   * The case this exists for: "Cmd +" is `mod+shift+equal` on a US layout but
+   * `mod+equal` is what the unshifted key reports, and react-hotkeys-hook
+   * matches shift exactly (`n !== g` in its matcher), so one chord cannot
+   * cover both. VS Code binds both for the same reason.
+   */
+  extraKeybindings?: string[];
   handler: () => void;
   when?: () => boolean;
   // Opt out of bindGlobalShortcutsToMonaco's editor bridge. Use when the
@@ -199,6 +210,12 @@ export interface SettingsSchema {
   'search.seedQueryFromCursor': 'selection' | 'always' | 'never';
   /** Lowercase query = case-insensitive; any uppercase = case-sensitive. */
   'search.useSmartcase': boolean;
+  /**
+   * Window zoom as a *level*, not a scale factor — 0 is unzoomed, each step is
+   * one 1.2x multiple. See `features/app-shell/zoom.ts`. Persisted so a zoomed
+   * window comes back zoomed, which is what VS Code's `window.zoomLevel` does.
+   */
+  'window.zoomLevel': number;
 }
 
 /**

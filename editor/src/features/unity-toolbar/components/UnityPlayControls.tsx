@@ -1,6 +1,13 @@
-import { Play, Pause, RefreshCw, Loader2 } from 'lucide-react';
+import { Play, Pause, RotateCcw, Square } from 'lucide-react';
+import Tooltip from '../../../components/Tooltip';
 import { useUnityStore } from '../../../stores/unity';
 
+/**
+ * The transport. Three buttons in one recessed well in the title bar, styled
+ * from `.unity-deck__*` in App.css rather than inline: these sit next to the
+ * connection segment inside the same capsule, and two style sources for one
+ * object is how they drifted apart in the first place.
+ */
 function UnityPlayControls() {
   const connected = useUnityStore((s) => s.connected);
   const playState = useUnityStore((s) => s.playState);
@@ -10,58 +17,47 @@ function UnityPlayControls() {
   const sendStop = useUnityStore((s) => s.sendStop);
 
   const disabled = !connected || isCompiling;
-
-  const btnStyle = (active?: boolean): React.CSSProperties => ({
-    background: active ? 'var(--hover)' : 'transparent',
-    border: 'none',
-    color: disabled ? 'var(--text-secondary)' : 'var(--text-primary)',
-    cursor: disabled ? 'not-allowed' : 'pointer',
-    padding: '4px 8px',
-    borderRadius: 3,
-    display: 'flex',
-    alignItems: 'center',
-    opacity: disabled ? 0.5 : 1,
-    transition: 'opacity 150ms ease, background 150ms ease',
-  });
+  const playing = playState === 'Playing';
+  const paused = playState === 'Paused';
 
   return (
-    <div style={{
-      display: 'flex',
-      alignItems: 'center',
-      gap: 2,
-    }}>
-      {isCompiling && (
-        <span style={{ color: 'var(--warning)', display: 'flex', alignItems: 'center', padding: '0 4px' }}>
-          <Loader2 size={12} className="animate-spin" />
-        </span>
-      )}
+    <div className="unity-deck__transport">
+      {/* One button, two jobs — so it has to carry two glyphs. It ran Stop
+          while still showing ▶, which reads as "not playing" at exactly the
+          moment the game is running. */}
+      <Tooltip label={playing ? 'Stop' : 'Play'} commandId={playing ? 'unity.stop' : 'unity.play'} side="bottom">
+        <button
+          className={`unity-deck__btn${playing ? ' unity-deck__btn--live' : ''}`}
+          onClick={playing ? sendStop : sendPlay}
+          disabled={disabled}
+          aria-label={playing ? 'Stop' : 'Play'}
+        >
+          {playing ? <Square size={12} fill="currentColor" /> : <Play size={13} fill="currentColor" />}
+        </button>
+      </Tooltip>
 
-      <button
-        title={playState === 'Playing' ? 'Stop (Ctrl+Shift+F10)' : 'Play (Ctrl+Shift+F5)'}
-        onClick={playState === 'Playing' ? sendStop : sendPlay}
-        disabled={disabled}
-        style={btnStyle(playState === 'Playing')}
-      >
-        <Play size={14} />
-      </button>
+      <Tooltip label="Pause" commandId="unity.pause" side="bottom">
+        <button
+          className={`unity-deck__btn${paused ? ' unity-deck__btn--active' : ''}`}
+          onClick={sendPause}
+          disabled={disabled || playState === 'Stopped'}
+          aria-label="Pause"
+          aria-pressed={paused}
+        >
+          <Pause size={13} fill="currentColor" />
+        </button>
+      </Tooltip>
 
-      <button
-        title="Pause (Ctrl+Shift+F6)"
-        onClick={sendPause}
-        disabled={disabled || playState === 'Stopped'}
-        style={btnStyle(playState === 'Paused')}
-      >
-        <Pause size={14} />
-      </button>
-
-      <button
-        title="Restart"
-        onClick={() => { sendStop(); setTimeout(sendPlay, 100); }}
-        disabled={disabled}
-        style={btnStyle()}
-      >
-        <RefreshCw size={14} />
-      </button>
+      <Tooltip label="Restart" side="bottom">
+        <button
+          className="unity-deck__btn"
+          onClick={() => { sendStop(); setTimeout(sendPlay, 100); }}
+          disabled={disabled}
+          aria-label="Restart"
+        >
+          <RotateCcw size={13} />
+        </button>
+      </Tooltip>
     </div>
   );
 }

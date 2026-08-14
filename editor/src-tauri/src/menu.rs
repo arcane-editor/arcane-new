@@ -120,6 +120,26 @@ pub fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     // palette, which is enough for something used once a month.
     let theme_picker = MenuItemBuilder::with_id("theme.openPicker", "Color Theme…")
         .build(&app_handle)?;
+    // Window zoom. These MUST stay in step with `view.zoom*` in App.tsx —
+    // `keybinding-parity.test.ts` normalises `=`/`-` against the registry's
+    // `equal`/`minus` spelling so a divergence here fails the suite.
+    //
+    // muda parses the key half of an accelerator from a fixed token list
+    // (accelerator.rs: "EQUAL" | "=", "MINUS" | "-", "DIGIT0" | "0"), and
+    // there is no "PLUS" token — so zoom-in is spelled `=`, matching how
+    // every other editor labels it. The shifted variant (Cmd+Shift+=, i.e.
+    // what "Cmd +" actually is on a US layout) is deliberately NOT a menu
+    // accelerator: macOS matches key equivalents exactly, so it falls through
+    // to the webview and the command's `extraKeybindings` answers it there.
+    let zoom_in = MenuItemBuilder::with_id("view.zoomIn", "Zoom In")
+        .accelerator("CmdOrCtrl+=")
+        .build(&app_handle)?;
+    let zoom_out = MenuItemBuilder::with_id("view.zoomOut", "Zoom Out")
+        .accelerator("CmdOrCtrl+-")
+        .build(&app_handle)?;
+    let zoom_reset = MenuItemBuilder::with_id("view.zoomReset", "Reset Zoom")
+        .accelerator("CmdOrCtrl+0")
+        .build(&app_handle)?;
     let view_submenu = SubmenuBuilder::new(&app_handle, "View")
         .item(&cmd_palette)
         .item(&quick_open)
@@ -128,13 +148,27 @@ pub fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         .item(&toggle_right)
         .item(&toggle_terminal)
         .separator()
+        .item(&zoom_in)
+        .item(&zoom_out)
+        .item(&zoom_reset)
+        .separator()
         .item(&theme_picker)
         .item(&PredefinedMenuItem::fullscreen(&app_handle, None)?)
         .build()?;
 
     // Window menu
+    //
+    // Minimize is a custom item rather than `PredefinedMenuItem::minimize`,
+    // and deliberately carries NO accelerator. The predefined item registers
+    // Cmd+M with AppKit, and the native menu beats the webview, so while it
+    // owned that chord `ai.cycleMode`'s mod+m could never fire on macOS.
+    // Dropping the accelerator hands the chord to the frontend; the item still
+    // minimizes when chosen from the menu, which now happens through
+    // `getCurrentWindow().minimize()` and needs core:window:allow-minimize.
+    let minimize = MenuItemBuilder::with_id("window.minimize", "Minimize")
+        .build(&app_handle)?;
     let window_submenu = SubmenuBuilder::new(&app_handle, "Window")
-        .item(&PredefinedMenuItem::minimize(&app_handle, None)?)
+        .item(&minimize)
         .item(&PredefinedMenuItem::maximize(&app_handle, None)?)
         .separator()
         .item(&PredefinedMenuItem::close_window(&app_handle, None)?)

@@ -21,6 +21,9 @@ import {
   verticalPersister,
   widthsForRestore,
   CoachMarks,
+  applyWebviewZoom,
+  clampZoomLevel,
+  nextZoomLevel,
 } from './features/app-shell';
 import { EditorPanel, Breadcrumbs, EditorErrorBoundary } from './features/editor';
 import {
@@ -32,7 +35,13 @@ import {
   initialBootSurface,
   consumePendingGotoForWorkspace,
 } from './features/project';
-import { AiChatPanel, MaximizedAiOverlay, restoreLatestSessionForWorkspace } from './features/ai-panel';
+import {
+  AiChatPanel,
+  MaximizedAiOverlay,
+  isAiComposerFocused,
+  nextEffort,
+  restoreLatestSessionForWorkspace,
+} from './features/ai-panel';
 import TooltipHost from './components/TooltipHost';
 import {
   focusTerminalById,
@@ -125,6 +134,58 @@ function selectionSeedQuery(): string {
   // matches nothing.
   if (selection.startLineNumber !== selection.endLineNumber) return '';
   return model.getValueInRange(selection);
+}
+
+/**
+ * Apply a window zoom level and remember it.
+ *
+ * Persisting and applying together, rather than applying and letting a
+ * subscriber persist, keeps the two from drifting: the setting is the record
+ * of what the webview was last told, so the restore on next launch cannot
+ * disagree with what the user sees now. That only holds if both are handed the
+ * *same* number, hence clamping here rather than relying on `applyWebviewZoom`
+ * to clamp on its way to the webview and storing the raw value beside it.
+ */
+function setZoomLevel(level: number): void {
+  const settings = useSettingsStore.getState();
+  const next = clampZoomLevel(level);
+  // `setSetting` writes the whole settings file, and zoom is the one chord a
+  // user holds down — at a bound every repeat would otherwise re-persist a
+  // value that did not change, once per key repeat.
+  if (settings.getSetting('window.zoomLevel') === next) return;
+  settings.setSetting('window.zoomLevel', next);
+  void applyWebviewZoom(next);
+}
+
+/** Step the current zoom level by `delta`, saturating at the bounds. */
+function stepZoom(delta: number): void {
+  const current = useSettingsStore.getState().getSetting('window.zoomLevel');
+  setZoomLevel(nextZoomLevel(current, delta));
+}
+
+/**
+ * Advance the AI mode Ask → Agent → Plan → Ask, and make sure the panel is
+ * showing so the change is visible.
+ *
+ * Shared by `ai.cycleMode` and the Cmd+M route below, so the two cannot
+ * disagree about the order or about the mid-run guard — cycling under a
+ * running agent would swap the toolset out from under it, which is why
+ * `ModeSelector` disables itself then too.
+ */
+function cycleAiMode(): void {
+  const ai = useAiStore.getState();
+  if (ai.isAgentRunning) return;
+  const order: Array<'ask' | 'agent' | 'plan'> = ['ask', 'agent', 'plan'];
+  ai.setMode(order[(order.indexOf(ai.mode) + 1) % order.length]);
+  useUiStore.getState().setActiveRightSidebarView('ai-panel');
+  useUiStore.getState().setRightSidebarVisible(true);
+}
+
+/** Step reasoning effort by `delta`, clamped. No-op mid-run, like the bars. */
+function stepEffort(delta: number): void {
+  const ai = useAiStore.getState();
+  if (ai.isAgentRunning) return;
+  ai.setEffort(nextEffort(ai.effort, delta));
 }
 
 function App() {
@@ -307,7 +368,15 @@ function App() {
     // no-op on first launch since there's no prior slot for this label.
     void invoke('terminal_reset_window');
 
-    useSettingsStore.getState().loadSettings();
+    // Zoom is applied only once settings are on disk-read, not from the
+    // default: the webview starts at 1.0, so restoring a persisted level is
+    // the only thing that makes a zoomed window come back zoomed.
+    void useSettingsStore
+      .getState()
+      .loadSettings()
+      .then(() => {
+        void applyWebviewZoom(useSettingsStore.getState().getSetting('window.zoomLevel'));
+      });
     useAuthStore.getState().loadFromDisk();
     // If the OS launched this window with an auth deep link, finish that
     // sign-in (or re-initiate when there's nothing to match it). Runs after
@@ -1009,6 +1078,50 @@ function App() {
       },
     },
     {
+      id: 'view.zoomIn',
+      label: 'Zoom In',
+      category: 'View',
+      keybinding: 'mod+equal',
+      // Both chords, because "Cmd +" is physically Cmd+Shift+= on a US layout
+      // while the unshifted key reports the same `code` ('Equal'), and
+      // react-hotkeys-hook matches shift exactly. VS Code binds both too.
+      extraKeybindings: ['mod+shift+equal'],
+      handler: () => stepZoom(1),
+    },
+    {
+      id: 'view.zoomOut',
+      label: 'Zoom Out',
+      category: 'View',
+      keybinding: 'mod+minus',
+      extraKeybindings: ['mod+shift+minus'],
+      handler: () => stepZoom(-1),
+    },
+    {
+      /*
+       * No keybinding: Cmd+M belongs to `ai.cycleMode` now. macOS's Minimize
+       * key equivalent would otherwise win the chord outright — the native
+       * menu beats the webview — so menu.rs deliberately builds this item
+       * WITHOUT an accelerator, which is what lets mod+m reach the frontend at
+       * all. Minimizing stays available from Window ▸ Minimize, the command
+       * palette, and the window's own yellow control.
+       */
+      id: 'window.minimize',
+      label: 'Minimize Window',
+      category: 'View',
+      handler: () => {
+        void getCurrentWindow().minimize();
+      },
+    },
+    {
+      id: 'view.zoomReset',
+      label: 'Reset Zoom',
+      category: 'View',
+      // mod+0 is free here — tab switching only claims mod+1..mod+9 — and it
+      // is the chord every browser and editor uses for this.
+      keybinding: 'mod+0',
+      handler: () => setZoomLevel(0),
+    },
+    {
       id: 'view.aiPanel',
       label: 'AI Assistant',
       category: 'View',
@@ -1106,16 +1219,40 @@ function App() {
       id: 'ai.cycleMode',
       label: 'Cycle AI Mode (Ask / Agent / Plan)',
       category: 'AI',
-      keybinding: 'mod+.',
-      handler: () => {
-        const ai = useAiStore.getState();
-        if (ai.isAgentRunning) return;
-        const order: Array<'ask' | 'agent' | 'plan'> = ['ask', 'agent', 'plan'];
-        const next = order[(order.indexOf(ai.mode) + 1) % order.length];
-        ai.setMode(next);
-        useUiStore.getState().setActiveRightSidebarView('ai-panel');
-        useUiStore.getState().setRightSidebarVisible(true);
-      },
+      // This command must be the one holding mod+m, not just the one that
+      // happens to run on it. `ModeSelector`'s Tooltip renders whatever chord
+      // the registry has under `ai.cycleMode` — so parking the real chord on a
+      // different command left the pill advertising the old mod+. while mod+m
+      // was what actually worked. tooltip-chord.ts warns about exactly this.
+      keybinding: 'mod+m',
+      when: () => isAiComposerFocused(),
+      skipMonacoBridge: true,
+      handler: cycleAiMode,
+    },
+    // Effort, from the composer only. mod+left/right is line-start/line-end in
+    // every other text surface in the app, so both the `when` gate and
+    // `skipMonacoBridge` are load-bearing: the gate stops
+    // KeyboardShortcutManager consuming the keystroke anywhere else, and
+    // skipping the Monaco bridge stops `editor.addCommand` swallowing it in
+    // the code editor — addCommand fires on the chord regardless of `when`,
+    // which is exactly what that flag exists for.
+    {
+      id: 'ai.effortUp',
+      label: 'Increase Reasoning Effort',
+      category: 'AI',
+      keybinding: 'mod+right',
+      when: () => isAiComposerFocused(),
+      skipMonacoBridge: true,
+      handler: () => stepEffort(1),
+    },
+    {
+      id: 'ai.effortDown',
+      label: 'Decrease Reasoning Effort',
+      category: 'AI',
+      keybinding: 'mod+left',
+      when: () => isAiComposerFocused(),
+      skipMonacoBridge: true,
+      handler: () => stepEffort(-1),
     },
     {
       id: 'ai.newChat',

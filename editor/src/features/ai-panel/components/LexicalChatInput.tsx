@@ -37,6 +37,8 @@ export interface LexicalChatInputHandle {
   submit: () => void;
   clear: () => void;
   focus: () => void;
+  /** Replace the contents — used by the empty state's starter prompts. */
+  setText: (text: string) => void;
 }
 
 interface Props {
@@ -86,6 +88,12 @@ const LexicalChatInput = forwardRef<LexicalChatInputHandle, Props>(
         clear: () => clearRef.current?.clear(),
         focus: () => {
           // ContentEditable focus
+          contentRef.current?.focus();
+        },
+        setText: (text: string) => {
+          clearRef.current?.setText(text);
+          // `onTextChange` fires from the OnChangePlugin as a result of the
+          // update above, so Send enables itself — nothing to notify here.
           contentRef.current?.focus();
         },
       }),

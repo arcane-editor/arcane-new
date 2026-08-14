@@ -16,6 +16,7 @@ import { describe, it, expect } from 'bun:test';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { getAllThemes } from './registry';
+import { monacoThemeFor, RED_DEFAULT_MONACO_COLOR_IDS } from './apply';
 import type { ThemeDefinition } from './types';
 
 const THEME_DIR = import.meta.dir;
@@ -385,5 +386,90 @@ describe('every custom-property reference resolves', () => {
       dangling.push(`--${token} (${where.length}x, e.g. ${where[0]})`);
     }
     expect(dangling).toEqual([]);
+  });
+});
+
+/**
+ * Monaco falls back to a saturated red (#FF1212 family) for any colour ID a
+ * theme leaves unstated — a hue no palette here uses, so it always reads as a
+ * defect rather than a design choice. Two of the six themes stated the
+ * diagnostic trio and four did not; none stated the minimap or
+ * unexpected-bracket entries. `monacoThemeFor` now supplies all of them from
+ * each theme's own tokens, and this pins that every theme comes out covered.
+ */
+describe('no theme leaves a red-defaulting Monaco colour to the default', () => {
+  it('every theme states every red-defaulting colour id', () => {
+    const missing: string[] = [];
+    for (const theme of themes) {
+      const colors = monacoThemeFor(theme).colors ?? {};
+      for (const id of RED_DEFAULT_MONACO_COLOR_IDS) {
+        if (!colors[id]) missing.push(`${theme.id} → ${id}`);
+      }
+    }
+    expect(missing).toEqual([]);
+  });
+
+  it('resolves each to a real colour, never Monaco red', () => {
+    const bad: string[] = [];
+    for (const theme of themes) {
+      const colors = monacoThemeFor(theme).colors ?? {};
+      for (const id of RED_DEFAULT_MONACO_COLOR_IDS) {
+        const value = colors[id];
+        if (!/^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$|^rgba?\(/.test(value)) {
+          bad.push(`${theme.id} → ${id} = ${value}`);
+        }
+        if (/^#ff1212/i.test(value)) bad.push(`${theme.id} → ${id} is Monaco red`);
+      }
+    }
+    expect(bad).toEqual([]);
+  });
+
+  it("a theme's own explicit choice still wins over the derived default", () => {
+    // arcane-dark deliberately states a rose that differs from its error-text.
+    const arcaneDark = themes.find((t) => t.id === 'arcane-dark')!;
+    expect(monacoThemeFor(arcaneDark).colors!['editorError.foreground']).toBe(
+      arcaneDark.monaco.colors!['editorError.foreground'],
+    );
+  });
+});
+
+/**
+ * Monaco parses every theme colour with `Color.fromHex`, which is hex-only:
+ *
+ *     static fromHex(hex) { return Color.Format.CSS.parseHex(hex) || Color.red; }
+ *
+ * There is no warning and no fallback to the CSS parser — an `rgba(...)` value,
+ * which is valid everywhere else in a ThemeDefinition (the `ui` tokens become
+ * custom properties, the terminal block goes to xterm), silently becomes
+ * OPAQUE #FF0000 in the editor.
+ *
+ * That is what "the weird red effect" was: arcane-dark and arcane-light wrote
+ * 12 colours each as `rgba(...)`, so putting the cursor next to a word painted
+ * it red (`editor.wordHighlightBackground`), the matching bracket went red
+ * (`editorBracketMatch.background`), and the scrollbar slider became a red bar
+ * (`scrollbarSlider.background`). The four VS Code-derived themes used hex and
+ * were unaffected, which is why it looked theme-specific and unexplainable.
+ */
+describe('monaco colours are hex — rgba() silently renders as red', () => {
+  const HEX = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
+
+  it('every colour in every theme parses as hex', () => {
+    const bad: string[] = [];
+    for (const theme of themes) {
+      for (const [id, value] of Object.entries(theme.monaco.colors ?? {})) {
+        if (!HEX.test(value)) bad.push(`${theme.id} → ${id} = ${value} (Monaco renders this as #FF0000)`);
+      }
+    }
+    expect(bad).toEqual([]);
+  });
+
+  it('holds after the diagnostic defaults are merged in', () => {
+    const bad: string[] = [];
+    for (const theme of themes) {
+      for (const [id, value] of Object.entries(monacoThemeFor(theme).colors ?? {})) {
+        if (!HEX.test(value)) bad.push(`${theme.id} → ${id} = ${value}`);
+      }
+    }
+    expect(bad).toEqual([]);
   });
 });

@@ -7,44 +7,11 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import {
-  ChevronDown,
-  Infinity as InfinityIcon,
-  ListChecks,
-  MessageSquare,
-  Check,
-} from 'lucide-react';
+import { ChevronDown, Check } from 'lucide-react';
 import { useAiStore } from '../../../stores/ai';
 import type { ChatMode } from '../services/types';
+import { MODES } from '../data/modes';
 import Tooltip from '../../../components/Tooltip';
-
-interface ModeOption {
-  value: ChatMode;
-  label: string;
-  description: string;
-  Icon: typeof MessageSquare;
-}
-
-const MODES: ModeOption[] = [
-  {
-    value: 'ask',
-    label: 'Ask',
-    description: 'Read-only conversation. No file edits.',
-    Icon: MessageSquare,
-  },
-  {
-    value: 'agent',
-    label: 'Agent',
-    description: 'AI can edit files and run commands.',
-    Icon: InfinityIcon,
-  },
-  {
-    value: 'plan',
-    label: 'Plan',
-    description: 'Plan first, then execute step by step.',
-    Icon: ListChecks,
-  },
-];
 
 const POPOVER_WIDTH = 240;
 
@@ -129,6 +96,9 @@ function ModeSelector() {
         disabled={isAgentRunning}
         aria-haspopup="menu"
         aria-expanded={open}
+        // Permanent, non-visual counterpart to the ChordHint keycap beside
+        // this pill — see EffortSelector for the same pairing.
+        aria-keyshortcuts="Meta+M"
       >
         <ActiveIcon size={12} className="ai-panel-mode-pill-icon" strokeWidth={2.25} />
         <span className="ai-panel-mode-pill-label">{active.label}</span>

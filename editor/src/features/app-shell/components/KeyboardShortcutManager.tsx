@@ -7,10 +7,13 @@ import { commandBeatsShell } from '../skip-shell';
 function HotkeyBinding({
   id,
   keybinding,
+  enabled,
   handler,
 }: {
   id: string;
   keybinding: string;
+  /** The command's `when` gate, read at keystroke time. */
+  enabled: () => boolean;
   handler: () => void;
 }) {
   useHotkeys(keybinding, (e) => {
@@ -32,6 +35,14 @@ function HotkeyBinding({
       return;
     }
 
+    // The `when` gate decides whether this chord is ours AT ALL right now, so
+    // it has to be consulted before preventDefault, not after. Commands scoped
+    // to one surface take chords the rest of the app needs — `ai.effortUp` is
+    // mod+right, which is line-end in every other text box — and swallowing
+    // the keystroke outside that surface would break the key everywhere while
+    // doing nothing.
+    if (!enabled()) return;
+
     e.preventDefault();
     handler();
     // enableOnFormTags covers <input>/<textarea>/<select>, but v5 gates
@@ -49,21 +60,32 @@ function KeyboardShortcutManager() {
 
   // Derive keybindings from the Map in a memo
   const keybindings = useMemo(() => {
-    return Array.from(commands.values())
-      .filter((cmd) => cmd.keybinding)
-      .map((cmd) => ({
+    return Array.from(commands.values()).flatMap((cmd) => {
+      // Aliases bind exactly like the primary chord — same handler, same
+      // `when` gate. Keyed by chord rather than by command id below, since a
+      // command with aliases now yields more than one binding.
+      const chords = [cmd.keybinding, ...(cmd.extraKeybindings ?? [])].filter(
+        (c): c is string => !!c
+      );
+      return chords.map((keybinding) => ({
         id: cmd.id,
-        keybinding: cmd.keybinding!,
-        handler: () => {
-          if (!cmd.when || cmd.when()) cmd.handler();
-        },
+        keybinding,
+        enabled: () => !cmd.when || cmd.when(),
+        handler: cmd.handler,
       }));
+    });
   }, [commands]);
 
   return (
     <>
       {keybindings.map((kb) => (
-        <HotkeyBinding key={kb.id} id={kb.id} keybinding={kb.keybinding} handler={kb.handler} />
+        <HotkeyBinding
+          key={`${kb.id}|${kb.keybinding}`}
+          id={kb.id}
+          keybinding={kb.keybinding}
+          enabled={kb.enabled}
+          handler={kb.handler}
+        />
       ))}
     </>
   );

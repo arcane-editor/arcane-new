@@ -13,7 +13,7 @@
  * The toolbar's left side hosts the Arcane ModeSelector + EffortSelector.
  */
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ArrowUp, Square } from 'lucide-react';
 import { useAiStore, selectPendingQuestion } from '../../../stores/ai';
 import { useWorkspaceStore } from '../../../stores/workspace';
@@ -37,6 +37,18 @@ function ChatInput() {
 
   const editorRef = useRef<LexicalChatInputHandle>(null);
   const [hasText, setHasText] = useState(false);
+
+  // Starter prompts from the empty state land here. Deliberately fills the
+  // composer instead of sending: the user gets to read and edit the request
+  // before it costs them a turn.
+  useEffect(() => {
+    function onPrefill(e: Event) {
+      const text = (e as CustomEvent<{ text?: string }>).detail?.text;
+      if (typeof text === 'string' && text) editorRef.current?.setText(text);
+    }
+    window.addEventListener('ai-compose-prefill', onPrefill);
+    return () => window.removeEventListener('ai-compose-prefill', onPrefill);
+  }, []);
 
   function handleSubmit(text: string) {
     // Answer-mode routing FIRST: while a question is pending, typed text

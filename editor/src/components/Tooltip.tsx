@@ -1,7 +1,7 @@
 import { cloneElement, useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
 import { createPortal } from 'react-dom';
-import { useCommandsStore } from '../stores/commands';
+import { useCommandsStore, type CommandsState } from '../stores/commands';
 import { tooltipParts } from './tooltip-chord';
 
 type Side = 'top' | 'bottom' | 'left' | 'right';
@@ -33,6 +33,24 @@ const GAP = 8;
 let lastClosedAt = 0;
 
 /**
+ * Select the command Map itself — never a value derived from it.
+ *
+ * Zustand v5 runs a selector as `useSyncExternalStore`'s `getSnapshot`, and
+ * React compares consecutive snapshots with `Object.is`. A selector that builds
+ * a fresh identity per call (`s.commands.get.bind(s.commands)`, an object
+ * literal, `.map(...)`) therefore never compares equal, so React's commit-phase
+ * snapshot check force-re-renders on every commit and the component loops until
+ * "Maximum update depth exceeded" — which is exactly what this did, taking the
+ * whole app down through the root error boundary whenever a store notified
+ * often enough to stack 50 of those re-renders (Unity log streaming did it).
+ *
+ * The Map's identity changes only when a command is registered or unregistered
+ * (see stores/commands.ts), so it is a stable snapshot. Derive from it in
+ * render, not in the selector.
+ */
+export const selectCommands = (s: CommandsState) => s.commands;
+
+/**
  * A real tooltip, replacing the native `title=` attribute.
  *
  * `title` cannot be styled, takes roughly a second to appear, never appears at
@@ -51,8 +69,8 @@ function Tooltip({ label, commandId, side = 'right', children }: TooltipProps) {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const id = useId();
 
-  const lookup = useCommandsStore((s) => s.commands.get.bind(s.commands));
-  const { label: text, chord } = tooltipParts(label, commandId, lookup);
+  const commands = useCommandsStore(selectCommands);
+  const { label: text, chord } = tooltipParts(label, commandId, (cid) => commands.get(cid));
 
   const close = useCallback(() => {
     if (timer.current) clearTimeout(timer.current);

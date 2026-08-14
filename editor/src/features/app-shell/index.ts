@@ -11,3 +11,5 @@ export { default as TitleBar } from './components/TitleBar';
 export { EDITOR_PANE_INDEX, MIN_EDITOR_WIDTH, initialPaneSizes, widthsForRestore } from './layout-sizes';
 export { createLayoutPersister, flushLayoutPersisters, layoutPersister, verticalPersister } from './layout-persist';
 export { default as CoachMarks } from './components/CoachMarks';
+export { MAX_ZOOM_LEVEL, MIN_ZOOM_LEVEL, clampZoomLevel, nextZoomLevel, zoomFactorFor } from './zoom';
+export { applyWebviewZoom } from './services/zoom-apply';

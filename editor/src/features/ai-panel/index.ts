@@ -12,6 +12,8 @@ export {
 export type { SessionData, SessionSummary, SaveSessionInput, PlanRef } from './services/session-persistence';
 export { restoreLatestSessionForWorkspace } from './services/session-restore';
 export { fixConsoleError } from './services/fix-console-error';
+export { isAiComposerFocused } from './services/composer-focus';
+export { EFFORT_ORDER, nextEffort } from './data/effort';
 export { planController } from './services/plan-controller';
 export { resetWriteApprovalSession } from './services/write-approval-gate';
 export type { AskUserOption, AskUserParams } from './services/ask-user-tool';

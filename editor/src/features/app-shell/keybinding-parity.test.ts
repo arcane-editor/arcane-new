@@ -26,9 +26,37 @@ const APP = readFileSync(path.join(ROOT, 'src/App.tsx'), 'utf8');
  * review step, automated.
  */
 
-/** `CmdOrCtrl+Shift+T` -> `mod+shift+t` */
-function toRegistryChord(accelerator: string): string {
-  return accelerator.replace(/CmdOrCtrl/gi, 'mod').toLowerCase();
+/**
+ * Punctuation keys have two spellings, one per side: menu.rs must use muda's
+ * accelerator tokens (`=`, `-`, `[`), while App.tsx uses react-hotkeys-hook's
+ * `code`-derived names (`equal`, `minus`, `bracketleft`). Folding them together
+ * is what makes the comparison below actually happen — an unmatched spelling
+ * is not reported as a mismatch, it is simply never compared, so without this
+ * the zoom chords would pass the guard while diverging freely.
+ */
+const KEY_ALIASES: Record<string, string> = {
+  '=': 'equal',
+  '-': 'minus',
+  '[': 'bracketleft',
+  ']': 'bracketright',
+  '`': 'backquote',
+  '\\': 'backslash',
+  ',': 'comma',
+  '.': 'period',
+  '/': 'slash',
+  ';': 'semicolon',
+  "'": 'quote',
+};
+
+/** `CmdOrCtrl+Shift+T` -> `mod+shift+t`, `CmdOrCtrl+=` -> `mod+equal` */
+function normalizeChord(chord: string): string {
+  return chord
+    .replace(/CmdOrCtrl/gi, 'mod')
+    .toLowerCase()
+    .split('+')
+    .map((token) => token.trim())
+    .map((token) => KEY_ALIASES[token] ?? token)
+    .join('+');
 }
 
 /** Every `id: '...'` / `keybinding: '...'` pair, matched by proximity. */
@@ -46,7 +74,7 @@ function registryBindings(source: string): Map<string, string> {
       if (candidate.index < m.index!) owner = candidate.id;
       else break;
     }
-    if (owner) out.set(m[1].toLowerCase(), owner);
+    if (owner) out.set(normalizeChord(m[1]), owner);
   }
   return out;
 }
@@ -70,7 +98,7 @@ function menuBindings(source: string): Map<string, string> {
       if (candidate.index < m.index!) owner = candidate.id;
       else break;
     }
-    if (owner) out.set(toRegistryChord(m[1]), owner);
+    if (owner) out.set(normalizeChord(m[1]), owner);
   }
   return out;
 }
@@ -86,6 +114,57 @@ describe('native menu vs command registry', () => {
     const registry = registryBindings(APP);
     expect(registry.size).toBeGreaterThan(20);
     expect(registry.get('mod+shift+t')).toBe('tab.reopenClosed');
+  });
+
+  /**
+   * Guards the alias folding itself. If `=` stopped normalising to `equal`,
+   * the mismatch test below would keep passing — it only compares chords
+   * present on BOTH sides — while Cmd+= silently drifted apart across
+   * platforms. Naming the zoom chords explicitly makes that failure loud.
+   */
+  it('compares the zoom chords across both spellings rather than skipping them', () => {
+    const menu = menuBindings(MENU);
+    const registry = registryBindings(APP);
+    for (const [chord, id] of [
+      ['mod+equal', 'view.zoomIn'],
+      ['mod+minus', 'view.zoomOut'],
+      ['mod+0', 'view.zoomReset'],
+    ] as const) {
+      expect({ chord, menu: menu.get(chord), registry: registry.get(chord) }).toEqual({
+        chord,
+        menu: id,
+        registry: id,
+      });
+    }
+  });
+
+  /**
+   * Two commands on one chord is the bug `view.toggleBottomPanel` was left
+   * unbound to avoid. It matters more now that chords are focus-routed:
+   * `window.minimize` answers mod+m and decides between minimizing and cycling
+   * the AI mode by where the caret is, so a second mod+m command would not
+   * merely double-fire, it would make the routing unreachable.
+   */
+  it('gives every chord exactly one owning command', () => {
+    const ids = [...APP.matchAll(/\bid:\s*'([^']+)'/g)].map((m) => ({
+      id: m[1],
+      index: m.index!,
+    }));
+    const seen = new Map<string, string>();
+    const collisions: string[] = [];
+    for (const m of APP.matchAll(/\bkeybinding:\s*'([^']+)'/g)) {
+      let owner: string | null = null;
+      for (const candidate of ids) {
+        if (candidate.index < m.index!) owner = candidate.id;
+        else break;
+      }
+      if (!owner) continue;
+      const chord = normalizeChord(m[1]);
+      const prior = seen.get(chord);
+      if (prior && prior !== owner) collisions.push(`${chord}: ${prior} and ${owner}`);
+      else seen.set(chord, owner);
+    }
+    expect(collisions).toEqual([]);
   });
 
   it('binds every shared chord to the same command id on both sides', () => {

@@ -22,6 +22,13 @@ describe('formatKeybinding', () => {
       expect(formatKeybinding('mod+backslash', false)).toBe('Ctrl+\\');
     });
 
+    it('renders arrow keys as the glyphs printed on them', () => {
+      expect(formatKeybinding('mod+left', false)).toBe('Ctrl+←');
+      expect(formatKeybinding('mod+right', false)).toBe('Ctrl+→');
+      expect(formatKeybinding('mod+up', false)).toBe('Ctrl+↑');
+      expect(formatKeybinding('mod+down', false)).toBe('Ctrl+↓');
+    });
+
     it('passes a literal backtick through', () => {
       expect(formatKeybinding('mod+`', false)).toBe('Ctrl+`');
     });
@@ -31,7 +38,7 @@ describe('formatKeybinding', () => {
     it('renders modifier symbols with no separator', () => {
       expect(formatKeybinding('mod+p', true)).toBe('⌘P');
       expect(formatKeybinding('mod+shift+a', true)).toBe('⌘⇧A');
-      expect(formatKeybinding('mod+alt+right', true)).toBe('⌘⌥Right');
+      expect(formatKeybinding('mod+alt+right', true)).toBe('⌘⌥→');
     });
   });
 });

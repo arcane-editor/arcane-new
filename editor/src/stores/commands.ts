@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import type { Command } from '../types';
 
-interface CommandsState {
+export interface CommandsState {
   commands: Map<string, Command>;
   registerCommand: (command: Command) => void;
   registerCommands: (commands: Command[]) => void;
