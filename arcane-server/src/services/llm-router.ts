@@ -1,14 +1,14 @@
 import { streamText, jsonSchema } from 'ai';
 import { createWorkersAI } from 'workers-ai-provider';
-import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
+import { openai as openaiWireProvider } from 'workers-ai-provider/openai';
 import type { ModelMessage, ToolSet } from 'ai';
 import type { ChatCompletionRequest, ChatMessage, StreamEvent, ToolDefinition } from '../types.ts';
 import { getMaxOutput } from '../lib/costs.ts';
 
-// Workers AI catalog models route through Cloudflare Workers AI via the AI
-// Gateway (the `AI` binding + a gateway id — no provider API key needed).
-// Everything else (custom-provider ids) routes through the AI Gateway's
-// unified /compat endpoint — see ExternalRoutingEnv below.
+// All models — Workers AI catalog ids and unified-billing third-party ids
+// alike — route through Cloudflare Workers AI via the AI Gateway (the `AI`
+// binding + a gateway id — no provider API key needed). The id prefix is the
+// only difference; the binding handles routing either way.
 export interface WorkersAiEnv {
     AI: Ai;
     CF_AI_GATEWAY_ID?: string;
@@ -24,59 +24,26 @@ export interface GatewayOverrides {
 // `gatewayOverrides` lets call sites tune per-request gateway behavior (e.g.
 // skipCache for non-deterministic/sampled completions) without affecting the
 // no-gateway-configured case, where no `gateway` key is sent at all.
+//
+// `providers: [openaiWireProvider]` registers the response parser for every
+// OpenAI-wire unified-billing catalog slug (`openai/…`, `xai/…`, plus the
+// long tail — see workers-ai-provider's README). Without it, workers-ai-provider
+// throws for any non-`@cf/` model id instead of routing it through the binding.
 export function workersAiProvider(env: WorkersAiEnv, gatewayOverrides?: GatewayOverrides) {
     return createWorkersAI({
         binding: env.AI,
+        providers: [openaiWireProvider],
         ...(env.CF_AI_GATEWAY_ID ? { gateway: { id: env.CF_AI_GATEWAY_ID, ...(gatewayOverrides ?? {}) } } : {}),
     });
 }
 
-// External providers (MiniMax, Moonshot) are reached through the AI Gateway's
-// unified /compat endpoint using custom-provider slugs. Keys are Worker
-// secrets sent per-request as the Authorization header (owner declined BYOK).
-export interface ExternalRoutingEnv {
-    CF_ACCOUNT_ID?: string;
-    MINIMAX_API_KEY?: string;
-    MOONSHOT_API_KEY?: string;
-}
-
-export type LlmEnv = WorkersAiEnv & ExternalRoutingEnv;
-
-/** Configuration (not model) failure: missing account id / gateway / secret. */
-export class LlmConfigError extends Error {}
-
-export function isExternalModel(modelId: string): boolean {
-    return !modelId.startsWith('@cf/');
-}
-
-export function externalApiKey(modelId: string, env: ExternalRoutingEnv): string {
-    if (modelId.startsWith('custom-minimax/')) {
-        if (!env.MINIMAX_API_KEY) throw new LlmConfigError('MINIMAX_API_KEY secret is not set');
-        return env.MINIMAX_API_KEY;
-    }
-    if (modelId.startsWith('custom-moonshot/')) {
-        if (!env.MOONSHOT_API_KEY) throw new LlmConfigError('MOONSHOT_API_KEY secret is not set');
-        return env.MOONSHOT_API_KEY;
-    }
-    throw new LlmConfigError(`No provider key mapping for model "${modelId}"`);
-}
-
-export function gatewayCompatUrl(env: ExternalRoutingEnv & { CF_AI_GATEWAY_ID?: string }): string {
-    if (!env.CF_ACCOUNT_ID) throw new LlmConfigError('CF_ACCOUNT_ID is not set');
-    if (!env.CF_AI_GATEWAY_ID) throw new LlmConfigError('CF_AI_GATEWAY_ID is not set');
-    return `https://gateway.ai.cloudflare.com/v1/${env.CF_ACCOUNT_ID}/${env.CF_AI_GATEWAY_ID}/compat`;
-}
+export type LlmEnv = WorkersAiEnv;
 
 export function resolveModel(modelId: string, env: LlmEnv, gatewayOverrides?: GatewayOverrides) {
-    if (!isExternalModel(modelId)) {
-        return workersAiProvider(env, gatewayOverrides)(modelId);
-    }
-    const provider = createOpenAICompatible({
-        name: 'ai-gateway-compat',
-        baseURL: gatewayCompatUrl(env),
-        apiKey: externalApiKey(modelId, env),
-    });
-    return provider(modelId);
+    // Workers AI and unified-billing third-party models both resolve through
+    // the AI binding — the id prefix is the only difference and the binding
+    // handles routing.
+    return workersAiProvider(env, gatewayOverrides)(modelId);
 }
 
 /**
@@ -164,54 +131,18 @@ export function convertTools(tools?: ToolDefinition[]): ToolSet | undefined {
     return toolSet;
 }
 
-// Classify a stream error for the SSE `code` field. Workers AI binding errors
-// are normalized by workers-ai-provider into an APICallError whose
-// `statusCode` carries the mapped HTTP status (internal codes 3036/3040 →
-// 429), so check that first — the stringified message never contains "429".
-// The message-text fallback covers rate-limit/capacity wording and the raw
-// internal codes for errors that escape normalization. External-provider
-// (MiniMax/Moonshot, via the gateway /compat endpoint) errors get their own
-// provider_* codes so ops can tell "our CF model is rate-limited" apart from
-// "the external provider is down/unauthorized/timed out".
-export type StreamErrorCode =
-    | 'rate_limit' | 'model_error'
-    | 'provider_rate_limit' | 'provider_auth_failure' | 'provider_unavailable' | 'gateway_timeout';
+export type StreamErrorCode = 'rate_limit' | 'model_error';
 
-export function classifyStreamError(error: unknown, externalModel: boolean): StreamErrorCode {
+// Workers AI binding errors are normalized by workers-ai-provider into an
+// APICallError whose `statusCode` carries the mapped HTTP status (internal
+// codes 3036/3040 -> 429), so check that first — the stringified message
+// never contains "429".
+export function classifyStreamError(error: unknown): StreamErrorCode {
     const status = typeof error === 'object' && error !== null
         ? (error as { statusCode?: number }).statusCode
         : undefined;
-    if (externalModel) {
-        if (status === 429) return 'provider_rate_limit';
-        if (status === 401 || status === 403) return 'provider_auth_failure';
-        if (status !== undefined && status >= 500) return 'provider_unavailable';
-        if (/timeout|timed out/i.test(String(error))) return 'gateway_timeout';
-        return 'model_error';
-    }
     if (status === 429) return 'rate_limit';
     return /rate limit|\b3036\b|\b3040\b|capacity/i.test(String(error)) ? 'rate_limit' : 'model_error';
-}
-
-// One-shot CF-catalog fallback per external model, so chat survives a
-// MiniMax/Moonshot outage. Keys must exist in MODEL_CATALOG (guard test A1).
-const FALLBACK_MODEL: Record<string, string> = {
-    'custom-minimax/MiniMax-M3': '@cf/qwen/qwen2.5-coder-32b-instruct',
-    'custom-moonshot/kimi-k3':   '@cf/zai-org/glm-5.2',
-};
-
-export function fallbackModelFor(modelId: string): string | null {
-    return FALLBACK_MODEL[modelId] ?? null;
-}
-
-/** 400-class request errors would fail identically anywhere — no fallback.
- *  Everything else (5xx, 429, network/timeout, provider 401/403) falls back. */
-export function shouldFallback(error: unknown): boolean {
-    const status = typeof error === 'object' && error !== null
-        ? (error as { statusCode?: number }).statusCode
-        : undefined;
-    if (status !== undefined && status >= 400 && status < 500
-        && status !== 401 && status !== 403 && status !== 429) return false;
-    return true;
 }
 
 type StreamTextFn = typeof streamText;
@@ -219,61 +150,27 @@ type StreamTextFn = typeof streamText;
 export async function* streamCompletion(
     req: ChatCompletionRequest, env: LlmEnv, streamTextImpl: StreamTextFn = streamText,
 ): AsyncGenerator<StreamEvent> {
-    let modelId = req.model;
-    let allowFallback = true;
-    // A missing secret / account id is a config failure, not a model failure —
-    // fall back immediately (and loudly) instead of 500ing the request.
-    try {
-        resolveModel(modelId, env, { skipCache: true });
-    } catch (err) {
-        const fb = err instanceof LlmConfigError ? fallbackModelFor(modelId) : null;
-        if (!fb) throw err;
-        console.error(JSON.stringify({ event: 'provider_config_fallback', model: modelId, fallback: fb, message: String(err) }));
-        yield { type: 'fallback', model: fb };
-        modelId = fb;
-        allowFallback = false;
-    }
-    yield* streamOnce(req, modelId, env, allowFallback, streamTextImpl);
-}
-
-async function* streamOnce(
-    req: ChatCompletionRequest, modelId: string, env: LlmEnv,
-    allowFallback: boolean, streamTextImpl: StreamTextFn,
-): AsyncGenerator<StreamEvent> {
-    // A cached replay of a sampled completion is semantically wrong — chat
-    // completions are non-deterministic (temperature-sampled), so bypass the
-    // gateway cache for this path.
-    const model = resolveModel(modelId, env, { skipCache: true });
+    // A cached replay of a sampled completion is semantically wrong — chat is
+    // temperature-sampled, so bypass the gateway cache on this path.
+    const model = resolveModel(req.model, env, { skipCache: true });
     const messages = convertMessages(req.messages);
     const tools = convertTools(req.tools);
-
-    // Clamp output tokens to the model's published cap (Workers AI models vary).
-    const cap = getMaxOutput(modelId);
-    const maxOutputTokens = Math.min(req.max_tokens ?? 8192, cap);
+    const maxOutputTokens = Math.min(req.max_tokens ?? 8192, getMaxOutput(req.model));
 
     const result = streamTextImpl({
-        model,
-        messages,
-        ...(tools ? { tools } : {}),
-        maxOutputTokens,
-        temperature: req.temperature,
+        model, messages, ...(tools ? { tools } : {}),
+        maxOutputTokens, temperature: req.temperature,
     });
 
-    let yieldedContent = false;
     for await (const part of result.fullStream) {
         switch (part.type) {
             case 'text-delta':
-                yieldedContent = true;
                 yield { type: 'text', content: part.text };
                 break;
             case 'tool-call':
-                yieldedContent = true;
                 yield {
-                    type: 'tool_call',
-                    id: part.toolCallId,
-                    name: part.toolName,
-                    arguments: JSON.stringify(part.input),
-                    finished: true,
+                    type: 'tool_call', id: part.toolCallId, name: part.toolName,
+                    arguments: JSON.stringify(part.input), finished: true,
                 };
                 break;
             case 'finish':
@@ -291,24 +188,11 @@ async function* streamOnce(
                 };
                 break;
             case 'reasoning-delta':
-                yieldedContent = true;
                 yield { type: 'thinking', thought: part.text, signature: '' };
                 break;
-            case 'error': {
-                const external = isExternalModel(modelId);
-                const fb = fallbackModelFor(modelId);
-                if (allowFallback && fb && !yieldedContent && shouldFallback(part.error)) {
-                    console.error(JSON.stringify({
-                        event: 'provider_fallback', model: modelId, fallback: fb,
-                        code: classifyStreamError(part.error, external), message: String(part.error),
-                    }));
-                    yield { type: 'fallback', model: fb };
-                    yield* streamOnce(req, fb, env, false, streamTextImpl);
-                    return;
-                }
-                yield { type: 'error', code: classifyStreamError(part.error, external), message: String(part.error) };
+            case 'error':
+                yield { type: 'error', code: classifyStreamError(part.error), message: String(part.error) };
                 break;
-            }
         }
     }
 }
