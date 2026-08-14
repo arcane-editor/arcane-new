@@ -202,9 +202,9 @@ Add a tier gate: reject `mid` / `high` for Free-plan users with a distinct error
 
 Add the monthly micro-USD ceiling check alongside the daily count check. Clamp FIM context to 600 tokens server-side. Record real inline spend into the new monthly accumulator.
 
-### Migration 0017
+### Migration 0019
 
-Add a monthly micro-USD accumulator and period anchor to `inline_usage`. `request_logs.fallback_model` is retained for historical rows but no longer written.
+Add an `inline_spend` table keyed by `(user_id, month_key)` holding a micro-USD accumulator. (The repository is at `0018_otp_attempts.sql`, so 0019 is next.) `request_logs.fallback_model` is retained for historical rows but no longer written.
 
 ### Editor
 
