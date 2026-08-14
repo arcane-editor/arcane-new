@@ -8,8 +8,12 @@ export interface InlineCompletionRequest {
     path?: string;
 }
 
-export const FIM_MAX_PREFIX_CHARS = 4000;
-export const FIM_MAX_SUFFIX_CHARS = 2000;
+// Clamped to ~600 tokens total (~4 chars/token). Input dominates inline cost
+// almost entirely, so this is the primary lever on tab-completion spend:
+// dropping from 1500 to 600 tokens roughly triples the number of suggestions
+// each plan's monthly budget buys.
+export const FIM_MAX_PREFIX_CHARS = 1600;
+export const FIM_MAX_SUFFIX_CHARS = 800;
 
 const FIM_STOP_TOKENS = ['<|fim_pad|>', '<|endoftext|>', '<|fim_prefix|>', '<|fim_suffix|>', '<|fim_middle|>', '<|repo_name|>', '<|file_sep|>'];
 

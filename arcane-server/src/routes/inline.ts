@@ -5,9 +5,12 @@ import { Hono } from 'hono';
 import type { AppEnv } from '../types.ts';
 import type { AuthPayload } from '../middleware/auth.ts';
 import { INLINE_MODEL } from '../config/plans.ts';
-import { checkInlineAllowance } from '../lib/inline-allowance.ts';
+import { checkInlineAllowance, utcMonthKey } from '../lib/inline-allowance.ts';
 import { clampInlineRequest, buildFimPrompt, cleanCompletion } from '../lib/fim.ts';
 import { recordUsage } from '../lib/usage.ts';
+import { addInlineSpend } from '../lib/db.ts';
+import { estimateCost } from '../lib/costs.ts';
+import { GATEWAY_FEE, usdToMicro } from '../config/tiers.ts';
 
 export const inlineRouter = new Hono<AppEnv>();
 
@@ -75,8 +78,19 @@ inlineRouter.post('/v1/completions/inline', async (c) => {
         // text-generation binding does not reliably return usage for this path.
         const inputEstimate = Math.ceil((req.prefix.length + req.suffix.length) / 4);
         const outputEstimate = Math.ceil(text.length / 4);
-        await recordUsage(c.env.arcane_db, userId, INLINE_MODEL, inputEstimate, outputEstimate,
-            Date.now() - started, { taskType: 'inline', skipDebit: true });
+
+        // Real cost only — no MARGIN. Inline is free to the user; this ceiling
+        // exists to bound OUR spend, not to bill theirs.
+        const realMicro = usdToMicro(
+            estimateCost(INLINE_MODEL, inputEstimate, outputEstimate) * GATEWAY_FEE,
+        );
+
+        await Promise.all([
+            recordUsage(c.env.arcane_db, userId, INLINE_MODEL, inputEstimate, outputEstimate,
+                Date.now() - started, { taskType: 'inline', skipDebit: true }),
+            addInlineSpend(c.env.arcane_db, userId, utcMonthKey(), realMicro)
+                .catch(err => console.error('Failed to record inline spend:', err)),
+        ]);
 
         return c.json({ text, model: INLINE_MODEL });
     } catch (err) {

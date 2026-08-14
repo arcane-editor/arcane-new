@@ -46,3 +46,24 @@ describe('cleanCompletion', () => {
         expect(cleanCompletion('x);', ');')).toBe('x);');
     });
 });
+
+describe('FIM context clamp', () => {
+    it('clamps to ~600 tokens total', () => {
+        // ~4 chars/token: 1600 + 800 = 2400 chars ~= 600 tokens.
+        expect(FIM_MAX_PREFIX_CHARS).toBe(1600);
+        expect(FIM_MAX_SUFFIX_CHARS).toBe(800);
+        expect((FIM_MAX_PREFIX_CHARS + FIM_MAX_SUFFIX_CHARS) / 4).toBe(600);
+    });
+
+    it('keeps the prefix tail and the suffix head', () => {
+        const r = clampInlineRequest({
+            prefix: 'a'.repeat(5000) + 'TAIL',
+            suffix: 'HEAD' + 'b'.repeat(5000),
+            language: 'csharp',
+        })!;
+        expect(r.prefix.length).toBe(FIM_MAX_PREFIX_CHARS);
+        expect(r.prefix.endsWith('TAIL')).toBe(true);
+        expect(r.suffix.length).toBe(FIM_MAX_SUFFIX_CHARS);
+        expect(r.suffix.startsWith('HEAD')).toBe(true);
+    });
+});
