@@ -319,11 +319,22 @@ async function doStream(
       // "your session expired" → sign in → identical 403, forever. (Google
       // signups are auto-verified, which is why it looked intermittent.)
       if (attemptResponse.status === 403) {
-        const body = (await attemptResponse.json().catch(() => ({}))) as { error?: string };
+        const body = (await attemptResponse.json().catch(() => ({}))) as { error?: string; code?: string };
         if (body.error === 'email_unverified') {
           useAiStore.getState().setVerificationRequired(true);
           throw new Error(
             'Verify your email address to use AI features. Check your inbox for the verification link.',
+          );
+        }
+        if (body.code === 'tier_not_available') {
+          // Deep Think / Max gated to paid plans — never retried (a retry
+          // can't change the plan gate). Folded into the same leading
+          // `[code:<x>]` marker the SSE error path uses, so
+          // `classifyTurnError` (turn-errors.ts) routes it to the
+          // 'tier_gated' kind and its upgrade CTA rather than the generic
+          // 403 fallback below.
+          throw new Error(
+            `[code:tier_not_available] ${body.error ?? 'Deep Think and Max are available on paid plans.'}`,
           );
         }
         throw new Error(body.error ?? `Request forbidden (${attemptResponse.status})`);

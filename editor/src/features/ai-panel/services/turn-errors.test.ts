@@ -184,8 +184,17 @@ describe('classifyTurnError — [code:] marker', () => {
     expect(err.raw).toBe('Some completely unexpected failure blob');
   });
 
-  it('maps a gateway_timeout marker to kind timeout, title "Connection timed out"', () => {
-    expect(classifyTurnError('[code:gateway_timeout] upstream timed out').kind).toBe('timeout');
+  it('a removed provider/gateway code marker now falls through to the table (no longer recognized)', () => {
+    const err = classifyTurnError('[code:gateway_timeout] upstream timed out');
+    expect(err.kind).not.toBe('timeout');
+    expect(err.raw).toBe('upstream timed out');
+  });
+
+  it('maps a tier_not_available marker to kind tier_gated, non-retriable, upgrade copy', () => {
+    const err = classifyTurnError('[code:tier_not_available] Deep Think and Max are available on paid plans.');
+    expect(err.kind).toBe('tier_gated');
+    expect(err.retriable).toBe(false);
+    expect(err.detail).toBe('Deep Think and Max are available on paid plans.');
   });
 });
 
@@ -202,6 +211,17 @@ describe('classifyServerCode', () => {
 
   it('maps server_error to server', () => {
     expect(classifyServerCode('server_error')).toBe('server');
+  });
+
+  it('maps tier_not_available to tier_gated', () => {
+    expect(classifyServerCode('tier_not_available')).toBe('tier_gated');
+  });
+
+  it('no longer recognizes the removed provider/gateway fallback codes', () => {
+    expect(classifyServerCode('provider_rate_limit')).toBeNull();
+    expect(classifyServerCode('provider_auth_failure')).toBeNull();
+    expect(classifyServerCode('provider_unavailable')).toBeNull();
+    expect(classifyServerCode('gateway_timeout')).toBeNull();
   });
 
   it('maps undefined to null', () => {
@@ -431,14 +451,10 @@ describe('hasRenderableContent', () => {
   });
 });
 
-// ---- new server codes + credits kind ----
+// ---- server codes + credits/tier-gated kinds ----
 
-describe('new server codes + credits kind', () => {
-  it('maps provider/gateway codes', () => {
-    expect(classifyServerCode('provider_rate_limit')).toBe('rate_limit');
-    expect(classifyServerCode('provider_auth_failure')).toBe('server');
-    expect(classifyServerCode('provider_unavailable')).toBe('server');
-    expect(classifyServerCode('gateway_timeout')).toBe('timeout');
+describe('server codes + credits/tier-gated kinds', () => {
+  it('maps a bogus code to null', () => {
     expect(classifyServerCode('nonsense')).toBeNull();
   });
 
@@ -448,5 +464,11 @@ describe('new server codes + credits kind', () => {
     expect(e.retriable).toBe(false);
     const e2 = classifyTurnError('You are out of AI credits. Open Account to upgrade or buy credits.');
     expect(e2.kind).toBe('credits');
+  });
+
+  it('classifies tier_not_available as a non-retriable tier_gated error', () => {
+    const e = classifyTurnError('[code:tier_not_available] Deep Think and Max are available on paid plans.');
+    expect(e.kind).toBe('tier_gated');
+    expect(e.retriable).toBe(false);
   });
 });

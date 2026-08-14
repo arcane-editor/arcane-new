@@ -55,7 +55,7 @@ function ErrorBlock({ message }: Props) {
       </button>
       {expanded && <div className="ai-message-error-raw">{turnError.raw}</div>}
 
-      {(turnError.retriable || turnError.kind === 'credits') && (
+      {(turnError.retriable || turnError.kind === 'credits' || turnError.kind === 'tier_gated') && (
         <div className="ai-message-error-actions">
           {turnError.retriable && (
             <button
@@ -77,6 +77,17 @@ function ErrorBlock({ message }: Props) {
               }}
             >
               Manage plan & credits
+            </button>
+          )}
+          {turnError.kind === 'tier_gated' && (
+            <button
+              type="button"
+              className="ai-message-error-retry"
+              onClick={() => {
+                void useAuthStore.getState().openBilling();
+              }}
+            >
+              Upgrade plan
             </button>
           )}
         </div>

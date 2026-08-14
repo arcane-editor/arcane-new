@@ -232,6 +232,36 @@ describe('createArcaneStreamFn', () => {
     expect(errorEvent.error.message).toMatch(/[Vv]erify your email/);
   });
 
+  // 403 tier_not_available: Deep Think / Max gated to paid plans. Never
+  // retried, and folded into a `[code:tier_not_available]` marker so
+  // turn-errors.ts routes it to the 'tier_gated' kind (upgrade CTA) rather
+  // than the generic 403 fallback or the out-of-credits path.
+  it('does not log out on 403 tier_not_available — surfaces a code-marked, non-retriable error', async () => {
+    let calls = 0;
+    const fetchImpl = (async () => {
+      calls++;
+      return new Response(
+        JSON.stringify({
+          error: 'Deep Think and Max are available on paid plans.',
+          code: 'tier_not_available',
+          requiredPlan: 'pro',
+        }),
+        { status: 403 },
+      );
+    }) as unknown as typeof fetch;
+
+    const streamFn = createArcaneStreamFn({ fetchImpl, retryBaseDelayMs: 1 });
+    const events = await drain(streamFn(ctx, opts()));
+
+    expect(calls).toBe(1);
+    expect(logoutCalls).toBe(0);
+    expect(verificationRequiredCalls).toEqual([]);
+    const errorEvent = events.find((e) => e.type === 'error') as Extract<AssistantMessageEvent, { type: 'error' }>;
+    expect(errorEvent.error.message).toBe(
+      '[code:tier_not_available] Deep Think and Max are available on paid plans.',
+    );
+  });
+
   it('does not log out on a non-verification 403 either', async () => {
     let calls = 0;
     const fetchImpl = (async () => {

@@ -16,6 +16,7 @@ import type { AiMessage } from '../../../stores/ai';
 export type TurnErrorKind =
   | 'auth'
   | 'credits'
+  | 'tier_gated'
   | 'rate_limit'
   | 'server'
   | 'network'
@@ -84,6 +85,18 @@ export function classifyTurnError(raw: string): TurnError {
         detail: 'This is usually temporary — try again in a moment.',
         raw: stripped,
         retriable: true,
+      };
+    }
+    if (kind === 'tier_gated') {
+      // Never retried — a retry can't change the plan gate, only an
+      // upgrade can. Routed to a distinct kind from 'credits' so ErrorBlock
+      // shows an upgrade CTA rather than the out-of-credits one.
+      return {
+        kind: 'tier_gated',
+        title: 'Upgrade required',
+        detail: 'Deep Think and Max are available on paid plans.',
+        raw: stripped,
+        retriable: false,
       };
     }
     return classifyTurnErrorTable(stripped);
@@ -192,11 +205,20 @@ function classifyTurnErrorTable(raw: string): TurnError {
 }
 
 /**
- * Maps the Arcane server's SSE `{type:'error', code?, message}` event code
- * to a `TurnErrorKind`, for the stream layer (T4) to use when a structured
- * code is available (rather than substring-matching `message`). Returns
- * `null` for an absent/unrecognized code, so the caller falls back to
+ * Maps a structured error code to a `TurnErrorKind`, for callers that have a
+ * code available (rather than substring-matching a message) — the SSE
+ * `{type:'error', code?, message}` event (T4's `arcane-stream.ts`) for
+ * `rate_limit`/`model_error`/`server_error`, and the pre-flight 403
+ * `tier_not_available` gate (also folded into a `[code:<x>]` marker by
+ * `arcane-stream.ts` before reaching here). Returns `null` for an
+ * absent/unrecognized code, so the caller falls back to
  * `classifyTurnError(message)`.
+ *
+ * All routing through a provider fallback is gone — one provider, no
+ * fallback model, so `provider_rate_limit` / `provider_auth_failure` /
+ * `provider_unavailable` / `gateway_timeout` no longer exist server-side and
+ * are deliberately NOT handled here; an unrecognized code (including these)
+ * falls through to the substring table like any other.
  */
 export function classifyServerCode(code: string | undefined): TurnErrorKind | null {
   switch (code) {
@@ -206,14 +228,8 @@ export function classifyServerCode(code: string | undefined): TurnErrorKind | nu
       return 'server';
     case 'server_error':
       return 'server';
-    case 'provider_rate_limit':
-      return 'rate_limit';
-    case 'provider_auth_failure':
-      return 'server';
-    case 'provider_unavailable':
-      return 'server';
-    case 'gateway_timeout':
-      return 'timeout';
+    case 'tier_not_available':
+      return 'tier_gated';
     default:
       return null;
   }
