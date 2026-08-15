@@ -23,7 +23,6 @@ import {
   createGraphifyPathTool,
   createGraphifyQueryTool,
 } from '../../graphify';
-import { useGraphifyStore } from '../../../stores/graphify';
 import { arcaneStream } from './arcane-stream';
 import {
   tauriReadOperations,
@@ -157,15 +156,15 @@ function createToolsForPromptMode(mode: PromptMode, workspacePath: string): Agen
     }),
   ];
 
-  const graphStatus = useGraphifyStore.getState().status;
-  const graphAvailable = graphStatus === 'present' || graphStatus === 'stale';
-  const graphTools: AgentTool[] = graphAvailable
-    ? [
-        createGraphifyQueryTool(workspacePath),
-        createGraphifyExplainTool(workspacePath),
-        createGraphifyPathTool(workspacePath),
-      ]
-    : [];
+  // Always registered regardless of graph status (cache activation §1): the
+  // tool set is part of the provider's cached prompt prefix, so it must not
+  // change when a graph gets built mid-session. The tools themselves answer
+  // with guidance when no graph exists (see graphify-tools.ts).
+  const graphTools: AgentTool[] = [
+    createGraphifyQueryTool(workspacePath),
+    createGraphifyExplainTool(workspacePath),
+    createGraphifyPathTool(workspacePath),
+  ];
 
   // Unity tools join only for Unity projects. Read tools are auto-approved and
   // available in every mode; engine-mutate tools (per-action approved) only join

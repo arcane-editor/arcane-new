@@ -16,6 +16,38 @@ import {
   graphifyQuery,
 } from './graphify-client';
 
+/**
+ * Availability gating (cache activation §1): these tools are registered in
+ * EVERY conversation regardless of graph status, so the tool set — part of
+ * the provider's cached prompt prefix — never changes when a graph is built
+ * or goes missing mid-session. When no graph exists, execute() answers with
+ * guidance instead of the tool disappearing.
+ */
+export interface GraphifyToolOpts {
+  /** Injectable for tests; defaults to reading the graphify store. */
+  isAvailable?: () => boolean;
+}
+
+const GRAPH_UNAVAILABLE_TEXT =
+  'No codebase graph has been built for this workspace yet. Suggest the user builds one from the Graphify panel; until then, use read/list to explore the codebase directly.';
+
+/**
+ * Default availability check. The graphify store is reached via a dynamic
+ * import (same pattern as turn-governor's `defaultOnCapReached`): its import
+ * chain transitively touches `document` via the theme store, which is fatal
+ * under Bun where these tool factories are imported directly by tests.
+ */
+async function defaultIsAvailable(): Promise<boolean> {
+  const { useGraphifyStore } = await import('../../../stores/graphify');
+  const status = useGraphifyStore.getState().status;
+  return status === 'present' || status === 'stale';
+}
+
+async function gateUnavailable(opts?: GraphifyToolOpts): Promise<boolean> {
+  const available = opts?.isAvailable ? opts.isAvailable() : await defaultIsAvailable();
+  return !available;
+}
+
 const queryArgs = Type.Object({
   question: Type.String({
     description:
@@ -56,7 +88,7 @@ function errorResult(err: unknown): AgentToolResult {
   return { content: [{ type: 'text', text: `graphify error: ${text}` }] };
 }
 
-export function createGraphifyQueryTool(workspacePath: string): AgentTool {
+export function createGraphifyQueryTool(workspacePath: string, opts?: GraphifyToolOpts): AgentTool {
   return {
     name: 'graphify_query',
     label: 'graphify_query',
@@ -67,6 +99,7 @@ export function createGraphifyQueryTool(workspacePath: string): AgentTool {
       'rather than reading individual files.',
     parameters: queryArgs,
     async execute(_id: string, params: unknown): Promise<AgentToolResult> {
+      if (await gateUnavailable(opts)) return textResult(GRAPH_UNAVAILABLE_TEXT);
       const { question, budget, dfs } = params as QueryArgs;
       try {
         const out = await graphifyQuery(workspacePath, question, { budget, dfs });
@@ -78,7 +111,7 @@ export function createGraphifyQueryTool(workspacePath: string): AgentTool {
   };
 }
 
-export function createGraphifyExplainTool(workspacePath: string): AgentTool {
+export function createGraphifyExplainTool(workspacePath: string, opts?: GraphifyToolOpts): AgentTool {
   return {
     name: 'graphify_explain',
     label: 'graphify_explain',
@@ -87,6 +120,7 @@ export function createGraphifyExplainTool(workspacePath: string): AgentTool {
       'Useful when you need to understand what a specific symbol does and what depends on it.',
     parameters: explainArgs,
     async execute(_id: string, params: unknown): Promise<AgentToolResult> {
+      if (await gateUnavailable(opts)) return textResult(GRAPH_UNAVAILABLE_TEXT);
       const { node } = params as ExplainArgs;
       try {
         const out = await graphifyExplain(workspacePath, node);
@@ -98,7 +132,7 @@ export function createGraphifyExplainTool(workspacePath: string): AgentTool {
   };
 }
 
-export function createGraphifyPathTool(workspacePath: string): AgentTool {
+export function createGraphifyPathTool(workspacePath: string, opts?: GraphifyToolOpts): AgentTool {
   return {
     name: 'graphify_path',
     label: 'graphify_path',
@@ -107,6 +141,7 @@ export function createGraphifyPathTool(workspacePath: string): AgentTool {
       'Reveals how one component reaches another through calls, imports, or references.',
     parameters: pathArgs,
     async execute(_id: string, params: unknown): Promise<AgentToolResult> {
+      if (await gateUnavailable(opts)) return textResult(GRAPH_UNAVAILABLE_TEXT);
       const { from, to } = params as PathArgs;
       try {
         const out = await graphifyPath(workspacePath, from, to);
