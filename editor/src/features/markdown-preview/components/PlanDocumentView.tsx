@@ -9,6 +9,7 @@ import { ensureMonacoTheme } from '../../theme';
 import { fileUri } from '../../lsp';
 import MarkdownPreview from './MarkdownPreview';
 import { planStepsOf, type PlanNote } from '../services/note-anchor';
+import { replaceBlock, toggleTaskAt } from '../services/block-edit';
 
 interface PlanDocumentViewProps {
   path: string;
@@ -65,10 +66,30 @@ function PlanDocumentView({
 
   const pct = steps.length > 0 ? Math.round((doneCount / steps.length) * 100) : 0;
 
+  // Block edits commit straight to disk as one atomic update-then-save, so the
+  // tab never LINGERS dirty — which keeps both the Execute dirty-guard and the
+  // fs-watcher's live tick-off refresh (skipIfDirty) working.
+  function commitBlockEdit(start: number, end: number, newText: string): void {
+    const next = replaceBlock(content, start, end, newText);
+    if (next === content) return;
+    const ws = useWorkspaceStore.getState();
+    ws.updateFileContent(path, next);
+    void ws.saveFile(path);
+  }
+
+  function toggleTask(offset: number): void {
+    const next = toggleTaskAt(content, offset);
+    if (next == null) return;
+    const ws = useWorkspaceStore.getState();
+    ws.updateFileContent(path, next);
+    void ws.saveFile(path);
+  }
+
   return (
     <div className="plan-doc">
       <div className="plan-doc-header">
         <div className="plan-doc-title">{path.split('/').pop()}</div>
+        {executing && <span className="plan-doc-pill">read-only while executing</span>}
         <div className="plan-doc-modes" role="group" aria-label="View mode">
           {(['preview', 'source'] as MarkdownViewMode[]).map((m) => (
             <button
@@ -121,7 +142,14 @@ function PlanDocumentView({
 
       <div className="plan-doc-body">
         {viewMode === 'preview' ? (
-          <MarkdownPreview content={content} notes={notes} onNotesChange={onNotesChange} />
+          <MarkdownPreview
+            content={content}
+            notes={notes}
+            onNotesChange={onNotesChange}
+            editable={!executing}
+            onCommitBlockEdit={commitBlockEdit}
+            onToggleTask={toggleTask}
+          />
         ) : (
           // Source mode embeds Monaco inside the plan chrome (header, progress,
           // footer stay). It edits the SAME workspace tab buffer the plain

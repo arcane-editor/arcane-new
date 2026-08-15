@@ -7211,6 +7211,38 @@ html, body, #root {
   color: var(--text-primary);
 }
 
+.plan-doc-pill {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  background: var(--warning-bg, #4d3800);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 8px;
+  white-space: nowrap;
+}
+
+/* Notion-style in-place block editing (plan preview) */
+.md-block-editable { cursor: text; border-radius: 4px; }
+.md-block-editable:hover { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+.md-block-editing-host { list-style: none; }
+.md-block-editing {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  resize: none;
+  min-height: 1.6em;
+  padding: 4px 6px;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--text-primary);
+  background: var(--bg-sidebar);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  outline: none;
+}
+.md-block-editing:focus { border-color: var(--accent); }
+
 .plan-doc-footer { border-top: 1px solid var(--border); background: var(--bg-sidebar); }
 .plan-doc-footer-count { font-size: var(--text-xs); color: var(--text-secondary); margin-right: auto; }
 .plan-doc-btn {
