@@ -2,7 +2,7 @@ import { describe, it, expect } from 'bun:test';
 import { buildAskPrompt } from './ask';
 import { buildAgentPrompt } from './agent';
 import { buildPlanPlanningPrompt } from './plan-planning';
-import { buildPlanExecutionPrompt } from './plan-execution';
+import { buildPlanExecutionPrompt, buildPlanSendPrefix } from './plan-execution';
 
 describe('prompt personas (anti-terseness regression)', () => {
   const ask = buildAskPrompt('/proj');
@@ -32,7 +32,6 @@ describe('todo_update instructions (T9)', () => {
   const planExecution = buildPlanExecutionPrompt({
     workspacePath: '/proj',
     planPath: '/proj/.arcane/plans/plan.md',
-    planContent: '## Steps\n\n- [ ] Step 1: Add CoinPickup component',
   });
 
   it('agent prompt has a Task tracking section requiring todo_update for multi-step work', () => {
@@ -53,7 +52,6 @@ describe('ask_user instructions (Task 2 — agent/plan-planning/plan-execution o
   const planExecution = buildPlanExecutionPrompt({
     workspacePath: '/proj',
     planPath: '/proj/.arcane/plans/plan.md',
-    planContent: '## Steps\n\n- [ ] Step 1: Add CoinPickup component',
   });
 
   it('agent, plan-planning, and plan-execution prompts all document ask_user', () => {
@@ -64,5 +62,27 @@ describe('ask_user instructions (Task 2 — agent/plan-planning/plan-execution o
 
   it('plan-planning prompt prefers asking before writing the plan', () => {
     expect(planPlanning).toContain('BEFORE writing the plan');
+  });
+});
+
+describe('plan-execution prompt is cache-stable (cache activation §1)', () => {
+  const planPath = '/proj/.arcane/plans/plan.md';
+  const planContent = '## Steps\n\n- [ ] Step 1: Add ZebraQuantumPickup component';
+  const prompt = buildPlanExecutionPrompt({ workspacePath: '/proj', planPath });
+
+  it('references the plan file path but never embeds the plan body', () => {
+    expect(prompt).toContain(planPath);
+    expect(prompt).not.toContain('ZebraQuantumPickup');
+  });
+
+  it('buildPlanSendPrefix carries the full plan only on the first send', () => {
+    const first = buildPlanSendPrefix(false, planPath, planContent);
+    expect(first).toContain(`## Approved plan (${planPath})`);
+    expect(first).toContain('ZebraQuantumPickup');
+
+    const later = buildPlanSendPrefix(true, planPath, planContent);
+    expect(later).toContain(planPath);
+    expect(later).not.toContain('ZebraQuantumPickup');
+    expect(later).toContain('re-read');
   });
 });

@@ -71,6 +71,7 @@ import { useSettingsStore } from '../../../stores/settings';
 import { useCheckpointsStore } from '../../../stores/checkpoints';
 import { buildSystemPrompt, captureDecoration, defaultPromptModeFor, type PromptMode } from './prompts';
 import { graphChangedSinceFreeze, resetFrozenDecoration } from './prompts/frozen-context';
+import { buildPlanSendPrefix } from './prompts/plan-execution';
 import { getUnityGroundingContext } from './prompts/unity-facts';
 import type { ContrastFacts } from './prompts/unity-contrast';
 import { lintAnswer, buildReviseMessage } from './grounding-lint';
@@ -508,6 +509,25 @@ export class AgentService {
     ) {
       promptText +=
         '\n\n[Note: the codebase graph changed since this conversation started — graphify_query reflects the current structure.]';
+    }
+
+    // Cache activation §1: the plan body moved OUT of the system prompt (see
+    // prompts/plan-execution.ts) — inject it into the first plan-execution
+    // user message of the conversation; later sends carry a one-line pointer.
+    // "Already injected" is detected from the conversation itself so it
+    // survives session resume across process restarts.
+    if (promptMode === 'plan-execution' && opts.planExecution) {
+      const { planPath, planContent } = opts.planExecution;
+      const marker = `## Approved plan (${planPath})`;
+      const alreadyInjected = this.agent.getMessages().some(
+        (m) =>
+          m.role === 'user' &&
+          (typeof m.content === 'string'
+            ? m.content.includes(marker)
+            : Array.isArray(m.content) &&
+              m.content.some((c) => c.type === 'text' && c.text.includes(marker))),
+      );
+      promptText = buildPlanSendPrefix(alreadyInjected, planPath, planContent) + promptText;
     }
 
     // T5 outcome-detection choke point: `before` marks where THIS send's own

@@ -3,9 +3,17 @@ import { UNITY_CONTEXT } from './unity-context';
 export interface PlanExecutionPromptArgs {
   workspacePath: string;
   planPath: string;
-  planContent: string;
 }
 
+/**
+ * Cache activation §1: the plan BODY is deliberately NOT part of the system
+ * prompt. Plan execution ticks checkboxes in the plan file as it works, so an
+ * embedded plan would change the system prompt on every send and re-bill the
+ * whole conversation history on prefix-caching providers. Instead the
+ * approved plan is injected once into the first plan-execution USER message
+ * (see buildPlanSendPrefix below + agent-service.ts), and the agent re-reads
+ * the plan file for current checkbox state.
+ */
 export function buildPlanExecutionPrompt(args: PlanExecutionPromptArgs): string {
   return `You are an AI Unity coding assistant in **PLAN mode — execution phase**.
 
@@ -15,11 +23,7 @@ A plan has already been drafted, reviewed, and approved by the user. The plan fi
 
 \`${args.planPath}\`
 
-Below is the current contents of the plan. Execute it.
-
-## Approved plan
-
-${args.planContent}
+The approved plan's contents are provided in the conversation. If they are not, or if you are resuming mid-plan, \`read\` the plan file first — it is the source of truth for which steps are already checked off.
 
 ## How to execute
 
@@ -49,4 +53,21 @@ ${args.planContent}
 - **Don't ask for permission to proceed with obviously reversible work**, and never ask more than twice across the whole plan.
 
 ${UNITY_CONTEXT}`;
+}
+
+/**
+ * The per-send plan injection that replaced the system-prompt embedding.
+ * First plan-execution send of a conversation carries the full approved plan;
+ * later sends carry a one-line pointer (the transcript already has the plan,
+ * and the file — not the transcript — holds current checkbox state).
+ */
+export function buildPlanSendPrefix(
+  alreadyInConversation: boolean,
+  planPath: string,
+  planContent: string,
+): string {
+  if (alreadyInConversation) {
+    return `[Plan file: ${planPath} — re-read it for current checkbox state]\n\n`;
+  }
+  return `## Approved plan (${planPath})\n\n${planContent}\n\n---\n\n`;
 }
