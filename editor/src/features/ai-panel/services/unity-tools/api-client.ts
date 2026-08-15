@@ -12,6 +12,7 @@
 // returning [] — a successful call that simply finds nothing is still `ok: true`.
 
 import { useAuthStore } from '../../../../stores/auth';
+import { postJsonWithTimeout } from './post-json';
 import { unityMajorMinor } from '../../../../data/unity-docs-index';
 import { getUnityGroundingContext } from '../prompts/unity-facts';
 import { ARCANE_API_URL } from '../../../../config/api';
@@ -67,17 +68,11 @@ function resolvedVersion(): string | null {
 async function postJson<T>(path: string, body: unknown): Promise<GroundingResult<T>> {
   const token = useAuthStore.getState().token;
   if (!token) return { ok: false, reason: 'signed-out' };
-  try {
-    const res = await fetch(`${ARCANE_SERVER_URL}${path}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) return { ok: false, reason: `http-${res.status}` };
-    return { ok: true, data: (await res.json()) as T };
-  } catch {
-    return { ok: false, reason: 'offline' };
-  }
+  // Bounded (10s) — see post-json.ts. These calls run inside the agent's tool
+  // loop; an unbounded fetch here once froze the whole agent mid-turn.
+  const result = await postJsonWithTimeout(`${ARCANE_SERVER_URL}${path}`, token, body);
+  if (!result.ok) return result;
+  return { ok: true, data: result.json as T };
 }
 
 export async function unityApiSearch(
