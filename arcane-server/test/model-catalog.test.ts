@@ -4,7 +4,7 @@ import { MODEL_CATALOG } from '../src/lib/costs.ts';
 
 describe('INTENSITY_CONFIG', () => {
     it('maps each tier to its model', () => {
-        expect(INTENSITY_CONFIG.low.model).toBe('openai/gpt-5.4-mini');
+        expect(INTENSITY_CONFIG.low.model).toBe('openai/gpt-5.6-luna');
         expect(INTENSITY_CONFIG.mid.model).toBe('@cf/zai-org/glm-5.2');
         expect(INTENSITY_CONFIG.high.model).toBe('xai/grok-4.6');
     });

@@ -1,6 +1,6 @@
 import { streamText, jsonSchema } from 'ai';
 import { createWorkersAI } from 'workers-ai-provider';
-import { openai as openaiWireProvider } from 'workers-ai-provider/openai';
+import { createOpenAI } from '@ai-sdk/openai';
 import type { ModelMessage, ToolSet } from 'ai';
 import type { ChatCompletionRequest, ChatMessage, StreamEvent, ToolDefinition } from '../types.ts';
 import { getMaxOutput } from '../lib/costs.ts';
@@ -25,14 +25,27 @@ export interface GatewayOverrides {
 // skipCache for non-deterministic/sampled completions) without affecting the
 // no-gateway-configured case, where no `gateway` key is sent at all.
 //
-// `providers: [openaiWireProvider]` registers the response parser for every
+// `providers: [openaiWire]` registers the response parser for every
 // OpenAI-wire unified-billing catalog slug (`openai/…`, `xai/…`, plus the
-// long tail — see workers-ai-provider's README). Without it, workers-ai-provider
-// throws for any non-`@cf/` model id instead of routing it through the binding.
+// long tail). This is workers-ai-provider's stock openai plugin EXCEPT for
+// one branch: Cloudflare's run catalog serves the GPT-5.6 family ONLY in
+// Responses-API format (the dashboard model page lists "Request formats:
+// responses"; a Chat-Completions body gets AiGatewayError 7003 "Invalid
+// value at input" — root-caused 2026-08-15 when gpt-5.6-luna 400'd on every
+// request while gpt-5.4/5.1/grok validated). Everything else stays on
+// `.chat()`, which the catalog serves for the rest of the OpenAI-wire tail.
+const openaiWire = {
+    wireFormat: 'openai' as const,
+    create: ({ modelId, fetch, baseURL }: { modelId: string; fetch: typeof globalThis.fetch; baseURL?: string }) => {
+        const provider = createOpenAI({ apiKey: 'unused', fetch, ...(baseURL ? { baseURL } : {}) });
+        return modelId.startsWith('gpt-5.6') ? provider.responses(modelId) : provider.chat(modelId);
+    },
+};
+
 export function workersAiProvider(env: WorkersAiEnv, gatewayOverrides?: GatewayOverrides) {
     return createWorkersAI({
         binding: env.AI,
-        providers: [openaiWireProvider],
+        providers: [openaiWire],
         ...(env.CF_AI_GATEWAY_ID ? { gateway: { id: env.CF_AI_GATEWAY_ID, ...(gatewayOverrides ?? {}) } } : {}),
     });
 }
