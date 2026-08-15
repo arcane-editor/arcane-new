@@ -4,6 +4,7 @@ import {
     getStoredToken, clearStoredToken, decodeToken, apiGetMe, type MeResponse,
 } from "@/lib/auth";
 import { initialsFromEmail, planLabel } from "@/lib/user-display";
+import { Skeleton } from "@/components/ui/skeleton";
 
 /** `unknown` covers the pre-hydration frame — the island is pre-rendered at
  *  build time, so localStorage isn't readable until the effect runs. Rendering
@@ -106,9 +107,6 @@ function PlanChip({ plan }: { plan: string | undefined }) {
     );
 }
 
-function Skeleton({ className = "" }: { className?: string }) {
-    return <span className={`inline-block animate-pulse rounded bg-muted-foreground/20 ${className}`} />;
-}
 
 const itemClass =
     "flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-sm text-muted-foreground transition-colors hover:bg-primary/10 hover:text-foreground focus-visible:bg-primary/10 focus-visible:text-foreground focus-visible:outline-none";
@@ -122,7 +120,7 @@ export function AccountSummaryBlock({ email, me, meFailed }: Pick<AuthSummary, "
                 <div className="min-w-0">
                     <p className="truncate text-sm font-medium text-foreground">{email}</p>
                     <div className="mt-1">
-                        {me ? <PlanChip plan={me.user.plan} /> : meFailed ? null : <Skeleton className="h-4 w-12" />}
+                        {me ? <PlanChip plan={me.user.plan} /> : meFailed ? null : <Skeleton className="h-4 w-12 animate-pulse motion-reduce:animate-none" />}
                     </div>
                 </div>
             </div>
@@ -136,7 +134,7 @@ export function AccountSummaryBlock({ email, me, meFailed }: Pick<AuthSummary, "
                 ) : meFailed ? (
                     <span className="text-xs text-muted-foreground">unavailable</span>
                 ) : (
-                    <Skeleton className="h-4 w-10" />
+                    <Skeleton className="h-4 w-10 animate-pulse motion-reduce:animate-none" />
                 )}
             </div>
 

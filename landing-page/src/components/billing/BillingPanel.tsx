@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { getStoredToken, clearStoredToken } from "@/lib/auth";
+import { Skeleton, SkeletonGroup } from "@/components/ui/skeleton";
 import {
     apiGetUsage, apiGetPlans, apiStartCheckout, apiOpenPortal,
     BillingError, type UsageResponse, type PlanTier, type TopupPack,
@@ -94,15 +95,39 @@ export default function BillingPanel() {
     };
 
     if (state === "loading") {
-        return <div className="container mx-auto px-4 max-w-2xl"><div className="glass rounded-2xl p-6 text-sm text-muted-foreground">Loading billing…</div></div>;
+        // Mirrors the plan card (title, big credit figure, usage bar) and the
+        // top-up card beneath it.
+        return (
+            <SkeletonGroup label="Loading billing" className="space-y-6">
+                <div className="glass rounded-2xl p-6">
+                    <div className="mb-5 flex items-center justify-between">
+                        <Skeleton className="h-4 w-32" />
+                        <Skeleton className="h-6 w-16 rounded-md" />
+                    </div>
+                    <Skeleton className="h-8 w-28" />
+                    <Skeleton className="mt-4 h-2 w-full rounded-full" />
+                    <Skeleton className="mt-3 h-3 w-40" />
+                </div>
+                <div className="glass rounded-2xl p-6">
+                    <Skeleton className="h-4 w-36" />
+                    <div className="mt-5 grid grid-cols-2 gap-3">
+                        <Skeleton className="h-16 rounded-xl" />
+                        <Skeleton className="h-16 rounded-xl" />
+                    </div>
+                </div>
+            </SkeletonGroup>
+        );
     }
     if (state === "retry" || !usage) {
         return (
-            <div className="container mx-auto px-4 max-w-2xl">
-                <div className="glass rounded-2xl p-6 flex items-center justify-between">
-                    <span className="text-sm text-muted-foreground">Couldn't load billing.</span>
-                    <button className="h-9 rounded-md px-4 text-sm font-semibold bg-primary text-primary-foreground hover:bg-primary/90 transition-all" onClick={() => void load(token)}>Retry</button>
-                </div>
+            <div className="glass flex items-center justify-between gap-4 rounded-2xl p-6">
+                <span className="text-sm text-muted-foreground">Couldn't load your plan and credits.</span>
+                <button
+                    className="h-9 shrink-0 rounded-md bg-primary px-4 text-sm font-semibold text-primary-foreground transition-all hover:bg-primary/90"
+                    onClick={() => void load(token)}
+                >
+                    Retry
+                </button>
             </div>
         );
     }
@@ -116,10 +141,9 @@ export default function BillingPanel() {
     const labelClass = "text-sm text-muted-foreground";
 
     return (
-        // `id` is the anchor the navbar's "Plans & billing" item jumps to —
-        // account settings and billing share one page, so the menu scrolls
-        // rather than pretending they are separate destinations.
-        <div id="billing" className="container mx-auto px-4 max-w-2xl pb-24 scroll-mt-24">
+        // Page chrome lives in AccountTabs; /account#billing now selects this
+        // tab rather than scrolling to it.
+        <div>
             {notice && (
                 <div className={`rounded-lg px-4 py-2 text-sm mb-4 border ${
                     notice.type === "success" ? "border-green-500/30 bg-green-500/10 text-green-500"

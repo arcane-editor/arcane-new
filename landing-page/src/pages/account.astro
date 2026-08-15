@@ -2,13 +2,11 @@
 import LandingLayout from '../layouts/LandingLayout.astro';
 import Navbar from '../components/Navbar.tsx';
 import Footer from '../components/Footer.astro';
-import AccountPanel from '../components/auth/AccountPanel.tsx';
-import BillingPanel from '../components/billing/BillingPanel.tsx';
+import AccountTabs from '../components/auth/AccountTabs.tsx';
 ---
 
 <LandingLayout analytics={false}>
   <Navbar client:load />
-  <AccountPanel client:load />
-  <BillingPanel client:load />
+  <AccountTabs client:load />
   <Footer />
 </LandingLayout>

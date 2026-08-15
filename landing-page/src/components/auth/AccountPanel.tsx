@@ -5,6 +5,7 @@ import {
     authErrorMessage, type MeResponse,
 } from "@/lib/auth";
 import { authInputClass, authPrimaryBtnClass, authErrorBannerClass } from "./AuthShell";
+import { Skeleton, SkeletonGroup } from "@/components/ui/skeleton";
 
 type State = "loading" | "ready" | "retry";
 
@@ -93,19 +94,42 @@ export default function AccountPanel() {
     };
 
     if (state === "loading") {
+        // Shaped like the cards below (profile rows, then the password form) so
+        // nothing shifts when the data lands.
         return (
-            <div className="min-h-[60vh] flex items-center justify-center">
-                <div className="text-muted-foreground text-sm">Loading...</div>
-            </div>
+            <SkeletonGroup label="Loading your account" className="space-y-6">
+                <div className="glass rounded-2xl p-6">
+                    <div className="space-y-4">
+                        <div className="flex items-center justify-between">
+                            <Skeleton className="h-3 w-14" />
+                            <Skeleton className="h-3 w-48" />
+                        </div>
+                        <div className="flex items-center justify-between">
+                            <Skeleton className="h-3 w-24" />
+                            <Skeleton className="h-3 w-10" />
+                        </div>
+                    </div>
+                </div>
+                <div className="glass rounded-2xl p-6">
+                    <Skeleton className="h-4 w-36" />
+                    <div className="mt-5 max-w-sm space-y-3">
+                        <Skeleton className="h-10 w-full rounded-md" />
+                        <Skeleton className="h-10 w-full rounded-md" />
+                        <Skeleton className="h-10 w-full rounded-md" />
+                    </div>
+                </div>
+            </SkeletonGroup>
         );
     }
 
     if (state === "retry" || !me) {
         return (
-            <div className="min-h-[60vh] flex flex-col items-center justify-center gap-4 px-4 text-center">
-                <p className="text-muted-foreground text-sm">Couldn't reach the server. Please try again.</p>
+            <div className="glass flex flex-col items-center gap-4 rounded-2xl p-8 text-center">
+                <p className="text-sm text-muted-foreground">
+                    Couldn't reach the server. Your session is still valid — try again.
+                </p>
                 <button
-                    className="h-10 rounded-md px-4 bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-all"
+                    className="h-10 rounded-md bg-primary px-4 text-sm font-semibold text-primary-foreground transition-all hover:bg-primary/90"
                     onClick={() => void loadMe(token)}
                 >
                     Retry
@@ -118,10 +142,9 @@ export default function AccountPanel() {
     const labelClass = "text-sm text-muted-foreground";
 
     return (
-        <div className="container mx-auto px-4 py-24 max-w-2xl">
-            <h1 className="font-display text-2xl font-bold mb-1">Your Account</h1>
-            <p className="text-muted-foreground text-sm mb-8">Manage how you sign in to Arcane</p>
-
+        // Page chrome (container, heading, tabs) belongs to AccountTabs now —
+        // this renders only the Account tab's own cards.
+        <div>
             {/* Profile */}
             <div className="glass rounded-2xl p-6 mb-6">
                 <div className={rowClass}>
