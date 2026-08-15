@@ -105,7 +105,7 @@ describe('streamCompletion event mapping', () => {
             { type: 'text', content: 'hello' },
             { type: 'tool_call', id: 'c1', name: 'read_file', arguments: JSON.stringify({ path: 'a.ts' }), finished: true },
             { type: 'thinking', thought: 'thinking it through', signature: '' },
-            { type: 'usage', input_tokens: 10, output_tokens: 5, cached_input_tokens: 2 },
+            { type: 'usage', model: '@cf/zai-org/glm-5.2', input_tokens: 10, output_tokens: 5, cached_input_tokens: 2 },
             { type: 'error', code: 'rate_limit', message: String(upstreamError) },
         ]);
     });

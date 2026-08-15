@@ -204,6 +204,9 @@ export async function* streamCompletion(
             case 'finish':
                 yield {
                     type: 'usage',
+                    // The model actually served (post-routing) — lets the
+                    // editor surface what ran without trusting its request.
+                    model: req.model,
                     input_tokens: part.totalUsage.inputTokens ?? 0,
                     output_tokens: part.totalUsage.outputTokens ?? 0,
                     // AI SDK v5: `totalUsage.cachedInputTokens` is deprecated in favor

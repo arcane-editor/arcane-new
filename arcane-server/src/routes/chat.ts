@@ -2,7 +2,8 @@ import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import type { ChatCompletionRequest, AppEnv } from '../types.ts';
 import { streamCompletion } from '../services/llm-router.ts';
-import { getIntensityConfig, DEFAULT_INTENSITY } from '../config/plans.ts';
+import { DEFAULT_INTENSITY } from '../config/plans.ts';
+import { resolveModelForSend } from '../config/routing.ts';
 import { isTierAllowed } from '../config/tiers.ts';
 import { checkAiBudget } from '../lib/credits.ts';
 import { getUserBillingRow } from '../lib/db.ts';
@@ -11,16 +12,6 @@ import { logChatError } from '../lib/log.ts';
 import type { AuthPayload } from '../middleware/auth.ts';
 
 export const chatRouter = new Hono<AppEnv>();
-
-function resolveModelForTier(tier: string): string {
-    // Model choice is 100% backend: the editor sends an abstract reasoningLevel
-    // (here, already resolved to `tier`) and we map it to a concrete Workers
-    // AI model id here.
-    //
-    // Safe fallback so a garbage level never sends a non-catalog id to the
-    // gateway. (The editor never sends a raw model id anymore.)
-    return getIntensityConfig(tier)?.model ?? getIntensityConfig(DEFAULT_INTENSITY)!.model;
-}
 
 // Chat metering keeps its own thin wrapper so the two call sites below stay
 // readable; the shared orchestration (period rollup + request log + cost) lives
@@ -60,12 +51,24 @@ chatRouter.post('/v1/chat/completions', async (c) => {
     const budget = await checkAiBudget(c.env.arcane_db, userId);
     if (!budget.ok) return c.json({ error: budget.error, code: budget.code }, budget.status);
 
-    // Resolve model
-    const model = resolveModelForTier(requestedTier);
+    // Resolve model — task-aware routing (config/routing.ts). Model choice is
+    // 100% backend: the editor sends an abstract reasoningLevel + routing
+    // signals; the concrete model id is chosen here. Routing only ever moves
+    // DOWN from the entitlement-gated tier (or to the inline side-task lane),
+    // so the isTierAllowed gate above stays authoritative.
+    const decision = resolveModelForSend(
+        requestedTier,
+        {
+            taskType: body.metadata?.taskType,
+            mode: body.metadata?.mode,
+            ...body.metadata?.routing,
+        },
+        c.env.ROUTING_V2,
+    );
     if (c.env.ENVIRONMENT === 'development') {
-        console.log(`[chat] user=${user.sub} requested="${body.model}" resolved="${model}"`);
+        console.log(`[chat] user=${user.sub} tier="${requestedTier}" resolved="${decision.model}" reason=${decision.reason}`);
     }
-    body.model = model;
+    body.model = decision.model;
 
     const startTime = Date.now();
     const env = c.env;
@@ -130,6 +133,9 @@ chatRouter.post('/v1/chat/completions', async (c) => {
                     prompt_tokens: inputTokens,
                     completion_tokens: outputTokens,
                     total_tokens: inputTokens + outputTokens,
+                    // OpenAI-compatible cached-prefix detail — consumed by the
+                    // eval harness's cache-share metric (eval-stream.ts).
+                    prompt_tokens_details: { cached_tokens: cachedInputTokens },
                 },
             });
         } catch (err) {

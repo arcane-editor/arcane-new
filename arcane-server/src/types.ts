@@ -30,6 +30,7 @@ export type AppEnv = {
         MOONSHOT_API_KEY?: string;   // secret — Moonshot (Kimi) key
         JWT_SECRET: string;
         ENVIRONMENT: string;
+        ROUTING_V2?: string;         // "on" enables task-aware model routing (config/routing.ts)
         WEB_BASE_URL: string;        // user-facing website base (auth pages, email links)
         API_BASE_URL: string;        // this worker's public base (Google redirect_uri)
         EMAIL_FROM: string;          // verified sender (no-reply@arcaneai.org)
@@ -79,6 +80,12 @@ export interface ChatCompletionRequest {
         reasoningLevel?: 'low' | 'mid' | 'high' | 'super';
         planPhase?: 'planning' | 'executing';
         sessionId?: string;
+        /** Task-aware routing signals (config/routing.ts); derived client-side from the conversation's first user message. */
+        routing?: {
+            promptChars?: number;
+            codeIntent?: boolean;
+            hasAttachments?: boolean;
+        };
         telemetry?: {
             turnIndex?: number;
             toolErrorCount?: number;
@@ -135,6 +142,6 @@ export interface ToolCall {
 export type StreamEvent =
     | { type: 'text'; content: string }
     | { type: 'tool_call'; id: string; name: string; arguments: string; finished: boolean }
-    | { type: 'usage'; input_tokens: number; output_tokens: number; cached_input_tokens?: number }
+    | { type: 'usage'; input_tokens: number; output_tokens: number; cached_input_tokens?: number; model?: string }
     | { type: 'thinking'; thought: string; signature: string }
     | { type: 'error'; code?: 'model_error' | 'rate_limit' | 'server_error'; message: string };

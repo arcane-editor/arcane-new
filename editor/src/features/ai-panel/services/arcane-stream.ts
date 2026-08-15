@@ -218,6 +218,27 @@ async function doStream(
   }));
 
   const currentMode = useAiStore.getState().mode;
+  // Task-aware routing signals (server config/routing.ts), derived from the
+  // conversation's FIRST user message so every send of a conversation routes
+  // identically — provider prompt caches are per-model, so the routed model
+  // must be sticky per conversation. Conservative by construction: a false
+  // codeIntent positive merely skips a cost downgrade.
+  const firstUser = context.messages.find((m) => m.role === 'user');
+  const firstUserText = !firstUser
+    ? ''
+    : typeof firstUser.content === 'string'
+      ? firstUser.content
+      : firstUser.content
+          .filter((c): c is { type: 'text'; text: string } => c.type === 'text')
+          .map((c) => c.text)
+          .join('\n');
+  const routing = {
+    promptChars: firstUserText.length,
+    codeIntent: /```|\b(write|edit|refactor|implement|fix|create|add|build|rename|generate)\b/i.test(
+      firstUserText,
+    ),
+    hasAttachments: firstUserText.includes('<attachments>'),
+  };
   // Map the UI mode to the server's taskType enum ('chat' | 'edit' | 'plan' |
   // 'explain'). Model choice is fully backend-driven off `reasoningLevel`; this
   // is metadata for logging only.
@@ -246,6 +267,7 @@ async function doStream(
       // Conversation id — the server derives provider prompt-cache routing
       // hints from it (prompt_cache_key / x-session-affinity).
       sessionId: useAiStore.getState().sessionId ?? undefined,
+      routing,
       telemetry: nextTurnTelemetry(),
     },
   });

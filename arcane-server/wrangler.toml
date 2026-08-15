@@ -34,6 +34,9 @@ index_name = "unity-docs-v1"
 
 [vars]
 ENVIRONMENT = "production"
+# Task-aware model routing (src/config/routing.ts). "on" enables the
+# simple-ask downgrade; the memory side-task lane is always active.
+ROUTING_V2 = "off"
 # AI Gateway id — when set, all Workers AI calls route through it for
 # caching/logging/rate-limits. Requests sent via the Workers AI `binding` (as
 # opposed to the public REST endpoint) are pre-authenticated within the
@@ -120,6 +123,7 @@ index_name = "unity-docs-v1"
 
 [env.dev.vars]
 ENVIRONMENT = "development"
+ROUTING_V2 = "on"
 CF_AI_GATEWAY_ID = "arcane-ai-gateway-dev"
 CF_ACCOUNT_ID = ""
 WEB_BASE_URL = "https://dev.arcaneai.org"
