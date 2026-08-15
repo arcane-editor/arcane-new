@@ -25,7 +25,7 @@
 
 import { fileUri, syncDocumentOpen, syncDocumentClose } from './document-sync';
 import { lspManager } from './manager';
-import { whenCsharpProjectLoaded } from './project-readiness';
+import { whenCsharpProjectLoaded, isCsharpProjectLoaded } from './project-readiness';
 
 /** Best-effort cap: never let a diagnostics fetch block the agent tool loop. */
 const DIAGNOSTICS_TIMEOUT_MS = 4000;
@@ -118,6 +118,12 @@ export async function requestFileDiagnostics(
 ): Promise<FileDiag[]> {
   const client = lspManager.client('csharp');
   if (!client.isRunning()) return [];
+  // Fast-skip while the project graph is (re)loading. This runs inside the
+  // agent's tool loop, and a new .cs file ITSELF schedules a csharp-ls
+  // restart (workspace store's csproj-regen watcher) — so during the
+  // post-write window the readiness race below could never win; it just
+  // burned the full DIAGNOSTICS_TIMEOUT_MS to return [] anyway.
+  if (!isCsharpProjectLoaded()) return [];
 
   const uri = fileUri(absPath);
 
