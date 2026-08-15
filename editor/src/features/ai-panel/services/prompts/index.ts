@@ -17,6 +17,8 @@ import type { ChatMode, Effort } from '../types';
 import { buildGraphSnapshot, graphSnapshotBudget } from '../../../graphify';
 import { useGraphifyStore } from '../../../../stores/graphify';
 import { useAsmdefStore } from '../../../../stores/asmdef';
+import { useWorkspaceStore } from '../../../../stores/workspace';
+import { getMemoryDigestSync } from '../memory/memory-cache';
 import { getUnityFactsBlock } from './unity-facts';
 import { getFrozenDecoration, type FrozenBlocks } from './frozen-context';
 import { buildContextPackText, CONTEXT_PACK_BUDGETS } from './context-pack';
@@ -63,10 +65,12 @@ export function captureDecoration(effort: Effort): FrozenBlocks {
     .map((g) => g.source_file)
     .filter((f): f is string => !!f);
 
+  const workspacePath = useWorkspaceStore.getState().workspacePath ?? '';
+
   return {
     factsBlock: getUnityFactsBlock(),
     contextPack: buildContextPackText(
-      { assemblies, keyFiles, memoryDigest: null },
+      { assemblies, keyFiles, memoryDigest: getMemoryDigestSync(workspacePath) },
       CONTEXT_PACK_BUDGETS[effort],
     ),
     graphSnapshot: buildGraphSnapshot({ maxChars: graphSnapshotBudget(effort) }),

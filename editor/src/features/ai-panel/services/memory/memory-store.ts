@@ -205,6 +205,33 @@ function uniqueSlug(title: string, entries: MemoryEntry[]): string {
   }
 }
 
+/**
+ * Salience bump for recalled entries (memory_search hits) — recall keeps
+ * useful memories alive against cap eviction. Best-effort per slug.
+ */
+export async function bumpUsage(
+  fs: MemoryFs,
+  workspacePath: string,
+  slugs: string[],
+  today: Today = defaultToday,
+): Promise<void> {
+  const dir = memoryDir(workspacePath);
+  const now = today();
+  for (const slug of slugs) {
+    try {
+      const entry = parseEntry(slug, await fs.read(`${dir}/${slug}.md`));
+      if (!entry) continue;
+      await writeEntry(fs, workspacePath, {
+        ...entry,
+        lastUsed: now,
+        timesUsed: entry.timesUsed + 1,
+      });
+    } catch {
+      // best-effort
+    }
+  }
+}
+
 // ── read side ──
 
 const CATEGORY_WEIGHT: Record<MemoryCategory, number> = { decision: 3, gotcha: 2, convention: 1 };

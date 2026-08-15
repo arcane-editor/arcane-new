@@ -67,6 +67,9 @@ import {
   runVerifiedPass,
 } from './verified-pass';
 import { distillSend } from './memory/distiller';
+import { maybeConsolidate } from './memory/consolidate';
+import { createMemorySearchTool } from './memory/memory-tool';
+import { primeMemory } from './memory/memory-cache';
 import { sideTaskRequest } from './memory/memory-request';
 import { tauriMemoryFs } from './memory/tauri-memory-fs';
 import { useAiStore, type AiMessage } from '../../../stores/ai';
@@ -174,6 +177,10 @@ function createToolsForPromptMode(mode: PromptMode, workspacePath: string): Agen
     createProjectSymbolsTool(workspacePath),
   ];
 
+  // Per-project memory recall (spec §4) — read-only, all modes, always
+  // registered (stable tool set; answers plainly when the store is empty).
+  const memoryTools: AgentTool[] = [createMemorySearchTool(workspacePath)];
+
   // Unity tools join only for Unity projects. Read tools are auto-approved and
   // available in every mode; engine-mutate tools (per-action approved) only join
   // the mutating modes. The analyzer-gate wraps write/edit on .cs output.
@@ -190,11 +197,11 @@ function createToolsForPromptMode(mode: PromptMode, workspacePath: string): Agen
   const unityRead: AgentTool[] = isUnity ? createUnityReadTools() : [];
 
   if (mode === 'ask') {
-    return [...readOnly, ...graphTools, ...unityRead].map(withRepeatCallGuard);
+    return [...readOnly, ...graphTools, ...memoryTools, ...unityRead].map(withRepeatCallGuard);
   }
 
   if (mode === 'plan-planning') {
-    return [...readOnly, ...graphTools, ...unityRead, createAskUserTool()].map(withRepeatCallGuard);
+    return [...readOnly, ...graphTools, ...memoryTools, ...unityRead, createAskUserTool()].map(withRepeatCallGuard);
   }
 
   // Verified-pass (P3.4) registers every file the send touches by composing
@@ -260,6 +267,7 @@ function createToolsForPromptMode(mode: PromptMode, workspacePath: string): Agen
   return [
     ...readOnly,
     ...graphTools,
+    ...memoryTools,
     ...unityRead,
     ...(isUnity ? createUnityMutateTools() : []),
     withEditReview(
@@ -738,7 +746,10 @@ export class AgentService {
     void distillSend(
       { userPrompt, finalAssistantText, touchedFiles: touchedFileList() },
       { request: sideTaskRequest, fs: tauriMemoryFs, workspacePath },
-    );
+    )
+      .then(() => maybeConsolidate({ fs: tauriMemoryFs, workspacePath, request: sideTaskRequest }))
+      .then(() => primeMemory(workspacePath))
+      .catch(() => {});
   }
 
   /**
