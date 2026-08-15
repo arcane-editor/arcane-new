@@ -30,6 +30,8 @@ function ChatInput() {
   const isAgentRunning = useAiStore((s) => s.isAgentRunning);
   const mode = useAiStore((s) => s.mode);
   const effort = useAiStore((s) => s.effort);
+  const planPhase = useAiStore((s) => s.planPhase);
+  const activePlanPath = useAiStore((s) => s.activePlanPath);
   const addUserMessage = useAiStore((s) => s.addUserMessage);
   const workspacePath = useWorkspaceStore((s) => s.workspacePath);
   const attachmentCount = useAiStore((s) => s.attachments.length);
@@ -67,11 +69,15 @@ function ChatInput() {
     useAiStore.getState().clearAttachments();
 
     if (mode === 'plan') {
+      // Phase-aware: with a plan awaiting execution (or stuck 'executing'),
+      // typed text RESUMES the remaining steps instead of re-planning — the
+      // old unconditional startPlanning() here re-created the plan on any
+      // message, with the write tools stripped so the model couldn't resume.
       // Last-resort net (T5): agent-service/plan-controller already surface
       // their own errors via the store, but a bug that throws before that
       // point would otherwise become an unhandled rejection.
       void planController
-        .startPlanning(text, attachments)
+        .sendPlanModeMessage(text, attachments)
         .catch((e) => useAiStore.getState().setError(String(e)));
     } else {
       void getAgentService()
@@ -89,12 +95,16 @@ function ChatInput() {
   // is blocked mid-run, but answering the question is exactly what unblocks it.
   const canSend = !!workspacePath && hasText && (!isAgentRunning || !!pendingQuestion);
 
+  const planResumePending =
+    mode === 'plan' && !!activePlanPath && (planPhase === 'awaiting-execute' || planPhase === 'executing');
   const placeholder = pendingQuestion
     ? "Answer the agent's question — or click an option above."
     : mode === 'ask'
       ? 'Ask a question about your Unity project. @ for context, ⏎ to send.'
       : mode === 'plan'
-        ? 'Describe what you want to build. @ for context, ⏎ to plan.'
+        ? planResumePending
+          ? 'Message continues the current plan — Regenerate to re-plan. ⏎ to send.'
+          : 'Describe what you want to build. @ for context, ⏎ to plan.'
         : 'Plan, build, edit. @ for context, ⏎ to send.';
 
   return (

@@ -165,6 +165,13 @@ export async function retryFailedTurn(errorMessageId: string): Promise<void> {
   const attachments = liveAttachments(target.userMessage);
   useAiStore.getState().addUserMessage(text, attachments);
   reanchorRetryCheckpoints(target.userMessage.id);
+  // Plan mode routes by phase (persisted with the session): a bare
+  // `sendMessage({ mode: 'plan' })` would default to plan-PLANNING, turning a
+  // retry of an execution turn into a fresh plan.
+  if (current.mode === 'plan') {
+    await planController.sendPlanModeMessage(text, attachments);
+    return;
+  }
   await getAgentService().sendMessage(text, {
     mode: current.mode,
     effort: current.effort,

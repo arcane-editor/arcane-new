@@ -19,6 +19,7 @@
 import { useAiStore } from '../../../stores/ai';
 import { useWorkspaceStore } from '../../../stores/workspace';
 import { getAgentService } from './agent-service';
+import { routePlanSend } from './plan-route';
 import {
   buildPlanPath,
   openPlanInEditor,
@@ -28,6 +29,7 @@ import {
 import type { TextContent, ThinkingContent, ToolCall } from './vendor/types';
 import type { Attachment } from './types';
 import type { PlanNote } from '../../markdown-preview';
+import { planStepsOf } from '../../markdown-preview';
 
 function getCurrentWorkspacePath(): string | null {
   return useWorkspaceStore.getState().workspacePath;
@@ -109,7 +111,24 @@ async function startPlanning(
   after.setPlanPhase('awaiting-execute');
 }
 
-async function executePlan(planPath: string): Promise<void> {
+/** Set the session `PlanRef.status` for `planPath`, keeping the existing ref's identity fields. */
+function setPlanRefStatus(planPath: string, status: 'draft' | 'executing' | 'done' | 'failed'): void {
+  const store = useAiStore.getState();
+  const existing = store.sessionPlans.find((p) => p.path === planPath);
+  store.addSessionPlan(
+    existing
+      ? { ...existing, status }
+      : { path: planPath, title: planPath.split('/').pop() ?? 'plan', createdAt: Date.now(), status },
+  );
+}
+
+/**
+ * Shared execution runner — Execute sends the canonical pointer text,
+ * resume sends the USER'S text (the plan pointer/body prefix is injected by
+ * agent-service from `planExecution`, so the user's words ride along as
+ * guidance for the remaining steps).
+ */
+async function runExecution(planPath: string, sendText: string): Promise<void> {
   const store = useAiStore.getState();
 
   // Dirty-tab guard: if the plan tab has unsaved edits, ask user to save first.
@@ -134,19 +153,62 @@ async function executePlan(planPath: string): Promise<void> {
   }
 
   store.setPlanPhase('executing');
+  setPlanRefStatus(planPath, 'executing');
 
-  await getAgentService().sendMessage(`Execute the plan at ${planPath}.`, {
-    mode: 'plan',
-    effort: store.effort,
-    promptMode: 'plan-execution',
-    planExecution: { planPath, planContent },
-  });
+  try {
+    await getAgentService().sendMessage(sendText, {
+      mode: 'plan',
+      effort: store.effort,
+      promptMode: 'plan-execution',
+      planExecution: { planPath, planContent },
+    });
+  } finally {
+    // Whatever happened — clean finish, abort, turn cap, or a REJECTED send —
+    // return to 'awaiting-execute' so the user can resume/re-execute. Without
+    // the finally, a rejection left the phase stuck at 'executing' and the
+    // composer routed every message into a fresh planning run.
+    useAiStore.getState().setPlanPhase('awaiting-execute');
 
-  // After execution (whether it completed cleanly or was aborted), return to
-  // 'awaiting-execute' so the user can re-execute, regenerate, or just keep
-  // the plan visible. The plan file on disk reflects whatever progress was
-  // made (the AI marks `[x]` as it goes).
-  useAiStore.getState().setPlanPhase('awaiting-execute');
+    // The file's own [x] ticks are the progress record: all ticked ⇒ done.
+    try {
+      const after = await readPlan(planPath);
+      const steps = planStepsOf(after);
+      if (steps.length > 0 && steps.every((s) => s.done)) {
+        setPlanRefStatus(planPath, 'done');
+      }
+    } catch {
+      /* status stays 'executing' (= started, not finished) */
+    }
+  }
+}
+
+async function executePlan(planPath: string): Promise<void> {
+  await runExecution(planPath, `Execute the plan at ${planPath}.`);
+}
+
+/** Continue the active plan's remaining steps, with the user's text as guidance. */
+async function resumeExecution(text: string): Promise<void> {
+  const store = useAiStore.getState();
+  const planPath = store.activePlanPath;
+  if (!planPath) {
+    store.setError('No active plan to resume.');
+    return;
+  }
+  await runExecution(planPath, text);
+}
+
+/**
+ * Route a composer message sent while the panel is in plan mode. With a plan
+ * pending (or a phase stuck at 'executing'), typed text RESUMES execution —
+ * it does not re-plan; Regenerate and Revise are the explicit re-plan paths.
+ */
+async function sendPlanModeMessage(text: string, attachments: Attachment[]): Promise<void> {
+  const store = useAiStore.getState();
+  if (routePlanSend(store.planPhase, store.activePlanPath) === 'resume') {
+    await resumeExecution(text);
+  } else {
+    await startPlanning(text, attachments);
+  }
 }
 
 async function regenerate(): Promise<void> {
@@ -223,6 +285,8 @@ function formatErr(err: unknown): string {
 export const planController = {
   startPlanning,
   executePlan,
+  resumeExecution,
+  sendPlanModeMessage,
   reviseWithNotes,
   regenerate,
   abortExecution,
