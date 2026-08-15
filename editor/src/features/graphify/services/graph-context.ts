@@ -6,9 +6,10 @@
  *     enrichment has run (see graphify-enrich.ts)
  *   - The graph's god nodes (most-connected symbols, project-wide signal),
  *     annotated with their role when enrichment is available
- *   - The active file's path (if any) so the model knows where the user is
  *
- * Deeper traversal is left to the `graphify_query` tool on demand.
+ * Deeper traversal is left to the `graphify_query` tool on demand. The output
+ * is deliberately deterministic (no counts, no active file) — it gets frozen
+ * into the cached system-prompt prefix for a whole conversation.
  */
 
 import { useGraphifyStore } from '../../../stores/graphify';
@@ -19,19 +20,17 @@ export { graphSnapshotBudget, capSnapshot } from './graph-snapshot-budget';
 const MAX_GOD_NODES = 8;
 const MAX_COMPONENTS = 8;
 
-export function buildGraphSnapshot(
-  activeFilePath: string | null,
-  opts?: { maxChars?: number },
-): string | null {
+export function buildGraphSnapshot(opts?: { maxChars?: number }): string | null {
   const { status, summary, enrichment } = useGraphifyStore.getState();
   if (status !== 'present' && status !== 'stale') return null;
   if (!summary) return null;
 
+  // Deliberately no node/edge counts and no active-file line: both jitter
+  // between builds/sends with no decision-relevant signal, and this snapshot
+  // is frozen into the cached system-prompt prefix (prompts/frozen-context.ts)
+  // where every changed byte re-bills the whole conversation history.
   const lines: string[] = [];
-  lines.push(
-    '## Codebase graph snapshot',
-    `Graph: ${summary.nodes} nodes, ${summary.edges} edges across ${summary.communities} communities.`,
-  );
+  lines.push('## Codebase graph snapshot');
 
   // AI-generated architecture summary (highest-signal — keep it near the top).
   if (enrichment?.architectureSummary) {
@@ -61,9 +60,6 @@ export function buildGraphSnapshot(
     }
   }
 
-  if (activeFilePath) {
-    lines.push('', `Active file: ${activeFilePath}`);
-  }
   lines.push(
     '',
     'To explore further: call graphify_query, graphify_explain, or graphify_path.',

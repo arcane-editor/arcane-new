@@ -69,7 +69,8 @@ import { useWorkspaceStore } from '../../../stores/workspace';
 import { useProjectContextStore } from '../../../stores/project-context';
 import { useSettingsStore } from '../../../stores/settings';
 import { useCheckpointsStore } from '../../../stores/checkpoints';
-import { buildSystemPrompt, defaultPromptModeFor, type PromptMode } from './prompts';
+import { buildSystemPrompt, captureDecoration, defaultPromptModeFor, type PromptMode } from './prompts';
+import { graphChangedSinceFreeze, resetFrozenDecoration } from './prompts/frozen-context';
 import { getUnityGroundingContext } from './prompts/unity-facts';
 import type { ContrastFacts } from './prompts/unity-contrast';
 import { lintAnswer, buildReviseMessage } from './grounding-lint';
@@ -381,6 +382,9 @@ export class AgentService {
       buildSystemPrompt(promptMode, workspacePath, {
         effort,
         planExecution: planExecutionArgs,
+        // Freeze the volatile decoration blocks per conversation so the
+        // system prompt stays byte-identical across sends (prefix caching).
+        conversationId: useAiStore.getState().sessionId,
       }),
     );
 
@@ -489,6 +493,21 @@ export class AgentService {
       if (shouldNudgeTodoUpdate(prevCounts.mutatingCalls, prevCounts.todoUpdateCalls)) {
         promptText = TODO_NUDGE_TEXT + promptText;
       }
+    }
+
+    // Cache activation §1: the system-prompt decoration is frozen per
+    // conversation (frozen-context.ts), so graph drift is surfaced at the
+    // message TAIL instead — appending to the newest user message never
+    // invalidates the provider's cached prefix, while editing the system
+    // prompt would re-bill the whole conversation.
+    if (
+      graphChangedSinceFreeze(
+        useAiStore.getState().sessionId,
+        captureDecoration(opts.effort).graphSnapshot,
+      )
+    ) {
+      promptText +=
+        '\n\n[Note: the codebase graph changed since this conversation started — graphify_query reflects the current structure.]';
     }
 
     // T5 outcome-detection choke point: `before` marks where THIS send's own
@@ -676,6 +695,9 @@ export class AgentService {
 
   reset(): void {
     this.agent.reset();
+    // A reset starts a fresh conversation — drop the frozen prompt blocks so
+    // the next conversation captures current facts/graph state.
+    resetFrozenDecoration();
   }
 
   /**
@@ -703,6 +725,9 @@ export class AgentService {
     this.unsubscribe?.();
     this.unsubscribeTelemetry?.();
     this.agent.abort();
+    // Workspace switch / New Chat: frozen prompt blocks belong to the old
+    // workspace's conversations — never reuse them.
+    resetFrozenDecoration();
     // T5: a disposed service (New Chat / workspace switch) starts the next
     // conversation with no replay target — a stale `lastSend` from the
     // conversation just torn down must never resend into the new one.

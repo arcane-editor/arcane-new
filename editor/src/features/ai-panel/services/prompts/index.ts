@@ -15,31 +15,45 @@ import {
 } from './plan-execution';
 import type { ChatMode, Effort } from '../types';
 import { buildGraphSnapshot, graphSnapshotBudget } from '../../../graphify';
-import { useWorkspaceStore } from '../../../../stores/workspace';
 import { getUnityFactsBlock } from './unity-facts';
+import { getFrozenDecoration, type FrozenBlocks } from './frozen-context';
 
 /**
- * Common decorators applied to every mode's base prompt, structured as a
- * STABLE prefix + VOLATILE tail so an eventual prompt cache (AI Gateway) keeps
- * the cacheable prefix byte-identical across turns:
+ * Common decorators applied to every mode's base prompt:
  *   [STABLE: base prompt incl. static Unity context crib]
- *   [VOLATILE: Unity project facts (incl. active-file assembly) + graph snapshot]
- * The volatile parts (which depend on the active file / detected facts) go LAST.
+ *   [FROZEN PER CONVERSATION: Unity project facts + context pack + graph snapshot]
  *
- * The graph snapshot's char budget scales with `effort`: higher tiers can
- * afford a bigger slice of the prompt (see graphSnapshotBudget).
+ * The trailing blocks are captured from live stores the FIRST time a
+ * conversation builds its prompt and then frozen for the conversation's
+ * lifetime (frozen-context.ts) — a byte-stable system prompt is what lets
+ * provider prefix caches keep the whole conversation history cached. Drift
+ * (graph rebuilds, facts changes) is surfaced at the message tail instead,
+ * by agent-service.ts.
+ *
+ * The graph snapshot's char budget scales with the effort of the send that
+ * captures it (see graphSnapshotBudget).
  */
-function decorate(base: string, effort: Effort): string {
+function decorate(base: string, effort: Effort, conversationId?: string | null): string {
+  const blocks = getFrozenDecoration(conversationId, () => captureDecoration(effort));
+
   const parts: string[] = [base];
-
-  const facts = getUnityFactsBlock();
-  if (facts) parts.push(facts);
-
-  const activeFilePath = useWorkspaceStore.getState().activeFilePath;
-  const snapshot = buildGraphSnapshot(activeFilePath, { maxChars: graphSnapshotBudget(effort) });
-  if (snapshot) parts.push(snapshot);
-
+  if (blocks.factsBlock) parts.push(blocks.factsBlock);
+  if (blocks.contextPack) parts.push(blocks.contextPack);
+  if (blocks.graphSnapshot) parts.push(blocks.graphSnapshot);
   return parts.join('\n\n');
+}
+
+/**
+ * Live capture of the decoration blocks. Exported for agent-service.ts's
+ * drift detection (`graphChangedSinceFreeze` compares a fresh capture's
+ * snapshot against the frozen one).
+ */
+export function captureDecoration(effort: Effort): FrozenBlocks {
+  return {
+    factsBlock: getUnityFactsBlock(),
+    contextPack: null,
+    graphSnapshot: buildGraphSnapshot({ maxChars: graphSnapshotBudget(effort) }),
+  };
 }
 
 /**
@@ -55,6 +69,12 @@ export interface BuildSystemPromptOpts {
   effort?: Effort;
   /** Required when mode === 'plan-execution'. */
   planExecution?: Omit<PlanExecutionPromptArgs, 'workspacePath'>;
+  /**
+   * The conversation (ai-store session) id. When set, the volatile decoration
+   * blocks are frozen per conversation (see frozen-context.ts) so the system
+   * prompt stays byte-identical across sends and provider prefix caches hold.
+   */
+  conversationId?: string | null;
 }
 
 export function buildSystemPrompt(
@@ -63,13 +83,14 @@ export function buildSystemPrompt(
   opts?: BuildSystemPromptOpts,
 ): string {
   const effort = opts?.effort ?? 'mid';
+  const conversationId = opts?.conversationId;
   switch (mode) {
     case 'ask':
-      return decorate(buildAskPrompt(workspacePath), effort);
+      return decorate(buildAskPrompt(workspacePath), effort, conversationId);
     case 'agent':
-      return decorate(buildAgentPrompt(workspacePath), effort);
+      return decorate(buildAgentPrompt(workspacePath), effort, conversationId);
     case 'plan-planning':
-      return decorate(buildPlanPlanningPrompt(workspacePath), effort);
+      return decorate(buildPlanPlanningPrompt(workspacePath), effort, conversationId);
     case 'plan-execution':
       if (!opts?.planExecution) {
         throw new Error('plan-execution prompt requires planPath and planContent');
@@ -77,6 +98,7 @@ export function buildSystemPrompt(
       return decorate(
         buildPlanExecutionPrompt({ workspacePath, ...opts.planExecution }),
         effort,
+        conversationId,
       );
   }
 }
