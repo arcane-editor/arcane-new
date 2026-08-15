@@ -23,6 +23,68 @@ import { compactMessages } from './compaction';
 /** Conservative default — the smallest model tier's window (qwen low). */
 const DEFAULT_CONTEXT_WINDOW = 32768;
 
+/**
+ * Per-tool wall-clock budget (overridable via `AgentTool.timeoutMs`). A tool
+ * that never resolves used to freeze the loop with no event, no error, and a
+ * Stop button that couldn't reach it — the signal was only checked BETWEEN
+ * tools. Now execution races the budget and the abort signal, and a breach
+ * degrades to an isError result the loop continues past.
+ */
+export const DEFAULT_TOOL_TIMEOUT_MS = 120_000;
+
+/**
+ * Race a tool execution against its timeout and the loop's abort signal.
+ * The losing `execute` promise is left running (its work may still land),
+ * but the LOOP moves on — that is the whole point.
+ */
+function executeToolBounded(
+  tool: AgentTool,
+  toolCall: ToolCall,
+  signal: AbortSignal | undefined,
+  onUpdate: (partialResult: AgentToolResult) => void,
+): Promise<AgentToolResult> {
+  const budgetMs = tool.timeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS;
+  return new Promise<AgentToolResult>((resolve, reject) => {
+    let settled = false;
+    let onAbort: (() => void) | null = null;
+    // `timeoutMs: Infinity` opts a tool out of the budget entirely — used by
+    // tools that legitimately wait on a HUMAN (write/edit approval, ask_user,
+    // approval-gated Unity mutations). Those still race the abort signal, so
+    // Stop always works; they just never spuriously "time out" while the user
+    // is thinking. Note: setTimeout coerces non-finite delays to ~1ms, so the
+    // skip must be explicit.
+    const timer = Number.isFinite(budgetMs)
+      ? setTimeout(() => {
+          settle(() =>
+            reject(new Error(`Tool "${toolCall.name}" timed out after ${Math.round(budgetMs / 1000)}s`)),
+          );
+        }, budgetMs)
+      : null;
+
+    function settle(fn: () => void): void {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      if (onAbort && signal) signal.removeEventListener('abort', onAbort);
+      fn();
+    }
+
+    if (signal) {
+      onAbort = () => settle(() => reject(new Error(`Tool "${toolCall.name}" aborted`)));
+      if (signal.aborted) {
+        onAbort();
+      } else {
+        signal.addEventListener('abort', onAbort, { once: true });
+      }
+    }
+
+    tool.execute(toolCall.id, toolCall.arguments, signal, onUpdate).then(
+      (result) => settle(() => resolve(result)),
+      (error) => settle(() => reject(error)),
+    );
+  });
+}
+
 type AgentLoopEventStream = EventStream<AgentEvent, AgentMessage[]>;
 
 /**
@@ -135,19 +197,14 @@ async function runLoop(
       let isError = false;
 
       try {
-        result = await tool.execute(
-          toolCall.id,
-          toolCall.arguments,
-          config.signal,
-          (partialResult) => {
-            stream.push({
-              type: 'tool_execution_update',
-              toolCallId: toolCall.id,
-              toolName: toolCall.name,
-              result: partialResult,
-            });
-          },
-        );
+        result = await executeToolBounded(tool, toolCall, config.signal, (partialResult) => {
+          stream.push({
+            type: 'tool_execution_update',
+            toolCallId: toolCall.id,
+            toolName: toolCall.name,
+            result: partialResult,
+          });
+        });
       } catch (error) {
         isError = true;
         result = {

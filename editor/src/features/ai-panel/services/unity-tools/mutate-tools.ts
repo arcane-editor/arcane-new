@@ -128,5 +128,9 @@ export function createUnityMutateTools(): AgentTool[] {
   if (get('unity.testRunner.enabled') !== false) {
     tools.push(createUnityRunTests());
   }
-  return tools;
+  // Every mutate tool blocks on `gated()` HUMAN approval (and unity_run_tests
+  // additionally rides a 5-minute bridge RPC) — opt out of the loop's per-tool
+  // budget so a user away from the keyboard doesn't cause spurious timeouts.
+  // The abort signal still cuts through (Stop always works).
+  return tools.map((t) => ({ ...t, timeoutMs: Number.POSITIVE_INFINITY }));
 }

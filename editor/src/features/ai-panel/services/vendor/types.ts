@@ -173,6 +173,13 @@ export type AgentToolUpdateCallback = (partialResult: AgentToolResult) => void;
 export interface AgentTool<TParameters extends TSchema = TSchema>
   extends Tool<TParameters> {
   label: string;
+  /**
+   * Wall-clock budget for one `execute` call. The loop races execution
+   * against this (default `DEFAULT_TOOL_TIMEOUT_MS` in agent-loop.ts) and
+   * degrades a breach to an `isError` tool result instead of hanging the
+   * agent. Long-running tools (e.g. the Unity test runner) override it.
+   */
+  timeoutMs?: number;
   execute: (
     toolCallId: string,
     params: Static<TParameters>,

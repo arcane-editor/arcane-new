@@ -209,22 +209,33 @@ function createToolsForPromptMode(mode: PromptMode, workspacePath: string): Agen
   // Verified-pass (P3.4) registers every file the send touches by composing
   // onto the existing onFileWritten/onFileEdited hooks — the vendor write/edit
   // tools themselves are untouched.
-  const writeTool = createWriteTool(workspacePath, {
-    operations: tauriWriteOperations,
-    onFileWritten: (path) => {
-      recordTouchedFile(path);
-      onFileWritten(path);
-    },
-    allowedRoot,
-  });
-  const editTool = createEditTool(workspacePath, {
-    operations: tauriEditOperations,
-    onFileEdited: (path) => {
-      recordTouchedFile(path);
-      onFileEdited(path);
-    },
-    allowedRoot,
-  });
+  // `timeoutMs: Infinity` on write/edit: in manual apply-mode they block on
+  // HUMAN approval (unbounded by design), and in auto mode every stage of
+  // their gate stack is now individually bounded (compile-wait 90s cap, LSP
+  // 4s, hints 8s) — so the loop's default budget would only ever fire
+  // spuriously. Decorators spread `...tool`, so the field survives wrapping.
+  const writeTool: AgentTool = {
+    ...createWriteTool(workspacePath, {
+      operations: tauriWriteOperations,
+      onFileWritten: (path) => {
+        recordTouchedFile(path);
+        onFileWritten(path);
+      },
+      allowedRoot,
+    }),
+    timeoutMs: Number.POSITIVE_INFINITY,
+  };
+  const editTool: AgentTool = {
+    ...createEditTool(workspacePath, {
+      operations: tauriEditOperations,
+      onFileEdited: (path) => {
+        recordTouchedFile(path);
+        onFileEdited(path);
+      },
+      allowedRoot,
+    }),
+    timeoutMs: Number.POSITIVE_INFINITY,
+  };
 
   // Wrap .cs write/edit with the analyzer gate (instant, offline, regex) innermost,
   // then the LSP gate (csharp-ls, live but no engine needed), then the compile gate
@@ -286,10 +297,15 @@ function createToolsForPromptMode(mode: PromptMode, workspacePath: string): Agen
         { allowedRoot },
       ),
     ),
-    createBashTool(workspacePath, {
-      operations: tauriBashOperations,
-      allowedRoot,
-    }),
+    {
+      // bash self-bounds each command (its own `timeout` param, default 30s);
+      // give the loop budget generous headroom over the longest legitimate run.
+      ...createBashTool(workspacePath, {
+        operations: tauriBashOperations,
+        allowedRoot,
+      }),
+      timeoutMs: 15 * 60_000,
+    },
     createTodoTool(),
     createAskUserTool(),
   ].map(withRepeatCallGuard);

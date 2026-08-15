@@ -148,6 +148,9 @@ export function createAskUserTool(request: RequestQuestionFn = defaultRequest): 
   return {
     name: 'ask_user',
     label: 'ask the user',
+    // Waits on a HUMAN by design — the loop's per-tool budget must never fire
+    // while the user is thinking. Abort (Stop) still cuts through.
+    timeoutMs: Number.POSITIVE_INFINITY,
     description:
       'Ask the user a question when a decision is genuinely theirs to make, or requirements are ' +
       'ambiguous enough that guessing risks wasted work. This call BLOCKS until the user answers — ' +
