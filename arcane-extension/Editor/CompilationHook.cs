@@ -22,6 +22,17 @@ namespace Arcane.Bridge
 {
     internal static class CompilationHook
     {
+        /// <summary>
+        /// SessionState key holding the serialized payload of the last
+        /// SUCCESSFUL compile. A successful compile is immediately followed by
+        /// a domain reload that can eat the live compilation_finished message
+        /// (worker wedged past Stop()'s Join, journals died with the
+        /// AppDomain) — BridgeBootstrap replays this after the reload so the
+        /// IDE's compile gate still resolves. Failed compiles don't reload, so
+        /// their message flows normally and is never persisted here.
+        /// </summary>
+        internal const string PendingResultKey = "Arcane.Bridge.PendingCompileResult";
+
         private static BridgeClient _client;
         private static bool _installed;
 
@@ -53,6 +64,8 @@ namespace Arcane.Bridge
         private static void OnCompilationStarted(object context)
         {
             ResetAccumulator();
+            // A new compile supersedes any pending post-reload replay.
+            SessionState.EraseString(PendingResultKey);
             if (_client == null) return;
             _client.Send(Protocol.Envelope(MsgType.CompilationStarted, JsonValue.NewObject()));
         }
@@ -89,6 +102,14 @@ namespace Arcane.Bridge
             payload["errors"] = _errors;
             payload["warnings"] = _warnings;
             payload["messages"] = msgArray;
+
+            // Persist BEFORE sending: only a success reloads the domain (and
+            // can therefore lose the live message). See PendingResultKey.
+            if (_errors == 0)
+            {
+                try { SessionState.SetString(PendingResultKey, payload.Serialize()); }
+                catch { /* replay is belt-and-braces; the live send below is primary */ }
+            }
 
             _client.Send(Protocol.Envelope(MsgType.CompilationFinished, payload));
             ResetAccumulator();

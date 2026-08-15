@@ -121,6 +121,37 @@ namespace Arcane.Bridge
                 epoch);
 
             _client.Start();
+
+            ReplayPendingCompileResult();
+        }
+
+        /// <summary>
+        /// Re-announce the last successful compile after the domain reload it
+        /// triggered. The live compilation_finished normally survives via the
+        /// worker's final outbox drain, but a wedged worker (Stop()'s Join
+        /// timing out) loses it with the AppDomain — and the IDE's compile
+        /// gate then waits out its full timeout for a report that never comes.
+        /// Send() only queues; the worker flushes once the session is live.
+        /// Double delivery is harmless: the IDE resolves on the first fresh
+        /// report and treats a second as a no-op store update.
+        /// </summary>
+        private static void ReplayPendingCompileResult()
+        {
+            try
+            {
+                string pending = SessionState.GetString(CompilationHook.PendingResultKey, "");
+                if (string.IsNullOrEmpty(pending)) return;
+                SessionState.EraseString(CompilationHook.PendingResultKey);
+
+                JsonValue payload = JsonValue.TryParse(pending);
+                if (payload == null || !payload.IsObject) return;
+                payload["replayed"] = true;
+                _client.Send(Protocol.Envelope(MsgType.CompilationFinished, payload));
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning("[ArcaneBridge] compile-result replay failed: " + e.Message);
+            }
         }
 
         // ── Main-thread pump ─────────────────────────────────────────────────

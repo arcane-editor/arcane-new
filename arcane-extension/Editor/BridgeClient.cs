@@ -260,9 +260,41 @@ namespace Arcane.Bridge
             }
             finally
             {
+                FlushOutboxFinal();
                 WriteFarewell();
                 CloseJournals();
             }
+        }
+
+        /// <summary>
+        /// Final outbox drain on the way out, IGNORING _running. FlushOutbox
+        /// stops at _running == false, so a message enqueued by the main thread
+        /// just before a reload shutdown (the compilation_finished of a
+        /// SUCCESSFUL compile — success always triggers a reload) was silently
+        /// discarded, and the IDE's compile gate never learned the compile
+        /// worked. Safe: this runs on the worker as it unwinds, strictly before
+        /// Stop()'s Join returns, so the next AppDomain does not exist yet and
+        /// cannot own the journal.
+        /// </summary>
+        private void FlushOutboxFinal()
+        {
+            if (_writer == null) return;
+            try
+            {
+                bool wrote = false;
+                for (;;)
+                {
+                    string line;
+                    lock (_sendLock)
+                    {
+                        if (_outbox.Count == 0) break;
+                        line = _outbox.Dequeue();
+                    }
+                    if (_writer.Append(line)) wrote = true;
+                }
+                if (wrote) _writer.Flush();
+            }
+            catch { /* best-effort — the journal may be mid-teardown */ }
         }
 
         /// <summary>
