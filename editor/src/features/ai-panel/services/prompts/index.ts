@@ -15,8 +15,11 @@ import {
 } from './plan-execution';
 import type { ChatMode, Effort } from '../types';
 import { buildGraphSnapshot, graphSnapshotBudget } from '../../../graphify';
+import { useGraphifyStore } from '../../../../stores/graphify';
+import { useAsmdefStore } from '../../../../stores/asmdef';
 import { getUnityFactsBlock } from './unity-facts';
 import { getFrozenDecoration, type FrozenBlocks } from './frozen-context';
+import { buildContextPackText, CONTEXT_PACK_BUDGETS } from './context-pack';
 
 /**
  * Common decorators applied to every mode's base prompt:
@@ -49,9 +52,23 @@ function decorate(base: string, effort: Effort, conversationId?: string | null):
  * snapshot against the frozen one).
  */
 export function captureDecoration(effort: Effort): FrozenBlocks {
+  // Context pack inputs (spec §3): the asmdef graph and graphify god-node
+  // files the editor already maintains, condensed deterministically.
+  const assemblies = useAsmdefStore.getState().graph.map((n) => ({
+    name: n.name,
+    references: n.references ?? [],
+    isEditorOnly: n.is_editor_only,
+  }));
+  const keyFiles = (useGraphifyStore.getState().summary?.god_nodes ?? [])
+    .map((g) => g.source_file)
+    .filter((f): f is string => !!f);
+
   return {
     factsBlock: getUnityFactsBlock(),
-    contextPack: null,
+    contextPack: buildContextPackText(
+      { assemblies, keyFiles, memoryDigest: null },
+      CONTEXT_PACK_BUDGETS[effort],
+    ),
     graphSnapshot: buildGraphSnapshot({ maxChars: graphSnapshotBudget(effort) }),
   };
 }
