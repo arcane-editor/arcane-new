@@ -28,6 +28,60 @@ function blocks<T>(content: T[] | null | undefined): T[] {
   return Array.isArray(content) ? content : [];
 }
 
+/**
+ * Repair the tool_call ↔ tool-result pairing invariant.
+ *
+ * An abort mid-tool-list or a mid-stream error leaves an assistant message
+ * carrying `tool_calls` with no matching results (agent-loop pushes the
+ * assistant message BEFORE executing tools). OpenAI-compatible providers 400
+ * on the orphaned pair — which used to poison the conversation permanently:
+ * every subsequent send replayed the same broken history and failed. This is
+ * the same invariant `compaction.ts` documents; enforcing it only there left
+ * the un-compacted path (every conversation under the trigger threshold)
+ * unprotected.
+ *
+ * Two repairs, one forward scan:
+ *  - assistant tool_calls with no result → synthesize an "[interrupted]" tool
+ *    message right after the answered ones;
+ *  - a tool message whose id matches no expected call at that position → drop
+ *    (providers also reject results with no preceding call).
+ */
+function repairToolPairs(messages: OpenAIMessage[]): OpenAIMessage[] {
+  const out: OpenAIMessage[] = [];
+  let i = 0;
+  while (i < messages.length) {
+    const m = messages[i];
+    if (m.role === 'assistant' && m.tool_calls && m.tool_calls.length > 0) {
+      out.push(m);
+      const expected = new Set(m.tool_calls.map((tc) => tc.id));
+      i++;
+      while (i < messages.length && messages[i].role === 'tool') {
+        const t = messages[i];
+        if (t.tool_call_id && expected.has(t.tool_call_id)) {
+          expected.delete(t.tool_call_id);
+          out.push(t);
+        }
+        i++;
+      }
+      for (const id of expected) {
+        out.push({
+          role: 'tool',
+          tool_call_id: id,
+          content: '[interrupted — no result produced]',
+        });
+      }
+      continue;
+    }
+    if (m.role === 'tool') {
+      i++; // stray result with no live tool_call — drop
+      continue;
+    }
+    out.push(m);
+    i++;
+  }
+  return out;
+}
+
 export function convertToOpenAI(systemPrompt: string, messages: Message[]): OpenAIMessage[] {
   const result: OpenAIMessage[] = [];
 
@@ -109,5 +163,5 @@ export function convertToOpenAI(systemPrompt: string, messages: Message[]): Open
     }
   }
 
-  return result;
+  return repairToolPairs(result);
 }
