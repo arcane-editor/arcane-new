@@ -4392,6 +4392,10 @@ mod staged_diff_tests {
         assert_eq!(repo_root(&one_deep).unwrap(), root);
     }
 
+    // Unix-only, matching `canonicalize_path_tests` in lib.rs: creating a
+    // symlink on Windows needs elevated privileges / dev mode, which isn't
+    // guaranteed in CI. The trap this guards is macOS-specific anyway.
+    #[cfg(unix)]
     #[test]
     fn repo_root_preserves_the_callers_path_spelling() {
         // Regression guard for the macOS symlink trap: `--show-toplevel`
