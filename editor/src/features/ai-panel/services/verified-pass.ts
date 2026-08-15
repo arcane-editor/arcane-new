@@ -31,7 +31,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { readScriptGuidFromMeta } from './unity-tools/script-guid';
-import type { CompilationPayload } from '../../../types/unity';
+import type { CompileWaitOutcome } from '../../unity-bridge';
 import type { Finding } from '../../unity-analyzers';
 
 export interface VerifiedCardData {
@@ -50,7 +50,7 @@ export interface VerifiedPassDeps {
   readFile: (absPath: string) => Promise<string>;
   runAnalyzers: (text: string, filePath: string) => Finding[] | Promise<Finding[]>;
   bridgeConnected: () => boolean | Promise<boolean>;
-  triggerRecompile: (opts: { signal?: AbortSignal }) => Promise<CompilationPayload | null>;
+  triggerRecompile: (opts: { signal?: AbortSignal }) => Promise<CompileWaitOutcome>;
   /** Resolves the GUID from a `.cs` file's paired `.meta`, or `null` if missing/unreadable. */
   readGuid: (absPath: string) => Promise<string | null>;
 }
@@ -71,7 +71,7 @@ async function defaultBridgeConnected(): Promise<boolean> {
 
 async function defaultTriggerRecompile(
   opts: { signal?: AbortSignal } = {},
-): Promise<CompilationPayload | null> {
+): Promise<CompileWaitOutcome> {
   const { triggerRecompileAndWait } = await import('../../unity-bridge');
   return triggerRecompileAndWait(opts);
 }
@@ -199,9 +199,12 @@ async function computeCompile(
       }, budgetMs);
     }
 
-    const report = await deps.triggerRecompile({ signal: controller.signal });
-    if (!report) return 'skipped'; // timed out / bridge dropped mid-wait / aborted
-    const errors = (report.messages ?? []).filter((m) => m.type === 'Error').length;
+    const outcome = await deps.triggerRecompile({ signal: controller.signal });
+    // `no-compile` means the refresh ran but Unity had nothing to build — the
+    // card can't claim a verified compile from that, so it stays 'skipped'
+    // (same conservative treatment `unknown` gets).
+    if (outcome.status !== 'report') return 'skipped';
+    const errors = (outcome.report.messages ?? []).filter((m) => m.type === 'Error').length;
     return errors === 0 ? 'clean' : { errors };
   } finally {
     if (abortTimer) clearTimeout(abortTimer);

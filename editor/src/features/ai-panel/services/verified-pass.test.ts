@@ -27,7 +27,7 @@ function fakeDeps(overrides: Partial<VerifiedPassDeps> = {}): VerifiedPassDeps {
     readFile: async () => 'class Foo {}',
     runAnalyzers: () => [],
     bridgeConnected: () => false,
-    triggerRecompile: async () => null,
+    triggerRecompile: async () => ({ status: 'unknown', reason: 'timeout' } as const),
     readGuid: async () => 'abc123',
     ...overrides,
   };
@@ -72,7 +72,7 @@ describe('runVerifiedPass', () => {
     const report: CompilationPayload = { started: false, success: true, errors: 0, messages: [] };
     const deps = fakeDeps({
       bridgeConnected: () => true,
-      triggerRecompile: async () => report,
+      triggerRecompile: async () => ({ status: 'report', report } as const),
     });
 
     const data = await runVerifiedPass(WORKSPACE, deps);
@@ -110,7 +110,7 @@ describe('runVerifiedPass', () => {
       bridgeConnected: () => false,
       triggerRecompile: async () => {
         triggerCalled = true;
-        return null;
+        return { status: 'unknown', reason: 'timeout' } as const;
       },
     });
 
@@ -135,7 +135,7 @@ describe('runVerifiedPass', () => {
     };
     const deps = fakeDeps({
       bridgeConnected: () => true,
-      triggerRecompile: async () => report,
+      triggerRecompile: async () => ({ status: 'report', report } as const),
     });
 
     const data = await runVerifiedPass(WORKSPACE, deps);
@@ -181,7 +181,7 @@ describe('runVerifiedPass', () => {
         throw new Error('analyzer engine exploded');
       },
       bridgeConnected: () => true,
-      triggerRecompile: async () => ({ started: false, success: true, errors: 0, messages: [] }),
+      triggerRecompile: async () => ({ status: 'report', report: { started: false, success: true, errors: 0, messages: [] } } as const),
       readGuid: async () => 'guid-1',
     });
 
