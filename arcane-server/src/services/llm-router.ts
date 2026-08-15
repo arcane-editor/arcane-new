@@ -3,7 +3,7 @@ import { createWorkersAI } from 'workers-ai-provider';
 import { createOpenAI } from '@ai-sdk/openai';
 import type { ModelMessage, ToolSet } from 'ai';
 import type { ChatCompletionRequest, ChatMessage, StreamEvent, ToolDefinition } from '../types.ts';
-import { getMaxOutput } from '../lib/costs.ts';
+import { getMaxOutput, wireFormatForNativeId } from '../lib/costs.ts';
 
 // All models — Workers AI catalog ids and unified-billing third-party ids
 // alike — route through Cloudflare Workers AI via the AI Gateway (the `AI`
@@ -38,7 +38,11 @@ const openaiWire = {
     wireFormat: 'openai' as const,
     create: ({ modelId, fetch, baseURL }: { modelId: string; fetch: typeof globalThis.fetch; baseURL?: string }) => {
         const provider = createOpenAI({ apiKey: 'unused', fetch, ...(baseURL ? { baseURL } : {}) });
-        return modelId.startsWith('gpt-5.6') ? provider.responses(modelId) : provider.chat(modelId);
+        // The catalog (costs.ts `wireFormat`) is authoritative; the family
+        // heuristic only covers uncataloged ids (ad-hoc probes).
+        const format = wireFormatForNativeId(modelId)
+            ?? (modelId.startsWith('gpt-5.6') ? 'responses' : 'chat');
+        return format === 'responses' ? provider.responses(modelId) : provider.chat(modelId);
     },
 };
 

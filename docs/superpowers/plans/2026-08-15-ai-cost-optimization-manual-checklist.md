@@ -35,6 +35,32 @@ against the live gateway; NOT introduced by the optimization work):
    worker) is pre-authenticated within the account, so no code change and
    glm-5.2 is unaffected. Repeat for `arcane-ai-gateway` before prod.
 
+## Wire-format contract (added after the luna incident — read before ANY model change)
+
+Cloudflare's run catalog validates request bodies against a PER-MODEL schema;
+the wrong wire format 400s (AiGatewayError 7003) on every request. Verified
+probe matrix, 2026-08-15, against the live gateway (SCHEMA-REJECT = 400 7003,
+accepted = passes to the unified-billing gate):
+
+| Model                | chat            | responses       |
+|----------------------|-----------------|-----------------|
+| openai/gpt-5.6-luna  | SCHEMA-REJECT   | accepted        |
+| openai/gpt-5.6-terra | SCHEMA-REJECT   | accepted        |
+| openai/gpt-5.6-sol   | (untested)      | accepted        |
+| openai/gpt-5.4       | accepted        | accepted        |
+| openai/gpt-5.4-mini  | accepted        | (untested)      |
+| xai/grok-4.6         | accepted        | SCHEMA-REJECT   |
+| @cf/* (glm, bge)     | native Workers AI — no gateway schema        |
+
+Enforcement now in code: `ModelInfo.wireFormat` in `src/lib/costs.ts` is
+REQUIRED for every unified-route model (model-catalog.test.ts fails without
+it) and drives llm-router's openai wire plugin. **Process for adding any
+third-party model:** (1) open its dashboard page (AI → Models → <model>) and
+read the "Request formats" field; (2) probe both formats through a local
+`wrangler dev --env dev` against the real gateway — a 400 7003 means wrong
+format, a 402 2021 means accepted-awaiting-billing; (3) set `wireFormat` in
+the catalog entry; the contract test forces this.
+
 ## Verify caching actually bills cached (the whole point)
 
 - [ ] Run a 3+ turn **agent** send against dev on each tier (low = gpt-5.4-mini,

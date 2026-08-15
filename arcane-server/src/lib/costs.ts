@@ -21,6 +21,20 @@ export interface LongContextRates {
 
 export interface ModelInfo {
     route: 'workers-ai' | 'unified';
+    /**
+     * The wire format Cloudflare's run catalog serves this model in —
+     * REQUIRED for every `unified` model (enforced by model-catalog.test.ts)
+     * because the catalog validates the request body against a per-model
+     * schema and a mismatch 400s (AiGatewayError 7003) on every request.
+     * Probe matrix verified 2026-08-15 against the live gateway:
+     *   gpt-5.6 family  → 'responses' ONLY (chat rejected)
+     *   xai/grok-4.6    → 'chat' ONLY (responses rejected)
+     *   gpt-5.4 family  → both accepted (we use chat)
+     * The per-model source of truth is the dashboard model page's
+     * "Request formats" field (AI → Models → <model>); re-probe before
+     * routing any new third-party model (see the 2026-08-15 checklist).
+     */
+    wireFormat?: 'chat' | 'responses';
     inputCostPer1M: number;
     outputCostPer1M: number;
     cachedInputCostPer1M: number;
@@ -29,18 +43,34 @@ export interface ModelInfo {
     longContext?: LongContextRates;
 }
 
+/**
+ * Wire format by PROVIDER-NATIVE model id (the gateway delegate strips the
+ * `openai/`/`xai/` slug prefix before handing the id to the wire plugin).
+ * Derived from MODEL_CATALOG below; consumed by llm-router's openai plugin.
+ */
+export function wireFormatForNativeId(nativeId: string): 'chat' | 'responses' | undefined {
+    for (const [slug, info] of Object.entries(MODEL_CATALOG)) {
+        if (info.route === 'unified' && slug.split('/').slice(1).join('/') === nativeId) {
+            return info.wireFormat;
+        }
+    }
+    return undefined;
+}
+
 export const MODEL_CATALOG: Record<string, ModelInfo> = {
     // Unrouted fallback reference (owner chose luna-only; kept in case the
     // gateway key setup ever needs a catalog-served stand-in). Pricing
     // verified 2026-08-15: $0.75/$0.075 cached/$4.50; 400k ctx, 128k out.
     'openai/gpt-5.4-mini': {
         route: 'unified',
+        wireFormat: 'chat',
         inputCostPer1M: 0.75, outputCostPer1M: 4.50, cachedInputCostPer1M: 0.075,
         contextWindow: 400_000, maxOutput: 128_000,
     },
     // Standard — served via gateway BYOK (see plans.ts).
     'openai/gpt-5.6-luna': {
         route: 'unified',
+        wireFormat: 'responses',
         inputCostPer1M: 0.20, outputCostPer1M: 1.20, cachedInputCostPer1M: 0.02,
         contextWindow: 1_050_000, maxOutput: 128_000,
         // Above 272k input OpenAI reprices at $0.40/$1.80. The long-context
@@ -62,6 +92,7 @@ export const MODEL_CATALOG: Record<string, ModelInfo> = {
     // Max — frontier intelligence. Above 200k the whole request reprices.
     'xai/grok-4.6': {
         route: 'unified',
+        wireFormat: 'chat',
         // No sub-threshold cached rate is published; charging cache hits at the
         // full input rate over-estimates, which is the safe direction.
         inputCostPer1M: 2.00, outputCostPer1M: 6.00, cachedInputCostPer1M: 2.00,
