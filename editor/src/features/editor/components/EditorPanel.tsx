@@ -193,42 +193,47 @@ function EditorPanel() {
   // its steps, suggestions and execute controls — the reason it opens here
   // rather than in Monaco is that a plan is something you act on, and sending
   // the user to a raw text buffer to do that was the gap.
-  if (isMarkdownPath(activeFile.name) && !activeFile.diff) {
-    const mode = markdownViewModeMap[activeFile.path] ?? 'preview';
-    if (mode === 'preview') {
-      if (isPlanPath(activeFile.path)) {
-        return (
-          <PlanDocumentView
-            path={activeFile.path}
-            content={activeFile.content}
-            notes={planNotes}
-            onNotesChange={setPlanNotes}
-            onRevise={() => planController.reviseWithNotes(activeFile.path, planNotes)}
-            onExecute={() => planController.executePlan(activeFile.path)}
-            onStop={() => planController.abortExecution()}
-          />
-        );
-      }
-      return (
-        <div className="md-preview-standalone">
-          <div className="md-preview-toolbar">
-            <button
-              type="button"
-              className="plan-doc-mode"
-              onClick={() => useUiStore.getState().setMarkdownViewMode(activeFile.path, 'source')}
-            >
-              Edit source
-            </button>
-          </div>
-          <MarkdownPreview
-            content={activeFile.content}
-            notes={[]}
-            onNotesChange={() => {}}
-            allowNotes={false}
-          />
+  //
+  // A plan is matched BEFORE the view-mode gate: PlanDocumentView owns both
+  // modes itself (its Source mode embeds Monaco inside the plan chrome). The
+  // old ordering gated on mode === 'preview' first, which made the Source
+  // button a one-way door into the bare Monaco fallback below — with no
+  // control anywhere to get back to the preview.
+  const isPlainMarkdown =
+    isMarkdownPath(activeFile.name) && !activeFile.diff && !isPlanPath(activeFile.path);
+  if (isMarkdownPath(activeFile.name) && !activeFile.diff && isPlanPath(activeFile.path)) {
+    return (
+      <PlanDocumentView
+        path={activeFile.path}
+        content={activeFile.content}
+        notes={planNotes}
+        onNotesChange={setPlanNotes}
+        onRevise={() => planController.reviseWithNotes(activeFile.path, planNotes)}
+        onExecute={() => planController.executePlan(activeFile.path)}
+        onStop={() => planController.abortExecution()}
+      />
+    );
+  }
+  if (isPlainMarkdown && (markdownViewModeMap[activeFile.path] ?? 'preview') === 'preview') {
+    return (
+      <div className="md-preview-standalone">
+        <div className="md-preview-toolbar">
+          <button
+            type="button"
+            className="plan-doc-mode"
+            onClick={() => useUiStore.getState().setMarkdownViewMode(activeFile.path, 'source')}
+          >
+            Edit source
+          </button>
         </div>
-      );
-    }
+        <MarkdownPreview
+          content={activeFile.content}
+          notes={[]}
+          onNotesChange={() => {}}
+          allowNotes={false}
+        />
+      </div>
+    );
   }
 
   if (activeFile.diff) {
@@ -312,6 +317,30 @@ function EditorPanel() {
   return (
     <div className="editor-container">
       <PackageCacheBanner />
+      {isPlainMarkdown && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            padding: '4px 10px',
+            fontSize: 12,
+            background: 'var(--bg-sidebar)',
+            borderBottom: '1px solid var(--border)',
+            color: 'var(--text-secondary)',
+            flexShrink: 0,
+          }}
+        >
+          <span>Markdown source</span>
+          <button
+            className="asset-viewer-btn"
+            style={{ marginLeft: 'auto' }}
+            onClick={() => useUiStore.getState().setMarkdownViewMode(activeFile.path, 'preview')}
+          >
+            Preview
+          </button>
+        </div>
+      )}
       {structuredCandidate && assetMode && assetMode !== 'structured' && (
         <div
           style={{

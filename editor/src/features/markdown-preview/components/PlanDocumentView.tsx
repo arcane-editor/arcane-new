@@ -1,7 +1,12 @@
 import { useMemo } from 'react';
+import MonacoEditor from '@monaco-editor/react';
 import { Check, Circle, CircleDot, Play, Square } from 'lucide-react';
 import { useAiStore } from '../../../stores/ai';
 import { useUiStore, type MarkdownViewMode } from '../../../stores/ui';
+import { useThemeStore } from '../../../stores/theme';
+import { useWorkspaceStore } from '../../../stores/workspace';
+import { ensureMonacoTheme } from '../../theme';
+import { fileUri } from '../../lsp';
 import MarkdownPreview from './MarkdownPreview';
 import { planStepsOf, type PlanNote } from '../services/note-anchor';
 
@@ -40,6 +45,8 @@ function PlanDocumentView({
   const setEffort = useAiStore((s) => s.setEffort);
 
   const executing = planPhase === 'executing';
+  const activeThemeId = useThemeStore((s) => s.activeThemeId);
+  const monacoThemeId = `app-theme-${activeThemeId}`;
 
   // Step state comes from the file — plan-execution.ts edits `- [ ]` to `- [x]`
   // as it completes each one — while the *running* step comes from the live
@@ -116,10 +123,34 @@ function PlanDocumentView({
         {viewMode === 'preview' ? (
           <MarkdownPreview content={content} notes={notes} onNotesChange={onNotesChange} />
         ) : (
-          // Source view is deliberately plain: the file is editable in a normal
-          // Monaco tab, and a second editor here would be a second source of
-          // truth for unsaved state.
-          <pre className="plan-doc-source">{content}</pre>
+          // Source mode embeds Monaco inside the plan chrome (header, progress,
+          // footer stay). It edits the SAME workspace tab buffer the plain
+          // Monaco fallback would — updateFileContent marks the tab dirty and
+          // the normal Cmd+S/save flow applies, so there is exactly one source
+          // of truth for unsaved state. Read-only while the agent executes.
+          <MonacoEditor
+            path={fileUri(path)}
+            height="100%"
+            language="markdown"
+            theme={monacoThemeId}
+            value={content}
+            onChange={(value) => {
+              if (value !== undefined) {
+                useWorkspaceStore.getState().updateFileContent(path, value);
+              }
+            }}
+            beforeMount={() => ensureMonacoTheme(useThemeStore.getState().getActiveTheme())}
+            onMount={() => ensureMonacoTheme(useThemeStore.getState().getActiveTheme())}
+            options={{
+              readOnly: executing,
+              minimap: { enabled: false },
+              wordWrap: 'on',
+              automaticLayout: true,
+              scrollBeyondLastLine: false,
+              overviewRulerLanes: 0,
+              overviewRulerBorder: false,
+            }}
+          />
         )}
       </div>
 
