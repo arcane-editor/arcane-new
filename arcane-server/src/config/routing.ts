@@ -12,10 +12,13 @@
 //   - everything else: the tier's static model (identical to the old
 //     resolveModelForTier behavior).
 //
-// Routing only ever moves DOWN from the requested tier, so the tier
-// entitlement gate (isTierAllowed, checked by the route before routing) stays
-// authoritative. Billing always uses the model actually served (usage.ts is
-// keyed by model id), so a downgraded send bills at the cheaper rate.
+// Routing moves DOWN from the requested tier (cost) with one deliberate
+// exception: low-tier PLAN-MODE PLANNING routes UP to the mid model — a plan
+// drafted by Deep Think and executed by the cheap tier is the product's
+// plan-mode contract (owner decision 2026-08-15). The tier entitlement gate
+// (isTierAllowed, checked by the route before routing) stays authoritative
+// for what the user may REQUEST; billing always uses the model actually
+// served (usage.ts is keyed by model id).
 //
 // Cache interaction: model choice must be sticky per conversation — provider
 // prompt caches are per-model. All routing signals are stable for the life of
@@ -28,6 +31,8 @@ import { getIntensityConfig, DEFAULT_INTENSITY, INLINE_MODEL, type Intensity } f
 export interface RoutingSignals {
     taskType?: string;
     mode?: string;
+    /** Plan-mode phase reported by the editor ('planning' | 'executing'). */
+    planPhase?: string;
     /** Chars of the conversation's FIRST user message (stable across sends). */
     promptChars?: number;
     codeIntent?: boolean;
@@ -38,7 +43,7 @@ export interface RoutingDecision {
     model: string;
     /** The tier whose model was actually served (for logs; billing keys off `model`). */
     routedTier: Intensity;
-    reason: 'static' | 'side-task' | 'simple-ask-downgrade' | 'routing-off';
+    reason: 'static' | 'side-task' | 'simple-ask-downgrade' | 'plan-on-deepthink' | 'routing-off';
 }
 
 /** Short, attachment-free, non-code ask prompts are downgrade candidates. */
@@ -67,6 +72,12 @@ export function resolveModelForSend(
 
     if (routingFlag !== 'on') {
         return { model: tierModel, routedTier: tier, reason: 'routing-off' };
+    }
+
+    // Plan-mode planning on the low tier drafts with the mid model
+    // (Deep Think); the execution phase stays on the tier model.
+    if (tier === 'low' && signals.mode === 'plan' && signals.planPhase === 'planning') {
+        return { model: getIntensityConfig('mid')!.model, routedTier: 'mid', reason: 'plan-on-deepthink' };
     }
 
     if (

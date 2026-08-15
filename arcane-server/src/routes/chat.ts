@@ -61,6 +61,7 @@ chatRouter.post('/v1/chat/completions', async (c) => {
         {
             taskType: body.metadata?.taskType,
             mode: body.metadata?.mode,
+            planPhase: body.metadata?.planPhase,
             ...body.metadata?.routing,
         },
         c.env.ROUTING_V2,

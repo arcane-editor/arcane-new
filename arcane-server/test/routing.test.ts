@@ -34,6 +34,20 @@ describe('resolveModelForSend', () => {
         expect(resolveModelForSend('low', signals, 'on').reason).toBe('static');
     });
 
+    it('low-tier plan-mode planning routes UP to the mid model; execution stays low', () => {
+        expect(resolveModelForSend('low', { mode: 'plan', planPhase: 'planning' }, 'on')).toEqual({
+            model: MID, routedTier: 'mid', reason: 'plan-on-deepthink',
+        });
+        expect(resolveModelForSend('low', { mode: 'plan', planPhase: 'executing' }, 'on').model).toBe(LOW);
+        expect(resolveModelForSend('low', { mode: 'plan' }, 'on').model).toBe(LOW);
+        // flag off → identity; other tiers unaffected
+        expect(resolveModelForSend('low', { mode: 'plan', planPhase: 'planning' }, undefined).model).toBe(LOW);
+        expect(resolveModelForSend('mid', { mode: 'plan', planPhase: 'planning' }, 'on').model).toBe(MID);
+        expect(resolveModelForSend('high', { mode: 'plan', planPhase: 'planning' }, 'on').model).toBe(HIGH);
+        // agent mode never gets the planning hop
+        expect(resolveModelForSend('low', { mode: 'agent', planPhase: 'planning' }, 'on').model).toBe(LOW);
+    });
+
     it('never downgrades code-intent, long, attachment-carrying, or non-ask sends', () => {
         const base = { mode: 'ask', promptChars: 120, codeIntent: false, hasAttachments: false };
         expect(resolveModelForSend('mid', { ...base, codeIntent: true }, 'on').model).toBe(MID);

@@ -29,6 +29,7 @@ import { AssistantMessageEventStream } from './vendor/event-stream';
 import { nextTurnTelemetry, recordTurnLatency } from './turn-telemetry';
 import { convertToOpenAI } from './openai-format';
 import { getStreamExtras } from './stream-extras';
+import { getSendPlanPhase } from './send-context';
 import { combineSignals, computeBackoffMs, isTransient, raceWithTimeout, sleep, TimeoutRaceError } from './stream-retry';
 import { ARCANE_API_URL } from '../../../config/api';
 
@@ -267,6 +268,10 @@ async function doStream(
       // Conversation id — the server derives provider prompt-cache routing
       // hints from it (prompt_cache_key / x-session-affinity).
       sessionId: useAiStore.getState().sessionId ?? undefined,
+      // Plan-mode phase FACT (send-context.ts) — the server's routing layer
+      // maps low-tier planning sends to the mid model; the editor never
+      // chooses models.
+      planPhase: getSendPlanPhase(),
       routing,
       telemetry: nextTurnTelemetry(),
     },

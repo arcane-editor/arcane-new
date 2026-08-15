@@ -81,6 +81,8 @@ import { useCheckpointsStore } from '../../../stores/checkpoints';
 import { buildSystemPrompt, captureDecoration, defaultPromptModeFor, type PromptMode } from './prompts';
 import { graphChangedSinceFreeze, resetFrozenDecoration } from './prompts/frozen-context';
 import { buildPlanSendPrefix } from './prompts/plan-execution';
+import { setSendPromptMode } from './send-context';
+import { assessTaskSize, TODO_FIRST_TEXT } from './auto-plan';
 import { getUnityGroundingContext } from './prompts/unity-facts';
 import type { ContrastFacts } from './prompts/unity-contrast';
 import { lintAnswer, buildReviseMessage } from './grounding-lint';
@@ -489,6 +491,9 @@ export class AgentService {
     }
 
     const promptMode: PromptMode = opts.promptMode ?? defaultPromptModeFor(opts.mode);
+    // Report the plan-mode phase FACT to the stream layer (metadata.planPhase);
+    // the server's routing layer owns every model decision.
+    setSendPromptMode(promptMode);
     this.syncForPromptMode(promptMode, effectiveEffort, opts.planExecution);
     this.agent.setReasoning(effectiveEffort);
     // Compaction budget: the real window of the model this tier maps to
@@ -526,9 +531,22 @@ export class AgentService {
     // same assignment) so it stacks with — rather than getting overwritten
     // by — an attachment prefix on the same send.
     if (promptMode === 'agent' || promptMode === 'plan-execution') {
-      const prevCounts = getPreviousSendNudgeCounts();
-      if (shouldNudgeTodoUpdate(prevCounts.mutatingCalls, prevCounts.todoUpdateCalls)) {
-        promptText = TODO_NUDGE_TEXT + promptText;
+      // Proactive sibling of the retrospective nudge below: a LARGE agent-mode
+      // request (auto-plan.ts heuristics on the user's own text — attachment
+      // prefixes excluded) gets a todo-first instruction up front. Agent mode
+      // only: plan-execution already works from an approved plan. When it
+      // fires, the retrospective nudge is redundant, so it's skipped.
+      const todoFirst =
+        promptMode === 'agent' &&
+        useSettingsStore.getState().getSetting('ai.autoPlan.enabled') !== false &&
+        assessTaskSize(text, opts.attachments?.length ?? 0) === 'large';
+      if (todoFirst) {
+        promptText = TODO_FIRST_TEXT + promptText;
+      } else {
+        const prevCounts = getPreviousSendNudgeCounts();
+        if (shouldNudgeTodoUpdate(prevCounts.mutatingCalls, prevCounts.todoUpdateCalls)) {
+          promptText = TODO_NUDGE_TEXT + promptText;
+        }
       }
     }
 
