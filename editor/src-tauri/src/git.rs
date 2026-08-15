@@ -2168,6 +2168,10 @@ mod branch_lifecycle_tests {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().to_str().unwrap();
         run_git(path, &["init", "--initial-branch=main"]);
+        // Windows git defaults to core.autocrlf=true and would rewrite LF to
+        // CRLF every time it materialises a file (restore, stash pop, discard);
+        // these tests assert on exact contents, so pin the temp repo instead.
+        run_git(path, &["config", "core.autocrlf", "false"]);
         run_git(path, &["config", "user.email", "test@example.com"]);
         run_git(path, &["config", "user.name", "Test User"]);
         run_git(path, &["commit", "--allow-empty", "-m", "init"]);
@@ -2422,6 +2426,10 @@ mod branch_reflog_tests {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().to_str().unwrap();
         run_git(path, &["init", "--initial-branch=main"]);
+        // Windows git defaults to core.autocrlf=true and would rewrite LF to
+        // CRLF every time it materialises a file (restore, stash pop, discard);
+        // these tests assert on exact contents, so pin the temp repo instead.
+        run_git(path, &["config", "core.autocrlf", "false"]);
         run_git(path, &["config", "user.email", "test@example.com"]);
         run_git(path, &["config", "user.name", "Test User"]);
         run_git(path, &["commit", "--allow-empty", "-m", "init"]);
@@ -2703,6 +2711,10 @@ mod commit_detail_tests {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().to_str().unwrap();
         run_git(path, &["init", "--initial-branch=main"]);
+        // Windows git defaults to core.autocrlf=true and would rewrite LF to
+        // CRLF every time it materialises a file (restore, stash pop, discard);
+        // these tests assert on exact contents, so pin the temp repo instead.
+        run_git(path, &["config", "core.autocrlf", "false"]);
         run_git(path, &["config", "user.email", "test@example.com"]);
         run_git(path, &["config", "user.name", "Test User"]);
         tmp
@@ -3409,6 +3421,10 @@ mod diff_file_head_tests {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().to_str().unwrap();
         run_git(path, &["init", "--initial-branch=main"]);
+        // Windows git defaults to core.autocrlf=true and would rewrite LF to
+        // CRLF every time it materialises a file (restore, stash pop, discard);
+        // these tests assert on exact contents, so pin the temp repo instead.
+        run_git(path, &["config", "core.autocrlf", "false"]);
         run_git(path, &["config", "user.email", "test@example.com"]);
         run_git(path, &["config", "user.name", "Test User"]);
         std::fs::write(std::path::Path::new(path).join("a.txt"), "line1\nline2\n").unwrap();
@@ -3522,6 +3538,10 @@ mod stash_and_amend_tests {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().to_str().unwrap();
         run_git(path, &["init", "--initial-branch=main"]);
+        // Windows git defaults to core.autocrlf=true and would rewrite LF to
+        // CRLF every time it materialises a file (restore, stash pop, discard);
+        // these tests assert on exact contents, so pin the temp repo instead.
+        run_git(path, &["config", "core.autocrlf", "false"]);
         run_git(path, &["config", "user.email", "test@example.com"]);
         run_git(path, &["config", "user.name", "Test User"]);
         std::fs::write(std::path::Path::new(path).join("a.txt"), "line1\n").unwrap();
@@ -3929,6 +3949,9 @@ mod status_parse_tests {
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().to_str().unwrap();
         run_git(p, &["init", "-q"]);
+        // See the note in the other init_repo helpers: Windows git would
+        // rewrite LF to CRLF on every checkout without this.
+        run_git(p, &["config", "core.autocrlf", "false"]);
         run_git(p, &["config", "user.email", "t@t.t"]);
         run_git(p, &["config", "user.name", "t"]);
         std::fs::write(dir.path().join("a.txt"), "one\n").unwrap();
@@ -4127,6 +4150,10 @@ mod staged_diff_tests {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().to_str().unwrap();
         run_git(path, &["init", "--initial-branch=main"]);
+        // Windows git defaults to core.autocrlf=true and would rewrite LF to
+        // CRLF every time it materialises a file (restore, stash pop, discard);
+        // these tests assert on exact contents, so pin the temp repo instead.
+        run_git(path, &["config", "core.autocrlf", "false"]);
         run_git(path, &["config", "user.email", "test@example.com"]);
         run_git(path, &["config", "user.name", "Test User"]);
         std::fs::write(std::path::Path::new(path).join("a.txt"), "line1\n").unwrap();
