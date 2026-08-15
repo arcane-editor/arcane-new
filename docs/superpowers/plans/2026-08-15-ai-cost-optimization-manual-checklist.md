@@ -12,9 +12,31 @@ credentials or a deploy — code-side work is done and green (editor
       `[env.dev.vars]`; prod ships `"off"` until the A/B below.
 - [ ] Ship an editor build (Arcane Dev) with the client changes.
 
+## Incident follow-up (2026-08-15 afternoon): third-party tiers were dead on arrival
+
+First real request after deploy 400'd. Root causes (verified by local repro
+against the live gateway; NOT introduced by the optimization work):
+
+1. Cloudflare's unified-billing run catalog rejects the ENTIRE gpt-5.6 family
+   (`AiGatewayError 7003 "Invalid value at input"` for luna/terra/sol) even
+   though developers.cloudflare.com/ai-gateway/supported-models lists them.
+   gpt-5.4, gpt-5.4-mini, gpt-5.1 and xai/grok-4.6 all validate.
+   → FIXED in code: Standard tier now serves `openai/gpt-5.4-mini`
+   ($0.75/$0.075-cached/$4.50, 400k ctx). Revert to luna = one line in
+   plans.ts once CF onboards 5.6 (probe first!). Consider reporting the
+   docs/catalog mismatch to Cloudflare.
+2. Unified billing refuses with `AiGatewayError 2021: "Gateway authentication
+   is required to use unified billing"` — credits were topped up, but the dev
+   gateway still has Authenticated Gateway DISABLED.
+   → OWNER ACTION (the one remaining blocker for low+high tiers):
+   dash.cloudflare.com → AI → AI Gateway → `arcane-ai-gateway-dev` →
+   Settings → enable **Authenticated Gateway**. Binding-path traffic (the
+   worker) is pre-authenticated within the account, so no code change and
+   glm-5.2 is unaffected. Repeat for `arcane-ai-gateway` before prod.
+
 ## Verify caching actually bills cached (the whole point)
 
-- [ ] Run a 3+ turn **agent** send against dev on each tier (low = gpt-5.6-luna,
+- [ ] Run a 3+ turn **agent** send against dev on each tier (low = gpt-5.4-mini,
       mid = glm-5.2, high = grok-4.6), then:
       `SELECT model, input_tokens, cached_input_tokens FROM request_logs ORDER BY id DESC LIMIT 20;`
       Expect `cached_input_tokens > 0` from turn 2 onward on low/mid; high is
