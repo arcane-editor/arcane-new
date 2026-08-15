@@ -8,6 +8,7 @@ export {
   listSessions,
   deleteSession,
   renameSession,
+  normalizePlanRestore,
 } from './services/session-persistence';
 export type { SessionData, SessionSummary, SaveSessionInput, PlanRef } from './services/session-persistence';
 export { restoreLatestSessionForWorkspace } from './services/session-restore';

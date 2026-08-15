@@ -25,6 +25,7 @@ import {
   type TurnError,
   type VerifiedCardData,
   coerceEffort,
+  normalizePlanRestore,
   resetWriteApprovalSession,
   resolvePendingQuestion,
 } from '../features/ai-panel';
@@ -353,6 +354,8 @@ function buildSaveInput(): SaveSessionInput | null {
     workspacePath: useWorkspaceStore.getState().workspacePath,
     arcanePlan: state.arcanePlan,
     plans: state.sessionPlans,
+    planPhase: state.planPhase,
+    activePlanPath: state.activePlanPath,
   };
 }
 
@@ -744,8 +747,10 @@ export const useAiStore = create<AiState>((set, get) => ({
       // Absent on sessions saved before plans were linked.
       sessionPlans: session.plans ?? [],
       attachments: [],
-      planPhase: 'idle',
-      activePlanPath: null,
+      // Restore plan state through the normalizer — a saved 'executing' run
+      // no longer exists in this process; 'awaiting-execute' + the plan file's
+      // [x] ticks are what can honestly be resumed.
+      ...normalizePlanRestore(session.planPhase, session.activePlanPath),
       pendingPrompt: null,
       lastAttachments: [],
       sessionUsage: { input: 0, output: 0, requests: 0 },

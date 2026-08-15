@@ -99,3 +99,86 @@ describe('stores/ai — default effort + restore coercion', () => {
 // coerceEffort itself (services/types.ts) is unit-tested directly in
 // types.test.ts, including `coerceEffort('super') === 'low'` — the exact
 // migration case this restore call site depends on.
+
+// ---------------------------------------------------------------------------
+// Plan-state persistence (agent-reliability fix): planPhase/activePlanPath
+// used to be in-memory only, so an app reload forgot a mid-flight plan and
+// the composer re-planned instead of resuming.
+// ---------------------------------------------------------------------------
+import { normalizePlanRestore } from './session-persistence';
+
+describe('plan-state persistence', () => {
+  const baseInput = {
+    id: 's1',
+    mode: 'plan',
+    effort: 'low',
+    messages: [{ id: 'm1', role: 'user', text: 'go', timestamp: 1 }],
+    agentKind: 'arcane',
+    workspacePath: '/ws',
+  } as never;
+
+  it('round-trips planPhase and activePlanPath through build + parse', () => {
+    const data = parseSessionData(
+      JSON.stringify(
+        buildSessionData({
+          ...(baseInput as object),
+          planPhase: 'awaiting-execute',
+          activePlanPath: '/ws/.arcane/plans/x.md',
+        } as never),
+      ),
+    );
+    expect(data.planPhase).toBe('awaiting-execute');
+    expect(data.activePlanPath).toBe('/ws/.arcane/plans/x.md');
+  });
+
+  it('omits the keys entirely for a session with no plan (file shape unchanged)', () => {
+    const data = buildSessionData({ ...(baseInput as object), planPhase: 'idle', activePlanPath: null } as never);
+    expect('planPhase' in data).toBe(false);
+    expect('activePlanPath' in data).toBe(false);
+  });
+
+  it('legacy records without the keys parse with them undefined', () => {
+    const data = parseSessionData(JSON.stringify(buildSessionData(baseInput)));
+    expect(data.planPhase).toBeUndefined();
+    expect(data.activePlanPath).toBeUndefined();
+  });
+});
+
+describe('normalizePlanRestore', () => {
+  it('restores awaiting-execute as-is', () => {
+    expect(normalizePlanRestore('awaiting-execute', '/p.md')).toEqual({
+      planPhase: 'awaiting-execute',
+      activePlanPath: '/p.md',
+    });
+  });
+
+  it('normalizes a saved executing phase to awaiting-execute (no run is live after a reload)', () => {
+    expect(normalizePlanRestore('executing', '/p.md')).toEqual({
+      planPhase: 'awaiting-execute',
+      activePlanPath: '/p.md',
+    });
+  });
+
+  it('normalizes a saved planning phase to idle and drops the path', () => {
+    expect(normalizePlanRestore('planning', '/p.md')).toEqual({ planPhase: 'idle', activePlanPath: null });
+  });
+
+  it('defaults a legacy record to idle', () => {
+    expect(normalizePlanRestore(undefined, undefined)).toEqual({ planPhase: 'idle', activePlanPath: null });
+  });
+
+  it('a pending phase with no path degrades to idle (nothing to resume)', () => {
+    expect(normalizePlanRestore('awaiting-execute', null)).toEqual({ planPhase: 'idle', activePlanPath: null });
+  });
+});
+
+describe('stores/ai — plan-state save/restore wiring', () => {
+  it('buildSaveInput passes planPhase and activePlanPath', () => {
+    expect(AI_STORE_SRC).toMatch(/planPhase:\s*state\.planPhase/);
+    expect(AI_STORE_SRC).toMatch(/activePlanPath:\s*state\.activePlanPath/);
+  });
+
+  it('loadSessionIntoStore restores through normalizePlanRestore, never raw', () => {
+    expect(AI_STORE_SRC).toMatch(/normalizePlanRestore\(session\.planPhase,\s*session\.activePlanPath\)/);
+  });
+});

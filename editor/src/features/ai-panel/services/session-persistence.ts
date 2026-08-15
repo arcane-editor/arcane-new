@@ -12,7 +12,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { join } from '@tauri-apps/api/path';
-import type { AiMessage, ArcanePlanEntry } from '../../../stores/ai';
+import type { AiMessage, ArcanePlanEntry, PlanPhase } from '../../../stores/ai';
 import { deleteCheckpointsFile } from './checkpoints/checkpoint-store-io';
 import { deleteReviewsFile } from './edit-review/review-store-io';
 import { coerceAgentKind, type AgentKind, type ChatMode, type Effort } from './types';
@@ -58,6 +58,14 @@ export interface SessionData {
    * `PlanRef`.
    */
   plans?: PlanRef[];
+  /**
+   * Plan-mode lifecycle at save time (+ the plan file it refers to). Optional
+   * exactly like `plans`: absent on legacy files and plan-less sessions.
+   * Restore goes through `normalizePlanRestore` — a saved 'executing' is a
+   * run that no longer exists after a reload.
+   */
+  planPhase?: PlanPhase;
+  activePlanPath?: string | null;
 }
 
 /** Lightweight header used by the history list (no full message bodies). */
@@ -85,6 +93,9 @@ export interface SaveSessionInput {
   arcanePlan?: ArcanePlanEntry[] | null;
   /** See `SessionData.plans`. */
   plans?: PlanRef[];
+  /** See `SessionData.planPhase` / `activePlanPath`. */
+  planPhase?: PlanPhase;
+  activePlanPath?: string | null;
 }
 
 let sessionsDir: string | null = null;
@@ -158,7 +169,30 @@ export function buildSessionData(input: SaveSessionInput): SessionData {
     // Omitted entirely when there are none, so a session file for a
     // plain chat is unchanged in shape.
     ...(input.plans && input.plans.length > 0 ? { plans: input.plans } : {}),
+    // Same omission rule: only sessions actually carrying plan state write it.
+    ...(input.activePlanPath && input.planPhase && input.planPhase !== 'idle'
+      ? { planPhase: input.planPhase, activePlanPath: input.activePlanPath }
+      : {}),
   };
+}
+
+/**
+ * Pure — maps saved plan state to what a fresh process can honestly claim.
+ * 'executing' ⇒ 'awaiting-execute' (the run died with the old process; the
+ * plan file's [x] ticks carry the progress), 'planning' ⇒ 'idle' (nothing to
+ * resume — the plan was never written), and a pending phase without a plan
+ * path degrades to 'idle'.
+ */
+export function normalizePlanRestore(
+  phase: PlanPhase | undefined,
+  activePlanPath: string | null | undefined,
+): { planPhase: PlanPhase; activePlanPath: string | null } {
+  const path = activePlanPath ?? null;
+  if (!path) return { planPhase: 'idle', activePlanPath: null };
+  if (phase === 'awaiting-execute' || phase === 'executing') {
+    return { planPhase: 'awaiting-execute', activePlanPath: path };
+  }
+  return { planPhase: 'idle', activePlanPath: null };
 }
 
 /**
