@@ -1323,7 +1323,9 @@ mod tests {
         let result = detect_unity_project(dir.to_string_lossy().to_string()).unwrap();
         assert!(!result.is_unity);
         let nested = result.nested_project_path.expect("should find depth-2 project");
-        assert_eq!(nested, my_game.to_string_lossy().to_string());
+        // Compared in UI-path form, like the depth-1 tests above: detection
+        // returns `to_ui_path`, which on Windows rewrites \ to /.
+        assert_eq!(nested, crate::path_util::to_ui_path(&my_game));
 
         fs::remove_dir_all(&dir).ok();
     }

@@ -771,7 +771,10 @@ mod tests {
         let _ = ensure_index(&ws, "v", true, None);
 
         let scene = ws.join("Assets/Scenes/Main.unity");
-        let scene_str = scene.to_string_lossy().to_string();
+        // UI-path form, matching the `file-index-changed` payload the frontend
+        // actually forwards here (see the note on `record_meta`). A raw
+        // `\`-separated Windows path would match no key and drop nothing.
+        let scene_str = crate::path_util::to_ui_path(&scene);
 
         // Remove the scene → reference should disappear.
         unity_index_apply_delta(
@@ -839,7 +842,8 @@ mod tests {
         unity_index_apply_delta(
             ws.to_string_lossy().to_string(),
             vec![],
-            vec![meta.to_string_lossy().to_string()],
+            // UI-path form — same contract as the scene delta above.
+            vec![crate::path_util::to_ui_path(&meta)],
         )
         .unwrap();
         let map = unity_index_guid_map(ws.to_string_lossy().to_string()).unwrap();

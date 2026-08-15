@@ -1182,13 +1182,20 @@ mod canonicalize_path_tests {
     }
 
     #[test]
-    fn falls_back_to_the_input_path_unchanged_when_the_path_does_not_exist() {
+    fn falls_back_to_the_input_path_when_the_path_does_not_exist() {
         let tmp = tempfile::tempdir().unwrap();
         let missing = tmp
             .path()
             .join("does-not-exist")
             .to_string_lossy()
             .into_owned();
-        assert_eq!(canonicalize_path(missing.clone()), missing);
+        // The fallback keeps the caller's path rather than erroring, but still
+        // returns it in UI-path form — `canonicalize_path` runs `to_ui_path` on
+        // both branches, so a Windows caller gets / separators back either way.
+        // Asserting on the raw input would only hold on unix.
+        assert_eq!(
+            canonicalize_path(missing.clone()),
+            crate::path_util::to_ui_path(&missing),
+        );
     }
 }
