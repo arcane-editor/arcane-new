@@ -23,6 +23,19 @@ const QUERY_PREFIX = 'Represent this sentence for searching relevant passages: '
 const SEARCH_MAX_TOPK = 20;
 const SEARCH_DEFAULT_TOPK = 8;
 
+// Search-response cache (spec §6): the corpus is a static out-of-band ingest,
+// so identical normalized queries return identical results — a hit skips the
+// bge embed AND the Vectorize query. 7-day TTL; expired rows are cleaned up
+// opportunistically (~1 in 50 requests) rather than by a scheduled job.
+const SEARCH_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const SEARCH_CACHE_CLEANUP_PROBABILITY = 0.02;
+
+async function searchCacheKey(parts: Record<string, unknown>): Promise<string> {
+    const canonical = JSON.stringify(parts, Object.keys(parts).sort());
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(canonical));
+    return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
 // docType values stored in Vectorize metadata (api signature | scriptref | manual prose).
 type DocType = 'scriptref' | 'manual' | 'api';
 
@@ -102,6 +115,45 @@ unityApiRouter.post('/v1/unity/api/search', async (c) => {
     const version = majorMinor(body.unityVersion);
     const topK = Math.min(Math.max(body.topK ?? SEARCH_DEFAULT_TOPK, 1), SEARCH_MAX_TOPK);
 
+    // Cache lookup — best-effort: any cache failure falls through to the
+    // normal search path.
+    const cacheKey = await searchCacheKey({
+        q: body.query.trim().toLowerCase(),
+        v: version,
+        rp: body.renderPipeline ?? '',
+        is: body.inputSystem ?? '',
+        dt: body.docType ?? 'all',
+        topK,
+    });
+    try {
+        const row = await c.env.arcane_db
+            .prepare('SELECT response FROM unity_search_cache WHERE cache_key = ? AND expires_at > ?')
+            .bind(cacheKey, Date.now())
+            .first<{ response: string }>();
+        if (row) {
+            return c.json(JSON.parse(row.response) as Record<string, unknown>);
+        }
+    } catch {
+        // table missing / transient D1 error — proceed uncached
+    }
+
+    const cachePut = async (payload: Record<string, unknown>): Promise<void> => {
+        try {
+            await c.env.arcane_db
+                .prepare('INSERT OR REPLACE INTO unity_search_cache (cache_key, response, expires_at) VALUES (?, ?, ?)')
+                .bind(cacheKey, JSON.stringify(payload), Date.now() + SEARCH_CACHE_TTL_MS)
+                .run();
+            if (Math.random() < SEARCH_CACHE_CLEANUP_PROBABILITY) {
+                await c.env.arcane_db
+                    .prepare('DELETE FROM unity_search_cache WHERE expires_at <= ?')
+                    .bind(Date.now())
+                    .run();
+            }
+        } catch {
+            // best-effort
+        }
+    };
+
     const startTime = Date.now();
     try {
         const { embedding, usage } = await embed({
@@ -143,10 +195,14 @@ unityApiRouter.post('/v1/unity/api/search', async (c) => {
         // not-yet-ingested version still grounds the model instead of failing.
         if (results.length === 0) {
             const rows = await searchUnitySignaturesByName(c.env.arcane_db, version, body.query, topK);
-            return c.json({ version, source: 'd1-fallback', results: rows.map(rowToSignature) });
+            const payload = { version, source: 'd1-fallback', results: rows.map(rowToSignature) };
+            if (payload.results.length > 0) await cachePut(payload);
+            return c.json(payload);
         }
 
-        return c.json({ version, source: 'vectorize', results });
+        const payload = { version, source: 'vectorize', results };
+        await cachePut(payload);
+        return c.json(payload);
     } catch (err) {
         // Vectorize unavailable → fall back to D1 name search rather than erroring.
         const rows = await searchUnitySignaturesByName(c.env.arcane_db, version, body.query, topK);
