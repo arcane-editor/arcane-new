@@ -17,14 +17,15 @@ credentials or a deploy — code-side work is done and green (editor
 First real request after deploy 400'd. Root causes (verified by local repro
 against the live gateway; NOT introduced by the optimization work):
 
-1. Cloudflare's unified-billing run catalog rejects the ENTIRE gpt-5.6 family
-   (`AiGatewayError 7003 "Invalid value at input"` for luna/terra/sol) even
-   though developers.cloudflare.com/ai-gateway/supported-models lists them.
-   gpt-5.4, gpt-5.4-mini, gpt-5.1 and xai/grok-4.6 all validate.
-   → FIXED in code: Standard tier now serves `openai/gpt-5.4-mini`
-   ($0.75/$0.075-cached/$4.50, 400k ctx). Revert to luna = one line in
-   plans.ts once CF onboards 5.6 (probe first!). Consider reporting the
-   docs/catalog mismatch to Cloudflare.
+1. Cloudflare serves the gpt-5.6 family ONLY in **Responses-API format**
+   (dashboard model page: "Request formats: responses"; the 7003 "Invalid
+   value at input" was the run catalog's schema rejecting our
+   Chat-Completions `messages` body — luna/terra/sol all 400'd while
+   gpt-5.4*/5.1/grok, which are cataloged as chat-completions, validated).
+   → FIXED in code (`ac42088`): llm-router's openai wire plugin now uses
+   `.responses()` for `gpt-5.6*` model ids and `.chat()` for everything
+   else. Standard tier stays on `openai/gpt-5.6-luna` per owner decision;
+   gpt-5.4-mini remains only as an unrouted catalog reference.
 2. Unified billing refuses with `AiGatewayError 2021: "Gateway authentication
    is required to use unified billing"` — credits were topped up, but the dev
    gateway still has Authenticated Gateway DISABLED.
