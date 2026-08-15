@@ -1,0 +1,12 @@
+# Normalise every text file to LF in the working tree on every platform.
+#
+# Without this, Git for Windows checks out LF files as CRLF (core.autocrlf
+# defaults to true there), and the source-text tests — which read a .ts file
+# with readFileSync and assert it contains a verbatim multi-line snippet —
+# fail on the Windows runner only. `search-tab-lifecycle.test.ts`'s nesting
+# check was the one that tripped; ten other test files read source the same
+# way and were one multi-line assertion away from the same breakage.
+#
+# Zero churn to adopt: nothing in the index is stored with CRLF today, and the
+# repo carries no .bat/.cmd/.ps1 that would want it.
+* text=auto eol=lf
