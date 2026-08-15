@@ -76,6 +76,21 @@ mock.module('../features/editor', () => ({
   EditorErrorBoundary: ({ children }: { children?: unknown }) => children ?? null,
   Breadcrumbs: () => null,
 }));
+// Same shape of problem one barrel over. `stores/ai` imports the
+// `features/ai-panel` barrel, which reaches `LexicalChatInput` ->
+// `@lexical/react`. Replacing a module makes bun re-evaluate its dependents,
+// and on bun >=1.3 re-entering `@lexical/react` throws `Cannot access
+// 'HISTORY_MERGE_TAG' before initialization` (bun 1.2 tolerates it, which is
+// why this only ever broke in CI, where setup-bun takes the latest release).
+//
+// Mocked at this leaf rather than at the barrel deliberately: `mock.module`
+// replaces a module wholesale, so stubbing the barrel would mean mirroring
+// every one of its runtime exports and re-mirroring them on every change.
+// This file is the only real importer and `default` is its only runtime
+// export, so one stub cuts the entire Lexical subtree out of the graph.
+mock.module('../features/ai-panel/components/LexicalChatInput', () => ({
+  default: () => null,
+}));
 
 // Minimal DOM stub for the theme store's module-scope FOUC bootstrap
 // (`applyCssVariables` at import time) and its `window.localStorage` use.

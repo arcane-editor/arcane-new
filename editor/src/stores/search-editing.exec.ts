@@ -87,6 +87,14 @@ mock.module('../features/editor', () => ({
   EditorErrorBoundary: ({ children }: { children?: unknown }) => children ?? null,
   Breadcrumbs: () => null,
 }));
+// Keeps `@lexical/react` out of the graph: `stores/ai` pulls the
+// `features/ai-panel` barrel, which reaches this leaf, and on bun >=1.3
+// re-evaluating it after a `mock.module` call throws `Cannot access
+// 'HISTORY_MERGE_TAG' before initialization`. See the long note in
+// `search-tab-lifecycle.exec.ts` for why the leaf and not the barrel.
+mock.module('../features/ai-panel/components/LexicalChatInput', () => ({
+  default: () => null,
+}));
 
 // Minimal DOM stub for the theme store's module-scope FOUC bootstrap
 // (`applyCssVariables` at import time) and its `window.localStorage` use —
