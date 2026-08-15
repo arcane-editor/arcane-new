@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { resolveModel, classifyStreamError, convertMessages, streamCompletion } from '../src/services/llm-router.ts';
+import { resolveModel, classifyStreamError, convertMessages, describeStreamError, streamCompletion } from '../src/services/llm-router.ts';
 import type { ChatCompletionRequest, ChatMessage, StreamEvent } from '../src/types.ts';
 
 const ENV = { AI: {} as Ai, CF_AI_GATEWAY_ID: 'gw' };
@@ -68,6 +68,72 @@ describe('convertMessages tolerates null content', () => {
     });
 });
 
+// Cross-model tool-call id replay (incident 2026-08-15 #2): workers-ai-provider
+// tags @cf tool-call ids with `::cf-wai-tool-call::<nonce>` and strips the tag
+// itself only when replaying to a @cf model. The openai wire path forwards ids
+// verbatim, and OpenAI validates them against ^[a-zA-Z0-9_-]+$ — so one glm
+// planning turn in history 400'd every later luna send of the conversation
+// ("AI_APICallError: Bad Request"). convertMessages therefore normalizes ids
+// for every model, keeping call/result pairs consistent.
+describe('convertMessages sanitizes tool-call ids', () => {
+    const MARKED = 'call_03847512860a4206bdc02a51::cf-wai-tool-call::hYq6TKFpEHXfw4Ol';
+
+    it('strips the workers-ai round-trip marker from calls and results alike', () => {
+        const out = convertMessages([
+            {
+                role: 'assistant',
+                content: null,
+                tool_calls: [{ id: MARKED, type: 'function', function: { name: 'read', arguments: '{}' } }],
+            },
+            { role: 'tool', content: 'ok', tool_call_id: MARKED, name: 'read' },
+        ] as unknown as ChatMessage[]);
+        const call = (out[0].content as Array<{ type: string; toolCallId?: string }>).find(p => p.type === 'tool-call')!;
+        const result = (out[1].content as Array<{ type: string; toolCallId?: string }>)[0];
+        expect(call.toolCallId).toBe('call_03847512860a4206bdc02a51');
+        expect(result.toolCallId).toBe('call_03847512860a4206bdc02a51');
+    });
+
+    it('normalizes any residual character outside [A-Za-z0-9_-]', () => {
+        const out = convertMessages([
+            { role: 'tool', content: 'ok', tool_call_id: 'id with:odd/chars', name: 'read' },
+        ] as unknown as ChatMessage[]);
+        expect((out[0].content as Array<{ toolCallId: string }>)[0].toolCallId).toBe('id_with_odd_chars');
+    });
+
+    it('keeps already-valid provider ids byte-identical (cache stability)', () => {
+        const out = convertMessages([
+            { role: 'tool', content: 'ok', tool_call_id: 'call_abc-DEF_123', name: 'read' },
+        ] as unknown as ChatMessage[]);
+        expect((out[0].content as Array<{ toolCallId: string }>)[0].toolCallId).toBe('call_abc-DEF_123');
+    });
+
+    it('never produces an empty id, even for a bare marker id', () => {
+        const bare = '::cf-wai-tool-call::hYq6TKFpEHXfw4Ol';
+        const out = convertMessages([
+            { role: 'tool', content: 'ok', tool_call_id: bare, name: 'read' },
+        ] as unknown as ChatMessage[]);
+        const id = (out[0].content as Array<{ toolCallId: string }>)[0].toolCallId;
+        expect(id.length).toBeGreaterThan(0);
+        expect(id).toMatch(/^[a-zA-Z0-9_-]+$/);
+    });
+});
+
+describe('describeStreamError', () => {
+    it('appends status code and upstream body when the error carries them', () => {
+        const err = Object.assign(new Error('Bad Request'), {
+            statusCode: 400,
+            responseBody: '{"error":{"message":"Invalid \'input[2].call_id\'"}}',
+        });
+        const msg = describeStreamError(err);
+        expect(msg).toContain('[status 400]');
+        expect(msg).toContain("Invalid 'input[2].call_id'");
+    });
+
+    it('leaves plain errors unchanged', () => {
+        expect(describeStreamError(new Error('boom'))).toBe('Error: boom');
+    });
+});
+
 // `streamCompletion` folded `streamOnce` back into itself once the fallback
 // machinery was deleted (Task 5); this is the one behavioral test for the
 // resulting generator, using the `streamTextImpl` injection seam to feed a
@@ -106,7 +172,7 @@ describe('streamCompletion event mapping', () => {
             { type: 'tool_call', id: 'c1', name: 'read_file', arguments: JSON.stringify({ path: 'a.ts' }), finished: true },
             { type: 'thinking', thought: 'thinking it through', signature: '' },
             { type: 'usage', model: '@cf/zai-org/glm-5.2', input_tokens: 10, output_tokens: 5, cached_input_tokens: 2 },
-            { type: 'error', code: 'rate_limit', message: String(upstreamError) },
+            { type: 'error', code: 'rate_limit', message: `${String(upstreamError)} [status 429]` },
         ]);
     });
 

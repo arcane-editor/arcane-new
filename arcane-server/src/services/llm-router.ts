@@ -86,6 +86,31 @@ function contentText(content: ChatMessage['content'], separator = ''): string {
     return content.filter(p => p.type === 'text').map(p => p.text ?? '').join(separator);
 }
 
+// workers-ai-provider tags @cf tool-call ids with this marker for its own
+// stream bookkeeping (`createAISDKToolCallId`) and strips it again ONLY when
+// replaying to a @cf model. The openai wire path forwards ids verbatim, and
+// OpenAI validates call ids against ^[a-zA-Z0-9_-]+$ — so a glm turn replayed
+// to gpt-5.6-luna 400'd every send ("Bad Request", incident 2026-08-15 #2:
+// plan-on-deepthink made glm→luna history the NORMAL plan-mode flow).
+const WAI_TOOL_CALL_MARKER = '::cf-wai-tool-call::';
+
+/**
+ * Normalize a replayed tool-call id for cross-model safety. Deterministic
+ * (same input → same output, so provider prompt caches stay stable) and
+ * applied identically to `tool-call` and `tool-result` parts so pairs keep
+ * matching. Already-valid ids pass through byte-identical.
+ */
+function sanitizeToolCallId(id: string): string {
+    const mi = id.lastIndexOf(WAI_TOOL_CALL_MARKER);
+    const unmarked = mi === -1
+        ? id
+        // The prefix is the model's own id; the suffix is the provider nonce.
+        // Prefer the prefix (matches what @cf models themselves see after the
+        // provider's own strip); a bare marker keeps the nonce instead.
+        : (id.slice(0, mi) || `tc_${id.slice(mi + WAI_TOOL_CALL_MARKER.length)}`);
+    return (unmarked.replace(/[^a-zA-Z0-9_-]/g, '_') || 'tc_0').slice(0, 64);
+}
+
 export function convertMessages(messages: ChatMessage[]): ModelMessage[] {
     const result: ModelMessage[] = [];
 
@@ -114,7 +139,7 @@ export function convertMessages(messages: ChatMessage[]): ModelMessage[] {
                 for (const tc of msg.tool_calls) {
                     parts.push({
                         type: 'tool-call',
-                        toolCallId: tc.id,
+                        toolCallId: sanitizeToolCallId(tc.id),
                         toolName: tc.function.name,
                         input: JSON.parse(tc.function.arguments),
                     });
@@ -131,7 +156,7 @@ export function convertMessages(messages: ChatMessage[]): ModelMessage[] {
                 role: 'tool',
                 content: [{
                     type: 'tool-result',
-                    toolCallId: msg.tool_call_id!,
+                    toolCallId: sanitizeToolCallId(msg.tool_call_id!),
                     toolName: msg.name ?? '',
                     output: { type: 'text', value: text },
                 }],
@@ -156,6 +181,26 @@ export function convertTools(tools?: ToolDefinition[]): ToolSet | undefined {
 }
 
 export type StreamErrorCode = 'rate_limit' | 'model_error';
+
+/**
+ * Stream-error message with the upstream detail attached. `String(error)` on
+ * an AI SDK APICallError yields just "AI_APICallError: Bad Request" — the
+ * status code and provider response body (which name the offending field) are
+ * separate properties, and dropping them cost a full debugging session in the
+ * 2026-08-15 tool-call-id incident. The enriched message flows into
+ * logChatError (Workers Logs) and the editor's surfaced error alike.
+ */
+export function describeStreamError(error: unknown): string {
+    const e = (typeof error === 'object' && error !== null ? error : {}) as {
+        statusCode?: number;
+        responseBody?: string;
+    };
+    const status = typeof e.statusCode === 'number' ? ` [status ${e.statusCode}]` : '';
+    const body = typeof e.responseBody === 'string' && e.responseBody
+        ? ` — upstream: ${e.responseBody.slice(0, 300)}`
+        : '';
+    return `${String(error)}${status}${body}`;
+}
 
 // Workers AI binding errors are normalized by workers-ai-provider into an
 // APICallError whose `statusCode` carries the mapped HTTP status (internal
@@ -239,7 +284,7 @@ export async function* streamCompletion(
                 yield { type: 'thinking', thought: part.text, signature: '' };
                 break;
             case 'error':
-                yield { type: 'error', code: classifyStreamError(part.error), message: String(part.error) };
+                yield { type: 'error', code: classifyStreamError(part.error), message: describeStreamError(part.error) };
                 break;
         }
     }

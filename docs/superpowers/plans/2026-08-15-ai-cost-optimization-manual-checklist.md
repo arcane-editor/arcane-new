@@ -35,6 +35,44 @@ against the live gateway; NOT introduced by the optimization work):
    worker) is pre-authenticated within the account, so no code change and
    glm-5.2 is unaffected. Repeat for `arcane-ai-gateway` before prod.
 
+## Incident #2 (2026-08-15 evening): cross-model tool-call id replay 400'd luna
+
+"AI_APICallError: Bad Request" returned on every plan-execution send even
+after incident #1's fixes. Root cause (reproduced and fix-verified against
+the REAL edge runtime via `wrangler dev --env dev --remote`):
+
+- `workers-ai-provider` tags every @cf tool-call id with
+  `::cf-wai-tool-call::<nonce>` (its stream-bookkeeping marker,
+  `createAISDKToolCallId`) and strips it again ONLY when replaying to a @cf
+  model. The openai wire path forwards ids verbatim, and OpenAI's Responses
+  API validates call ids against `^[a-zA-Z0-9_-]+$` — the colons 400
+  instantly. One glm turn anywhere in history therefore killed every later
+  luna send of that conversation. Plan-on-deepthink (glm plans → luna
+  executes) made that history shape the NORMAL plan-mode flow, which is why
+  it surfaced the same day that shipped.
+- FIXED in `llm-router.ts` `sanitizeToolCallId`: strip the marker + normalize
+  to the OpenAI charset, applied identically to tool-call and tool-result
+  parts (pairs keep matching; deterministic, so provider prompt caches stay
+  stable; valid ids pass byte-identical).
+- Also enriched stream-error logging (`describeStreamError`): upstream
+  `statusCode` + `responseBody` now reach Workers Logs and the editor's
+  surfaced error — `String(error)` alone hid the offending field name and
+  cost most of the debugging session.
+
+Debug technique that cracked it (in order of what actually worked):
+1. `request_logs` on remote dev D1: failing sends log with
+   `input_tokens=0, output_tokens=0` — a zero-token row IS a failed send.
+   The glm rows (planning) succeeded while luna rows (execution) were 0/0,
+   which localized the failure to the phase switch.
+2. `~/.arcane-dev/sessions/<id>.json` holds the exact failing conversation —
+   replaying it verbatim beats reconstructing toy repros (toy probes passed
+   for hours while the real history failed on one id).
+3. `wrangler dev --env dev --remote` = the REAL edge runtime + real AI
+   binding + real gateway, but with `.dev.vars` JWT_SECRET, so a self-minted
+   token works. Local (non-remote) `wrangler dev` proxies the AI binding
+   through wrangler's REST shim — fine here, but remote is the true parity
+   check and should be the default for gateway debugging.
+
 ## Wire-format contract (added after the luna incident — read before ANY model change)
 
 Cloudflare's run catalog validates request bodies against a PER-MODEL schema;
