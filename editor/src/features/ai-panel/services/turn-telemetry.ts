@@ -15,8 +15,8 @@ interface TurnTelemetry {
   /** Repeat-call guard suppressions this send (P3.2) — now reported to the server (P4). */
   loopGuardHits: number;
   /**
-   * Whether repair-triggered tier escalation (P3.6, `turn-escalation.ts`) has
-   * fired this send — now reported to the server (P4).
+   * Whether send-boundary tier escalation (`send-escalation.ts`) applies to
+   * this send — reported to the server (P4).
    */
   escalated: boolean;
   /** `unity_api_search` tool executions observed this send (P4, `recordTelemetryEvent`). */
@@ -65,6 +65,8 @@ const MUTATING_TOOL_NAMES = new Set(['write', 'edit', 'bash']);
 let nudgeCounts: NudgeCounts = { ...EMPTY_NUDGE_COUNTS };
 /** Snapshot of the PREVIOUS send's `nudgeCounts`, captured by `resetTurnTelemetry()`. */
 let previousSendNudgeCounts: NudgeCounts = { ...EMPTY_NUDGE_COUNTS };
+/** Snapshot of the PREVIOUS send's repair count, captured by `resetTurnTelemetry()` — drives send-boundary escalation (send-escalation.ts). */
+let previousSendRepairCount = 0;
 
 export function resetTurnTelemetry(): void {
   // Snapshot THIS (about-to-be-superseded) send's nudge counts as "previous"
@@ -72,6 +74,7 @@ export function resetTurnTelemetry(): void {
   // calls this once, up front, then later reads `getPreviousSendNudgeCounts()`
   // while assembling the new send's prompt.
   previousSendNudgeCounts = nudgeCounts;
+  previousSendRepairCount = current.repairCount;
   nudgeCounts = { ...EMPTY_NUDGE_COUNTS };
   current = { ...EMPTY_TELEMETRY };
 }
@@ -79,6 +82,16 @@ export function resetTurnTelemetry(): void {
 /** Read-only peek at the PREVIOUS send's nudge counts (T9, Part 4) — consulted by `agent-service.ts` at send time. */
 export function getPreviousSendNudgeCounts(): NudgeCounts {
   return { ...previousSendNudgeCounts };
+}
+
+/**
+ * Read-only peek at the PREVIOUS send's final repair count — consulted by
+ * `send-escalation.ts` when deciding whether the NEXT send should run on a
+ * stronger tier. (Mid-send escalation was removed: switching models inside a
+ * send resets the provider's prompt-prefix cache for the whole conversation.)
+ */
+export function getPreviousSendRepairCount(): number {
+  return previousSendRepairCount;
 }
 
 /**
@@ -130,20 +143,18 @@ export function recordTurnLatency(latencyMs: number): void {
 }
 
 /**
- * Read-only peek at the current repair count — consulted by
- * `turn-escalation.ts` at request-build time. Unlike `nextTurnTelemetry`,
- * this does NOT increment `turnIndex`, since checking whether to escalate
- * isn't itself a new outgoing request.
+ * Read-only peek at the current repair count. Unlike `nextTurnTelemetry`,
+ * this does NOT increment `turnIndex` — reading telemetry isn't itself a new
+ * outgoing request.
  */
 export function getRepairCount(): number {
   return current.repairCount;
 }
 
 /**
- * Marks this send as escalated (P3.6, `turn-escalation.ts`) once the tier
- * has been bumped, so every subsequent request's telemetry snapshot (and the
- * request metadata sent to the server) carries it. Idempotent — safe to call
- * on every request once escalated, not just the triggering one.
+ * Marks this send as escalated (`send-escalation.ts`) when it runs on a
+ * bumped tier, so every request's telemetry snapshot (and the request
+ * metadata sent to the server) carries it. Idempotent.
  */
 export function recordEscalation(): void {
   current.escalated = true;

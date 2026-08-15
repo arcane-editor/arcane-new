@@ -46,14 +46,16 @@ import { withWriteApproval } from './write-approval-gate';
 import { withResultDiffs } from './diff-decorator';
 import { withEditReview } from './edit-review/edit-review-decorator';
 import { withTurnGovernor, resetTurnGovernor, grantExtraCalls } from './turn-governor';
-import { withTurnEscalation, resetTurnEscalation } from './turn-escalation';
+import { resolveSendEffort, resetSendEscalation } from './send-escalation';
 import { withStreamErrorGuard } from './stream-error-guard';
 import { withRepeatCallGuard, resetRepeatCallGuard } from './tool-guards';
 import {
   resetTurnTelemetry,
   recordTelemetryEvent,
   recordGroundingLintHit,
+  recordEscalation,
   getPreviousSendNudgeCounts,
+  getPreviousSendRepairCount,
   shouldNudgeTodoUpdate,
 } from './turn-telemetry';
 import {
@@ -330,14 +332,12 @@ export class AgentService {
       systemPrompt: buildSystemPrompt('agent', workspacePath, { effort: 'mid' }),
       model: PLACEHOLDER_MODEL,
       tools: createToolsForPromptMode('agent', workspacePath),
-      // Escalation (P3.6) sits INSIDE the governor: the governor's own
-      // per-effort call-cap lookup must keep reading the send's ORIGINAL
-      // effort (unaffected by escalation), while only the request actually
-      // reaching `arcaneStream` should carry the bumped tier. The stream-
-      // error guard (T5) sits OUTERMOST so it catches a synchronous throw
-      // from either of those two decorators as well as the innermost
-      // `arcaneStream` itself.
-      streamFn: withStreamErrorGuard(withTurnGovernor(withTurnEscalation(arcaneStream))),
+      // The stream-error guard (T5) sits OUTERMOST so it catches a
+      // synchronous throw from the governor as well as the innermost
+      // `arcaneStream` itself. (Mid-send tier escalation was removed — model
+      // switches inside a send reset the provider's prompt cache; escalation
+      // now happens at send boundaries, see send-escalation.ts.)
+      streamFn: withStreamErrorGuard(withTurnGovernor(arcaneStream)),
       convertToLlm,
       reasoning: 'mid',
       // Server picks the model per reasoningLevel; default to the smallest tier's
@@ -437,13 +437,9 @@ export class AgentService {
       useCheckpointsStore.getState().beginTurn(sessionIdForTurn, this.currentUserMessageId());
     }
 
-    const promptMode: PromptMode = opts.promptMode ?? defaultPromptModeFor(opts.mode);
-    this.syncForPromptMode(promptMode, opts.effort, opts.planExecution);
-    this.agent.setReasoning(opts.effort);
-    // Compaction budget: the real window of the model this tier maps to
-    // (server model lineup is fixed; see TIER_CONTEXT_WINDOWS).
-    this.agent.setContextWindow(TIER_CONTEXT_WINDOWS[opts.effort]);
-    // Fresh compile-gate repair budget per user turn.
+    // Fresh per-send state FIRST: resetTurnTelemetry() snapshots the
+    // previous send's repair count, which the escalation decision below
+    // consumes — so the resets must precede it.
     resetCompileGate();
     resetTurnTelemetry();
     // Fresh turn-governor call budget + repeat-call guard registries per
@@ -451,12 +447,39 @@ export class AgentService {
     // createToolsForPromptMode), so their per-send state needs an explicit
     // reset here, same as the compile gate above.
     resetTurnGovernor();
-    // Fresh escalation latch per send (P3.6) — same "wraps streamFn ONCE,
-    // needs an explicit per-send reset" reasoning as the governor above.
-    resetTurnEscalation();
     resetRepeatCallGuard();
     // Fresh touched-file registry for the verified-pass closing check (P3.4).
     beginVerifiedPass();
+
+    // Send-boundary escalation (spec §2): if the PREVIOUS send burned through
+    // repeated compile/analyzer/LSP repairs, run this and every later send of
+    // the conversation one tier up. Replaces the old mid-send escalation,
+    // which switched models inside a send and reset the provider's prompt
+    // cache for the whole conversation.
+    const escalation = resolveSendEffort(
+      useAiStore.getState().sessionId,
+      opts.effort,
+      getPreviousSendRepairCount(),
+      () => useSettingsStore.getState().getSetting('ai.escalation.enabled') !== false,
+    );
+    const effectiveEffort = escalation.effort;
+    if (effectiveEffort !== opts.effort) {
+      recordEscalation();
+    }
+    if (escalation.escalatedNow) {
+      useAiStore
+        .getState()
+        .addSystemMessage(
+          `Escalating to ${effectiveEffort} for this conversation after repeated compile repairs`,
+        );
+    }
+
+    const promptMode: PromptMode = opts.promptMode ?? defaultPromptModeFor(opts.mode);
+    this.syncForPromptMode(promptMode, effectiveEffort, opts.planExecution);
+    this.agent.setReasoning(effectiveEffort);
+    // Compaction budget: the real window of the model this tier maps to
+    // (server model lineup is fixed; see TIER_CONTEXT_WINDOWS).
+    this.agent.setContextWindow(TIER_CONTEXT_WINDOWS[effectiveEffort]);
     // T9: the todo list now lives for the whole session, not just this send —
     // no reset here (see `resetConversation`/`loadSessionIntoStore` in stores/ai.ts).
 
@@ -503,7 +526,7 @@ export class AgentService {
     if (
       graphChangedSinceFreeze(
         useAiStore.getState().sessionId,
-        captureDecoration(opts.effort).graphSnapshot,
+        captureDecoration(effectiveEffort).graphSnapshot,
       )
     ) {
       promptText +=
@@ -714,9 +737,10 @@ export class AgentService {
 
   reset(): void {
     this.agent.reset();
-    // A reset starts a fresh conversation — drop the frozen prompt blocks so
-    // the next conversation captures current facts/graph state.
+    // A reset starts a fresh conversation — drop the frozen prompt blocks and
+    // escalation latches so the next conversation starts from current state.
     resetFrozenDecoration();
+    resetSendEscalation();
   }
 
   /**
@@ -744,9 +768,10 @@ export class AgentService {
     this.unsubscribe?.();
     this.unsubscribeTelemetry?.();
     this.agent.abort();
-    // Workspace switch / New Chat: frozen prompt blocks belong to the old
-    // workspace's conversations — never reuse them.
+    // Workspace switch / New Chat: frozen prompt blocks and escalation
+    // latches belong to the old workspace's conversations — never reuse them.
     resetFrozenDecoration();
+    resetSendEscalation();
     // T5: a disposed service (New Chat / workspace switch) starts the next
     // conversation with no replay target — a stale `lastSend` from the
     // conversation just torn down must never resend into the new one.

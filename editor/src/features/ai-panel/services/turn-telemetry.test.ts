@@ -67,6 +67,20 @@ describe('turn telemetry', () => {
     expect(nextTurnTelemetry().loopGuardHits).toBe(0);
   });
 
+  it('snapshots the previous send repair count at reset (send-boundary escalation)', () => {
+    const { getPreviousSendRepairCount, recordTelemetryEvent: rec, resetTurnTelemetry: reset } =
+      require('./turn-telemetry') as typeof import('./turn-telemetry');
+    reset();
+    rec({
+      type: 'message_end',
+      message: { role: 'toolResult', toolCallId: 'c', toolName: 'write', content: '[Unity compile] 2 errors', isError: true, timestamp: 1 },
+    } as never);
+    reset(); // snapshot happens here
+    expect(getPreviousSendRepairCount()).toBe(1);
+    reset(); // a clean send resets the snapshot
+    expect(getPreviousSendRepairCount()).toBe(0);
+  });
+
   it('exposes the repair count via getRepairCount without incrementing turnIndex (P3.6)', () => {
     recordTelemetryEvent(repairResult('[Unity compile] 2 compiler error(s) after writing X'));
     expect(getRepairCount()).toBe(1);
