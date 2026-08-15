@@ -218,4 +218,14 @@ queueMicrotask(() => {
       cache = null;
     }
   });
+
+  // Zustand subscribe only fires on CHANGES — if the workspace was already a
+  // Unity project when this module loaded (app start with a restored
+  // workspace), prime immediately. This makes the FIRST conversation's frozen
+  // facts snapshot (frozen-context.ts) usually complete instead of
+  // version-only, killing the turn-1/turn-2 prompt-prefix divergence.
+  if (useProjectContextStore.getState().isUnityProject) {
+    const wp = useWorkspaceStore.getState().workspacePath;
+    if (wp) void primeUnityFacts(wp);
+  }
 });
