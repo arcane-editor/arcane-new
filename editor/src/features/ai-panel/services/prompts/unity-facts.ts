@@ -178,7 +178,14 @@ export function getUnityFactsBlock(): string | null {
   }
 
   if (facts?.unityRules) {
-    lines.push('', '## Project conventions (.ai/unity-rules.md — follow these)', facts.unityRules.trim());
+    // Cap the user-authored rules file (spec §5): it was the one unbounded
+    // block in the system prompt. 6KB keeps ~1.5k tokens as the worst case.
+    const rules = facts.unityRules.trim();
+    const capped =
+      rules.length > 6000
+        ? `${rules.slice(0, 6000)}\n[…truncated — full rules in .ai/unity-rules.md; read it if needed]`
+        : rules;
+    lines.push('', '## Project conventions (.ai/unity-rules.md — follow these)', capped);
   }
 
   return lines.join('\n');

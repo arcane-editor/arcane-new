@@ -1,6 +1,6 @@
 import { Type, type Static } from '@sinclair/typebox';
 import type { AgentTool } from '../vendor/types';
-import { txt } from './text-result';
+import { cap, txt } from './text-result';
 import type { ApiSignature, ApiSearchHit, GroundingResult } from './api-client';
 import { recordGroundingToolCall, recordGroundingUnavailable } from '../turn-telemetry';
 
@@ -92,9 +92,11 @@ export function createUnityApiSearchTool(client: UnityApiClient): AgentTool {
     name: 'unity_api_search',
     label: 'unity api search',
     description:
-      "Search the version-accurate Unity API + documentation for THIS project's exact Unity version. " +
-      'Use BEFORE writing Unity code you are unsure about, to confirm an API exists and get its real ' +
-      'signature/overloads (this prevents hallucinated APIs). Pass `member` as "Type.Member" for an exact lookup.',
+      "Verify Unity APIs against THIS project's exact Unity version (semantic docs search + exact signature lookup). " +
+      'Call BEFORE writing any Unity API usage you are not certain exists with that exact signature — including ' +
+      'shader/property names, event/method names, and enum values — and whenever a compile error mentions a missing ' +
+      'member. Returns real signatures, overloads, deprecations, and doc links; this prevents hallucinated APIs. ' +
+      'Pass `member` as "Type.Member" for an exact lookup.',
     parameters: schema,
     async execute(_id, params) {
       // Count this genuine execution (guard is outermost, so suppressed calls
@@ -113,7 +115,7 @@ export function createUnityApiSearchTool(client: UnityApiClient): AgentTool {
           return txt(unavailableText(lookupResult.reason));
         }
         if (lookupResult.data.length > 0) {
-          return txt(`Exact Unity API signatures:\n${formatSignatures(lookupResult.data)}`);
+          return txt(cap(`Exact Unity API signatures:\n${formatSignatures(lookupResult.data)}`));
         }
       }
 
@@ -129,7 +131,7 @@ export function createUnityApiSearchTool(client: UnityApiClient): AgentTool {
             `isn't ingested yet, or the symbol name is off. Try get_unity_docs, or a different phrasing.`,
         );
       }
-      return txt(`Unity API / docs matches (version-accurate):\n${formatHits(hits)}`);
+      return txt(cap(`Unity API / docs matches (version-accurate):\n${formatHits(hits)}`));
     },
   };
 }
