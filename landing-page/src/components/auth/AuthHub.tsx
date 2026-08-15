@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from "react";
+import { Github } from "lucide-react";
 import {
     getStoredToken, setStoredToken, clearStoredToken,
     apiLogin, apiSignup, apiGetMe, apiWebExchange, apiEditorGrant,
     apiVerifyEmail, apiResendVerification,
-    authErrorMessage, isKnownAuthErrorCode,
+    authErrorMessage, isKnownAuthErrorCode, githubStartUrl,
 } from "@/lib/auth";
 import {
     parseEditorLoginParams, saveEditorLoginRequest, loadEditorLoginRequest,
@@ -11,7 +12,7 @@ import {
     sanitizeInternalReturn, savePostAuthReturn, takePostAuthReturn, clearPostAuthReturn,
 } from "@/lib/editor-login";
 import TurnstileWidget, { turnstileEnabled } from "./TurnstileWidget";
-import { AuthShell, authInputClass, authPrimaryBtnClass, authErrorBannerClass } from "./AuthShell";
+import { AuthShell, authInputClass, authPrimaryBtnClass, authErrorBannerClass, authOAuthBtnClass } from "./AuthShell";
 
 type HubState = "boot" | "hard-error" | "forms";
 type Tab = "signin" | "signup";
@@ -101,7 +102,9 @@ export default function AuthHub() {
 
             setEditorPending(loadEditorLoginRequest() !== null);
 
-            // (3) Google return: swap the one-time ?code= for a session token.
+            // (3) OAuth return (GitHub or Google): swap the one-time ?code= for
+            // a session token. A pending editor request survives the round-trip
+            // in sessionStorage, so afterAuthenticated still reaches the grant.
             if (code) {
                 setBootMessage("Signing you in…");
                 try {
@@ -115,7 +118,7 @@ export default function AuthHub() {
                 return;
             }
 
-            // (4) Redirect errors (e.g. google_not_configured, google_oauth_failed).
+            // (4) Redirect errors (e.g. github_oauth_failed, github_email_unverified).
             // errorParam is attacker-controllable (it's a raw query param), so unlike
             // API-returned errors we do NOT fall back to echoing it verbatim — only
             // known codes get their mapped copy; anything else gets a generic banner.
@@ -303,6 +306,25 @@ export default function AuthHub() {
                         {label}
                     </button>
                 ))}
+            </div>
+
+            {/* One button for both tabs: the callback signs in or creates the
+                account from the same verified GitHub identity. Full-page
+                navigation — a pending editor request lives in sessionStorage,
+                so it survives the round-trip. */}
+            <button
+                className={authOAuthBtnClass}
+                onClick={() => { window.location.href = githubStartUrl("/auth"); }}
+                disabled={submitting}
+            >
+                <Github className="w-4 h-4" aria-hidden="true" />
+                Continue with GitHub
+            </button>
+
+            <div className="flex items-center gap-3 my-4">
+                <span className="h-px flex-1 bg-border/50" />
+                <span className="text-[11px] uppercase tracking-wider text-muted-foreground">or</span>
+                <span className="h-px flex-1 bg-border/50" />
             </div>
 
             {formError && <div className={authErrorBannerClass}>{formError}</div>}

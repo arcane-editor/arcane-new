@@ -154,10 +154,18 @@ export default function AccountPanel() {
                         </a>
                     </div>
                 )}
-                {/* The Google row is gone with the sign-in button: no account can
-                    reach a linked state any more, so it read "Not connected" for
-                    everyone. `googleLinked` is still on /me — restore this row if
-                    the OAuth client ever gets provisioned. */}
+                {/* Shown only when linked. There is no "Connect" action here on
+                    purpose: the callback resolves the account by verified email,
+                    so connecting while signed in under a different address would
+                    silently switch accounts rather than link this one.
+                    (The Google row stays retired — its button is still gone, so
+                    no new account can reach a google-linked state.) */}
+                {me.githubLinked && (
+                    <div className="flex items-center justify-between py-3 border-b border-border/30">
+                        <span className={labelClass}>GitHub</span>
+                        <span className="text-sm text-foreground">Connected</span>
+                    </div>
+                )}
                 <div className="flex items-center justify-between py-3">
                     <span className={labelClass}>AI requests used</span>
                     <span className="text-sm font-mono text-foreground">{me.usage.totalRequests}</span>
@@ -204,7 +212,10 @@ export default function AccountPanel() {
                 ) : (
                     <>
                         <p className="text-muted-foreground text-sm mb-4">
-                            You sign in with Google. Add a password to also sign in with email.
+                            {/* Only OAuth signups reach a passwordless state, so name
+                                the provider this account actually used. */}
+                            You sign in with {me.githubLinked ? "GitHub" : "Google"}. Add a
+                            password to also sign in with email.
                         </p>
                         <button
                             className="h-10 rounded-md px-4 bg-secondary text-secondary-foreground text-sm font-semibold hover:bg-secondary/80 transition-all"

@@ -21,6 +21,7 @@ export interface MeResponse {
     user: AuthUser;
     hasPassword: boolean;
     googleLinked: boolean;
+    githubLinked: boolean;
     usage: {
         totalRequests: number;
         totalInputTokens: number;
@@ -52,6 +53,10 @@ const ERROR_MESSAGES: Record<string, string> = {
     turnstile_failed: 'Human verification failed. Refresh the page and try again.',
     google_not_configured: "Google sign-in isn't set up yet. Use email and password instead.",
     google_oauth_failed: 'Google sign-in failed. Please try again.',
+    github_not_configured: "GitHub sign-in isn't set up yet. Use email and password instead.",
+    github_oauth_failed: 'GitHub sign-in failed. Please try again.',
+    github_email_unverified: 'Your primary GitHub email address is not verified. Verify it in GitHub email settings, then try again.',
+    github_account: 'That email is already linked to a different GitHub account. Sign in with that account, or use email and password.',
 };
 
 export function authErrorMessage(codeOrMessage: string | undefined | null): string {
@@ -165,6 +170,12 @@ export function googleStartUrl(returnTo: '/auth' | '/account'): string {
     // Full-page navigation target (302 to Google), NOT a fetch endpoint.
     // returnTo must be on the server's allowlist: /auth, /account.
     return `${API_URL}/v1/auth/google/start?return_to=${encodeURIComponent(returnTo)}`;
+}
+
+/** Full-page navigation target (302 to GitHub), NOT a fetch endpoint.
+ *  returnTo must be on the server's allowlist: /auth, /account. */
+export function githubStartUrl(returnTo: '/auth' | '/account'): string {
+    return `${API_URL}/v1/auth/github/start?return_to=${encodeURIComponent(returnTo)}`;
 }
 
 export async function apiWebExchange(code: string): Promise<AuthResponse> {

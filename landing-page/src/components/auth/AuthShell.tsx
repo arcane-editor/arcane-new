@@ -18,5 +18,9 @@ export const authInputClass =
 export const authPrimaryBtnClass =
     "h-10 w-full rounded-md bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-all disabled:opacity-50";
 
+/** Secondary-weight button for identity-provider sign-in (icon + label). */
+export const authOAuthBtnClass =
+    "h-10 w-full rounded-md border border-border bg-secondary/50 text-foreground text-sm font-semibold hover:bg-secondary hover:border-border/80 transition-colors flex items-center justify-center gap-2 disabled:opacity-50";
+
 export const authErrorBannerClass =
     "mb-4 rounded-md bg-destructive/10 border border-destructive/20 px-3 py-2.5 text-sm text-destructive";
