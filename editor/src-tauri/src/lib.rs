@@ -848,6 +848,7 @@ pub fn run() {
             graphify::graphify_path,
             graphify::graphify_load_summary,
             graphify::graphify_enrich_payload,
+            graphify::graphify_symbols,
             create_directory_recursive,
             execute_command,
             cli::peek_pending_goto,

@@ -14,6 +14,7 @@ import {
   graphifyExplain,
   graphifyPath,
   graphifyQuery,
+  graphifySymbols,
 } from './graphify-client';
 
 /**
@@ -103,6 +104,35 @@ export function createGraphifyQueryTool(workspacePath: string, opts?: GraphifyTo
       const { question, budget, dfs } = params as QueryArgs;
       try {
         const out = await graphifyQuery(workspacePath, question, { budget, dfs });
+        return textResult(out || '(empty)');
+      } catch (e) {
+        return errorResult(e);
+      }
+    },
+  };
+}
+
+const symbolsArgs = Type.Object({
+  file: Type.Optional(
+    Type.String({ description: 'File path (relative paths match by suffix), e.g. Assets/Scripts/Player.cs' }),
+  ),
+  type: Type.Optional(Type.String({ description: 'Type/class name to look up instead of a file.' })),
+});
+type SymbolsArgs = Static<typeof symbolsArgs>;
+
+export function createProjectSymbolsTool(workspacePath: string, opts?: GraphifyToolOpts): AgentTool {
+  return {
+    name: 'project_symbols',
+    label: 'project_symbols',
+    description:
+      'List the types and member symbols in a file (or the file owning a type) without reading the whole file. ' +
+      'Prefer this over read when you only need to know what exists or where a member is declared.',
+    parameters: symbolsArgs,
+    async execute(_id: string, params: unknown): Promise<AgentToolResult> {
+      if (await gateUnavailable(opts)) return textResult(GRAPH_UNAVAILABLE_TEXT);
+      const { file, type } = params as SymbolsArgs;
+      try {
+        const out = await graphifySymbols(workspacePath, { file, typeName: type });
         return textResult(out || '(empty)');
       } catch (e) {
         return errorResult(e);

@@ -4,7 +4,9 @@ export {
   createGraphifyQueryTool,
   createGraphifyExplainTool,
   createGraphifyPathTool,
+  createProjectSymbolsTool,
 } from './services/graphify-tools';
+
 export { buildGraphSnapshot, graphSnapshotBudget } from './services/graph-context';
 export { enrichGraph, type GraphEnrichment } from './services/graphify-enrich';
 export { computeBuildOpts } from './services/build-opts';

@@ -22,6 +22,7 @@ import {
   createGraphifyExplainTool,
   createGraphifyPathTool,
   createGraphifyQueryTool,
+  createProjectSymbolsTool,
 } from '../../graphify';
 import { arcaneStream } from './arcane-stream';
 import {
@@ -166,6 +167,7 @@ function createToolsForPromptMode(mode: PromptMode, workspacePath: string): Agen
     createGraphifyQueryTool(workspacePath),
     createGraphifyExplainTool(workspacePath),
     createGraphifyPathTool(workspacePath),
+    createProjectSymbolsTool(workspacePath),
   ];
 
   // Unity tools join only for Unity projects. Read tools are auto-approved and

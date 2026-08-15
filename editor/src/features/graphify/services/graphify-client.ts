@@ -76,6 +76,17 @@ export async function graphifyQuery(
   });
 }
 
+export async function graphifySymbols(
+  workspacePath: string,
+  opts: { file?: string; typeName?: string },
+): Promise<string> {
+  return invoke<string>('graphify_symbols', {
+    workspacePath,
+    file: opts.file ?? null,
+    typeName: opts.typeName ?? null,
+  });
+}
+
 export async function graphifyExplain(
   workspacePath: string,
   node: string,

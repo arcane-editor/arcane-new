@@ -389,6 +389,168 @@ pub async fn graphify_load_summary(
     })
 }
 
+/// `project_symbols` backing: list the symbols (graph nodes) recorded for a
+/// file or a type, straight from graph.json — no sidecar invocation, so it
+/// works with any previously-built graph. The AST graph's nodes ARE the
+/// symbol table: one node per extracted class/function with `label`,
+/// `source_file`, and `source_location`.
+///
+/// Filters: `file` matches by path suffix (so relative paths like
+/// `Assets/Scripts/Player.cs` work against absolute stored paths);
+/// `type_name` finds the best label match, then lists every symbol in that
+/// symbol's file (a type's file is its member table). At least one filter is
+/// required.
+#[tauri::command]
+pub async fn graphify_symbols(
+    app: AppHandle,
+    workspace_path: String,
+    file: Option<String>,
+    type_name: Option<String>,
+) -> Result<String, String> {
+    let graph_path = graph_json_path(&app, &workspace_path)?;
+    if !graph_path.exists() {
+        return Err("no graph available — build it first".to_string());
+    }
+    let graph_text = std::fs::read_to_string(&graph_path).map_err(|e| e.to_string())?;
+    let graph: serde_json::Value = serde_json::from_str(&graph_text).map_err(|e| e.to_string())?;
+    let empty: Vec<serde_json::Value> = Vec::new();
+    let nodes = graph.get("nodes").and_then(|v| v.as_array()).unwrap_or(&empty);
+    Ok(format_symbols(nodes, file.as_deref(), type_name.as_deref()))
+}
+
+const MAX_SYMBOL_FILES: usize = 4;
+const MAX_SYMBOLS_PER_FILE: usize = 64;
+const MAX_SYMBOLS_OUTPUT: usize = 2048;
+
+/// Pure formatting core of `graphify_symbols` (unit-tested below).
+fn format_symbols(
+    nodes: &[serde_json::Value],
+    file: Option<&str>,
+    type_name: Option<&str>,
+) -> String {
+    use std::collections::BTreeMap;
+
+    let node_str = |n: &serde_json::Value, key: &str| -> String {
+        n.get(key).and_then(|v| v.as_str()).unwrap_or("").to_string()
+    };
+
+    // Resolve the target files.
+    let mut target_files: Vec<String> = Vec::new();
+    if let Some(f) = file {
+        let needle = f.trim_start_matches("./");
+        let mut matches: Vec<String> = nodes
+            .iter()
+            .map(|n| node_str(n, "source_file"))
+            .filter(|sf| !sf.is_empty() && sf.ends_with(needle))
+            .collect();
+        matches.sort();
+        matches.dedup();
+        target_files.extend(matches.into_iter().take(MAX_SYMBOL_FILES));
+    }
+    if target_files.is_empty() {
+        if let Some(t) = type_name {
+            let term = t.to_lowercase();
+            let mut best: Option<(usize, String)> = None;
+            for n in nodes {
+                let label = node_str(n, "label").to_lowercase();
+                if label.contains(&term) {
+                    // Prefer the shortest containing label (closest match).
+                    let sf = node_str(n, "source_file");
+                    if sf.is_empty() {
+                        continue;
+                    }
+                    if best.as_ref().map(|(len, _)| label.len() < *len).unwrap_or(true) {
+                        best = Some((label.len(), sf));
+                    }
+                }
+            }
+            if let Some((_, sf)) = best {
+                target_files.push(sf);
+            }
+        }
+    }
+
+    if target_files.is_empty() {
+        return match (file, type_name) {
+            (None, None) => "project_symbols needs a `file` or `type` argument.".to_string(),
+            _ => "No symbols found — check the path/type name, or rebuild the graph if the file is new.".to_string(),
+        };
+    }
+
+    // Group matching nodes by file, ordered by source_location then label.
+    let mut by_file: BTreeMap<String, Vec<(String, String)>> = BTreeMap::new();
+    for n in nodes {
+        let sf = node_str(n, "source_file");
+        if target_files.contains(&sf) {
+            by_file
+                .entry(sf)
+                .or_default()
+                .push((node_str(n, "source_location"), node_str(n, "label")));
+        }
+    }
+
+    let mut lines: Vec<String> = Vec::new();
+    for (sf, mut symbols) in by_file {
+        symbols.sort();
+        lines.push(format!("FILE {}", sf));
+        let total = symbols.len();
+        for (loc, label) in symbols.into_iter().take(MAX_SYMBOLS_PER_FILE) {
+            if loc.is_empty() {
+                lines.push(format!("  {}", label));
+            } else {
+                lines.push(format!("  {} [{}]", label, loc));
+            }
+        }
+        if total > MAX_SYMBOLS_PER_FILE {
+            lines.push(format!("  … {} more symbols", total - MAX_SYMBOLS_PER_FILE));
+        }
+    }
+
+    let mut out = lines.join("\n");
+    if out.len() > MAX_SYMBOLS_OUTPUT {
+        out.truncate(MAX_SYMBOLS_OUTPUT);
+        out.push_str("\n… (truncated)");
+    }
+    out
+}
+
+#[cfg(test)]
+mod symbol_tests {
+    use super::format_symbols;
+    use serde_json::json;
+
+    fn nodes() -> Vec<serde_json::Value> {
+        vec![
+            json!({"label": "PlayerController", "source_file": "/ws/Assets/Scripts/PlayerController.cs", "source_location": "L10"}),
+            json!({"label": "PlayerController.Move", "source_file": "/ws/Assets/Scripts/PlayerController.cs", "source_location": "L25"}),
+            json!({"label": "GameManager", "source_file": "/ws/Assets/Scripts/GameManager.cs", "source_location": "L5"}),
+        ]
+    }
+
+    #[test]
+    fn file_filter_matches_by_suffix() {
+        let out = format_symbols(&nodes(), Some("Assets/Scripts/PlayerController.cs"), None);
+        assert!(out.contains("FILE /ws/Assets/Scripts/PlayerController.cs"));
+        assert!(out.contains("PlayerController.Move [L25]"));
+        assert!(!out.contains("GameManager"));
+    }
+
+    #[test]
+    fn type_filter_lists_the_owning_file() {
+        let out = format_symbols(&nodes(), None, Some("gamemanager"));
+        assert!(out.contains("FILE /ws/Assets/Scripts/GameManager.cs"));
+        assert!(out.contains("GameManager [L5]"));
+    }
+
+    #[test]
+    fn no_match_and_no_args_are_reported() {
+        let out = format_symbols(&nodes(), Some("Nope.cs"), None);
+        assert!(out.contains("No symbols found"));
+        let out2 = format_symbols(&nodes(), None, None);
+        assert!(out2.contains("needs a `file` or `type`"));
+    }
+}
+
 /// Build a trimmed projection of the locally-built graph for server-side AI
 /// enrichment. We group nodes by community and sample a handful of member
 /// labels/files per community (and pull god nodes from the summary), so the
