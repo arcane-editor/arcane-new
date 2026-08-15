@@ -39,11 +39,18 @@ export function workersAiProvider(env: WorkersAiEnv, gatewayOverrides?: GatewayO
 
 export type LlmEnv = WorkersAiEnv;
 
-export function resolveModel(modelId: string, env: LlmEnv, gatewayOverrides?: GatewayOverrides) {
+export function resolveModel(
+    modelId: string,
+    env: LlmEnv,
+    gatewayOverrides?: GatewayOverrides,
+    modelSettings?: Record<string, unknown>,
+) {
     // Workers AI and unified-billing third-party models both resolve through
     // the AI binding — the id prefix is the only difference and the binding
-    // handles routing.
-    return workersAiProvider(env, gatewayOverrides)(modelId);
+    // handles routing. `modelSettings` reaches the model constructor (e.g.
+    // `sessionAffinity` → the `x-session-affinity` header Workers AI's prefix
+    // cache uses to route related requests to the same cache shard).
+    return workersAiProvider(env, gatewayOverrides)(modelId, modelSettings);
 }
 
 /**
@@ -150,9 +157,23 @@ type StreamTextFn = typeof streamText;
 export async function* streamCompletion(
     req: ChatCompletionRequest, env: LlmEnv, streamTextImpl: StreamTextFn = streamText,
 ): AsyncGenerator<StreamEvent> {
-    // A cached replay of a sampled completion is semantically wrong — chat is
-    // temperature-sampled, so bypass the gateway cache on this path.
-    const model = resolveModel(req.model, env, { skipCache: true });
+    // `skipCache` disables the AI GATEWAY's exact-match response-replay cache
+    // (a cached replay of a temperature-sampled completion is semantically
+    // wrong). It has nothing to do with PROVIDER prompt-prefix caching below,
+    // which discounts repeated prompt prefixes without replaying responses.
+    //
+    // Provider prefix-cache routing hints, keyed by the editor conversation id
+    // (metadata.sessionId): Workers AI models take `x-session-affinity` via
+    // model settings; OpenAI's GPT-5.6 family wants `prompt_cache_key` in the
+    // request body for reliable cache-shard routing. Both are best-effort —
+    // caching still works opportunistically without them. xAI's chat
+    // completions hint is a header the gateway path doesn't expose today, so
+    // grok relies on opportunistic prefix matching.
+    const cacheKey = req.metadata?.sessionId;
+    const model = resolveModel(
+        req.model, env, { skipCache: true },
+        cacheKey && req.model.startsWith('@cf/') ? { sessionAffinity: cacheKey } : undefined,
+    );
     const messages = convertMessages(req.messages);
     const tools = convertTools(req.tools);
     const maxOutputTokens = Math.min(req.max_tokens ?? 8192, getMaxOutput(req.model));
@@ -163,6 +184,9 @@ export async function* streamCompletion(
         // forbidding tool calls — the editor's turn governor sends it at the
         // per-send call cap.
         ...(req.tool_choice === 'none' ? { toolChoice: 'none' as const } : {}),
+        ...(cacheKey && req.model.startsWith('openai/')
+            ? { providerOptions: { openai: { promptCacheKey: cacheKey } } }
+            : {}),
         maxOutputTokens, temperature: req.temperature,
     });
 

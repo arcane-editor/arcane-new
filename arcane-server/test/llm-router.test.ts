@@ -123,4 +123,30 @@ describe('streamCompletion event mapping', () => {
         expect(seen[0].toolChoice).toBe('none');
         expect('toolChoice' in seen[1]).toBe(false);
     });
+
+    it('sends prompt_cache_key (via providerOptions.openai) only for openai/* models with a session id', async () => {
+        const seen: Array<Record<string, unknown>> = [];
+        const impl = ((args: Record<string, unknown>) => {
+            seen.push(args);
+            return { fullStream: (async function* () {})() };
+        }) as unknown as typeof import('ai').streamText;
+
+        const withSession = (model: string): ChatCompletionRequest => ({
+            model, messages: [{ role: 'user', content: 'hi' }],
+            metadata: { sessionId: 'conv_123' },
+        });
+
+        for await (const _ of streamCompletion(withSession('openai/gpt-5.6-luna'), ENV, impl)) { /* drain */ }
+        for await (const _ of streamCompletion(withSession('@cf/zai-org/glm-5.2'), ENV, impl)) { /* drain */ }
+        for await (const _ of streamCompletion({ model: 'openai/gpt-5.6-luna', messages: [{ role: 'user', content: 'hi' }] }, ENV, impl)) { /* drain */ }
+
+        expect(seen[0].providerOptions).toEqual({ openai: { promptCacheKey: 'conv_123' } });
+        expect('providerOptions' in seen[1]).toBe(false);
+        expect('providerOptions' in seen[2]).toBe(false);
+    });
+
+    it('passes sessionAffinity into @cf model settings (x-session-affinity routing hint)', () => {
+        const model = resolveModel('@cf/zai-org/glm-5.2', ENV, undefined, { sessionAffinity: 'conv_123' });
+        expect((model as unknown as { settings: { sessionAffinity?: string } }).settings.sessionAffinity).toBe('conv_123');
+    });
 });

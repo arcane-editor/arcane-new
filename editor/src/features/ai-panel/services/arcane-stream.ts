@@ -243,6 +243,9 @@ async function doStream(
       taskType,
       mode: currentMode,
       reasoningLevel: options.reasoning ?? 'low',
+      // Conversation id — the server derives provider prompt-cache routing
+      // hints from it (prompt_cache_key / x-session-affinity).
+      sessionId: useAiStore.getState().sessionId ?? undefined,
       telemetry: nextTurnTelemetry(),
     },
   });
