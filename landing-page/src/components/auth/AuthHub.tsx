@@ -96,6 +96,9 @@ export default function AuthHub() {
             if (ret) savePostAuthReturn(ret);
             const code = params.get("code");
             const errorParam = params.get("error");
+            // ?tab=signup lets the navbar's "Sign up" button land on the right
+            // tab. Read before the strip below, like every other param here.
+            if (params.get("tab") === "signup") setTab("signup");
             if (window.location.search) {
                 window.history.replaceState(null, "", window.location.pathname);
             }

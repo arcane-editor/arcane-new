@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import { Menu, X } from "lucide-react";
-import { getStoredToken } from "@/lib/auth";
+import { CreditCard, LogOut, Menu, Settings, X } from "lucide-react";
+import AccountMenu, { AccountSummaryBlock, useAuthSummary } from "@/components/AccountMenu";
 
 // Order mirrors the landing page itself: features → download → pricing → docs.
 const links = [
@@ -11,16 +11,14 @@ const links = [
   { label: "Docs", href: "/docs/" },
 ];
 
+const mobileItemClass =
+  "flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary";
+
 const Navbar = () => {
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState("");
   const [scrolled, setScrolled] = useState(false);
-  const [authed, setAuthed] = useState(false);
-
-  useEffect(() => {
-    // localStorage only after hydration — the island is pre-rendered at build time.
-    setAuthed(!!getStoredToken());
-  }, []);
+  const auth = useAuthSummary();
 
   useEffect(() => {
     const onScroll = () => {
@@ -87,20 +85,48 @@ const Navbar = () => {
 
           {/* Same hover treatment as the nav links above — it sits in the same
               row, so hovering it to a different colour reads as a bug. */}
-          <a
-            href={authed ? "/account" : "/auth"}
-            className="group relative rounded-lg px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-primary"
-          >
-            {authed ? "Account" : "Sign in"}
-            <span className="pointer-events-none absolute bottom-0 left-1/2 h-0.5 w-6 -translate-x-1/2 scale-x-0 rounded-full bg-primary glow-orange-sm transition-transform duration-200 ease-out group-hover:scale-x-100" />
-          </a>
+          {auth.state === "signed-out" && (
+            <a
+              href="/auth"
+              className="group relative rounded-lg px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-primary"
+            >
+              Log in
+              <span className="pointer-events-none absolute bottom-0 left-1/2 h-0.5 w-6 -translate-x-1/2 scale-x-0 rounded-full bg-primary glow-orange-sm transition-transform duration-200 ease-out group-hover:scale-x-100" />
+            </a>
+          )}
+
+          {/* Download stays the only amber CTA in this row; Sign up sits a tier
+              below it, Log in a tier below that. */}
+          {auth.state === "signed-out" && (
+            <Button variant="secondary" size="sm" className="ml-2" asChild>
+              <a href="/auth?tab=signup">Sign up</a>
+            </Button>
+          )}
 
           <Button variant="hero" size="sm" className="ml-4" asChild>
             <a href="#download">Download</a>
           </Button>
+
+          {/* Avatar is last, the one position every product puts it in.
+              Fixed-size placeholder while auth is unknown so the row never
+              shifts when hydration resolves. */}
+          {auth.state === "unknown" && <div className="ml-2 h-9 w-9" aria-hidden="true" />}
+          {auth.state === "signed-in" && <AccountMenu {...auth} />}
         </div>
 
-        <Button variant="ghost" size="icon" className="md:hidden" onClick={() => setOpen(!open)}>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="md:hidden"
+          aria-label={open ? "Close menu" : "Open menu"}
+          aria-expanded={open}
+          onClick={() => {
+            // Same lazy fetch the desktop popover does — plan/credits are only
+            // needed once the sheet is actually on screen.
+            if (!open && auth.state === "signed-in") auth.loadMe();
+            setOpen(!open);
+          }}
+        >
           {open ? <X /> : <Menu />}
         </Button>
       </div>
@@ -118,16 +144,56 @@ const Navbar = () => {
                 {l.label}
               </a>
             ))}
-            <a
-              href={authed ? "/account" : "/auth"}
-              onClick={() => setOpen(false)}
-              className="rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary"
-            >
-              {authed ? "Account" : "Sign in"}
-            </a>
             <Button variant="hero" size="sm" className="mt-2" asChild>
               <a href="#download">Download</a>
             </Button>
+
+            {/* A popover inside a sheet is a trap on touch, so the same content
+                renders as flat rows here instead. */}
+            {auth.state === "signed-out" && (
+              <div className="mt-2 flex flex-col gap-2 border-t border-border/50 pt-3">
+                <a
+                  href="/auth"
+                  onClick={() => setOpen(false)}
+                  className="rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary"
+                >
+                  Log in
+                </a>
+                <Button variant="secondary" size="sm" asChild>
+                  <a href="/auth?tab=signup">Sign up</a>
+                </Button>
+              </div>
+            )}
+
+            {auth.state === "signed-in" && (
+              <div className="mt-2 border-t border-border/50 pt-2">
+                <AccountSummaryBlock email={auth.email} me={auth.me} meFailed={auth.meFailed} />
+                <a
+                  href="/account"
+                  onClick={() => setOpen(false)}
+                  className={mobileItemClass}
+                >
+                  <Settings className="h-4 w-4 shrink-0" aria-hidden="true" />
+                  Account settings
+                </a>
+                <a
+                  href="/account#billing"
+                  onClick={() => setOpen(false)}
+                  className={mobileItemClass}
+                >
+                  <CreditCard className="h-4 w-4 shrink-0" aria-hidden="true" />
+                  Plans &amp; billing
+                </a>
+                <button
+                  type="button"
+                  onClick={auth.signOut}
+                  className={`${mobileItemClass} w-full hover:bg-destructive/10 hover:text-destructive`}
+                >
+                  <LogOut className="h-4 w-4 shrink-0" aria-hidden="true" />
+                  Sign out
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}

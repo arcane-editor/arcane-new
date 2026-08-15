@@ -116,7 +116,10 @@ export default function BillingPanel() {
     const labelClass = "text-sm text-muted-foreground";
 
     return (
-        <div className="container mx-auto px-4 max-w-2xl pb-24">
+        // `id` is the anchor the navbar's "Plans & billing" item jumps to —
+        // account settings and billing share one page, so the menu scrolls
+        // rather than pretending they are separate destinations.
+        <div id="billing" className="container mx-auto px-4 max-w-2xl pb-24 scroll-mt-24">
             {notice && (
                 <div className={`rounded-lg px-4 py-2 text-sm mb-4 border ${
                     notice.type === "success" ? "border-green-500/30 bg-green-500/10 text-green-500"
