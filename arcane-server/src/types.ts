@@ -75,7 +75,7 @@ export interface ChatCompletionRequest {
      */
     tool_choice?: 'none' | 'auto';
     metadata?: {
-        taskType?: 'chat' | 'edit' | 'plan' | 'explain';
+        taskType?: 'chat' | 'edit' | 'plan' | 'explain' | 'memory';
         mode?: 'agent' | 'ask' | 'plan';
         reasoningLevel?: 'low' | 'mid' | 'high' | 'super';
         planPhase?: 'planning' | 'executing';

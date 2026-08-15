@@ -22,6 +22,7 @@ const DEFAULT_SETTINGS: SettingsSchema = {
   'graphify.suppressFirstOpenToast': false,
   'ai.checkpoints.enabled': true,
   'ai.escalation.enabled': true,
+  'ai.memory.enabled': true,
   'ai.edits.applyMode': 'auto',
   'ai.edits.alwaysApproveUnityAssets': true,
   'ai.inlineSuggestions.enabled': true,

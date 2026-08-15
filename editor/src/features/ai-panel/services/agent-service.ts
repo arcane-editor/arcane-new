@@ -63,8 +63,12 @@ import {
   beginVerifiedPass,
   recordTouchedFile,
   touchedFileCount,
+  touchedFileList,
   runVerifiedPass,
 } from './verified-pass';
+import { distillSend } from './memory/distiller';
+import { sideTaskRequest } from './memory/memory-request';
+import { tauriMemoryFs } from './memory/tauri-memory-fs';
 import { useAiStore, type AiMessage } from '../../../stores/ai';
 import { useAuthStore } from '../../../stores/auth';
 import { useWorkspaceStore } from '../../../stores/workspace';
@@ -582,6 +586,9 @@ export class AgentService {
         // of the grounding linter above — runs once the whole send is done,
         // over everything it touched.
         await this.runVerifiedPassIfNeeded(promptMode);
+        // Memory distillation (spec §4): fire-and-forget on the cheap
+        // side-task lane; a failure never surfaces as a send error.
+        this.maybeDistillMemory(promptMode, text);
       }
     } catch (error) {
       if (error instanceof Error && error.message === 'Agent is already running') {
@@ -703,6 +710,35 @@ export class AgentService {
       // runVerifiedPass is already defensive per-step; this is just an extra
       // safety net so a verified-pass failure never surfaces as a send error.
     }
+  }
+
+  /**
+   * Memory distillation gate + kickoff (spec §4). Only after sends that did
+   * real mutating work, only when enabled, never for the placeholder
+   * workspace, never after an abort. Runs detached — errors are swallowed
+   * inside distillSend.
+   */
+  private maybeDistillMemory(promptMode: PromptMode, userPrompt: string): void {
+    if (promptMode !== 'agent' && promptMode !== 'plan-execution') return;
+    if (this.abortRequested) return;
+    if (touchedFileCount() === 0) return;
+    if (useSettingsStore.getState().getSetting('ai.memory.enabled') === false) return;
+    const workspacePath = getCurrentWorkspacePath();
+    if (workspacePath === '/') return;
+
+    const lastAssistant = [...this.agent.getMessages()].reverse().find((m) => m.role === 'assistant');
+    const finalAssistantText =
+      lastAssistant && lastAssistant.role === 'assistant'
+        ? lastAssistant.content
+            .filter((c): c is TextContent => c.type === 'text')
+            .map((c) => c.text)
+            .join('\n')
+        : '';
+
+    void distillSend(
+      { userPrompt, finalAssistantText, touchedFiles: touchedFileList() },
+      { request: sideTaskRequest, fs: tauriMemoryFs, workspacePath },
+    );
   }
 
   /**

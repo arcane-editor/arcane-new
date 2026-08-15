@@ -103,6 +103,11 @@ export function touchedFileCount(): number {
   return touched.size;
 }
 
+/** Absolute paths touched this send (sorted copy) — memory distiller input. */
+export function touchedFileList(): string[] {
+  return [...touched].sort();
+}
+
 // ---- Helpers ----
 
 function isCsFile(p: string): boolean {
