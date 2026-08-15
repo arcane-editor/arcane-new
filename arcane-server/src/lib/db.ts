@@ -10,6 +10,7 @@ export interface UserRow {
     role: string;
     created_at: string;
     google_sub: string | null;
+    github_id: string | null;  // GitHub's numeric user id, as TEXT (migration 0020)
     email_verified: number;  // 0 | 1
     token_version: number;   // session revocation epoch (JWT claim must match)
     // Billing (migration 0013). Balances are integer micro-USD of model cost.
@@ -490,11 +491,37 @@ export async function linkGoogleSubClearingCredentials(db: D1Database, userId: n
     return row ?? null;
 }
 
-/** Google-only signup: '' password sentinel (column is NOT NULL), pre-verified. */
-export async function createOAuthUser(db: D1Database, data: { email: string; googleSub: string }): Promise<UserRow> {
+export async function findUserByGitHubId(db: D1Database, githubId: string): Promise<UserRow | null> {
+    return db.prepare('SELECT * FROM users WHERE github_id = ?').bind(githubId).first<UserRow>();
+}
+
+/** GitHub twin of linkGoogleSub. Deliberately a separate function rather than a
+ *  provider-parameterised one: a column name cannot be bound as a SQL
+ *  parameter, so sharing would mean interpolating it into the statement. */
+export async function linkGitHubId(db: D1Database, userId: number, githubId: string): Promise<UserRow | null> {
+    return db.prepare(
+        'UPDATE users SET github_id = ?, email_verified = 1 WHERE id = ? RETURNING *'
+    ).bind(githubId, userId).first<UserRow>();
+}
+
+/** GitHub twin of linkGoogleSubClearingCredentials — same pre-account-takeover
+ *  guard: an untrusted password on a never-verified row is cleared and every
+ *  session it minted is revoked. */
+export async function linkGitHubIdClearingCredentials(db: D1Database, userId: number, githubId: string): Promise<UserRow | null> {
+    const row = await db.prepare(
+        "UPDATE users SET github_id = ?, email_verified = 1, password_hash = '', salt = '', token_version = token_version + 1 WHERE id = ? RETURNING *"
+    ).bind(githubId, userId).first<UserRow>();
+    return row ?? null;
+}
+
+/** OAuth-only signup: '' password sentinel (column is NOT NULL), pre-verified.
+ *  Exactly one provider id is supplied; the other stays NULL. */
+export async function createOAuthUser(
+    db: D1Database, data: { email: string; googleSub?: string; githubId?: string },
+): Promise<UserRow> {
     const result = await db.prepare(
-        "INSERT INTO users (email, password_hash, salt, email_verified, google_sub) VALUES (?, '', '', 1, ?) RETURNING *"
-    ).bind(data.email.toLowerCase(), data.googleSub).first<UserRow>();
+        "INSERT INTO users (email, password_hash, salt, email_verified, google_sub, github_id) VALUES (?, '', '', 1, ?, ?) RETURNING *"
+    ).bind(data.email.toLowerCase(), data.googleSub ?? null, data.githubId ?? null).first<UserRow>();
     return result!;
 }
 

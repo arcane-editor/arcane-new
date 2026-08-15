@@ -11,6 +11,7 @@ import { inlineRouter } from './src/routes/inline.ts';
 import { authRouter } from './src/routes/auth.ts';
 import { authEmailRouter } from './src/routes/auth-email.ts';
 import { authGoogleRouter } from './src/routes/auth-google.ts';
+import { authGithubRouter } from './src/routes/auth-github.ts';
 import { authEditorRouter } from './src/routes/auth-editor.ts';
 import { usageRouter } from './src/routes/usage.ts';
 import { adminRouter } from './src/routes/admin.ts';
@@ -45,6 +46,7 @@ for (const path of [
     '/v1/auth/signup', '/v1/auth/login', '/v1/auth/forgot', '/v1/auth/reset',
     '/v1/auth/verify', '/v1/auth/resend-verification', '/v1/auth/change-password',
     '/v1/auth/web/exchange', '/v1/auth/editor/exchange', '/v1/auth/google/start',
+    '/v1/auth/github/start',
 ]) {
     app.use(path, strict);
 }
@@ -60,6 +62,7 @@ app.get('/health', (c) => c.json({ status: 'ok' }));
 app.route('/', authRouter);
 app.route('/', authEmailRouter);
 app.route('/', authGoogleRouter);
+app.route('/', authGithubRouter);
 app.route('/', authEditorRouter);
 app.route('/', feedbackRouter);
 // Billing: the webhook is PUBLIC (Dodo signs it, no user JWT) — mount it with

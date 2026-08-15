@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { env, SELF } from 'cloudflare:test';
-import { seedPasswordUser, seedGoogleOnlyUser, tokenFor, jsonPost } from './helpers.ts';
+import { seedPasswordUser, seedGoogleOnlyUser, seedGitHubOnlyUser, tokenFor, jsonPost } from './helpers.ts';
 
 describe('POST /v1/auth/signup', () => {
     it('creates an unverified user, mints a token, stores a verify_email token', async () => {
@@ -56,18 +56,30 @@ describe('POST /v1/auth/login', () => {
 });
 
 describe('GET /v1/auth/me', () => {
-    it('returns emailVerified/hasPassword/googleLinked', async () => {
+    it('returns emailVerified/hasPassword/googleLinked/githubLinked', async () => {
         const user = await seedPasswordUser('me@test.dev', 'password123');
         const res = await SELF.fetch('https://example.com/v1/auth/me', {
             headers: { Authorization: `Bearer ${await tokenFor(user)}` },
         });
         expect(res.status).toBe(200);
         const body = await res.json<{
-            user: { emailVerified: boolean }; hasPassword: boolean; googleLinked: boolean;
+            user: { emailVerified: boolean }; hasPassword: boolean;
+            googleLinked: boolean; githubLinked: boolean;
         }>();
         expect(body.user.emailVerified).toBe(true);
         expect(body.hasPassword).toBe(true);
         expect(body.googleLinked).toBe(false);
+        expect(body.githubLinked).toBe(false);
+    });
+
+    it('reports githubLinked for a GitHub-linked account', async () => {
+        const user = await seedGitHubOnlyUser('melinked@test.dev', '77001');
+        const res = await SELF.fetch('https://example.com/v1/auth/me', {
+            headers: { Authorization: `Bearer ${await tokenFor(user)}` },
+        });
+        const body = await res.json<{ hasPassword: boolean; githubLinked: boolean }>();
+        expect(body.githubLinked).toBe(true);
+        expect(body.hasPassword).toBe(false);
     });
 });
 

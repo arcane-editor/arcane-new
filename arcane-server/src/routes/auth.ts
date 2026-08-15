@@ -120,6 +120,7 @@ authRouter.get('/v1/auth/me', authMiddleware(), async (c) => {
         user: makeUserResponse(user),
         hasPassword: user.password_hash !== '',
         googleLinked: user.google_sub !== null,
+        githubLinked: user.github_id !== null,
         usage: {
             totalRequests: usage?.total_requests ?? 0,
             totalInputTokens: usage?.total_input_tokens ?? 0,

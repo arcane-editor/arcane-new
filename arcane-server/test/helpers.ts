@@ -21,6 +21,13 @@ export async function seedGoogleOnlyUser(email: string, googleSub: string): Prom
     return row!;
 }
 
+export async function seedGitHubOnlyUser(email: string, githubId: string): Promise<UserRow> {
+    const row = await env.arcane_db.prepare(
+        "INSERT INTO users (email, password_hash, salt, email_verified, github_id) VALUES (?, '', '', 1, ?) RETURNING *"
+    ).bind(email.toLowerCase(), githubId).first<UserRow>();
+    return row!;
+}
+
 /** Current-claims JWT for a seeded user (same mint path as the server). */
 export async function tokenFor(user: UserRow): Promise<string> {
     return signJwt(makeJwtPayloadFromUser(user), env.JWT_SECRET);

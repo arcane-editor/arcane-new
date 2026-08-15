@@ -49,8 +49,10 @@ CF_ACCOUNT_ID = ""
 # Base URL of the user-facing website (auth pages live there). Phase 2 uses
 # this for the device-flow verification_uri and email links.
 WEB_BASE_URL = "https://arcaneai.org"
-# This worker's own public base URL — used as the Google OAuth redirect_uri
-# host and anywhere the server must name itself.
+# This worker's own public base URL — used as the OAuth redirect_uri host
+# (Google + GitHub) and anywhere the server must name itself. GitHub allows a
+# single callback URL per OAuth App, so prod and dev need one App each,
+# registered against their own API_BASE_URL.
 API_BASE_URL = "https://api.arcaneai.org"
 # Verified sender on the onboarded arcaneai.org Email Service domain.
 EMAIL_FROM = "no-reply@arcaneai.org"

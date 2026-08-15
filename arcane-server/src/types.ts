@@ -39,6 +39,8 @@ export type AppEnv = {
         RL_INLINE?: RateLimiter;        // 30/60s/user inline-completion burst cap (absent in tests → fail open)
         GOOGLE_CLIENT_ID?: string;      // secret — unset until owner provisions OAuth client
         GOOGLE_CLIENT_SECRET?: string;  // secret
+        GITHUB_CLIENT_ID?: string;      // secret — one OAuth App per environment (GitHub allows a single callback URL each)
+        GITHUB_CLIENT_SECRET?: string;  // secret
         TURNSTILE_SECRET?: string;      // secret — unset = Turnstile verification skipped
         // Dodo Payments (billing). Secrets unset until owner provisions the
         // account; when absent the billing routes degrade to 503 and the
