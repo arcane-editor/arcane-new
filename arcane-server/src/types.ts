@@ -67,6 +67,12 @@ export interface ChatCompletionRequest {
     stream?: boolean;
     max_tokens?: number;
     temperature?: number;
+    /**
+     * OpenAI-style tool choice. The editor's turn governor sends 'none' at
+     * the call cap so the model answers tool-free while the `tools` block
+     * stays byte-identical for provider prompt-prefix caches.
+     */
+    tool_choice?: 'none' | 'auto';
     metadata?: {
         taskType?: 'chat' | 'edit' | 'plan' | 'explain';
         mode?: 'agent' | 'ask' | 'plan';

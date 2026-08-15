@@ -5,10 +5,11 @@
  * module is a `StreamFn` decorator: once the wrapped stream has been called
  * `cap` times for the current send (per-effort table below), every
  * subsequent call receives a MODIFIED COPY of the outgoing request —
- * `tools` stripped (so the model physically cannot emit a tool call via the
- * function-calling API) and a one-shot "wrap up" user-style message
- * appended — so the model's next response is naturally tool-free and the
- * loop exits on its own.
+ * `tool_choice: 'none'` attached via stream-extras (so the model cannot emit
+ * a tool call, while the `tools` block itself stays byte-identical for the
+ * provider's prompt-prefix cache) and a one-shot "wrap up" user-style
+ * message appended — so the model's next response is naturally tool-free and
+ * the loop exits on its own.
  *
  * Request-scoped only: the modified `Context` is a fresh object built here;
  * the caller's `context.messages` (backed by the agent's real history) is
@@ -34,6 +35,7 @@
 
 import type { Context, Message, StreamFn, StreamOptions } from './vendor/types';
 import type { Effort } from './types';
+import { withStreamExtras } from './stream-extras';
 
 const KNOWN_EFFORTS: readonly Effort[] = ['low', 'mid', 'high'];
 
@@ -149,11 +151,17 @@ export function withTurnGovernor(
       (config.onCapReached ?? defaultOnCapReached)(effort, cap);
     }
 
-    const governedContext: Context = {
-      ...context,
-      messages: [...context.messages, wrapUpMessage()],
-      tools: [],
-    };
+    // Keep `tools` byte-identical (it heads the provider's cached prompt
+    // prefix — stripping it re-bills the whole conversation) and force a
+    // tool-free response via `tool_choice: 'none'` instead, carried as a
+    // stream extra so vendor types stay untouched.
+    const governedContext: Context = withStreamExtras(
+      {
+        ...context,
+        messages: [...context.messages, wrapUpMessage()],
+      },
+      { toolChoice: 'none' },
+    );
     return streamFn(governedContext, options);
   };
 }

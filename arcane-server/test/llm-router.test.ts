@@ -109,4 +109,18 @@ describe('streamCompletion event mapping', () => {
             { type: 'error', code: 'rate_limit', message: String(upstreamError) },
         ]);
     });
+
+    it("passes tool_choice 'none' through to streamText (governor at cap keeps tools cached)", async () => {
+        const seen: Array<Record<string, unknown>> = [];
+        const impl = ((args: Record<string, unknown>) => {
+            seen.push(args);
+            return { fullStream: (async function* () {})() };
+        }) as unknown as typeof import('ai').streamText;
+
+        for await (const _ of streamCompletion({ ...REQ, tool_choice: 'none' }, ENV, impl)) { /* drain */ }
+        for await (const _ of streamCompletion(REQ, ENV, impl)) { /* drain */ }
+
+        expect(seen[0].toolChoice).toBe('none');
+        expect('toolChoice' in seen[1]).toBe(false);
+    });
 });

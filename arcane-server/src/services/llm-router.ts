@@ -159,6 +159,10 @@ export async function* streamCompletion(
 
     const result = streamTextImpl({
         model, messages, ...(tools ? { tools } : {}),
+        // 'none' keeps the tools block in the prompt (cached prefix) while
+        // forbidding tool calls — the editor's turn governor sends it at the
+        // per-send call cap.
+        ...(req.tool_choice === 'none' ? { toolChoice: 'none' as const } : {}),
         maxOutputTokens, temperature: req.temperature,
     });
 

@@ -28,6 +28,7 @@ import type {
 import { AssistantMessageEventStream } from './vendor/event-stream';
 import { nextTurnTelemetry, recordTurnLatency } from './turn-telemetry';
 import { convertToOpenAI } from './openai-format';
+import { getStreamExtras } from './stream-extras';
 import { combineSignals, computeBackoffMs, isTransient, raceWithTimeout, sleep, TimeoutRaceError } from './stream-retry';
 import { ARCANE_API_URL } from '../../../config/api';
 
@@ -229,9 +230,13 @@ async function doStream(
   // `turnIndex` increments once per agent-loop turn, so a retried attempt
   // (still the same logical turn/request) must not inflate it by calling
   // `nextTurnTelemetry()` again per attempt.
+  const extras = getStreamExtras(context);
   const requestBody = JSON.stringify({
     messages,
     tools: tools.length > 0 ? tools : undefined,
+    // Turn-governor at cap: tools stay in the request (cached prefix) but the
+    // model is told not to call them.
+    ...(extras?.toolChoice ? { tool_choice: extras.toolChoice } : {}),
     stream: true,
     max_tokens: maxTokensByTask[taskType],
     metadata: {

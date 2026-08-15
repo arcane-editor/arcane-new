@@ -1,7 +1,13 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
 import { withTurnGovernor, resetTurnGovernor, grantExtraCalls, DEFAULT_TURN_CAPS, WRAP_UP_TEXT } from './turn-governor';
+import { getStreamExtras } from './stream-extras';
 import type { Context, StreamFn, StreamOptions } from './vendor/types';
 import { AssistantMessageEventStream } from './vendor/event-stream';
+
+/** A governed request keeps its tools but carries tool_choice: 'none'. */
+function isGoverned(c: Context): boolean {
+  return getStreamExtras(c)?.toolChoice === 'none';
+}
 
 const CTX: Context = { systemPrompt: 'SYS', messages: [{ role: 'user', content: 'hi', timestamp: 1 }], tools: [{ name: 't', description: 'd', parameters: {} as never }] };
 
@@ -39,7 +45,7 @@ describe('withTurnGovernor', () => {
     expect(calls()[1]).toBe(CTX);
   });
 
-  it('strips tools and appends the wrap-up message at the cap', () => {
+  it('keeps tools, sets tool_choice none, and appends the wrap-up message at the cap', () => {
     const { streamFn, calls } = recordingStreamFn();
     const governed = withTurnGovernor(streamFn, () => ({ caps: { mid: 2 } }));
 
@@ -47,7 +53,11 @@ describe('withTurnGovernor', () => {
     governed(CTX, opts('mid')); // call 2: AT cap
 
     const finalRequest = calls()[1];
-    expect(finalRequest.tools).toEqual([]);
+    // Tools stay byte-identical — they head the provider's cached prompt
+    // prefix. The governed request signals tool_choice 'none' instead.
+    expect(finalRequest.tools).toBe(CTX.tools);
+    expect(isGoverned(finalRequest)).toBe(true);
+    expect(isGoverned(calls()[0])).toBe(false);
     expect(finalRequest.messages.length).toBe(CTX.messages.length + 1);
     const injected = finalRequest.messages[finalRequest.messages.length - 1];
     expect(injected.role).toBe('user');
@@ -74,8 +84,8 @@ describe('withTurnGovernor', () => {
     governed(CTX, opts('mid')); // AT cap
     governed(CTX, opts('mid')); // BEYOND cap
 
-    expect(calls()[0].tools).toEqual([]);
-    expect(calls()[1].tools).toEqual([]);
+    expect(isGoverned(calls()[0])).toBe(true);
+    expect(isGoverned(calls()[1])).toBe(true);
   });
 
   it('resets the call count per send', () => {
@@ -83,11 +93,11 @@ describe('withTurnGovernor', () => {
     const governed = withTurnGovernor(streamFn, () => ({ caps: { mid: 2 } }));
 
     governed(CTX, opts('mid'));
-    governed(CTX, opts('mid')); // AT cap — stripped
+    governed(CTX, opts('mid')); // AT cap — governed
     resetTurnGovernor();
     governed(CTX, opts('mid')); // fresh send, call 1 — untouched again
 
-    expect(calls()[2].tools.length).toBe(1);
+    expect(isGoverned(calls()[2])).toBe(false);
   });
 
   it('fires the cap-reached notice exactly once per send even across multiple over-cap calls', () => {
@@ -112,10 +122,10 @@ describe('withTurnGovernor', () => {
     const governed = withTurnGovernor(streamFn);
 
     for (let i = 0; i < 9; i++) governed(CTX, opts('low'));
-    expect(calls()[8].tools.length).toBe(1); // call 9 of 10 — still below cap
+    expect(isGoverned(calls()[8])).toBe(false); // call 9 of 10 — still below cap
 
     governed(CTX, opts('low')); // call 10 — AT cap
-    expect(calls()[9].tools).toEqual([]);
+    expect(isGoverned(calls()[9])).toBe(true);
   });
 
   it('falls back to the mid cap for an unrecognized/absent reasoning value', () => {
@@ -124,7 +134,7 @@ describe('withTurnGovernor', () => {
 
     governed(CTX, opts(undefined));
 
-    expect(calls()[0].tools).toEqual([]); // treated as 'mid', cap 1 reached immediately
+    expect(isGoverned(calls()[0])).toBe(true); // treated as 'mid', cap 1 reached immediately
   });
 
   it('grantExtraCalls(1) at cap allows one more call through untouched', () => {
@@ -132,12 +142,12 @@ describe('withTurnGovernor', () => {
     const governed = withTurnGovernor(streamFn, () => ({ caps: { mid: 2 } }));
 
     governed(CTX, opts('mid')); // call 1: below cap
-    governed(CTX, opts('mid')); // call 2: AT cap, stripped
+    governed(CTX, opts('mid')); // call 2: AT cap, governed
     grantExtraCalls(1);
     governed(CTX, opts('mid')); // call 3: extra grant used, untouched
 
-    expect(calls()[1].tools).toEqual([]); // capped
-    expect(calls()[2].tools.length).toBe(1); // grant allowed through
+    expect(isGoverned(calls()[1])).toBe(true); // capped
+    expect(isGoverned(calls()[2])).toBe(false); // grant allowed through
   });
 
   it('call after grantExtraCalls grant is consumed stays capped', () => {
@@ -150,8 +160,8 @@ describe('withTurnGovernor', () => {
     governed(CTX, opts('mid')); // call 3: grant used, untouched
     governed(CTX, opts('mid')); // call 4: grant consumed, now capped
 
-    expect(calls()[2].tools.length).toBe(1); // grant allowed
-    expect(calls()[3].tools).toEqual([]); // back to capped
+    expect(isGoverned(calls()[2])).toBe(false); // grant allowed
+    expect(isGoverned(calls()[3])).toBe(true); // back to capped
   });
 
   it('reset clears the extra-calls grant', () => {
@@ -159,12 +169,12 @@ describe('withTurnGovernor', () => {
     const governed = withTurnGovernor(streamFn, () => ({ caps: { mid: 2 } }));
 
     governed(CTX, opts('mid')); // call 1: below cap
-    governed(CTX, opts('mid')); // call 2: AT cap, stripped
+    governed(CTX, opts('mid')); // call 2: AT cap, governed
     grantExtraCalls(1);
     resetTurnGovernor();
     governed(CTX, opts('mid')); // fresh send, call 1 — untouched again
 
-    expect(calls()[1].tools).toEqual([]); // second call was capped
-    expect(calls()[2].tools.length).toBe(1); // reset cleared the grant + reset count, fresh send
+    expect(isGoverned(calls()[1])).toBe(true); // second call was capped
+    expect(isGoverned(calls()[2])).toBe(false); // reset cleared the grant + reset count, fresh send
   });
 });
