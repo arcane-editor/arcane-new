@@ -69,6 +69,16 @@ jobs:
       - name: JS tests (isolated processes)
         run: cd editor && bun run test:isolated
 
+      # `editor/unity-bridge/` is a gitignored staging copy of `arcane-extension/`,
+      # and tauri.conf.json declares it as a bundled resource — so the Tauri build
+      # script aborts with "resource path `../unity-bridge` doesn't exist" when it
+      # is missing. `tauri dev`/`tauri build` create it via beforeDevCommand/
+      # beforeBuildCommand, but `cargo test` invokes the build script directly and
+      # never triggers those hooks. It only ever passed locally because an earlier
+      # build had left the folder behind; a clean checkout has never had it.
+      - name: Stage the Unity bridge resource (cargo does not run Tauri's hooks)
+        run: cd editor && bun run sync:bridge
+
       # verify:intellisense is deliberately NOT run here. It needs a real Unity
       # install, and its skip semantics (ARCANE_INTELLISENSE_E2E=required) make
       # a CI skip indistinguishable from a pass — which is precisely the failure
