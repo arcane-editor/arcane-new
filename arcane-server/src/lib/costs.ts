@@ -30,7 +30,18 @@ export interface ModelInfo {
 }
 
 export const MODEL_CATALOG: Record<string, ModelInfo> = {
-    // Standard — day-to-day coding. Coding Agent Index #6.
+    // Standard — day-to-day coding. Stand-in for gpt-5.6-luna until
+    // Cloudflare's run catalog onboards the 5.6 family (see plans.ts).
+    // Pricing verified 2026-08-15 (developers.openai.com): $0.75/$0.075
+    // cached (90% off, automatic)/$4.50; 400k context, 128k max output.
+    // No long-context repricing published for the mini tier.
+    'openai/gpt-5.4-mini': {
+        route: 'unified',
+        inputCostPer1M: 0.75, outputCostPer1M: 4.50, cachedInputCostPer1M: 0.075,
+        contextWindow: 400_000, maxOutput: 128_000,
+    },
+    // Intended Standard model — NOT currently servable through the gateway
+    // (run catalog lacks the 5.6 family); kept so the revert is one line.
     'openai/gpt-5.6-luna': {
         route: 'unified',
         inputCostPer1M: 0.20, outputCostPer1M: 1.20, cachedInputCostPer1M: 0.02,

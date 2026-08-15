@@ -95,7 +95,7 @@ export type Attachment =
  * the ENTIRE request once input crosses a threshold — a 200,001-token Max
  * request costs double a 200,000-token one — so the economic limit is lower
  * than the model's advertised window and compaction must respect it:
- *   low  → openai/gpt-5.6-luna, window 1,050,000, reprices above 272,000
+ *   low  → openai/gpt-5.4-mini, window 400,000 (gpt-5.6-luna pending CF catalog)
  *   mid  → @cf/zai-org/glm-5.2, window 262,144, FLAT pricing (no cliff)
  *   high → xai/grok-4.6,        window 500,000,   reprices above 200,000
  *
@@ -103,7 +103,7 @@ export type Attachment =
  * genuinely large-context work despite sitting lower on the ladder.
  */
 export const TIER_CONTEXT_WINDOWS: Record<Effort, number> = {
-  low: 272_000,
+  low: 400_000,
   mid: 262_144,
   high: 200_000,
 };

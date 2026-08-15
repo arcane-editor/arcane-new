@@ -22,7 +22,14 @@ export interface IntensityConfig {
 
 export const INTENSITY_CONFIG: Record<Intensity, IntensityConfig> = {
     low: {
-        model: 'openai/gpt-5.6-luna',
+        // gpt-5.6-luna is the intended model, but Cloudflare's unified-billing
+        // run catalog rejects the whole GPT-5.6 family as of 2026-08-15
+        // (AiGatewayError 7003 "Invalid value at input" on any 5.6 id, while
+        // gpt-5.4* / gpt-5.1 validate) even though the docs list it. Verified
+        // empirically — see docs/superpowers/plans/2026-08-15-ai-cost-
+        // optimization-manual-checklist.md. gpt-5.4-mini is the same
+        // cost-optimized class; revert to luna once CF onboards 5.6.
+        model: 'openai/gpt-5.4-mini',
         label: 'Standard',
         description: 'Day-to-day coding',
     },
