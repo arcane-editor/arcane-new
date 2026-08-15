@@ -45,6 +45,12 @@ export interface UsageTotals {
   input: number;
   output: number;
   requests: number;
+  /**
+   * Input tokens the provider served from its prompt cache (subset of
+   * `input`). Optional so existing `{input, output, requests}` literals stay
+   * valid; accumulate with `(usage.cachedInput ?? 0) + n`.
+   */
+  cachedInput?: number;
 }
 
 /**
@@ -68,7 +74,12 @@ interface OpenAIChatResponse {
       tool_calls?: Array<{ id: string; function: { name: string; arguments: string } }>;
     };
   }>;
-  usage?: { prompt_tokens?: number; completion_tokens?: number };
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    /** OpenAI-compatible cached-prefix detail, echoed by arcane-server. */
+    prompt_tokens_details?: { cached_tokens?: number };
+  };
 }
 
 // Pre-existing eval default, used only when no `requestState` is supplied —
@@ -159,6 +170,7 @@ export function createEvalStreamFn(
       const msg = json.choices?.[0]?.message ?? {};
       usage.input += json.usage?.prompt_tokens ?? 0;
       usage.output += json.usage?.completion_tokens ?? 0;
+      usage.cachedInput = (usage.cachedInput ?? 0) + (json.usage?.prompt_tokens_details?.cached_tokens ?? 0);
 
       const content: AssistantMessage['content'] = [];
       if (msg.content) content.push({ type: 'text', text: msg.content });

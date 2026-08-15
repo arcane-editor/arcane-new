@@ -62,7 +62,7 @@ describe('createEvalStreamFn', () => {
     const done = events.find((e) => (e as { type: string }).type === 'done') as { message: { content: { type: string; text?: string }[]; stopReason: string } };
     expect(done.message.content[0]).toEqual({ type: 'text', text: 'hello' });
     expect(done.message.stopReason).toBe('stop');
-    expect(usage).toEqual({ input: 10, output: 5, requests: 1 });
+    expect(usage).toEqual({ input: 10, output: 5, requests: 1, cachedInput: 0 });
   });
 
   it('converts tool_calls and sets stopReason toolUse', async () => {
@@ -102,7 +102,7 @@ describe('createEvalStreamFn', () => {
     const done = events.find((e) => (e as { type: string }).type === 'done') as { message: { content: { type: string; text?: string }[] } };
     expect(done.message.content[0]).toEqual({ type: 'text', text: 'hello' });
     expect(calls).toBe(2);
-    expect(usage).toEqual({ input: 10, output: 5, requests: 2 });
+    expect(usage).toEqual({ input: 10, output: 5, requests: 2, cachedInput: 0 });
   });
 
   it('gives up after maxAttempts consecutive 500s and emits only an error event', async () => {

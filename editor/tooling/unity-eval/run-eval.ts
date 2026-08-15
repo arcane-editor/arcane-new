@@ -191,7 +191,8 @@ await writeFile(
 );
 
 console.log(renderReport(aggregated, label));
-console.error(`\nSaved: ${outPath} — total tokens in/out: ${usage.input}/${usage.output} over ${usage.requests} requests`);
+const cachedShare = usage.input > 0 ? (((usage.cachedInput ?? 0) / usage.input) * 100).toFixed(1) : '0.0';
+console.error(`\nSaved: ${outPath} — total tokens in/out: ${usage.input}/${usage.output} over ${usage.requests} requests (cached input share: ${cachedShare}%)`);
 if (groundingCacheMisses > 0) {
   console.error(
     `[unity-eval] ${groundingCacheMisses} grounding cache miss(es) — see warnings above. ` +

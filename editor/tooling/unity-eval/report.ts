@@ -24,14 +24,16 @@ export function renderReport(results: AggregatedTaskResult[], label: string): st
   // values — label them accordingly so the table isn't misread.
   const sumSuffix = repeats > 1 ? ' (Σ)' : '';
   lines.push(
-    `| Task | Family | Pass | Score | Turns${sumSuffix} | Wall (s)${sumSuffix} | Tokens in/out${sumSuffix} | Failing checks |`,
+    `| Task | Family | Pass | Score | Turns${sumSuffix} | Wall (s)${sumSuffix} | Tokens in/out${sumSuffix} | Cached in %${sumSuffix} | Failing checks |`,
   );
-  lines.push('|---|---|---|---|---|---|---|---|');
+  lines.push('|---|---|---|---|---|---|---|---|---|');
   for (const r of results) {
     const turns = r.attempts.reduce((sum, a) => sum + a.turns, 0);
     const wallMs = r.attempts.reduce((sum, a) => sum + a.wallMs, 0);
     const inputTokens = r.attempts.reduce((sum, a) => sum + a.inputTokens, 0);
     const outputTokens = r.attempts.reduce((sum, a) => sum + a.outputTokens, 0);
+    const cachedTokens = r.attempts.reduce((sum, a) => sum + (a.cachedInputTokens ?? 0), 0);
+    const cachedShare = inputTokens > 0 ? `${((cachedTokens / inputTokens) * 100).toFixed(0)}%` : '—';
     const failing =
       r.attempts
         .flatMap((a) => a.checks.filter((c) => !c.pass).map((c) => c.detail))
@@ -40,7 +42,7 @@ export function renderReport(results: AggregatedTaskResult[], label: string): st
     // independent of which way the aggregated verdict landed.
     const passGlyph = `${r.pass ? '✅' : '❌'}${r.flaky ? ' ~' : ''}`;
     lines.push(
-      `| ${r.taskId} | ${r.family} | ${passGlyph} | ${r.passCount}/${r.repeats} | ${turns} | ${(wallMs / 1000).toFixed(1)} | ${inputTokens}/${outputTokens} | ${failing} |`,
+      `| ${r.taskId} | ${r.family} | ${passGlyph} | ${r.passCount}/${r.repeats} | ${turns} | ${(wallMs / 1000).toFixed(1)} | ${inputTokens}/${outputTokens} | ${cachedShare} | ${failing} |`,
     );
   }
   lines.push('');

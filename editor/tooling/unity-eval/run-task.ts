@@ -264,6 +264,7 @@ export async function runTask(
     wallMs,
     inputTokens: usage.input - usageBefore.input,
     outputTokens: usage.output - usageBefore.output,
+    cachedInputTokens: (usage.cachedInput ?? 0) - (usageBefore.cachedInput ?? 0),
     error,
     groundingCacheMisses: 'misses' in apiClient ? apiClient.misses : 0,
     recordFailures: 'recordFailures' in apiClient ? apiClient.recordFailures : 0,
