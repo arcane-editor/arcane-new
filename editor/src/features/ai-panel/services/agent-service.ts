@@ -51,6 +51,7 @@ import { resolveSendEffort, resetSendEscalation } from './send-escalation';
 import { maxEntitledEffort } from './entitlement';
 import { withStreamErrorGuard } from './stream-error-guard';
 import { withRepeatCallGuard, resetRepeatCallGuard } from './tool-guards';
+import { computeAllowedRoots } from './sandbox-roots';
 import {
   resetTurnTelemetry,
   recordTelemetryEvent,
@@ -151,17 +152,16 @@ function getCurrentWorkspacePath(): string {
  */
 function createToolsForPromptMode(mode: PromptMode, workspacePath: string): AgentTool[] {
   const isUnity = useProjectContextStore.getState().isUnityProject;
-  // In a Unity project, confine the agent's file operations to the Assets/
-  // folder PLUS the IDE's own `.arcane/` workspace dir. `.arcane` must be in
-  // the sandbox: plan files live at `<ws>/.arcane/plans/*.md`, and plan
-  // execution both re-reads them on resume sends and edits them to tick
-  // `- [ ]` → `- [x]`. An Assets-only sandbox refused exactly those calls
-  // ("this environment blocks access to .arcane/"), so resumes fell back to
-  // stale conversation copies and no plan ever advanced past 0/N done.
-  // Assets stays FIRST — `primaryRoot` is bash's default working directory
-  // and list's default scan root.
-  const assetsRoot = isUnity ? (useWorkspaceStore.getState().assetsRootPath ?? null) : null;
-  const allowedRoot = assetsRoot ? [assetsRoot, `${workspacePath}/.arcane`] : null;
+  // Sandbox roots per workspace shape — see sandbox-roots.ts. Unity confines
+  // file operations to Assets/ (+ .arcane/ plan files + Packages/ for
+  // manifest.json, which the agent prompt allows after confirming); non-Unity
+  // workspaces confine to the workspace itself (they used to get NO sandbox);
+  // no workspace open denies file tools entirely.
+  const allowedRoot = computeAllowedRoots(
+    workspacePath,
+    isUnity,
+    isUnity ? (useWorkspaceStore.getState().assetsRootPath ?? null) : null,
+  );
 
   const readOnly: AgentTool[] = [
     createReadTool(workspacePath, {
