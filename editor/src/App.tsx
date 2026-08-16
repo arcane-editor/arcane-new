@@ -41,6 +41,7 @@ import {
   isAiComposerFocused,
   nextEffort,
   restoreLatestSessionForWorkspace,
+  resetAgentService,
 } from './features/ai-panel';
 import TooltipHost from './components/TooltipHost';
 import {
@@ -506,6 +507,12 @@ function App() {
       const next = state.workspacePath;
       if (next === prevPath) return;
       prevPath = next;
+      // Kill the OLD workspace's agent first: a still-running turn kept
+      // writing the old project's files while its events streamed into the
+      // new project's blank transcript (dispose aborts the loop and
+      // unsubscribes its store feed). resetConversation alone never touches
+      // the agent — it even sets isAgentRunning:false while one still runs.
+      resetAgentService();
       // Drop the previous workspace's transcript, then load the new one's.
       useAiStore.getState().resetConversation();
       if (next) void restoreLatestSessionForWorkspace(next);

@@ -12,6 +12,7 @@ export {
 } from './services/session-persistence';
 export type { SessionData, SessionSummary, SaveSessionInput, PlanRef } from './services/session-persistence';
 export { restoreLatestSessionForWorkspace } from './services/session-restore';
+export { resetAgentService } from './services/agent-service';
 export { fixConsoleError } from './services/fix-console-error';
 export { isAiComposerFocused } from './services/composer-focus';
 export { EFFORT_ORDER, nextEffort } from './data/effort';

@@ -8,6 +8,7 @@
  */
 
 import { useAiStore } from '../../../stores/ai';
+import { useWorkspaceStore } from '../../../stores/workspace';
 import { loadLatestSession } from './session-persistence';
 import { getAgentService } from './agent-service';
 
@@ -24,6 +25,12 @@ export async function restoreLatestSessionForWorkspace(
 
   const data = await loadLatestSession(workspacePath);
   if (!data) return false;
+
+  // The load is async: the user may have switched workspaces while it ran.
+  // Without this, workspace A's transcript loads under B and the next save
+  // stamps it with B's path — permanently migrating the session between
+  // projects.
+  if (useWorkspaceStore.getState().workspacePath !== workspacePath) return false;
 
   // Guard again — an async gap may have let a message land or restore re-run.
   const after = useAiStore.getState();
