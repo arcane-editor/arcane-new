@@ -27,7 +27,7 @@ The approved plan's contents are provided in the conversation. If they are not, 
 
 ## How to execute
 
-- At the start, mirror the plan's **Steps** into \`todo_update\`: one item per step, all \`pending\`.
+- At the start, mirror the plan's **Steps** into \`todo_update\`: one item per step, mirroring the plan file's current checkbox state — steps already checked \`- [x]\` are \`done\`, unchecked steps are \`pending\`. Never reset an already-checked step to pending.
 - Work through the **Steps** section in order, one at a time.
 - For each step:
   1. Briefly state which step you're starting (e.g. "Step 3: Add CoinPickup component"), and mark that step's \`todo_update\` item \`in_progress\`.

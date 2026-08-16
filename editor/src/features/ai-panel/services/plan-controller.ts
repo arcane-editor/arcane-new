@@ -20,6 +20,7 @@ import { useAiStore } from '../../../stores/ai';
 import { useWorkspaceStore } from '../../../stores/workspace';
 import { getAgentService } from './agent-service';
 import { routePlanSend } from './plan-route';
+import { buildRegeneratePrompt, type PriorPlan } from './plan-regen';
 import {
   buildPlanPath,
   openPlanInEditor,
@@ -52,6 +53,15 @@ function extractPlanMarkdown(
 async function startPlanning(
   prompt: string,
   attachments: Attachment[],
+  opts: {
+    /**
+     * Overrides the text actually sent to the model (regenerate uses this to
+     * attach the previous plan's progress marks). The plan file name, session
+     * title and `pendingPrompt` always come from `prompt`, so a regenerate
+     * doesn't pollute them with the embedded prior plan.
+     */
+    sendText?: string;
+  } = {},
 ): Promise<void> {
   const workspacePath = getCurrentWorkspacePath();
   if (!workspacePath) {
@@ -64,7 +74,7 @@ async function startPlanning(
   store.setPendingPrompt(prompt);
   store.setLastAttachments(attachments);
 
-  await getAgentService().sendMessage(prompt, {
+  await getAgentService().sendMessage(opts.sendText ?? prompt, {
     mode: 'plan',
     effort: store.effort,
     promptMode: 'plan-planning',
@@ -217,7 +227,20 @@ async function regenerate(): Promise<void> {
     store.setError('No previous prompt to regenerate from.');
     return;
   }
-  await startPlanning(store.pendingPrompt, store.lastAttachments);
+  // Attach the previous plan (its `- [x]` marks are the progress record) so
+  // the planner carries completed steps forward pre-checked instead of
+  // re-planning them unchecked — which reset every done todo on execute.
+  let priorPlan: PriorPlan | null = null;
+  if (store.activePlanPath) {
+    try {
+      priorPlan = { path: store.activePlanPath, content: await readPlan(store.activePlanPath) };
+    } catch {
+      /* plan file gone — regenerate from the prompt alone */
+    }
+  }
+  await startPlanning(store.pendingPrompt, store.lastAttachments, {
+    sendText: buildRegeneratePrompt(store.pendingPrompt, priorPlan),
+  });
 }
 
 /**

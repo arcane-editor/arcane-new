@@ -116,3 +116,24 @@ describe('bridge-independence + step ordering (plan prompts)', () => {
     expect(execution.toLowerCase()).toContain('script steps first');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Progress must survive a re-plan. A regenerated plan used to come back with
+// every step unchecked, and execution mirrored todos as ALL pending — so one
+// regenerate wiped the visible progress of everything already completed.
+// ---------------------------------------------------------------------------
+describe('plan progress carry-over (regenerate edge case)', () => {
+  const planning = planningPromptFor('/proj');
+  const execution = executionPromptFor({ workspacePath: '/proj', planPath: '/proj/.arcane/plans/p.md' });
+
+  it('planning carries completed steps forward pre-checked, never resetting them', () => {
+    expect(planning).toContain('Never reset completed work');
+    expect(planning).toContain('- [x]');
+  });
+
+  it('execution mirrors todo state from the plan checkboxes, not all-pending', () => {
+    expect(execution).toContain('mirror the plan');
+    expect(execution).not.toContain('all `pending`');
+    expect(execution.toLowerCase()).toContain('already checked');
+  });
+});
