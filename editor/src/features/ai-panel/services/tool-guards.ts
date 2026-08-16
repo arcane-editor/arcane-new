@@ -28,6 +28,7 @@
 
 import type { AgentTool, AgentToolResult } from './vendor/types';
 import { recordLoopGuardHit } from './turn-telemetry';
+import { isRejectedWrite } from './write-approval-gate';
 
 /**
  * Deterministic JSON serialization — sorts object keys recursively so two
@@ -102,8 +103,17 @@ export function withRepeatCallGuard(tool: AgentTool): AgentTool {
       callCounts.set(key, seenCount + 1);
       const result = await tool.execute(id, params, signal, onUpdate);
 
-      if ((tool.name === 'write' || tool.name === 'edit') && path !== undefined) {
-        writtenSincePaths.add(path);
+      if (tool.name === 'write' || tool.name === 'edit') {
+        if (isRejectedWrite(result)) {
+          // Nothing touched disk. The rejection text tells the model to ask
+          // before retrying — when the user then SAYS YES, the byte-identical
+          // re-issue must execute, not get answered with a synthetic "the
+          // result would be identical". Un-count it (and never arm the
+          // post-write read exemption for a write that didn't land).
+          callCounts.set(key, seenCount);
+        } else if (path !== undefined) {
+          writtenSincePaths.add(path);
+        }
       }
 
       return result;

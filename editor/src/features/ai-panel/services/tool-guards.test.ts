@@ -98,6 +98,57 @@ describe('withRepeatCallGuard', () => {
     expect(calls()).toBe(1);
   });
 
+  it('a rejected write does not count as already-made — the identical retry executes', async () => {
+    let calls = 0;
+    const guarded = withRepeatCallGuard({
+      name: 'write',
+      label: 'write',
+      description: 'fake write',
+      parameters: Type.Object({}),
+      async execute(): Promise<AgentToolResult> {
+        calls++;
+        return calls === 1
+          ? ({
+              content: [{ type: 'text', text: 'User rejected this edit' }],
+              rejected: true,
+            } as AgentToolResult)
+          : { content: [{ type: 'text', text: 'Successfully wrote file' }] };
+      },
+    });
+
+    const params = { path: 'Assets/A.cs', content: 'x' };
+    await guarded.execute('c1', params);
+    const second = await guarded.execute('c2', params);
+
+    expect(calls).toBe(2); // not suppressed — the user changed their mind
+    expect(second.content[0]).toEqual({ type: 'text', text: 'Successfully wrote file' });
+  });
+
+  it('a rejected write does not arm the post-write read exemption', async () => {
+    const read = fakeTool('read');
+    const guardedRead = withRepeatCallGuard(read.tool);
+    const guardedWrite = withRepeatCallGuard({
+      name: 'write',
+      label: 'write',
+      description: 'fake write',
+      parameters: Type.Object({}),
+      async execute(): Promise<AgentToolResult> {
+        return {
+          content: [{ type: 'text', text: 'User rejected this edit' }],
+          rejected: true,
+        } as AgentToolResult;
+      },
+    });
+
+    await guardedRead.execute('c1', { path: 'Assets/A.cs' });
+    await guardedWrite.execute('c2', { path: 'Assets/A.cs', content: 'x' }); // rejected — no write landed
+    const third = await guardedRead.execute('c3', { path: 'Assets/A.cs' });
+
+    expect(read.calls()).toBe(1); // second read suppressed: nothing was written
+    const text = third.content[0].type === 'text' ? third.content[0].text : '';
+    expect(text).toContain('You already called read with identical arguments this task');
+  });
+
   it('reset clears both the call-count and written-since registries', async () => {
     const { tool, calls } = fakeTool('bash');
     const guarded = withRepeatCallGuard(tool);
