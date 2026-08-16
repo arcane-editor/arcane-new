@@ -42,12 +42,26 @@ export function resolveSendEffort(
   requested: Effort,
   prevRepairCount: number,
   isEnabled: () => boolean,
+  /**
+   * Highest tier the account's plan may REQUEST (see `maxEntitledEffort`).
+   * Escalation must never exceed it: the server 403s a disallowed tier
+   * ("Deep Think and Max are available on paid plans"), and a latch above the
+   * entitlement bricked the whole conversation — clearing a latch requires
+   * the user to request ≥ the latched tier, which a free plan cannot do.
+   */
+  maxEffort: Effort = 'high',
 ): SendEscalationResult {
   if (!isEnabled()) return { effort: requested, escalatedNow: false };
   if (!sessionId) return { effort: requested, escalatedNow: false };
 
   const existing = latched.get(sessionId);
   if (existing) {
+    // Entitlement shrank under an existing latch (plan expired, or the latch
+    // predates this cap) — drop it so the conversation recovers.
+    if (TIER_RANK[existing] > TIER_RANK[maxEffort]) {
+      latched.delete(sessionId);
+      return { effort: requested, escalatedNow: false };
+    }
     // The user manually selecting a tier at or above the latch supersedes it.
     if (TIER_RANK[requested] >= TIER_RANK[existing]) {
       latched.delete(sessionId);
@@ -57,7 +71,11 @@ export function resolveSendEffort(
   }
 
   const next = NEXT_TIER[requested];
-  if (prevRepairCount >= SEND_ESCALATION_THRESHOLD && next) {
+  if (
+    prevRepairCount >= SEND_ESCALATION_THRESHOLD &&
+    next &&
+    TIER_RANK[next] <= TIER_RANK[maxEffort]
+  ) {
     latched.set(sessionId, next);
     return { effort: next, escalatedNow: true };
   }

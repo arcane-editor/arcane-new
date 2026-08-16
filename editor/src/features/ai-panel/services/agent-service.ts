@@ -48,6 +48,7 @@ import { withResultDiffs } from './diff-decorator';
 import { withEditReview } from './edit-review/edit-review-decorator';
 import { withTurnGovernor, resetTurnGovernor, grantExtraCalls } from './turn-governor';
 import { resolveSendEffort, resetSendEscalation } from './send-escalation';
+import { maxEntitledEffort } from './entitlement';
 import { withStreamErrorGuard } from './stream-error-guard';
 import { withRepeatCallGuard, resetRepeatCallGuard } from './tool-guards';
 import {
@@ -493,6 +494,9 @@ export class AgentService {
       opts.effort,
       getPreviousSendRepairCount(),
       () => useSettingsStore.getState().getSetting('ai.escalation.enabled') !== false,
+      // Never escalate past the plan's entitlement — the server 403s a gated
+      // tier and a latched over-entitlement escalation bricked the session.
+      maxEntitledEffort(useAuthStore.getState().plan),
     );
     const effectiveEffort = escalation.effort;
     if (effectiveEffort !== opts.effort) {

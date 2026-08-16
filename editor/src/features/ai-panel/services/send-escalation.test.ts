@@ -54,3 +54,41 @@ describe('send-boundary escalation (cache-aware turn-escalation replacement)', (
     expect(resolveSendEffort('s1', 'low', 0, on).effort).toBe('low');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Entitlement cap: auto-escalation must never request a tier the account's
+// plan cannot use. A free-plan conversation that escalated to 'mid' had EVERY
+// subsequent send 403 ("Deep Think and Max are available on paid plans") —
+// and the latch could never clear, because clearing requires the user to
+// request a tier ≥ the latch and free can only request 'low'. Bricked session.
+// ---------------------------------------------------------------------------
+describe('send-boundary escalation entitlement cap', () => {
+  beforeEach(() => resetSendEscalation());
+
+  it('does not escalate (or latch) past maxEffort', () => {
+    expect(resolveSendEffort('s1', 'low', 5, on, 'low')).toEqual({ effort: 'low', escalatedNow: false });
+    // Nothing latched: the next send is still low, still no escalation.
+    expect(resolveSendEffort('s1', 'low', 0, on, 'low')).toEqual({ effort: 'low', escalatedNow: false });
+  });
+
+  it('escalates freely when the plan allows the next tier', () => {
+    expect(resolveSendEffort('s1', 'low', 2, on, 'high')).toEqual({ effort: 'mid', escalatedNow: true });
+  });
+
+  it('caps a mid→high escalation for a plan whose ceiling is mid', () => {
+    expect(resolveSendEffort('s1', 'mid', 5, on, 'mid')).toEqual({ effort: 'mid', escalatedNow: false });
+  });
+
+  it('self-heals a latch that sits above the entitlement (bricked pre-fix sessions)', () => {
+    // Latched at mid while entitlement looked fine…
+    resolveSendEffort('s1', 'low', 2, on, 'high');
+    // …but resolves with a free-plan ceiling now (plan expired / dev account):
+    // the latch is dropped, the requested tier goes through, and it stays gone.
+    expect(resolveSendEffort('s1', 'low', 0, on, 'low')).toEqual({ effort: 'low', escalatedNow: false });
+    expect(resolveSendEffort('s1', 'low', 2, on, 'low')).toEqual({ effort: 'low', escalatedNow: false });
+  });
+
+  it('defaults to no cap when maxEffort is omitted (existing call sites)', () => {
+    expect(resolveSendEffort('s1', 'low', 2, on).effort).toBe('mid');
+  });
+});
