@@ -30,8 +30,18 @@ const STALE_READ_PREFIX = '[Stale read superseded by a newer read of ';
 /** Tool-result content carrying these is an open repair task — never elide it. */
 const REPAIR_SENTINELS = ['[Unity compile]', '[Unity analyzers]'];
 
+/**
+ * Flat char-equivalent for an image block. Counting the base64 payload as
+ * text overshot real vision token cost ~1000x — one pasted screenshot pinned
+ * every later send above the compaction trigger, and since compaction only
+ * elides tool results (never the image) the model lost its own bash/compile
+ * outputs for the rest of the session. Vision models bill an image at
+ * roughly 1–2k tokens; 2k tokens' worth of chars is a safe over-estimate.
+ */
+const IMAGE_CHARS_ESTIMATE = 2000 * CHARS_PER_TOKEN;
+
 function blockChars(b: TextContent | ImageContent): number {
-  return b.type === 'text' ? b.text.length : b.data.length;
+  return b.type === 'text' ? b.text.length : IMAGE_CHARS_ESTIMATE;
 }
 
 function contentChars(content: string | (TextContent | ImageContent)[] | null | undefined): number {
