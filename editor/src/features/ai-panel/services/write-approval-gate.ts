@@ -121,6 +121,7 @@ import type { AgentTool, AgentToolResult } from './vendor/types';
 import {
   resolveWithinRoot,
   PathOutsideRootError,
+  type AllowedRoots,
 } from './vendor/tools/path-utils';
 import { applyEdits, type Edit } from './vendor/tools/edit-diff';
 import { useSettingsStore } from '../../../stores/settings';
@@ -166,7 +167,7 @@ export interface WriteApprovalOptions {
    * with (null = no sandbox). Must match, or this gate prompts for paths the
    * inner tool will refuse to write.
    */
-  allowedRoot?: string | null;
+  allowedRoot?: AllowedRoots;
   deps?: WriteApprovalDeps;
 }
 

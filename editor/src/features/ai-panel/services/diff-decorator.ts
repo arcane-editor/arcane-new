@@ -47,7 +47,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import type { AgentTool } from './vendor/types';
-import { resolveWithinRoot, PathOutsideRootError } from './vendor/tools/path-utils';
+import { resolveWithinRoot, PathOutsideRootError, type AllowedRoots } from './vendor/tools/path-utils';
 
 export interface DiffDecoratorDeps {
   /** Reads the file's current content; resolves `null` if it doesn't exist (or is unreadable). */
@@ -60,7 +60,7 @@ export interface DiffDecoratorOptions {
    * with (null = no sandbox). Must match, or this decorator reads around
    * paths the inner tool will refuse to write.
    */
-  allowedRoot?: string | null;
+  allowedRoot?: AllowedRoots;
   deps?: DiffDecoratorDeps;
 }
 

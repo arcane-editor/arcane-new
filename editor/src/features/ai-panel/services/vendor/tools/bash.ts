@@ -10,6 +10,8 @@ import {
   resolveWithinRoot,
   PathOutsideRootError,
   pathOutsideRootMessage,
+  type AllowedRoots,
+  primaryRoot,
 } from './path-utils';
 
 const bashSchema = Type.Object({
@@ -40,7 +42,7 @@ export interface BashToolOptions {
    * a command string from `cd`-ing elsewhere — true containment needs a backend
    * guard in execute_command (see plan).
    */
-  allowedRoot?: string | null;
+  allowedRoot?: AllowedRoots;
 }
 
 export function createBashTool(cwd: string, options: BashToolOptions): AgentTool {
@@ -67,7 +69,7 @@ export function createBashTool(cwd: string, options: BashToolOptions): AgentTool
       try {
         // Default cwd to the sandbox root (Assets/) when set; validate any
         // caller-supplied cwd stays inside it.
-        workDir = resolveWithinRoot(paramCwd ?? allowedRoot ?? cwd, cwd, allowedRoot);
+        workDir = resolveWithinRoot(paramCwd ?? primaryRoot(allowedRoot) ?? cwd, cwd, allowedRoot);
       } catch (err) {
         if (err instanceof PathOutsideRootError) {
           return { content: [{ type: 'text', text: pathOutsideRootMessage(err) }] };

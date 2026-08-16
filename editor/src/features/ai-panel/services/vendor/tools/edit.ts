@@ -10,6 +10,7 @@ import {
   resolveWithinRoot,
   PathOutsideRootError,
   pathOutsideRootMessage,
+  type AllowedRoots,
 } from './path-utils';
 import { applyEdits, generateDiff, type Edit } from './edit-diff';
 
@@ -37,7 +38,7 @@ export interface EditToolOptions {
   /** Called after a successful edit with the absolute path */
   onFileEdited?: (absolutePath: string) => void;
   /** When set, file operations are confined to this root (the Assets/ sandbox). */
-  allowedRoot?: string | null;
+  allowedRoot?: AllowedRoots;
 }
 
 export function createEditTool(cwd: string, options: EditToolOptions): AgentTool {

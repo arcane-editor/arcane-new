@@ -151,12 +151,17 @@ function getCurrentWorkspacePath(): string {
  */
 function createToolsForPromptMode(mode: PromptMode, workspacePath: string): AgentTool[] {
   const isUnity = useProjectContextStore.getState().isUnityProject;
-  // In a Unity project, confine ALL of the agent's file operations to the
-  // Assets/ folder. `assetsRootPath` is `${workspacePath}/Assets` for Unity
-  // projects, null otherwise (which disables the sandbox for non-Unity work).
-  const allowedRoot = isUnity
-    ? (useWorkspaceStore.getState().assetsRootPath ?? null)
-    : null;
+  // In a Unity project, confine the agent's file operations to the Assets/
+  // folder PLUS the IDE's own `.arcane/` workspace dir. `.arcane` must be in
+  // the sandbox: plan files live at `<ws>/.arcane/plans/*.md`, and plan
+  // execution both re-reads them on resume sends and edits them to tick
+  // `- [ ]` → `- [x]`. An Assets-only sandbox refused exactly those calls
+  // ("this environment blocks access to .arcane/"), so resumes fell back to
+  // stale conversation copies and no plan ever advanced past 0/N done.
+  // Assets stays FIRST — `primaryRoot` is bash's default working directory
+  // and list's default scan root.
+  const assetsRoot = isUnity ? (useWorkspaceStore.getState().assetsRootPath ?? null) : null;
+  const allowedRoot = assetsRoot ? [assetsRoot, `${workspacePath}/.arcane`] : null;
 
   const readOnly: AgentTool[] = [
     createReadTool(workspacePath, {

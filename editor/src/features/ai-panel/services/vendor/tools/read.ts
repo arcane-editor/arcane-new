@@ -10,6 +10,7 @@ import {
   PathOutsideRootError,
   pathOutsideRootMessage,
   addLineNumbers,
+  type AllowedRoots,
 } from './path-utils';
 import { truncateHead } from './truncate';
 
@@ -33,7 +34,7 @@ export interface ReadOperations {
 export interface ReadToolOptions {
   operations: ReadOperations;
   /** When set, file operations are confined to this root (the Assets/ sandbox). */
-  allowedRoot?: string | null;
+  allowedRoot?: AllowedRoots;
 }
 
 export function createReadTool(cwd: string, options: ReadToolOptions): AgentTool {

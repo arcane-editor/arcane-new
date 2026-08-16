@@ -20,24 +20,46 @@ export function resolveToCwd(filePath: string, cwd: string): string {
 }
 
 /**
- * Raised when a path resolves outside the allowed root (the Assets sandbox for
- * Unity projects). Tools catch this and return a model-visible error result.
+ * The tool sandbox: a single root, several roots, or none. Unity projects use
+ * `[<ws>/Assets, <ws>/.arcane]` — Assets for game files, plus the IDE's own
+ * `.arcane/` workspace dir, which holds the plan files the executor must
+ * re-read and tick (`- [ ]` → `- [x]`). Assets-only blocked exactly that:
+ * resume sends couldn't re-read the plan and every plan sat at 0/N done.
+ */
+export type AllowedRoots = string | readonly string[] | null;
+
+/** First root of the sandbox (bash's default working directory), or null. */
+export function primaryRoot(roots: AllowedRoots): string | null {
+  if (!roots) return null;
+  if (typeof roots === 'string') return roots;
+  return roots[0] ?? null;
+}
+
+function rootList(roots: AllowedRoots): string[] {
+  if (!roots) return [];
+  const arr = typeof roots === 'string' ? [roots] : roots;
+  return arr.map((r) => collapseDotSegments(normalizePath(r)));
+}
+
+/**
+ * Raised when a path resolves outside every allowed root (the Assets +
+ * .arcane sandbox for Unity projects). Tools catch this and return a
+ * model-visible error result.
  */
 export class PathOutsideRootError extends Error {
   constructor(
     readonly attemptedPath: string,
-    readonly allowedRoot: string,
+    readonly allowedRoots: readonly string[],
   ) {
-    super(`Path '${attemptedPath}' is outside the allowed root '${allowedRoot}'`);
+    super(`Path '${attemptedPath}' is outside the allowed roots: ${allowedRoots.join(', ')}`);
     this.name = 'PathOutsideRootError';
   }
 }
 
 /**
- * Like {@link resolveToCwd}, but when `allowedRoot` is non-null the resolved
- * path is required to live inside it (or equal it). Used to confine the AI's
- * file operations to the Assets/ folder in Unity projects. When `allowedRoot`
- * is null this behaves exactly like `resolveToCwd` (no sandbox).
+ * Like {@link resolveToCwd}, but when `allowedRoots` is non-null the resolved
+ * path is required to live inside (or equal) at least one of the roots. When
+ * null this behaves exactly like `resolveToCwd` (no sandbox).
  *
  * Containment is compared case-insensitively so projects on the default
  * case-insensitive macOS/Windows filesystems aren't tripped up by `assets/`
@@ -46,26 +68,31 @@ export class PathOutsideRootError extends Error {
 export function resolveWithinRoot(
   filePath: string,
   cwd: string,
-  allowedRoot: string | null,
+  allowedRoots: AllowedRoots,
 ): string {
   const resolved = resolveToCwd(filePath, cwd);
-  if (!allowedRoot) return resolved;
-
-  const root = collapseDotSegments(normalizePath(allowedRoot));
-  const resolvedCmp = resolved.toLowerCase();
-  const rootCmp = root.toLowerCase();
-  if (resolvedCmp === rootCmp || resolvedCmp.startsWith(rootCmp + '/')) {
-    return resolved;
+  const roots = rootList(allowedRoots);
+  if (roots.length === 0) {
+    if (!allowedRoots) return resolved; // no sandbox
+    throw new PathOutsideRootError(resolved, roots); // empty list = deny all
   }
-  throw new PathOutsideRootError(resolved, root);
+
+  const resolvedCmp = resolved.toLowerCase();
+  for (const root of roots) {
+    const rootCmp = root.toLowerCase();
+    if (resolvedCmp === rootCmp || resolvedCmp.startsWith(rootCmp + '/')) {
+      return resolved;
+    }
+  }
+  throw new PathOutsideRootError(resolved, roots);
 }
 
 /** Consistent, actionable message shown to the model when a path is blocked. */
 export function pathOutsideRootMessage(err: PathOutsideRootError): string {
   return (
     `Error: '${err.attemptedPath}' is outside the allowed project area. ` +
-    `In Unity projects, file operations are restricted to the Assets/ folder ` +
-    `(${err.allowedRoot}). Use a path inside Assets/.`
+    `File operations are restricted to: ${err.allowedRoots.join(', ')}. ` +
+    `Use a path inside one of those folders.`
   );
 }
 

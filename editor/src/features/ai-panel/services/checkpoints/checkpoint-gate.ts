@@ -35,7 +35,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import type { AgentTool } from '../vendor/types';
-import { resolveWithinRoot, PathOutsideRootError } from '../vendor/tools/path-utils';
+import { resolveWithinRoot, PathOutsideRootError, type AllowedRoots } from '../vendor/tools/path-utils';
 import { useSettingsStore } from '../../../../stores/settings';
 import { useCheckpointsStore } from '../../../../stores/checkpoints';
 
@@ -59,7 +59,7 @@ export interface CheckpointGateOptions {
    * with (null = no sandbox). Must match, or this gate snapshots paths the
    * inner tool will refuse to write.
    */
-  allowedRoot?: string | null;
+  allowedRoot?: AllowedRoots;
   deps?: CheckpointGateDeps;
 }
 

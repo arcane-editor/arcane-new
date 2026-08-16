@@ -9,6 +9,7 @@ import {
   resolveWithinRoot,
   PathOutsideRootError,
   pathOutsideRootMessage,
+  type AllowedRoots,
 } from './path-utils';
 
 const writeSchema = Type.Object({
@@ -28,7 +29,7 @@ export interface WriteToolOptions {
   /** Called after a successful write with the absolute path */
   onFileWritten?: (absolutePath: string) => void;
   /** When set, file operations are confined to this root (the Assets/ sandbox). */
-  allowedRoot?: string | null;
+  allowedRoot?: AllowedRoots;
 }
 
 export function createWriteTool(cwd: string, options: WriteToolOptions): AgentTool {
