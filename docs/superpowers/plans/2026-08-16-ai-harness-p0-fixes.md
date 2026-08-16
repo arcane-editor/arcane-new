@@ -29,7 +29,7 @@
 
 **Interfaces:** `fuzzyFindText` / `applyEdits` signatures unchanged. `mapNormalizedIndexToOriginal` is deleted.
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 ```ts
 import { describe, it, expect } from 'bun:test';
@@ -82,9 +82,9 @@ describe('fuzzy whitespace matching', () => {
 });
 ```
 
-- [ ] **Step 2:** Run `bun test src/features/ai-panel/services/vendor/tools/edit-diff.test.ts` — expect the first four to FAIL (EOF-mapping bug).
+- [x] **Step 2:** Run `bun test src/features/ai-panel/services/vendor/tools/edit-diff.test.ts` — expect the first four to FAIL (EOF-mapping bug).
 
-- [ ] **Step 3: Implement.** Replace `mapNormalizedIndexToOriginal` with a span-mapped normalizer; rewrite the normalized branch of `fuzzyFindText`:
+- [x] **Step 3: Implement.** Replace `mapNormalizedIndexToOriginal` with a span-mapped normalizer; rewrite the normalized branch of `fuzzyFindText`:
 
 ```ts
 /**
@@ -145,8 +145,8 @@ In `fuzzyFindText`, replace the normalized-match block with:
 
 Delete `mapNormalizedIndexToOriginal`. `normalizeWhitespace` stays (still used for `oldText`). Note `normalizeWithMap` must produce byte-identical output to `normalizeWhitespace` for any input (whitespace-run collapse first, then CRLF — verified equivalent because a `\r\n` pair is never inside a `[ \t]` run).
 
-- [ ] **Step 4:** `bun test src/features/ai-panel/services/vendor/tools/edit-diff.test.ts` → PASS. Also run the neighboring suites: `bun test src/features/ai-panel/services/write-approval-gate.test.ts` (it imports `applyEdits`).
-- [ ] **Step 5: Commit** `fix(ai): fuzzy edit matching maps spans exactly — tab/space mismatch no longer deletes to EOF`
+- [x] **Step 4:** `bun test src/features/ai-panel/services/vendor/tools/edit-diff.test.ts` → PASS. Also run the neighboring suites: `bun test src/features/ai-panel/services/write-approval-gate.test.ts` (it imports `applyEdits`).
+- [x] **Step 5: Commit** `fix(ai): fuzzy edit matching maps spans exactly — tab/space mismatch no longer deletes to EOF`
 
 ---
 
@@ -158,7 +158,7 @@ Delete `mapNormalizedIndexToOriginal`. `normalizeWhitespace` stays (still used f
 
 **Interfaces:** Consumes `isRejectedWrite` from `./write-approval-gate` (Bun-safe module, no cycle: write-approval-gate does not import tool-guards).
 
-- [ ] **Step 1: Write failing tests** (append to the existing suite; reuse its fake-tool helpers/style):
+- [x] **Step 1: Write failing tests** (append to the existing suite; reuse its fake-tool helpers/style):
 
 ```ts
 it('a rejected write does not count as already-made — the identical retry executes', async () => {
@@ -199,8 +199,8 @@ it('a rejected write does not arm the post-write read exemption', async () => {
 });
 ```
 
-- [ ] **Step 2:** Run the suite — both FAIL.
-- [ ] **Step 3: Implement.** Add `import { isRejectedWrite } from './write-approval-gate';`. In `execute`, replace the post-execute block:
+- [x] **Step 2:** Run the suite — both FAIL.
+- [x] **Step 3: Implement.** Add `import { isRejectedWrite } from './write-approval-gate';`. In `execute`, replace the post-execute block:
 
 ```ts
       callCounts.set(key, seenCount + 1);
@@ -221,8 +221,8 @@ it('a rejected write does not arm the post-write read exemption', async () => {
       return result;
 ```
 
-- [ ] **Step 4:** `bun test src/features/ai-panel/services/tool-guards.test.ts` → PASS.
-- [ ] **Step 5: Commit** `fix(ai): repeat-call guard lets a user-approved retry of a rejected write execute`
+- [x] **Step 4:** `bun test src/features/ai-panel/services/tool-guards.test.ts` → PASS.
+- [x] **Step 5: Commit** `fix(ai): repeat-call guard lets a user-approved retry of a rejected write execute`
 
 ---
 
@@ -232,7 +232,7 @@ it('a rejected write does not arm the post-write read exemption', async () => {
 - Modify: `editor/src/features/ai-panel/services/write-approval-gate.ts`
 - Test: `editor/src/features/ai-panel/services/write-approval-gate.test.ts`
 
-- [ ] **Step 1: Write failing tests** (existing suite has fake `deps`; follow its fixtures):
+- [x] **Step 1: Write failing tests** (existing suite has fake `deps`; follow its fixtures):
 
 ```ts
 it('approve mode: an edit whose search text does not match refuses without executing or prompting', async () => {
@@ -268,8 +268,8 @@ it('serialized asset in auto mode: unreadable pre-read refuses instead of writin
 
 (Adapt `fakeTool` to whatever helper the suite already uses; if any existing test pins the old delegate-on-null behavior, update it to the new refusal contract.)
 
-- [ ] **Step 2:** Run — FAIL (both currently delegate to `tool.execute`).
-- [ ] **Step 3: Implement.** At the top of `execute`, keep the current out-of-root delegate. Then replace the null-`newText` delegate (lines ~301–309) with a refusal:
+- [x] **Step 2:** Run — FAIL (both currently delegate to `tool.execute`).
+- [x] **Step 3: Implement.** At the top of `execute`, keep the current out-of-root delegate. Then replace the null-`newText` delegate (lines ~301–309) with a refusal:
 
 ```ts
       const currentContent = await deps.readFile(absPath);
@@ -298,8 +298,8 @@ it('serialized asset in auto mode: unreadable pre-read refuses instead of writin
 
 Also update the module-header paragraph "Computing the pending diff without writing" to describe the refusal (the old text documents the unsound assumption).
 
-- [ ] **Step 4:** `bun test src/features/ai-panel/services/write-approval-gate.test.ts` → PASS (fix any pinned old-behavior tests per their intent).
-- [ ] **Step 5: Commit** `fix(ai): approval gate refuses unpreviewable edits instead of delegating unprompted`
+- [x] **Step 4:** `bun test src/features/ai-panel/services/write-approval-gate.test.ts` → PASS (fix any pinned old-behavior tests per their intent).
+- [x] **Step 5: Commit** `fix(ai): approval gate refuses unpreviewable edits instead of delegating unprompted`
 
 ---
 
@@ -312,7 +312,7 @@ Also update the module-header paragraph "Computing the pending diff without writ
 
 **Interfaces:** Produces `computeAllowedRoots(workspacePath: string, isUnity: boolean, assetsRootPath: string | null): readonly string[]` — consumed by `createToolsForPromptMode`. Empty array = deny-all (established `resolveWithinRoot` semantics).
 
-- [ ] **Step 1: Write failing tests** (`sandbox-roots.test.ts`):
+- [x] **Step 1: Write failing tests** (`sandbox-roots.test.ts`):
 
 ```ts
 import { describe, it, expect } from 'bun:test';
@@ -337,8 +337,8 @@ describe('computeAllowedRoots', () => {
 });
 ```
 
-- [ ] **Step 2:** FAIL (module doesn't exist).
-- [ ] **Step 3: Implement** `sandbox-roots.ts` (pure, no imports):
+- [x] **Step 2:** FAIL (module doesn't exist).
+- [x] **Step 3: Implement** `sandbox-roots.ts` (pure, no imports):
 
 ```ts
 /**
@@ -376,8 +376,8 @@ In `agent-service.ts`, replace the two lines computing `assetsRoot`/`allowedRoot
 
 (keep the existing comment block, updated to point at `sandbox-roots.ts`), and add the import. The `AllowedRoots` type accepts `readonly string[]` already.
 
-- [ ] **Step 4:** `bun test src/features/ai-panel/services/sandbox-roots.test.ts` → PASS; `bun run build`-level type check comes with the final verify (tsc).
-- [ ] **Step 5: Commit** `fix(ai): every workspace gets a real tool sandbox; Unity sandbox admits Packages/`
+- [x] **Step 4:** `bun test src/features/ai-panel/services/sandbox-roots.test.ts` → PASS; `bun run build`-level type check comes with the final verify (tsc).
+- [x] **Step 5: Commit** `fix(ai): every workspace gets a real tool sandbox; Unity sandbox admits Packages/`
 
 ---
 
@@ -389,7 +389,7 @@ In `agent-service.ts`, replace the two lines computing `assetsRoot`/`allowedRoot
 
 **Interfaces:** Produces `endTurn(): void` + `activeTurnId: string | null` on the store. Task 8 wires `endTurn` into `sendMessage`'s finally.
 
-- [ ] **Step 1: Write failing tests:**
+- [x] **Step 1: Write failing tests:**
 
 ```ts
 it('recordPreWrite outside an open turn is discarded — never appended to a previous turn', () => {
@@ -412,8 +412,8 @@ it('recordPreWrite with no turn ever opened is a no-op', () => {
 });
 ```
 
-- [ ] **Step 2:** First test FAILS (entry lands on the closed turn).
-- [ ] **Step 3: Implement.**
+- [x] **Step 2:** First test FAILS (entry lands on the closed turn).
+- [x] **Step 3: Implement.**
   - State: add `activeTurnId: string | null` (initial `null`) to `CheckpointsState` + the store object, and `endTurn: () => void` to the interface with doc: `/** Close the current send's turn. recordPreWrite calls outside an open turn are discarded — a mid-turn settings flip must not attach pre-images to a PREVIOUS turn (whose restore plan would then roll files back past accepted work). */`
   - `beginTurn`: include the generated `turnId` in the returned state as `activeTurnId`.
   - `endTurn: () => set({ activeTurnId: null }),`
@@ -426,8 +426,8 @@ it('recordPreWrite with no turn ever opened is a no-op', () => {
 ```
 
   - `reset` and `loadForSession`: set `activeTurnId: null` in their `set` calls.
-- [ ] **Step 4:** `bun test src/stores/checkpoints.test.ts` → PASS (update any existing test that relied on recordPreWrite appending without beginTurn/endTurn bookkeeping — add `beginTurn` calls to them, matching real wiring).
-- [ ] **Step 5: Commit** `fix(ai): checkpoint pre-writes only attach to the turn opened for the current send`
+- [x] **Step 4:** `bun test src/stores/checkpoints.test.ts` → PASS (update any existing test that relied on recordPreWrite appending without beginTurn/endTurn bookkeeping — add `beginTurn` calls to them, matching real wiring).
+- [x] **Step 5: Commit** `fix(ai): checkpoint pre-writes only attach to the turn opened for the current send`
 
 ---
 
@@ -438,7 +438,7 @@ it('recordPreWrite with no turn ever opened is a no-op', () => {
 - Modify: `editor/src/features/ai-panel/services/vendor/compaction.ts` (null-guards only; token estimate is Task 7)
 - Test: `editor/src/features/ai-panel/services/vendor/agent-loop.test.ts`
 
-- [ ] **Step 1: Write failing test** (reuse the suite's existing config/stream fakes):
+- [x] **Step 1: Write failing test** (reuse the suite's existing config/stream fakes):
 
 ```ts
 it('a loop crash preserves the prompt and appends an error tail instead of rolling back the turn', async () => {
@@ -461,8 +461,8 @@ it('a loop crash preserves the prompt and appends an error tail instead of rolli
 });
 ```
 
-- [ ] **Step 2:** FAIL (agent_end carries `[]`, prompt lost).
-- [ ] **Step 3: Implement.** In `runLoop`, wrap the `while (true)` loop in try/catch; always finish with the accumulated messages:
+- [x] **Step 2:** FAIL (agent_end carries `[]`, prompt lost).
+- [x] **Step 3: Implement.** In `runLoop`, wrap the `while (true)` loop in try/catch; always finish with the accumulated messages:
 
 ```ts
   try {
@@ -509,8 +509,8 @@ function contentChars(content: string | (TextContent | ImageContent)[] | null | 
 
 and in `messageChars`'s assistant branch use `(m.content ?? []).reduce(...)`.
 
-- [ ] **Step 4:** `bun test src/features/ai-panel/services/vendor/agent-loop.test.ts src/features/ai-panel/services/vendor/agent.test.ts` → PASS.
-- [ ] **Step 5: Commit** `fix(ai): loop crash appends an error tail instead of deleting the turn from history`
+- [x] **Step 4:** `bun test src/features/ai-panel/services/vendor/agent-loop.test.ts src/features/ai-panel/services/vendor/agent.test.ts` → PASS.
+- [x] **Step 5: Commit** `fix(ai): loop crash appends an error tail instead of deleting the turn from history`
 
 ---
 
@@ -520,7 +520,7 @@ and in `messageChars`'s assistant branch use `(m.content ?? []).reduce(...)`.
 - Modify: `editor/src/features/ai-panel/services/vendor/compaction.ts`
 - Test (new): `editor/src/features/ai-panel/services/vendor/compaction.test.ts`
 
-- [ ] **Step 1: Write failing tests:**
+- [x] **Step 1: Write failing tests:**
 
 ```ts
 import { describe, it, expect } from 'bun:test';
@@ -559,8 +559,8 @@ describe('image token estimate', () => {
 });
 ```
 
-- [ ] **Step 2:** First test FAILS (~195k estimated tokens).
-- [ ] **Step 3: Implement:**
+- [x] **Step 2:** First test FAILS (~195k estimated tokens).
+- [x] **Step 3: Implement:**
 
 ```ts
 /**
@@ -578,8 +578,8 @@ function blockChars(b: TextContent | ImageContent): number {
 }
 ```
 
-- [ ] **Step 4:** `bun test src/features/ai-panel/services/vendor/compaction.test.ts` → PASS.
-- [ ] **Step 5: Commit** `fix(ai): images estimate at real vision token cost, not base64 length`
+- [x] **Step 4:** `bun test src/features/ai-panel/services/vendor/compaction.test.ts` → PASS.
+- [x] **Step 5: Commit** `fix(ai): images estimate at real vision token cost, not base64 length`
 
 ---
 
@@ -590,7 +590,7 @@ function blockChars(b: TextContent | ImageContent): number {
 
 No Bun test can load this module (monaco chain); covered by tsc, the existing suites of everything it wires, and the guards mirroring the already-shipped `maybeDistillMemory` pattern.
 
-- [ ] **Step 1: Restructure `sendMessage`:** add `private sendInFlight = false;` next to `abortRequested`. New shape:
+- [x] **Step 1: Restructure `sendMessage`:** add `private sendInFlight = false;` next to `abortRequested`. New shape:
 
 ```ts
   async sendMessage(text: string, opts: SendMessageOptions): Promise<void> {
@@ -635,7 +635,7 @@ No Bun test can load this module (monaco chain); covered by tsc, the existing su
   }
 ```
 
-- [ ] **Step 2: Abort-guard the post-loop:** first line of `runGroundingLint` and (after its promptMode check) `runVerifiedPassIfNeeded`:
+- [x] **Step 2: Abort-guard the post-loop:** first line of `runGroundingLint` and (after its promptMode check) `runVerifiedPassIfNeeded`:
 
 ```ts
     // A user Stop can leave an 'error'/'toolUse' tail instead of 'aborted'
@@ -646,8 +646,8 @@ No Bun test can load this module (monaco chain); covered by tsc, the existing su
     if (this.abortRequested) return;
 ```
 
-- [ ] **Step 3:** `bun test src` (whole editor suite) — green; tsc via final verify.
-- [ ] **Step 4: Commit** `fix(ai): Stop suppresses the post-loop (lint revise, verified pass) and sends serialize fully`
+- [x] **Step 3:** `bun test src` (whole editor suite) — green; tsc via final verify.
+- [x] **Step 4: Commit** `fix(ai): Stop suppresses the post-loop (lint revise, verified pass) and sends serialize fully`
 
 ---
 
@@ -658,7 +658,7 @@ No Bun test can load this module (monaco chain); covered by tsc, the existing su
 - Modify: `editor/src/features/ai-panel/services/session-restore.ts`
 - Check: `editor/src/features/ai-panel/index.ts` exports `resetAgentService` (add if missing)
 
-- [ ] **Step 1: App.tsx** — in the workspace subscriber, before `resetConversation()`:
+- [x] **Step 1: App.tsx** — in the workspace subscriber, before `resetConversation()`:
 
 ```ts
       // Kill the OLD workspace's agent first: a still-running turn kept
@@ -671,7 +671,7 @@ No Bun test can load this module (monaco chain); covered by tsc, the existing su
 
 Import `resetAgentService` from `./features/ai-panel` (barrel).
 
-- [ ] **Step 2: session-restore.ts** — re-check the workspace after the async load:
+- [x] **Step 2: session-restore.ts** — re-check the workspace after the async load:
 
 ```ts
   const data = await loadLatestSession(workspacePath);
@@ -685,8 +685,8 @@ Import `resetAgentService` from `./features/ai-panel` (barrel).
 
 Import `useWorkspaceStore` from `../../../stores/workspace`.
 
-- [ ] **Step 3:** `bun test src` green (no suite loads these; tsc + module-boundary check in final verify).
-- [ ] **Step 4: Commit** `fix(ai): workspace switch disposes the running agent; stale session loads are dropped`
+- [x] **Step 3:** `bun test src` green (no suite loads these; tsc + module-boundary check in final verify).
+- [x] **Step 4: Commit** `fix(ai): workspace switch disposes the running agent; stale session loads are dropped`
 
 ---
 
@@ -697,7 +697,7 @@ Import `useWorkspaceStore` from `../../../stores/workspace`.
 - Modify: `editor/src/features/app-shell/components/RightSidebarPanel.tsx`
 - Check: `editor/src/App.tsx:1772` second `<AiChatPanel />` mount — wrap the same way
 
-- [ ] **Step 1: Reorder AiChatPanel** so ALL hooks run before any return: move `function handleNewChat()` and the new-chat/history `useEffect` (currently below the two gates) up, directly after the first `useEffect`. Add above the `if (!loggedIn)` return:
+- [x] **Step 1: Reorder AiChatPanel** so ALL hooks run before any return: move `function handleNewChat()` and the new-chat/history `useEffect` (currently below the two gates) up, directly after the first `useEffect`. Add above the `if (!loggedIn)` return:
 
 ```tsx
   // HOOKS END HERE. The two gates below are conditional RETURNS — any hook
@@ -706,7 +706,7 @@ Import `useWorkspaceStore` from `../../../stores/workspace`.
   // throws ("Rendered more/fewer hooks") on the first-sign-in mainline flow.
 ```
 
-- [ ] **Step 2: Boundary.** In `RightSidebarPanel.tsx`, wrap every returned panel body (read the file first; it returns `<AiChatPanel />` from three branches) with the shared boundary, matching `SidebarPanel.tsx`'s pattern:
+- [x] **Step 2: Boundary.** In `RightSidebarPanel.tsx`, wrap every returned panel body (read the file first; it returns `<AiChatPanel />` from three branches) with the shared boundary, matching `SidebarPanel.tsx`'s pattern:
 
 ```tsx
 import { ErrorBoundary } from '../../../components/ErrorBoundary';
@@ -718,8 +718,8 @@ import { ErrorBoundary } from '../../../components/ErrorBoundary';
 
 Do the same for the `App.tsx:1772` mount (maximized overlay) so a panel crash never replaces the whole editor.
 
-- [ ] **Step 3:** `bun test src` green; visual behavior verified by the final `bun run verify` (tsc) — no DOM test infra exists.
-- [ ] **Step 4: Commit** `fix(ai): panel hooks precede auth gates; right sidebar gets a local error boundary`
+- [x] **Step 3:** `bun test src` green; visual behavior verified by the final `bun run verify` (tsc) — no DOM test infra exists.
+- [x] **Step 4: Commit** `fix(ai): panel hooks precede auth gates; right sidebar gets a local error boundary`
 
 ---
 
@@ -729,7 +729,7 @@ Do the same for the `App.tsx:1772` mount (maximized overlay) so a panel crash ne
 - Modify: `editor/src/features/ai-panel/services/arcane-stream.ts` (lines ~635–666)
 - Test: `editor/src/features/ai-panel/services/arcane-stream.test.ts`
 
-- [ ] **Step 1: Write failing test** (reuse the suite's SSE-body fixtures):
+- [x] **Step 1: Write failing test** (reuse the suite's SSE-body fixtures):
 
 ```ts
 it('a stream that dies without [DONE] after text surfaces an error, not a complete answer', async () => {
@@ -745,8 +745,8 @@ it('a stream that dies without [DONE] after text surfaces an error, not a comple
 
 (Adapt to the suite's actual helper names; an existing test may pin the old `'stop'` finalization for text-only truncation — update it, the old behavior is the bug.)
 
-- [ ] **Step 2:** FAIL (`done` with stopReason `'stop'`).
-- [ ] **Step 3: Implement.** Replace the tool-call-only truncation guard so ANY content (or a dangling partial line) makes the no-[DONE] end an error:
+- [x] **Step 2:** FAIL (`done` with stopReason `'stop'`).
+- [x] **Step 3: Implement.** Replace the tool-call-only truncation guard so ANY content (or a dangling partial line) makes the no-[DONE] end an error:
 
 ```ts
   // The server ALWAYS terminates a stream with [DONE] (or an error event) —
@@ -774,8 +774,8 @@ it('a stream that dies without [DONE] after text surfaces an error, not a comple
   }
 ```
 
-- [ ] **Step 4:** `bun test src/features/ai-panel/services/arcane-stream.test.ts src/features/ai-panel/services/stream-retry.test.ts src/features/ai-panel/services/stream-error-guard.test.ts` → PASS.
-- [ ] **Step 5: Commit** `fix(ai): truncated streams surface as errors with Retry instead of fake clean answers`
+- [x] **Step 4:** `bun test src/features/ai-panel/services/arcane-stream.test.ts src/features/ai-panel/services/stream-retry.test.ts src/features/ai-panel/services/stream-error-guard.test.ts` → PASS.
+- [x] **Step 5: Commit** `fix(ai): truncated streams surface as errors with Retry instead of fake clean answers`
 
 ---
 
@@ -788,7 +788,7 @@ it('a stream that dies without [DONE] after text surfaces an error, not a comple
 
 **Interfaces:** Produces `buildReviseNotesPrompt(planPath: string, planContent: string, notes: PlanNote[]): string` (pure; `import type { PlanNote } from '../../markdown-preview'` — type-only, Bun-safe).
 
-- [ ] **Step 1: Write failing tests** (`plan-revise.test.ts`):
+- [x] **Step 1: Write failing tests** (`plan-revise.test.ts`):
 
 ```ts
 import { describe, it, expect } from 'bun:test';
@@ -813,8 +813,8 @@ describe('buildReviseNotesPrompt', () => {
 });
 ```
 
-- [ ] **Step 2:** FAIL (module doesn't exist).
-- [ ] **Step 3: Implement `plan-revise.ts`:**
+- [x] **Step 2:** FAIL (module doesn't exist).
+- [x] **Step 3: Implement `plan-revise.ts`:**
 
 ```ts
 /**
@@ -851,7 +851,7 @@ export function buildReviseNotesPrompt(
 }
 ```
 
-- [ ] **Step 4: Rewire `plan-controller.ts`:**
+- [x] **Step 4: Rewire `plan-controller.ts`:**
   1. `runExecution`'s two dead-end branches (readPlan failure, empty plan) additionally clear the plan state so the next composer message starts fresh instead of resuming the same failure forever:
 
 ```ts
@@ -926,8 +926,8 @@ async function reviseWithNotes(planPath: string, notes: PlanNote[]): Promise<voi
 ```
 
   Import `buildReviseNotesPrompt` from `./plan-revise`.
-- [ ] **Step 5:** `bun test src/features/ai-panel/services/plan-revise.test.ts src/features/ai-panel/services/plan-route.test.ts src/features/ai-panel/services/plan-regen.test.ts` → PASS.
-- [ ] **Step 6: Commit** `fix(ai): plan revise persists the revision; dead plans clear; execute pins the active plan`
+- [x] **Step 5:** `bun test src/features/ai-panel/services/plan-revise.test.ts src/features/ai-panel/services/plan-route.test.ts src/features/ai-panel/services/plan-regen.test.ts` → PASS.
+- [x] **Step 6: Commit** `fix(ai): plan revise persists the revision; dead plans clear; execute pins the active plan`
 
 ---
 
@@ -938,7 +938,7 @@ async function reviseWithNotes(planPath: string, notes: PlanNote[]): Promise<voi
 - Modify: `arcane-server/src/routes/chat.ts` (both lanes)
 - Test: `arcane-server/test/llm-router.test.ts`, plus a route-level metering regression in a new `arcane-server/test/chat-metering.test.ts`
 
-- [ ] **Step 1: Write failing tests.**
+- [x] **Step 1: Write failing tests.**
 
 `llm-router.test.ts` (follow its existing fake-`streamTextImpl` pattern):
 
@@ -985,8 +985,8 @@ describe('chat metering on the error lane', () => {
 
 (If `waitUntil` promises don't settle before assertions under `cloudflare:test`, use the non-streaming lane's plain `await` metering — see Step 3 — which is why that lane keeps `await` and only the streaming lane uses `waitUntil`.)
 
-- [ ] **Step 2:** Run `cd arcane-server && bun run test` — both FAIL.
-- [ ] **Step 3: Implement.**
+- [x] **Step 2:** Run `cd arcane-server && bun run test` — both FAIL.
+- [x] **Step 3: Implement.**
 
 `llm-router.ts`:
 
@@ -1064,8 +1064,8 @@ and add `...(signal ? { abortSignal: signal } : {}),` to the `streamTextImpl({..
 
 Check other `streamCompletion` call sites (`grep -rn "streamCompletion(" arcane-server/src`) still compile with the new optional 4th param.
 
-- [ ] **Step 4:** `cd arcane-server && bun run test` → all green.
-- [ ] **Step 5: Commit** `fix(server): client Stop aborts the provider; error/abort turns are metered, not free`
+- [x] **Step 4:** `cd arcane-server && bun run test` → all green.
+- [x] **Step 5: Commit** `fix(server): client Stop aborts the provider; error/abort turns are metered, not free`
 
 ---
 
@@ -1075,7 +1075,7 @@ Check other `streamCompletion` call sites (`grep -rn "streamCompletion(" arcane-
 - Modify: `arcane-server/src/lib/db.ts` (`resetFreePlanCredits`)
 - Test: `arcane-server/test/credits.test.ts`
 
-- [ ] **Step 1: Write failing tests** (use the suite's `setBalances` helper; trigger via `checkAiBudget`/`refreshAndGetBalance` with an expired period):
+- [x] **Step 1: Write failing tests** (use the suite's `setBalances` helper; trigger via `checkAiBudget`/`refreshAndGetBalance` with an expired period):
 
 ```ts
 it('monthly reset settles a negative top-up (overshoot debt) from the new grant', async () => {
@@ -1107,8 +1107,8 @@ it('a positive top-up is untouched by the reset', async () => {
 });
 ```
 
-- [ ] **Step 2:** First two FAIL (topup stays negative forever).
-- [ ] **Step 3: Implement:**
+- [x] **Step 2:** First two FAIL (topup stays negative forever).
+- [x] **Step 3: Implement:**
 
 ```ts
 /** Free-tier monthly reset: SET (never add) the plan bucket and re-anchor the
@@ -1132,17 +1132,17 @@ export async function resetFreePlanCredits(
 }
 ```
 
-- [ ] **Step 4:** `cd arcane-server && bun run test` → green (`credits.test.ts`, `billing-gate.test.ts`, `gating.test.ts` all touch this path).
-- [ ] **Step 5: Commit** `fix(server): free-tier reset settles overshoot debt instead of taxing every future month`
+- [x] **Step 4:** `cd arcane-server && bun run test` → green (`credits.test.ts`, `billing-gate.test.ts`, `gating.test.ts` all touch this path).
+- [x] **Step 5: Commit** `fix(server): free-tier reset settles overshoot debt instead of taxing every future month`
 
 ---
 
 ### Task 15: full verification + wrap-up
 
-- [ ] `cd editor && bun run verify` — tsc, module-boundary, JS suite, Rust suite, `verify:intellisense` (SKIPPED ≠ pass; report honestly if skipped).
-- [ ] `cd arcane-server && bun run test` — full vitest suite.
-- [ ] Re-read the diff (`git diff dev...HEAD`) against each finding; confirm every task's finding is actually closed by its change.
-- [ ] Update the review memory file: mark the 15 as fixed-on-branch, reservation ledger explicitly deferred.
+- [x] `cd editor && bun run verify` — tsc, module-boundary, JS suite, Rust suite, `verify:intellisense` (SKIPPED ≠ pass; report honestly if skipped).
+- [x] `cd arcane-server && bun run test` — full vitest suite.
+- [x] Re-read the diff (`git diff dev...HEAD`) against each finding; confirm every task's finding is actually closed by its change.
+- [x] Update the review memory file: mark the 15 as fixed-on-branch, reservation ledger explicitly deferred.
 
 ## Self-Review (done at planning time)
 
