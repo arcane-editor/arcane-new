@@ -279,28 +279,43 @@ describe('withWriteApproval', () => {
       expect(requests[0].diff).toEqual({ path: '/proj/Foo.cs', oldText: current, newText: expected.content });
     });
 
-    it('edit: when applyEdits cannot find the search text, skip the prompt and let the real tool fail naturally', async () => {
-      let delegated = false;
-      const tool: AgentTool = {
-        name: 'edit',
-        label: 'edit',
-        description: 'fake',
-        parameters: Type.Object({}),
-        async execute(): Promise<AgentToolResult> {
-          delegated = true;
-          // Mirrors the real edit.ts's error text for an unmatched search string.
-          return { content: [{ type: 'text', text: 'Edit 1: Could not find text to replace:\n"does not exist"' }] };
-        },
-      };
+    it('edit: when applyEdits cannot find the search text, refuse WITHOUT executing or prompting', async () => {
+      // The old behavior delegated on the assumption the inner tool would
+      // "fail deterministically" — but edit.ts re-reads the file itself, so
+      // an external change (Unity reimport, git checkout) between the gate's
+      // read and the tool's read could make the edit LAND unprompted, on
+      // exactly the always-prompt paths this gate exists to protect.
+      const { tool, calls } = fakeWriteTool('edit');
       const current = 'no match here\n';
       const edits: Edit[] = [{ oldText: 'does not exist', newText: 'replacement' }];
       const { deps, requests } = fakeApprovalDeps('reject', { readFile: async () => current });
 
       const res = await withWriteApproval(tool, CWD, { deps }).execute('call-1', { path: 'Foo.cs', edits });
 
-      expect(requests).toHaveLength(0); // no prompt over an impossible edit
-      expect(delegated).toBe(true); // delegated straight through instead
-      expect(res.content[0]).toMatchObject({ text: expect.stringContaining('Could not find text to replace') });
+      expect(requests).toHaveLength(0); // no prompt over an unpreviewable edit
+      expect(calls()).toBe(0); // and NO delegate either — nothing may touch disk
+      const text = res.content[0].type === 'text' ? res.content[0].text : '';
+      expect(text).toContain('NOT applied');
+      expect(text).toContain('does not match');
+    });
+
+    it('edit: an unreadable pre-read on a serialized asset in auto mode refuses instead of writing unprompted', async () => {
+      const { tool, calls } = fakeWriteTool('edit');
+      const { deps, requests } = fakeApprovalDeps('apply', {
+        readFile: async () => null,
+        getApplyMode: () => 'auto',
+      });
+
+      const res = await withWriteApproval(tool, CWD, { deps }).execute('call-1', {
+        path: 'Scene.unity',
+        edits: [{ oldText: 'a', newText: 'b' }] as Edit[],
+      });
+
+      expect(requests).toHaveLength(0);
+      expect(calls()).toBe(0);
+      const text = res.content[0].type === 'text' ? res.content[0].text : '';
+      expect(text).toContain('could not be read');
+      expect(text).toContain('NOT applied');
     });
   });
 });

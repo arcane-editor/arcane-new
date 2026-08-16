@@ -53,11 +53,13 @@
  * `edit`: current on-disk content run through `applyEdits` — the SAME pure
  * function `vendor/tools/edit.ts` calls internally (imported, not
  * reimplemented, for exact parity with what a real edit produces) — against
- * `params.edits`. If `applyEdits` reports `applied: false` (the search text
- * doesn't match), there's nothing real to approve: the wrapped tool will
- * fail with the identical, deterministic error if we delegate to it (same
- * content, same edits), so we skip the prompt and let it return its own
- * error rather than asking the user to approve a change that can't happen.
+ * `params.edits`. If the file can't be read, or `applyEdits` reports
+ * `applied: false` (the search text doesn't match), the gate REFUSES without
+ * executing: the wrapped tool re-reads the file itself, so delegating on the
+ * assumption it would "fail deterministically" was unsound — an external
+ * change (Unity reimport, git checkout) between the two reads could make the
+ * edit land with no prompt on exactly the always-prompt paths this gate
+ * guarantees. The refusal tells the model to re-read and retry.
  *
  * ── Composition & the "rejected writes must be inert" investigation ─────
  * Wiring (`agent-service.ts`): `withResultDiffs(wrapCs(withWriteApproval(
@@ -298,14 +300,29 @@ export function withWriteApproval(
 
       if (canSkipPrompt) return tool.execute(id, params, signal, onUpdate);
 
-      const currentContent = (await deps.readFile(absPath)) ?? '';
-      const newText = await computePendingNewText(tool, params, currentContent);
+      const currentContent = await deps.readFile(absPath);
+      const newText = await computePendingNewText(tool, params, currentContent ?? '');
       if (newText === null) {
-        // Can't compute a meaningful diff (e.g. the edit's search text won't
-        // match the current content) — the wrapped tool will fail
-        // deterministically with the same inputs, so let it run and surface
-        // its own error instead of prompting over a change that can't happen.
-        return tool.execute(id, params, signal, onUpdate);
+        // A prompt is REQUIRED on this path (approve mode / serialized Unity
+        // asset), but no diff could be computed — the file was unreadable, or
+        // the edit's search text doesn't match the content we read. The old
+        // behavior delegated on the assumption the tool would "fail
+        // deterministically"; the tool re-reads the file itself, so an
+        // external change (Unity reimport, git checkout) could make it
+        // SUCCEED — an unprompted write to an always-prompt path. Refuse.
+        return {
+          content: [
+            {
+              type: 'text',
+              text:
+                `Error: could not preview this ${tool.name} to ${absPath} for approval` +
+                (currentContent === null
+                  ? ' (the file could not be read).'
+                  : " (the edit's search text does not match the file's current content).") +
+                ' The change was NOT applied. Re-read the file and retry with matching text.',
+            },
+          ],
+        };
       }
 
       // The reads/diff-compute above are genuinely async (real disk I/O in
@@ -320,7 +337,7 @@ export function withWriteApproval(
       const decision = await deps.requestApproval(
         id,
         tool.name,
-        { path: absPath, oldText: currentContent, newText },
+        { path: absPath, oldText: currentContent ?? '', newText },
         signal,
       );
 
