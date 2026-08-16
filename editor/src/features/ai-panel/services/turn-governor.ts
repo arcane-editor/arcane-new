@@ -87,8 +87,19 @@ function normalizeEffort(reasoning: string | undefined): Effort {
     : 'mid';
 }
 
+// The reason MUST be named: at the cap tools are disabled via
+// tool_choice:'none', and a model that only hears "stop using tools" invents
+// its own explanation — real transcripts showed "I'm hitting an intermittent
+// tool limitation where write becomes unavailable" followed by pasted file
+// contents for the user to apply by hand. Name the cause, forbid the failure
+// narrative, and point at the real recovery path (a follow-up message resumes
+// with a fresh turn budget — and in plan mode, resumes the plan directly).
 export const WRAP_UP_TEXT =
-  "You have one response left. Stop using tools; summarize what you did, what's verified, and what remains.";
+  "You have one response left: this send's turn limit was reached, so tools are disabled for this " +
+  'final message only — they are not broken and will work again next send. Summarize what you did, ' +
+  "what's verified, and what remains, then tell the user that replying 'continue' resumes the " +
+  'remaining work. Do not paste file contents for manual use, and do not describe this as a tool ' +
+  'limitation or failure.';
 
 function wrapUpMessage(): Message {
   return { role: 'user', content: WRAP_UP_TEXT, timestamp: Date.now() };

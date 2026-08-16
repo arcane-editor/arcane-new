@@ -178,3 +178,18 @@ describe('withTurnGovernor', () => {
     expect(isGoverned(calls()[2])).toBe(false); // reset cleared the grant + reset count, fresh send
   });
 });
+
+// Regression pin: at the cap the model's tools are disabled via
+// tool_choice:'none'. The old wrap-up text ("Stop using tools; summarize…")
+// never said WHY, so models confabulated "I'm hitting an intermittent tool
+// limitation where write becomes unavailable" and pasted file contents for the
+// user to apply by hand. The instruction must name the real cause and the real
+// recovery path, and forbid the failure narrative.
+describe('WRAP_UP_TEXT honesty', () => {
+  it('names the turn limit, forbids claiming tool failure, and points at continue', () => {
+    expect(WRAP_UP_TEXT).toContain('turn limit');
+    expect(WRAP_UP_TEXT.toLowerCase()).toContain('not broken');
+    expect(WRAP_UP_TEXT).toContain("'continue'");
+    expect(WRAP_UP_TEXT.toLowerCase()).toContain('do not paste');
+  });
+});
