@@ -230,14 +230,26 @@ export async function debitCredits(db: D1Database, userId: number, micro: number
     `).bind(micro, userId).run();
 }
 
-/** Free-tier monthly reset: SET (never add) the plan bucket to the grant and
- *  re-anchor the period. Idempotent under races (same grant, same anchor). */
+/** Free-tier monthly reset: SET (never add) the plan bucket and re-anchor the
+ *  period. Outstanding overshoot debt (a NEGATIVE top-up — see debitCredits'
+ *  final-request overspend note) is settled from the new grant here instead
+ *  of surviving every reset as a permanent tax on the monthly allotment (it
+ *  was only ever cleared when a purchased top-up silently paid it off). Debt
+ *  larger than one grant carries the remainder into next month's reset.
+ *  Idempotent under races once debt is settled (topup >= 0 makes both
+ *  expressions collapse to the plain SET); a same-instant double reset with
+ *  debt still outstanding can double-settle — accepted, the period re-anchor
+ *  makes that window one request wide. */
 export async function resetFreePlanCredits(
     db: D1Database, userId: number, grantMicro: number, periodEnd: string,
 ): Promise<void> {
-    await db.prepare(
-        'UPDATE users SET plan_credits_micro = ?, plan_period_end = ? WHERE id = ?'
-    ).bind(grantMicro, periodEnd, userId).run();
+    await db.prepare(`
+        UPDATE users SET
+            plan_credits_micro  = MAX(0, ?1 + MIN(0, topup_credits_micro)),
+            topup_credits_micro = MAX(0, topup_credits_micro) + MIN(0, ?1 + MIN(0, topup_credits_micro)),
+            plan_period_end     = ?2
+        WHERE id = ?3
+    `).bind(grantMicro, periodEnd, userId).run();
 }
 
 /** Grant a plan's credits and switch the user's plan (webhook-driven, B3). */

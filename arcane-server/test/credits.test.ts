@@ -93,3 +93,37 @@ describe('checkAiBudget', () => {
         expect(r!.topup_credits_micro).toBe(100_000);
     });
 });
+
+// P0 fix wave 2026-08-16: a final-request overshoot leaves top-up NEGATIVE
+// (see debitCredits above). The monthly reset used to SET only the plan
+// bucket, so that debt survived every reset — permanently taxing each
+// month's grant, cleared only when a purchased top-up silently paid it off.
+describe('resetFreePlanCredits — overshoot debt settles at the monthly reset', () => {
+    it('settles a negative top-up from the new grant', async () => {
+        const u = await seedPasswordUser('debt1@test.dev', 'password123');
+        await setBalances(u.id, 'free', 0, -350_000, '2000-01-01T00:00:00.000Z');
+        await refreshAndGetBalance(env.arcane_db, u.id);
+        const r = await getUserBillingRow(env.arcane_db, u.id);
+        expect(r!.topup_credits_micro).toBe(0);
+        expect(r!.plan_credits_micro).toBe(tierGrantMicro('free') - 350_000);
+    });
+
+    it('carries debt larger than the grant instead of vanishing or compounding', async () => {
+        const u = await seedPasswordUser('debt2@test.dev', 'password123');
+        const grant = tierGrantMicro('free');
+        await setBalances(u.id, 'free', 0, -(grant + 500_000), '2000-01-01T00:00:00.000Z');
+        await refreshAndGetBalance(env.arcane_db, u.id);
+        const r = await getUserBillingRow(env.arcane_db, u.id);
+        expect(r!.plan_credits_micro).toBe(0);
+        expect(r!.topup_credits_micro).toBe(-500_000);
+    });
+
+    it('leaves a positive top-up untouched by the reset', async () => {
+        const u = await seedPasswordUser('debt3@test.dev', 'password123');
+        await setBalances(u.id, 'free', 0, 100_000, '2000-01-01T00:00:00.000Z');
+        await refreshAndGetBalance(env.arcane_db, u.id);
+        const r = await getUserBillingRow(env.arcane_db, u.id);
+        expect(r!.plan_credits_micro).toBe(tierGrantMicro('free'));
+        expect(r!.topup_credits_micro).toBe(100_000);
+    });
+});
