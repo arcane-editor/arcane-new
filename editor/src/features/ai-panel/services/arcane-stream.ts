@@ -637,12 +637,16 @@ async function doStream(
     stream.push(corruptionErrorEvent(malformedLines, contentBlocks));
     return;
   }
-  // Tool calls in a stream that ended WITHOUT [DONE] may be half-streamed —
-  // executing them would run garbage arguments, and labeling the turn 'stop'
-  // hid the truncation entirely (the loop then treated it as a clean finish).
-  // Surface it as an error: the orphan repair in openai-format keeps the
-  // history sendable and the ErrorBlock offers Retry.
-  if (contentBlocks.some((c) => c.type === 'toolCall')) {
+  // The server ALWAYS terminates a stream with [DONE] (or an error event) —
+  // reaching here means the connection died mid-response (worker eviction,
+  // proxy close). Half-streamed TOOL CALLS were already rescued; a text-only
+  // tail was labeled 'stop' and rendered as a complete answer with no error
+  // and no Retry. Treat ANY partial content — or unparsed bytes left in the
+  // line buffer — as truncation. A zero-content cutoff still falls through
+  // to the empty 'stop' finalizer below, which the send-level empty-response
+  // detection already turns into an actionable error. The orphan repair in
+  // openai-format keeps the history sendable and the ErrorBlock offers Retry.
+  if (contentBlocks.length > 0 || buffer.trim().length > 0) {
     const message = 'Stream ended unexpectedly mid-response';
     stream.push({
       type: 'error',

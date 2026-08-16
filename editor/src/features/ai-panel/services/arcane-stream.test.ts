@@ -543,6 +543,37 @@ describe('createArcaneStreamFn', () => {
     expect(done.message.content[0]).toEqual({ type: 'text', text: 'hello' });
   });
 
+  it('a stream that dies without [DONE] after real text surfaces an error, not a complete answer', async () => {
+    // Worker eviction / proxy close: the connection ends cleanly but the
+    // server never wrote [DONE]. This used to finalize as stopReason 'stop'
+    // whenever no tool call was present — a mid-sentence truncated answer
+    // rendered as a complete response with no error and no Retry.
+    const fetchImpl = (async () =>
+      sseResponse(['data: {"type":"text","content":"Half an ans"}\n\n'])) as unknown as typeof fetch;
+
+    const streamFn = createArcaneStreamFn({ fetchImpl });
+    const events = await drain(streamFn(ctx, opts()));
+
+    expect(events.some((e) => e.type === 'done')).toBe(false);
+    const errorEvent = events.find((e) => e.type === 'error') as Extract<AssistantMessageEvent, { type: 'error' }>;
+    expect(errorEvent).toBeDefined();
+    expect(errorEvent.error.message).toMatch(/ended unexpectedly/);
+    expect(errorEvent.partial?.stopReason).toBe('error');
+    expect(errorEvent.partial?.content[0]).toEqual({ type: 'text', text: 'Half an ans' });
+  });
+
+  it('an empty stream without [DONE] still finalizes as an empty stop (rescued as empty-response downstream)', async () => {
+    const fetchImpl = (async () => sseResponse([])) as unknown as typeof fetch;
+
+    const streamFn = createArcaneStreamFn({ fetchImpl });
+    const events = await drain(streamFn(ctx, opts()));
+
+    const done = events.find((e) => e.type === 'done') as Extract<AssistantMessageEvent, { type: 'done' }>;
+    expect(done).toBeDefined();
+    expect(done.message.content).toEqual([]);
+    expect(done.message.stopReason).toBe('stop');
+  });
+
   it('reports corruption when the reader ends (no [DONE]) with only malformed lines', async () => {
     const fetchImpl = (async () =>
       sseResponse(['data: not json\n\n', 'data: also bad\n\n'])) as unknown as typeof fetch;
