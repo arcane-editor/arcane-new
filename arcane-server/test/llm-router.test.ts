@@ -190,6 +190,21 @@ describe('streamCompletion event mapping', () => {
         expect('toolChoice' in seen[1]).toBe(false);
     });
 
+    it('forwards the abort signal to streamText so a client Stop cancels the provider call', async () => {
+        const seen: Array<Record<string, unknown>> = [];
+        const impl = ((args: Record<string, unknown>) => {
+            seen.push(args);
+            return { fullStream: (async function* () {})() };
+        }) as unknown as typeof import('ai').streamText;
+
+        const ctl = new AbortController();
+        for await (const _ of streamCompletion(REQ, ENV, impl, ctl.signal)) { /* drain */ }
+        for await (const _ of streamCompletion(REQ, ENV, impl)) { /* drain */ }
+
+        expect(seen[0].abortSignal).toBe(ctl.signal);
+        expect('abortSignal' in seen[1]).toBe(false);
+    });
+
     it('sends prompt_cache_key (via providerOptions.openai) only for openai/* models with a session id', async () => {
         const seen: Array<Record<string, unknown>> = [];
         const impl = ((args: Record<string, unknown>) => {

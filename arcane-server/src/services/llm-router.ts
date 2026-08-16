@@ -218,6 +218,7 @@ type StreamTextFn = typeof streamText;
 
 export async function* streamCompletion(
     req: ChatCompletionRequest, env: LlmEnv, streamTextImpl: StreamTextFn = streamText,
+    signal?: AbortSignal,
 ): AsyncGenerator<StreamEvent> {
     // `skipCache` disables the AI GATEWAY's exact-match response-replay cache
     // (a cached replay of a temperature-sampled completion is semantically
@@ -249,6 +250,9 @@ export async function* streamCompletion(
         ...(cacheKey && req.model.startsWith('openai/')
             ? { providerOptions: { openai: { promptCacheKey: cacheKey } } }
             : {}),
+        // Client Stop/disconnect: without this the provider drained (and
+        // billed) the full generation after the user stopped reading.
+        ...(signal ? { abortSignal: signal } : {}),
         maxOutputTokens, temperature: req.temperature,
     });
 

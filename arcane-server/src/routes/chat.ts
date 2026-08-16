@@ -77,13 +77,13 @@ chatRouter.post('/v1/chat/completions', async (c) => {
     const errCtx = { userId: user.sub, model: body.model, reasoningLevel: body.metadata?.reasoningLevel, taskType: body.metadata?.taskType };
 
     if (!body.stream) {
+        let content = '';
+        const toolCalls: Array<{ id: string; name: string; arguments: string }> = [];
+        let inputTokens = 0;
+        let outputTokens = 0;
+        let cachedInputTokens = 0;
+        let sawUsage = false;
         try {
-            let content = '';
-            const toolCalls: Array<{ id: string; name: string; arguments: string }> = [];
-            let inputTokens = 0;
-            let outputTokens = 0;
-            let cachedInputTokens = 0;
-
             for await (const event of streamCompletion(body, env)) {
                 if (event.type === 'text') content += event.content;
                 if (event.type === 'tool_call') toolCalls.push({ id: event.id, name: event.name, arguments: event.arguments });
@@ -91,25 +91,11 @@ chatRouter.post('/v1/chat/completions', async (c) => {
                     inputTokens = event.input_tokens;
                     outputTokens = event.output_tokens;
                     cachedInputTokens = event.cached_input_tokens ?? 0;
+                    sawUsage = true;
                 }
                 // Surface upstream errors instead of silently returning empty content.
                 if (event.type === 'error') throw new Error(event.message);
             }
-
-            const durationMs = Date.now() - startTime;
-            await logUsage(env.arcane_db, user, body.model, inputTokens, outputTokens, durationMs, {
-                taskType: body.metadata?.taskType,
-                turnIndex: body.metadata?.telemetry?.turnIndex,
-                toolErrorCount: body.metadata?.telemetry?.toolErrorCount,
-                repairCount: body.metadata?.telemetry?.repairCount,
-                cachedInputTokens,
-                groundingLintHits: body.metadata?.telemetry?.groundingLintHits,
-                loopGuardHits: body.metadata?.telemetry?.loopGuardHits,
-                escalated: body.metadata?.telemetry?.escalated,
-                groundingToolCalls: body.metadata?.telemetry?.groundingToolCalls,
-                groundingUnavailable: body.metadata?.telemetry?.groundingUnavailable,
-                lastTurnLatencyMs: body.metadata?.telemetry?.lastTurnLatencyMs,
-            });
 
             return c.json({
                 id: `chatcmpl-${crypto.randomUUID()}`,
@@ -143,35 +129,18 @@ chatRouter.post('/v1/chat/completions', async (c) => {
             const message = err instanceof Error ? err.message : String(err);
             logChatError(errCtx, 'chat.nonstream.catch', message);
             return c.json({ error: { message, type: 'server_error' } }, 500);
-        }
-    }
-
-    // Streaming: SSE with StreamEvent format
-    return streamSSE(c, async (stream) => {
-        let inputTokens = 0;
-        let outputTokens = 0;
-        let cachedInputTokens = 0;
-
-        try {
-            for await (const event of streamCompletion(body, env)) {
-                if (event.type === 'usage') {
-                    inputTokens = event.input_tokens;
-                    outputTokens = event.output_tokens;
-                    cachedInputTokens = event.cached_input_tokens ?? 0;
-                }
-                if (event.type === 'error') {
-                    logChatError(errCtx, 'chat.stream.forward', event.message);
-                }
-                await stream.writeSSE({ data: JSON.stringify(event) });
-            }
-            await stream.writeSSE({ data: '[DONE]' });
-        } catch (err) {
-            const message = err instanceof Error ? err.message : String(err);
-            logChatError(errCtx, 'chat.stream.catch', message);
-            await stream.writeSSE({
-                data: JSON.stringify({ type: 'error', code: 'server_error', message }),
-            });
         } finally {
+            // Metering must run on the ERROR path too: the throw above used to
+            // jump past logUsage entirely — real provider spend recorded as
+            // NOTHING, invisible to the debit and the $1/hr anti-abuse cap.
+            // When the provider died before its finish event, estimate from
+            // what actually streamed.
+            if (!sawUsage && (content.length > 0 || toolCalls.length > 0)) {
+                outputTokens = Math.ceil(
+                    (content.length + toolCalls.reduce((n, tc) => n + tc.arguments.length, 0)) / 4,
+                );
+                inputTokens = Math.ceil(JSON.stringify(body.messages ?? []).length / 4);
+            }
             const durationMs = Date.now() - startTime;
             await logUsage(env.arcane_db, user, body.model, inputTokens, outputTokens, durationMs, {
                 taskType: body.metadata?.taskType,
@@ -186,6 +155,76 @@ chatRouter.post('/v1/chat/completions', async (c) => {
                 groundingUnavailable: body.metadata?.telemetry?.groundingUnavailable,
                 lastTurnLatencyMs: body.metadata?.telemetry?.lastTurnLatencyMs,
             });
+        }
+    }
+
+    // Streaming: SSE with StreamEvent format
+    return streamSSE(c, async (stream) => {
+        let inputTokens = 0;
+        let outputTokens = 0;
+        let cachedInputTokens = 0;
+        let sawUsage = false;
+        let streamedChars = 0;
+        // Client Stop/disconnect aborts this signal; forwarding it into
+        // streamCompletion cancels the provider call instead of draining
+        // (and billing) the full post-Stop generation. Hono's writeSSE
+        // swallows dead-writer errors, so the signal — not a write failure —
+        // is the only reliable disconnect notification.
+        const clientSignal = c.req.raw.signal;
+
+        try {
+            for await (const event of streamCompletion(body, env, undefined, clientSignal)) {
+                if (event.type === 'text') streamedChars += event.content.length;
+                if (event.type === 'tool_call') streamedChars += event.arguments.length;
+                if (event.type === 'usage') {
+                    inputTokens = event.input_tokens;
+                    outputTokens = event.output_tokens;
+                    cachedInputTokens = event.cached_input_tokens ?? 0;
+                    sawUsage = true;
+                }
+                if (event.type === 'error') {
+                    logChatError(errCtx, 'chat.stream.forward', event.message);
+                }
+                if (clientSignal.aborted) break; // dead writer — stop pulling upstream
+                await stream.writeSSE({ data: JSON.stringify(event) });
+            }
+            await stream.writeSSE({ data: '[DONE]' });
+        } catch (err) {
+            // An abort surfaces as a throw from the AI SDK — that's the
+            // expected Stop path, not a server error worth logging/forwarding.
+            if (!clientSignal.aborted) {
+                const message = err instanceof Error ? err.message : String(err);
+                logChatError(errCtx, 'chat.stream.catch', message);
+                await stream.writeSSE({
+                    data: JSON.stringify({ type: 'error', code: 'server_error', message }),
+                });
+            }
+        } finally {
+            // Aborted/errored streams end with no 'finish' part, so usage was
+            // metered as 0x0 — the delivered tokens were free and invisible
+            // to the $1/hr cap. Estimate from what actually streamed.
+            if (!sawUsage && streamedChars > 0) {
+                outputTokens = Math.ceil(streamedChars / 4);
+                inputTokens = Math.ceil(JSON.stringify(body.messages ?? []).length / 4);
+            }
+            const durationMs = Date.now() - startTime;
+            // waitUntil: on client disconnect the runtime can tear this
+            // handler down mid-write — the debit and the request_logs row
+            // feeding the hourly cap must survive it (same pattern
+            // auth-email.ts uses for its verification send).
+            c.executionCtx.waitUntil(logUsage(env.arcane_db, user, body.model, inputTokens, outputTokens, durationMs, {
+                taskType: body.metadata?.taskType,
+                turnIndex: body.metadata?.telemetry?.turnIndex,
+                toolErrorCount: body.metadata?.telemetry?.toolErrorCount,
+                repairCount: body.metadata?.telemetry?.repairCount,
+                cachedInputTokens,
+                groundingLintHits: body.metadata?.telemetry?.groundingLintHits,
+                loopGuardHits: body.metadata?.telemetry?.loopGuardHits,
+                escalated: body.metadata?.telemetry?.escalated,
+                groundingToolCalls: body.metadata?.telemetry?.groundingToolCalls,
+                groundingUnavailable: body.metadata?.telemetry?.groundingUnavailable,
+                lastTurnLatencyMs: body.metadata?.telemetry?.lastTurnLatencyMs,
+            }));
         }
     });
 });
