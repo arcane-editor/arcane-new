@@ -40,6 +40,30 @@ function AiChatPanel() {
     if (loggedIn) setAuthNotice(null);
   }, [loggedIn, setAuthNotice]);
 
+  function handleNewChat() {
+    resetConversation();
+    resetAgentService();
+  }
+
+  // The header buttons and the mod+shift+L / mod+shift+H chords must do the
+  // same thing, so the commands dispatch these events rather than duplicating
+  // the handlers. The panel owns `historyOpen`, which a command cannot reach.
+  useEffect(() => {
+    const onNewChat = () => handleNewChat();
+    const onToggleHistory = () => setHistoryOpen((v) => !v);
+    window.addEventListener('ai-new-chat', onNewChat);
+    window.addEventListener('ai-toggle-history', onToggleHistory);
+    return () => {
+      window.removeEventListener('ai-new-chat', onNewChat);
+      window.removeEventListener('ai-toggle-history', onToggleHistory);
+    };
+  }, []);
+
+  // HOOKS END HERE. The two gates below are conditional RETURNS — any hook
+  // added after them changes the hook count when loggedIn /
+  // verificationRequired flips while the panel is mounted, and React 19
+  // throws ("Rendered more/fewer hooks") on the first-sign-in mainline flow.
+
   if (!loggedIn) {
     return (
       <div className="ai-panel">
@@ -63,25 +87,6 @@ function AiChatPanel() {
   if (verificationRequired) {
     return <AiVerifyEmailGate />;
   }
-
-  function handleNewChat() {
-    resetConversation();
-    resetAgentService();
-  }
-
-  // The header buttons and the mod+shift+L / mod+shift+H chords must do the
-  // same thing, so the commands dispatch these events rather than duplicating
-  // the handlers. The panel owns `historyOpen`, which a command cannot reach.
-  useEffect(() => {
-    const onNewChat = () => handleNewChat();
-    const onToggleHistory = () => setHistoryOpen((v) => !v);
-    window.addEventListener('ai-new-chat', onNewChat);
-    window.addEventListener('ai-toggle-history', onToggleHistory);
-    return () => {
-      window.removeEventListener('ai-new-chat', onNewChat);
-      window.removeEventListener('ai-toggle-history', onToggleHistory);
-    };
-  }, []);
 
   // Files dragged in from the explorer tree or the tab bar. These are
   // in-webview HTML5 drags, unaffected by Tauri's native interception of OS

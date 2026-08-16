@@ -2,6 +2,7 @@ import { useUiStore } from '../../../stores/ui';
 import { useProjectContextStore } from '../../../stores/project-context';
 import { AiChatPanel } from '../../ai-panel';
 import { SceneUsagePanel } from '../../unity-context';
+import { ErrorBoundary } from '../../../components/ErrorBoundary';
 
 function RightSidebarPanel() {
   const activeView = useUiStore((s) => s.activeRightSidebarView);
@@ -15,13 +16,30 @@ function RightSidebarPanel() {
     return null;
   }
 
+  // Local boundary, same pattern as the left SidebarPanel's per-panel
+  // boundaries: without it a panel crash bubbles to the ROOT boundary and
+  // replaces the entire editor with the crash card.
+  const aiPanel = (
+    <ErrorBoundary
+      fallback={<div className="sidebar-empty">AI panel crashed — close and reopen it to retry.</div>}
+    >
+      <AiChatPanel />
+    </ErrorBoundary>
+  );
+
   switch (activeView) {
     case 'ai-panel':
-      return <AiChatPanel />;
+      return aiPanel;
     case 'unity-inspector':
-      return isUnityProject ? <SceneUsagePanel /> : <AiChatPanel />;
+      return isUnityProject ? (
+        <ErrorBoundary fallback={<div className="sidebar-empty">Scene panel unavailable.</div>}>
+          <SceneUsagePanel />
+        </ErrorBoundary>
+      ) : (
+        aiPanel
+      );
     default:
-      return <AiChatPanel />;
+      return aiPanel;
   }
 }
 

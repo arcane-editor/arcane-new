@@ -44,6 +44,7 @@ import {
   resetAgentService,
 } from './features/ai-panel';
 import TooltipHost from './components/TooltipHost';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import {
   focusTerminalById,
   handleTerminalDrop,
@@ -1776,7 +1777,15 @@ function App() {
       <CoachMarks />
       {aiPanelMaximized && (
         <MaximizedAiOverlay>
-          <AiChatPanel />
+          {/* Same local boundary RightSidebarPanel gives the docked panel — a
+              panel crash must never replace the whole editor. */}
+          <ErrorBoundary
+            fallback={
+              <div className="sidebar-empty">AI panel crashed — close and reopen it to retry.</div>
+            }
+          >
+            <AiChatPanel />
+          </ErrorBoundary>
         </MaximizedAiOverlay>
       )}
       {graphifyIntroOpen && (
