@@ -34,7 +34,10 @@ function blockChars(b: TextContent | ImageContent): number {
   return b.type === 'text' ? b.text.length : b.data.length;
 }
 
-function contentChars(content: string | (TextContent | ImageContent)[]): number {
+function contentChars(content: string | (TextContent | ImageContent)[] | null | undefined): number {
+  // Aborted/restored turns can carry null content at runtime (see
+  // openai-format.ts) — a throw here crashed the whole loop every turn.
+  if (content == null) return 0;
   if (typeof content === 'string') return content.length;
   return content.reduce((n, b) => n + blockChars(b), 0);
 }
@@ -45,7 +48,7 @@ function messageChars(m: AgentMessage): number {
     case 'toolResult':
       return contentChars(m.content);
     case 'assistant':
-      return m.content.reduce((n, b) => {
+      return (m.content ?? []).reduce((n, b) => {
         if (b.type === 'text') return n + b.text.length;
         if (b.type === 'thinking') return n + b.thinking.length;
         if (b.type === 'toolCall') return n + b.name.length + JSON.stringify(b.arguments).length;

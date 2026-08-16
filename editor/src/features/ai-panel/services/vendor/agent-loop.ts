@@ -129,122 +129,145 @@ async function runLoop(
   }
 
   // Main agent loop
-  while (true) {
-    if (config.signal?.aborted) break;
-
-    stream.push({ type: 'turn_start' });
-
-    // 1. Stream assistant response from LLM.
-    // `allMessages` stays the full record (saved/displayed); the LLM only sees a
-    // compacted view so weak-model context never grows unbounded.
-    const visible = compactMessages(allMessages, {
-      contextWindow: config.contextWindow ?? DEFAULT_CONTEXT_WINDOW,
-    });
-    const assistantMessage = await streamAssistantResponse(
-      config,
-      { systemPrompt: state.systemPrompt, messages: visible, tools: state.tools },
-      stream,
-    );
-
-    allMessages.push(assistantMessage);
-    newMessages.push(assistantMessage);
-
-    // 2. Check stop conditions
-    if (assistantMessage.stopReason === 'error' || assistantMessage.stopReason === 'aborted') {
-      stream.push({ type: 'turn_end' });
-      break;
-    }
-
-    // 3. Extract tool calls from response
-    const toolCalls = assistantMessage.content.filter(
-      (c): c is ToolCall => c.type === 'toolCall',
-    );
-
-    if (toolCalls.length === 0) {
-      stream.push({ type: 'turn_end' });
-      break; // No tool calls = agent is done
-    }
-
-    // 4. Execute tool calls sequentially
-    for (const toolCall of toolCalls) {
+  try {
+    while (true) {
       if (config.signal?.aborted) break;
 
-      const tool = state.tools.find((t) => t.name === toolCall.name);
-      if (!tool) {
-        const errorResult: ToolResultMessage = {
+      stream.push({ type: 'turn_start' });
+
+      // 1. Stream assistant response from LLM.
+      // `allMessages` stays the full record (saved/displayed); the LLM only sees a
+      // compacted view so weak-model context never grows unbounded.
+      const visible = compactMessages(allMessages, {
+        contextWindow: config.contextWindow ?? DEFAULT_CONTEXT_WINDOW,
+      });
+      const assistantMessage = await streamAssistantResponse(
+        config,
+        { systemPrompt: state.systemPrompt, messages: visible, tools: state.tools },
+        stream,
+      );
+
+      allMessages.push(assistantMessage);
+      newMessages.push(assistantMessage);
+
+      // 2. Check stop conditions
+      if (assistantMessage.stopReason === 'error' || assistantMessage.stopReason === 'aborted') {
+        stream.push({ type: 'turn_end' });
+        break;
+      }
+
+      // 3. Extract tool calls from response
+      const toolCalls = assistantMessage.content.filter(
+        (c): c is ToolCall => c.type === 'toolCall',
+      );
+
+      if (toolCalls.length === 0) {
+        stream.push({ type: 'turn_end' });
+        break; // No tool calls = agent is done
+      }
+
+      // 4. Execute tool calls sequentially
+      for (const toolCall of toolCalls) {
+        if (config.signal?.aborted) break;
+
+        const tool = state.tools.find((t) => t.name === toolCall.name);
+        if (!tool) {
+          const errorResult: ToolResultMessage = {
+            role: 'toolResult',
+            toolCallId: toolCall.id,
+            toolName: toolCall.name,
+            content: `Error: Unknown tool "${toolCall.name}"`,
+            isError: true,
+            timestamp: Date.now(),
+          };
+          allMessages.push(errorResult);
+          newMessages.push(errorResult);
+          stream.push({ type: 'message_start', message: errorResult });
+          stream.push({ type: 'message_end', message: errorResult });
+          continue;
+        }
+
+        stream.push({
+          type: 'tool_execution_start',
+          toolCallId: toolCall.id,
+          toolName: toolCall.name,
+          args: toolCall.arguments as Record<string, unknown>,
+        });
+
+        let result: AgentToolResult;
+        let isError = false;
+
+        try {
+          result = await executeToolBounded(tool, toolCall, config.signal, (partialResult) => {
+            stream.push({
+              type: 'tool_execution_update',
+              toolCallId: toolCall.id,
+              toolName: toolCall.name,
+              result: partialResult,
+            });
+          });
+        } catch (error) {
+          isError = true;
+          result = {
+            content: [
+              { type: 'text', text: `Error: ${error instanceof Error ? error.message : String(error)}` },
+            ],
+          };
+        }
+
+        stream.push({
+          type: 'tool_execution_end',
+          toolCallId: toolCall.id,
+          toolName: toolCall.name,
+          result,
+          isError,
+        });
+
+        // Build tool result message
+        const toolResultContent = result.content
+          .filter((c): c is { type: 'text'; text: string } => c.type === 'text')
+          .map((c) => c.text)
+          .join('\n');
+
+        const toolResultMessage: ToolResultMessage = {
           role: 'toolResult',
           toolCallId: toolCall.id,
           toolName: toolCall.name,
-          content: `Error: Unknown tool "${toolCall.name}"`,
-          isError: true,
+          content: toolResultContent || '(empty result)',
+          isError,
           timestamp: Date.now(),
         };
-        allMessages.push(errorResult);
-        newMessages.push(errorResult);
-        stream.push({ type: 'message_start', message: errorResult });
-        stream.push({ type: 'message_end', message: errorResult });
-        continue;
+
+        allMessages.push(toolResultMessage);
+        newMessages.push(toolResultMessage);
+        stream.push({ type: 'message_start', message: toolResultMessage });
+        stream.push({ type: 'message_end', message: toolResultMessage });
       }
 
-      stream.push({
-        type: 'tool_execution_start',
-        toolCallId: toolCall.id,
-        toolName: toolCall.name,
-        args: toolCall.arguments as Record<string, unknown>,
-      });
-
-      let result: AgentToolResult;
-      let isError = false;
-
-      try {
-        result = await executeToolBounded(tool, toolCall, config.signal, (partialResult) => {
-          stream.push({
-            type: 'tool_execution_update',
-            toolCallId: toolCall.id,
-            toolName: toolCall.name,
-            result: partialResult,
-          });
-        });
-      } catch (error) {
-        isError = true;
-        result = {
-          content: [
-            { type: 'text', text: `Error: ${error instanceof Error ? error.message : String(error)}` },
-          ],
-        };
-      }
-
-      stream.push({
-        type: 'tool_execution_end',
-        toolCallId: toolCall.id,
-        toolName: toolCall.name,
-        result,
-        isError,
-      });
-
-      // Build tool result message
-      const toolResultContent = result.content
-        .filter((c): c is { type: 'text'; text: string } => c.type === 'text')
-        .map((c) => c.text)
-        .join('\n');
-
-      const toolResultMessage: ToolResultMessage = {
-        role: 'toolResult',
-        toolCallId: toolCall.id,
-        toolName: toolCall.name,
-        content: toolResultContent || '(empty result)',
-        isError,
-        timestamp: Date.now(),
-      };
-
-      allMessages.push(toolResultMessage);
-      newMessages.push(toolResultMessage);
-      stream.push({ type: 'message_start', message: toolResultMessage });
-      stream.push({ type: 'message_end', message: toolResultMessage });
+      stream.push({ type: 'turn_end' });
+      // Loop back to stream next assistant response
     }
-
+  } catch (error) {
+    // A crash anywhere in the loop (compaction, convertToLlm, a decorator
+    // throwing outside executeToolBounded) must not roll the turn out of
+    // history: the old handler emitted agent_end with the PRE-turn snapshot,
+    // deleting the user's prompt from LLM history while the UI kept showing
+    // it — and Retry's rewind then truncated the PREVIOUS exchange. Append
+    // an error tail in the same shape a streamFn error produces and finish
+    // normally with everything accumulated so far.
+    const message = error instanceof Error ? error.message : String(error);
+    const crashTail: AssistantMessage = {
+      role: 'assistant',
+      content: [],
+      stopReason: 'error',
+      errorMessage: `Agent loop crashed: ${message}`,
+      timestamp: Date.now(),
+    };
+    allMessages.push(crashTail);
+    newMessages.push(crashTail);
+    stream.push({ type: 'message_start', message: crashTail });
+    stream.push({ type: 'message_end', message: crashTail });
     stream.push({ type: 'turn_end' });
-    // Loop back to stream next assistant response
   }
 
   // Update state with accumulated messages

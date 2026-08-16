@@ -119,3 +119,41 @@ describe('agent-loop per-tool timeout', () => {
     expect(DEFAULT_TOOL_TIMEOUT_MS).toBe(120_000);
   });
 });
+
+// P0 fix wave 2026-08-16: a crash anywhere in the loop (compaction over
+// null content, convertToLlm, a decorator throwing outside
+// executeToolBounded) used to emit agent_end with the PRE-turn message
+// snapshot — deleting the user's prompt from LLM history while the UI kept
+// showing it, and pointing Retry's rewind at the PREVIOUS exchange.
+describe('agentLoop crash containment', () => {
+  it('a loop crash preserves the prompt and appends an error tail instead of rolling back the turn', async () => {
+    const state = {
+      systemPrompt: 'sys',
+      messages: [] as AgentMessage[],
+      tools: [] as AgentTool[],
+    };
+    const config = {
+      model: { id: 'x', name: 'x', provider: 'test' },
+      streamFn: (() => {
+        throw new Error('never reached');
+      }) as never,
+      convertToLlm: () => {
+        throw new Error('boom in convert');
+      },
+    } as unknown as AgentLoopConfig;
+
+    const prompts: AgentMessage[] = [{ role: 'user', content: 'hello', timestamp: 1 } as AgentMessage];
+    const stream = agentLoop(config, state, prompts);
+    let final: AgentMessage[] = [];
+    for await (const ev of stream) {
+      if (ev.type === 'agent_end') final = ev.messages;
+    }
+
+    expect(final.some((m) => m.role === 'user' && m.content === 'hello')).toBe(true);
+    const tail = final[final.length - 1];
+    expect(tail.role).toBe('assistant');
+    expect((tail as { stopReason?: string }).stopReason).toBe('error');
+    expect((tail as { errorMessage?: string }).errorMessage).toContain('boom in convert');
+    expect(state.messages).toBe(final); // state advanced — not the pre-turn snapshot
+  });
+});
