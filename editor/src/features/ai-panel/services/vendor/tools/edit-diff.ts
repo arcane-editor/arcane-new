@@ -42,22 +42,19 @@ export function fuzzyFindText(content: string, oldText: string): FuzzyMatchResul
   }
 
   // Try normalized match (collapse whitespace differences)
-  const normalizedContent = normalizeWhitespace(content);
+  const norm = normalizeWithMap(content);
   const normalizedOld = normalizeWhitespace(oldText);
-  const normalizedIndex = normalizedContent.indexOf(normalizedOld);
+  const normalizedIndex =
+    normalizedOld.length > 0 ? norm.normalized.indexOf(normalizedOld) : -1;
 
   if (normalizedIndex !== -1) {
-    // Map back to original content positions
-    const originalStart = mapNormalizedIndexToOriginal(content, normalizedIndex);
-    const originalEnd = mapNormalizedIndexToOriginal(
-      content,
-      normalizedIndex + normalizedOld.length,
-    );
+    const startIndex = norm.starts[normalizedIndex];
+    const endIndex = norm.ends[normalizedIndex + normalizedOld.length - 1];
     return {
       found: true,
-      startIndex: originalStart,
-      endIndex: originalEnd,
-      matchedText: content.slice(originalStart, originalEnd),
+      startIndex,
+      endIndex,
+      matchedText: content.slice(startIndex, endIndex),
     };
   }
 
@@ -150,19 +147,46 @@ function normalizeWhitespace(text: string): string {
   return text.replace(/[ \t]+/g, ' ').replace(/\r\n/g, '\n');
 }
 
-function mapNormalizedIndexToOriginal(original: string, normalizedIndex: number): number {
-  let origIdx = 0;
-  let normIdx = 0;
-  const normalized = normalizeWhitespace(original);
-
-  while (normIdx < normalizedIndex && origIdx < original.length) {
-    if (normalized[normIdx] === original[origIdx]) {
-      normIdx++;
-      origIdx++;
+/**
+ * Normalize whitespace while keeping, for every normalized char, the
+ * [start, end) span of the original text it derives from. Output is
+ * byte-identical to `normalizeWhitespace` (a `\r\n` pair can never sit inside
+ * a `[ \t]` run, so collapsing runs first commutes with the CRLF rewrite).
+ *
+ * Replaces the old char-by-char index mapper, which only advanced the
+ * normalized cursor on EXACT char equality — any tab-vs-space difference
+ * (Unity's tab-indented templates vs model-emitted spaces) walked the end
+ * index to EOF and the edit silently deleted the rest of the file.
+ */
+function normalizeWithMap(original: string): {
+  normalized: string;
+  starts: number[];
+  ends: number[];
+} {
+  const chars: string[] = [];
+  const starts: number[] = [];
+  const ends: number[] = [];
+  let i = 0;
+  while (i < original.length) {
+    const ch = original[i];
+    if (ch === ' ' || ch === '\t') {
+      let j = i + 1;
+      while (j < original.length && (original[j] === ' ' || original[j] === '\t')) j++;
+      chars.push(' ');
+      starts.push(i);
+      ends.push(j);
+      i = j;
+    } else if (ch === '\r' && original[i + 1] === '\n') {
+      chars.push('\n');
+      starts.push(i);
+      ends.push(i + 2);
+      i += 2;
     } else {
-      origIdx++;
+      chars.push(ch);
+      starts.push(i);
+      ends.push(i + 1);
+      i += 1;
     }
   }
-
-  return origIdx;
+  return { normalized: chars.join(''), starts, ends };
 }
