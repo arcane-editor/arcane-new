@@ -21,6 +21,7 @@ import { useWorkspaceStore } from '../../../stores/workspace';
 import { getAgentService } from './agent-service';
 import { routePlanSend } from './plan-route';
 import { buildRegeneratePrompt, type PriorPlan } from './plan-regen';
+import { buildReviseNotesPrompt } from './plan-revise';
 import {
   buildPlanPath,
   openPlanInEditor,
@@ -74,12 +75,20 @@ async function startPlanning(
   store.setPendingPrompt(prompt);
   store.setLastAttachments(attachments);
 
-  await getAgentService().sendMessage(opts.sendText ?? prompt, {
-    mode: 'plan',
-    effort: store.effort,
-    promptMode: 'plan-planning',
-    attachments,
-  });
+  try {
+    await getAgentService().sendMessage(opts.sendText ?? prompt, {
+      mode: 'plan',
+      effort: store.effort,
+      promptMode: 'plan-planning',
+      attachments,
+    });
+  } catch (err) {
+    // Without this, a throw stranded planPhase at 'planning' forever and the
+    // composer had no way back to a working plan mode.
+    useAiStore.getState().setPlanPhase('idle');
+    useAiStore.getState().setError(`Planning failed: ${formatErr(err)}`);
+    return;
+  }
 
   // Pull the freshest state after the agent loop completes.
   const after = useAiStore.getState();
@@ -154,15 +163,26 @@ async function runExecution(planPath: string, sendText: string): Promise<void> {
   try {
     planContent = await readPlan(planPath);
   } catch (err) {
-    store.setError(`Could not read plan file: ${formatErr(err)}`);
+    // Clear the plan state, or every subsequent plan-mode message routes to
+    // 'resume' and dead-ends on this same unreadable file forever.
+    store.setActivePlanPath(null);
+    store.setPlanPhase('idle');
+    store.setError(
+      `Could not read plan file: ${formatErr(err)} — plan cleared; send a message to plan again.`,
+    );
     return;
   }
   if (!planContent.trim()) {
-    store.setError('Plan file is empty.');
+    store.setActivePlanPath(null);
+    store.setPlanPhase('idle');
+    store.setError('Plan file is empty — plan cleared; send a message to plan again.');
     return;
   }
 
   store.setPlanPhase('executing');
+  // Pin the plan being run: a follow-up composer message resumes THIS plan,
+  // not whatever stale activePlanPath an earlier planning run left behind.
+  store.setActivePlanPath(planPath);
   setPlanRefStatus(planPath, 'executing');
 
   try {
@@ -246,14 +266,11 @@ async function regenerate(): Promise<void> {
 /**
  * Send the user's pinned suggestions back to the model and rewrite the plan.
  *
- * Each note is presented as its quoted text under the heading it was pinned
- * to, so the model knows exactly which part of its own plan is being
- * questioned — that targeting is the whole reason notes are anchored rather
- * than collected as free text.
- *
- * Notes whose text no longer appears (the plan moved on) are still sent, but
- * marked, so the model treats them as general feedback rather than hunting for
- * a passage that is gone.
+ * The revise prompt (see plan-revise.ts) asks for the full revised plan as
+ * the REPLY — plan-planning's toolset is read-only, so the model cannot
+ * write the file itself; the old prompt ordered it to anyway, which silently
+ * discarded every note. WE persist the reply here, exactly as startPlanning
+ * persists the initial draft.
  */
 async function reviseWithNotes(planPath: string, notes: PlanNote[]): Promise<void> {
   const store = useAiStore.getState();
@@ -268,27 +285,38 @@ async function reviseWithNotes(planPath: string, notes: PlanNote[]): Promise<voi
     return;
   }
 
-  const body = notes
-    .map((n, i) => {
-      const where = n.anchored
-        ? `under "${n.headingPath}"`
-        : `under "${n.headingPath}" (this text is no longer in the plan — treat as general feedback)`;
-      return `${i + 1}. ${where}\n   > ${n.quotedText}\n   ${n.body}`;
-    })
-    .join('\n\n');
-
-  const prompt =
-    `Revise the plan at ${planPath} to address these suggestions, then write the ` +
-    `full revised plan back to that file in the same format.\n\n${body}`;
-
   store.setPlanPhase('planning');
-  await getAgentService().sendMessage(prompt, {
-    mode: 'plan',
-    effort: store.effort,
-    promptMode: 'plan-planning',
-    planExecution: { planPath, planContent },
-  });
-  useAiStore.getState().setPlanPhase('awaiting-execute');
+  // Pin the plan being revised — same reason runExecution pins it.
+  store.setActivePlanPath(planPath);
+  try {
+    await getAgentService().sendMessage(buildReviseNotesPrompt(planPath, planContent, notes), {
+      mode: 'plan',
+      effort: store.effort,
+      promptMode: 'plan-planning',
+    });
+
+    const after = useAiStore.getState();
+    let revised = '';
+    for (let i = after.messages.length - 1; i >= 0; i--) {
+      const m = after.messages[i];
+      if (m.role === 'assistant') {
+        revised = extractPlanMarkdown(m.content);
+        if (revised) break;
+      }
+    }
+    if (!revised) {
+      after.setError('Revision did not produce a plan — the file was left unchanged.');
+      return;
+    }
+    try {
+      await writePlan(planPath, revised);
+      openPlanInEditor(planPath);
+    } catch (err) {
+      after.setError(`Failed to write revised plan: ${formatErr(err)}`);
+    }
+  } finally {
+    useAiStore.getState().setPlanPhase('awaiting-execute');
+  }
 }
 
 function abortExecution(): void {
