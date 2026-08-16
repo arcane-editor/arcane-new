@@ -63,9 +63,20 @@ export interface RestoreResult {
 interface CheckpointsState {
   turns: CheckpointTurn[];
   sessionId: string | null;
+  /** The turn opened for the CURRENT send, or null between sends — see `endTurn`. */
+  activeTurnId: string | null;
 
   /** Start a new checkpoint turn for a user send. Subsequent `recordPreWrite` calls append to it. */
   beginTurn: (sessionId: string, userMessageId: string) => void;
+  /**
+   * Close the current send's turn (called from `sendMessage`'s finally).
+   * `recordPreWrite` calls outside an open turn are DISCARDED: the per-write
+   * gate re-reads `ai.checkpoints.enabled` on every write, so a mid-turn
+   * settings flip used to attach pre-images to whatever turn happened to be
+   * last — a PREVIOUS send's — whose restore plan would then roll files back
+   * past accepted work.
+   */
+  endTurn: () => void;
   /**
    * Snapshot a path's content immediately before a write. `null` = the file
    * didn't exist. `toolCallId` (T6) is the tool call that triggered this
@@ -187,6 +198,7 @@ async function clearEditReviewFor(plan: RestorePlanEntry[]): Promise<void> {
 export const useCheckpointsStore = create<CheckpointsState>((set, get) => ({
   turns: [],
   sessionId: null,
+  activeTurnId: null,
 
   beginTurn: (sessionId, userMessageId) => {
     set((s) => {
@@ -200,15 +212,18 @@ export const useCheckpointsStore = create<CheckpointsState>((set, get) => ({
       const turns = [...s.turns, turn];
       const capped =
         turns.length > MAX_TURNS_PER_SESSION ? turns.slice(turns.length - MAX_TURNS_PER_SESSION) : turns;
-      return { turns: capped, sessionId };
+      return { turns: capped, sessionId, activeTurnId: turn.turnId };
     });
     schedulePersist();
   },
 
+  endTurn: () => set({ activeTurnId: null }),
+
   recordPreWrite: (path, beforeContent, toolCallId) => {
     set((s) => {
-      if (s.turns.length === 0) return s; // no active turn — nothing wired beginTurn first, no-op
+      if (!s.activeTurnId) return s; // no turn open for THIS send — discard
       const last = s.turns[s.turns.length - 1];
+      if (!last || last.turnId !== s.activeTurnId) return s;
       // Dedupe: first snapshot per path per turn wins — including its
       // toolCallId, even if a later same-turn write for this path carries a
       // different one (see `checkpoint-selection.ts`'s
@@ -261,7 +276,7 @@ export const useCheckpointsStore = create<CheckpointsState>((set, get) => ({
     // (e.g. hand-edited or from an older build) exceeds it.
     const capped =
       turns.length > MAX_TURNS_PER_SESSION ? turns.slice(turns.length - MAX_TURNS_PER_SESSION) : turns;
-    set({ turns: capped, sessionId });
+    set({ turns: capped, sessionId, activeTurnId: null });
   },
 
   flushCheckpointsNow: () => flushPersist(),
@@ -280,6 +295,6 @@ export const useCheckpointsStore = create<CheckpointsState>((set, get) => ({
       clearTimeout(persistTimer);
       persistTimer = null;
     }
-    set({ turns: [], sessionId: null });
+    set({ turns: [], sessionId: null, activeTurnId: null });
   },
 }));

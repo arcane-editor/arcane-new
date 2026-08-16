@@ -91,3 +91,45 @@ describe('useCheckpointsStore.reanchorTurns', () => {
     useCheckpointsStore.getState().reset();
   });
 });
+
+// P0 fix wave 2026-08-16: recordPreWrite used to append to whatever turn
+// happened to be LAST — enabling checkpoints mid-turn attached pre-images to
+// the PREVIOUS send's turn, whose restore plan would then roll files back
+// past accepted work. Now only the turn opened for the CURRENT send (between
+// beginTurn and endTurn) accepts entries. Each test ends with reset() so the
+// debounced persist never fires (see the header note above).
+describe('useCheckpointsStore turn lifecycle', () => {
+  it('recordPreWrite outside an open turn is discarded — never appended to a previous turn', () => {
+    const s = useCheckpointsStore.getState();
+    s.reset();
+    s.beginTurn('sess', 'msg1');
+    s.recordPreWrite('/a.cs', 'old1');
+    s.endTurn();
+    s.recordPreWrite('/b.cs', 'oldB'); // e.g. checkpoints enabled mid-turn
+    const turns = useCheckpointsStore.getState().turns;
+    expect(turns).toHaveLength(1);
+    expect(turns[0].entries.map((e) => e.path)).toEqual(['/a.cs']);
+    useCheckpointsStore.getState().reset();
+  });
+
+  it('recordPreWrite with no turn ever opened is a no-op', () => {
+    const s = useCheckpointsStore.getState();
+    s.reset();
+    s.recordPreWrite('/a.cs', 'x');
+    expect(useCheckpointsStore.getState().turns).toHaveLength(0);
+  });
+
+  it('recordPreWrite inside an open turn still records and dedupes per path', () => {
+    const s = useCheckpointsStore.getState();
+    s.reset();
+    s.beginTurn('sess', 'msg1');
+    s.recordPreWrite('/a.cs', 'first');
+    s.recordPreWrite('/a.cs', 'second'); // same path, same turn — first wins
+    s.recordPreWrite('/b.cs', null);
+    const turns = useCheckpointsStore.getState().turns;
+    expect(turns[0].entries).toHaveLength(2);
+    expect(turns[0].entries[0]).toMatchObject({ path: '/a.cs', beforeContent: 'first' });
+    expect(turns[0].entries[1]).toMatchObject({ path: '/b.cs', kind: 'created' });
+    useCheckpointsStore.getState().reset();
+  });
+});
