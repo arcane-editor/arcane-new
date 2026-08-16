@@ -9,4 +9,6 @@ export function bridgeConnected(): boolean {
 
 export const NOT_CONNECTED =
   'Unity bridge not connected — this needs a running Unity Editor with the Arcane bridge installed. ' +
+  'If Unity is running, the connection drops briefly during every script recompile/domain reload and ' +
+  'reconnects automatically — do any remaining file creation/editing first, then retry this. ' +
   'The IDE can still read project files statically with the read/list tools.';

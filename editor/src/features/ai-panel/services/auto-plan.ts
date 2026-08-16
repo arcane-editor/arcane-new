@@ -41,4 +41,7 @@ export function assessTaskSize(text: string, attachmentCount = 0): TaskSize {
  */
 export const TODO_FIRST_TEXT =
   '[This looks like a multi-step task: FIRST break it into concrete steps with todo_update, ' +
-  'then execute them one at a time, marking each in_progress and done as you go.]\n\n';
+  'then execute them one at a time, marking each in_progress and done as you go. ' +
+  'Order the steps scripts-first, editor-last: every step that creates or edits files comes ' +
+  'before any step that drives the Unity editor (GameObjects, prefabs, scenes, baking, menu ' +
+  'items) — script writes trigger recompiles that briefly drop the editor connection.]\n\n';

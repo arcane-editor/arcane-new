@@ -85,6 +85,10 @@ describe('withUnityCompileGate', () => {
     expect(recompiles()).toBe(0);
     expect(textOf(res1)).toContain('[Unity compile] Unity bridge not connected');
     expect(textOf(res2)).toContain('[Unity compile] Unity bridge not connected');
+    // The note must tell the model to KEEP GOING — models read "not connected"
+    // as a step failure and stop mid-plan otherwise.
+    expect(textOf(res1)).toContain('NOT a failure');
+    expect(textOf(res1)).toContain('continue with the remaining file work');
     expect(warns()).toBe(1);
 
     resetCompileGate();
@@ -107,14 +111,17 @@ describe('withUnityCompileGate', () => {
     const res = await gate.execute('id', { path: 'Assets/Foo.cs' }, undefined, undefined);
     expect(textOf(res)).toContain('[Unity compile] Compile status unknown');
     expect(textOf(res)).toContain('verify before finishing');
+    expect(textOf(res)).toContain('NOT a failure');
   });
 
-  it('reports unknown/bridge-lost honestly', async () => {
+  it('reports unknown/bridge-lost honestly and tells the model to continue', async () => {
     resetCompileGate();
     const { deps } = makeDeps({ status: 'unknown', reason: 'bridge-lost' });
     const gate = createCompileGate(fakeTool(OK_WRITE), CWD, idleClient, deps);
     const res = await gate.execute('id', { path: 'Assets/Foo.cs' }, undefined, undefined);
     expect(textOf(res)).toContain('[Unity compile] Compile status unknown');
+    expect(textOf(res)).toContain('NOT a failure');
+    expect(textOf(res)).toContain('continue with the remaining file work');
   });
 
   it('returns the result unchanged on unknown/aborted', async () => {

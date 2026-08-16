@@ -156,7 +156,8 @@ export function withUnityCompileGate(
         return appendNote(
           res,
           `\n\n[Unity compile] Unity bridge not connected — compile status unknown; ` +
-            `Unity will pick up this change when it next gains focus.`,
+            `Unity will pick up this change when it reconnects or next gains focus. ` +
+            `This is NOT a failure: the write succeeded — continue with the remaining file work.`,
         );
       }
 
@@ -171,11 +172,13 @@ export function withUnityCompileGate(
         if (outcome.reason === 'aborted') return res;
         const why =
           outcome.reason === 'bridge-lost'
-            ? 'Unity bridge was lost mid-compile'
+            ? 'Unity bridge was lost mid-compile; it reconnects automatically after the reload'
             : "timed out waiting for Unity's report";
         return appendNote(
           res,
-          `\n\n[Unity compile] Compile status unknown (${why}) — verify before finishing.`,
+          `\n\n[Unity compile] Compile status unknown (${why}). ` +
+            `This is NOT a failure: the write succeeded — continue with the remaining file work, ` +
+            `and verify before finishing the task.`,
         );
       }
 

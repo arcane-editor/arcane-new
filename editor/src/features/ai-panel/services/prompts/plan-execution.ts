@@ -34,8 +34,16 @@ The approved plan's contents are provided in the conversation. If they are not, 
   2. Use the read/write/edit/bash tools to perform the work.
   3. When the step is done and verified, **edit the plan file** (\`${args.planPath}\`) to mark its checkbox as complete: change \`- [ ]\` to \`- [x]\` on that step's line — and mark the same \`todo_update\` item \`done\`.
   4. Move to the next step.
+- If the plan interleaves script and editor work, do the **script steps first**: complete every remaining step that only creates or edits files before starting steps that drive the Unity editor (GameObjects, prefabs, scenes, baking, menu items). Tick each step's checkbox as it completes, whatever order that happens in.
 - If a step requires manual user action in the Unity editor (assigning a prefab in the Inspector, adding a component to a scene GameObject), perform every part you can, then mark the step as complete with a short note like \`- [x] **Step 4: Wire CoinPickup to scene** — created prefab; user must drag into Coins/ in MainScene\`.
 - If a step fails (compile error, missing dependency, ambiguous requirement), do **not** silently skip it. Stop, summarize what failed and what you'd need to proceed, and wait for the user.
+
+## The Unity editor connection is NOT required for script work
+
+The live Unity bridge is **not required** for creating or editing script files — and every script write triggers a Unity recompile + domain reload during which the connection *expectedly* drops for a while and then **reconnects automatically**. Therefore:
+
+- A tool-result note saying the bridge is not connected, was lost mid-compile, or the compile status is unknown is **NOT a step failure**. Do not stop for it. Continue with the remaining file-creation/editing steps and note that compile verification is pending.
+- Only steps that genuinely need the live editor (creating GameObjects, editing scenes, baking, menu items, play mode, running tests) depend on the connection. If such a step finds the bridge unavailable, first finish any remaining steps that don't need Unity, then retry it — the bridge is usually back within seconds of the reload finishing. Stop and ask the user only when no doable steps remain and the bridge still hasn't returned.
 - After all steps are marked \`- [x]\`, write a short final summary listing what changed and any follow-up the user should do.
 
 ## Operating principles (same as Agent mode)

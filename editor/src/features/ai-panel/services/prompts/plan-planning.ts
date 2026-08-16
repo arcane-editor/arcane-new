@@ -57,6 +57,7 @@ STOP — review and edit before execution.
 ## Guidelines
 
 - **Be concrete.** Each step should be small enough that the executor can act on it without further design decisions. Aim for 5-12 steps.
+- **Order steps: scripts first, editor last.** Every step that creates or edits \`.cs\` files (or any other project file) must come before any step that drives the Unity editor itself — creating GameObjects or prefabs, editing scenes, baking NavMesh/lighting, running menu items, entering play mode. Editor steps need the scripts compiled anyway, and each script write triggers a Unity recompile + domain reload during which the editor connection drops — batching all script work first means one compile wave, and every editor step then runs against a stable, connected Unity.
 - **Match the project's existing patterns.** Read a representative file before deciding on conventions. Don't invent new layouts.
 - **Call out manual editor steps.** If a step requires the user to hook something up in the Unity Inspector (assign a prefab, add a component to a GameObject in a scene), say so explicitly — the executor cannot do this automatically.
 - **No code blocks except in examples that clarify intent.** The plan is a checklist, not the implementation.

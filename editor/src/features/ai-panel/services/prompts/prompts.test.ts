@@ -86,3 +86,33 @@ describe('plan-execution prompt is cache-stable (cache activation §1)', () => {
     expect(later).toContain('re-read');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Bridge loss during recompiles is NOT a step failure. Real transcripts: the
+// execution prompt's stop-on-failure rule made the model stop and "wait for
+// the user" whenever a compile-verification note said the bridge was
+// unavailable — which is the EXPECTED state during every domain reload the
+// agent's own writes trigger. Script work never needs the live editor.
+// ---------------------------------------------------------------------------
+import { buildPlanPlanningPrompt as planningPromptFor } from './plan-planning';
+import { buildPlanExecutionPrompt as executionPromptFor } from './plan-execution';
+
+describe('bridge-independence + step ordering (plan prompts)', () => {
+  const planning = planningPromptFor('/proj');
+  const execution = executionPromptFor({ workspacePath: '/proj', planPath: '/proj/.arcane/plans/p.md' });
+
+  it('planning orders all script steps before any editor-side steps', () => {
+    expect(planning).toContain('scripts first, editor last');
+    expect(planning.toLowerCase()).toContain('before any step that drives the unity editor');
+  });
+
+  it('execution says bridge loss is not a failure and script work continues', () => {
+    expect(execution.toLowerCase()).toContain('not required');
+    expect(execution).toContain('NOT a step failure');
+    expect(execution.toLowerCase()).toContain('reconnects automatically');
+  });
+
+  it('execution prefers remaining script steps while the editor is unavailable', () => {
+    expect(execution.toLowerCase()).toContain('script steps first');
+  });
+});
