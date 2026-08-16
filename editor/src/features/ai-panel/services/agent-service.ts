@@ -362,6 +362,12 @@ export class AgentService {
    * abort mid-tool-execution never gets a chance to reach `'aborted'`).
    */
   private abortRequested = false;
+  /**
+   * True for the FULL duration of a send — vendor loop AND post-loop
+   * (grounding lint, verified pass) — unlike `agent.isRunning`, which only
+   * covers the loop. `sendMessage` guards on both so sends serialize fully.
+   */
+  private sendInFlight = false;
 
   constructor() {
     const workspacePath = getCurrentWorkspacePath();
@@ -430,16 +436,14 @@ export class AgentService {
   }
 
   async sendMessage(text: string, opts: SendMessageOptions): Promise<void> {
-    // T5: fresh per-send abort tracking — reset unconditionally, even ahead
-    // of the guards below, so a leftover `true` from a prior aborted send
-    // never contaminates this one (mirrors the other per-send resets below).
-    this.abortRequested = false;
-
-    // Guard against concurrent entry: callers like fixConsoleError() invoke
-    // sendMessage() without the composer's in-flight guard. Bail out before
-    // any reset/mutation below (compile-gate budget, turn telemetry) so a
-    // concurrent call can't zero out the in-flight turn's state.
-    if (this.agent.isRunning) {
+    // Serialize whole SENDS, not just the vendor loop: `agent.isRunning`
+    // goes false while turn A's post-loop (grounding lint / verified pass,
+    // up to ~10s) is still running, and a quick follow-up send used to clear
+    // `abortRequested` and reset the governor/telemetry UNDER turn A —
+    // making a deliberate Stop post a spurious red error block. (Also still
+    // guards callers like fixConsoleError() that bypass the composer's
+    // in-flight guard.)
+    if (this.agent.isRunning || this.sendInFlight) {
       useAiStore.getState().setError('Agent is already processing a message.');
       return;
     }
@@ -453,11 +457,27 @@ export class AgentService {
       return;
     }
 
+    // T5: fresh per-send abort tracking. AFTER the guards, so entering while
+    // a prior send is mid-post-loop can never clear THAT send's abort flag.
+    this.abortRequested = false;
     // T5: capture the exact send for retry-turn.ts's replay path. Set only
     // after the guards above so a rejected send (already running / signed
     // out) never clobbers a real in-flight send's replay target.
     lastSend = { text, opts };
 
+    this.sendInFlight = true;
+    try {
+      await this.runSend(text, opts);
+    } finally {
+      this.sendInFlight = false;
+      // Close the checkpoint turn opened in runSend — recordPreWrite calls
+      // landing after this send (mid-turn settings flips, stragglers) must
+      // not attach to it (see stores/checkpoints.ts's endTurn).
+      useCheckpointsStore.getState().endTurn();
+    }
+  }
+
+  private async runSend(text: string, opts: SendMessageOptions): Promise<void> {
     // Checkpoints (P5.2): open a new turn for this send so any writes the
     // agent makes get grouped under it for later restore. Requires a
     // sessionId — set by `addUserMessage`/`agent_start` before every normal
@@ -694,6 +714,12 @@ export class AgentService {
    * caller's existing catch block, same as the initial prompt.
    */
   private async runGroundingLint(): Promise<void> {
+    // A user Stop can leave an 'error'/'toolUse' tail instead of 'aborted'
+    // (an abort mid-tool never reaches 'aborted'), so the stopReason check
+    // below misses it — and this method then fired a fresh BILLED revise
+    // turn on a brand-new AbortController for a cancelled send. Same guard
+    // maybeDistillMemory already has.
+    if (this.abortRequested) return;
     if (!useProjectContextStore.getState().isUnityProject) return;
 
     const lastAssistant = [...this.agent.getMessages()]
@@ -743,6 +769,9 @@ export class AgentService {
    */
   private async runVerifiedPassIfNeeded(promptMode: PromptMode): Promise<void> {
     if (promptMode !== 'agent' && promptMode !== 'plan-execution') return;
+    // Same Stop guard as runGroundingLint: a cancelled send must not trigger
+    // a live Unity recompile and a "Verified" card.
+    if (this.abortRequested) return;
     if (touchedFileCount() === 0) return;
     if (!useProjectContextStore.getState().isUnityProject) return;
     if (useSettingsStore.getState().getSetting('unity.verifiedPass.enabled') === false) return;
