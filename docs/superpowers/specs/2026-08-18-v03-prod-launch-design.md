@@ -56,8 +56,10 @@ Failing closed on an unknown plan string matters: an allowlist means a future
 tier id, a typo, or a corrupted row can never accidentally open a purchase
 path. It also keeps the server and the client predicate on identical logic.
 
-Authority is `users.plan` read from D1, never the JWT claim — a stale token
-must not be able to buy past the gate.
+Authority is `users.plan` read from D1. The JWT carries no plan claim at all
+(`AuthPayload` is `sub`/`email`/`role`/`email_verified`/`token_version`), so
+the DB read is not merely preferred — it is the only correct source, and no
+plan claim should be added to the token to avoid it.
 
 Two deliberate non-changes:
 
