@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { getStoredToken, clearStoredToken } from "@/lib/auth";
 import { Skeleton, SkeletonGroup } from "@/components/ui/skeleton";
 import {
-    apiGetUsage, apiGetPlans, apiStartCheckout, apiOpenPortal,
+    apiGetUsage, apiGetPlans, apiStartCheckout, apiOpenPortal, canBuyTopups,
     BillingError, type UsageResponse, type PlanTier, type TopupPack,
 } from "@/lib/billing";
 
@@ -86,6 +86,10 @@ export default function BillingPanel() {
     const handleCheckoutError = (err: unknown) => {
         if (err instanceof BillingError && (err.code === "billing_unconfigured" || err.code === "product_unconfigured")) {
             setNotice({ msg: "Billing is launching soon — check back shortly.", type: "info" });
+        } else if (err instanceof BillingError && err.code === "plan_required") {
+            // A 403 that is NOT an auth failure — must be handled before the
+            // 401/403 branch below, which signs the user out.
+            setNotice({ msg: err.message, type: "info" });
         } else if (err instanceof BillingError && (err.status === 401 || err.status === 403)) {
             clearStoredToken();
             window.location.href = "/auth?return=/account";
@@ -133,6 +137,7 @@ export default function BillingPanel() {
     }
 
     const isFree = usage.plan === "free";
+    const canBuy = canBuyTopups(usage.plan, tiers);
     const monthlyGrant = tiers.find(t => t.id === usage.plan)?.monthlyCredits ?? 0;
     const planRemaining = usage.credits.plan;
     const pct = monthlyGrant > 0 ? Math.max(0, Math.min(100, (planRemaining / monthlyGrant) * 100)) : 0;
@@ -206,20 +211,33 @@ export default function BillingPanel() {
             {topups.length > 0 && (
                 <div className="glass rounded-2xl p-6">
                     <h2 className="font-display text-lg font-bold mb-1">Buy extra credits</h2>
-                    <p className="text-muted-foreground text-sm mb-4">One-time top-ups that never expire — used after your plan credits run out.</p>
+                    <p className="text-muted-foreground text-sm mb-4">
+                        {canBuy
+                            ? "One-time top-ups that never expire — used after your plan credits run out."
+                            : "One-time top-ups that never expire. Available on paid plans."}
+                    </p>
                     <div className="flex flex-wrap gap-3">
                         {topups.map(p => (
                             <button
                                 key={p.id}
                                 onClick={() => buyTopup(p.id)}
-                                disabled={busy === p.id}
-                                className="flex-1 min-w-[150px] glass rounded-xl p-4 text-left hover:border-primary/40 transition-all disabled:opacity-50"
+                                disabled={!canBuy || busy === p.id}
+                                title={canBuy ? undefined : "Upgrade to a paid plan to buy credits"}
+                                className={`flex-1 min-w-[150px] glass rounded-xl p-4 text-left transition-all disabled:opacity-50 ${canBuy ? "hover:border-primary/40" : "cursor-not-allowed"}`}
                             >
                                 <div className="font-mono text-base font-bold text-foreground">{p.credits.toLocaleString()} credits</div>
                                 <div className="text-sm text-primary font-semibold mt-1">{busy === p.id ? "Starting…" : `$${p.priceUsd}`}</div>
                             </button>
                         ))}
                     </div>
+                    {!canBuy && (
+                        <a
+                            href="/pricing"
+                            className="inline-block mt-4 h-10 leading-10 rounded-md px-4 bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-all"
+                        >
+                            Upgrade to buy credits
+                        </a>
+                    )}
                 </div>
             )}
         </div>

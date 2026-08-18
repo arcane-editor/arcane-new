@@ -22,6 +22,16 @@ export interface PlansResponse {
     topups: TopupPack[];
 }
 
+/** Top-ups are a paid-plan feature (server gate: `plan_required`, 403).
+ *  Derived from the tier ladder the server serves rather than a hardcoded
+ *  list, so `arcane-server/src/config/tiers.ts` stays the single source of
+ *  truth. An unknown plan — or an empty ladder because /plans failed — is
+ *  false, matching the server's allowlist and failing closed. */
+export function canBuyTopups(plan: string, tiers: PlanTier[]): boolean {
+    const tier = tiers.find(t => t.id === plan);
+    return tier !== undefined && tier.priceUsd > 0;
+}
+
 export interface UsageResponse {
     plan: string;
     credits: { balance: number; plan: number; topup: number };
