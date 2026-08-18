@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
     TIERS, MARGIN, GATEWAY_FEE, TOPUP_PACKS,
     INLINE_DAILY_CAP, INLINE_MONTHLY_MICRO_CEILING,
-    isTierAllowed, tierGrantMicro,
+    isTierAllowed, tierGrantMicro, isPaidPlan,
 } from '../src/config/tiers.ts';
 
 describe('margin constants', () => {
@@ -97,6 +97,26 @@ describe('top-up packs', () => {
     it('price a credit identically to plans', () => {
         for (const pack of TOPUP_PACKS) {
             expect(pack.credits).toBe(pack.priceUsd * 100);
+        }
+    });
+});
+
+describe('isPaidPlan', () => {
+    it('is true only for known tiers that cost money', () => {
+        expect(isPaidPlan('pro')).toBe(true);
+        expect(isPaidPlan('proplus')).toBe(true);
+        expect(isPaidPlan('ultra')).toBe(true);
+        expect(isPaidPlan('free')).toBe(false);
+    });
+
+    it('fails closed on unknown plan values', () => {
+        expect(isPaidPlan('enterprise')).toBe(false);
+        expect(isPaidPlan('')).toBe(false);
+    });
+
+    it('agrees with the tier table rather than a hardcoded list', () => {
+        for (const tier of Object.values(TIERS)) {
+            expect(isPaidPlan(tier.id)).toBe(tier.priceUsd > 0);
         }
     });
 });

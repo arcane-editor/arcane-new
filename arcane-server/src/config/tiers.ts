@@ -94,6 +94,14 @@ export function isTierId(x: string): boolean {
     return Object.prototype.hasOwnProperty.call(TIERS, x);
 }
 
+/** True only for a KNOWN tier that costs money. An unrecognised plan value
+ *  returns false — an allowlist, so a future tier id, a typo, or a corrupted
+ *  row can never accidentally open a purchase path. */
+export function isPaidPlan(planId: string): boolean {
+    const tier = TIERS[planId as TierId];
+    return tier !== undefined && tier.priceUsd > 0;
+}
+
 export function creditsToMicro(credits: number): number {
     return Math.round(credits * MICRO_PER_CREDIT);
 }

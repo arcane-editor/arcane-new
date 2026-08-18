@@ -3,7 +3,7 @@ import type { AppEnv } from '../types.ts';
 import { authMiddleware, requireVerifiedEmail } from '../middleware/auth.ts';
 import type { AuthPayload } from '../middleware/auth.ts';
 import { findUserById } from '../lib/db.ts';
-import { TIERS, TOPUP_PACKS, isTierId, type Tier, type TierId } from '../config/tiers.ts';
+import { TIERS, TOPUP_PACKS, isTierId, isPaidPlan, type Tier, type TierId } from '../config/tiers.ts';
 import { createDodoCheckout, createDodoCustomerPortal, dodoApiBase } from '../lib/dodo.ts';
 
 export const billingRouter = new Hono<AppEnv>();
@@ -27,9 +27,6 @@ billingRouter.get('/v1/billing/plans', (c) => {
 
 // Start a checkout for a subscription tier or a one-time top-up pack.
 billingRouter.post('/v1/billing/checkout', authMiddleware(), requireVerifiedEmail(), async (c) => {
-    if (!c.env.DODO_API_KEY) {
-        return c.json({ error: 'Billing is not available yet.', code: 'billing_unconfigured' }, 503);
-    }
     const user = c.get('user') as AuthPayload;
     const body = await c.req.json<{ tier?: string; pack?: string }>().catch(() => ({} as { tier?: string; pack?: string }));
 
@@ -52,12 +49,29 @@ billingRouter.post('/v1/billing/checkout', authMiddleware(), requireVerifiedEmai
         return c.json({ error: 'A tier or pack is required', code: 'bad_request' }, 400);
     }
 
+    const full = await findUserById(c.env.arcane_db, parseInt(user.sub));
+
+    // Top-ups are a paid-plan feature. Checked BEFORE the provider-config
+    // guards because it is a fact about the request, not about Dodo. The DB
+    // row is the authority — the JWT carries no plan claim, and none should be
+    // added. Subscription checkout is deliberately NOT gated: that is the
+    // upgrade path itself.
+    if (kind === 'topup' && !isPaidPlan(full?.plan ?? 'free')) {
+        return c.json({
+            error: 'Extra credits are available on paid plans. Upgrade your plan to buy credits.',
+            code: 'plan_required',
+        }, 403);
+    }
+
+    if (!c.env.DODO_API_KEY) {
+        return c.json({ error: 'Billing is not available yet.', code: 'billing_unconfigured' }, 503);
+    }
+
     const product = productId(c.env, varName);
     if (!product) {
         return c.json({ error: 'This plan is not available yet.', code: 'product_unconfigured' }, 503);
     }
 
-    const full = await findUserById(c.env.arcane_db, parseInt(user.sub));
     try {
         const result = await createDodoCheckout({
             apiKey: c.env.DODO_API_KEY,
