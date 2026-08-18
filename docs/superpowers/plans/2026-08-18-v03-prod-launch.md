@@ -572,7 +572,32 @@ Expected: `users = 9`, matching prod.
 ```bash
 npx wrangler d1 migrations apply arcane-db --local
 ```
-Expected: `0012`–`0021` all report success. Any failure here is the rehearsal earning its keep — fix the migration before touching prod.
+
+**RESULT (2026-08-18): THIS FAILED, and the rehearsal earned its keep.**
+`0012` applied, then `0013_billing.sql` died with `duplicate column name: plan`,
+leaving the replica half-migrated. Root cause: prod's `users` table still
+carries `plan`, `promo_code`, `promo_expires_at`, and `credits_reset_at`, and
+the `plans` and `upgrade_requests` tables still exist — i.e.
+`0008_remove_plans_credits.sql` is recorded as applied in prod's
+`d1_migrations` but **none of its statements ever took effect** (most likely the
+D1 SQLite version at the time did not support `ALTER TABLE ... DROP COLUMN`).
+The dev database was provisioned after that point, so 0008 applied there for
+real and the divergence never surfaced.
+
+Fix: `arcane-server/scripts/prod-reconcile-0008.sql` replays 0008's body so the
+schema matches what the migration history already claims. Run it against the
+target database IMMEDIATELY BEFORE `migrations apply`:
+
+```bash
+npx wrangler d1 execute arcane-db --local --file=scripts/prod-reconcile-0008.sql
+npx wrangler d1 migrations apply arcane-db --local
+```
+Expected (verified 2026-08-18): the reconciliation reports `6 commands executed
+successfully`, then `0012`–`0021` all apply ✅ and `migrations list` reports
+`No migrations to apply!`.
+
+It is deliberately NOT a numbered migration: `d1_migrations` already lists 0008
+as applied, and a new number would run after 0013 — too late to help.
 
 - [ ] **Step 4: Confirm the existing users survived with sane billing defaults**
 
@@ -581,6 +606,19 @@ npx wrangler d1 execute arcane-db --local \
   --command "SELECT id, email, plan, plan_credits_micro, topup_credits_micro, plan_period_end, email_verified FROM users ORDER BY id"
 ```
 Expected: all 9 rows present, every `plan = 'free'`, `topup_credits_micro = 0`, and no NULLs in `plan` or `plan_credits_micro`. A NULL `plan` would break `isPaidPlan` and the credit gate — if one appears, add a migration that backfills it before prod.
+
+**RESULT (2026-08-18): PASS.** All 9 users present, each `plan='free'`,
+`plan_credits_micro=1500000` (0013's grandfather grant of 150 credits),
+`topup_credits_micro=0`, `plan_period_end=NULL`, no NULLs anywhere. Legacy
+tables `plans`/`upgrade_requests` gone; `subscriptions`, `billing_events`,
+`usage_periods`, `request_logs` all present; `dodo_customer_id` resolves.
+
+**One value is intentionally discarded by the reconciliation:** user id 5
+(`sourav.das@masaischool.com`) had legacy `plan='pro'` from the removed
+pre-0008 credits system. `DROP COLUMN plan` discards it and 0013 re-creates the
+column defaulting to `'free'`. That account has no Dodo subscription backing it,
+so `'free'` is the correct new-system state — but Task 5 restores it anyway so
+nobody is silently downgraded. Capture the legacy values BEFORE reconciling.
 
 - [ ] **Step 5: Verify the schema the new code expects is actually there**
 
@@ -649,6 +687,25 @@ npx wrangler secret list
 ```
 Expected: the list shows `JWT_SECRET`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`. `DODO_*` must still be ABSENT — that is what keeps billing dark.
 
+- [ ] **Step 3b: Capture legacy paid plans, then reconcile the prod schema**
+
+`deploy-server.yml` runs `d1 migrations apply` as its first step, and on prod
+that WILL fail at `0013_billing.sql` unless the schema is reconciled first (see
+Task 4 Step 3). Do this before dispatching the workflow.
+
+```bash
+cd arcane-server
+# 1. Capture what the reconciliation is about to discard — keep this output.
+npx wrangler d1 execute arcane-db --remote \
+  --command "SELECT id, email, plan FROM users WHERE plan <> 'free'"
+# 2. Replay 0008's body so the schema matches the recorded migration history.
+npx wrangler d1 execute arcane-db --remote --file=scripts/prod-reconcile-0008.sql
+```
+Expected: step 1 returns exactly one row (id 5, `sourav.das@masaischool.com`,
+`pro`) — record it for Step 6b. Step 2 reports `6 commands executed
+successfully`. If step 1 returns rows you did not expect, STOP and reassess:
+every non-free legacy plan must be restored in Step 6b.
+
 - [ ] **Step 4: Deploy the worker (migrations run first)**
 
 ```bash
@@ -672,6 +729,23 @@ for p in /health /v1/billing/plans; do printf '%s -> ' "$p"; curl -s -o /dev/nul
 for p in /pricing /auth /account; do printf '%s -> ' "$p"; curl -s -o /dev/null -w "%{http_code}\n" "https://arcaneai.org$p"; done
 ```
 Expected: every one returns `200` (they were `404` before this task).
+
+- [ ] **Step 6b: Restore the legacy paid plan discarded by the reconciliation**
+
+For every row captured in Step 3b, restore the plan and its monthly grant so the
+account is not silently downgraded. For the expected single row (id 5, `pro`,
+grant = 2,000 credits × 10,000 micro):
+
+```bash
+cd arcane-server
+npx wrangler d1 execute arcane-db --remote \
+  --command "UPDATE users SET plan = 'pro', plan_credits_micro = 20000000 WHERE id = 5"
+npx wrangler d1 execute arcane-db --remote \
+  --command "SELECT id, email, plan, plan_credits_micro FROM users WHERE id = 5"
+```
+Expected: `plan='pro'`, `plan_credits_micro=20000000`. Note this account has no
+Dodo subscription, so nothing will renew it — it is a grandfathered grant, not a
+billing relationship, and `subscription.*` webhooks will never touch it.
 
 - [ ] **Step 7: Verify billing is safely closed**
 
