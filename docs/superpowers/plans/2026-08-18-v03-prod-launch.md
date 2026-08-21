@@ -685,6 +685,41 @@ Expected: the `CI` workflow passes on `master`. Do not start Task 5 until it doe
 > mismatch is discovered before a live charge — Task 6 should not start until
 > it has been done.
 
+> **RUN LOG 2026-08-21 (later) — Window 1 EXECUTED. Prod is live on v0.3.0 with
+> billing dark.**
+>
+> `master` = `a8becf9` (v0.3.0). Prerequisites found already in place: the prod
+> GitHub OAuth App was registered and `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET`
+> / `JWT_SECRET` were already set on the prod worker, with every `DODO_*` absent
+> — so Steps 2 and 3 needed no action.
+>
+> Fresh restore point taken immediately before the reconciliation:
+> `000000b9-00000000-000050ce-6b8a656108760452780e9c7b5c29f33a`
+>
+> Step 3b capture returned exactly the one predicted row — id 5,
+> `sourav.das@masaischool.com`, `pro` — out of 9 users. The reconciliation then
+> reported `6 commands executed successfully`, and the worker deploy was
+> dispatched immediately after, keeping the broken window to about a minute.
+>
+> - Step 4 — `Deploy Server` run 32512459489, `deploy-prod` green in 39s.
+>   `0012`–`0021` applied; `d1 migrations list` now reports
+>   "No migrations to apply!".
+> - Step 5 — `Deploy Landing` run 32512556090, `deploy-prod` green in 53s.
+> - Step 6 — `api.arcaneai.org/health` 200, `/v1/billing/plans` 200 (was 404).
+>   `arcaneai.org/pricing`, `/auth`, `/account` all 200 (308 → trailing slash;
+>   all were 404 before).
+> - Step 6b — id 5 restored to `plan='pro'`, `plan_credits_micro=20000000`,
+>   verified by read-back. Grandfathered grant, no Dodo subscription behind it.
+> - Step 7 — partial. Unauthenticated `POST /v1/billing/checkout` returns 401
+>   (the auth gate fires before the billing gate), and every `DODO_*` secret is
+>   absent, so checkout cannot reach Dodo. The full 503 `billing_unconfigured`
+>   proof needs a real signed-up account and is left to the owner.
+> - Step 8 — NOT RUN. Requires a browser signup with a real email, the GitHub
+>   sign-in round trip, and a chat from the installed app. Owner follow-up.
+>
+> Task 6 (live Dodo payments) deliberately untouched: it needs owner-only
+> live-mode KYC and product provisioning, and Task 3 Steps 4–12 still gate it.
+
 Billing being dark is not a special build: with `DODO_API_KEY` unset, checkout and portal return 503 by design, and the webhook returns 503 rather than trusting an unsigned payload.
 
 - [x] **Step 1: Record the restore point BEFORE migrating** — DONE 2026-08-21
@@ -702,7 +737,7 @@ Restore with:
 npx wrangler d1 time-travel restore arcane-db --bookmark=000000b7-00000002-000050ce-ab27bfa69a3b9490ca31447b015226cd
 ```
 
-- [ ] **Step 2: OWNER — register the production GitHub OAuth App**
+- [x] **Step 2: OWNER — register the production GitHub OAuth App** — ALREADY DONE (secrets present 2026-08-21)
 
 GitHub allows one callback URL per OAuth App, so prod needs its own, separate from dev's. At <https://github.com/settings/developers> → **New OAuth App**:
 - Application name: `Arcane`
@@ -711,7 +746,7 @@ GitHub allows one callback URL per OAuth App, so prod needs its own, separate fr
 
 Then hand over the Client ID and a generated Client Secret. (`gh` cannot create OAuth Apps — this step is unavoidably manual.)
 
-- [ ] **Step 3: Set the GitHub secrets on the prod worker**
+- [x] **Step 3: Set the GitHub secrets on the prod worker** — ALREADY DONE (verified 2026-08-21)
 
 ```bash
 cd arcane-server
@@ -721,7 +756,7 @@ npx wrangler secret list
 ```
 Expected: the list shows `JWT_SECRET`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`. `DODO_*` must still be ABSENT — that is what keeps billing dark.
 
-- [ ] **Step 3b: Capture legacy paid plans, then reconcile the prod schema**
+- [x] **Step 3b: Capture legacy paid plans, then reconcile the prod schema** — DONE 2026-08-21
 
 `deploy-server.yml` runs `d1 migrations apply` as its first step, and on prod
 that WILL fail at `0013_billing.sql` unless the schema is reconciled first (see
@@ -740,7 +775,7 @@ Expected: step 1 returns exactly one row (id 5, `sourav.das@masaischool.com`,
 successfully`. If step 1 returns rows you did not expect, STOP and reassess:
 every non-free legacy plan must be restored in Step 6b.
 
-- [ ] **Step 4: Deploy the worker (migrations run first)**
+- [x] **Step 4: Deploy the worker (migrations run first)** — DONE 2026-08-21 (run 32512459489)
 
 ```bash
 gh workflow run deploy-server.yml -f environment=production --ref master
@@ -748,7 +783,7 @@ gh run watch
 ```
 Expected: the `deploy-prod` job applies `0012`–`0021` to `arcane-db` and then deploys. Migrations run BEFORE the deploy so new code never sees an old schema. If migrations fail, stop and restore via `npx wrangler d1 time-travel restore arcane-db --bookmark <bookmark from Step 1>`. If migrations succeed but the deployed worker misbehaves, roll the code back with `npx wrangler rollback` (the schema is forward-compatible with the old code for these migrations — they only add tables and columns).
 
-- [ ] **Step 5: Deploy the website**
+- [x] **Step 5: Deploy the website** — DONE 2026-08-21 (run 32512556090)
 
 ```bash
 gh workflow run deploy-landing.yml -f environment=production --ref master
@@ -756,7 +791,7 @@ gh run watch
 ```
 Expected: typecheck, tests, and a build with `PUBLIC_API_URL=https://api.arcaneai.org`, published to the `arcane-landing` Pages project.
 
-- [ ] **Step 6: Verify the prod surface is live**
+- [x] **Step 6: Verify the prod surface is live** — DONE 2026-08-21 (all 200)
 
 ```bash
 for p in /health /v1/billing/plans; do printf '%s -> ' "$p"; curl -s -o /dev/null -w "%{http_code}\n" "https://api.arcaneai.org$p"; done
@@ -764,7 +799,7 @@ for p in /pricing /auth /account; do printf '%s -> ' "$p"; curl -s -o /dev/null 
 ```
 Expected: every one returns `200` (they were `404` before this task).
 
-- [ ] **Step 6b: Restore the legacy paid plan discarded by the reconciliation**
+- [x] **Step 6b: Restore the legacy paid plan discarded by the reconciliation** — DONE 2026-08-21 (id 5)
 
 For every row captured in Step 3b, restore the plan and its monthly grant so the
 account is not silently downgraded. For the expected single row (id 5, `pro`,
@@ -802,7 +837,7 @@ cd arcane-server && npx wrangler d1 execute arcane-db --remote \
 ```
 Expected: at least one row from the chat in (d).
 
-- [ ] **Step 9: Record the window-1 result**
+- [x] **Step 9: Record the window-1 result** — DONE 2026-08-21 (see run log above)
 
 Note in the run log: the bookmark from Step 1, the deploy run URLs, and each verification outcome. Stop here if anything above failed — Task 6 introduces real money and must not start on a shaky stack.
 
@@ -962,7 +997,7 @@ git push origin master
 - Consumes: a verified live stack from Task 6.
 - Produces: a `v0.3.0` tag and installers in the `arcane-releases` R2 bucket.
 
-- [ ] **Step 1: Bump the version in all three places**
+- [x] **Step 1: Bump the version in all three places** — DONE in a8becf9
 
 All three must match or the Tauri build fails.
 
@@ -975,7 +1010,7 @@ grep -n '^version' editor/src-tauri/Cargo.toml
 ```
 Expected: `0.3.0` in all three.
 
-- [ ] **Step 2: Refresh the Cargo lockfile**
+- [x] **Step 2: Refresh the Cargo lockfile** — DONE in a8becf9 (Cargo.lock `editor` = 0.3.0)
 
 ```bash
 cd editor/src-tauri && cargo check --quiet 2>&1 | tail -5
@@ -983,7 +1018,7 @@ git diff --stat Cargo.lock
 ```
 Expected: `Cargo.lock` picks up the new version. A stale lockfile fails the release build on CI.
 
-- [ ] **Step 3: Commit and tag**
+- [x] **Step 3: Commit and tag** — DONE 2026-08-21 (tag `v0.3.0` → a8becf9, pushed)
 
 ```bash
 cd /Users/inno/Documents/experiments/arcane-editor
