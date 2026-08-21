@@ -316,4 +316,91 @@ export const CLIENT_METHOD = {
   terminalRelease: 'terminal/release',
   terminalWaitForExit: 'terminal/wait_for_exit',
   terminalKill: 'terminal/kill',
+  elicitationCreate: 'elicitation/create',
+  elicitationComplete: 'elicitation/complete',
 } as const;
+
+/**
+ * How much of the model's context window the session has consumed. Claude Code
+ * surfaces this prominently, and it is the one number that predicts a
+ * compaction — worth showing rather than discarding.
+ */
+export interface SessionUsage {
+  used: number;
+  size: number;
+}
+
+// ── Elicitation (structured questions) ───────────────────────────
+//
+// How an agent asks the USER something mid-turn, as opposed to asking
+// permission to act. Claude Code's `AskUserQuestion` tool arrives this way —
+// and ONLY if the client advertises `elicitation.form`, otherwise the adapter
+// puts the tool on its disallowed list and the model silently loses the
+// ability to ask. Advertising it is the whole feature.
+
+/** One choice in a `oneOf` / `anyOf` enum. `const` is the value to send back. */
+export interface EnumOption {
+  const: string;
+  title: string;
+  description?: string | null;
+  _meta?: Record<string, unknown> | null;
+}
+
+/**
+ * A single field of the requested form. Only the primitive shapes ACP allows;
+ * anything else is rendered as free text rather than dropped.
+ */
+export interface ElicitationPropertySchema {
+  type?: string;
+  title?: string | null;
+  description?: string | null;
+  /** Present on a single-select string field. */
+  oneOf?: EnumOption[] | null;
+  /** Bare string enum, the shape MCP servers tend to send. */
+  enum?: string[] | null;
+  /** Present on a multi-select array field. */
+  items?: { anyOf?: EnumOption[] | null; enum?: string[] | null } | null;
+  default?: unknown;
+  _meta?: Record<string, unknown> | null;
+}
+
+export interface ElicitationSchema {
+  type?: string;
+  title?: string | null;
+  description?: string | null;
+  properties?: Record<string, ElicitationPropertySchema>;
+  required?: string[] | null;
+}
+
+export interface CreateElicitationParams {
+  /** 'form' is the only mode Arcane advertises; 'url' is answered by opening it. */
+  mode: string;
+  sessionId?: string;
+  toolCallId?: string | null;
+  requestId?: string | null;
+  message: string;
+  requestedSchema?: ElicitationSchema;
+  /** `mode: 'url'` only. */
+  url?: string;
+  elicitationId?: string;
+  _meta?: Record<string, unknown> | null;
+}
+
+export type ElicitationValue = string | number | boolean | string[];
+
+export type CreateElicitationResult =
+  | { action: 'accept'; content: Record<string, ElicitationValue> }
+  /** The user chose not to answer. The agent continues the turn without it. */
+  | { action: 'decline' }
+  /** The user cancelled — the agent aborts the tool call. */
+  | { action: 'cancel' };
+
+/**
+ * `_meta` key the Claude adapter uses to mark the per-question free-text field
+ * that mirrors the CLI's "Other" box. Its value names the question it belongs
+ * to, which is how a typed answer gets routed to the right slot.
+ */
+export const ASK_CUSTOM_ANSWER_META = '_askUserQuestionCustomAnswer';
+
+/** `_meta` key carrying an option's preview text (a mockup, a code snippet). */
+export const ASK_OPTION_META = '_claude/askUserQuestionOption';

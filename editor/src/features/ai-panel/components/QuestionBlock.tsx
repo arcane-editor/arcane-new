@@ -7,6 +7,9 @@
  *  - No `options`: chip-less card — the question is answered only via
  *    ChatInput's answer mode (typing in the composer).
  *  - `options`, single-select: clicking a chip resolves immediately.
+ *  - `options` carrying descriptions or previews (external agents' structured
+ *    questions): the same options rendered as stacked cards instead, since the
+ *    explanation is the point of asking.
  *  - `options`, `allowMultiple`: chips toggle a local selected-set; an
  *    "Answer" button (disabled while nothing is selected) submits the
  *    comma-joined labels.
@@ -24,7 +27,7 @@
  */
 
 import { useState } from 'react';
-import { MessageCircleQuestion } from 'lucide-react';
+import { CheckSquare, MessageCircleQuestion, Square } from 'lucide-react';
 import { useAiStore, type AiMessage } from '../../../stores/ai';
 
 interface Props {
@@ -53,6 +56,12 @@ function QuestionBlock({ message }: Props) {
   const cancelled = !!req.cancelled;
   const locked = resolved || cancelled;
   const chosenLabels = resolved ? splitAnswerLabels(req.resolvedAnswer!) : selected;
+
+  // Layout follows the content. Bare labels stay a row of chips — compact, and
+  // what the Arcane agent's questions look like. Options that carry an
+  // explanation or a preview get a stacked card each, because a choice whose
+  // reasoning is hidden in a tooltip is a choice made blind.
+  const detailed = !!req.options?.some((o) => o.description || o.preview);
 
   function resolveWith(answer: string) {
     if (locked) return;
@@ -87,21 +96,42 @@ function QuestionBlock({ message }: Props) {
       </div>
 
       {req.options && req.options.length > 0 && (
-        <div className="ai-question-block-options">
+        <div className={detailed ? 'ai-question-block-cards' : 'ai-question-block-options'}>
           {req.options.map((opt) => {
             const isChosen = chosenLabels.has(opt.label);
+            const className = `${detailed ? 'ai-question-block-card' : 'ai-question-block-chip'} ${
+              isChosen ? 'is-selected' : ''
+            } ${locked ? 'is-locked' : ''}`;
             return (
               <button
                 key={opt.label}
                 type="button"
-                className={`ai-question-block-chip ${isChosen ? 'is-selected' : ''} ${
-                  locked ? 'is-locked' : ''
-                }`}
-                title={opt.description}
+                className={className}
+                // A card shows its description, so a tooltip would only repeat it.
+                title={detailed ? undefined : opt.description}
                 disabled={locked}
                 onClick={() => pick(opt.label)}
               >
-                {opt.label}
+                {detailed ? (
+                  <>
+                    <span className="ai-question-block-card-label">
+                      {req.allowMultiple && (
+                        <span className="ai-question-block-card-mark" aria-hidden>
+                          {isChosen ? <CheckSquare size={12} /> : <Square size={12} />}
+                        </span>
+                      )}
+                      {opt.label}
+                    </span>
+                    {opt.description && (
+                      <span className="ai-question-block-card-desc">{opt.description}</span>
+                    )}
+                    {opt.preview && (
+                      <pre className="ai-question-block-card-preview">{opt.preview}</pre>
+                    )}
+                  </>
+                ) : (
+                  opt.label
+                )}
               </button>
             );
           })}

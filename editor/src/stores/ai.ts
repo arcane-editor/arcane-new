@@ -7,8 +7,7 @@ import { create } from 'zustand';
 import type {
   AuthMethod,
   AvailableCommand,
-  SessionConfigOption,
-} from '../features/acp';
+  SessionConfigOption, AcpSessionUsage } from '../features/acp';
 import {
   generateSessionId,
   saveSession,
@@ -252,6 +251,12 @@ interface AiState {
   /** Whether the agent subprocess is currently alive. */
   agentBridgeRunning: boolean;
   /**
+   * How much of the external agent's context window is in use. `null` until
+   * the agent reports it — which not every agent does, so the UI must treat
+   * "unknown" as a real state rather than assuming zero.
+   */
+  agentContextUsage: AcpSessionUsage | null;
+  /**
    * Arcane's own in-loop todo list, maintained via the `todo_update` tool
    * (P3.5). `null` means "no list yet this conversation" (distinct from `[]`,
    * an explicit empty list) so `PlanList` can tell "nothing to show" apart
@@ -296,6 +301,7 @@ interface AiState {
   setAcpSessionId: (id: string | null) => void;
   setAgentConfigOptions: (options: SessionConfigOption[]) => void;
   setAgentAvailableCommands: (commands: AvailableCommand[]) => void;
+  setAgentContextUsage: (usage: AcpSessionUsage | null) => void;
   setAgentAuthMethods: (methods: AuthMethod[]) => void;
   setAgentNeedsAuth: (needsAuth: boolean) => void;
   setAgentBridgeRunning: (running: boolean) => void;
@@ -535,6 +541,7 @@ export const useAiStore = create<AiState>((set, get) => ({
   agentAuthMethods: [],
   agentNeedsAuth: false,
   agentBridgeRunning: false,
+  agentContextUsage: null,
   arcanePlan: null,
   attachments: [],
   planPhase: 'idle',
@@ -860,6 +867,8 @@ export const useAiStore = create<AiState>((set, get) => ({
   setAgentAuthMethods: (methods: AuthMethod[]) => set({ agentAuthMethods: methods }),
   setAgentNeedsAuth: (needsAuth: boolean) => set({ agentNeedsAuth: needsAuth }),
   setAgentBridgeRunning: (running: boolean) => set({ agentBridgeRunning: running }),
+
+  setAgentContextUsage: (usage) => set({ agentContextUsage: usage }),
   resetExternalAgentSession: () => set(externalAgentReset()),
   setArcanePlan: (plan: ArcanePlanEntry[] | null) => {
     set({ arcanePlan: plan });

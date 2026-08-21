@@ -219,3 +219,44 @@ export function reconcileToolCall(
   const args = hasNewArgs ? incoming : (known.args ?? {});
   return { name, args, changed: name !== known.name || (hasNewArgs && args !== known.args) };
 }
+
+/**
+ * What Arcane tells the agent it can do. Extracted and frozen because two of
+ * these are FEATURE SWITCHES, not descriptions: an agent that does not see
+ * them removes the corresponding ability from the model rather than falling
+ * back to something degraded, and it does so silently.
+ *
+ *  - `elicitation.form` — without it Claude Code puts `AskUserQuestion` on its
+ *    disallowed-tools list. The model then guesses instead of asking, and
+ *    nothing anywhere reports a problem.
+ *  - `session.configOptions.boolean` — without it a boolean setting (Fast
+ *    mode) is downgraded to a two-value select.
+ *  - `fs` — without it the agent writes to disk directly, and the edits lose
+ *    checkpoints, the review rows and the sandbox.
+ */
+export const CLIENT_CAPABILITIES = {
+  fs: { readTextFile: true, writeTextFile: true },
+  terminal: true,
+  auth: { terminal: true },
+  elicitation: { form: {}, url: {} },
+  session: { configOptions: { boolean: {} } },
+  _meta: { 'terminal-auth': true },
+} as const;
+
+/**
+ * Build the `session/set_config_option` payload.
+ *
+ * The request is a discriminated union and a boolean value MUST carry its
+ * `type` tag; without it the agent validates against the string variant and
+ * rejects the call ("expected string, received boolean"). Verified against the
+ * live agent — the alternative is a toggle that silently never applies.
+ */
+export function configOptionPayload(
+  sessionId: string,
+  configId: string,
+  value: string | boolean,
+): Record<string, unknown> {
+  return typeof value === 'boolean'
+    ? { sessionId, configId, type: 'boolean', value }
+    : { sessionId, configId, value };
+}

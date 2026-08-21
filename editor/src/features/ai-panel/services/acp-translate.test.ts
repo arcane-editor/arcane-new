@@ -9,6 +9,8 @@ import {
   toolDisplayName,
   toolStatusFor,
   reconcileToolCall,
+  CLIENT_CAPABILITIES,
+  configOptionPayload,
 } from './acp-translate';
 
 describe('contentToText', () => {
@@ -214,5 +216,48 @@ describe('reconcileToolCall', () => {
       {},
     );
     expect(next.args).toEqual({});
+  });
+});
+
+describe('CLIENT_CAPABILITIES', () => {
+  // These are not descriptions of Arcane, they are switches on the agent. Each
+  // assertion below names a feature that disappears — with no error anywhere —
+  // if the capability stops being advertised.
+  it('advertises form elicitation, or the agent stops asking questions entirely', () => {
+    expect(CLIENT_CAPABILITIES.elicitation.form).toBeDefined();
+  });
+
+  it('advertises boolean config options, or Fast mode degrades to a select', () => {
+    expect(CLIENT_CAPABILITIES.session.configOptions.boolean).toBeDefined();
+  });
+
+  it('advertises fs, or edits bypass checkpoints, review and the sandbox', () => {
+    expect(CLIENT_CAPABILITIES.fs).toEqual({ readTextFile: true, writeTextFile: true });
+  });
+
+  it('advertises terminal auth in both spellings', () => {
+    expect(CLIENT_CAPABILITIES.auth.terminal).toBe(true);
+    expect(CLIENT_CAPABILITIES._meta['terminal-auth']).toBe(true);
+  });
+});
+
+describe('configOptionPayload', () => {
+  it('tags a boolean with its type, which the agent requires', () => {
+    // Without `type` the agent answers -32602 "expected string, received
+    // boolean" and the toggle silently never applies.
+    expect(configOptionPayload('s1', 'fast', true)).toEqual({
+      sessionId: 's1',
+      configId: 'fast',
+      type: 'boolean',
+      value: true,
+    });
+  });
+
+  it('sends a select value untagged, as the string variant expects', () => {
+    expect(configOptionPayload('s1', 'mode', 'plan')).toEqual({
+      sessionId: 's1',
+      configId: 'mode',
+      value: 'plan',
+    });
   });
 });

@@ -126,6 +126,28 @@ enough to delete (`bce889d`):
    generically by `AgentConfigBar`. Do not hardcode Claude's mode or model ids —
    the last integration went stale exactly that way.
 
+**Capabilities are feature switches, not descriptions.** `CLIENT_CAPABILITIES`
+in `acp-translate.ts` is the single place they are declared, and dropping one
+does not degrade a feature — it removes it, silently, with no error on either
+side:
+
+| Capability | What disappears without it |
+|---|---|
+| `elicitation.form` | Claude puts `AskUserQuestion` on its **disallowed-tools** list. The model stops asking and starts guessing. |
+| `session.configOptions.boolean` | Boolean settings (Fast mode) degrade to a two-value select. |
+| `fs` | The agent writes to disk directly; edits lose checkpoints, review rows and the sandbox. |
+| `auth.terminal` | No terminal sign-in method is offered, so a signed-out user has no way in. |
+
+`acp-translate.test.ts` guards each one, and `verify:acp` proves the boolean
+capability took effect by asserting `fast` comes back typed as a boolean rather
+than as a select.
+
+One related trap in the same request family: `session/set_config_option` is a
+discriminated union, and a boolean value **must** carry `type: 'boolean'`.
+Without the tag the agent validates against the string variant and answers
+`-32602`, so the toggle silently never applies. Build the payload with
+`configOptionPayload()`.
+
 Debugging: every line in both directions is written to the trace file returned by
 the `acp_trace_path` command (`->` sent, `<-` received, `!!` error), the same
 convention as `lsp.rs`. A protocol this chatty is undebuggable without it.

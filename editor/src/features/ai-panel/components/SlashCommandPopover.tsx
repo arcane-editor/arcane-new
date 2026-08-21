@@ -2,7 +2,7 @@
  * SlashCommandPopover — lists the slash commands the connected external agent
  * advertises (ACP `available_commands_update`) when the user types `/` at the
  * start of the composer. Reuses the mention-popover styles. Picking inserts
- * `/<name> `.
+ * `/<name> `, leaving the caret ready for any argument the command declares.
  *
  * The list is entirely agent-supplied: an agent's commands are its own, they
  * change with its configuration (project-local commands, plugins), and Arcane
@@ -16,6 +16,16 @@ import { SlashSquare } from 'lucide-react';
 import type { AvailableCommand } from '../../acp';
 
 const POPOVER_WIDTH = 300;
+
+/**
+ * Skill descriptions are whole paragraphs — trigger lists, examples, several
+ * languages. One line is all a picker row can hold; the rest would push every
+ * other command off screen.
+ */
+function firstLine(text: string): string {
+  const line = text.split('\n')[0].trim();
+  return line.length > 120 ? `${line.slice(0, 117)}…` : line;
+}
 const MAX_ITEMS = 8;
 const SPACE_BELOW_THRESHOLD = 240;
 
@@ -94,7 +104,7 @@ function SlashCommandPopover({ open, query, anchorRect, commands, onPick, onClos
   if (!open || !style || items.length === 0) return null;
 
   return createPortal(
-    <div ref={ref} className="ai-panel-mention-popover" style={style}>
+    <div ref={ref} className="ai-panel-mention-popover ai-panel-command-popover" style={style}>
       <div className="ai-panel-mention-section">
         <div className="ai-panel-mention-section-header">COMMANDS</div>
         {items.map((c, i) => (
@@ -110,7 +120,13 @@ function SlashCommandPopover({ open, query, anchorRect, commands, onPick, onClos
           >
             <SlashSquare size={14} className="ai-panel-mention-icon" />
             <span className="ai-panel-mention-label">/{c.name}</span>
-            {c.description && <span className="ai-panel-mention-path">{c.description}</span>}
+            {/* An agent-supplied argument hint is the difference between a
+                command that runs on Enter and one that needs something typed
+                after it, so it sits with the name rather than in the blurb. */}
+            {c.input?.hint && <span className="ai-panel-command-hint">{c.input.hint}</span>}
+            {c.description && (
+              <span className="ai-panel-mention-path">{firstLine(c.description)}</span>
+            )}
           </button>
         ))}
       </div>

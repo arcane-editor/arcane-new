@@ -19,6 +19,13 @@ import type { AgentTool, AgentToolResult } from './vendor/types';
 export interface AskUserOption {
   label: string;
   description?: string;
+  /**
+   * A mockup, code snippet or diagram the agent attached to this choice, to be
+   * shown verbatim. Only external agents send these today (Claude Code's
+   * `AskUserQuestion` previews); the `ask_user` tool's own schema does not
+   * accept one, because a model writing its own preview tends to write prose.
+   */
+  preview?: string;
 }
 
 export interface AskUserParams {

@@ -12,11 +12,16 @@
  *
  * Replaces ModeSelector + EffortSelector while an external agent is selected,
  * because those two control the Arcane loop specifically.
+ *
+ * The context meter sits at the end of the same row. It is not a setting, but
+ * it is the other thing that changes about a live session and the one number
+ * that predicts a compaction, so it belongs with them rather than somewhere
+ * else on screen.
  */
 
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Check, ChevronDown } from 'lucide-react';
+import { Check, ChevronDown, Gauge } from 'lucide-react';
 import type { SessionConfigOption } from '../../acp';
 import { useAiStore } from '../../../stores/ai';
 import { getClaudeBackend } from '../services/claude-backend';
@@ -25,7 +30,8 @@ const POPOVER_WIDTH = 240;
 
 function AgentConfigBar() {
   const options = useAiStore((s) => s.agentConfigOptions);
-  if (options.length === 0) return null;
+  const usage = useAiStore((s) => s.agentContextUsage);
+  if (options.length === 0 && !usage) return null;
 
   return (
     <>
@@ -36,7 +42,39 @@ function AgentConfigBar() {
           <BooleanOption key={option.id} option={option} />
         ),
       )}
+      {usage && <ContextMeter usage={usage} />}
     </>
+  );
+}
+
+/** Round to the nearest useful unit — "620k" reads faster than "619,847". */
+function compactTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n < 10_000_000 ? 1 : 0)}M`;
+  if (n >= 1_000) return `${Math.round(n / 1_000)}k`;
+  return String(n);
+}
+
+/**
+ * The pill IS the gauge: its own background fills left to right as the context
+ * does. One device rather than a pill plus a separate bar, and it reads
+ * without being read — you notice a nearly-full pill before you parse "94%".
+ */
+function ContextMeter({ usage }: { usage: { used: number; size: number } }) {
+  const ratio = Math.min(1, Math.max(0, usage.used / usage.size));
+  const percent = Math.round(ratio * 100);
+  // 80% is where compaction stops being hypothetical, which is the only moment
+  // this needs to compete for attention.
+  const pressed = ratio >= 0.8;
+
+  return (
+    <span
+      className={`ai-panel-mode-pill ai-panel-context-meter ${pressed ? 'is-tight' : ''}`}
+      style={{ '--context-fill': `${percent}%` } as React.CSSProperties}
+      title={`Context: ${compactTokens(usage.used)} of ${compactTokens(usage.size)} tokens used. Claude compacts the conversation as this fills.`}
+    >
+      <Gauge size={11} className="ai-panel-mode-pill-icon" strokeWidth={2.25} />
+      <span className="ai-panel-mode-pill-label">{percent}%</span>
+    </span>
   );
 }
 

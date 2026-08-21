@@ -3902,6 +3902,82 @@ html, body, #root {
   letter-spacing: 0.1px;
 }
 
+/* Context meter — a read-only pill that doubles as its own gauge. The fill is
+   the pill's background, so no second shape enters the toolbar row. */
+/* Argument hint on a slash command — a quiet monospace tag, so "[query]"
+   never reads as part of the command's name. */
+/* In the command list the name is the thing being chosen, so it holds its
+   width and the description gives way — the opposite of the file-mention list,
+   where the path is what disambiguates two identically-named files. */
+.ai-panel-command-popover .ai-panel-mention-label {
+  flex-shrink: 0;
+  max-width: 62%;
+}
+
+.ai-panel-command-popover .ai-panel-mention-path {
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+.ai-panel-command-hint {
+  flex-shrink: 0;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--text-primary) 7%, transparent);
+  color: var(--text-secondary);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.ai-panel-context-meter {
+  --context-track: color-mix(in srgb, var(--text-primary) 6%, transparent);
+  --context-ink: color-mix(in srgb, var(--accent) 40%, transparent);
+  background:
+    linear-gradient(
+      to right,
+      var(--context-ink) 0 var(--context-fill, 0%),
+      var(--context-track) var(--context-fill, 0%) 100%
+    );
+  cursor: default;
+  font-variant-numeric: tabular-nums;
+  transition: background 240ms var(--ease-out);
+}
+
+.ai-panel-context-meter:hover {
+  /* Read-only: no hover lift, or it reads as a control. */
+  background:
+    linear-gradient(
+      to right,
+      var(--context-ink) 0 var(--context-fill, 0%),
+      var(--context-track) var(--context-fill, 0%) 100%
+    );
+}
+
+.ai-panel-context-meter.is-tight {
+  /* Not `--warning`: in the Arcane themes it is a gold within a few points of
+     `--accent`, so a warning drawn in it would be indistinguishable from the
+     normal state. `--error-text` is the only token that reads as different at
+     a glance — and the fill gets denser and the label heavier too, so the
+     state survives a theme where the hues do collide. */
+  --context-ink: color-mix(in srgb, var(--error-text) 55%, transparent);
+  border-color: color-mix(in srgb, var(--error-text) 50%, transparent);
+}
+
+.ai-panel-context-meter.is-tight .ai-panel-mode-pill-icon {
+  color: var(--error-text);
+}
+
+.ai-panel-context-meter.is-tight .ai-panel-mode-pill-label {
+  font-weight: 600;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ai-panel-context-meter {
+    transition: none;
+  }
+}
+
 .ai-panel-mode-pill-caret {
   margin-left: 1px;
   color: var(--text-secondary);
@@ -5232,6 +5308,96 @@ html, body, #root {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+
+/* Card layout — used when the options carry an explanation worth reading
+   before choosing (external agents' structured questions). */
+.ai-question-block-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.ai-question-block-card {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  padding: 7px 9px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 120ms ease,
+    background 120ms ease;
+}
+
+.ai-question-block-card:hover:not(:disabled) {
+  background: var(--hover);
+  border-left-color: var(--accent);
+}
+
+.ai-question-block-card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.ai-question-block-card.is-selected {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  border-left-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-primary));
+}
+
+.ai-question-block-card.is-locked {
+  cursor: default;
+  opacity: 0.75;
+}
+
+.ai-question-block-card.is-locked:hover {
+  background: var(--bg-primary);
+  border-left-color: var(--border);
+}
+
+.ai-question-block-card-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.1px;
+}
+
+.ai-question-block-card-mark {
+  display: inline-flex;
+  color: var(--accent);
+}
+
+.ai-question-block-card-desc {
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+/* Previews are ASCII mockups and code: keep them monospace, keep them from
+   stretching the panel, and let long lines scroll inside the card. */
+.ai-question-block-card-preview {
+  margin: 3px 0 0;
+  padding: 6px 7px;
+  max-height: 160px;
+  overflow: auto;
+  background: color-mix(in srgb, var(--text-primary) 4%, transparent);
+  border-radius: 4px;
+  color: var(--text-secondary);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10.5px;
+  line-height: 1.45;
+  white-space: pre;
+  tab-size: 2;
 }
 
 .ai-question-block-chip {

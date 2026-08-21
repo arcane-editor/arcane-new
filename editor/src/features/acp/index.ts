@@ -34,6 +34,8 @@ export {
 export type { AcpProbe, AcpSetupState, AcpInstallProgress } from './services/install';
 
 export {
+  ASK_CUSTOM_ANSWER_META,
+  ASK_OPTION_META,
   ACP_AUTH_REQUIRED,
   ACP_INTERNAL_ERROR,
   ACP_METHOD_NOT_FOUND,
@@ -43,6 +45,12 @@ export {
 } from './services/protocol';
 export type {
   AcpPlanEntry,
+  CreateElicitationParams,
+  CreateElicitationResult,
+  ElicitationPropertySchema,
+  ElicitationSchema,
+  ElicitationValue,
+  EnumOption,
   AgentCapabilities,
   AuthMethod,
   AvailableCommand,
@@ -60,6 +68,7 @@ export type {
   RequestPermissionOutcome,
   RequestPermissionParams,
   SessionConfigOption,
+  SessionUsage as AcpSessionUsage,
   SessionConfigSelectOption,
   SessionMode,
   SessionModeState,

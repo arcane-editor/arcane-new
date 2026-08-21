@@ -55,6 +55,9 @@ import {
   type TerminalRefParams,
   type ToolCallUpdate,
   AcpMethodNotFoundError,
+  type CreateElicitationParams,
+  type CreateElicitationResult,
+  type ElicitationValue,
 } from '../../acp';
 import { useAiStore } from '../../../stores/ai';
 import { useCheckpointsStore } from '../../../stores/checkpoints';
@@ -71,6 +74,8 @@ import {
   toolDisplayName,
   toolStatusFor,
   reconcileToolCall,
+  CLIENT_CAPABILITIES,
+  configOptionPayload,
 } from './acp-translate';
 // `fileUri` is the single source for file:// construction — hand-rolling one
 // silently breaks every Windows path (`file://D%3A/...` vs `file:///D:/...`),
@@ -78,6 +83,14 @@ import {
 import { fileUri } from '../../lsp';
 import { resolveAttachments } from './attachments';
 import { loadMcpServers } from './mcp-config';
+import {
+  choicesFor,
+  encodeAnswer,
+  parseElicitationForm,
+  questionTextFor,
+} from './acp-elicitation';
+import { requestUserQuestion } from './question-gate';
+import { openUrl } from '@tauri-apps/plugin-opener';
 import { classifyTurnError } from './turn-errors';
 import type { Attachment } from './types';
 import type { AgentToolResult, AssistantMessage, TextContent } from './vendor/types';
@@ -122,11 +135,19 @@ export class ClaudeBackend {
   private toolNames = new Map<string, string>();
   /** Last known arguments per tool call — they stream in after the call opens. */
   private toolArgs = new Map<string, Record<string, unknown>>();
+  /** Questions currently on screen, so the turn's end can lock them. */
+  private openQuestions = new Set<string>();
   /** Tool call id → accumulated result, so updates are additive not replacing. */
   private toolResults = new Map<string, AgentToolResult>();
 
   private abortRequested = false;
   private promptInFlight = false;
+  /**
+   * Aborted when the turn ends for any reason. Questions raised mid-turn hang
+   * on the user, so they need a signal that fires on Stop or on the agent
+   * dying — otherwise a stopped turn leaves a live question card behind.
+   */
+  private turnAbort: AbortController | null = null;
   /** True while `session/load` replays history we are already rendering. */
   private suppressReplay = false;
 
@@ -151,6 +172,7 @@ export class ClaudeBackend {
     const prompt = await this.buildPromptBlocks(text, opts.attachments ?? []);
 
     this.promptInFlight = true;
+    this.turnAbort = new AbortController();
     this.resetStreamState();
     ai.handleAgentEvent({ type: 'agent_start' });
 
@@ -179,6 +201,7 @@ export class ClaudeBackend {
       }
     } finally {
       this.promptInFlight = false;
+      this.endTurnQuestions();
       useCheckpointsStore.getState().endTurn();
       useAiStore.getState().handleAgentEvent({ type: 'agent_end', messages: [] });
     }
@@ -193,6 +216,7 @@ export class ClaudeBackend {
       .notify(AGENT_METHOD.sessionCancel, { sessionId: this.acpSessionId })
       .catch(() => {});
     cancelExternalAgentApprovals();
+    this.turnAbort?.abort();
   }
 
   /**
@@ -234,7 +258,7 @@ export class ClaudeBackend {
     if (!this.client || !this.acpSessionId) return;
     const response = await this.client.request<{ configOptions?: SessionConfigOption[] }>(
       AGENT_METHOD.sessionSetConfigOption,
-      { sessionId: this.acpSessionId, configId, value },
+      configOptionPayload(this.acpSessionId, configId, value),
     );
     // The agent returns the full reconciled set — switching model can change
     // which modes exist, so trusting our local edit would show stale options.
@@ -295,23 +319,13 @@ export class ClaudeBackend {
     this.client = client;
     this.sessionCwd = cwd;
     useAiStore.getState().setAgentBridgeRunning(true);
+    useAiStore.getState().setAgentContextUsage(null);
   }
 
   private async initialize(_probe: AcpProbe): Promise<void> {
     const result = await this.client!.request<InitializeResult>(AGENT_METHOD.initialize, {
       protocolVersion: ACP_PROTOCOL_VERSION,
-      clientCapabilities: {
-        // Advertising fs is what routes the agent's edits through `acp-fs.ts`,
-        // where they pick up checkpoints, review rows and the sandbox. Without
-        // it the agent writes to disk directly and all three are lost.
-        fs: { readTextFile: true, writeTextFile: true },
-        terminal: true,
-        // Both spellings: the stable capability, plus the `_meta` opt-in that
-        // makes the agent hand us an exact command/args pair for the login
-        // rather than only extra args to append.
-        auth: { terminal: true },
-        _meta: { 'terminal-auth': true },
-      },
+      clientCapabilities: CLIENT_CAPABILITIES,
       clientInfo: { name: 'arcane', title: 'Arcane', version: APP_VERSION },
     });
 
@@ -451,6 +465,8 @@ export class ClaudeBackend {
         return this.terminals.release(params as TerminalRefParams);
       case CLIENT_METHOD.requestPermission:
         return this.handlePermissionRequest(params as RequestPermissionParams);
+      case CLIENT_METHOD.elicitationCreate:
+        return this.handleElicitation(params as CreateElicitationParams);
       default:
         // Answered as JSON-RPC -32601, which agents are required to handle —
         // capability negotiation exists precisely so an agent can cope with a
@@ -480,6 +496,78 @@ export class ClaudeBackend {
     return optionId === null
       ? { outcome: { outcome: 'cancelled' } }
       : { outcome: { outcome: 'selected', optionId } };
+  }
+
+  /**
+   * `elicitation/create` — the agent asking the USER something, as opposed to
+   * asking permission to act. Claude Code's `AskUserQuestion` arrives here.
+   *
+   * Each field is asked as an ordinary Arcane question, in order, through the
+   * same gate the `ask_user` tool uses — so the user gets `QuestionBlock`'s
+   * chips, the composer's answer mode, and the existing cancel semantics, with
+   * no second question UI to build or keep consistent.
+   */
+  private async handleElicitation(
+    params: CreateElicitationParams,
+  ): Promise<CreateElicitationResult> {
+    if (params.mode === 'url') {
+      // We advertise URL elicitation because the alternative is the agent
+      // silently losing a sign-in flow; the browser is the only place such a
+      // flow can complete.
+      if (typeof params.url === 'string' && params.url) {
+        await openUrl(params.url).catch(() => {});
+        return { action: 'accept', content: {} };
+      }
+      return { action: 'decline' };
+    }
+    if (params.mode !== 'form') return { action: 'decline' };
+
+    const form = parseElicitationForm(params);
+    if (!form) return { action: 'decline' };
+
+    const signal = this.turnAbort?.signal;
+    const content: Record<string, ElicitationValue> = {};
+
+    for (const field of form.fields) {
+      const questionId = `${params.toolCallId ?? params.elicitationId ?? 'ask'}:${field.key}`;
+      this.openQuestions.add(questionId);
+      const outcome = await requestUserQuestion(
+        questionId,
+        {
+          question: questionTextFor(form, field),
+          options: choicesFor(field)?.map((c) => ({
+            label: c.label,
+            description: c.description,
+            preview: c.preview,
+          })),
+          allowMultiple: field.kind === 'multiselect',
+        },
+        signal,
+      );
+      this.openQuestions.delete(questionId);
+
+      if (outcome.kind === 'cancelled') return { action: 'cancel' };
+      Object.assign(content, encodeAnswer(field, outcome.answer));
+    }
+
+    // Nothing answered is a skip, not an abort: the agent is told the user
+    // passed and carries on, which is what `decline` means to it.
+    return Object.keys(content).length > 0
+      ? { action: 'accept', content }
+      : { action: 'decline' };
+  }
+
+  /**
+   * Lock any question still on screen when the turn ends. The gate's own abort
+   * path covers a Stop click; this covers the turn ending underneath a
+   * question for any other reason (agent crash, timeout).
+   */
+  private endTurnQuestions(): void {
+    this.turnAbort?.abort();
+    this.turnAbort = null;
+    const ai = useAiStore.getState();
+    for (const id of this.openQuestions) ai.markQuestionCancelled(id);
+    this.openQuestions.clear();
   }
 
   // ── Agent → client notifications ──────────────────────────────
@@ -525,6 +613,16 @@ export class ClaudeBackend {
       case 'plan':
         ai.setArcanePlan(planEntriesFor((update as { entries?: never }).entries));
         break;
+
+      case 'usage_update': {
+        // Not every agent reports this, so the UI treats its absence as
+        // "unknown" rather than "empty" — see `agentContextUsage`.
+        const u = update as unknown as { used?: number; size?: number };
+        if (typeof u.used === 'number' && typeof u.size === 'number' && u.size > 0) {
+          ai.setAgentContextUsage({ used: u.used, size: u.size });
+        }
+        break;
+      }
 
       case 'available_commands_update':
         ai.setAgentAvailableCommands(
@@ -711,6 +809,7 @@ export class ClaudeBackend {
   private handleExit(info: { error?: string }): void {
     const wasPrompting = this.promptInFlight;
     this.promptInFlight = false;
+    this.endTurnQuestions();
     this.client = null;
     this.acpSessionId = null;
     this.initResult = null;

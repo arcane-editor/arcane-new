@@ -177,10 +177,16 @@ function bail(msg, extra) {
 try {
   const init = await request('initialize', {
     protocolVersion: 1,
+    // Must mirror CLIENT_CAPABILITIES in `acp-translate.ts`. Several of these
+    // are feature switches on the agent, so probing with a different set would
+    // verify a session Arcane never actually opens.
     clientCapabilities: {
       fs: { readTextFile: true, writeTextFile: true },
       terminal: true,
       auth: { terminal: true },
+      elicitation: { form: {}, url: {} },
+      session: { configOptions: { boolean: {} } },
+      _meta: { 'terminal-auth': true },
     },
     clientInfo: { name: 'arcane-verify', title: 'Arcane', version: '0.0.0' },
   });
@@ -209,7 +215,24 @@ try {
 
   if (!session?.sessionId) bail('session/new returned no sessionId.', JSON.stringify(session));
 
-  const optionIds = (session.configOptions ?? []).map((o) => o.id);
+  const options = session.configOptions ?? [];
+  const optionIds = options.map((o) => o.id);
+
+  if (options.length === 0) {
+    bail('session/new advertised no config options — mode and model switching would be empty.');
+  }
+
+  // `fast` arriving as a real boolean is the observable proof that
+  // `session.configOptions.boolean` was accepted; an agent that did not see it
+  // degrades the same option to a two-value select.
+  const fast = options.find((o) => o.id === 'fast');
+  if (fast && fast.type !== 'boolean') {
+    bail(
+      `The agent degraded 'fast' to a ${fast.type}, so the boolean capability was not accepted.`,
+      'Check clientCapabilities.session.configOptions.boolean in acp-translate.ts.',
+    );
+  }
+
   child.kill('SIGKILL');
 
   console.log('\n  PASS  ACP external-agent end-to-end check');
@@ -217,7 +240,8 @@ try {
   console.log(`        agent          ${init.agentInfo?.name ?? 'unknown'} ${init.agentInfo?.version ?? ''}`.trimEnd());
   console.log(`        protocol       v${init.protocolVersion}`);
   console.log(`        loadSession    ${caps.loadSession === true}`);
-  console.log(`        config options ${optionIds.length ? optionIds.join(', ') : '(none advertised)'}`);
+  console.log(`        config options ${optionIds.join(', ')}`);
+  console.log(`        boolean opts   ${fast ? `yes (${fast.id})` : 'none advertised'}`);
   console.log('');
   process.exit(0);
 } catch (e) {
