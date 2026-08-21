@@ -990,6 +990,18 @@ git push origin master
 
 ### Task 7: Tag and ship v0.3.0
 
+> **RUN LOG 2026-08-21 — Steps 1–5 DONE; 6 and 7 are owner follow-ups.**
+>
+> Steps 1–2 were already carried in `a8becf9`; all three version fields and
+> `Cargo.lock` read `0.3.0`. Tag `v0.3.0` was created on `a8becf9` and pushed,
+> which triggered `Release` run 32512754189 — macOS arm64 in ~9m, Windows x64
+> in ~14m50s, plus the Unity extension job. R2 now serves
+> `latest/` and `v0.3.0/` for `Arcane-arm64.dmg` (62,182,161 B) and
+> `ArcaneSetup.exe` (56,539,389 B), byte-identical between the two prefixes.
+>
+> Step 6 (install the shipped build and sign in against prod) is not
+> scriptable and is left to the owner, together with Task 5 Steps 7–8.
+
 **Files:**
 - Modify: `editor/package.json`, `editor/src-tauri/Cargo.toml`, `editor/src-tauri/tauri.conf.json` (version `0.2.2` → `0.3.0`)
 
@@ -1029,14 +1041,14 @@ git tag v0.3.0
 git push origin v0.3.0
 ```
 
-- [ ] **Step 4: Watch the release build**
+- [x] **Step 4: Watch the release build** — DONE 2026-08-21 (run 32512754189, both platforms green)
 
 ```bash
 gh run watch
 ```
 Expected: the `Release` workflow builds macOS arm64 and Windows x64 and uploads to the `arcane-releases` R2 bucket.
 
-- [ ] **Step 5: Verify the installers are downloadable**
+- [x] **Step 5: Verify the installers are downloadable** — DONE 2026-08-21 (206 on latest/ and v0.3.0/, 62 MB dmg + 56 MB exe)
 
 ```bash
 curl -s -o /dev/null -w "%{http_code}\n" https://releases.arcaneai.org/latest/Arcane-arm64.dmg
