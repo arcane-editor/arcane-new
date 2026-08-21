@@ -437,7 +437,7 @@ git commit -m "feat(billing): lock top-up cards on the free plan"
 
 Dev already has everything needed: test products, `DODO_API_KEY`, `DODO_WEBHOOK_SECRET`, and a registered webhook endpoint `ep_3HizO4n2sOp4JKd4F9Wd7KX5qsU` → `https://api-dev.arcaneai.org/v1/billing/webhook` with no event filter.
 
-- [ ] **Step 1: Run every suite green**
+- [x] **Step 1: Run every suite green** — DONE 2026-08-21
 
 ```bash
 cd arcane-server && npm run check:types && npm test
@@ -445,6 +445,13 @@ cd ../editor && bunx tsc --noEmit && bun test src
 cd ../landing-page && pnpm exec astro sync && pnpm exec tsc --noEmit && pnpm test && pnpm build
 ```
 Expected: all green. Record the server and editor test counts in the run notes — a drop from a prior run is a regression, not noise.
+
+**RESULT (2026-08-21): PASS.** server 279 tests / 33 files + typecheck clean;
+editor 1722 JS tests / 159 files + 454 Rust tests + `bun run verify` green
+(incl. `verify:intellisense` PASS and `verify:acp` PASS against the live
+adapter); landing 51 tests / 6 files + typecheck + build (27 pages).
+Editor counts are UP (1665 → 1722) — the external-agent work landed since this
+plan was written.
 
 - [ ] **Step 2: Push to `dev` and let CI deploy**
 
@@ -454,7 +461,7 @@ gh run watch
 ```
 Expected: `Deploy Server` and `Deploy Landing` both succeed (the push touches `arcane-server/**` and `landing-page/**`).
 
-- [ ] **Step 3: Confirm the dev stack is serving the new code**
+- [x] **Step 3: Confirm the dev stack is serving the new code** — DONE 2026-08-21 (4 tiers + 2 packs returned)
 
 ```bash
 curl -s https://api-dev.arcaneai.org/v1/billing/plans | head -c 400
@@ -628,7 +635,7 @@ npx wrangler d1 execute arcane-db --local --command "SELECT dodo_customer_id FRO
 ```
 Expected: all four tables listed, and the `dodo_customer_id` column resolves (proving `0013`'s `ADD COLUMN` applied).
 
-- [ ] **Step 6: Merge `dev` into `master`**
+- [x] **Step 6: Merge `dev` into `master`** — DONE 2026-08-21 (`fd45b83..d96c11c`, clean fast-forward)
 
 `dev` already contains every commit on `master` (verified: `git rev-list --count dev..master` = 0), so this is a clean fast-forward and `--ff-only` asserts that.
 
@@ -639,7 +646,7 @@ git merge --ff-only dev
 git push origin master
 ```
 
-- [ ] **Step 7: Confirm CI is green on `master`**
+- [x] **Step 7: Confirm CI is green on `master`** — DONE 2026-08-21 (run 32507689204: macos-14 ✅, windows-latest ✅)
 
 ```bash
 gh run watch
@@ -659,14 +666,41 @@ Expected: the `CI` workflow passes on `master`. Do not start Task 5 until it doe
 
 **Owner action required in Step 2** — everything else is automated.
 
+> **RUN LOG 2026-08-21 — stopped here, deliberately.**
+>
+> Completed: Task 3 Steps 1 & 3, Task 4 Steps 6–7, Task 5 Step 1. `master` is
+> at `d96c11c` with CI green on both platforms, and the Dev Build shipped
+> `dev/latest/Arcane-Dev-arm64.dmg` + `dev/latest/ArcaneDevSetup.exe` (both
+> serve 206 on a range request).
+>
+> **Step 3b must NOT be run early.** It drops `plan`, `promo_code`,
+> `promo_expires_at`, `credits_reset_at` and the `plans`/`upgrade_requests`
+> tables from the LIVE database. Prod is still running pre-0012 code that reads
+> those, so reconciling before the new worker is deployed breaks production for
+> real users for the whole gap. Run 3b and Step 4 back-to-back, after the
+> secrets in Steps 2–3 exist.
+>
+> Also outstanding: Task 3 Steps 4–12 (the Dodo test-mode purchase proof) are
+> browser-driven and were never run. Task 3 exists precisely so an event-name
+> mismatch is discovered before a live charge — Task 6 should not start until
+> it has been done.
+
 Billing being dark is not a special build: with `DODO_API_KEY` unset, checkout and portal return 503 by design, and the webhook returns 503 rather than trusting an unsigned payload.
 
-- [ ] **Step 1: Record the restore point BEFORE migrating**
+- [x] **Step 1: Record the restore point BEFORE migrating** — DONE 2026-08-21
 
 ```bash
 cd arcane-server && npx wrangler d1 time-travel info arcane-db
 ```
 Write the reported bookmark down in the run notes. This is the only rollback for a failed migration; do not skip it.
+
+**BOOKMARK (2026-08-21, prod `arcane-db`):**
+`000000b7-00000002-000050ce-ab27bfa69a3b9490ca31447b015226cd`
+
+Restore with:
+```bash
+npx wrangler d1 time-travel restore arcane-db --bookmark=000000b7-00000002-000050ce-ab27bfa69a3b9490ca31447b015226cd
+```
 
 - [ ] **Step 2: OWNER — register the production GitHub OAuth App**
 
