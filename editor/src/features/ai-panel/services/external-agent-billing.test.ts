@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'bun:test';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 /**
  * External agents run on the user's OWN provider account. A Claude turn is
@@ -15,7 +16,10 @@ import path from 'node:path';
  * backends by routing the external one through `arcane-stream.ts`.
  */
 
-const HERE = path.dirname(new URL(import.meta.url).pathname);
+// `fileURLToPath`, never `new URL(...).pathname`: on Windows the latter yields
+// "/D:/a/…", a path with a leading slash that every fs call rejects. Caught by
+// CI on windows-latest, which is the only place it reproduces.
+const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../../..');
 
 /** Every file that runs as part of an external-agent turn. */
@@ -49,6 +53,11 @@ function code(file: string): string {
     .replace(/(^|[^:])\/\/.*$/gm, '$1');
 }
 
+/** Repo-relative and POSIX-separated, so assertions read the same on Windows. */
+function rel(file: string): string {
+  return path.relative(SRC, file).split(path.sep).join('/');
+}
+
 function collect(target: string): string[] {
   const stat = statSync(target);
   if (stat.isFile()) return target.endsWith('.ts') || target.endsWith('.tsx') ? [target] : [];
@@ -65,15 +74,13 @@ describe('external agents never bill Arcane credits', () => {
   for (const marker of BILLING_MARKERS) {
     it(`no external-agent source references ${marker}`, () => {
       const offenders = files.filter((f) => code(f).includes(marker));
-      expect(offenders.map((f) => path.relative(SRC, f))).toEqual([]);
+      expect(offenders.map(rel)).toEqual([]);
     });
   }
 
   it('only the Arcane stream records session usage', () => {
     const all = collect(SRC).filter((f) => !f.endsWith('.test.ts'));
     const callers = all.filter((f) => /recordSessionUsage\s*\(/.test(code(f)));
-    expect(callers.map((f) => path.relative(SRC, f)).sort()).toEqual([
-      'features/ai-panel/services/arcane-stream.ts',
-    ]);
+    expect(callers.map(rel).sort()).toEqual(['features/ai-panel/services/arcane-stream.ts']);
   });
 });
