@@ -27,7 +27,17 @@ export interface TerminalInstance {
 interface TerminalState extends GroupsState {
   terminals: TerminalInstance[];
 
-  createTerminal: (cwd: string, shell?: string) => Promise<number | null>;
+  /**
+   * Open a terminal tab. `options.args` runs a specific program instead of the
+   * user's login shell — used for an external agent's interactive sign-in,
+   * where the tab IS the auth flow — and `options.name` labels that tab for
+   * what it is rather than "zsh 3".
+   */
+  createTerminal: (
+    cwd: string,
+    shell?: string,
+    options?: { args?: string[]; name?: string },
+  ) => Promise<number | null>;
   splitTerminal: (sourceId: number) => Promise<number | null>;
   killTerminal: (id: number) => Promise<void>;
   killGroup: (groupId: number) => Promise<void>;
@@ -58,7 +68,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   activeGroupId: null,
   activeTerminalId: null,
 
-  createTerminal: async (cwd: string, shell?: string) => {
+  createTerminal: async (cwd: string, shell?: string, options?: { args?: string[]; name?: string }) => {
     // `terminal_spawn` is async, so two callers that both saw an empty list —
     // the toggle command and the panel's auto-spawn effect, on the very first
     // reveal — would each spawn a shell and the user would get two tabs from
@@ -73,6 +83,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       id = await invoke<number>('terminal_spawn', {
         cwd,
         shell: shell ?? null,
+        args: options?.args ?? null,
         rows: 24,
         cols: 80,
       });
@@ -88,7 +99,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     const count = get().terminals.length + 1;
     const instance: TerminalInstance = {
       id,
-      name: `${shellName} ${count}`,
+      name: options?.name ?? `${shellName} ${count}`,
       isAlive: true,
       cwd,
     };

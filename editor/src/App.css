@@ -5073,6 +5073,21 @@ html, body, #root {
   background: transparent;
 }
 
+/* Why an external agent row is locked, next to its name — "Paid plans",
+   "Offline", "Sign in". Reads at a glance without opening the tooltip. */
+.ai-panel-agent-menu-badge {
+  margin-left: 6px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  background: var(--bg-tertiary, rgba(255, 255, 255, 0.06));
+  vertical-align: middle;
+}
+
 /* ---- AI Panel: System message (status/info, mid-thread) ---- */
 .ai-panel-system-message {
   margin: 8px 12px;

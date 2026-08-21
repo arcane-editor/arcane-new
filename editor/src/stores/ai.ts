@@ -4,6 +4,11 @@
  */
 
 import { create } from 'zustand';
+import type {
+  AuthMethod,
+  AvailableCommand,
+  SessionConfigOption,
+} from '../features/acp';
 import {
   generateSessionId,
   saveSession,
@@ -213,6 +218,39 @@ interface AiState {
 
   // Which backend the chat is using.
   selectedAgent: AgentKind;
+
+  /**
+   * External-agent (ACP) session state. All of it is scoped to one connected
+   * agent and is meaningless while `selectedAgent === 'arcane'`, but it lives
+   * flat here — rather than in a nested object — so the existing per-key
+   * subscription pattern keeps working and a re-render is scoped to the field
+   * that actually changed.
+   */
+
+  /**
+   * The agent's own session id, needed to resume a thread with its full
+   * context via `session/load`. Distinct from `sessionId`, which is Arcane's
+   * transcript id, and persisted alongside it.
+   */
+  acpSessionId: string | null;
+  /**
+   * Settings the agent advertises (mode, model, effort, …). Rendered
+   * generically by `AgentConfigBar` — Arcane never hardcodes the ids or the
+   * values, because they change between agent releases.
+   */
+  agentConfigOptions: SessionConfigOption[];
+  /** Slash commands this agent session offers. */
+  agentAvailableCommands: AvailableCommand[];
+  /**
+   * Sign-in methods the agent advertises, populated only after it reports
+   * `auth_required`. Empty is meaningful: an agent that needs auth but offers
+   * no method we can drive is a dead end we must say so about.
+   */
+  agentAuthMethods: AuthMethod[];
+  /** The agent refused to start a session until the user signs in to it. */
+  agentNeedsAuth: boolean;
+  /** Whether the agent subprocess is currently alive. */
+  agentBridgeRunning: boolean;
   /**
    * Arcane's own in-loop todo list, maintained via the `todo_update` tool
    * (P3.5). `null` means "no list yet this conversation" (distinct from `[]`,
@@ -255,6 +293,14 @@ interface AiState {
   setMode: (mode: ChatMode) => void;
   setEffort: (effort: Effort) => void;
   setSelectedAgent: (agent: AgentKind) => void;
+  setAcpSessionId: (id: string | null) => void;
+  setAgentConfigOptions: (options: SessionConfigOption[]) => void;
+  setAgentAvailableCommands: (commands: AvailableCommand[]) => void;
+  setAgentAuthMethods: (methods: AuthMethod[]) => void;
+  setAgentNeedsAuth: (needsAuth: boolean) => void;
+  setAgentBridgeRunning: (running: boolean) => void;
+  /** Clear everything tied to one agent connection, keeping the transcript. */
+  resetExternalAgentSession: () => void;
   setArcanePlan: (plan: ArcanePlanEntry[] | null) => void;
   addAssistantTextMessage: (text: string) => string;
   addSystemMessage: (text: string) => string;
@@ -342,6 +388,32 @@ function sweepUnresolvedQuestions(messages: AiMessage[]): AiMessage[] {
 const SAVE_DEBOUNCE_MS = 600;
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
+/**
+ * Every field tied to ONE external-agent connection. Declared once so
+ * `resetConversation`, `loadSessionIntoStore` and an explicit disconnect can
+ * never drift apart — a stale `acpSessionId` surviving a reset would make the
+ * next `session/load` resume someone else's thread.
+ *
+ * `agentBridgeRunning` is deliberately absent: whether the subprocess is alive
+ * is a fact about the process, not about the conversation, and only the
+ * spawn/exit path may set it.
+ */
+function externalAgentReset(): Pick<
+  AiState,
+  'acpSessionId' | 'agentConfigOptions' | 'agentAvailableCommands' | 'agentAuthMethods' | 'agentNeedsAuth'
+> {
+  // Fresh arrays each call rather than a shared frozen constant: these land in
+  // store state, and handing every reset the same array instance would let one
+  // conversation's mutation leak into the next.
+  return {
+    acpSessionId: null,
+    agentConfigOptions: [],
+    agentAvailableCommands: [],
+    agentAuthMethods: [],
+    agentNeedsAuth: false,
+  };
+}
+
 function buildSaveInput(): SaveSessionInput | null {
   const state = useAiStore.getState();
   if (!state.sessionId || state.messages.length === 0) return null;
@@ -351,6 +423,7 @@ function buildSaveInput(): SaveSessionInput | null {
     effort: state.effort,
     messages: state.messages,
     agentKind: state.selectedAgent,
+    acpSessionId: state.acpSessionId,
     workspacePath: useWorkspaceStore.getState().workspacePath,
     arcanePlan: state.arcanePlan,
     plans: state.sessionPlans,
@@ -456,6 +529,12 @@ export const useAiStore = create<AiState>((set, get) => ({
   effort: 'low',
   sessionId: null,
   selectedAgent: 'arcane',
+  acpSessionId: null,
+  agentConfigOptions: [],
+  agentAvailableCommands: [],
+  agentAuthMethods: [],
+  agentNeedsAuth: false,
+  agentBridgeRunning: false,
   arcanePlan: null,
   attachments: [],
   planPhase: 'idle',
@@ -714,6 +793,7 @@ export const useAiStore = create<AiState>((set, get) => ({
       pendingPrompt: null,
       lastAttachments: [],
       sessionUsage: { input: 0, output: 0, requests: 0 },
+      ...externalAgentReset(),
     });
     useCheckpointsStore.getState().reset();
     useEditReviewStore.getState().reset();
@@ -754,6 +834,11 @@ export const useAiStore = create<AiState>((set, get) => ({
       pendingPrompt: null,
       lastAttachments: [],
       sessionUsage: { input: 0, output: 0, requests: 0 },
+      // A restored transcript is not a live agent connection: the subprocess is
+      // gone and its advertised config/commands went with it. Only
+      // `acpSessionId` survives, and only so the backend can offer to resume.
+      ...externalAgentReset(),
+      acpSessionId: session.acpSessionId ?? null,
     }));
     void useCheckpointsStore.getState().loadForSession(session.id);
     void useEditReviewStore.getState().loadForSession(session.id);
@@ -767,6 +852,15 @@ export const useAiStore = create<AiState>((set, get) => ({
   setEffort: (effort: Effort) => set({ effort }),
 
   setSelectedAgent: (agent: AgentKind) => set({ selectedAgent: agent }),
+  setAcpSessionId: (id: string | null) => set({ acpSessionId: id }),
+  setAgentConfigOptions: (options: SessionConfigOption[]) =>
+    set({ agentConfigOptions: options }),
+  setAgentAvailableCommands: (commands: AvailableCommand[]) =>
+    set({ agentAvailableCommands: commands }),
+  setAgentAuthMethods: (methods: AuthMethod[]) => set({ agentAuthMethods: methods }),
+  setAgentNeedsAuth: (needsAuth: boolean) => set({ agentNeedsAuth: needsAuth }),
+  setAgentBridgeRunning: (running: boolean) => set({ agentBridgeRunning: running }),
+  resetExternalAgentSession: () => set(externalAgentReset()),
   setArcanePlan: (plan: ArcanePlanEntry[] | null) => {
     set({ arcanePlan: plan });
     // T9: persist mid-turn todo_update calls (debounced) so a crash between

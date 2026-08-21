@@ -352,6 +352,9 @@ export interface SendMessageOptions {
 }
 
 export class AgentService {
+  /** Identifies this backend to `chat-backend.ts`'s `ChatBackend` contract. */
+  readonly kind = 'arcane' as const;
+
   private agent: Agent;
   private unsubscribe: (() => void) | null = null;
   private unsubscribeTelemetry: (() => void) | null = null;

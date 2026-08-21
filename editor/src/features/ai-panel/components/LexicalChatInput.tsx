@@ -8,6 +8,7 @@
  *   - Enter (no Shift): submit
  *   - Shift+Enter: newline
  *   - @: opens mention popover (handled by MentionTriggerPlugin)
+ *   - /: opens the external agent's slash commands (SlashTriggerPlugin)
  */
 
 import {
@@ -29,6 +30,7 @@ import ClearOnSendPlugin, {
   type ClearOnSendHandle,
 } from './lexical/ClearOnSendPlugin';
 import MentionTriggerPlugin from './lexical/MentionTriggerPlugin';
+import SlashTriggerPlugin from './lexical/SlashTriggerPlugin';
 import { MentionNode } from './lexical/MentionNode';
 import PasteImagePlugin from './lexical/PasteImagePlugin';
 import DropImagePlugin from './lexical/DropImagePlugin';
@@ -139,6 +141,7 @@ const LexicalChatInput = forwardRef<LexicalChatInputHandle, Props>(
           <EnterToSendPlugin onSend={submit} enabled={!disabled && hasText} />
           <ClearOnSendPlugin ref={clearRef} />
           <MentionTriggerPlugin />
+          <SlashTriggerPlugin />
           <PasteImagePlugin />
           <DropImagePlugin />
         </LexicalComposer>

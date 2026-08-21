@@ -42,6 +42,7 @@ import {
   nextEffort,
   restoreLatestSessionForWorkspace,
   resetAgentService,
+  disposeExternalBackends,
 } from './features/ai-panel';
 import TooltipHost from './components/TooltipHost';
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -369,6 +370,10 @@ function App() {
     // (workspacePath is still null at this point, so nothing has yet); a
     // no-op on first launch since there's no prior slot for this label.
     void invoke('terminal_reset_window');
+    // Same reasoning for external agents: an ACP subprocess is keyed by window
+    // label in the Rust process, so a webview reload leaves the previous
+    // incarnation's agent running with nobody listening to its stdout.
+    void invoke('acp_reset_window');
 
     // Zoom is applied only once settings are on disk-read, not from the
     // default: the webview starts at 1.0, so restoring a persisted level is
@@ -514,6 +519,11 @@ function App() {
       // unsubscribes its store feed). resetConversation alone never touches
       // the agent — it even sets isAgentRunning:false while one still runs.
       resetAgentService();
+      // External agents get the same treatment, and need it more: an ACP
+      // session's cwd is fixed when the session is created and cannot be
+      // moved, so a surviving subprocess would answer the new project's
+      // prompts with the old project's files.
+      void disposeExternalBackends();
       // Drop the previous workspace's transcript, then load the new one's.
       useAiStore.getState().resetConversation();
       if (next) void restoreLatestSessionForWorkspace(next);

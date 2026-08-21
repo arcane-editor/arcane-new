@@ -1,8 +1,9 @@
 use crate::sync_util::lock_recover;
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::{Read, Write};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -197,8 +198,37 @@ fn kill_pty_session(
     let _ = killer.kill();
 }
 
+/// A one-shot terminal created on an external agent's behalf via the ACP
+/// `terminal/*` methods.
+///
+/// Unlike `PtyInstance` (an interactive xterm the user types into), this runs
+/// ONE command, buffers its output into a capped in-memory ring, and captures
+/// the exit code — the shape `terminal/output` and `terminal/wait_for_exit`
+/// expect. It runs on a PTY rather than plain pipes because agents run tools
+/// that behave differently without a TTY: colour, progress bars, and anything
+/// that checks `isatty` before deciding to be interactive.
+struct AcpTerminal {
+    child: Arc<Mutex<Box<dyn portable_pty::Child + Send + Sync>>>,
+    master: Box<dyn MasterPty + Send>,
+    output: Arc<Mutex<Vec<u8>>>,
+    truncated: Arc<AtomicBool>,
+    /// The exit code once reaped; `None` while the command is still running.
+    exit: Arc<Mutex<Option<i32>>>,
+    _reader_thread: Option<thread::JoinHandle<()>>,
+}
+
+fn kill_acp_terminal(term: &AcpTerminal) {
+    let mut child = lock_recover(&term.child);
+    let _ = child.kill();
+}
+
 struct WindowSlot {
     instances: HashMap<u32, PtyInstance>,
+    /// One-shot terminals created for an external agent (see the ACP section
+    /// at the bottom of this file). Kept in the same slot as the interactive
+    /// ones so a window teardown reaps both — an agent's `npm test` must not
+    /// outlive the window that asked for it.
+    acp: HashMap<u32, AcpTerminal>,
     next_id: u32,
 }
 
@@ -206,6 +236,7 @@ impl WindowSlot {
     fn new() -> Self {
         Self {
             instances: HashMap::new(),
+            acp: HashMap::new(),
             next_id: 1,
         }
     }
@@ -234,6 +265,11 @@ impl TerminalState {
                     // no ack is ever coming.
                     inst.fc.close();
                 }
+            }
+            // Agent terminals have no flow control to wake and no killer handle
+            // — killing the child is what ends their reader thread.
+            for (_id, term) in slot.acp.drain() {
+                kill_acp_terminal(&term);
             }
         }
     }
@@ -536,6 +572,14 @@ fn run_output_sender(
     );
 }
 
+/// Open a PTY for this window.
+///
+/// `shell` defaults to the user's login shell. `args`, when given, is the exact
+/// argv to run instead — and suppresses the `-l` login flag, because the caller
+/// wants one specific program on a real TTY rather than an interactive shell.
+/// That is what an external agent's sign-in flow needs: its CLI login is a TUI,
+/// so it has to run on a PTY the user can actually type into, and reusing the
+/// terminal panel means it lands in a tab they already know how to use.
 #[tauri::command]
 pub fn terminal_spawn(
     app_handle: AppHandle,
@@ -543,6 +587,7 @@ pub fn terminal_spawn(
     state: tauri::State<'_, TerminalState>,
     cwd: String,
     shell: Option<String>,
+    args: Option<Vec<String>>,
     rows: Option<u16>,
     cols: Option<u16>,
 ) -> Result<u32, String> {
@@ -577,9 +622,20 @@ pub fn terminal_spawn(
         cmd.env(key, value);
     }
 
-    #[cfg(unix)]
-    {
-        cmd.arg("-l");
+    match args {
+        Some(argv) => {
+            for arg in argv {
+                cmd.arg(arg);
+            }
+        }
+        None => {
+            // A login shell, so the user's profile (and therefore their PATH,
+            // aliases and prompt) is what they see in the terminal panel.
+            #[cfg(unix)]
+            {
+                cmd.arg("-l");
+            }
+        }
     }
 
     // Take the writer and reader BEFORE spawning. Both can fail, and on the
@@ -857,6 +913,269 @@ pub fn terminal_clipboard_image_to_temp(app_handle: AppHandle) -> Result<Option<
         .map_err(|e| format!("Failed to finish PNG: {}", e))?;
 
     Ok(Some(path.to_string_lossy().into_owned()))
+}
+
+// ── ACP terminals (`terminal/*` from an external agent) ──────────────────────
+//
+// These run a specific command rather than a login shell, buffer output into a
+// capped ring, and capture the exit code. Output is pulled (`terminal/output`)
+// rather than pushed, because ACP's contract is that the agent asks — so there
+// is no event, no flow control, and no ack protocol here.
+
+/// 1 MiB. Generous enough for a test run's output, small enough that a runaway
+/// command cannot exhaust memory. An agent may request less, never more than it
+/// asks for, and never less than 1 KiB.
+const ACP_DEFAULT_OUTPUT_LIMIT: usize = 1024 * 1024;
+
+#[derive(Deserialize)]
+pub struct AcpEnvVar {
+    name: String,
+    value: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcpTerminalOutputResult {
+    output: String,
+    truncated: bool,
+    exited: bool,
+    exit_code: Option<i32>,
+    signal: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcpTerminalWaitResult {
+    exit_code: Option<i32>,
+    signal: Option<String>,
+}
+
+#[tauri::command]
+pub fn acp_terminal_create(
+    window: Window,
+    state: tauri::State<'_, TerminalState>,
+    command: String,
+    args: Vec<String>,
+    cwd: Option<String>,
+    env: Vec<AcpEnvVar>,
+    output_byte_limit: Option<usize>,
+) -> Result<u32, String> {
+    let label = window.label().to_string();
+    let id = {
+        let mut map = lock_recover(&state.windows);
+        let slot = map.entry(label.clone()).or_insert_with(WindowSlot::new);
+        let current = slot.next_id;
+        slot.next_id += 1;
+        current
+    };
+
+    let pty_system = native_pty_system();
+    let pair = pty_system
+        .openpty(PtySize {
+            rows: 24,
+            cols: 80,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .map_err(|e| format!("Failed to open PTY: {}", e))?;
+
+    let mut cmd = CommandBuilder::new(&command);
+    for arg in &args {
+        cmd.arg(arg);
+    }
+    if let Some(dir) = cwd.as_ref().filter(|d| !d.is_empty()) {
+        cmd.cwd(dir);
+    }
+    // Inherit the parent environment, force a real terminfo entry, then apply
+    // the agent's overrides last so they win.
+    for (key, value) in std::env::vars() {
+        cmd.env(key, value);
+    }
+    cmd.env("TERM", "xterm-256color");
+    cmd.env("COLORTERM", "truecolor");
+    for ev in &env {
+        cmd.env(&ev.name, &ev.value);
+    }
+    // Note the absence of `-l`: this is a direct command, not a login shell.
+
+    let child = pair
+        .slave
+        .spawn_command(cmd)
+        .map_err(|e| format!("Failed to run '{}': {}", command, e))?;
+
+    let mut reader = pair
+        .master
+        .try_clone_reader()
+        .map_err(|e| format!("Failed to clone PTY reader: {}", e))?;
+
+    let limit = output_byte_limit
+        .unwrap_or(ACP_DEFAULT_OUTPUT_LIMIT)
+        .max(1024);
+    let output = Arc::new(Mutex::new(Vec::<u8>::new()));
+    let truncated = Arc::new(AtomicBool::new(false));
+    let exit = Arc::new(Mutex::new(None::<i32>));
+    let child = Arc::new(Mutex::new(child));
+
+    let output_c = output.clone();
+    let truncated_c = truncated.clone();
+    let exit_c = exit.clone();
+    let child_c = child.clone();
+    let reader_thread = thread::spawn(move || {
+        let mut buf = [0u8; 4096];
+        loop {
+            match reader.read(&mut buf) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => {
+                    let mut out = lock_recover(&output_c);
+                    if out.len() >= limit {
+                        truncated_c.store(true, Ordering::Relaxed);
+                    } else {
+                        let space = limit - out.len();
+                        if n <= space {
+                            out.extend_from_slice(&buf[..n]);
+                        } else {
+                            // Keep the head, not the tail: the agent asked for a
+                            // byte limit, and a command's first output is where
+                            // its errors usually are.
+                            out.extend_from_slice(&buf[..space]);
+                            truncated_c.store(true, Ordering::Relaxed);
+                        }
+                    }
+                }
+            }
+        }
+        // EOF on the PTY. Poll for the exit status rather than blocking on
+        // wait(), so a concurrent `terminal/kill` can still take the child lock.
+        loop {
+            {
+                let mut ch = lock_recover(&child_c);
+                match ch.try_wait() {
+                    Ok(Some(status)) => {
+                        *lock_recover(&exit_c) = Some(status.exit_code() as i32);
+                        break;
+                    }
+                    Ok(None) => {}
+                    Err(_) => {
+                        *lock_recover(&exit_c) = Some(-1);
+                        break;
+                    }
+                }
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
+    });
+
+    let term = AcpTerminal {
+        child,
+        master: pair.master,
+        output,
+        truncated,
+        exit,
+        _reader_thread: Some(reader_thread),
+    };
+
+    let mut map = lock_recover(&state.windows);
+    let slot = map.entry(label).or_insert_with(WindowSlot::new);
+    slot.acp.insert(id, term);
+    Ok(id)
+}
+
+#[tauri::command]
+pub fn acp_terminal_output(
+    window: Window,
+    state: tauri::State<'_, TerminalState>,
+    id: u32,
+) -> Result<AcpTerminalOutputResult, String> {
+    let label = window.label();
+    let map = lock_recover(&state.windows);
+    let slot = map
+        .get(label)
+        .ok_or_else(|| format!("No terminal slot for window {}", label))?;
+    let term = slot
+        .acp
+        .get(&id)
+        .ok_or_else(|| format!("Agent terminal {} not found", id))?;
+
+    let bytes = lock_recover(&term.output).clone();
+    // Lossy on purpose: the buffer is capped mid-stream, so its tail can be a
+    // partial UTF-8 sequence. Replacement characters beat refusing to report.
+    let output = String::from_utf8_lossy(&bytes).to_string();
+    let exit_code = *lock_recover(&term.exit);
+    Ok(AcpTerminalOutputResult {
+        output,
+        truncated: term.truncated.load(Ordering::Relaxed),
+        exited: exit_code.is_some(),
+        exit_code,
+        signal: None,
+    })
+}
+
+#[tauri::command]
+pub async fn acp_terminal_wait(
+    window: Window,
+    state: tauri::State<'_, TerminalState>,
+    id: u32,
+) -> Result<AcpTerminalWaitResult, String> {
+    let label = window.label().to_string();
+    loop {
+        {
+            let map = lock_recover(&state.windows);
+            let slot = map
+                .get(&label)
+                .ok_or_else(|| format!("No terminal slot for window {}", label))?;
+            let term = slot
+                .acp
+                .get(&id)
+                .ok_or_else(|| format!("Agent terminal {} not found", id))?;
+            // Bound to a local first: an `if let` on the deref would keep the
+            // MutexGuard temporary alive to the end of the block, outliving the
+            // `map` guard it borrows from.
+            let exit_code = *lock_recover(&term.exit);
+            if let Some(code) = exit_code {
+                return Ok(AcpTerminalWaitResult {
+                    exit_code: Some(code),
+                    signal: None,
+                });
+            }
+        }
+        // Every guard above is released before this await. Holding a std Mutex
+        // across an await point would deadlock the whole terminal subsystem.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+#[tauri::command]
+pub fn acp_terminal_kill(
+    window: Window,
+    state: tauri::State<'_, TerminalState>,
+    id: u32,
+) -> Result<(), String> {
+    let label = window.label();
+    let map = lock_recover(&state.windows);
+    if let Some(term) = map.get(label).and_then(|slot| slot.acp.get(&id)) {
+        kill_acp_terminal(term);
+    }
+    Ok(())
+}
+
+/// Drop a terminal the agent is finished with. Kills it first: ACP lets an
+/// agent release a terminal it never waited on, and a released handle with a
+/// live process behind it is a leak.
+#[tauri::command]
+pub fn acp_terminal_release(
+    window: Window,
+    state: tauri::State<'_, TerminalState>,
+    id: u32,
+) -> Result<(), String> {
+    let label = window.label();
+    let mut map = lock_recover(&state.windows);
+    if let Some(slot) = map.get_mut(label) {
+        if let Some(term) = slot.acp.remove(&id) {
+            kill_acp_terminal(&term);
+            drop(term.master);
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

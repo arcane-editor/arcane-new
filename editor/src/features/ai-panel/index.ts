@@ -13,6 +13,21 @@ export {
 export type { SessionData, SessionSummary, SaveSessionInput, PlanRef } from './services/session-persistence';
 export { restoreLatestSessionForWorkspace } from './services/session-restore';
 export { resetAgentService } from './services/agent-service';
+// External agents (ACP). `disposeExternalBackends` is exported for App.tsx's
+// workspace-change teardown, which must kill an agent pinned to the folder the
+// user just left.
+export {
+  disposeExternalBackends,
+  getChatBackend,
+  sendChatMessage,
+  currentExternalAgentStatus,
+} from './services/chat-backend';
+export {
+  canUseExternalAgents,
+  externalAgentStatus,
+  type ExternalAgentGate,
+  type ExternalAgentStatus,
+} from './services/external-agent-gate';
 export { fixConsoleError } from './services/fix-console-error';
 export { isAiComposerFocused } from './services/composer-focus';
 export { EFFORT_ORDER, nextEffort } from './data/effort';

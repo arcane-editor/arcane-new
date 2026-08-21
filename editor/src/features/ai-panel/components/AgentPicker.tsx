@@ -1,21 +1,39 @@
 /**
- * AgentPicker — header dropdown for the chat agent. Currently only the Arcane
- * Agent (cloud) is available; the popover keeps a disabled "coming soon"
- * placeholder for future external agents.
+ * AgentPicker — header dropdown for the chat agent: the hosted Arcane agent, or
+ * an external one connected over ACP.
+ *
+ * External agents are a paid-plan feature, and the row for one is always
+ * RENDERED — never hidden — with the single reason it is unavailable shown in
+ * place of its description. Hiding it would leave a paid feature undiscoverable;
+ * showing "Upgrade" to someone who is merely offline would be worse, which is
+ * why the reason comes from `externalAgentStatus` rather than a plan check.
  *
  * Matches the Zed pattern: clickable label with a chevron in the panel header.
  */
 
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ChevronDown, Sparkles, Check, Plus } from 'lucide-react';
+import { ChevronDown, Sparkles, Check, Lock, Terminal, RefreshCw } from 'lucide-react';
 import { useAiStore } from '../../../stores/ai';
+import { useAuthStore } from '../../../stores/auth';
+import { useConnectivityStore } from '../../../stores/connectivity';
+import {
+  externalAgentStatus,
+  showsUpgradeCta,
+  showsRetryCta,
+  EXTERNAL_AGENT_STATUS_LABEL,
+  EXTERNAL_AGENT_STATUS_TITLE,
+} from '../services/external-agent-gate';
+import { disposeExternalBackends } from '../services/chat-backend';
 import type { AgentKind } from '../services/types';
 
 interface AgentOption {
   value: AgentKind;
   label: string;
   description: string;
+  icon: typeof Sparkles;
+  /** External agents run locally, are plan-gated, and bill through their own provider. */
+  external: boolean;
 }
 
 const AGENTS: AgentOption[] = [
@@ -23,6 +41,15 @@ const AGENTS: AgentOption[] = [
     value: 'arcane',
     label: 'Arcane Agent',
     description: 'Hosted agent using your Arcane account.',
+    icon: Sparkles,
+    external: false,
+  },
+  {
+    value: 'claude',
+    label: 'Claude Code',
+    description: 'Runs locally with your own Claude account.',
+    icon: Terminal,
+    external: true,
   },
 ];
 
@@ -32,6 +59,14 @@ function AgentPicker() {
   const selectedAgent = useAiStore((s) => s.selectedAgent);
   const setSelectedAgent = useAiStore((s) => s.setSelectedAgent);
   const isAgentRunning = useAiStore((s) => s.isAgentRunning);
+
+  // Subscribed per field so the row's locked state follows a plan refresh or a
+  // connectivity flip without the panel re-rendering for unrelated changes.
+  const loggedIn = useAuthStore((s) => s.loggedIn);
+  const plan = useAuthStore((s) => s.plan);
+  const online = useConnectivityStore((s) => s.online);
+  const externalStatus = externalAgentStatus({ loggedIn, online, plan });
+  const externalAvailable = externalStatus === 'available';
 
   const [open, setOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -80,7 +115,14 @@ function AgentPicker() {
   }, [open]);
 
   function pick(value: AgentKind) {
+    const option = AGENTS.find((a) => a.value === value);
+    if (option?.external && !externalAvailable) return;
+
     if (value !== selectedAgent) {
+      // Switching away from an external agent kills its subprocess. Leaving it
+      // running would hold a workspace lock and an idle model session for a
+      // conversation the user has moved on from.
+      if (selectedAgent !== 'arcane') void disposeExternalBackends();
       setSelectedAgent(value);
     }
     setOpen(false);
@@ -128,23 +170,43 @@ function AgentPicker() {
           >
             {AGENTS.map((a) => {
               const selected = selectedAgent === a.value;
+              const locked = a.external && !externalAvailable;
+              const Icon = a.icon;
               return (
                 <button
                   key={a.value}
                   type="button"
                   role="menuitemradio"
                   aria-checked={selected}
-                  className={`ai-panel-mode-menu-item ${selected ? 'is-selected' : ''}`}
+                  aria-disabled={locked}
+                  className={`ai-panel-mode-menu-item ${selected ? 'is-selected' : ''} ${
+                    locked ? 'is-disabled' : ''
+                  }`}
+                  disabled={locked}
+                  title={locked ? EXTERNAL_AGENT_STATUS_TITLE[externalStatus] : a.description}
                   onClick={() => pick(a.value)}
                 >
                   <span className="ai-panel-mode-menu-icon">
-                    <Sparkles size={14} strokeWidth={2} />
+                    {locked ? (
+                      <Lock size={14} strokeWidth={2} />
+                    ) : (
+                      <Icon size={14} strokeWidth={2} />
+                    )}
                   </span>
                   <span className="ai-panel-mode-menu-text">
-                    <span className="ai-panel-mode-menu-label">{a.label}</span>
-                    <span className="ai-panel-mode-menu-desc">{a.description}</span>
+                    <span className="ai-panel-mode-menu-label">
+                      {a.label}
+                      {locked && (
+                        <span className="ai-panel-agent-menu-badge">
+                          {EXTERNAL_AGENT_STATUS_LABEL[externalStatus]}
+                        </span>
+                      )}
+                    </span>
+                    <span className="ai-panel-mode-menu-desc">
+                      {locked ? EXTERNAL_AGENT_STATUS_TITLE[externalStatus] : a.description}
+                    </span>
                   </span>
-                  {selected && (
+                  {selected && !locked && (
                     <Check
                       size={13}
                       className="ai-panel-mode-menu-check"
@@ -155,21 +217,57 @@ function AgentPicker() {
               );
             })}
 
-            <div className="ai-panel-agent-menu-section">More</div>
-            <button
-              type="button"
-              className="ai-panel-mode-menu-item is-disabled"
-              disabled
-              title="Additional agents (Gemini, Codex…) coming soon"
-            >
-              <span className="ai-panel-mode-menu-icon">
-                <Plus size={14} strokeWidth={2} />
-              </span>
-              <span className="ai-panel-mode-menu-text">
-                <span className="ai-panel-mode-menu-label">Add More Agents</span>
-                <span className="ai-panel-mode-menu-desc">Coming soon</span>
-              </span>
-            </button>
+            {showsRetryCta(externalStatus) && (
+              <>
+                <div className="ai-panel-agent-menu-section">More</div>
+                <button
+                  type="button"
+                  className="ai-panel-mode-menu-item"
+                  onClick={() => {
+                    setOpen(false);
+                    // `plan` is only ever in memory, so the fix for both of
+                    // these states is one successful /v1/usage.
+                    void useAuthStore.getState().refreshUsage();
+                  }}
+                >
+                  <span className="ai-panel-mode-menu-icon">
+                    <RefreshCw size={14} strokeWidth={2} />
+                  </span>
+                  <span className="ai-panel-mode-menu-text">
+                    <span className="ai-panel-mode-menu-label">Check again</span>
+                    <span className="ai-panel-mode-menu-desc">
+                      Re-check your plan with the Arcane server.
+                    </span>
+                  </span>
+                </button>
+              </>
+            )}
+
+            {showsUpgradeCta(externalStatus) && (
+              <>
+                <div className="ai-panel-agent-menu-section">More</div>
+                <button
+                  type="button"
+                  className="ai-panel-mode-menu-item"
+                  onClick={() => {
+                    setOpen(false);
+                    // Purchases happen on the website, never in the app —
+                    // matching every other upgrade path in the editor.
+                    void useAuthStore.getState().openBilling();
+                  }}
+                >
+                  <span className="ai-panel-mode-menu-icon">
+                    <Sparkles size={14} strokeWidth={2} />
+                  </span>
+                  <span className="ai-panel-mode-menu-text">
+                    <span className="ai-panel-mode-menu-label">Upgrade plan</span>
+                    <span className="ai-panel-mode-menu-desc">
+                      Unlock Claude Code and more
+                    </span>
+                  </span>
+                </button>
+              </>
+            )}
           </div>,
           document.body,
         )}

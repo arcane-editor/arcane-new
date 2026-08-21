@@ -14,6 +14,7 @@ mod unity_tests;
 mod unity_ipc;
 mod unity_journal;
 mod dap;
+mod acp;
 mod auth;
 mod auth_loopback;
 mod graphify;
@@ -719,6 +720,7 @@ pub fn run() {
         .manage(file_index::FileIndexState::new())
         .manage(unity_ipc::UnityIpcState::new())
         .manage(dap::DapState::new())
+        .manage(acp::AcpState::new())
         .manage(search::ContentSearchState::new())
         .manage(auth_loopback::LoopbackState::new())
         .invoke_handler(tauri::generate_handler![
@@ -798,6 +800,11 @@ pub fn run() {
             terminal::terminal_resize,
             terminal::terminal_kill,
             terminal::terminal_clipboard_image_to_temp,
+            terminal::acp_terminal_create,
+            terminal::acp_terminal_output,
+            terminal::acp_terminal_wait,
+            terminal::acp_terminal_kill,
+            terminal::acp_terminal_release,
             file_scanner::scan_all_files_v2,
             file_scanner::fuzzy_search_files,
             file_scanner::start_file_watcher,
@@ -841,6 +848,13 @@ pub fn run() {
             dap::dap_send,
             dap::dap_stop,
             dap::check_mono_installed,
+            acp::acp_probe,
+            acp::acp_install,
+            acp::acp_start,
+            acp::acp_send,
+            acp::acp_stop,
+            acp::acp_reset_window,
+            acp::acp_trace_path,
             graphify::graphify_check,
             graphify::graphify_build,
             graphify::graphify_query,
@@ -952,6 +966,15 @@ pub fn run() {
                     let label_clone = label.clone();
                     tauri::async_runtime::spawn(async move {
                         let dummy = dap::DapState(inner);
+                        dummy.drop_window(&label_clone).await;
+                    });
+                }
+                // Per-window external-agent (ACP) cleanup
+                if let Some(state) = window.try_state::<acp::AcpState>() {
+                    let inner = state.0.clone();
+                    let label_clone = label.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let dummy = acp::AcpState(inner);
                         dummy.drop_window(&label_clone).await;
                     });
                 }

@@ -13,6 +13,7 @@ import { ARCANE_FILE_MIME, parseFileDrag } from '../../../utils/drag-mime';
 import { resetAgentService } from '../services/agent-service';
 import { buildFileAttachment, isAlreadyStaged } from '../services/stage-file';
 import MessageList from './MessageList';
+import ClaudeSetupGate from './ClaudeSetupGate';
 import ReviewBar from './ReviewBar';
 import PlanList from './PlanList';
 import ChatInput from './ChatInput';
@@ -165,6 +166,12 @@ function AiChatPanel() {
           <button onClick={() => setError(null)}>x</button>
         </div>
       )}
+
+      {/* External-agent setup / sign-in. Rendered unconditionally and returns
+          null once the agent is ready — a conditional return HERE would sit
+          below the hooks and change their count when it flips (see the
+          HOOKS END HERE note above). */}
+      <ClaudeSetupGate />
 
       {/* Messages */}
       <MessageList />

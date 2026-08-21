@@ -1,6 +1,6 @@
-// Inline approval gate for the Arcane vendor loop. Two request shapes share
-// ONE pending-map/resolution flow, both rendered via the same permission-
-// request UI (`PermissionRequestBlock.tsx`):
+// Inline approval gate. Three request shapes share ONE pending-map/resolution
+// flow, all rendered via the same permission-request UI
+// (`PermissionRequestBlock.tsx`):
 //
 //  - Engine-mutate approvals (F-5.6 tier 3): Unity tools that mutate the live
 //    editor (play/stop/refresh/run_tests/execute_menu_item) block inside their
@@ -12,11 +12,17 @@
 //    calls (see `write-approval-gate.ts`), carrying a `diff` for
 //    `PermissionRequestBlock` to render via `DiffBlock`, with a third option
 //    ("Apply all this session") alongside Apply/Reject.
+//  - External-agent approvals (ACP `session/request_permission`): an agent
+//    such as Claude Code asks before running one of ITS tools. The options are
+//    whatever the agent offers, so unlike the two above they are not a fixed
+//    list. Routing them through this same map is what lets
+//    `PermissionRequestBlock` and `useAiStore.resolvePermissionRequest` serve
+//    external agents with no branch of their own.
 //
-// Both requests resolve through the SAME `pending` map + `resolvePendingApproval`
+// All three resolve through the SAME `pending` map + `resolvePendingApproval`
 // — the map holds a plain `(optionId: string) => void` per toolCallId, and
-// each request-side function (`requestEngineApproval`/`requestFileWriteApproval`)
-// maps the raw optionId to its own decision type when it resolves its promise.
+// each request-side function maps the raw optionId to its own decision type
+// when it resolves its promise.
 
 import { useAiStore } from '../../../stores/ai';
 
@@ -130,11 +136,67 @@ export function requestFileWriteApproval(
   });
 }
 
+/**
+ * Cancellers for in-flight external approvals.
+ *
+ * Kept separate from `pending` because cancelling is NOT the same as choosing a
+ * rejection: ACP distinguishes `{outcome: 'cancelled'}` from
+ * `{outcome: 'selected', optionId: <a reject option>}`, and an agent that is
+ * told "rejected" when the user actually hit Stop will apologise and try
+ * something else instead of stopping.
+ */
+const externalCancellers = new Map<string, () => void>();
+
+/** One choice an external agent offers. Mirrors ACP's `PermissionOption`. */
+export interface ExternalPermissionOption {
+  optionId: string;
+  name: string;
+  kind: 'allow_once' | 'allow_always' | 'reject_once' | 'reject_always';
+}
+
+/**
+ * Render an approval request on behalf of an external agent and resolve with
+ * the option the user picked, or `null` if the request was cancelled (the turn
+ * was stopped, or the agent died before the user answered).
+ *
+ * Unlike the two Arcane paths, the options come from the agent. They are
+ * passed through untouched — inventing or reordering choices here would
+ * misrepresent what the user is actually agreeing to.
+ */
+export function requestExternalAgentPermission(
+  toolCallId: string,
+  toolName: string | undefined,
+  options: ExternalPermissionOption[],
+  detail?: string,
+  diff?: PendingWriteDiff,
+): Promise<string | null> {
+  useAiStore.getState().addPermissionRequest(toolCallId, toolName, options, detail, diff);
+  return new Promise<string | null>((resolve) => {
+    pending.set(toolCallId, (optionId) => resolve(optionId));
+    externalCancellers.set(toolCallId, () => resolve(null));
+  });
+}
+
+/**
+ * Cancel every in-flight external approval — on turn cancel, or when the agent
+ * process dies. Also locks the rendered buttons, so no card is left live with
+ * nothing behind it.
+ */
+export function cancelExternalAgentApprovals(): void {
+  for (const [toolCallId, cancel] of externalCancellers) {
+    pending.delete(toolCallId);
+    useAiStore.getState().resolvePermissionRequest(toolCallId, 'cancelled');
+    cancel();
+  }
+  externalCancellers.clear();
+}
+
 /** Resolve a pending approval — engine-mutate or file-write (called from the permission-request UI). */
 export function resolvePendingApproval(toolCallId: string, optionId: string): void {
   const r = pending.get(toolCallId);
   if (!r) return;
   pending.delete(toolCallId);
+  externalCancellers.delete(toolCallId);
   useAiStore.getState().resolvePermissionRequest(toolCallId, optionId); // lock the buttons
   r(optionId);
 }

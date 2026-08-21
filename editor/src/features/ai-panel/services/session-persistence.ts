@@ -66,6 +66,16 @@ export interface SessionData {
    */
   planPhase?: PlanPhase;
   activePlanPath?: string | null;
+  /**
+   * The EXTERNAL agent's own session id (`agentKind !== 'arcane'`), so a
+   * reopened transcript can be resumed with its full context via ACP
+   * `session/load` rather than restarting cold.
+   *
+   * Optional and omitted for Arcane sessions, so their files keep the exact
+   * shape they had before external agents existed. A stale id is harmless:
+   * `session/load` failing is a soft-resume, not an error.
+   */
+  acpSessionId?: string | null;
 }
 
 /** Lightweight header used by the history list (no full message bodies). */
@@ -96,6 +106,8 @@ export interface SaveSessionInput {
   /** See `SessionData.planPhase` / `activePlanPath`. */
   planPhase?: PlanPhase;
   activePlanPath?: string | null;
+  /** See `SessionData.acpSessionId`. */
+  acpSessionId?: string | null;
 }
 
 let sessionsDir: string | null = null;
@@ -173,6 +185,8 @@ export function buildSessionData(input: SaveSessionInput): SessionData {
     ...(input.activePlanPath && input.planPhase && input.planPhase !== 'idle'
       ? { planPhase: input.planPhase, activePlanPath: input.activePlanPath }
       : {}),
+    // Same omission rule again: an Arcane session never carries an agent id.
+    ...(input.acpSessionId ? { acpSessionId: input.acpSessionId } : {}),
   };
 }
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { TIER_CONTEXT_WINDOWS, coerceAgentKind, coerceEffort } from './types';
+import { TIER_CONTEXT_WINDOWS, coerceAgentKind, coerceEffort, isExternalAgent } from './types';
 
 describe('TIER_CONTEXT_WINDOWS', () => {
   // These are PRICING cliffs, not model windows. Exceeding them reprices the
@@ -20,8 +20,15 @@ describe('coerceAgentKind (persisted-session migration)', () => {
     expect(coerceAgentKind('arcane')).toBe('arcane');
   });
 
-  it('coerces the removed "claude" kind to "arcane"', () => {
-    expect(coerceAgentKind('claude')).toBe('arcane');
+  it('round-trips the "claude" kind now that external agents are back', () => {
+    expect(coerceAgentKind('claude')).toBe('claude');
+  });
+
+  it('restores a Claude transcript regardless of entitlement', () => {
+    // Guards a tempting shortcut: coercing 'claude' -> 'arcane' for free-plan
+    // users would silently relabel whose turns those were. The gate belongs on
+    // the composer, not on history.
+    expect(coerceAgentKind('claude')).toBe('claude');
   });
 
   it('coerces any unknown / future kind to "arcane"', () => {
@@ -34,6 +41,13 @@ describe('coerceAgentKind (persisted-session migration)', () => {
     expect(coerceAgentKind(null)).toBe('arcane');
     expect(coerceAgentKind(42)).toBe('arcane');
     expect(coerceAgentKind({})).toBe('arcane');
+  });
+});
+
+describe('isExternalAgent', () => {
+  it('is false for the hosted agent and true for everything else', () => {
+    expect(isExternalAgent('arcane')).toBe(false);
+    expect(isExternalAgent('claude')).toBe(true);
   });
 });
 

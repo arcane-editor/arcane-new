@@ -101,6 +101,46 @@ derives its reference set from the Unity install (`unity.rs`,
 `unity_install_references`). `csproj_is_complete_without_any_unity_generated_csproj`
 is the hermetic regression test for that and needs no Unity installed.
 
+## Two agent backends now, not one
+
+The AI panel talks to either the hosted **Arcane** agent or an **external agent
+over ACP** (Agent Client Protocol — JSON-RPC 2.0 as newline-delimited JSON over a
+subprocess's stdio, the same idea as LSP but for agents). Claude Code is the only
+external agent shipped, and it is gated on a paid plan.
+
+Three rules keep this from turning into `selectedAgent === 'claude'` scattered
+through the UI, which is what made the *previous* Claude integration expensive
+enough to delete (`bce889d`):
+
+1. **`getChatBackend()` (`ai-panel/services/chat-backend.ts`) is the only place
+   that branches on the selected agent.** `ChatInput.handleSubmit` calls it;
+   nothing else should need to know which agent is running. `getAgentService()`
+   stays Arcane-only, for Arcane-only internals (plan controller, retry-turn,
+   session restore).
+2. **Meaning lives in `ai-panel`, transport lives in `features/acp`.** The `acp`
+   feature owns the protocol, the process and the install, and imports nothing
+   from `ai-panel` — the dependency runs one way (`ai-panel -> acp -> stores`).
+   A mutual barrel import between two features is what broke app startup before.
+3. **The agent describes itself; the UI renders what it is told.** Modes,
+   models and effort arrive as ACP session config options and are rendered
+   generically by `AgentConfigBar`. Do not hardcode Claude's mode or model ids —
+   the last integration went stale exactly that way.
+
+Debugging: every line in both directions is written to the trace file returned by
+the `acp_trace_path` command (`->` sent, `<-` received, `!!` error), the same
+convention as `lsp.rs`. A protocol this chatty is undebuggable without it.
+
+**Run `bun run verify:acp` when you touch any of this.** It spawns the real
+`@agentclientprotocol/claude-agent-acp`, runs `initialize` + `session/new` and
+asserts the capabilities the editor depends on. It is the same class of check as
+`verify:intellisense` and exists for the same reason: every failure this
+integration has in the field is environmental (Node too old, half-finished
+install, renamed package, expired login, protocol bump), and none of those appear
+in a diff or break a mocked test. As with IntelliSense, **a `SKIPPED` is not a
+pass** — set `ARCANE_ACP_E2E=required` to turn a skip into a failure, and
+`ARCANE_ACP_ADAPTER=<path to dist/index.js>` to point it at an adapter outside
+the managed install.
+
 ## Keybindings: always check both sides
 
 A keyboard chord can be owned in **two independent places**, and changing one does not change the other:

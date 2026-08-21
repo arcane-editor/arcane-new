@@ -10,19 +10,24 @@
  *   │ └──────────────────────────────────────────────┘   │
  *   └────────────────────────────────────────────────────┘
  *
- * The toolbar's left side hosts the Arcane ModeSelector + EffortSelector.
+ * The toolbar's left side hosts the Arcane ModeSelector + EffortSelector — or,
+ * when an external agent is selected, that agent's OWN advertised settings via
+ * AgentConfigBar. The two are mutually exclusive: mode and effort configure the
+ * Arcane loop, and an external agent neither reads them nor has an equivalent.
  */
 
 import { useEffect, useRef, useState } from 'react';
 import { ArrowUp, Square } from 'lucide-react';
 import { useAiStore, selectPendingQuestion } from '../../../stores/ai';
 import { useWorkspaceStore } from '../../../stores/workspace';
+import { getChatBackend, sendChatMessage } from '../services/chat-backend';
 import { getAgentService } from '../services/agent-service';
 import { planController } from '../services/plan-controller';
 import { shouldRouteToQuestion } from '../services/question-routing';
 import LexicalChatInput, { type LexicalChatInputHandle } from './LexicalChatInput';
 import ModeSelector from './ModeSelector';
 import EffortSelector from './EffortSelector';
+import AgentConfigBar from './AgentConfigBar';
 import AttachmentBar from './AttachmentBar';
 import ImageAttachButton from './ImageAttachButton';
 
@@ -30,6 +35,7 @@ function ChatInput() {
   const isAgentRunning = useAiStore((s) => s.isAgentRunning);
   const mode = useAiStore((s) => s.mode);
   const effort = useAiStore((s) => s.effort);
+  const selectedAgent = useAiStore((s) => s.selectedAgent);
   const planPhase = useAiStore((s) => s.planPhase);
   const activePlanPath = useAiStore((s) => s.activePlanPath);
   const addUserMessage = useAiStore((s) => s.addUserMessage);
@@ -68,6 +74,18 @@ function ChatInput() {
     addUserMessage(text, attachments);
     useAiStore.getState().clearAttachments();
 
+    // The ONE place the panel branches on which agent is selected. An external
+    // agent runs its own loop and exposes its own modes (plan, accept-edits, …)
+    // as session config options, so Arcane's plan controller — which writes
+    // .arcane/plans/*.md and swaps prompt modes on the vendor loop — has no
+    // meaning for it and is skipped entirely.
+    if (selectedAgent !== 'arcane') {
+      void sendChatMessage(text, { mode, effort, attachments }).catch((e) =>
+        useAiStore.getState().setError(String(e)),
+      );
+      return;
+    }
+
     if (mode === 'plan') {
       // Phase-aware: with a plan awaiting execution (or stuck 'executing'),
       // typed text RESUMES the remaining steps instead of re-planning — the
@@ -87,7 +105,7 @@ function ChatInput() {
   }
 
   function handleStop() {
-    getAgentService().abort();
+    getChatBackend().abort();
   }
 
   // Extended so the pending-question path is send-able even though the agent
@@ -127,8 +145,14 @@ function ChatInput() {
 
         <div className="ai-panel-composer-toolbar">
           <div className="ai-panel-composer-toolbar-left">
-            <ModeSelector />
-            <EffortSelector />
+            {selectedAgent === 'arcane' ? (
+              <>
+                <ModeSelector />
+                <EffortSelector />
+              </>
+            ) : (
+              <AgentConfigBar />
+            )}
           </div>
           <div className="ai-panel-composer-toolbar-right">
             <ImageAttachButton />

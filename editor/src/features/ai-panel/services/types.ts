@@ -10,21 +10,39 @@ export type ChatMode = 'ask' | 'agent' | 'plan';
 export type Effort = 'low' | 'mid' | 'high';
 
 /**
- * Which agent backend the panel is talking to. Only 'arcane' remains — the
- * former local Claude Code / ACP-bridge agent was removed. Kept as a named
- * type (rather than inlining the literal) so persisted-session migration and
- * future external agents have a single place to widen.
+ * Which agent backend the panel is talking to.
+ *
+ * - `'arcane'` — the hosted Arcane agent (the default, and the only one a free
+ *   plan can use).
+ * - `'claude'` — Claude Code, driven locally over the Agent Client Protocol.
+ *   Paid plans only; see `external-agent-gate.ts`.
+ *
+ * Widening this type is the single place a new external agent is registered:
+ * add the literal here, add it to `KNOWN_AGENT_KINDS` below, and give it a row
+ * in `AgentPicker`.
  */
-export type AgentKind = 'arcane';
+export type AgentKind = 'arcane' | 'claude';
+
+/** Every agent kind except the built-in hosted one. */
+export type ExternalAgentKind = Exclude<AgentKind, 'arcane'>;
+
+export function isExternalAgent(kind: AgentKind): kind is ExternalAgentKind {
+  return kind !== 'arcane';
+}
 
 /**
- * Coerce a persisted `agentKind` value (an arbitrary string read off disk —
- * older sessions carry now-removed kinds like `'claude'`) to a live
- * `AgentKind`. Anything that isn't a currently-supported kind falls back to
- * `'arcane'`, so old transcripts restore read-only and simply run as Arcane
- * rather than crashing the history list or restore path. Pure function.
+ * Coerce a persisted `agentKind` value (an arbitrary string read off disk) to
+ * a live `AgentKind`. Anything that isn't a currently-supported kind falls
+ * back to `'arcane'`, so a session written by a newer build (or a corrupted
+ * one) restores read-only as Arcane rather than crashing the history list or
+ * restore path. Pure function.
+ *
+ * NOTE: `'claude'` now round-trips. Entitlement is deliberately NOT checked
+ * here — a restored Claude transcript must still render for a user whose plan
+ * lapsed; the composer is what locks. Coercing on plan would silently rewrite
+ * history and mislabel whose turns those were.
  */
-const KNOWN_AGENT_KINDS: readonly AgentKind[] = ['arcane'];
+const KNOWN_AGENT_KINDS: readonly AgentKind[] = ['arcane', 'claude'];
 
 export function coerceAgentKind(value: unknown): AgentKind {
   return KNOWN_AGENT_KINDS.includes(value as AgentKind) ? (value as AgentKind) : 'arcane';
