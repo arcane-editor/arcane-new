@@ -20,7 +20,14 @@ export interface LongContextRates {
 }
 
 export interface ModelInfo {
-    route: 'workers-ai' | 'unified';
+    // 'workers-ai'  → @cf/* id, bills as Workers AI.
+    // 'unified'     → third-party model billed through AI Gateway unified
+    //                 billing (CF sits in the request path; wireFormat REQUIRED).
+    // 'direct'      → third-party OpenAI-compatible provider called directly
+    //                 with the owner's own key; no Cloudflare in the path, so
+    //                 no gateway fee (see usage.ts's billedMicro) and no
+    //                 wireFormat (the gateway's per-model schema never sees it).
+    route: 'workers-ai' | 'unified' | 'direct';
     /**
      * The wire format Cloudflare's run catalog serves this model in —
      * REQUIRED for every `unified` model (enforced by model-catalog.test.ts)
@@ -33,6 +40,7 @@ export interface ModelInfo {
      * The per-model source of truth is the dashboard model page's
      * "Request formats" field (AI → Models → <model>); re-probe before
      * routing any new third-party model (see the 2026-08-15 checklist).
+     * Not applicable to 'workers-ai' or 'direct' routes — stays undefined.
      */
     wireFormat?: 'chat' | 'responses';
     inputCostPer1M: number;
@@ -121,17 +129,45 @@ export const MODEL_CATALOG: Record<string, ModelInfo> = {
         inputCostPer1M: 0.02, outputCostPer1M: 0.00, cachedInputCostPer1M: 0.02,
         contextWindow: 512, maxOutput: 0,
     },
+    // High-tier planner. Same family as luna → Responses wire. Seeded at the
+    // STANDARD (post-promo) unified-billing rates so debits over-charge during
+    // the promo rather than under-charge after it; owner tunes via admin panel.
+    'openai/gpt-5.6-sol': {
+        route: 'unified', wireFormat: 'responses',
+        inputCostPer1M: 5.00, outputCostPer1M: 30.00, cachedInputCostPer1M: 0.50,
+        contextWindow: 400_000, maxOutput: 128_000,
+    },
+    // Direct OpenAI-compatible provider (owner's Spark key; no CF gateway).
+    // Output rate confirmed by owner; input/cached SEEDED = output rate as a
+    // conservative over-charge until the owner enters real prices via the
+    // admin Pricing panel. Context window conservative for the same reason.
+    'spark/muse-spark-1.2-contributor': {
+        route: 'direct',
+        inputCostPer1M: 0.20, outputCostPer1M: 0.20, cachedInputCostPer1M: 0.20,
+        contextWindow: 131_072, maxOutput: 16_384,
+    },
+    // New inline (tab-completion) model — $0.051/$0.34 per M (CF docs 2026-08),
+    // ~15% cheaper than glm-4.7-flash on the input-heavy inline mix and a much
+    // stronger coder. 32k window is ample: inline requests are capped at 32 KB.
+    '@cf/qwen/qwen3-30b-a3b-fp8': {
+        route: 'workers-ai',
+        inputCostPer1M: 0.051, outputCostPer1M: 0.34, cachedInputCostPer1M: 0.051,
+        contextWindow: 32_768, maxOutput: 8_192,
+    },
 };
 
 const DEFAULT_MAX_OUTPUT = 8192;
 const DEFAULT_CONTEXT_WINDOW = 32768;
 
-export function getMaxOutput(model: string): number {
-    return MODEL_CATALOG[model]?.maxOutput ?? DEFAULT_MAX_OUTPUT;
+// `catalog` defaults to MODEL_CATALOG; callers on the effective-pricing path
+// (see app-config.ts's getEffectivePricing) pass the merged runtime catalog
+// instead so an admin override is honoured everywhere cost is computed.
+export function getMaxOutput(model: string, catalog: Record<string, ModelInfo> = MODEL_CATALOG): number {
+    return catalog[model]?.maxOutput ?? DEFAULT_MAX_OUTPUT;
 }
 
-export function getContextWindow(model: string): number {
-    return MODEL_CATALOG[model]?.contextWindow ?? DEFAULT_CONTEXT_WINDOW;
+export function getContextWindow(model: string, catalog: Record<string, ModelInfo> = MODEL_CATALOG): number {
+    return catalog[model]?.contextWindow ?? DEFAULT_CONTEXT_WINDOW;
 }
 
 /**
@@ -143,14 +179,18 @@ export function getContextWindow(model: string): number {
  * fresh, cached and output alike — bills at the long-context rates.
  *
  * An unknown model costs 0 (and is therefore never debited).
+ *
+ * `catalog` defaults to MODEL_CATALOG; pass the merged runtime catalog from
+ * getEffectivePricing (app-config.ts) to honour an admin pricing override.
  */
 export function estimateCost(
     model: string,
     inputTokens: number,
     outputTokens: number,
     cachedTokens = 0,
+    catalog: Record<string, ModelInfo> = MODEL_CATALOG,
 ): number {
-    const info = MODEL_CATALOG[model];
+    const info = catalog[model];
     if (!info) return 0;
 
     const rates = info.longContext && inputTokens > info.longContext.thresholdTokens

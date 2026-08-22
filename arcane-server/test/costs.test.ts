@@ -41,6 +41,38 @@ describe('MODEL_CATALOG verified rates', () => {
         expect(m.outputCostPer1M).toBe(0.40);
         expect(m.contextWindow).toBe(131_072);
     });
+
+    it('gpt-5.6-sol (high-tier planner, unified/responses)', () => {
+        const m = MODEL_CATALOG['openai/gpt-5.6-sol']!;
+        expect(m.route).toBe('unified');
+        expect(m.wireFormat).toBe('responses');
+        expect(m.inputCostPer1M).toBe(5.00);
+        expect(m.outputCostPer1M).toBe(30.00);
+        expect(m.cachedInputCostPer1M).toBe(0.50);
+        expect(m.contextWindow).toBe(400_000);
+        expect(m.maxOutput).toBe(128_000);
+    });
+
+    it('spark/muse-spark-1.2-contributor (direct, no gateway)', () => {
+        const m = MODEL_CATALOG['spark/muse-spark-1.2-contributor']!;
+        expect(m.route).toBe('direct');
+        expect(m.wireFormat).toBeUndefined();
+        expect(m.inputCostPer1M).toBe(0.20);
+        expect(m.outputCostPer1M).toBe(0.20);
+        expect(m.cachedInputCostPer1M).toBe(0.20);
+        expect(m.contextWindow).toBe(131_072);
+        expect(m.maxOutput).toBe(16_384);
+    });
+
+    it('@cf/qwen/qwen3-30b-a3b-fp8 (new inline model)', () => {
+        const m = MODEL_CATALOG['@cf/qwen/qwen3-30b-a3b-fp8']!;
+        expect(m.route).toBe('workers-ai');
+        expect(m.inputCostPer1M).toBe(0.051);
+        expect(m.outputCostPer1M).toBe(0.34);
+        expect(m.cachedInputCostPer1M).toBe(0.051);
+        expect(m.contextWindow).toBe(32_768);
+        expect(m.maxOutput).toBe(8_192);
+    });
 });
 
 describe('estimateCost', () => {
@@ -77,6 +109,22 @@ describe('estimateCost', () => {
     it('returns 0 for an unknown model', () => {
         expect(estimateCost('nope/nope', 1000, 1000, 0)).toBe(0);
     });
+
+    it('accepts an injectable catalog that overrides the default MODEL_CATALOG', () => {
+        const overrideCatalog = {
+            ...MODEL_CATALOG,
+            '@cf/zai-org/glm-5.2': { ...MODEL_CATALOG['@cf/zai-org/glm-5.2']!, outputCostPer1M: 999.0 },
+        };
+        const overridden = estimateCost('@cf/zai-org/glm-5.2', 0, 1_000, 0, overrideCatalog);
+        const stock = estimateCost('@cf/zai-org/glm-5.2', 0, 1_000, 0); // default arg -> MODEL_CATALOG
+        expect(overridden).toBeCloseTo((1_000 * 999.0) / 1e6, 10);
+        expect(stock).toBeCloseTo((1_000 * 4.40) / 1e6, 10);
+        expect(overridden).not.toBe(stock);
+    });
+
+    it('a model absent from an injected catalog costs 0 even if it exists in MODEL_CATALOG', () => {
+        expect(estimateCost('@cf/zai-org/glm-5.2', 1000, 1000, 0, {})).toBe(0);
+    });
 });
 
 describe('lookups', () => {
@@ -87,5 +135,21 @@ describe('lookups', () => {
 
     it('getMaxOutput falls back to 8192', () => {
         expect(getMaxOutput('nope/nope')).toBe(8192);
+    });
+
+    it('getContextWindow/getMaxOutput accept an injectable catalog', () => {
+        const fixture = { 'custom/model': { ...MODEL_CATALOG['@cf/zai-org/glm-5.2']!, contextWindow: 1234, maxOutput: 55 } };
+        expect(getContextWindow('custom/model', fixture)).toBe(1234);
+        expect(getMaxOutput('custom/model', fixture)).toBe(55);
+        // Absent from the injected catalog -> falls back to the DEFAULT, not MODEL_CATALOG's entry.
+        expect(getContextWindow('xai/grok-4.6', fixture)).toBe(32_768);
+    });
+});
+
+describe('route type', () => {
+    it("'direct' is a valid route (spark provider) alongside 'workers-ai' and 'unified'", () => {
+        expect(MODEL_CATALOG['spark/muse-spark-1.2-contributor']!.route).toBe('direct');
+        expect(MODEL_CATALOG['@cf/zai-org/glm-5.2']!.route).toBe('workers-ai');
+        expect(MODEL_CATALOG['xai/grok-4.6']!.route).toBe('unified');
     });
 });

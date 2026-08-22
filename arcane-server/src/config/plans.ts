@@ -11,6 +11,13 @@
 //
 // Internal keys stay low/mid/high; only the labels are user-facing. The
 // legacy `super` wire value maps to `high` (see getIntensityConfig).
+//
+// NOTE: INTENSITY_CONFIG/INLINE_MODEL below are the CURRENT routing (still
+// consumed directly by routing.ts/inline.ts). DEFAULT_MODEL_ROUTING further
+// down is the NEW routing shape (app-config.ts's ModelRoutingDoc) — the seed
+// a later task swaps the consumers over to; it is not yet wired to any route.
+
+import type { ModelRoutingDoc } from '../lib/app-config.ts';
 
 export type Intensity = 'low' | 'mid' | 'high';
 
@@ -55,3 +62,18 @@ export function getIntensityConfig(level: string): IntensityConfig | undefined {
     const normalized = level === 'super' ? 'high' : level;
     return INTENSITY_CONFIG[normalized as Intensity];
 }
+
+/** Direct OpenAI-compatible provider (owner's Spark key; no CF gateway) — see
+ *  costs.ts's MODEL_CATALOG entry for pricing/route detail. */
+export const SPARK_MODEL = 'spark/muse-spark-1.2-contributor';
+
+/** Code-default model routing — served whenever the app_config table has no
+ *  valid 'model_routing' doc. The admin panel overrides at runtime. */
+export const DEFAULT_MODEL_ROUTING: ModelRoutingDoc = {
+    tiers: {
+        low:  { planner: SPARK_MODEL, executor: SPARK_MODEL },
+        mid:  { planner: 'xai/grok-4.6', executor: SPARK_MODEL },
+        high: { planner: 'openai/gpt-5.6-sol', executor: SPARK_MODEL, executorHard: 'xai/grok-4.6' },
+    },
+    inline: '@cf/qwen/qwen3-30b-a3b-fp8',
+};

@@ -1,10 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import { env } from 'cloudflare:test';
 import { recordUsage } from '../src/lib/usage.ts';
-import { estimateCost } from '../src/lib/costs.ts';
+import { estimateCost, MODEL_CATALOG } from '../src/lib/costs.ts';
 import { getCurrentPeriodStart, getUserBillingRow } from '../src/lib/db.ts';
 import { usdToMicro } from '../src/config/tiers.ts';
 import { seedPasswordUser } from './helpers.ts';
+import { putConfigDoc, clearConfigCache } from '../src/lib/app-config.ts';
 
 // recordUsage is the shared metering path for ALL four AI routes. The test env
 // has no AI binding, so we exercise the helper directly against the test D1
@@ -101,6 +102,37 @@ describe('recordUsage', () => {
         ).bind(user.id).first<{ fallback_model: string | null }>();
         expect(log?.fallback_model).toBe('@cf/qwen/qwen2.5-coder-32b-instruct');
     });
+
+    it('honours an admin model_pricing override end-to-end (cost logged + credits debited)', async () => {
+        clearConfigCache();
+        const user = await seedPasswordUser('usage-pricing-override@test.dev', 'password123');
+        await env.arcane_db.prepare(
+            "UPDATE users SET plan = 'pro', plan_credits_micro = ?, plan_period_end = '2099-01-01T00:00:00.000Z' WHERE id = ?"
+        ).bind(10_000_000, user.id).run();
+
+        const model = '@cf/zai-org/glm-5.2';
+        await putConfigDoc(env.arcane_db, 'model_pricing', {
+            models: { [model]: { ...MODEL_CATALOG[model]!, outputCostPer1M: 50.0 } },
+            gatewayFee: 1.05,
+            margin: 1.0,
+        });
+
+        const inTok = 0, outTok = 1_000;
+        await recordUsage(env.arcane_db, user.id, model, inTok, outTok, 5);
+
+        const overriddenCost = (outTok * 50.0) / 1e6; // 0.05
+        const row = await env.arcane_db.prepare(
+            'SELECT cost_usd FROM request_logs WHERE user_id = ? ORDER BY id DESC LIMIT 1'
+        ).bind(user.id).first<{ cost_usd: number }>();
+        expect(row!.cost_usd).toBeCloseTo(overriddenCost, 9);
+        // Sanity: NOT the static (unmerged) cost, which would be far smaller.
+        expect(row!.cost_usd).not.toBeCloseTo(estimateCost(model, inTok, outTok), 9);
+
+        const billing = await getUserBillingRow(env.arcane_db, user.id);
+        expect(billing!.plan_credits_micro).toBe(10_000_000 - usdToMicro(overriddenCost * 1.05 * 1.0));
+
+        clearConfigCache(); // leave a clean cache for any test file sharing this isolate
+    });
 });
 
 import { billedMicro } from '../src/lib/usage.ts';
@@ -128,5 +160,36 @@ describe('billedMicro', () => {
         const below = billedMicro('xai/grok-4.6', 200_000, 1_000, 0);
         const above = billedMicro('xai/grok-4.6', 200_001, 1_000, 0);
         expect(above).toBeGreaterThan(below * 1.9);
+    });
+
+    it('a route:direct model (spark) is never charged the gateway fee, static path', () => {
+        const cost = estimateCost('spark/muse-spark-1.2-contributor', 100_000, 1_000, 0);
+        const micro = billedMicro('spark/muse-spark-1.2-contributor', 100_000, 1_000, 0);
+        // No GATEWAY_FEE applied; MARGIN is 1.0, so this is just usdToMicro(cost).
+        expect(micro).toBe(usdToMicro(cost));
+    });
+
+    it('a route:workers-ai model IS charged the gateway fee, static path', () => {
+        const cost = estimateCost('@cf/zai-org/glm-4.7-flash', 100_000, 1_000, 0);
+        const micro = billedMicro('@cf/zai-org/glm-4.7-flash', 100_000, 1_000, 0);
+        expect(micro).toBe(usdToMicro(cost * 1.05));
+    });
+
+    it('accepts an EffectivePricing override: merged catalog + route-aware fee + margin', () => {
+        const pricing = {
+            catalog: { ...MODEL_CATALOG, '@cf/zai-org/glm-5.2': { ...MODEL_CATALOG['@cf/zai-org/glm-5.2']!, outputCostPer1M: 10 } },
+            gatewayFee: 2,
+            margin: 2,
+        };
+        const micro = billedMicro('@cf/zai-org/glm-5.2', 0, 1_000, 0, pricing);
+        // cost = 1000 * 10 / 1e6 = 0.01; * gatewayFee(2) * margin(2) = 0.04 -> 40_000 micro
+        expect(micro).toBe(usdToMicro(0.01 * 2 * 2));
+    });
+
+    it('waives the gateway fee for a route:direct model even with an EffectivePricing override', () => {
+        const pricing = { catalog: MODEL_CATALOG, gatewayFee: 3, margin: 1 };
+        const micro = billedMicro('spark/muse-spark-1.2-contributor', 100_000, 1_000, 0, pricing);
+        const cost = estimateCost('spark/muse-spark-1.2-contributor', 100_000, 1_000, 0, MODEL_CATALOG);
+        expect(micro).toBe(usdToMicro(cost)); // fee waived despite gatewayFee: 3
     });
 });
