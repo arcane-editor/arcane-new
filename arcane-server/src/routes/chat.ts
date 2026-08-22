@@ -7,6 +7,7 @@ import { resolveModelForSend } from '../config/routing.ts';
 import { isTierAllowed, minPlanForTier, TIERS } from '../config/tiers.ts';
 import { checkAiBudget } from '../lib/credits.ts';
 import { getUserBillingRow } from '../lib/db.ts';
+import { getModelRouting, getEffectivePricing } from '../lib/app-config.ts';
 import { recordUsage } from '../lib/usage.ts';
 import { logChatError } from '../lib/log.ts';
 import type { AuthPayload } from '../middleware/auth.ts';
@@ -53,23 +54,34 @@ chatRouter.post('/v1/chat/completions', async (c) => {
     const budget = await checkAiBudget(c.env.arcane_db, userId);
     if (!budget.ok) return c.json({ error: budget.error, code: budget.code }, budget.status);
 
-    // Resolve model — task-aware routing (config/routing.ts). Model choice is
-    // 100% backend: the editor sends an abstract reasoningLevel + routing
-    // signals; the concrete model id is chosen here. Routing only ever moves
-    // DOWN from the entitlement-gated tier (or to the inline side-task lane),
-    // so the isTierAllowed gate above stays authoritative.
+    // Resolve model — config-driven routing (config/routing.ts against the
+    // runtime `model_routing` doc, lib/app-config.ts). Model choice is 100%
+    // backend: the editor sends an abstract reasoningLevel + routing signals;
+    // the concrete model id is chosen here against the already-gated tier, so
+    // the isTierAllowed gate above stays authoritative for what was REQUESTED.
+    const routingDoc = await getModelRouting(c.env.arcane_db);
     const decision = resolveModelForSend(
         requestedTier,
         {
             taskType: body.metadata?.taskType,
-            mode: body.metadata?.mode,
             planPhase: body.metadata?.planPhase,
-            ...body.metadata?.routing,
+            difficulty: body.metadata?.difficulty,
         },
-        c.env.ROUTING_V2,
+        routingDoc,
     );
+
+    // Serve guard: a routing doc (or the code-default fallback) can only be
+    // trusted once cross-checked against the EFFECTIVE pricing catalog — a
+    // model missing from it would otherwise bill $0 (see usage.ts) and stream
+    // through a provider call that's not accounted for anywhere.
+    const pricing = await getEffectivePricing(c.env.arcane_db);
+    if (!pricing.catalog[decision.model]) {
+        console.error(JSON.stringify({ event: 'model_unconfigured', model: decision.model }));
+        return c.json({ error: 'This model is not configured. Contact support.', code: 'model_unconfigured' }, 503);
+    }
+
     if (c.env.ENVIRONMENT === 'development') {
-        console.log(`[chat] user=${user.sub} tier="${requestedTier}" resolved="${decision.model}" reason=${decision.reason}`);
+        console.log(`[chat] user=${user.sub} tier="${requestedTier}" resolved="${decision.model}" routedTier="${decision.routedTier}" reason=${decision.reason}`);
     }
     body.model = decision.model;
 

@@ -3,6 +3,9 @@ import { env, SELF } from 'cloudflare:test';
 import { seedPasswordUser, tokenFor, jsonPost } from './helpers.ts';
 import { INLINE_DAILY_CAP } from '../src/config/tiers.ts';
 import { utcDateKey } from '../src/lib/inline-allowance.ts';
+import { MODEL_CATALOG } from '../src/lib/costs.ts';
+import { DEFAULT_MODEL_ROUTING } from '../src/config/plans.ts';
+import { clearConfigCache } from '../src/lib/app-config.ts';
 
 const GOOD_BODY = { prefix: 'int x = ', suffix: ';', language: 'csharp' };
 
@@ -88,5 +91,34 @@ describe('POST /v1/completions/inline', () => {
         const res = await jsonPost('/v1/completions/inline', GOOD_BODY, await tokenFor(user));
         expect(res.status).toBe(503);
         expect((await res.json() as { code: string }).code).toBe('inline_unavailable');
+    });
+
+    // Same guard as chat.ts's, run before the model is called at all — see
+    // chat-metering.test.ts's model_unconfigured test for why the catalog
+    // must be mutated directly to reproduce it (validated routing docs can't
+    // reference an uncatalogued model, so this can only happen via a
+    // catalog/routing-doc drift, not through the admin config path).
+    it('503 model_unconfigured when the resolved inline model is missing from the effective catalog', async () => {
+        const user = await seedPasswordUser('inl-unconf@test.dev', 'password123');
+        await env.arcane_db.prepare("UPDATE users SET plan = 'starter' WHERE id = ?").bind(user.id).run();
+        const token = await tokenFor(user);
+
+        const saved = MODEL_CATALOG[DEFAULT_MODEL_ROUTING.inline];
+        delete MODEL_CATALOG[DEFAULT_MODEL_ROUTING.inline];
+        clearConfigCache();
+        try {
+            const res = await jsonPost('/v1/completions/inline', GOOD_BODY, token);
+            expect(res.status).toBe(503);
+            expect((await res.json() as { code: string }).code).toBe('model_unconfigured');
+
+            // Nothing spent: the guard returns before AI.run/recordUsage/addInlineSpend.
+            const spend = await env.arcane_db.prepare(
+                'SELECT spend_micro FROM inline_spend WHERE user_id = ?'
+            ).bind(user.id).first<{ spend_micro: number }>();
+            expect(spend).toBeNull();
+        } finally {
+            MODEL_CATALOG[DEFAULT_MODEL_ROUTING.inline] = saved!;
+            clearConfigCache();
+        }
     });
 });

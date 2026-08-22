@@ -1,22 +1,20 @@
 import { describe, it, expect } from 'vitest';
-import { INTENSITY_CONFIG, INLINE_MODEL, getIntensityConfig } from '../src/config/plans.ts';
+import { INTENSITY_CONFIG, getIntensityConfig, DEFAULT_MODEL_ROUTING, SPARK_MODEL } from '../src/config/plans.ts';
 import { MODEL_CATALOG, wireFormatForNativeId } from '../src/lib/costs.ts';
 
 describe('INTENSITY_CONFIG', () => {
-    it('maps each tier to its model', () => {
-        expect(INTENSITY_CONFIG.low.model).toBe('openai/gpt-5.6-luna');
-        expect(INTENSITY_CONFIG.mid.model).toBe('@cf/zai-org/glm-5.2');
-        expect(INTENSITY_CONFIG.high.model).toBe('xai/grok-4.6');
+    it('is label/description-only — model choice moved to the runtime routing doc', () => {
+        for (const cfg of Object.values(INTENSITY_CONFIG)) {
+            expect(cfg).not.toHaveProperty('model');
+            expect(typeof cfg.label).toBe('string');
+            expect(typeof cfg.description).toBe('string');
+        }
     });
 
     it('carries user-facing labels', () => {
         expect(INTENSITY_CONFIG.low.label).toBe('Standard');
         expect(INTENSITY_CONFIG.mid.label).toBe('Deep Think');
         expect(INTENSITY_CONFIG.high.label).toBe('Max');
-    });
-
-    it('uses glm-4.7-flash for inline', () => {
-        expect(INLINE_MODEL).toBe('@cf/zai-org/glm-4.7-flash');
     });
 });
 
@@ -45,6 +43,7 @@ describe('wire-format contract', () => {
 
     it('matches the 2026-08-15 probe matrix (400-vs-402 verified live)', () => {
         expect(wireFormatForNativeId('gpt-5.6-luna')).toBe('responses'); // chat is schema-rejected
+        expect(wireFormatForNativeId('gpt-5.6-sol')).toBe('responses');  // same family as luna
         expect(wireFormatForNativeId('grok-4.6')).toBe('chat');          // responses is schema-rejected
         expect(wireFormatForNativeId('gpt-5.4-mini')).toBe('chat');      // both accepted; we use chat
         expect(wireFormatForNativeId('glm-5.2')).toBeUndefined();        // workers-ai native, no gateway schema
@@ -53,10 +52,40 @@ describe('wire-format contract', () => {
 
 // Guard A1: a tier pointing at a model with no catalog entry silently bills $0.
 describe('catalog guard', () => {
-    it('every routed model exists in MODEL_CATALOG', () => {
-        for (const cfg of Object.values(INTENSITY_CONFIG)) {
-            expect(MODEL_CATALOG[cfg.model], `missing catalog entry: ${cfg.model}`).toBeDefined();
+    it('every model referenced by DEFAULT_MODEL_ROUTING has a MODEL_CATALOG entry', () => {
+        for (const [tierName, tier] of Object.entries(DEFAULT_MODEL_ROUTING.tiers)) {
+            expect(MODEL_CATALOG[tier.planner], `missing catalog entry: ${tierName}.planner (${tier.planner})`).toBeDefined();
+            expect(MODEL_CATALOG[tier.executor], `missing catalog entry: ${tierName}.executor (${tier.executor})`).toBeDefined();
+            if (tier.executorHard) {
+                expect(MODEL_CATALOG[tier.executorHard], `missing catalog entry: ${tierName}.executorHard (${tier.executorHard})`).toBeDefined();
+            }
         }
-        expect(MODEL_CATALOG[INLINE_MODEL]).toBeDefined();
+        expect(MODEL_CATALOG[DEFAULT_MODEL_ROUTING.inline], `missing catalog entry: inline (${DEFAULT_MODEL_ROUTING.inline})`).toBeDefined();
+    });
+});
+
+// Role pins — catches an accidental swap of which model serves which
+// planner/executor/executorHard slot in the code-default routing doc.
+describe('DEFAULT_MODEL_ROUTING role pins', () => {
+    it('low: spark planner, spark executor', () => {
+        expect(DEFAULT_MODEL_ROUTING.tiers.low.planner).toBe(SPARK_MODEL);
+        expect(DEFAULT_MODEL_ROUTING.tiers.low.executor).toBe(SPARK_MODEL);
+        expect(DEFAULT_MODEL_ROUTING.tiers.low.executorHard).toBeUndefined();
+    });
+
+    it('mid: grok planner, spark executor', () => {
+        expect(DEFAULT_MODEL_ROUTING.tiers.mid.planner).toBe('xai/grok-4.6');
+        expect(DEFAULT_MODEL_ROUTING.tiers.mid.executor).toBe(SPARK_MODEL);
+        expect(DEFAULT_MODEL_ROUTING.tiers.mid.executorHard).toBeUndefined();
+    });
+
+    it('high: sol planner, spark executor, grok executorHard', () => {
+        expect(DEFAULT_MODEL_ROUTING.tiers.high.planner).toBe('openai/gpt-5.6-sol');
+        expect(DEFAULT_MODEL_ROUTING.tiers.high.executor).toBe(SPARK_MODEL);
+        expect(DEFAULT_MODEL_ROUTING.tiers.high.executorHard).toBe('xai/grok-4.6');
+    });
+
+    it('inline: qwen3-30b', () => {
+        expect(DEFAULT_MODEL_ROUTING.inline).toBe('@cf/qwen/qwen3-30b-a3b-fp8');
     });
 });

@@ -30,7 +30,6 @@ export type AppEnv = {
         MOONSHOT_API_KEY?: string;   // secret — Moonshot (Kimi) key
         JWT_SECRET: string;
         ENVIRONMENT: string;
-        ROUTING_V2?: string;         // "on" enables task-aware model routing (config/routing.ts)
         WEB_BASE_URL: string;        // user-facing website base (auth pages, email links)
         API_BASE_URL: string;        // this worker's public base (Google redirect_uri)
         EMAIL_FROM: string;          // verified sender (no-reply@arcaneai.org)
@@ -78,9 +77,14 @@ export interface ChatCompletionRequest {
         taskType?: 'chat' | 'edit' | 'plan' | 'explain' | 'memory';
         mode?: 'agent' | 'ask' | 'plan';
         reasoningLevel?: 'low' | 'mid' | 'high' | 'super';
-        planPhase?: 'planning' | 'executing';
+        planPhase?: 'preplanning' | 'planning' | 'executing';
+        /** 'easy' | 'hard' — meaningful only for high-tier execution (config/routing.ts). */
+        difficulty?: 'easy' | 'hard';
         sessionId?: string;
-        /** Task-aware routing signals (config/routing.ts); derived client-side from the conversation's first user message. */
+        /** LEGACY/IGNORED: the old flag-gated simple-ask-downgrade signal set
+         *  (config/routing.ts, pre-Task-3). Older editor builds still send this;
+         *  the server no longer reads it. Kept only for tolerant parsing of a
+         *  field an older client may include — no behavior is driven by it. */
         routing?: {
             promptChars?: number;
             codeIntent?: boolean;

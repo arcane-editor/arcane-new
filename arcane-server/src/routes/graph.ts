@@ -4,14 +4,10 @@ import type { AppEnv } from '../types.ts';
 import type { AuthPayload } from '../middleware/auth.ts';
 import { checkAiBudget } from '../lib/credits.ts';
 import { recordUsage } from '../lib/usage.ts';
-import { INTENSITY_CONFIG } from '../config/plans.ts';
+import { getModelRouting } from '../lib/app-config.ts';
 import { workersAiProvider } from '../services/llm-router.ts';
 
 export const graphRouter = new Hono<AppEnv>();
-
-// One-shot summarization — reuse the mid-tier model so it tracks the single
-// model config object instead of hardcoding an id here.
-const ENRICH_MODEL = INTENSITY_CONFIG.mid.model;
 
 // ─── Request / response contract ─────────────────────────────────────────────
 // The editor sends a TRIMMED projection of the locally-built graph (graph.json
@@ -90,9 +86,15 @@ graphRouter.post('/v1/graph/enrich', async (c) => {
         return c.json({ error: 'Invalid graph payload' }, 400);
     }
 
+    // Enrichment stays on the mid tier's cheap executor — a per-request
+    // lookup against the runtime routing doc (lib/app-config.ts) rather than
+    // a hardcoded id, so an admin routing change takes effect here too.
+    const routing = await getModelRouting(c.env.arcane_db);
+    const enrichModel = routing.tiers.mid.executor;
+
     // Generative enrichment, like chat, is sampled (temperature 0.2) — skip the
     // gateway cache so a repeat call doesn't replay a stale sampled response.
-    const model = workersAiProvider(c.env, { skipCache: true })(ENRICH_MODEL);
+    const model = workersAiProvider(c.env, { skipCache: true })(enrichModel);
 
     const system = [
         'You are a code-architecture summarizer. You are given a structural code',
@@ -114,9 +116,9 @@ graphRouter.post('/v1/graph/enrich', async (c) => {
             maxOutputTokens: 1500,
             temperature: 0.2,
         });
-        await recordUsage(c.env.arcane_db, parseInt(user.sub), ENRICH_MODEL, usage.inputTokens ?? 0, usage.outputTokens ?? 0, Date.now() - startTime, { taskType: 'graph_enrich' });
+        await recordUsage(c.env.arcane_db, parseInt(user.sub), enrichModel, usage.inputTokens ?? 0, usage.outputTokens ?? 0, Date.now() - startTime, { taskType: 'graph_enrich' });
         const parsed = parseEnrichment(text);
-        return c.json<GraphEnrichResponse>({ ...parsed, model: ENRICH_MODEL });
+        return c.json<GraphEnrichResponse>({ ...parsed, model: enrichModel });
     } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         return c.json({ error: { message, type: 'server_error' } }, 500);

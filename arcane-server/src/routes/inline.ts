@@ -4,13 +4,13 @@
 import { Hono } from 'hono';
 import type { AppEnv } from '../types.ts';
 import type { AuthPayload } from '../middleware/auth.ts';
-import { INLINE_MODEL } from '../config/plans.ts';
+import { getModelRouting, getEffectivePricing } from '../lib/app-config.ts';
 import { checkInlineAllowance, utcMonthKey } from '../lib/inline-allowance.ts';
 import { clampInlineRequest, buildFimPrompt, cleanCompletion } from '../lib/fim.ts';
 import { recordUsage } from '../lib/usage.ts';
 import { addInlineSpend } from '../lib/db.ts';
 import { estimateCost } from '../lib/costs.ts';
-import { GATEWAY_FEE, usdToMicro } from '../config/tiers.ts';
+import { usdToMicro } from '../config/tiers.ts';
 
 export const inlineRouter = new Hono<AppEnv>();
 
@@ -60,6 +60,19 @@ inlineRouter.post('/v1/completions/inline', async (c) => {
         }, allowance.status);
     }
 
+    // Model comes from the runtime routing doc now (lib/app-config.ts) — the
+    // validator guarantees `inline` is a '@cf/*' id (Workers AI only; inline
+    // traffic never pays gateway/third-party rates). Cross-check against the
+    // EFFECTIVE pricing catalog before running anything: a model missing from
+    // it would otherwise bill $0 (see usage.ts) and run ungoverned.
+    const routingDoc = await getModelRouting(c.env.arcane_db);
+    const model = routingDoc.inline;
+    const pricing = await getEffectivePricing(c.env.arcane_db);
+    if (!pricing.catalog[model]) {
+        console.error(JSON.stringify({ event: 'model_unconfigured', model }));
+        return c.json({ error: 'This model is not configured. Contact support.', code: 'model_unconfigured' }, 503);
+    }
+
     if (!c.env.AI) return c.json({ error: 'AI backend unavailable', code: 'inline_unavailable' }, 503);
 
     const started = Date.now();
@@ -68,7 +81,7 @@ inlineRouter.post('/v1/completions/inline', async (c) => {
         // orphaned run finishes server-side and is simply discarded.
         const result = await Promise.race([
             c.env.AI.run(
-                INLINE_MODEL as Parameters<Ai['run']>[0],
+                model as Parameters<Ai['run']>[0],
                 { prompt: buildFimPrompt(req), max_tokens: 128, temperature: 0.2, top_p: 0.9 },
                 c.env.CF_AI_GATEWAY_ID ? { gateway: { id: c.env.CF_AI_GATEWAY_ID } } : {},
             ),
@@ -85,19 +98,22 @@ inlineRouter.post('/v1/completions/inline', async (c) => {
         const outputEstimate = Math.ceil(text.length / 4);
 
         // Real cost only — no MARGIN. Inline is free to the user; this ceiling
-        // exists to bound OUR spend, not to bill theirs.
+        // exists to bound OUR spend, not to bill theirs. Gateway fee is
+        // route-aware (matches usage.ts's billedMicro): waived only for a
+        // `route: 'direct'` model — the current '@cf/*' inline model keeps it.
+        const fee = pricing.catalog[model]?.route === 'direct' ? 1 : pricing.gatewayFee;
         const realMicro = usdToMicro(
-            estimateCost(INLINE_MODEL, inputEstimate, outputEstimate) * GATEWAY_FEE,
+            estimateCost(model, inputEstimate, outputEstimate, 0, pricing.catalog) * fee,
         );
 
         await Promise.all([
-            recordUsage(c.env.arcane_db, userId, INLINE_MODEL, inputEstimate, outputEstimate,
+            recordUsage(c.env.arcane_db, userId, model, inputEstimate, outputEstimate,
                 Date.now() - started, { taskType: 'inline', skipDebit: true }),
             addInlineSpend(c.env.arcane_db, userId, utcMonthKey(), realMicro)
                 .catch(err => console.error('Failed to record inline spend:', err)),
         ]);
 
-        return c.json({ text, model: INLINE_MODEL });
+        return c.json({ text, model });
     } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         if (message === 'inline_timeout') {

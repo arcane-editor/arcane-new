@@ -1,53 +1,36 @@
-// ─── Task-aware model routing (spec §2) ────
+// ─── Task-aware model routing ────
 //
-// The effort tier is a CEILING and billing gate, not a model pin. This layer
-// picks the concrete model per send:
+// The effort tier is a CEILING and billing gate, not a model pin: the tier
+// entitlement gate (isTierAllowed, checked by the route BEFORE this module
+// runs) stays authoritative for what a user may REQUEST. This layer picks
+// the concrete model per send from the runtime routing doc (app_config's
+// `model_routing`, see lib/app-config.ts) for that already-gated tier.
 //
-//   - side-task lane: harness-internal calls (memory distillation) always run
-//     on the cheap inline model, flag or no flag;
-//   - simple-ask downgrade (flag-gated ROUTING_V2="on"): a short, attachment-
-//     free, non-code ask-mode question runs on the low-tier model even when
-//     the user's effort selector sits higher — same answer, fraction of the
-//     price;
-//   - everything else: the tier's static model (identical to the old
-//     resolveModelForTier behavior).
+// Billing keys off the model actually SERVED (usage.ts is keyed by model
+// id), so any upward routing driven by request metadata only ever burns the
+// caller's OWN credits — it can't be used to reach a model the entitlement
+// gate would otherwise block.
 //
-// Routing moves DOWN from the requested tier (cost) with one deliberate
-// exception: low-tier PLAN-MODE PLANNING routes UP to the mid model — a plan
-// drafted by Deep Think and executed by the cheap tier is the product's
-// plan-mode contract (owner decision 2026-08-15). The tier entitlement gate
-// (isTierAllowed, checked by the route before routing) stays authoritative
-// for what the user may REQUEST; billing always uses the model actually
-// served (usage.ts is keyed by model id).
-//
-// Cache interaction: model choice must be sticky per conversation — provider
-// prompt caches are per-model. All routing signals are stable for the life of
-// a conversation's sends EXCEPT promptChars/codeIntent, which describe the
-// FIRST user prompt semantics; the editor sends signals derived from the
-// conversation's first user message so repeat sends route identically.
-
-import { getIntensityConfig, DEFAULT_INTENSITY, INLINE_MODEL, type Intensity } from './plans.ts';
+// Model stickiness (provider prompt caches are per-model) now holds per
+// DIFFICULTY SEGMENT on the high tier: 'hard' sends stay on executorHard,
+// everything else stays on executor — not per-conversation like the old
+// simple-ask/plan-on-deepthink downgrades, which moved model mid-conversation.
+import type { ModelRoutingDoc } from '../lib/app-config.ts';
+import { getIntensityConfig, DEFAULT_INTENSITY, type Intensity } from './plans.ts';
 
 export interface RoutingSignals {
     taskType?: string;
-    mode?: string;
-    /** Plan-mode phase reported by the editor ('planning' | 'executing'). */
+    /** 'preplanning' | 'planning' | 'executing' (editor-reported phase). */
     planPhase?: string;
-    /** Chars of the conversation's FIRST user message (stable across sends). */
-    promptChars?: number;
-    codeIntent?: boolean;
-    hasAttachments?: boolean;
+    /** 'easy' | 'hard' — meaningful only for high-tier execution. */
+    difficulty?: string;
 }
 
 export interface RoutingDecision {
     model: string;
-    /** The tier whose model was actually served (for logs; billing keys off `model`). */
     routedTier: Intensity;
-    reason: 'static' | 'side-task' | 'simple-ask-downgrade' | 'plan-on-deepthink' | 'routing-off';
+    reason: 'side-task' | 'planner' | 'executor' | 'executor-hard';
 }
-
-/** Short, attachment-free, non-code ask prompts are downgrade candidates. */
-const SIMPLE_ASK_MAX_CHARS = 600;
 
 function tierOf(level: string | undefined): Intensity {
     const cfg = getIntensityConfig(level ?? DEFAULT_INTENSITY);
@@ -58,37 +41,23 @@ function tierOf(level: string | undefined): Intensity {
 export function resolveModelForSend(
     requestedTier: string,
     signals: RoutingSignals,
-    routingFlag: string | undefined,
+    routing: ModelRoutingDoc,
 ): RoutingDecision {
     const tier = tierOf(requestedTier);
-    const tierModel = getIntensityConfig(tier)!.model;
 
-    // Side-task lane is NOT flag-gated: 'memory' is only ever sent by the
-    // harness's own distiller (memory-request.ts), which must never burn
-    // tier-model rates regardless of rollout state.
+    // Side-task lane: harness-internal calls (memory distillation) always run
+    // on the cheap inline model — this must never burn tier-model rates.
     if (signals.taskType === 'memory') {
-        return { model: INLINE_MODEL, routedTier: 'low', reason: 'side-task' };
+        return { model: routing.inline, routedTier: 'low', reason: 'side-task' };
     }
 
-    if (routingFlag !== 'on') {
-        return { model: tierModel, routedTier: tier, reason: 'routing-off' };
+    if (signals.planPhase === 'planning' || signals.planPhase === 'preplanning') {
+        return { model: routing.tiers[tier].planner, routedTier: tier, reason: 'planner' };
     }
 
-    // Plan-mode planning on the low tier drafts with the mid model
-    // (Deep Think); the execution phase stays on the tier model.
-    if (tier === 'low' && signals.mode === 'plan' && signals.planPhase === 'planning') {
-        return { model: getIntensityConfig('mid')!.model, routedTier: 'mid', reason: 'plan-on-deepthink' };
+    if (tier === 'high' && signals.difficulty === 'hard' && routing.tiers.high.executorHard) {
+        return { model: routing.tiers.high.executorHard, routedTier: tier, reason: 'executor-hard' };
     }
 
-    if (
-        tier !== 'low' &&
-        signals.mode === 'ask' &&
-        (signals.promptChars ?? Number.POSITIVE_INFINITY) < SIMPLE_ASK_MAX_CHARS &&
-        !signals.hasAttachments &&
-        !signals.codeIntent
-    ) {
-        return { model: getIntensityConfig('low')!.model, routedTier: 'low', reason: 'simple-ask-downgrade' };
-    }
-
-    return { model: tierModel, routedTier: tier, reason: 'static' };
+    return { model: routing.tiers[tier].executor, routedTier: tier, reason: 'executor' };
 }
