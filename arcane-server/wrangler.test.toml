@@ -25,15 +25,15 @@ JWT_SECRET = "test-secret"
 # a test that actually reaches streamText's real fetch never hits a live
 # host. Only llm-router.test.ts's config-error/clamp tests are meant to read
 # this — they use the injected `streamTextImpl` seam and never call fetch at
-# all. The two PRE-EXISTING e2e tests that now route through spark for real
-# (chat-metering.test.ts, tier-gate.test.ts — both post real requests to
-# /v1/chat/completions with the code-default routing, which sends most
-# traffic to spark/*) still pass, but Miniflare/workerd logs a harmless
-# "uncaught exception; ... internal error" line for each when the real
-# unmocked fetch hits this unresolvable DNS name — a runtime/sandbox
-# artifact (confirmed: swapping in a RESOLVABLE host makes the log line
-# disappear), not an error-handling bug — the request still 500s correctly
-# and is metered correctly either way.
+# all. The two PRE-EXISTING e2e tests that resolve to spark/* under the
+# code-default routing (chat-metering.test.ts, tier-gate.test.ts) deliberately
+# override `model_routing` to a '@cf/...' id for their spark-adjacent request
+# instead of exercising the real (unmocked) fetch path here — a real fetch to
+# this unresolvable DNS name, even though the request still errors correctly,
+# makes Miniflare/workerd log a spurious "uncaught exception; ... internal
+# error" line (a runtime/sandbox artifact, not an error-handling bug) that
+# breaks pristine test output. See the comment above `CF_ONLY_ROUTING` in
+# each of those two files.
 SPARK_BASE_URL = "https://spark.invalid"
 # Secrets in real envs; plain vars HERE ONLY, same as JWT_SECRET/DODO_WEBHOOK_SECRET above.
 SPARK_API_KEY = "test-spark-key"
