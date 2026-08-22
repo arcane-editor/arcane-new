@@ -1,9 +1,10 @@
 import { streamText, jsonSchema } from 'ai';
 import { createWorkersAI } from 'workers-ai-provider';
 import { createOpenAI } from '@ai-sdk/openai';
+import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import type { ModelMessage, ToolSet } from 'ai';
 import type { ChatCompletionRequest, ChatMessage, StreamEvent, ToolDefinition } from '../types.ts';
-import { getMaxOutput, wireFormatForNativeId } from '../lib/costs.ts';
+import { getMaxOutput, wireFormatForNativeId, MODEL_CATALOG, type ModelInfo } from '../lib/costs.ts';
 
 // All models — Workers AI catalog ids and unified-billing third-party ids
 // alike — route through Cloudflare Workers AI via the AI Gateway (the `AI`
@@ -54,7 +55,21 @@ export function workersAiProvider(env: WorkersAiEnv, gatewayOverrides?: GatewayO
     });
 }
 
-export type LlmEnv = WorkersAiEnv;
+// 'direct' route (MODEL_CATALOG): a third-party OpenAI-compatible provider
+// called with the owner's OWN key, no Cloudflare in the path at all — not
+// Workers AI, not the AI Gateway. Spark is the first (and so far only)
+// tenant of this path.
+export interface SparkEnv {
+    SPARK_BASE_URL?: string;
+    SPARK_API_KEY?: string;
+}
+
+export type LlmEnv = WorkersAiEnv & SparkEnv;
+
+/** Configuration (not model) failure: a required binding/secret is unset. */
+export class LlmConfigError extends Error {}
+
+const SPARK_PREFIX = 'spark/';
 
 export function resolveModel(
     modelId: string,
@@ -62,6 +77,37 @@ export function resolveModel(
     gatewayOverrides?: GatewayOverrides,
     modelSettings?: Record<string, unknown>,
 ) {
+    if (modelId.startsWith(SPARK_PREFIX)) {
+        // No CF AI Gateway in this path, so none of the gateway-shaped knobs
+        // apply: `gatewayOverrides.skipCache` has nothing to skip-cache
+        // (there's no gateway response-replay cache to begin with), and the
+        // `@cf/`-only sessionAffinity / `openai/`-only promptCacheKey model
+        // settings never reach here (both callers below already gate on
+        // those exact prefixes, and `spark/` matches neither — see
+        // streamCompletion). Provider-side prompt-prefix caching is still
+        // possible (opportunistic, same as xAI today): if Spark's backend
+        // reports cached tokens in its OpenAI-compatible usage details, the
+        // AI SDK surfaces them as `totalUsage.inputTokenDetails.cacheReadTokens`
+        // — the exact field streamCompletion already reads into
+        // `cached_input_tokens` — so billing picks them up with no extra
+        // wiring, the same as every other route.
+        if (!env.SPARK_BASE_URL) throw new LlmConfigError('SPARK_BASE_URL is not set');
+        if (!env.SPARK_API_KEY) throw new LlmConfigError('SPARK_API_KEY secret is not set');
+        // `includeUsage` verified against the installed
+        // @ai-sdk/openai-compatible@2.0.30 type defs: it's a
+        // provider-FACTORY option (OpenAICompatibleProviderSettings), not a
+        // per-call one. It appends `stream_options: {include_usage: true}`
+        // to the streamed request so the OpenAI-compatible chunk stream ends
+        // with a usage chunk — without it, streaming responses carry no
+        // usage at all and the `finish` event below would see zeroes.
+        const provider = createOpenAICompatible({
+            name: 'spark',
+            baseURL: env.SPARK_BASE_URL,
+            apiKey: env.SPARK_API_KEY,
+            includeUsage: true,
+        });
+        return provider(modelId.slice(SPARK_PREFIX.length));
+    }
     // Workers AI and unified-billing third-party models both resolve through
     // the AI binding — the id prefix is the only difference and the binding
     // handles routing. `modelSettings` reaches the model constructor (e.g.
@@ -218,7 +264,7 @@ type StreamTextFn = typeof streamText;
 
 export async function* streamCompletion(
     req: ChatCompletionRequest, env: LlmEnv, streamTextImpl: StreamTextFn = streamText,
-    signal?: AbortSignal,
+    signal?: AbortSignal, catalog: Record<string, ModelInfo> = MODEL_CATALOG,
 ): AsyncGenerator<StreamEvent> {
     // `skipCache` disables the AI GATEWAY's exact-match response-replay cache
     // (a cached replay of a temperature-sampled completion is semantically
@@ -239,7 +285,7 @@ export async function* streamCompletion(
     );
     const messages = convertMessages(req.messages);
     const tools = convertTools(req.tools);
-    const maxOutputTokens = Math.min(req.max_tokens ?? 8192, getMaxOutput(req.model));
+    const maxOutputTokens = Math.min(req.max_tokens ?? 8192, getMaxOutput(req.model, catalog));
 
     const result = streamTextImpl({
         model, messages, ...(tools ? { tools } : {}),

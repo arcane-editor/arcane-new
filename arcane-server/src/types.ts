@@ -25,9 +25,14 @@ export type AppEnv = {
         AI: Ai;                      // Cloudflare Workers AI binding
         VECTORIZE: Vectorize;        // Unity docs/API vector index (384-dim, bge-small)
         CF_AI_GATEWAY_ID: string;    // AI Gateway id (caching/logging/rate-limits)
-        CF_ACCOUNT_ID?: string;      // account id for the gateway /compat URL (external models)
-        MINIMAX_API_KEY?: string;    // secret — MiniMax key, sent through the gateway per-request
-        MOONSHOT_API_KEY?: string;   // secret — Moonshot (Kimi) key
+        // Spark direct provider (MODEL_CATALOG route:'direct') — no CF AI
+        // Gateway in this path; the Worker calls SPARK_BASE_URL straight,
+        // authenticated with SPARK_API_KEY. Empty/unset base URL ⇒ spark/*
+        // models fail loud via LlmConfigError (llm-router.ts), never a silent
+        // fallback to some other route.
+        SPARK_BASE_URL?: string;     // var — owner's Spark OpenAI-compatible endpoint
+        SPARK_API_KEY?: string;      // secret — sent as `Authorization: Bearer` straight to SPARK_BASE_URL
+        ADMIN_PASSWORD?: string;     // secret — admin auth, consumed by a later task; declared now so wrangler/test config lands once
         JWT_SECRET: string;
         ENVIRONMENT: string;
         WEB_BASE_URL: string;        // user-facing website base (auth pages, email links)

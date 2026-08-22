@@ -1,8 +1,14 @@
 import { describe, it, expect } from 'vitest';
-import { resolveModel, classifyStreamError, convertMessages, describeStreamError, streamCompletion } from '../src/services/llm-router.ts';
+import {
+    resolveModel, classifyStreamError, convertMessages, describeStreamError, streamCompletion,
+    LlmConfigError, type LlmEnv,
+} from '../src/services/llm-router.ts';
+import { SPARK_MODEL } from '../src/config/plans.ts';
 import type { ChatCompletionRequest, ChatMessage, StreamEvent } from '../src/types.ts';
+import type { ModelInfo } from '../src/lib/costs.ts';
 
 const ENV = { AI: {} as Ai, CF_AI_GATEWAY_ID: 'gw' };
+const SPARK_ENV: LlmEnv = { AI: {} as Ai, SPARK_BASE_URL: 'https://spark.invalid', SPARK_API_KEY: 'test-spark-key' };
 
 describe('resolveModel', () => {
     it('resolves Workers AI ids through the binding', () => {
@@ -18,6 +24,33 @@ describe('resolveModel', () => {
         // 3.2.0 (see gateway-delegate.ts `parseSlug`).
         expect(resolveModel('openai/gpt-5.6-luna', ENV).modelId).toBe('gpt-5.6-luna');
         expect(resolveModel('xai/grok-4.6', ENV).modelId).toBe('grok-4.6');
+    });
+});
+
+// Spark: the first (and so far only) 'direct' route in MODEL_CATALOG — an
+// OpenAI-compatible provider called with the owner's own key, no CF AI
+// Gateway/binding involved. No real Spark credentials exist yet; these cover
+// resolveModel's config-error and success paths only, never a live call.
+describe('resolveModel: spark direct provider', () => {
+    it('throws LlmConfigError naming SPARK_BASE_URL when it is unset', () => {
+        expect(() => resolveModel(SPARK_MODEL, { AI: {} as Ai })).toThrow(LlmConfigError);
+        expect(() => resolveModel(SPARK_MODEL, { AI: {} as Ai })).toThrow(/SPARK_BASE_URL/);
+    });
+
+    it('throws LlmConfigError naming SPARK_API_KEY when the base URL is set but the key is not', () => {
+        const env: LlmEnv = { AI: {} as Ai, SPARK_BASE_URL: 'https://spark.invalid' };
+        expect(() => resolveModel(SPARK_MODEL, env)).toThrow(LlmConfigError);
+        expect(() => resolveModel(SPARK_MODEL, env)).toThrow(/SPARK_API_KEY/);
+    });
+
+    it('resolves to the spark provider with the prefix stripped, given both bindings', () => {
+        const model = resolveModel(SPARK_MODEL, SPARK_ENV);
+        expect(model.modelId).toBe('muse-spark-1.2-contributor');
+        // @ai-sdk/openai-compatible's `.provider` getter returns
+        // `${name}.${modelType}` (e.g. 'spark.chat') — verified against the
+        // installed 2.0.30 source (openai-compatible-provider.ts
+        // getCommonModelConfig). The `name` half is what we configured.
+        expect(model.provider.split('.')[0]).toBe('spark');
     });
 });
 
@@ -229,5 +262,91 @@ describe('streamCompletion event mapping', () => {
     it('passes sessionAffinity into @cf model settings (x-session-affinity routing hint)', () => {
         const model = resolveModel('@cf/zai-org/glm-5.2', ENV, undefined, { sessionAffinity: 'conv_123' });
         expect((model as unknown as { settings: { sessionAffinity?: string } }).settings.sessionAffinity).toBe('conv_123');
+    });
+
+    // Mixed spark↔grok history (incident-2026-08-15-#2 shape, new route): a
+    // @cf-marked tool-call id minted on an earlier turn gets replayed once for
+    // a spark completion and once for a grok one. Same convertMessages
+    // pipeline serves both routes, so the sanitized id (and the call/result
+    // pairing) must come out identical regardless of which model is about to
+    // run — this exercises the full streamCompletion pipeline (resolveModel +
+    // convertMessages together), not just convertMessages in isolation.
+    it('sanitizes a @cf-marked tool-call id identically whether the next turn is spark or grok', async () => {
+        const seen: Array<Record<string, unknown>> = [];
+        const impl = ((args: Record<string, unknown>) => {
+            seen.push(args);
+            return { fullStream: (async function* () {})() };
+        }) as unknown as typeof import('ai').streamText;
+
+        const marked = 'call_5f2a9c::cf-wai-tool-call::nonceXYZ';
+        const history: ChatMessage[] = [
+            { role: 'user', content: 'read config.json' },
+            {
+                role: 'assistant', content: null,
+                tool_calls: [{ id: marked, type: 'function', function: { name: 'read_file', arguments: '{"path":"config.json"}' } }],
+            },
+            { role: 'tool', content: '{}', tool_call_id: marked, name: 'read_file' },
+        ];
+
+        for await (const _ of streamCompletion({ model: SPARK_MODEL, messages: history }, SPARK_ENV, impl)) { /* drain */ }
+        for await (const _ of streamCompletion({ model: 'xai/grok-4.6', messages: history }, ENV, impl)) { /* drain */ }
+
+        expect(seen).toHaveLength(2);
+        for (const call of seen) {
+            const messages = call.messages as Array<{ content: unknown }>;
+            const toolCall = (messages[1].content as Array<{ type: string; toolCallId?: string }>).find(p => p.type === 'tool-call')!;
+            const toolResult = (messages[2].content as Array<{ type: string; toolCallId?: string }>)[0];
+            expect(toolCall.toolCallId).toBe('call_5f2a9c');
+            expect(toolResult.toolCallId).toBe('call_5f2a9c');
+        }
+    });
+});
+
+// `catalog` (streamCompletion's trailing param, wired from chat.ts's
+// getEffectivePricing) drives the maxOutputTokens clamp via getMaxOutput —
+// callers on the effective-pricing path must see an admin override honored,
+// and every other caller (tests, or a future call site with no catalog) must
+// still see the code-default MODEL_CATALOG.
+describe('streamCompletion maxOutputTokens clamp uses the passed catalog', () => {
+    function fakeStreamText() {
+        const seen: Array<Record<string, unknown>> = [];
+        const fn = ((args: Record<string, unknown>) => {
+            seen.push(args);
+            return { fullStream: (async function* () {})() };
+        }) as unknown as typeof import('ai').streamText;
+        return { seen, fn };
+    }
+
+    it('clamps to the passed catalog entry for a spark id (16_384 per the seed entry)', async () => {
+        const { seen, fn } = fakeStreamText();
+        const catalog: Record<string, ModelInfo> = {
+            [SPARK_MODEL]: {
+                route: 'direct',
+                inputCostPer1M: 0.2, outputCostPer1M: 0.2, cachedInputCostPer1M: 0.2,
+                contextWindow: 131_072, maxOutput: 16_384,
+            },
+        };
+        const req: ChatCompletionRequest = {
+            model: SPARK_MODEL,
+            messages: [{ role: 'user', content: 'hi' }],
+            max_tokens: 999_999, // far above the catalog cap — the clamp must win
+        };
+
+        for await (const _ of streamCompletion(req, SPARK_ENV, fn, undefined, catalog)) { /* drain */ }
+
+        expect(seen[0].maxOutputTokens).toBe(16_384);
+    });
+
+    it('falls back to the code-default MODEL_CATALOG when no catalog is passed', async () => {
+        const { seen, fn } = fakeStreamText();
+        const req: ChatCompletionRequest = {
+            model: SPARK_MODEL,
+            messages: [{ role: 'user', content: 'hi' }],
+            max_tokens: 999_999,
+        };
+
+        for await (const _ of streamCompletion(req, SPARK_ENV, fn)) { /* drain */ }
+
+        expect(seen[0].maxOutputTokens).toBe(16_384); // MODEL_CATALOG's real seed entry
     });
 });

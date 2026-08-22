@@ -98,7 +98,7 @@ chatRouter.post('/v1/chat/completions', async (c) => {
         let cachedInputTokens = 0;
         let sawUsage = false;
         try {
-            for await (const event of streamCompletion(body, env)) {
+            for await (const event of streamCompletion(body, env, undefined, undefined, pricing.catalog)) {
                 if (event.type === 'text') content += event.content;
                 if (event.type === 'tool_call') toolCalls.push({ id: event.id, name: event.name, arguments: event.arguments });
                 if (event.type === 'usage') {
@@ -187,7 +187,7 @@ chatRouter.post('/v1/chat/completions', async (c) => {
         const clientSignal = c.req.raw.signal;
 
         try {
-            for await (const event of streamCompletion(body, env, undefined, clientSignal)) {
+            for await (const event of streamCompletion(body, env, undefined, clientSignal, pricing.catalog)) {
                 if (event.type === 'text') streamedChars += event.content.length;
                 if (event.type === 'tool_call') streamedChars += event.arguments.length;
                 if (event.type === 'usage') {
