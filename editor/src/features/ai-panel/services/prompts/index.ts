@@ -83,7 +83,7 @@ export function captureDecoration(effort: Effort): FrozenBlocks {
  * about this; they pass `mode` (ask/agent/plan), and the agent service maps
  * to the right phase based on planPhase state.
  */
-export type PromptMode = 'ask' | 'agent' | 'plan-planning' | 'plan-execution';
+export type PromptMode = 'ask' | 'agent' | 'preplanning' | 'plan-planning' | 'plan-execution';
 
 export interface BuildSystemPromptOpts {
   /** Drives the graph-snapshot char budget. Defaults to 'mid'. */
@@ -110,6 +110,13 @@ export function buildSystemPrompt(
       return decorate(buildAskPrompt(workspacePath), effort, conversationId);
     case 'agent':
       return decorate(buildAgentPrompt(workspacePath), effort, conversationId);
+    case 'preplanning':
+      // TEMPORARY: preplanning has no prompt of its own yet — reuse
+      // plan-planning's persona so the mode is wired end-to-end (server
+      // accepts metadata.planPhase: 'preplanning' already) ahead of the real
+      // prompt landing.
+      // Task 11 replaces this with `prompts/preplanning.ts`.
+      return decorate(buildPlanPlanningPrompt(workspacePath), effort, conversationId);
     case 'plan-planning':
       return decorate(buildPlanPlanningPrompt(workspacePath), effort, conversationId);
     case 'plan-execution':

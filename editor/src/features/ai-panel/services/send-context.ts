@@ -18,10 +18,16 @@ export function setSendPromptMode(mode: PromptMode): void {
  * The plan-mode phase of the in-flight send, in the server's metadata
  * vocabulary — undefined outside plan mode.
  */
-export function getSendPlanPhase(): 'planning' | 'executing' | undefined {
+export function getSendPlanPhase(): 'preplanning' | 'planning' | 'executing' | undefined {
+  if (currentPromptMode === 'preplanning') return 'preplanning';
   if (currentPromptMode === 'plan-planning') return 'planning';
   if (currentPromptMode === 'plan-execution') return 'executing';
   return undefined;
+}
+
+/** The raw stored prompt mode of the in-flight send — `null` before any send. */
+export function getSendPromptMode(): PromptMode | null {
+  return currentPromptMode;
 }
 
 /** Test seam. */

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'bun:test';
-import { createTodoTool, MAX_TODO_ITEMS, type TodoItem } from './todo-tool';
+import { createTodoTool, mergeTodoDifficulty, MAX_TODO_ITEMS, type TodoItem } from './todo-tool';
+import type { ArcanePlanEntry } from '../../../stores/ai';
 
 function textOf(result: { content: { type: string; text?: string }[] }): string {
   return result.content.map((c) => c.text ?? '').join('\n');
@@ -109,6 +110,133 @@ describe('todo_update tool', () => {
     expect(text).toContain(`Todo list updated: 0 done / 0 in progress / ${MAX_TODO_ITEMS} pending`);
     expect(text).toContain(`capped at ${MAX_TODO_ITEMS}`);
     expect(text).toContain('5 excess item(s) dropped');
+  });
+
+  describe('difficulty schema (Task 10)', () => {
+    it('accepts items with a valid difficulty tag', async () => {
+      let captured: TodoItem[] | undefined;
+      const tool = createTodoTool((items) => {
+        captured = items;
+      });
+
+      const result = await tool.execute('c1', {
+        items: [
+          { text: 'Add the component', status: 'in_progress', difficulty: 'hard' },
+          { text: 'Update the docs', status: 'pending', difficulty: 'easy' },
+        ],
+      });
+
+      expect(captured).toEqual([
+        { text: 'Add the component', status: 'in_progress', difficulty: 'hard' },
+        { text: 'Update the docs', status: 'pending', difficulty: 'easy' },
+      ]);
+      expect(textOf(result)).toContain('Todo list updated');
+    });
+
+    it('accepts items with difficulty entirely absent', async () => {
+      let captured: TodoItem[] | undefined;
+      const tool = createTodoTool((items) => {
+        captured = items;
+      });
+
+      await tool.execute('c1', { items: [{ text: 'A', status: 'pending' }] });
+
+      expect(captured).toEqual([{ text: 'A', status: 'pending' }]);
+      expect(captured?.[0]).not.toHaveProperty('difficulty');
+    });
+
+    it('rejects an invalid difficulty value without calling onUpdate', async () => {
+      let called = false;
+      const tool = createTodoTool(() => {
+        called = true;
+      });
+
+      const result = await tool.execute('c1', {
+        items: [{ text: 'A', status: 'pending', difficulty: 'medium' }],
+      });
+
+      expect(called).toBe(false);
+      const text = textOf(result);
+      expect(text).toContain('Error');
+      expect(text).toContain('difficulty');
+      expect(text).toContain('easy');
+      expect(text).toContain('hard');
+    });
+
+    it('describes difficulty as optional and copy-forward in the tool description', () => {
+      const tool = createTodoTool(() => {});
+      expect(tool.description.toLowerCase()).toContain('difficulty');
+      expect(tool.description.toLowerCase()).toContain('optional');
+    });
+  });
+
+  describe('mergeTodoDifficulty (Task 10)', () => {
+    it('returns the incoming list unchanged when there is no previous plan', () => {
+      const next: TodoItem[] = [{ text: 'A', status: 'pending' }];
+      expect(mergeTodoDifficulty(null, next)).toEqual(next);
+      expect(mergeTodoDifficulty([], next)).toEqual(next);
+    });
+
+    it('inherits difficulty from a prev entry when the incoming item has none, matching by normalized text', () => {
+      const prev: ArcanePlanEntry[] = [{ text: 'Write the tool', status: 'done', difficulty: 'hard' }];
+      const next: TodoItem[] = [{ text: '  Write   THE tool  ', status: 'in_progress' }];
+
+      expect(mergeTodoDifficulty(prev, next)).toEqual([
+        { text: '  Write   THE tool  ', status: 'in_progress', difficulty: 'hard' },
+      ]);
+    });
+
+    it('keeps an incoming item\'s own difficulty rather than the prev entry\'s', () => {
+      const prev: ArcanePlanEntry[] = [{ text: 'Write the tool', status: 'done', difficulty: 'hard' }];
+      const next: TodoItem[] = [{ text: 'Write the tool', status: 'in_progress', difficulty: 'easy' }];
+
+      expect(mergeTodoDifficulty(prev, next)).toEqual([
+        { text: 'Write the tool', status: 'in_progress', difficulty: 'easy' },
+      ]);
+    });
+
+    it('leaves an incoming item untagged when no prev entry matches its text', () => {
+      const prev: ArcanePlanEntry[] = [{ text: 'Write the tool', status: 'done', difficulty: 'hard' }];
+      const next: TodoItem[] = [{ text: 'A completely different task', status: 'pending' }];
+
+      expect(mergeTodoDifficulty(prev, next)).toEqual([{ text: 'A completely different task', status: 'pending' }]);
+    });
+
+    it('leaves an incoming item untagged when the matching prev entry itself has no difficulty', () => {
+      const prev: ArcanePlanEntry[] = [{ text: 'Write the tool', status: 'done' }];
+      const next: TodoItem[] = [{ text: 'Write the tool', status: 'in_progress' }];
+
+      expect(mergeTodoDifficulty(prev, next)).toEqual([{ text: 'Write the tool', status: 'in_progress' }]);
+    });
+
+    it('normalizes on trim, case, and internal whitespace collapse for matching', () => {
+      const prev: ArcanePlanEntry[] = [{ text: 'Ship   the  Eval Stub', status: 'pending', difficulty: 'easy' }];
+      const next: TodoItem[] = [{ text: '  ship the eval stub', status: 'pending' }];
+
+      expect(mergeTodoDifficulty(prev, next)).toEqual([
+        { text: '  ship the eval stub', status: 'pending', difficulty: 'easy' },
+      ]);
+    });
+
+    it('merges a full matrix in one call: inherit, keep-own, no-match, and untagged-prev side by side', () => {
+      const prev: ArcanePlanEntry[] = [
+        { text: 'Inherit me', status: 'done', difficulty: 'hard' },
+        { text: 'Untagged prev', status: 'done' },
+      ];
+      const next: TodoItem[] = [
+        { text: 'Inherit me', status: 'pending' },
+        { text: 'Keep my own', status: 'pending', difficulty: 'easy' },
+        { text: 'No match here', status: 'pending' },
+        { text: 'untagged prev', status: 'pending' },
+      ];
+
+      expect(mergeTodoDifficulty(prev, next)).toEqual([
+        { text: 'Inherit me', status: 'pending', difficulty: 'hard' },
+        { text: 'Keep my own', status: 'pending', difficulty: 'easy' },
+        { text: 'No match here', status: 'pending' },
+        { text: 'untagged prev', status: 'pending' },
+      ]);
+    });
   });
 
   // NOTE: the default `onUpdate` (no argument) reaches the ai store via a

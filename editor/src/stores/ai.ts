@@ -144,6 +144,13 @@ export interface AiMessage {
    * card simply doesn't reappear after a reload. Acceptable for v1.
    */
   verifiedPass?: VerifiedCardData;
+  /**
+   * The model id the server actually served this turn (from the `usage` SSE
+   * event's `model` field, `arcane-stream.ts`), stamped on at `message_end`
+   * (`role: 'assistant'` only) via `pendingServedModel`. Undefined for a
+   * session saved before this field existed, or for any non-assistant role.
+   */
+  servedModel?: string;
   /** Metadata */
   timestamp: number;
   isStreaming?: boolean;
@@ -167,6 +174,14 @@ export interface ToolCallStatus {
 export interface ArcanePlanEntry {
   text: string;
   status: 'pending' | 'in_progress' | 'done';
+  /**
+   * Optional difficulty tag ('easy' | 'hard'), carried in generically by JSON
+   * session persistence like every other field here — no special-cased
+   * serialization needed. Only ever populated on the high tier
+   * (`services/difficulty.ts`'s `difficultyForRequest` gate); merged in from
+   * the model's `todo_update` calls by `todo-tool.ts`'s `mergeTodoDifficulty`.
+   */
+  difficulty?: 'easy' | 'hard';
 }
 
 /** Plan-mode lifecycle. */
@@ -263,6 +278,18 @@ interface AiState {
    * from a live-but-empty list.
    */
   arcanePlan: ArcanePlanEntry[] | null;
+  /**
+   * Transient per-turn holder for the served `model` id reported by the
+   * in-flight request's `usage` SSE event (`arcane-stream.ts`'s
+   * `recordServedModel`) — mirrors `streamingMessageId`'s lifecycle. Copied
+   * onto the finalized assistant message as `servedModel` at `message_end`
+   * and reset to `null` immediately after, since usage events always precede
+   * the request's `[DONE]`. Not persisted itself (only the stamped message
+   * field is); reset alongside `streamingMessageId` on conversation
+   * reset/load so a stale value from a killed turn can never leak onto the
+   * next one.
+   */
+  pendingServedModel: string | null;
 
   // Composer staging
   attachments: Attachment[];
@@ -360,6 +387,8 @@ interface AiState {
   setLastAttachments: (attachments: Attachment[]) => void;
   /** Accumulates a completed request's token usage into `sessionUsage` (P4, `arcane-stream.ts`). */
   recordSessionUsage: (inputTokens: number, outputTokens: number) => void;
+  /** Stashes the in-flight request's served model id, read back at `message_end` (see `pendingServedModel`). */
+  recordServedModel: (model: string) => void;
 }
 
 let messageCounter = 0;
@@ -543,6 +572,7 @@ export const useAiStore = create<AiState>((set, get) => ({
   agentBridgeRunning: false,
   agentContextUsage: null,
   arcanePlan: null,
+  pendingServedModel: null,
   attachments: [],
   planPhase: 'idle',
   activePlanPath: null,
@@ -638,6 +668,9 @@ export const useAiStore = create<AiState>((set, get) => ({
           const streamId = get().streamingMessageId;
           if (streamId) {
             const am = msg as AssistantMessage;
+            // Read BEFORE the set() below so the closure captures this turn's
+            // value even though the same set() also resets it to null.
+            const servedModel = get().pendingServedModel;
             set((s) => ({
               messages: s.messages.map((m) =>
                 m.id === streamId
@@ -649,11 +682,20 @@ export const useAiStore = create<AiState>((set, get) => ({
                       stopReason: am.stopReason,
                       errorMessage: am.errorMessage,
                       isStreaming: false,
+                      servedModel: servedModel ?? undefined,
                     }
                   : m,
               ),
               streamingMessageId: null,
+              // Reset for the next turn — usage events always precede this
+              // request's [DONE], so `servedModel` above already captured it.
+              pendingServedModel: null,
             }));
+          } else {
+            // No dangling stream message to stamp (e.g. already cleared by a
+            // crash-recovery agent_end), but the pending value must still not
+            // leak into the next turn.
+            set({ pendingServedModel: null });
           }
           // Persist at each completed assistant turn so a later crash can't lose it.
           scheduleSave();
@@ -793,6 +835,7 @@ export const useAiStore = create<AiState>((set, get) => ({
       verificationRequired: false,
       sessionId: null,
       arcanePlan: null,
+      pendingServedModel: null,
       sessionPlans: [],
       attachments: [],
       planPhase: 'idle',
@@ -831,6 +874,10 @@ export const useAiStore = create<AiState>((set, get) => ({
       // session file saved before T9 lacks the key entirely (undefined),
       // which falls back to null same as a fresh conversation.
       arcanePlan: session.arcanePlan ?? null,
+      // A restored transcript has no in-flight request to attribute — the
+      // finalized messages already carry whatever `servedModel` they were
+      // stamped with at save time.
+      pendingServedModel: null,
       // Absent on sessions saved before plans were linked.
       sessionPlans: session.plans ?? [],
       attachments: [],
@@ -1050,6 +1097,8 @@ export const useAiStore = create<AiState>((set, get) => ({
         requests: s.sessionUsage.requests + 1,
       },
     })),
+
+  recordServedModel: (model: string) => set({ pendingServedModel: model }),
 }));
 
 /**

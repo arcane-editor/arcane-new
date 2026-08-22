@@ -25,10 +25,14 @@ mock.module('../../../stores/auth', () => ({
   },
 }));
 
-let aiState: { mode: 'ask' | 'agent' | 'plan' } = { mode: 'ask' };
+let aiState: {
+  mode: 'ask' | 'agent' | 'plan';
+  arcanePlan: Array<{ status: string; difficulty?: 'easy' | 'hard' }> | null;
+} = { mode: 'ask', arcanePlan: null };
 let sessionUsageCalls: Array<{ inputTokens: number; outputTokens: number }> = [];
 let authNoticeCalls: Array<string | null> = [];
 let verificationRequiredCalls: boolean[] = [];
+let servedModelCalls: string[] = [];
 mock.module('../../../stores/ai', () => ({
   useAiStore: {
     getState: () => ({
@@ -42,15 +46,19 @@ mock.module('../../../stores/ai', () => ({
       setVerificationRequired: (required: boolean) => {
         verificationRequiredCalls.push(required);
       },
+      recordServedModel: (model: string) => {
+        servedModelCalls.push(model);
+      },
     }),
   },
 }));
 
 const { createArcaneStreamFn } = await import('./arcane-stream');
+const { resetSendContext, setSendPromptMode } = await import('./send-context');
 
 const ctx: Context = { systemPrompt: 'SYS', messages: [], tools: [] };
-function opts(signal?: AbortSignal): StreamOptions {
-  return { model: { id: 'm', name: 'm', provider: 'arcane' }, signal };
+function opts(signal?: AbortSignal, reasoning?: string): StreamOptions {
+  return { model: { id: 'm', name: 'm', provider: 'arcane' }, signal, reasoning };
 }
 
 function sseResponse(lines: string[], status = 200): Response {
@@ -61,6 +69,20 @@ function sseResponse(lines: string[], status = 200): Response {
     },
   });
   return new Response(body, { status });
+}
+
+interface CapturedRequestBody {
+  metadata: Record<string, unknown>;
+}
+
+/** Captures the JSON body of the (single, non-retried) fetch call for metadata assertions. */
+function capturingFetchImpl(response: Response): { fetchImpl: typeof fetch; bodies: CapturedRequestBody[] } {
+  const bodies: CapturedRequestBody[] = [];
+  const fetchImpl = (async (_url: string, init?: { body?: string }) => {
+    if (init?.body) bodies.push(JSON.parse(init.body));
+    return response;
+  }) as unknown as typeof fetch;
+  return { fetchImpl, bodies };
 }
 
 async function drain(events: AsyncIterable<AssistantMessageEvent>): Promise<AssistantMessageEvent[]> {
@@ -112,10 +134,12 @@ function delayedSseResponse(chunks: string[], chunkDelayMs: number, signal?: Abo
 beforeEach(() => {
   authState = { token: 'test-token' };
   logoutCalls = 0;
-  aiState = { mode: 'ask' };
+  aiState = { mode: 'ask', arcanePlan: null };
   sessionUsageCalls = [];
   authNoticeCalls = [];
   verificationRequiredCalls = [];
+  servedModelCalls = [];
+  resetSendContext();
   resetTurnTelemetry();
   // Several existing tests deliberately throw a genuine (un-aborted) error
   // from fetchImpl to exercise the retry path — the connect-phase catch
@@ -726,5 +750,90 @@ describe('createArcaneStreamFn', () => {
     expect(seenThis).toHaveLength(1);
     // WebKit's check is `this instanceof Window`; globalThis is what satisfies it.
     expect(seenThis[0]).toBe(globalThis);
+  });
+
+  describe('served-model usage event (Task 10)', () => {
+    it('records the served model reported on a usage event into the ai store', async () => {
+      const fetchImpl = (async () =>
+        sseResponse([
+          'data: {"type":"usage","input_tokens":10,"output_tokens":5,"model":"sol-large"}\n\n',
+          'data: [DONE]\n\n',
+        ])) as unknown as typeof fetch;
+
+      const streamFn = createArcaneStreamFn({ fetchImpl });
+      await drain(streamFn(ctx, opts()));
+
+      expect(servedModelCalls).toEqual(['sol-large']);
+    });
+
+    it('does not call recordServedModel when a usage event carries no model field', async () => {
+      const fetchImpl = (async () =>
+        sseResponse([
+          'data: {"type":"usage","input_tokens":10,"output_tokens":5}\n\n',
+          'data: [DONE]\n\n',
+        ])) as unknown as typeof fetch;
+
+      const streamFn = createArcaneStreamFn({ fetchImpl });
+      await drain(streamFn(ctx, opts()));
+
+      expect(servedModelCalls).toEqual([]);
+    });
+  });
+
+  describe('difficulty metadata FACT (Task 10)', () => {
+    it('includes difficulty for high effort + agent promptMode, from the tagged in_progress todo', async () => {
+      setSendPromptMode('agent');
+      aiState.arcanePlan = [{ status: 'in_progress', difficulty: 'hard' }];
+      const { fetchImpl, bodies } = capturingFetchImpl(sseResponse(['data: [DONE]\n\n']));
+
+      const streamFn = createArcaneStreamFn({ fetchImpl });
+      await drain(streamFn(ctx, opts(undefined, 'high')));
+
+      expect(bodies[0].metadata.difficulty).toBe('hard');
+    });
+
+    it('includes difficulty for plan-execution promptMode too, falling back to the first pending todo', async () => {
+      setSendPromptMode('plan-execution');
+      aiState.arcanePlan = [{ status: 'pending', difficulty: 'easy' }];
+      const { fetchImpl, bodies } = capturingFetchImpl(sseResponse(['data: [DONE]\n\n']));
+
+      const streamFn = createArcaneStreamFn({ fetchImpl });
+      await drain(streamFn(ctx, opts(undefined, 'high')));
+
+      expect(bodies[0].metadata.difficulty).toBe('easy');
+    });
+
+    it('omits the difficulty key entirely when effort is not high', async () => {
+      setSendPromptMode('agent');
+      aiState.arcanePlan = [{ status: 'in_progress', difficulty: 'hard' }];
+      const { fetchImpl, bodies } = capturingFetchImpl(sseResponse(['data: [DONE]\n\n']));
+
+      const streamFn = createArcaneStreamFn({ fetchImpl });
+      await drain(streamFn(ctx, opts(undefined, 'mid')));
+
+      expect(bodies[0].metadata).not.toHaveProperty('difficulty');
+    });
+
+    it('omits the difficulty key outside agent/plan-execution promptModes, even at high effort', async () => {
+      setSendPromptMode('ask');
+      aiState.arcanePlan = [{ status: 'in_progress', difficulty: 'hard' }];
+      const { fetchImpl, bodies } = capturingFetchImpl(sseResponse(['data: [DONE]\n\n']));
+
+      const streamFn = createArcaneStreamFn({ fetchImpl });
+      await drain(streamFn(ctx, opts(undefined, 'high')));
+
+      expect(bodies[0].metadata).not.toHaveProperty('difficulty');
+    });
+
+    it('omits the difficulty key when the plan has no tagged in_progress/pending entry', async () => {
+      setSendPromptMode('agent');
+      aiState.arcanePlan = [{ status: 'done', difficulty: 'hard' }];
+      const { fetchImpl, bodies } = capturingFetchImpl(sseResponse(['data: [DONE]\n\n']));
+
+      const streamFn = createArcaneStreamFn({ fetchImpl });
+      await drain(streamFn(ctx, opts(undefined, 'high')));
+
+      expect(bodies[0].metadata).not.toHaveProperty('difficulty');
+    });
   });
 });

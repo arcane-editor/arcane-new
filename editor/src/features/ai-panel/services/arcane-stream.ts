@@ -29,7 +29,8 @@ import { AssistantMessageEventStream } from './vendor/event-stream';
 import { nextTurnTelemetry, recordTurnLatency } from './turn-telemetry';
 import { convertToOpenAI } from './openai-format';
 import { getStreamExtras } from './stream-extras';
-import { getSendPlanPhase } from './send-context';
+import { getSendPlanPhase, getSendPromptMode } from './send-context';
+import { difficultyForRequest } from './difficulty';
 import { combineSignals, computeBackoffMs, isTransient, raceWithTimeout, sleep, TimeoutRaceError } from './stream-retry';
 import { ARCANE_API_URL } from '../../../config/api';
 
@@ -61,6 +62,14 @@ interface ArcaneStreamEvent {
    * "Prompt caching status") — parsed here for forward-compatibility only.
    */
   cached_input_tokens?: number;
+  /**
+   * The model id the server actually served this turn (usage events only) —
+   * routing is fully server-driven, so this is the ONLY way the editor learns
+   * which concrete model answered. Recorded into the ai store's
+   * `pendingServedModel` (`recordServedModel`) and stamped onto the finalized
+   * assistant message at `message_end`.
+   */
+  model?: string;
   message?: string;
   /**
    * Structured error classification from the Arcane server (T1's gateway
@@ -224,6 +233,16 @@ async function doStream(
   // identically — provider prompt caches are per-model, so the routed model
   // must be sticky per conversation. Conservative by construction: a false
   // codeIntent positive merely skips a cost downgrade.
+  //
+  // Stickiness is no longer whole-conversation-flat on the high tier: it now
+  // holds per DIFFICULTY SEGMENT (see `difficulty.ts` + the `metadata.
+  // difficulty` FACT below) — a run of consecutive todos sharing the same
+  // easy/hard tag stays on one model, and each easy<->hard transition
+  // re-bills the conversation history once, at the incoming model's
+  // fresh-input rate, the same one-time cost a brand-new conversation would
+  // pay. The prompt enforces grouping same-difficulty todos consecutively
+  // (rather than interleaving them), which is what bounds how many times a
+  // single conversation can flip and re-bill.
   const firstUser = context.messages.find((m) => m.role === 'user');
   const firstUserText = !firstUser
     ? ''
@@ -272,6 +291,12 @@ async function doStream(
       // maps low-tier planning sends to the mid model; the editor never
       // chooses models.
       planPhase: getSendPlanPhase(),
+      // Difficulty FACT (difficulty.ts) — undefined outside high-tier
+      // agent/plan-execution sends, or when the current in_progress/pending
+      // todo carries no tag. `JSON.stringify` drops the key entirely when
+      // undefined, same as `planPhase` above — the server sees no key at all
+      // rather than a literal `"difficulty": null`.
+      difficulty: difficultyForRequest(options.reasoning, getSendPromptMode(), useAiStore.getState().arcanePlan),
       routing,
       telemetry: nextTurnTelemetry(),
     },
@@ -607,6 +632,9 @@ async function doStream(
             // nothing renders it yet).
             recordTurnLatency(Date.now() - requestStartTime);
             useAiStore.getState().recordSessionUsage(event.input_tokens ?? 0, event.output_tokens ?? 0);
+            if (event.model) {
+              useAiStore.getState().recordServedModel(event.model);
+            }
             break;
           }
         }
