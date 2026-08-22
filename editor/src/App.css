@@ -2481,6 +2481,12 @@ html, body, #root {
   font-family: var(--font-mono);
 }
 
+.settings-account-usage-note {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+
 .settings-account-actions {
   display: flex;
   flex-direction: column;
@@ -4491,6 +4497,14 @@ html, body, #root {
   line-height: 1.5;
   color: var(--text-primary);
   padding-top: 3px;
+}
+
+/* Served-model footer (T13): same muted-metadata idiom as the effort chord
+   (.ai-panel-effort-chord) — quiet enough to ignore, findable when looked for. */
+.ai-message-served-model {
+  margin-top: 4px;
+  font-size: 10.5px;
+  color: color-mix(in srgb, var(--text-secondary) 65%, transparent);
 }
 
 /* ---- AI Panel: Input area ---- */

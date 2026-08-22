@@ -40,6 +40,7 @@ import {
   MaximizedAiOverlay,
   isAiComposerFocused,
   nextEffort,
+  clampEffort,
   restoreLatestSessionForWorkspace,
   resetAgentService,
   disposeExternalBackends,
@@ -94,6 +95,7 @@ import { initUnityTelemetry } from './features/unity-telemetry';
 import { useUnityStore } from './stores/unity';
 import { useDebugStore } from './stores/debug';
 import { useAuthStore } from './stores/auth';
+import { useServerConfigStore, maxAllowedEffort } from './stores/server-config';
 import { initConnectivityListeners } from './stores/connectivity';
 import { useSceneUsageStore } from './features/unity-context';
 import {
@@ -184,11 +186,20 @@ function cycleAiMode(): void {
   useUiStore.getState().setRightSidebarVisible(true);
 }
 
-/** Step reasoning effort by `delta`, clamped. No-op mid-run, like the bars. */
+/**
+ * Step reasoning effort by `delta`, clamped both to the scale's ends
+ * (`nextEffort`) and to the account's current ceiling (`maxAllowedEffort`) —
+ * mirrors `EffortSelector`'s fail-closed bars, so the chord can't step past a
+ * tier the plan doesn't allow even though the bars aren't what fired it.
+ * No-op mid-run, like the bars.
+ */
 function stepEffort(delta: number): void {
   const ai = useAiStore.getState();
   if (ai.isAgentRunning) return;
-  ai.setEffort(nextEffort(ai.effort, delta));
+  const config = useServerConfigStore.getState().config;
+  const plan = useAuthStore.getState().plan;
+  const next = nextEffort(ai.effort, delta);
+  ai.setEffort(clampEffort(next, maxAllowedEffort(config, plan)));
 }
 
 function App() {

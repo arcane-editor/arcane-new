@@ -40,6 +40,19 @@ describe('inline client', () => {
         expect(await mk(500, {}).fetchCompletion(REQ)).toEqual({ ok: false, reason: 'server' });
     });
 
+    it('403 inline_not_available → plan (the account plan doesn\'t include inline at all)', async () => {
+        const c = clientWith(async () => ok({ error: 'inline_not_available', code: 'inline_not_available' }, 403));
+        expect(await c.fetchCompletion(REQ)).toEqual({ ok: false, reason: 'plan' });
+    });
+
+    it('every OTHER 403 (expired/invalid token, no/mismatched code) stays auth', async () => {
+        expect(await clientWith(async () => ok({}, 403)).fetchCompletion(REQ)).toEqual({ ok: false, reason: 'auth' });
+        expect(await clientWith(async () => ok({ code: 'token_expired' }, 403)).fetchCompletion(REQ)).toEqual({ ok: false, reason: 'auth' });
+        // Malformed/non-JSON 403 body must not throw — falls back to 'auth'.
+        const c = clientWith(async () => new Response('not json', { status: 403 }));
+        expect(await c.fetchCompletion(REQ)).toEqual({ ok: false, reason: 'auth' });
+    });
+
     it('network throw → offline', async () => {
         const c = clientWith(async () => { throw new TypeError('fetch failed'); });
         expect(await c.fetchCompletion(REQ)).toEqual({ ok: false, reason: 'offline' });

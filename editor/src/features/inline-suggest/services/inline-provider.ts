@@ -8,6 +8,7 @@ import { shouldRequestInline } from './gating';
 import { useAuthStore } from '../../../stores/auth';
 import { useSettingsStore } from '../../../stores/settings';
 import { useConnectivityStore } from '../../../stores/connectivity';
+import { useServerConfigStore, inlineAllowed } from '../../../stores/server-config';
 import { useInlineSuggestStore, type InlineSuggestStatus } from '../../../stores/inline-suggest';
 
 const DEBOUNCE_MS = 250;
@@ -25,10 +26,20 @@ const breaker = createCircuitBreaker();
 
 let registered = false;
 
-function gateStatus(gate: { enabled: boolean; loggedIn: boolean; online: boolean; breakerAllows: boolean; quotaActive: boolean }): InlineSuggestStatus {
+// Exported (alongside `handleFailure` below) purely so both can be
+// unit-tested directly with an explicit gate object / result — neither reads
+// `stores/auth.ts`, which `arcane-stream.test.ts` permanently `mock.module`'s
+// process-wide with no restore (see that file's header), so any test in this
+// SAME `bun test` process that exercised `provideInlineCompletions` end-to-end
+// would read a stubbed `useAuthStore.getState()` with no `loggedIn`/`plan`
+// fields at all — always failing the gate before ever reaching the
+// `planAllows` logic under test. These two functions are the pure, testable
+// seam on the near side of that landmine.
+export function gateStatus(gate: { enabled: boolean; loggedIn: boolean; online: boolean; breakerAllows: boolean; quotaActive: boolean; planAllows: boolean }): InlineSuggestStatus {
     if (!gate.enabled) return 'disabled';
     if (!gate.loggedIn) return 'signed-out';
     if (!gate.online) return 'offline';
+    if (!gate.planAllows) return 'upgrade-required';
     // gate.quotaActive is a single boolean (gating.ts's InlineGate stays a
     // pure yes/no gate), but the store already knows WHICH pause is in force
     // — quota (daily) vs budget-exhausted (monthly) — since it's the same
@@ -43,7 +54,7 @@ function gateStatus(gate: { enabled: boolean; loggedIn: boolean; online: boolean
     return 'active';
 }
 
-function handleFailure(result: Extract<InlineResult, { ok: false }>): void {
+export function handleFailure(result: Extract<InlineResult, { ok: false }>): void {
     const store = useInlineSuggestStore.getState();
     switch (result.reason) {
         case 'aborted':
@@ -56,6 +67,12 @@ function handleFailure(result: Extract<InlineResult, { ok: false }>): void {
             return;
         case 'auth':
             store.setStatus('signed-out');
+            return;
+        case 'plan':
+            // Same treatment as 'auth': a stable, known condition (not a flaky
+            // server), so no circuit-breaker escalation — just the status the
+            // account is actually stuck in until it upgrades.
+            store.setStatus('upgrade-required');
             return;
         case 'offline':
             useConnectivityStore.getState().reportFetchFailure();
@@ -88,6 +105,10 @@ export function registerInlineSuggestProvider(monaco: Monaco): IDisposable | und
                 online: useConnectivityStore.getState().online,
                 breakerAllows: breaker.allows(),
                 quotaActive: useInlineSuggestStore.getState().quotaActive(),
+                // Unknown config ⇒ true (the server's 403 is authoritative) —
+                // this only ever short-circuits a plan the config has
+                // CONFIRMED excludes inline, never a startup race.
+                planAllows: inlineAllowed(useServerConfigStore.getState().config, useAuthStore.getState().plan),
                 scheme: model.uri.scheme,
                 contentLength: model.getValueLength(),
             };

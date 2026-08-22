@@ -91,14 +91,31 @@ describe('stores/ai — default effort + restore coercion', () => {
     expect(AI_STORE_SRC).toMatch(/\beffort:\s*'low',/);
   });
 
-  it('restores a persisted effort through coerceEffort, never passing the raw value through', () => {
-    expect(AI_STORE_SRC).toMatch(/effort:\s*coerceEffort\(session\.effort\)/);
+  it('restores a persisted effort through restoreSessionEffort, never passing the raw value through', () => {
+    expect(AI_STORE_SRC).toMatch(/effort:\s*restoreSessionEffort\(session\)/);
+  });
+
+  it('restoreSessionEffort itself coerces first, then clamps only when config is known', () => {
+    // Both calls have to live inside restoreSessionEffort — coerceEffort so a
+    // legacy/invalid persisted value ('super', a removed tier) never reaches
+    // the store raw, and restoreEffort so a null config (cold start) leaves
+    // the coerced value UNCLAMPED rather than knocking a Pro/Max session's
+    // 'mid'/'high' down to the offline-fallback ceiling for the split second
+    // before /v1/config lands.
+    expect(AI_STORE_SRC).toMatch(
+      /function restoreSessionEffort\(session: SessionData\): Effort \{[\s\S]*?coerceEffort\(session\.effort\)[\s\S]*?\}/,
+    );
+    expect(AI_STORE_SRC).toMatch(/const maxAllowed = config \? maxAllowedEffort\(config, useAuthStore\.getState\(\)\.plan\) : null/);
+    expect(AI_STORE_SRC).toMatch(/return restoreEffort\(coerceEffort\(session\.effort\), maxAllowed\)/);
   });
 });
 
 // coerceEffort itself (services/types.ts) is unit-tested directly in
 // types.test.ts, including `coerceEffort('super') === 'low'` — the exact
-// migration case this restore call site depends on.
+// migration case this restore call site depends on. `restoreEffort` and
+// `clampEffort` (data/effort.ts) are unit-tested directly in effort.test.ts,
+// including the cold-start-leaves-unclamped case restoreSessionEffort relies
+// on above.
 
 // ---------------------------------------------------------------------------
 // Plan-state persistence (agent-reliability fix): planPhase/activePlanPath

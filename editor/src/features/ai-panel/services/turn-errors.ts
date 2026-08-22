@@ -121,8 +121,13 @@ function classifyTurnErrorTable(raw: string): TurnError {
   if (lower.includes('out of credits') || lower.includes('out of ai credits')) {
     return {
       kind: 'credits',
-      title: 'Out of credits',
-      detail: 'Upgrade your plan or add a top-up to continue.',
+      // Owner directive: never a raw credit number user-facing — this 402
+      // means the account's balance is at/below zero, i.e. 100% of the
+      // monthly grant is spent, so that's the figure shown here rather than
+      // "Out of credits". ErrorBlock's existing "Manage plan & credits" CTA
+      // (kind === 'credits') is unaffected.
+      title: 'Out of AI usage',
+      detail: "You've used 100% of your monthly AI usage. Upgrade your plan or add a top-up to continue.",
       raw,
       retriable: false,
     };

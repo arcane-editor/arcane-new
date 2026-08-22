@@ -15,3 +15,4 @@ export {
   type PollResult,
 } from './services/browser-login';
 export type { Session, SessionUser } from './services/session-types';
+export { planGrantsClient } from './services/plan-grants';

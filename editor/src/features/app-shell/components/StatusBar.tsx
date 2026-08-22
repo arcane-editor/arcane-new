@@ -4,6 +4,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { openPath } from '@tauri-apps/plugin-opener';
 import { useWorkspaceStore } from '../../../stores/workspace';
 import { useAuthStore } from '../../../stores/auth';
+import { usagePercent } from '../../../utils/usage-percent';
 import { useUiStore } from '../../../stores/ui';
 import { useProjectContextStore } from '../../../stores/project-context';
 import { useUnityStore } from '../../../stores/unity';
@@ -49,7 +50,13 @@ function StatusBar() {
   );
   const isGitRepo = useGitStore((s) => s.isGitRepo);
   const branch = useGitStore((s) => s.branch);
-  const credits = useAuthStore((s) => s.credits);
+  // NEVER render a raw credit number here (owner directive) — a PERCENTAGE
+  // of the plan's monthly grant only, and only once both halves of that
+  // computation are actually known (`usagePercent` returns null otherwise,
+  // which hides the warning rather than showing a misleading 0%/100%).
+  const usage = useAuthStore((s) => s.usage);
+  const planGrant = useAuthStore((s) => s.planGrant);
+  const usedPct = usage && planGrant !== null ? usagePercent(planGrant, usage.planBalance) : null;
   const activeFile = openFiles.find((f) => f.path === activeFilePath);
   const language = activeFile ? detectLanguageName(activeFile.name) : null;
   const lspStatus = useUiStore((s) => s.lspStatus);
@@ -179,15 +186,15 @@ function StatusBar() {
       </div>
 
       <div className="status-bar-right">
-        {credits !== null && credits < 10 && (
+        {usedPct !== null && usedPct >= 90 && (
           <span
             className="status-bar-item clickable"
             onClick={() => void useAuthStore.getState().openBilling()}
-            title="You're almost out of AI credits — click to manage your plan."
+            title="You're almost out of AI usage for this period — click to manage your plan."
             style={{ cursor: 'pointer', color: 'var(--warning)' }}
           >
             <span className="icon"><AlertTriangle size={14} /></span>
-            <span>{Math.max(0, Math.floor(credits))} credits</span>
+            <span>AI usage {usedPct}%</span>
           </span>
         )}
         <InlineSuggestStatusItem />

@@ -32,6 +32,7 @@ import {
   normalizePlanRestore,
   resetWriteApprovalSession,
   resolvePendingQuestion,
+  restoreEffort,
 } from '../features/ai-panel';
 // From utils/, NOT the ai-panel barrel. This is called at MODULE SCOPE below,
 // and the barrel is mid-evaluation when this module runs (barrel → AiChatPanel
@@ -41,6 +42,8 @@ import { createUpdateCoalescer } from '../utils/update-coalescer';
 import { useWorkspaceStore } from './workspace';
 import { useCheckpointsStore } from './checkpoints';
 import { useEditReviewStore } from './edit-review';
+import { useAuthStore } from './auth';
+import { useServerConfigStore, maxAllowedEffort } from './server-config';
 import { notify } from './notifications';
 
 // ---- UI-friendly message types ----
@@ -412,6 +415,19 @@ function sweepUnresolvedQuestions(messages: AiMessage[]): AiMessage[] {
       ? { ...m, questionRequest: { ...m.questionRequest, cancelled: true } }
       : m,
   );
+}
+
+/**
+ * Effort to restore for `loadSessionIntoStore` — `coerceEffort` first (a
+ * session saved before Free-tier gating existed can carry a now-invalid
+ * value), then `restoreEffort` clamps it to the account's current ceiling
+ * ONLY when server-config is already known (`null` at cold start leaves the
+ * persisted value alone — see `restoreEffort`'s own doc for why).
+ */
+function restoreSessionEffort(session: SessionData): Effort {
+  const config = useServerConfigStore.getState().config;
+  const maxAllowed = config ? maxAllowedEffort(config, useAuthStore.getState().plan) : null;
+  return restoreEffort(coerceEffort(session.effort), maxAllowed);
 }
 
 // ---- Incremental session persistence ----
@@ -864,9 +880,10 @@ export const useAiStore = create<AiState>((set, get) => ({
       mode: session.mode ?? 'agent',
       // A session saved before Free-tier gating existed can carry a
       // now-invalid level ('super' was a real removed tier, 'high' is no
-      // longer safe to auto-restore) — coerce rather than pass it through,
-      // same treatment `agentKind` gets just below.
-      effort: coerceEffort(session.effort),
+      // longer safe to auto-restore) — coerce and clamp rather than pass it
+      // through, same treatment `agentKind` gets just below. See
+      // `restoreSessionEffort`'s doc for the cold-start unclamped case.
+      effort: restoreSessionEffort(session),
       // agentKind is coerced to a live kind on load (see session-persistence);
       // old non-Arcane sessions restore as read-only Arcane transcripts.
       selectedAgent: session.agentKind ?? 'arcane',

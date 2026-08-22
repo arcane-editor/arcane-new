@@ -5,9 +5,14 @@ import { create } from 'zustand';
 // 'quota' = the 429 daily request-count cap; 'budget-exhausted' = the 402
 // monthly spend ceiling — two independent server-side pause conditions with
 // the same resetAt-tracking/gating shape but different (daily vs monthly)
-// status-bar copy.
+// status-bar copy. 'upgrade-required' = the account's plan doesn't include
+// inline completions at all (client-side `planAllows` gate, or the server's
+// 403 `inline_not_available` backstop) — distinct from 'signed-out' (no
+// session) and from the quota/budget pauses (a paid plan temporarily spent
+// out), since only this one is fixed by upgrading, not by waiting or logging
+// in.
 export type InlineSuggestStatus =
-    | 'active' | 'disabled' | 'signed-out' | 'offline' | 'quota' | 'budget-exhausted' | 'backoff';
+    | 'active' | 'disabled' | 'signed-out' | 'offline' | 'quota' | 'budget-exhausted' | 'backoff' | 'upgrade-required';
 
 const RESET_TRACKED_STATUSES: readonly InlineSuggestStatus[] = ['quota', 'budget-exhausted'];
 

@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach, mock } from 'bun:test';
-import type { BrowserLoginHandlers, ExchangeResult } from '../features/auth';
+import { describe, it, expect, beforeEach, afterAll, mock } from 'bun:test';
+import type { BrowserLoginHandlers, ExchangeResult, UsageSummary } from '../features/auth';
 
 // stores/auth.ts statically imports both '../features/auth' (the barrel —
 // authClient + the browser-login service functions) and '@tauri-apps/api/event'
@@ -20,6 +20,18 @@ let exchangeEditorCodeImpl: (
 ) => Promise<ExchangeResult> = async () => ({ success: false, error: 'not configured' });
 
 let loadFromDiskImpl: () => Promise<{ token: string; email: string } | null> = async () => null;
+
+// `refreshUsage` calls both of these — default to throwing/resolving null so
+// every EXISTING test's behavior stays byte-for-byte identical to before
+// (previously `authClient.fetchUsage` was simply ABSENT from this mock, so
+// calling it threw "not a function", caught by refreshUsage's own try/catch —
+// same outcome, just via an explicit variable now so new tests can flip it).
+let fetchUsageCalls = 0;
+let fetchUsageImpl: (token: string) => Promise<UsageSummary> = async () => {
+  throw new Error('fetchUsage not configured');
+};
+let getGrantCalls: string[] = [];
+let getGrantImpl: (plan: string) => Promise<number | null> = async () => null;
 
 let beginBrowserLoginCalls: number = 0;
 let beginBrowserLoginRejection: Error | null = null;
@@ -50,6 +62,16 @@ mock.module('../features/auth', () => ({
     },
     loadFromDisk: () => loadFromDiskImpl(),
     logout: async () => {},
+    fetchUsage: (token: string) => {
+      fetchUsageCalls++;
+      return fetchUsageImpl(token);
+    },
+  },
+  planGrantsClient: {
+    getGrant: (plan: string) => {
+      getGrantCalls.push(plan);
+      return getGrantImpl(plan);
+    },
   },
   beginBrowserLogin: async (handlers: BrowserLoginHandlers) => {
     beginBrowserLoginCalls++;
@@ -112,6 +134,22 @@ mock.module('@tauri-apps/api/event', () => ({
 }));
 
 const { useAuthStore } = await import('./auth');
+// Dynamic, AFTER the mocks above (same reason `useAuthStore` itself is) —
+// `server-config.ts` statically imports `./auth`, so loading it any earlier
+// would resolve THAT import before the mocks are registered.
+const { useServerConfigStore } = await import('./server-config');
+
+// `refreshUsage` fire-and-forgets a real `useServerConfigStore.getState().refresh()`
+// call on a successful fetch (kept fresh alongside usage — see its comment in
+// auth.ts). That store's `refresh` makes a REAL network `fetch` when actually
+// invoked; every test in this file wants that side effect neutralized, since
+// none of them are testing server-config's own behavior (that's
+// `server-config.test.ts`, which builds ISOLATED stores via
+// `createServerConfigStore()` and never touches this shared singleton).
+// Restored in `afterAll` so a later file in the same `bun test` process never
+// inherits a permanently-stubbed shared singleton.
+const REAL_SERVER_CONFIG_REFRESH = useServerConfigStore.getState().refresh;
+let serverConfigRefreshCalls = 0;
 
 /** Bounded wait for fire-and-forget async transitions (mirrors the helper
  * `stores/edit-review.test.ts` uses for the same kind of glue). */
@@ -142,6 +180,8 @@ function resetStore(): void {
     loggedIn: false,
     email: null,
     plan: null,
+    usage: null,
+    planGrant: null,
     token: null,
     loginStatus: 'idle',
     error: null,
@@ -164,6 +204,22 @@ beforeEach(() => {
   coldStartResumes = false;
   hadLaunchUrlResult = false;
   capturedColdStartHandlers = null;
+  fetchUsageCalls = 0;
+  fetchUsageImpl = async () => {
+    throw new Error('fetchUsage not configured');
+  };
+  getGrantCalls = [];
+  getGrantImpl = async () => null;
+  serverConfigRefreshCalls = 0;
+  useServerConfigStore.setState({
+    refresh: async () => {
+      serverConfigRefreshCalls++;
+    },
+  });
+});
+
+afterAll(() => {
+  useServerConfigStore.setState({ refresh: REAL_SERVER_CONFIG_REFRESH });
 });
 
 describe('useAuthStore.resumeColdStartLogin', () => {
@@ -373,7 +429,10 @@ describe('useAuthStore.loadFromDisk', () => {
   });
 
   it('resolves null (token file genuinely missing, e.g. logout in another window) -> resets to signed-out', async () => {
-    useAuthStore.setState({ loggedIn: true, email: 'was@example.com', token: 'tok', plan: 'pro' });
+    useAuthStore.setState({
+      loggedIn: true, email: 'was@example.com', token: 'tok', plan: 'pro',
+      usage: { planBalance: 1800, topupBalance: 0 }, planGrant: 2097,
+    });
     loadFromDiskImpl = async () => null;
 
     await useAuthStore.getState().loadFromDisk();
@@ -384,6 +443,10 @@ describe('useAuthStore.loadFromDisk', () => {
     expect(state.token).toBeNull();
     expect(state.plan).toBeNull();
     expect(state.error).toBeNull();
+    // Signed out entirely — the usage percentage must not survive into the
+    // NEXT account's (or a re-signed-in same account's) first render.
+    expect(state.usage).toBeNull();
+    expect(state.planGrant).toBeNull();
   });
 
   it('REJECTS (transient read/parse error, distinct from "no token") -> current session left unchanged (Fix 1 regression guard)', async () => {
@@ -407,5 +470,78 @@ describe('useAuthStore.loadFromDisk', () => {
     expect(state.token).toBe('still-tok');
     expect(state.plan).toBe('pro');
     expect(state.loginStatus).toBe('idle');
+  });
+});
+
+describe('useAuthStore.refreshUsage', () => {
+  it('sets plan, credits, the planBalance/topupBalance split, and planGrant on success', async () => {
+    useAuthStore.setState({ token: 'tok' });
+    fetchUsageImpl = async () => ({
+      plan: 'pro',
+      credits: { balance: 2000, plan: 1800, topup: 200 },
+      planPeriodEnd: '2099-01-01T00:00:00.000Z',
+    });
+    getGrantImpl = async (plan) => (plan === 'pro' ? 2097 : null);
+
+    await useAuthStore.getState().refreshUsage();
+    // planGrant lands via a SEPARATE fire-and-forget `.then` inside
+    // refreshUsage (not awaited by the action itself) — wait for it.
+    await waitFor(() => useAuthStore.getState().planGrant !== null);
+    // Also fire-and-forgotten on success: keeping /v1/config fresh. Wait for
+    // the STUB (not the real network `refresh`, neutralized in beforeEach) to
+    // have run, confirming this test never attempted a real fetch.
+    await waitFor(() => serverConfigRefreshCalls > 0);
+
+    const state = useAuthStore.getState();
+    expect(state.plan).toBe('pro');
+    expect(state.credits).toBe(2000);
+    expect(state.usage).toEqual({ planBalance: 1800, topupBalance: 200 });
+    expect(state.planGrant).toBe(2097);
+    expect(getGrantCalls).toEqual(['pro']);
+  });
+
+  it('a failed fetchUsage leaves plan/credits/usage/planGrant untouched (best-effort)', async () => {
+    useAuthStore.setState({
+      token: 'tok', plan: 'pro', credits: 500,
+      usage: { planBalance: 400, topupBalance: 100 }, planGrant: 2097,
+    });
+    fetchUsageImpl = async () => {
+      throw new Error('network down');
+    };
+
+    await useAuthStore.getState().refreshUsage();
+
+    const state = useAuthStore.getState();
+    expect(state.plan).toBe('pro');
+    expect(state.credits).toBe(500);
+    expect(state.usage).toEqual({ planBalance: 400, topupBalance: 100 });
+    expect(state.planGrant).toBe(2097);
+    expect(getGrantCalls).toEqual([]); // never reached — fetchUsage threw first
+  });
+
+  it('a failed grant lookup leaves planGrant null WITHOUT touching the balance that just landed', async () => {
+    useAuthStore.setState({ token: 'tok' });
+    fetchUsageImpl = async () => ({
+      plan: 'starter',
+      credits: { balance: 300, plan: 280, topup: 20 },
+      planPeriodEnd: null,
+    });
+    getGrantImpl = async () => null; // simulates a failed /v1/billing/plans fetch
+
+    await useAuthStore.getState().refreshUsage();
+    await waitFor(() => getGrantCalls.length > 0);
+
+    const state = useAuthStore.getState();
+    expect(state.usage).toEqual({ planBalance: 280, topupBalance: 20 });
+    expect(state.planGrant).toBeNull();
+  });
+
+  it('is a no-op without a token — never calls fetchUsage or the grant lookup', async () => {
+    useAuthStore.setState({ token: null });
+
+    await useAuthStore.getState().refreshUsage();
+
+    expect(fetchUsageCalls).toBe(0);
+    expect(getGrantCalls).toEqual([]);
   });
 });

@@ -3,7 +3,7 @@ import { shouldRequestInline } from './gating';
 
 const OPEN = {
     enabled: true, loggedIn: true, online: true, breakerAllows: true,
-    quotaActive: false, scheme: 'file', contentLength: 100,
+    quotaActive: false, planAllows: true, scheme: 'file', contentLength: 100,
 };
 
 describe('shouldRequestInline', () => {
@@ -16,6 +16,7 @@ describe('shouldRequestInline', () => {
         ['offline', { online: false }],
         ['breaker open', { breakerAllows: false }],
         ['quota active', { quotaActive: true }],
+        ['plan does not allow inline', { planAllows: false }],
         ['non-file scheme', { scheme: 'auth' }],
         ['large file', { contentLength: 1_000_001 }],
     ] as const)('blocks when %s', (_label, override) => {

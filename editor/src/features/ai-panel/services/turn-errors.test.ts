@@ -466,6 +466,20 @@ describe('server codes + credits/tier-gated kinds', () => {
     expect(e2.kind).toBe('credits');
   });
 
+  // Owner directive: user-facing surfaces never show a raw credit number —
+  // usage percentages only. The out-of-credits card is a fixed "100% used"
+  // (the 402 only fires once the balance is at/below zero), not a computed
+  // figure, so this pins the literal copy rather than a percentage helper.
+  it("the credits card's title/detail read as a usage percentage, never raw credits", () => {
+    const e = classifyTurnError('You are out of credits. Upgrade your plan or add a top-up to keep using AI.');
+    expect(e.title).toBe('Out of AI usage');
+    expect(e.detail).toBe("You've used 100% of your monthly AI usage. Upgrade your plan or add a top-up to continue.");
+    // The word "credits" alone is fine (the CTA button says "Manage plan &
+    // credits" — see ErrorBlock.tsx); a NUMBER glued to it is what's banned.
+    expect(e.title).not.toMatch(/\d.*credits|credits.*\d/i);
+    expect(e.detail).not.toMatch(/\d.*credits|credits.*\d/i);
+  });
+
   it('classifies tier_not_available as a non-retriable tier_gated error', () => {
     const e = classifyTurnError('[code:tier_not_available] Deep Think and Max are available on paid plans.');
     expect(e.kind).toBe('tier_gated');

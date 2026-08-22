@@ -8,6 +8,7 @@ import {
   submitManualCode as serviceSubmitManualCode,
   resumeFromColdStart as serviceResumeFromColdStart,
   hadLaunchUrl as serviceHadLaunchUrl,
+  planGrantsClient,
   type Session,
 } from '../features/auth';
 import { ARCANE_WEB_URL } from '../config/api';
@@ -18,8 +19,26 @@ interface AuthState {
   loggedIn: boolean;
   email: string | null;
   plan: string | null;
-  /** Spendable credit balance (plan + top-up), in user-facing credits. */
+  /** Spendable credit balance (plan + top-up), in user-facing credits. Never
+   *  rendered raw anywhere user-facing — see `usage`/`planGrant` below, which
+   *  exist so the UI can show a PERCENTAGE instead (owner directive). */
   credits: number | null;
+  /**
+   * Per-bucket split of `credits`, from `/v1/usage`'s `credits.plan` /
+   * `credits.topup` (`refreshUsage`) — the plan-grant balance and the top-up
+   * balance separately. `planBalance` is what `usagePercent` measures against
+   * the monthly grant (`planGrant`); `topupBalance` only ever drives a
+   * boolean "extra usage available" line, never a number.
+   */
+  usage: { planBalance: number; topupBalance: number } | null;
+  /**
+   * This account's plan's monthly credit grant — NOT carried by `/v1/usage`,
+   * so it's fetched separately (`planGrantsClient`, `GET /v1/billing/plans`,
+   * public + module-cached) and stamped alongside `usage`. `null` until that
+   * fetch lands, or if it fails; `0` for a plan id outside the tier ladder.
+   * See `utils/usage-percent.ts`'s `usagePercent` for how the two combine.
+   */
+  planGrant: number | null;
   token: string | null;
   loginStatus: LoginStatus;
   error: string | null;
@@ -120,6 +139,8 @@ export const useAuthStore = create<AuthState>((set) => ({
   email: null,
   plan: null,
   credits: null,
+  usage: null,
+  planGrant: null,
   token: null,
   loginStatus: 'idle',
   error: null,
@@ -191,7 +212,10 @@ export const useAuthStore = create<AuthState>((set) => ({
   logout: async () => {
     serviceCancelBrowserLogin();
     await authClient.logout();
-    set({ loggedIn: false, email: null, plan: null, credits: null, token: null, loginStatus: 'idle', error: null });
+    set({
+      loggedIn: false, email: null, plan: null, credits: null, usage: null, planGrant: null,
+      token: null, loginStatus: 'idle', error: null,
+    });
     void emit('auth-changed');
     // Dynamic import (not static): a static import here would cycle back
     // against server-config.ts's own import of this store for the auth
@@ -216,14 +240,20 @@ export const useAuthStore = create<AuthState>((set) => ({
     if (!stored) {
       // Token file missing — e.g. logout happened in ANOTHER window (spec C3)
       // or a fresh install. Reset instead of silently keeping stale state.
-      set({ loggedIn: false, email: null, plan: null, credits: null, token: null, error: null });
+      set({
+        loggedIn: false, email: null, plan: null, credits: null, usage: null, planGrant: null,
+        token: null, error: null,
+      });
       void import('./server-config').then((m) => m.useServerConfigStore.getState().clear());
       return;
     }
 
     if (isJwtExpired(stored.token)) {
       await authClient.logout().catch(() => {});
-      set({ loggedIn: false, email: null, plan: null, credits: null, token: null, error: null });
+      set({
+        loggedIn: false, email: null, plan: null, credits: null, usage: null, planGrant: null,
+        token: null, error: null,
+      });
       void import('./server-config').then((m) => m.useServerConfigStore.getState().clear());
       return;
     }
@@ -249,12 +279,21 @@ export const useAuthStore = create<AuthState>((set) => ({
     if (!token) return;
     try {
       const u = await authClient.fetchUsage(token);
-      set({ plan: u.plan, credits: u.credits.balance });
+      set({
+        plan: u.plan,
+        credits: u.credits.balance,
+        usage: { planBalance: u.credits.plan, topupBalance: u.credits.topup },
+      });
       // Fire-and-forget: refreshUsage already runs on login, session-restore,
       // Account mount, and stream 402s, so this is the natural place to keep
       // /v1/config fresh too. Dynamic import — see stores/server-config.ts's
       // header for why a static one would cycle.
       void import('./server-config').then((m) => m.useServerConfigStore.getState().refresh());
+      // Best-effort, independently of the block above: a failed grant lookup
+      // must not touch `usage`/`credits` — it only ever leaves `planGrant`
+      // (and therefore the usage PERCENTAGE) unset, ISOLATED from the balance
+      // this try/catch already landed.
+      void planGrantsClient.getGrant(u.plan).then((grant) => set({ planGrant: grant }));
     } catch {
       // Best-effort — a transient failure must not clear a known balance.
     }

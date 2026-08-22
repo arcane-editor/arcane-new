@@ -14,9 +14,12 @@
  */
 
 import { useAiStore } from '../../../stores/ai';
+import { useAuthStore } from '../../../stores/auth';
+import { useServerConfigStore, allowedEfforts } from '../../../stores/server-config';
 import { useCommandsStore } from '../../../stores/commands';
 import { isMac } from '../../../utils/platform';
 import { effortChordLabel } from '../data/effort-chord';
+import { effortLockMessage } from '../data/effort';
 import type { Effort } from '../services/types';
 
 // Standard is first because it is the default: the server gates `mid`/`high`
@@ -32,6 +35,15 @@ function EffortSelector() {
   const effort = useAiStore((s) => s.effort);
   const setEffort = useAiStore((s) => s.setEffort);
   const isAgentRunning = useAiStore((s) => s.isAgentRunning);
+
+  // Fail-closed by construction: `allowedEfforts` degrades to a plan-ceiling
+  // fallback (and that ceiling defaults to 'low') the instant `plan` or
+  // `config` is anything other than a currently-known paid tier — signed-out,
+  // plan-unknown, and config-unknown all land there. See its STALE-CONFIG
+  // GUARD doc in stores/server-config.ts.
+  const config = useServerConfigStore((s) => s.config);
+  const plan = useAuthStore((s) => s.plan);
+  const allowed = allowedEfforts(config, plan);
 
   const activeLevel = LEVELS.find((l) => l.value === effort) ?? LEVELS[0];
   const activeBars = activeLevel.bars;
@@ -61,23 +73,32 @@ function EffortSelector() {
         {[1, 2, 3].map((idx) => {
           const lvl = LEVELS.find((l) => l.bars === idx)!;
           const isActive = idx <= activeBars;
+          const locked = !allowed.includes(lvl.value);
+          const lockMessage = locked ? effortLockMessage(lvl.value) : null;
           return (
             <button
               key={idx}
               type="button"
               role="radio"
               aria-checked={effort === lvl.value}
+              aria-disabled={locked || undefined}
               className={`ai-panel-effort-bar ai-panel-effort-bar--${idx} ${
                 isActive ? 'is-active' : ''
               }`}
-              onClick={() => setEffort(lvl.value)}
-              disabled={isAgentRunning}
-              // No `title`: these bars carried a native tooltip each, plus one
-              // on the group, and hovering the toolbar flashed them constantly.
-              // `aria-label` keeps the bars named for screen readers — with the
-              // tooltip gone it is their only accessible name, since the button
-              // itself has no text.
-              aria-label={`${lvl.label} reasoning`}
+              // Locked bars get NO click handler at all — not just a disabled
+              // attribute — so a stray click can never race a re-render that
+              // briefly clears `disabled`.
+              onClick={locked ? undefined : () => setEffort(lvl.value)}
+              disabled={isAgentRunning || locked}
+              // No `title` on an UNLOCKED bar: these carried a native tooltip
+              // each, plus one on the group, and hovering the toolbar flashed
+              // them constantly. A locked bar is the exception — it needs to
+              // explain WHY it's locked, so it gets a `title` (TooltipHost
+              // upgrades it to the styled tooltip on hover) alongside the
+              // `aria-label` screen readers rely on either way, since the
+              // button itself has no text.
+              title={lockMessage || undefined}
+              aria-label={lockMessage || `${lvl.label} reasoning`}
             />
           );
         })}

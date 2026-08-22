@@ -10,6 +10,7 @@ import remarkGfm from 'remark-gfm';
 import type { AiMessage } from '../../../stores/ai';
 import type { TextContent, ThinkingContent, ToolCall } from '../services/vendor/types';
 import { hasRenderableContent } from '../services/turn-errors';
+import { modelShortName } from '../data/served-model';
 import ThinkingBlock from './ThinkingBlock';
 import ToolCallBlock from './ToolCallBlock';
 import StreamingIndicator from './StreamingIndicator';
@@ -89,6 +90,16 @@ function AssistantMessage({ message, turnUserMessageId }: AssistantMessageProps)
           }
         })}
         {message.isStreaming && <StreamingIndicator />}
+        {/* Turn-final only: streaming not yet finished, or a stopReason other
+            than 'stop' (e.g. 'toolUse'), means there's another assistant
+            message still coming in this turn — showing the served model on an
+            intermediate tool-call step would misattribute whichever model
+            happens to be stamped mid-turn (`pendingServedModel` is only
+            captured once, at `message_end`) to a bubble that isn't the turn's
+            actual answer. */}
+        {!message.isStreaming && message.stopReason === 'stop' && message.servedModel && (
+          <div className="ai-message-served-model">{modelShortName(message.servedModel)}</div>
+        )}
       </div>
     </div>
   );

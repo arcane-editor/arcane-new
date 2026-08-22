@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { CreditCard, Globe, KeyRound, Loader2, LogOut, RotateCw, X } from 'lucide-react';
 import { useAuthStore } from '../../../stores/auth';
 import { reopenBrowser } from '../../auth';
+import { usagePercent } from '../../../utils/usage-percent';
 
 /**
  * Account pane of the settings modal — signed-in details, or the sign-in flow.
@@ -15,7 +16,8 @@ export function AccountSection() {
     loggedIn,
     email,
     plan,
-    credits,
+    usage,
+    planGrant,
     loginStatus,
     error,
     beginBrowserLogin,
@@ -27,6 +29,11 @@ export function AccountSection() {
   } = useAuthStore();
   const [showPaste, setShowPaste] = useState(false);
   const [pasteCode, setPasteCode] = useState('');
+
+  // NEVER a raw credit count here (owner directive) — a PERCENTAGE of the
+  // plan's monthly grant only. `null` (grant unknown, or the fetch hasn't
+  // landed) renders as "—", same as the old raw-credits placeholder did.
+  const usedPct = usage && planGrant !== null ? usagePercent(planGrant, usage.planBalance) : null;
 
   // Pull the latest plan + credit balance whenever the account view is shown
   // signed-in (also refreshed after login and on 402 from the AI stream).
@@ -57,10 +64,17 @@ export function AccountSection() {
             </div>
           </div>
           <div className="settings-account-field">
-            <div className="settings-account-field-label">Credits left</div>
+            <div className="settings-account-field-label">Usage</div>
             <div className="settings-account-field-value settings-account-credits">
-              {credits === null ? '—' : Math.round(credits).toLocaleString()}
+              {usedPct === null
+                ? '—'
+                : plan === 'free'
+                  ? `AI trial ${usedPct}% used`
+                  : `${usedPct}% of monthly AI usage used`}
             </div>
+            {usage && usage.topupBalance > 0 && (
+              <div className="settings-account-usage-note">Extra usage available</div>
+            )}
           </div>
         </div>
 

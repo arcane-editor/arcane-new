@@ -10,6 +10,7 @@ const LABELS: Record<InlineSuggestStatus, string> = {
   quota: 'Tab · daily limit',
   'budget-exhausted': 'Tab · monthly limit',
   backoff: 'Tab · paused',
+  'upgrade-required': 'Tab · upgrade',
 };
 
 const TITLES: Record<InlineSuggestStatus, string> = {
@@ -20,6 +21,7 @@ const TITLES: Record<InlineSuggestStatus, string> = {
   quota: 'Daily completion limit reached.',
   'budget-exhausted': 'Tab completions for this month are used up.',
   backoff: 'Suggestions paused after repeated errors — retrying shortly.',
+  'upgrade-required': 'Tab completions are available on the Starter plan and above.',
 };
 
 // Matches the neighboring GraphifyStatusBadge's inline-styled-button

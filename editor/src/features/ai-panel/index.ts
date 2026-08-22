@@ -30,7 +30,7 @@ export {
 } from './services/external-agent-gate';
 export { fixConsoleError } from './services/fix-console-error';
 export { isAiComposerFocused } from './services/composer-focus';
-export { EFFORT_ORDER, nextEffort } from './data/effort';
+export { EFFORT_ORDER, nextEffort, clampEffort, restoreEffort } from './data/effort';
 export { planController } from './services/plan-controller';
 export { resetWriteApprovalSession } from './services/write-approval-gate';
 export type { AskUserOption, AskUserParams } from './services/ask-user-tool';

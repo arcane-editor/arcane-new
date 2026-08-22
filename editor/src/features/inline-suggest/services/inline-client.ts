@@ -13,7 +13,11 @@ export interface InlineRequest {
 
 export type InlineResult =
     | { ok: true; text: string }
-    | { ok: false; reason: 'aborted' | 'offline' | 'auth' | 'quota' | 'budget' | 'server' | 'timeout'; resetAt?: string };
+    | {
+        ok: false;
+        reason: 'aborted' | 'offline' | 'auth' | 'plan' | 'quota' | 'budget' | 'server' | 'timeout';
+        resetAt?: string;
+    };
 
 interface InlineClientConfig {
     fetchImpl?: typeof fetch;
@@ -56,7 +60,17 @@ export function createInlineClient(cfg: InlineClientConfig = {}) {
                 }
                 return { ok: false, reason: 'offline' };
             }
-            if (res.status === 401 || res.status === 403) return { ok: false, reason: 'auth' };
+            if (res.status === 401) return { ok: false, reason: 'auth' };
+            if (res.status === 403) {
+                // Distinguish the plan-lock backstop (client-side `planAllows`
+                // gate should already have short-circuited BEFORE this request
+                // for a known-current config, so a live 403 here is either a
+                // startup race — config said "maybe" and the server said no —
+                // or a downgrade the client hasn't heard about yet) from every
+                // other 403 (expired/invalid token), which stays 'auth'.
+                const body = (await res.json().catch(() => ({}))) as { code?: string };
+                return { ok: false, reason: body.code === 'inline_not_available' ? 'plan' : 'auth' };
+            }
             if (res.status === 429) {
                 const body = (await res.json().catch(() => ({}))) as { resetAt?: string };
                 return { ok: false, reason: 'quota', ...(body.resetAt ? { resetAt: body.resetAt } : {}) };
