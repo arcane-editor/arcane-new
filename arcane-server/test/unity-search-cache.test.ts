@@ -21,6 +21,10 @@ async function keyFor(parts: Record<string, unknown>): Promise<string> {
 describe('unity search cache', () => {
     it('a seeded cache row is served without any AI/Vectorize call', async () => {
         const user = await seedPasswordUser('search-cache@test.dev', 'password123');
+        // seedPasswordUser is a raw INSERT (bypasses createUser's signup-trial
+        // grant), so give this free-plan row credits directly — the route
+        // gates on checkAiBudget before it ever reaches the cache lookup.
+        await env.arcane_db.prepare('UPDATE users SET plan_credits_micro = 1500000 WHERE id = ?').bind(user.id).run();
         const token = await tokenFor(user);
 
         const cached = { version: '6000.3', source: 'vectorize', results: [{ score: 0.9, docType: 'scriptref', text: 'cached hit' }] };
@@ -54,6 +58,7 @@ describe('unity search cache', () => {
 
     it('an expired row is ignored (falls through to the live path)', async () => {
         const user = await seedPasswordUser('search-cache-exp@test.dev', 'password123');
+        await env.arcane_db.prepare('UPDATE users SET plan_credits_micro = 1500000 WHERE id = ?').bind(user.id).run();
         const token = await tokenFor(user);
 
         const cacheKey = await keyFor({ q: 'expired query', v: '6000.3', rp: '', is: '', dt: 'all', topK: 8 });

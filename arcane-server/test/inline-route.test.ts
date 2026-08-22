@@ -54,11 +54,27 @@ describe('POST /v1/completions/inline', () => {
         expect((await res.json() as { code: string }).code).toBe('inline_too_large');
     });
 
-    it('429 inline_quota with resetAt once the daily cap is hit', async () => {
+    it('403 inline_not_available with requiredPlan for a free-plan user', async () => {
+        const user = await seedPasswordUser('inl-free@test.dev', 'password123'); // free by default
+        const res = await jsonPost('/v1/completions/inline', GOOD_BODY, await tokenFor(user));
+        expect(res.status).toBe(403);
+        const body = await res.json() as { code: string; requiredPlan: string };
+        expect(body.code).toBe('inline_not_available');
+        expect(body.requiredPlan).toBe('starter');
+
+        // No daily-counter bump for a locked-out plan.
+        const dailyRow = await env.arcane_db.prepare(
+            'SELECT count FROM inline_usage WHERE user_id = ? AND usage_date = ?'
+        ).bind(user.id, utcDateKey()).first<{ count: number }>();
+        expect(dailyRow).toBeNull();
+    });
+
+    it('429 inline_quota with resetAt once the daily cap is hit (paid plan)', async () => {
         const user = await seedPasswordUser('inl-q@test.dev', 'password123');
+        await env.arcane_db.prepare("UPDATE users SET plan = 'starter' WHERE id = ?").bind(user.id).run();
         await env.arcane_db.prepare(
             'INSERT INTO inline_usage (user_id, usage_date, count) VALUES (?, ?, ?)'
-        ).bind(user.id, utcDateKey(), INLINE_DAILY_CAP.free).run();
+        ).bind(user.id, utcDateKey(), INLINE_DAILY_CAP.starter).run();
         const res = await jsonPost('/v1/completions/inline', GOOD_BODY, await tokenFor(user));
         expect(res.status).toBe(429);
         const body = await res.json() as { code: string; resetAt: string };
@@ -66,8 +82,9 @@ describe('POST /v1/completions/inline', () => {
         expect(Date.parse(body.resetAt)).toBeGreaterThan(Date.now());
     });
 
-    it('503 inline_unavailable when the AI binding is absent (test env)', async () => {
+    it('503 inline_unavailable when the AI binding is absent (test env, paid plan)', async () => {
         const user = await seedPasswordUser('inl-ok@test.dev', 'password123');
+        await env.arcane_db.prepare("UPDATE users SET plan = 'starter' WHERE id = ?").bind(user.id).run();
         const res = await jsonPost('/v1/completions/inline', GOOD_BODY, await tokenFor(user));
         expect(res.status).toBe(503);
         expect((await res.json() as { code: string }).code).toBe('inline_unavailable');

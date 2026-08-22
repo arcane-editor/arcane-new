@@ -108,15 +108,16 @@ import { billedMicro } from '../src/lib/usage.ts';
 describe('billedMicro', () => {
     it('applies gateway fee and margin to the list cost', () => {
         // glm-5.2, 10k fresh + 20k cached + 2k out = $0.028 list
-        // 0.028 * 1.05 * 2.0 = $0.0588 -> 58800 micro
-        expect(billedMicro('@cf/zai-org/glm-5.2', 30_000, 2_000, 20_000)).toBe(58_800);
+        // MARGIN is 1.0 now (margin lives in grant sizing, not at debit time):
+        // 0.028 * 1.05 * 1.0 = $0.0294 -> 29400 micro
+        expect(billedMicro('@cf/zai-org/glm-5.2', 30_000, 2_000, 20_000)).toBe(29_400);
     });
 
     it('rounds to an integer micro-USD', () => {
         const micro = billedMicro('openai/gpt-5.6-luna', 8_000, 800, 0);
         expect(Number.isInteger(micro)).toBe(true);
-        // 0.00256 * 2.10 = 0.005376 -> 5376
-        expect(micro).toBe(5_376);
+        // 0.00256 * 1.05 = 0.002688 -> 2688
+        expect(micro).toBe(2_688);
     });
 
     it('is 0 for an unknown model so it is never debited', () => {

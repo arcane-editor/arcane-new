@@ -71,6 +71,13 @@ describe('subscription checkout stays open to free users', () => {
         expect((await body(res)).code).toBe('billing_unconfigured');
     });
 
+    it('does not block a free user starting a starter checkout', async () => {
+        const u = await seedPasswordUser('gate-starter@test.dev', 'password123');
+        const res = await checkout(u, { tier: 'starter' });
+        expect(res.status).toBe(503);
+        expect((await body(res)).code).toBe('billing_unconfigured');
+    });
+
     it('still rejects a bogus tier with 400', async () => {
         const u = await seedPasswordUser('gate-badtier@test.dev', 'password123');
         const res = await checkout(u, { tier: 'platinum' });

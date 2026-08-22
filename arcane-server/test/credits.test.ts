@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { env } from 'cloudflare:test';
-import { debitCredits, getUserBillingRow, grantPlanCredits, addTopupCredits } from '../src/lib/db.ts';
+import { debitCredits, getUserBillingRow, grantPlanCredits, addTopupCredits, upsertSubscription } from '../src/lib/db.ts';
 import { checkAiBudget, refreshAndGetBalance } from '../src/lib/credits.ts';
 import { tierGrantMicro } from '../src/config/tiers.ts';
 import { seedPasswordUser } from './helpers.ts';
@@ -40,29 +40,98 @@ describe('debitCredits — plan bucket first, then top-up', () => {
     });
 });
 
-describe('refreshAndGetBalance — free monthly reset', () => {
-    it('grants the free allotment when the period is unanchored (NULL)', async () => {
+describe('refreshAndGetBalance — free never regrants', () => {
+    it('a free user with an unanchored (NULL) period stays at their current balance', async () => {
         const u = await seedPasswordUser('free1@test.dev', 'password123'); // defaults: free, 0, NULL
         await setBalances(u.id, 'free', 0, 0, null);
         const bal = await refreshAndGetBalance(env.arcane_db, u.id);
-        expect(bal.planMicro).toBe(tierGrantMicro('free'));
+        expect(bal.planMicro).toBe(0); // no lazy regrant — free credits are a one-time signup trial
         const r = await getUserBillingRow(env.arcane_db, u.id);
-        expect(r!.plan_period_end).not.toBeNull(); // anchor was set
+        expect(r!.plan_period_end).toBeNull(); // never anchored — free has no cycle
     });
 
-    it('does not reset a free user whose period is still in the future', async () => {
+    it('does not touch a free user whose period is in the future', async () => {
         const u = await seedPasswordUser('free2@test.dev', 'password123');
         await setBalances(u.id, 'free', 0, 0, '2099-01-01T00:00:00.000Z');
         const bal = await refreshAndGetBalance(env.arcane_db, u.id);
         expect(bal.planMicro).toBe(0);
     });
+});
 
-    it('NEVER auto-regrants a paid plan, even past its period end', async () => {
-        const u = await seedPasswordUser('paid1@test.dev', 'password123');
-        await setBalances(u.id, 'pro', 0, 0, '2000-01-01T00:00:00.000Z'); // long expired
+// Comp/lapsed-paid lazy expiry (replaces the deleted free-monthly-reset path):
+// a paid plan past its period end with no live subscription row reverts to
+// free with NO regrant. Real Dodo subscribers always have a subscriptions
+// row; 'active' and 'on_hold' (dunning) both protect the plan from expiry.
+describe('refreshAndGetBalance — comp/lapsed-paid lazy expiry', () => {
+    it('reverts to free when past period end with no subscription row', async () => {
+        const u = await seedPasswordUser('comp-expire@test.dev', 'password123');
+        await setBalances(u.id, 'pro', 500_000, 200_000, '2000-01-01T00:00:00.000Z'); // long expired, comped
+        const bal = await refreshAndGetBalance(env.arcane_db, u.id);
+        expect(bal.plan).toBe('free');
+        expect(bal.planMicro).toBe(0);
+        expect(bal.topupMicro).toBe(200_000); // top-ups kept
+        expect(bal.planPeriodEnd).toBeNull();
+
+        const r = await getUserBillingRow(env.arcane_db, u.id);
+        expect(r!.plan).toBe('free');
+        expect(r!.plan_credits_micro).toBe(0);
+        expect(r!.topup_credits_micro).toBe(200_000);
+        expect(r!.plan_period_end).toBeNull();
+    });
+
+    it('leaves an expired plan untouched when a subscription row is active', async () => {
+        const u = await seedPasswordUser('comp-active@test.dev', 'password123');
+        await setBalances(u.id, 'pro', 500_000, 0, '2000-01-01T00:00:00.000Z');
+        await upsertSubscription(env.arcane_db, {
+            subscriptionId: `sub_active_${u.id}`, userId: u.id, productId: null,
+            plan: 'pro', status: 'active', currentPeriodEnd: '2000-01-01T00:00:00.000Z',
+        });
         const bal = await refreshAndGetBalance(env.arcane_db, u.id);
         expect(bal.plan).toBe('pro');
-        expect(bal.planMicro).toBe(0); // failed renewal must not hand out free paid credits
+        expect(bal.planMicro).toBe(500_000); // untouched — a live subscriber, not a comp
+
+        const r = await getUserBillingRow(env.arcane_db, u.id);
+        expect(r!.plan).toBe('pro');
+    });
+
+    it('leaves an expired plan untouched when the subscription is on_hold (dunning)', async () => {
+        const u = await seedPasswordUser('comp-onhold@test.dev', 'password123');
+        await setBalances(u.id, 'pro', 500_000, 0, '2000-01-01T00:00:00.000Z');
+        await upsertSubscription(env.arcane_db, {
+            subscriptionId: `sub_onhold_${u.id}`, userId: u.id, productId: null,
+            plan: 'pro', status: 'on_hold', currentPeriodEnd: '2000-01-01T00:00:00.000Z',
+        });
+        const bal = await refreshAndGetBalance(env.arcane_db, u.id);
+        expect(bal.plan).toBe('pro');
+        expect(bal.planMicro).toBe(500_000);
+    });
+
+    it('a subscription row that is cancelled does not protect the plan', async () => {
+        const u = await seedPasswordUser('comp-cancelled@test.dev', 'password123');
+        await setBalances(u.id, 'pro', 500_000, 0, '2000-01-01T00:00:00.000Z');
+        await upsertSubscription(env.arcane_db, {
+            subscriptionId: `sub_cancelled_${u.id}`, userId: u.id, productId: null,
+            plan: 'pro', status: 'cancelled', currentPeriodEnd: '2000-01-01T00:00:00.000Z',
+        });
+        const bal = await refreshAndGetBalance(env.arcane_db, u.id);
+        expect(bal.plan).toBe('free');
+        expect(bal.planMicro).toBe(0);
+    });
+
+    it('never expires a paid plan whose period is still in the future', async () => {
+        const u = await seedPasswordUser('comp-future@test.dev', 'password123');
+        await setBalances(u.id, 'pro', 500_000, 0, '2099-01-01T00:00:00.000Z');
+        const bal = await refreshAndGetBalance(env.arcane_db, u.id);
+        expect(bal.plan).toBe('pro');
+        expect(bal.planMicro).toBe(500_000);
+    });
+
+    it('the free plan never expires (nothing to expire) and never regrants', async () => {
+        const u = await seedPasswordUser('comp-free@test.dev', 'password123');
+        await setBalances(u.id, 'free', 0, 0, '2000-01-01T00:00:00.000Z'); // a stray past date on free
+        const bal = await refreshAndGetBalance(env.arcane_db, u.id);
+        expect(bal.plan).toBe('free');
+        expect(bal.planMicro).toBe(0);
     });
 });
 
@@ -90,40 +159,6 @@ describe('checkAiBudget', () => {
         expect((await checkAiBudget(env.arcane_db, u.id)).ok).toBe(true);
         await addTopupCredits(env.arcane_db, u.id, 100_000);
         const r = await getUserBillingRow(env.arcane_db, u.id);
-        expect(r!.topup_credits_micro).toBe(100_000);
-    });
-});
-
-// P0 fix wave 2026-08-16: a final-request overshoot leaves top-up NEGATIVE
-// (see debitCredits above). The monthly reset used to SET only the plan
-// bucket, so that debt survived every reset — permanently taxing each
-// month's grant, cleared only when a purchased top-up silently paid it off.
-describe('resetFreePlanCredits — overshoot debt settles at the monthly reset', () => {
-    it('settles a negative top-up from the new grant', async () => {
-        const u = await seedPasswordUser('debt1@test.dev', 'password123');
-        await setBalances(u.id, 'free', 0, -350_000, '2000-01-01T00:00:00.000Z');
-        await refreshAndGetBalance(env.arcane_db, u.id);
-        const r = await getUserBillingRow(env.arcane_db, u.id);
-        expect(r!.topup_credits_micro).toBe(0);
-        expect(r!.plan_credits_micro).toBe(tierGrantMicro('free') - 350_000);
-    });
-
-    it('carries debt larger than the grant instead of vanishing or compounding', async () => {
-        const u = await seedPasswordUser('debt2@test.dev', 'password123');
-        const grant = tierGrantMicro('free');
-        await setBalances(u.id, 'free', 0, -(grant + 500_000), '2000-01-01T00:00:00.000Z');
-        await refreshAndGetBalance(env.arcane_db, u.id);
-        const r = await getUserBillingRow(env.arcane_db, u.id);
-        expect(r!.plan_credits_micro).toBe(0);
-        expect(r!.topup_credits_micro).toBe(-500_000);
-    });
-
-    it('leaves a positive top-up untouched by the reset', async () => {
-        const u = await seedPasswordUser('debt3@test.dev', 'password123');
-        await setBalances(u.id, 'free', 0, 100_000, '2000-01-01T00:00:00.000Z');
-        await refreshAndGetBalance(env.arcane_db, u.id);
-        const r = await getUserBillingRow(env.arcane_db, u.id);
-        expect(r!.plan_credits_micro).toBe(tierGrantMicro('free'));
         expect(r!.topup_credits_micro).toBe(100_000);
     });
 });

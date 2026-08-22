@@ -63,27 +63,58 @@ describe('billing webhook', () => {
         const u = await seedPasswordUser('wh-topup@test.dev', 'password123');
         const res = await postWebhook({
             type: 'payment.succeeded',
-            data: { metadata: { arcane_user_id: String(u.id), arcane_kind: 'topup', arcane_ref: 'topup_1000' }, id: 'pay_1' },
+            data: { metadata: { arcane_user_id: String(u.id), arcane_kind: 'topup', arcane_ref: 'topup_16' }, id: 'pay_1' },
         });
         expect(res.status).toBe(200);
         const row = await getUserBillingRow(env.arcane_db, u.id);
-        // topup_1000's pack id is unchanged (maps to a live Dodo product) but its
-        // credit grant was bumped to 1600 (Task 2) — 16,000,000 micro-USD.
-        expect(row!.topup_credits_micro).toBe(creditsToMicro(1600));
+        // topup_16 carries a 20% markup: floor(16 * 100 / 1.2) = 1333 credits.
+        expect(row!.topup_credits_micro).toBe(creditsToMicro(1333));
     });
 
-    it('subscription.cancelled downgrades to free (top-up credits preserved)', async () => {
+    it('subscription.active grants the starter tier plan + credits', async () => {
+        const u = await seedPasswordUser('wh-starter@test.dev', 'password123');
+        const res = await postWebhook(subEvent('subscription.active', u.id, 'starter'));
+        expect(res.status).toBe(200);
+
+        const row = await getUserBillingRow(env.arcane_db, u.id);
+        expect(row!.plan).toBe('starter');
+        expect(row!.plan_credits_micro).toBe(tierGrantMicro('starter'));
+
+        const sub = await findSubscriptionByUser(env.arcane_db, u.id);
+        expect(sub!.plan).toBe('starter');
+        expect(sub!.status).toBe('active');
+    });
+
+    // Free credits are a ONE-TIME signup trial (Task 1 controller ruling) —
+    // cancellation must NOT hand out a fresh trial. Downgrade matches
+    // expireCompPlan exactly: plan free, credits 0, period end NULL.
+    it('subscription.cancelled downgrades to free with NO regrant (top-up credits preserved)', async () => {
         const u = await seedPasswordUser('wh-cancel@test.dev', 'password123');
         await env.arcane_db.prepare(
-            "UPDATE users SET plan='pro', plan_credits_micro=?, topup_credits_micro=? WHERE id=?"
+            "UPDATE users SET plan='pro', plan_credits_micro=?, topup_credits_micro=?, plan_period_end='2099-01-01T00:00:00.000Z' WHERE id=?"
         ).bind(tierGrantMicro('pro'), 250_000, u.id).run();
 
         const res = await postWebhook(subEvent('subscription.cancelled', u.id, 'pro'));
         expect(res.status).toBe(200);
         const row = await getUserBillingRow(env.arcane_db, u.id);
         expect(row!.plan).toBe('free');
-        expect(row!.plan_credits_micro).toBe(tierGrantMicro('free'));
+        expect(row!.plan_credits_micro).toBe(0); // no regrant — one-time trial already spent
+        expect(row!.plan_period_end).toBeNull();
         expect(row!.topup_credits_micro).toBe(250_000); // untouched
+    });
+
+    it('subscription.failed downgrades to free with NO regrant', async () => {
+        const u = await seedPasswordUser('wh-failed@test.dev', 'password123');
+        await env.arcane_db.prepare(
+            "UPDATE users SET plan='max', plan_credits_micro=?, plan_period_end='2099-01-01T00:00:00.000Z' WHERE id=?"
+        ).bind(tierGrantMicro('max'), u.id).run();
+
+        const res = await postWebhook(subEvent('subscription.failed', u.id, 'max'));
+        expect(res.status).toBe(200);
+        const row = await getUserBillingRow(env.arcane_db, u.id);
+        expect(row!.plan).toBe('free');
+        expect(row!.plan_credits_micro).toBe(0);
+        expect(row!.plan_period_end).toBeNull();
     });
 
     it('renewal WITHOUT metadata resolves user + tier from the stored subscription', async () => {
