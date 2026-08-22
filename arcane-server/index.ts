@@ -14,6 +14,7 @@ import { authGoogleRouter } from './src/routes/auth-google.ts';
 import { authGithubRouter } from './src/routes/auth-github.ts';
 import { authEditorRouter } from './src/routes/auth-editor.ts';
 import { usageRouter } from './src/routes/usage.ts';
+import { configRouter } from './src/routes/config.ts';
 import { adminRouter } from './src/routes/admin.ts';
 import { feedbackRouter } from './src/routes/feedback.ts';
 import { billingRouter } from './src/routes/billing.ts';
@@ -86,6 +87,7 @@ app.route('/', inlineRouter);
 
 // Protected routes (auth only)
 app.route('/', usageRouter);
+app.route('/', configRouter);
 
 // Admin routes (auth + admin middleware applied inside adminRouter)
 app.route('/', adminRouter);
