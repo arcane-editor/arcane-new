@@ -56,14 +56,38 @@ export interface UsageExtras {
 }
 
 /**
+ * getEffectivePricing, but hardened for recordUsage's "never throws" contract.
+ * getEffectivePricing already swallows a bad/malformed config DOC internally
+ * (see app-config.ts) — but NOT a transient failure of the raw D1 read itself
+ * (e.g. a D1 outage). That read is NOT wrapped in a try/catch anywhere else,
+ * so left unguarded it would throw straight out of recordUsage, before any
+ * of the three best-effort writes below run — every AI route calls
+ * recordUsage AFTER already sending the user's response (chat.ts's
+ * non-streaming `finally`, embeddings.ts, graph.ts, inline.ts, unity-api.ts),
+ * so an uncaught throw here would discard an already-completed AI answer or
+ * 500 a request that in fact succeeded. Falls back to the static defaults
+ * (MODEL_CATALOG/GATEWAY_FEE/MARGIN) so metering/debit still happen at
+ * default rates even during a config-read outage.
+ */
+async function safeEffectivePricing(db: D1Database): Promise<EffectivePricing> {
+    try {
+        return await getEffectivePricing(db);
+    } catch (err) {
+        console.error(JSON.stringify({ event: 'app_config_read_failed', error: String(err) }));
+        return { catalog: MODEL_CATALOG, gatewayFee: GATEWAY_FEE, margin: MARGIN };
+    }
+}
+
+/**
  * Record one AI request's usage: upserts the user's monthly `usage_periods`
  * rollup, appends a `request_logs` audit row, AND debits the request's cost
  * from the user's credit balance. All three writes are best-effort (errors are
  * logged, never thrown) so a metering/debit failure can't break the AI response
  * the user already received. Cost is `estimateCost(model, in, out)` against
- * the EFFECTIVE catalog (app-config.ts's getEffectivePricing — at most one D1
- * read per isolate per 60s); a model missing from it costs $0 (logged
- * upstream as a bug) and is not debited. Debit is
+ * the EFFECTIVE catalog (app-config.ts's getEffectivePricing via
+ * safeEffectivePricing above — at most one D1 read per isolate per 60s, and
+ * itself never throws); a model missing from it costs $0 (logged upstream as
+ * a bug) and is not debited. Debit is
  * `estimateCost x gatewayFee x margin` (gatewayFee waived for a `route:
  * 'direct'` model — see billedMicro above); both default to GATEWAY_FEE/
  * MARGIN (1.0 — a no-op now) absent an admin override.
@@ -78,7 +102,7 @@ export async function recordUsage(
     extras: UsageExtras = {},
 ): Promise<void> {
     const cachedTokens = extras.cachedInputTokens ?? 0;
-    const pricing = await getEffectivePricing(db);
+    const pricing = await safeEffectivePricing(db);
     const cost = estimateCost(model, inputTokens, outputTokens, cachedTokens, pricing.catalog);
     const micro = billedMicro(model, inputTokens, outputTokens, cachedTokens, pricing);
     const periodStart = getCurrentPeriodStart();

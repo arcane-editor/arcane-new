@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { env } from 'cloudflare:test';
 import { recordUsage } from '../src/lib/usage.ts';
 import { estimateCost, MODEL_CATALOG } from '../src/lib/costs.ts';
@@ -10,6 +10,29 @@ import { putConfigDoc, clearConfigCache } from '../src/lib/app-config.ts';
 // recordUsage is the shared metering path for ALL four AI routes. The test env
 // has no AI binding, so we exercise the helper directly against the test D1
 // (this is what each route calls after its model response).
+
+/**
+ * Wraps a REAL D1Database so `.prepare()` throws synchronously for any query
+ * against `app_config` — simulating a transient D1 outage on just that one
+ * read (as opposed to a bad/malformed doc, which app-config.ts already
+ * handles internally). Every other query passes straight through to the real
+ * binding, so the surrounding recordUsage call still writes to the real D1.
+ */
+function withFailingAppConfigRead(db: D1Database): D1Database {
+    return new Proxy(db, {
+        get(target, prop, receiver) {
+            if (prop === 'prepare') {
+                return (query: string) => {
+                    if (query.includes('app_config')) {
+                        throw new Error('simulated D1 outage reading app_config');
+                    }
+                    return target.prepare(query);
+                };
+            }
+            return Reflect.get(target, prop, receiver);
+        },
+    });
+}
 
 describe('recordUsage', () => {
     it('appends a request_logs row with catalog-derived cost', async () => {
@@ -132,6 +155,47 @@ describe('recordUsage', () => {
         expect(billing!.plan_credits_micro).toBe(10_000_000 - usdToMicro(overriddenCost * 1.05 * 1.0));
 
         clearConfigCache(); // leave a clean cache for any test file sharing this isolate
+    });
+
+    it('never throws when the app_config D1 read itself fails; falls back to static rates', async () => {
+        clearConfigCache();
+        const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        const user = await seedPasswordUser('usage-config-outage@test.dev', 'password123');
+        await env.arcane_db.prepare(
+            "UPDATE users SET plan = 'pro', plan_credits_micro = ?, plan_period_end = '2099-01-01T00:00:00.000Z' WHERE id = ?"
+        ).bind(5_000_000, user.id).run();
+
+        const model = '@cf/zai-org/glm-5.2';
+        const inTok = 10_000, outTok = 500;
+        const failingDb = withFailingAppConfigRead(env.arcane_db);
+
+        // The critical assertion: recordUsage resolves (never rejects/throws)
+        // even though the underlying app_config read blew up.
+        await expect(recordUsage(failingDb, user.id, model, inTok, outTok, 10)).resolves.toBeUndefined();
+
+        // Logged as a distinct anomaly (not the same event as a bad-doc fallback).
+        const loggedReadFailure = spy.mock.calls.some(call => {
+            try { return JSON.parse(call[0] as string).event === 'app_config_read_failed'; }
+            catch { return false; }
+        });
+        expect(loggedReadFailure).toBe(true);
+
+        // Metering + debit still happened, at the STATIC (non-merged) rates —
+        // proof the fallback used MODEL_CATALOG/GATEWAY_FEE/MARGIN, not a doc
+        // it could never have successfully read. Reads go through the real db.
+        const expectedCost = estimateCost(model, inTok, outTok);
+        const expectedMicro = billedMicro(model, inTok, outTok);
+
+        const row = await env.arcane_db.prepare(
+            'SELECT cost_usd FROM request_logs WHERE user_id = ? ORDER BY id DESC LIMIT 1'
+        ).bind(user.id).first<{ cost_usd: number }>();
+        expect(row!.cost_usd).toBeCloseTo(expectedCost, 9);
+
+        const billing = await getUserBillingRow(env.arcane_db, user.id);
+        expect(billing!.plan_credits_micro).toBe(5_000_000 - expectedMicro);
+
+        spy.mockRestore();
+        clearConfigCache();
     });
 });
 
