@@ -3,7 +3,7 @@ import type { AppEnv } from '../types.ts';
 import { verifyDodoWebhook } from '../lib/dodo.ts';
 import {
     recordBillingEvent, grantPlanCredits, addTopupCredits, setDodoCustomerId,
-    upsertSubscription, findSubscriptionById, getNextPeriodStart,
+    upsertSubscription, findSubscriptionById, expireCompPlan,
 } from '../lib/db.ts';
 import { tierGrantMicro, isTierId, creditsToMicro, TOPUP_PACKS, TIERS, type Tier } from '../config/tiers.ts';
 
@@ -103,8 +103,10 @@ export async function handleBillingEvent(
 
         case 'subscription.cancelled':
         case 'subscription.failed': {
-            // Downgrade to free (top-up credits are untouched — they were paid for).
-            await grantPlanCredits(env.arcane_db, userId, 'free', tierGrantMicro('free'), getNextPeriodStart());
+            // Downgrade to free — free credits are a ONE-TIME signup trial, so
+            // cancellation must NOT regrant them (top-up credits are untouched,
+            // same as the lazy comp-expiry path in lib/credits.ts).
+            await expireCompPlan(env.arcane_db, userId);
             if (subscriptionId) {
                 await upsertSubscription(env.arcane_db, {
                     subscriptionId, userId, productId: data.product_id ?? null,

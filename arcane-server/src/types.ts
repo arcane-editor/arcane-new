@@ -49,11 +49,11 @@ export type AppEnv = {
         DODO_API_KEY?: string;          // secret — Bearer for the Dodo REST API
         DODO_WEBHOOK_SECRET?: string;   // secret — Standard-Webhooks signing key
         // Dodo product ids per tier / top-up pack (vars; empty until created).
+        DODO_PRODUCT_STARTER?: string;
         DODO_PRODUCT_PRO?: string;
-        DODO_PRODUCT_PROPLUS?: string;
-        DODO_PRODUCT_ULTRA?: string;
-        DODO_PRODUCT_TOPUP_1000?: string;
-        DODO_PRODUCT_TOPUP_5000?: string;
+        DODO_PRODUCT_MAX?: string;
+        DODO_PRODUCT_TOPUP_16?: string;
+        DODO_PRODUCT_TOPUP_75?: string;
     };
     Variables: {
         user: AuthPayload;

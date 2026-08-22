@@ -62,11 +62,11 @@ EMAIL_FROM = "no-reply@arcaneai.org"
 # Dodo Payments product ids (per tier / top-up pack). Empty until the owner
 # creates the LIVE products; billing routes 503 while unset. Secrets
 # DODO_API_KEY + DODO_WEBHOOK_SECRET are set via `wrangler secret put`.
+DODO_PRODUCT_STARTER = ""
 DODO_PRODUCT_PRO = ""
-DODO_PRODUCT_PROPLUS = ""
-DODO_PRODUCT_ULTRA = ""
-DODO_PRODUCT_TOPUP_1000 = ""
-DODO_PRODUCT_TOPUP_5000 = ""
+DODO_PRODUCT_MAX = ""
+DODO_PRODUCT_TOPUP_16 = ""
+DODO_PRODUCT_TOPUP_75 = ""
 
 [observability]
 enabled = true
@@ -129,15 +129,17 @@ CF_ACCOUNT_ID = ""
 WEB_BASE_URL = "https://dev.arcaneai.org"
 API_BASE_URL = "https://api-dev.arcaneai.org"
 EMAIL_FROM = "no-reply@arcaneai.org"
-# Dodo TEST-mode product ids. Created 2026-08-06 against test.dodopayments.com
-# (business "Arcane"); prices mirror src/config/tiers.ts. These are test-mode
-# only — they do NOT exist on the live host, which is why prod's copies above
-# stay empty until live products are provisioned separately.
-DODO_PRODUCT_PRO = "pdt_0NkmTqRLtYobtctDx4ojT"
-DODO_PRODUCT_PROPLUS = "pdt_0NkmTqTBy5taw2MyrnI5t"
-DODO_PRODUCT_ULTRA = "pdt_0NkmTqUChnKJPJU20lTTi"
-DODO_PRODUCT_TOPUP_1000 = "pdt_0NkmTqYT7iVPq8SPBf7n9"
-DODO_PRODUCT_TOPUP_5000 = "pdt_0NkmTqZeNlpTNdXx4fGlx"
+# Dodo product ids: empty for now. The old dev test-mode ids (created against
+# test.dodopayments.com pre-relaunch) pointed at the retired $20/$50/$200
+# tier ladder and MUST NOT be reused under the new starter/pro/max names —
+# reusing them would checkout customers into the wrong price. Empty means
+# checkout 503s cleanly (product_unconfigured) until an owner re-provisions
+# test-mode products for the new ladder.
+DODO_PRODUCT_STARTER = ""
+DODO_PRODUCT_PRO = ""
+DODO_PRODUCT_MAX = ""
+DODO_PRODUCT_TOPUP_16 = ""
+DODO_PRODUCT_TOPUP_75 = ""
 
 [env.dev.observability]
 enabled = true

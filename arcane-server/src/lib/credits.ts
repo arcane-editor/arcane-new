@@ -1,9 +1,9 @@
 // The AI-access budget gate, called at the top of every AI route. Two checks:
-//   1. Credit balance (with a lazy free-tier monthly reset) → 402 when empty.
+//   1. Credit balance (with lazy comp-plan expiry) → 402 when empty.
 //   2. The $1/hr soft spend cap (anti-abuse backstop, unchanged) → 429.
 // Debiting happens AFTER the model call, inside recordUsage (src/lib/usage.ts).
-import { getHourlyCost, getUserBillingRow, resetFreePlanCredits, getNextPeriodStart } from './db.ts';
-import { tierGrantMicro, microToCredits } from '../config/tiers.ts';
+import { getHourlyCost, getUserBillingRow, findSubscriptionByUser, expireCompPlan } from './db.ts';
+import { isPaidPlan, microToCredits } from '../config/tiers.ts';
 
 const HOURLY_LIMIT_USD = 1.0;
 
@@ -12,10 +12,11 @@ export type BudgetResult =
     | { ok: false; status: 402 | 429; code: 'credits_exhausted' | 'rate_limited'; error: string; balanceMicro: number };
 
 /**
- * Resolve a user's spendable balance, refreshing the free tier's monthly grant
- * if the period rolled over. Paid plans are NEVER auto-regranted here — their
- * credits come only from Dodo webhooks, so a lapsed/failed renewal can't hand
- * out free paid credits. Returns balances in micro-USD.
+ * Resolve a user's spendable balance, lazily expiring a comp/lapsed-paid plan
+ * back to free (no regrant — free credits are a one-time signup trial, see
+ * config/tiers.ts's SIGNUP_TRIAL_MICRO). Paid plans are NEVER auto-regranted
+ * here — their credits come only from Dodo webhooks, so a lapsed/failed
+ * renewal can't hand out free paid credits. Returns balances in micro-USD.
  */
 export async function refreshAndGetBalance(
     db: D1Database, userId: number,
@@ -23,15 +24,19 @@ export async function refreshAndGetBalance(
     const row = await getUserBillingRow(db, userId);
     if (!row) return { plan: 'free', planMicro: 0, topupMicro: 0, planPeriodEnd: null };
 
-    let planMicro = row.plan_credits_micro;
-    let planPeriodEnd = row.plan_period_end;
     const nowIso = new Date().toISOString();
-    if (row.plan === 'free' && (row.plan_period_end === null || row.plan_period_end <= nowIso)) {
-        planMicro = tierGrantMicro('free');
-        planPeriodEnd = getNextPeriodStart();
-        await resetFreePlanCredits(db, userId, planMicro, planPeriodEnd);
+    // Comp expiry: a paid plan past its period end with no live subscription row
+    // (comps are granted WITHOUT one) reverts to free — no regrant. Real Dodo
+    // subscribers always have a row; 'active' and 'on_hold' (dunning) both
+    // protect them.
+    if (isPaidPlan(row.plan) && row.plan_period_end && row.plan_period_end <= nowIso) {
+        const sub = await findSubscriptionByUser(db, userId);
+        if (!sub || (sub.status !== 'active' && sub.status !== 'on_hold')) {
+            await expireCompPlan(db, userId);
+            return { plan: 'free', planMicro: 0, topupMicro: row.topup_credits_micro, planPeriodEnd: null };
+        }
     }
-    return { plan: row.plan, planMicro, topupMicro: row.topup_credits_micro, planPeriodEnd };
+    return { plan: row.plan, planMicro: row.plan_credits_micro, topupMicro: row.topup_credits_micro, planPeriodEnd: row.plan_period_end };
 }
 
 export async function checkAiBudget(db: D1Database, userId: number): Promise<BudgetResult> {

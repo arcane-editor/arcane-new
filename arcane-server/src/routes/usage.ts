@@ -13,8 +13,9 @@ usageRouter.get('/v1/usage', authMiddleware(), async (c) => {
     const db = c.env.arcane_db;
     const userId = parseInt(user.sub);
 
-    // Refresh the free monthly grant if it rolled over, so the balance shown
-    // here matches what the AI gate would enforce on the next request.
+    // Lazily expire a comp/lapsed-paid plan back to free if it rolled past its
+    // period end unprotected, so the balance shown here matches what the AI
+    // gate would enforce on the next request.
     const { plan, planMicro, topupMicro, planPeriodEnd } = await refreshAndGetBalance(db, userId);
 
     const periodStart = getCurrentPeriodStart();

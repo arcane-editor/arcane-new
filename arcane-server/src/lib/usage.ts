@@ -10,8 +10,9 @@ import { usdToMicro, GATEWAY_FEE, MARGIN } from '../config/tiers.ts';
 
 /**
  * What the user is charged, in integer micro-USD: the model's list cost,
- * uplifted by Cloudflare's gateway fee and the platform margin. Exported so
- * the arithmetic is testable independently of D1.
+ * uplifted by Cloudflare's gateway fee (and MARGIN, currently 1.0 — a no-op;
+ * margin now lives in plan-grant sizing and the top-up markup, see
+ * config/tiers.ts). Exported so the arithmetic is testable independently of D1.
  */
 export function billedMicro(
     model: string, inputTokens: number, outputTokens: number, cachedTokens = 0,
@@ -47,8 +48,8 @@ export interface UsageExtras {
  * logged, never thrown) so a metering/debit failure can't break the AI response
  * the user already received. Cost is `estimateCost(model, in, out)`; a model
  * missing from the catalog costs $0 (logged upstream as a bug) and is not
- * debited. Debit is `estimateCost x GATEWAY_FEE x MARGIN` — margin lives here, per
- * request, so an upstream price change moves it automatically.
+ * debited. Debit is `estimateCost x GATEWAY_FEE x MARGIN`; MARGIN is 1.0 now
+ * (see billedMicro above), so this effectively bills real cost + gateway fee.
  */
 export async function recordUsage(
     db: D1Database,

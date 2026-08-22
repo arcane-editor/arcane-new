@@ -2,9 +2,9 @@ import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import type { ChatCompletionRequest, AppEnv } from '../types.ts';
 import { streamCompletion } from '../services/llm-router.ts';
-import { DEFAULT_INTENSITY } from '../config/plans.ts';
+import { DEFAULT_INTENSITY, getIntensityConfig } from '../config/plans.ts';
 import { resolveModelForSend } from '../config/routing.ts';
-import { isTierAllowed } from '../config/tiers.ts';
+import { isTierAllowed, minPlanForTier, TIERS } from '../config/tiers.ts';
 import { checkAiBudget } from '../lib/credits.ts';
 import { getUserBillingRow } from '../lib/db.ts';
 import { recordUsage } from '../lib/usage.ts';
@@ -39,10 +39,12 @@ chatRouter.post('/v1/chat/completions', async (c) => {
     const billing = await getUserBillingRow(c.env.arcane_db, userId);
     const plan = billing?.plan ?? 'free';
     if (!isTierAllowed(plan, requestedTier)) {
+        const requiredPlan = minPlanForTier(requestedTier);
+        const featureLabel = getIntensityConfig(requestedTier)?.label ?? 'This feature';
         return c.json({
-            error: 'Deep Think and Max are available on paid plans.',
+            error: `${featureLabel} requires the ${TIERS[requiredPlan].name} plan.`,
             code: 'tier_not_available',
-            requiredPlan: 'pro',
+            requiredPlan,
         }, 403);
     }
 

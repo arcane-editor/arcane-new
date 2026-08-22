@@ -1,4 +1,5 @@
 import type { TokenPurpose } from './tokens.ts';
+import { SIGNUP_TRIAL_MICRO } from '../config/tiers.ts';
 
 // --- Row types (match D1/SQLite column names) ---
 
@@ -14,7 +15,7 @@ export interface UserRow {
     email_verified: number;  // 0 | 1
     token_version: number;   // session revocation epoch (JWT claim must match)
     // Billing (migration 0013). Balances are integer micro-USD of model cost.
-    plan: string;            // free | pro | proplus | ultra
+    plan: string;            // free | starter | pro | max
     plan_credits_micro: number;   // resets each billing period
     topup_credits_micro: number;  // persists until spent
     plan_period_end: string | null;  // ISO-8601 UTC; NULL = free cycle not yet anchored
@@ -94,10 +95,14 @@ export async function findUserById(db: D1Database, id: number): Promise<UserRow 
 export async function createUser(db: D1Database, data: {
     email: string; passwordHash: string; salt: string; emailVerified?: boolean;
 }): Promise<UserRow> {
+    // plan_credits_micro seeds the free plan's ONE-TIME signup trial — the
+    // only place it is granted; it is never topped up again (see
+    // refreshAndGetBalance in lib/credits.ts). plan_period_end stays NULL:
+    // free never anchors a cycle.
     const result = await db.prepare(
-        'INSERT INTO users (email, password_hash, salt, email_verified) VALUES (?, ?, ?, ?) RETURNING *'
+        'INSERT INTO users (email, password_hash, salt, email_verified, plan_credits_micro) VALUES (?, ?, ?, ?, ?) RETURNING *'
     ).bind(
-        data.email.toLowerCase(), data.passwordHash, data.salt, data.emailVerified ? 1 : 0,
+        data.email.toLowerCase(), data.passwordHash, data.salt, data.emailVerified ? 1 : 0, SIGNUP_TRIAL_MICRO,
     ).first<UserRow>();
     return result!;
 }
@@ -230,26 +235,17 @@ export async function debitCredits(db: D1Database, userId: number, micro: number
     `).bind(micro, userId).run();
 }
 
-/** Free-tier monthly reset: SET (never add) the plan bucket and re-anchor the
- *  period. Outstanding overshoot debt (a NEGATIVE top-up — see debitCredits'
- *  final-request overspend note) is settled from the new grant here instead
- *  of surviving every reset as a permanent tax on the monthly allotment (it
- *  was only ever cleared when a purchased top-up silently paid it off). Debt
- *  larger than one grant carries the remainder into next month's reset.
- *  Idempotent under races once debt is settled (topup >= 0 makes both
- *  expressions collapse to the plain SET); a same-instant double reset with
- *  debt still outstanding can double-settle — accepted, the period re-anchor
- *  makes that window one request wide. */
-export async function resetFreePlanCredits(
-    db: D1Database, userId: number, grantMicro: number, periodEnd: string,
-): Promise<void> {
-    await db.prepare(`
-        UPDATE users SET
-            plan_credits_micro  = MAX(0, ?1 + MIN(0, topup_credits_micro)),
-            topup_credits_micro = MAX(0, topup_credits_micro) + MIN(0, ?1 + MIN(0, topup_credits_micro)),
-            plan_period_end     = ?2
-        WHERE id = ?3
-    `).bind(grantMicro, periodEnd, userId).run();
+/** Comp/lapsed-paid lazy downgrade: revert to free with NO regrant. Top-ups
+ *  are kept — they were paid for outright and are independent of plan.
+ *  Called lazily from refreshAndGetBalance (lib/credits.ts) when a paid plan
+ *  is past its period end with no live subscription protecting it, and
+ *  directly from the webhook on subscription.cancelled/failed. Free credits
+ *  are a ONE-TIME signup trial (see SIGNUP_TRIAL_MICRO), so downgrading to
+ *  free must never regrant them. */
+export async function expireCompPlan(db: D1Database, userId: number): Promise<void> {
+    await db.prepare(
+        "UPDATE users SET plan='free', plan_credits_micro=0, plan_period_end=NULL WHERE id=?"
+    ).bind(userId).run();
 }
 
 /** Grant a plan's credits and switch the user's plan (webhook-driven, B3). */
@@ -527,13 +523,14 @@ export async function linkGitHubIdClearingCredentials(db: D1Database, userId: nu
 }
 
 /** OAuth-only signup: '' password sentinel (column is NOT NULL), pre-verified.
- *  Exactly one provider id is supplied; the other stays NULL. */
+ *  Exactly one provider id is supplied; the other stays NULL. Seeds the same
+ *  one-time signup trial as createUser (see its comment). */
 export async function createOAuthUser(
     db: D1Database, data: { email: string; googleSub?: string; githubId?: string },
 ): Promise<UserRow> {
     const result = await db.prepare(
-        "INSERT INTO users (email, password_hash, salt, email_verified, google_sub, github_id) VALUES (?, '', '', 1, ?, ?) RETURNING *"
-    ).bind(data.email.toLowerCase(), data.googleSub ?? null, data.githubId ?? null).first<UserRow>();
+        "INSERT INTO users (email, password_hash, salt, email_verified, google_sub, github_id, plan_credits_micro) VALUES (?, '', '', 1, ?, ?, ?) RETURNING *"
+    ).bind(data.email.toLowerCase(), data.googleSub ?? null, data.githubId ?? null, SIGNUP_TRIAL_MICRO).first<UserRow>();
     return result!;
 }
 

@@ -52,7 +52,12 @@ inlineRouter.post('/v1/completions/inline', async (c) => {
 
     const allowance = await checkInlineAllowance(c.env.arcane_db, userId);
     if (!allowance.ok) {
-        return c.json({ error: allowance.error, code: allowance.code, resetAt: allowance.resetAt }, allowance.status);
+        return c.json({
+            error: allowance.error,
+            code: allowance.code,
+            ...('resetAt' in allowance ? { resetAt: allowance.resetAt } : {}),
+            ...('requiredPlan' in allowance ? { requiredPlan: allowance.requiredPlan } : {}),
+        }, allowance.status);
     }
 
     if (!c.env.AI) return c.json({ error: 'AI backend unavailable', code: 'inline_unavailable' }, 503);
