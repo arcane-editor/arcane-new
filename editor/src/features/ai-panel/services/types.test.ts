@@ -2,12 +2,13 @@ import { describe, it, expect } from 'bun:test';
 import { TIER_CONTEXT_WINDOWS, coerceAgentKind, coerceEffort, isExternalAgent } from './types';
 
 describe('TIER_CONTEXT_WINDOWS', () => {
-  // These are PRICING cliffs, not model windows. Exceeding them reprices the
-  // entire request, so compaction must treat them as hard limits.
+  // Offline fallback only — mirrors /v1/config's per-tier contextWindow
+  // (min across planner/executor/executorHard). All three sit at spark's
+  // conservative 131k seed window today.
   it('encodes each tier usable window', () => {
-    expect(TIER_CONTEXT_WINDOWS.low).toBe(272_000);   // luna reprices above this
-    expect(TIER_CONTEXT_WINDOWS.mid).toBe(262_144);   // glm-5.2, flat pricing
-    expect(TIER_CONTEXT_WINDOWS.high).toBe(200_000);  // grok-4.6 reprices above this
+    expect(TIER_CONTEXT_WINDOWS.low).toBe(131_072);
+    expect(TIER_CONTEXT_WINDOWS.mid).toBe(131_072);
+    expect(TIER_CONTEXT_WINDOWS.high).toBe(131_072);
   });
 
   it('has no super tier', () => {

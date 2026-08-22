@@ -91,4 +91,13 @@ describe('send-boundary escalation entitlement cap', () => {
   it('defaults to no cap when maxEffort is omitted (existing call sites)', () => {
     expect(resolveSendEffort('s1', 'low', 2, on).effort).toBe('mid');
   });
+
+  it('a pro-plan ceiling (mid) escalates low→mid and latches there, never high', () => {
+    expect(resolveSendEffort('s1', 'low', 2, on, 'mid')).toEqual({ effort: 'mid', escalatedNow: true });
+    // Latched at mid; further repairs on later sends (still requesting the
+    // user's original 'low' selection) must not push past the ceiling even
+    // though continued repairs would normally escalate 'mid' on to 'high'.
+    expect(resolveSendEffort('s1', 'low', 5, on, 'mid')).toEqual({ effort: 'mid', escalatedNow: false });
+    expect(resolveSendEffort('s1', 'low', 5, on, 'mid')).toEqual({ effort: 'mid', escalatedNow: false });
+  });
 });

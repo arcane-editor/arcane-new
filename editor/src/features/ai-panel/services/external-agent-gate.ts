@@ -6,9 +6,16 @@
  * collect a snapshot of the world, and let the FIRST failing reason pick the
  * copy, so an offline user never sees an upgrade upsell they can't act on.
  *
+ * `acpEnabled` (from `acpAllowed()` in `stores/server-config.ts`) is the
+ * PRIMARY source once `/v1/config` has landed: non-null DECIDES outright
+ * (`false` → 'upgrade-required', `true` → available, subject only to the
+ * signed-in/online checks above it) so it can express things the plan alone
+ * can't (e.g. a feature flag independent of the tier ladder). `null` (no
+ * config yet) falls back to the plan check below — the OFFLINE FALLBACK.
+ *
  * SINGLE SOURCE RULE: `PAID_PLANS` must track `isPaidPlan()` in
- * arcane-server/src/config/tiers.ts (a tier with `priceUsd > 0`: pro / proplus
- * / ultra). Unknown or missing plans coerce to locked, exactly like
+ * arcane-server/src/config/tiers.ts (a tier with `priceUsd > 0`: starter / pro
+ * / max). Unknown or missing plans coerce to locked, exactly like
  * `maxEntitledEffort(null) === 'low'` in `entitlement.ts`, so drift can only
  * ever WITHHOLD access (harmless), never grant it.
  *
@@ -25,7 +32,7 @@
 
 import type { AgentKind } from './types';
 
-const PAID_PLANS = new Set(['pro', 'proplus', 'ultra']);
+const PAID_PLANS = new Set(['starter', 'pro', 'max']);
 
 /** Snapshot of everything the gate reads. Collected by the caller. */
 export interface ExternalAgentGate {
@@ -33,6 +40,9 @@ export interface ExternalAgentGate {
   online: boolean;
   /** `useAuthStore.plan` — null until a `/v1/usage` call has succeeded. */
   plan: string | null;
+  /** `acpAllowed(useServerConfigStore.getState().config)` — null means no
+   *  `/v1/config` has landed yet, and the plan check below decides instead. */
+  acpEnabled: boolean | null;
 }
 
 export type ExternalAgentStatus =
@@ -53,6 +63,9 @@ export type ExternalAgentStatus =
 export function externalAgentStatus(gate: ExternalAgentGate): ExternalAgentStatus {
   if (!gate.loggedIn) return 'signed-out';
   if (!gate.online) return 'offline';
+  // Server-published feature flag decides outright once known; only fall
+  // back to the plan set while `/v1/config` hasn't landed.
+  if (gate.acpEnabled !== null) return gate.acpEnabled ? 'available' : 'upgrade-required';
   if (gate.plan === null) return 'plan-unknown';
   return PAID_PLANS.has(gate.plan) ? 'available' : 'upgrade-required';
 }

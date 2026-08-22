@@ -107,21 +107,31 @@ export type Attachment =
     };
 
 /**
- * Usable context per tier, in tokens.
+ * Usable context per tier, in tokens — the OFFLINE FALLBACK only.
  *
- * These are PRICING cliffs, not model windows. Two of the three models reprice
- * the ENTIRE request once input crosses a threshold — a 200,001-token Max
- * request costs double a 200,000-token one — so the economic limit is lower
- * than the model's advertised window and compaction must respect it:
- *   low  → openai/gpt-5.6-luna, window 1,050,000, reprices above 272,000
- *   mid  → @cf/zai-org/glm-5.2, window 262,144, FLAT pricing (no cliff)
- *   high → xai/grok-4.6,        window 500,000,   reprices above 200,000
+ * The runtime source of truth is the server-config store
+ * (`stores/server-config.ts`'s `effectiveContextWindow`), which reads the
+ * per-tier `contextWindow` published by `GET /v1/config`. That value is
+ * already the per-tier MINIMUM across that tier's role models (planner /
+ * executor / executorHard) in the server's merged model catalog — i.e. the
+ * real economic/usable limit, not any one model's advertised window — so the
+ * editor never has to reprice the cliff logic itself; it just uses the number
+ * the server hands it. These constants below are what the editor falls back
+ * to before the first successful `/v1/config` round-trip, and after one
+ * fails, and mirror that same per-tier-minimum rule for today's lineup:
+ *   low  → min(spark 131,072)                              = 131,072
+ *   mid  → min(grok 500,000, spark 131,072)                 = 131,072
+ *   high → min(sol 400,000, spark 131,072, grok 500,000)    = 131,072
  *
- * Note Max has the SMALLEST usable window. Deep Think is the correct tier for
- * genuinely large-context work despite sitting lower on the ladder.
+ * spark's 131k is a conservative seed window until the owner configures its
+ * real context size — every tier is bottlenecked on it today, which is why
+ * all three fallback values are currently identical. Update alongside
+ * `stores/server-config.ts`'s `FALLBACK_CONTEXT_WINDOW`, which duplicates
+ * these same three numbers (see that file's header for why it's a duplicate
+ * rather than an import of this constant).
  */
 export const TIER_CONTEXT_WINDOWS: Record<Effort, number> = {
-  low: 272_000,
-  mid: 262_144,
-  high: 200_000,
+  low: 131_072,
+  mid: 131_072,
+  high: 131_072,
 };

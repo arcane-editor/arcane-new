@@ -193,6 +193,10 @@ export const useAuthStore = create<AuthState>((set) => ({
     await authClient.logout();
     set({ loggedIn: false, email: null, plan: null, credits: null, token: null, loginStatus: 'idle', error: null });
     void emit('auth-changed');
+    // Dynamic import (not static): a static import here would cycle back
+    // against server-config.ts's own import of this store for the auth
+    // token. See stores/server-config.ts's header.
+    void import('./server-config').then((m) => m.useServerConfigStore.getState().clear());
   },
 
   loadFromDisk: async () => {
@@ -213,12 +217,14 @@ export const useAuthStore = create<AuthState>((set) => ({
       // Token file missing — e.g. logout happened in ANOTHER window (spec C3)
       // or a fresh install. Reset instead of silently keeping stale state.
       set({ loggedIn: false, email: null, plan: null, credits: null, token: null, error: null });
+      void import('./server-config').then((m) => m.useServerConfigStore.getState().clear());
       return;
     }
 
     if (isJwtExpired(stored.token)) {
       await authClient.logout().catch(() => {});
       set({ loggedIn: false, email: null, plan: null, credits: null, token: null, error: null });
+      void import('./server-config').then((m) => m.useServerConfigStore.getState().clear());
       return;
     }
 
@@ -244,6 +250,11 @@ export const useAuthStore = create<AuthState>((set) => ({
     try {
       const u = await authClient.fetchUsage(token);
       set({ plan: u.plan, credits: u.credits.balance });
+      // Fire-and-forget: refreshUsage already runs on login, session-restore,
+      // Account mount, and stream 402s, so this is the natural place to keep
+      // /v1/config fresh too. Dynamic import — see stores/server-config.ts's
+      // header for why a static one would cycle.
+      void import('./server-config').then((m) => m.useServerConfigStore.getState().refresh());
     } catch {
       // Best-effort — a transient failure must not clear a known balance.
     }

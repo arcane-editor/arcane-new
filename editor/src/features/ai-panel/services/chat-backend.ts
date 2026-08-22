@@ -14,6 +14,7 @@
 import { useAiStore } from '../../../stores/ai';
 import { useAuthStore } from '../../../stores/auth';
 import { useConnectivityStore } from '../../../stores/connectivity';
+import { useServerConfigStore, acpAllowed } from '../../../stores/server-config';
 import { getAgentService, type SendMessageOptions } from './agent-service';
 import { getClaudeBackend, resetClaudeBackend } from './claude-backend';
 import {
@@ -51,6 +52,7 @@ export function readExternalAgentGate(): ExternalAgentGate {
     loggedIn: auth.loggedIn,
     online: useConnectivityStore.getState().online,
     plan: auth.plan,
+    acpEnabled: acpAllowed(useServerConfigStore.getState().config),
   };
 }
 

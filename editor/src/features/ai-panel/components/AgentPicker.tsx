@@ -17,6 +17,7 @@ import { ChevronDown, Sparkles, Check, Lock, Terminal, RefreshCw } from 'lucide-
 import { useAiStore } from '../../../stores/ai';
 import { useAuthStore } from '../../../stores/auth';
 import { useConnectivityStore } from '../../../stores/connectivity';
+import { useServerConfigStore, acpAllowed } from '../../../stores/server-config';
 import {
   externalAgentStatus,
   showsUpgradeCta,
@@ -65,7 +66,13 @@ function AgentPicker() {
   const loggedIn = useAuthStore((s) => s.loggedIn);
   const plan = useAuthStore((s) => s.plan);
   const online = useConnectivityStore((s) => s.online);
-  const externalStatus = externalAgentStatus({ loggedIn, online, plan });
+  const serverConfig = useServerConfigStore((s) => s.config);
+  const externalStatus = externalAgentStatus({
+    loggedIn,
+    online,
+    plan,
+    acpEnabled: acpAllowed(serverConfig),
+  });
   const externalAvailable = externalStatus === 'available';
 
   const [open, setOpen] = useState(false);

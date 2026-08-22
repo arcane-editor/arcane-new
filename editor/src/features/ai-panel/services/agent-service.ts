@@ -48,7 +48,6 @@ import { withResultDiffs } from './diff-decorator';
 import { withEditReview } from './edit-review/edit-review-decorator';
 import { withTurnGovernor, resetTurnGovernor, grantExtraCalls } from './turn-governor';
 import { resolveSendEffort, resetSendEscalation } from './send-escalation';
-import { maxEntitledEffort } from './entitlement';
 import { withStreamErrorGuard } from './stream-error-guard';
 import { withRepeatCallGuard, resetRepeatCallGuard } from './tool-guards';
 import { computeAllowedRoots } from './sandbox-roots';
@@ -76,6 +75,7 @@ import { sideTaskRequest } from './memory/memory-request';
 import { tauriMemoryFs } from './memory/tauri-memory-fs';
 import { useAiStore, type AiMessage } from '../../../stores/ai';
 import { useAuthStore } from '../../../stores/auth';
+import { useServerConfigStore, effectiveContextWindow, maxAllowedEffort } from '../../../stores/server-config';
 import { useWorkspaceStore } from '../../../stores/workspace';
 import { useProjectContextStore } from '../../../stores/project-context';
 import { useSettingsStore } from '../../../stores/settings';
@@ -91,7 +91,7 @@ import { lintAnswer, buildReviseMessage } from './grounding-lint';
 import { resolveAttachments } from './attachments';
 import { classifyTurnError, detectTurnOutcome, loopCrashError } from './turn-errors';
 import type { Model, AgentTool, AgentMessage, TextContent } from './vendor/types';
-import { TIER_CONTEXT_WINDOWS, type Attachment, type ChatMode, type Effort } from './types';
+import type { Attachment, ChatMode, Effort } from './types';
 
 /** Convert saved UI messages back into vendor AgentMessages for resume. */
 function restoreAgentMessages(messages: AiMessage[]): AgentMessage[] {
@@ -524,7 +524,9 @@ export class AgentService {
       () => useSettingsStore.getState().getSetting('ai.escalation.enabled') !== false,
       // Never escalate past the plan's entitlement — the server 403s a gated
       // tier and a latched over-entitlement escalation bricked the session.
-      maxEntitledEffort(useAuthStore.getState().plan),
+      // Config-first (server-published `allowed` flags), falling back to the
+      // offline plan ladder only before the first /v1/config lands.
+      maxAllowedEffort(useServerConfigStore.getState().config, useAuthStore.getState().plan),
     );
     const effectiveEffort = escalation.effort;
     if (effectiveEffort !== opts.effort) {
@@ -544,9 +546,11 @@ export class AgentService {
     setSendPromptMode(promptMode);
     this.syncForPromptMode(promptMode, effectiveEffort, opts.planExecution);
     this.agent.setReasoning(effectiveEffort);
-    // Compaction budget: the real window of the model this tier maps to
-    // (server model lineup is fixed; see TIER_CONTEXT_WINDOWS).
-    this.agent.setContextWindow(TIER_CONTEXT_WINDOWS[effectiveEffort]);
+    // Compaction budget: the server-published per-tier minimum window
+    // (config-first; TIER_CONTEXT_WINDOWS is only the offline fallback).
+    this.agent.setContextWindow(
+      effectiveContextWindow(useServerConfigStore.getState().config, effectiveEffort),
+    );
     // T9: the todo list now lives for the whole session, not just this send —
     // no reset here (see `resetConversation`/`loadSessionIntoStore` in stores/ai.ts).
 
