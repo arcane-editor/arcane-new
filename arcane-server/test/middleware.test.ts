@@ -153,6 +153,18 @@ describe('index.ts rate-limit wiring', () => {
         expect(res.status).toBe(429);
         expect(await res.json()).toEqual({ error: 'rate_limited' });
     });
+
+    it('POST /v1/admin/login is behind RL_AUTH_STRICT', async () => {
+        const res = await app.request('/v1/admin/login',
+            {
+                method: 'POST',
+                headers: { 'CF-Connecting-IP': '1.2.3.4', 'Content-Type': 'application/json' },
+                body: '{}',
+            },
+            { RL_AUTH_STRICT: { limit: async () => ({ success: false }) } });
+        expect(res.status).toBe(429);
+        expect(await res.json()).toEqual({ error: 'rate_limited' });
+    });
 });
 
 describe('claim/response builders', () => {
