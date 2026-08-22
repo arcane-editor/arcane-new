@@ -84,7 +84,7 @@ import { buildSystemPrompt, captureDecoration, defaultPromptModeFor, type Prompt
 import { graphChangedSinceFreeze, resetFrozenDecoration } from './prompts/frozen-context';
 import { buildPlanSendPrefix } from './prompts/plan-execution';
 import { setSendPromptMode } from './send-context';
-import { assessTaskSize, TODO_FIRST_TEXT } from './auto-plan';
+import { includesTodoTool, nudgeEligible } from './todo-gates';
 import { getUnityGroundingContext } from './prompts/unity-facts';
 import type { ContrastFacts } from './prompts/unity-contrast';
 import { lintAnswer, buildReviseMessage } from './grounding-lint';
@@ -149,8 +149,16 @@ function getCurrentWorkspacePath(): string {
  *
  * Graphify tools (query, explain, path) are read-only and join every mode
  * when a graph has been built for the workspace.
+ *
+ * PREPLANNING (Task 11) → read + list + graph + memory + unityRead, plus
+ * `ask_user` and `todo_update` — the same read-only set as plan-planning,
+ * because its one required final action IS a `todo_update` call.
+ *
+ * `effort` only matters for 'agent': `includesTodoTool` (todo-gates.ts)
+ * excludes `todo_update` at 'low' (Standard has no todo machinery,
+ * guaranteed) and includes it at every other tier/mode combo.
  */
-function createToolsForPromptMode(mode: PromptMode, workspacePath: string): AgentTool[] {
+function createToolsForPromptMode(mode: PromptMode, workspacePath: string, effort: Effort): AgentTool[] {
   const isUnity = useProjectContextStore.getState().isUnityProject;
   // Sandbox roots per workspace shape — see sandbox-roots.ts. Unity confines
   // file operations to Assets/ (+ .arcane/ plan files + Packages/ for
@@ -210,6 +218,17 @@ function createToolsForPromptMode(mode: PromptMode, workspacePath: string): Agen
 
   if (mode === 'plan-planning') {
     return [...readOnly, ...graphTools, ...memoryTools, ...unityRead, createAskUserTool()].map(withRepeatCallGuard);
+  }
+
+  if (mode === 'preplanning') {
+    return [
+      ...readOnly,
+      ...graphTools,
+      ...memoryTools,
+      ...unityRead,
+      createAskUserTool(),
+      createTodoTool(),
+    ].map(withRepeatCallGuard);
   }
 
   // Verified-pass (P3.4) registers every file the send touches by composing
@@ -312,7 +331,7 @@ function createToolsForPromptMode(mode: PromptMode, workspacePath: string): Agen
       }),
       timeoutMs: 15 * 60_000,
     },
-    createTodoTool(),
+    ...(includesTodoTool(mode, effort) ? [createTodoTool()] : []),
     createAskUserTool(),
   ].map(withRepeatCallGuard);
 }
@@ -378,7 +397,7 @@ export class AgentService {
     this.agent = new Agent({
       systemPrompt: buildSystemPrompt('agent', workspacePath, { effort: 'mid' }),
       model: PLACEHOLDER_MODEL,
-      tools: createToolsForPromptMode('agent', workspacePath),
+      tools: createToolsForPromptMode('agent', workspacePath, 'mid'),
       // The stream-error guard (T5) sits OUTERMOST so it catches a
       // synchronous throw from the governor as well as the innermost
       // `arcaneStream` itself. (Mid-send tier escalation was removed — model
@@ -435,7 +454,7 @@ export class AgentService {
       }),
     );
 
-    this.agent.setTools(createToolsForPromptMode(promptMode, workspacePath));
+    this.agent.setTools(createToolsForPromptMode(promptMode, workspacePath, effort));
   }
 
   async sendMessage(text: string, opts: SendMessageOptions): Promise<void> {
@@ -582,23 +601,18 @@ export class AgentService {
     // about). Applied AFTER the attachment prefix above (not folded into the
     // same assignment) so it stacks with — rather than getting overwritten
     // by — an attachment prefix on the same send.
-    if (promptMode === 'agent' || promptMode === 'plan-execution') {
-      // Proactive sibling of the retrospective nudge below: a LARGE agent-mode
-      // request (auto-plan.ts heuristics on the user's own text — attachment
-      // prefixes excluded) gets a todo-first instruction up front. Agent mode
-      // only: plan-execution already works from an approved plan. When it
-      // fires, the retrospective nudge is redundant, so it's skipped.
-      const todoFirst =
-        promptMode === 'agent' &&
-        useSettingsStore.getState().getSetting('ai.autoPlan.enabled') !== false &&
-        assessTaskSize(text, opts.attachments?.length ?? 0) === 'large';
-      if (todoFirst) {
-        promptText = TODO_FIRST_TEXT + promptText;
-      } else {
-        const prevCounts = getPreviousSendNudgeCounts();
-        if (shouldNudgeTodoUpdate(prevCounts.mutatingCalls, prevCounts.todoUpdateCalls)) {
-          promptText = TODO_NUDGE_TEXT + promptText;
-        }
+    //
+    // Task 11: the proactive "todo-first" heuristic (auto-plan.ts) is gone —
+    // preplanning (preplan-controller.ts) now runs a real read-only context
+    // pass ahead of execution on tiers that have it, instead of guessing from
+    // prompt-text heuristics. The retrospective nudge below is gated to
+    // `nudgeEligible` (todo-gates.ts, `effort !== 'low'`): at 'low' the todo
+    // tool isn't even registered (see `createToolsForPromptMode`), so
+    // reminding the model to call it would be nonsensical.
+    if ((promptMode === 'agent' || promptMode === 'plan-execution') && nudgeEligible(effectiveEffort)) {
+      const prevCounts = getPreviousSendNudgeCounts();
+      if (shouldNudgeTodoUpdate(prevCounts.mutatingCalls, prevCounts.todoUpdateCalls)) {
+        promptText = TODO_NUDGE_TEXT + promptText;
       }
     }
 
@@ -849,6 +863,17 @@ export class AgentService {
   abort(): void {
     this.abortRequested = true;
     this.agent.abort();
+  }
+
+  /**
+   * Preplan-controller chain-guard (Task 11): true iff the USER stopped the
+   * most recently COMPLETED `sendMessage` call. `abortRequested` is reset to
+   * `false` at the top of every `sendMessage` (after its guards, T5) and only
+   * ever set by `abort()`, so it survives exactly for the duration this needs
+   * — from the end of a send until the next one starts.
+   */
+  wasLastSendAborted(): boolean {
+    return this.abortRequested;
   }
 
   /** Seed the agent with a saved session's history so the next prompt continues it. */

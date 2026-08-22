@@ -1,8 +1,11 @@
 import { describe, it, expect } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { buildAskPrompt } from './ask';
 import { buildAgentPrompt } from './agent';
 import { buildPlanPlanningPrompt } from './plan-planning';
 import { buildPlanExecutionPrompt, buildPlanSendPrefix } from './plan-execution';
+import { buildPreplanningPrompt } from './preplanning';
 
 describe('prompt personas (anti-terseness regression)', () => {
   const ask = buildAskPrompt('/proj');
@@ -135,5 +138,66 @@ describe('plan progress carry-over (regenerate edge case)', () => {
     expect(execution).toContain('mirror the plan');
     expect(execution).not.toContain('all `pending`');
     expect(execution.toLowerCase()).toContain('already checked');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Preplanning prompt (Task 11) — the read-only context-gathering pass that
+// runs automatically ahead of agent-mode execution on tiers that have it.
+// ---------------------------------------------------------------------------
+describe('preplanning prompt (Task 11)', () => {
+  const preplanning = buildPreplanningPrompt('/proj', { difficultyTags: false });
+  const withDifficulty = buildPreplanningPrompt('/proj', { difficultyTags: true });
+
+  it('requires exactly one todo_update call as the final action', () => {
+    expect(preplanning).toContain('todo_update');
+    expect(preplanning).toContain('required, not optional');
+  });
+
+  it('cannot write, edit, or run anything', () => {
+    expect(preplanning).toContain('cannot');
+    expect(preplanning).toContain('unavailable');
+    expect(preplanning).toContain('write');
+    expect(preplanning).toContain('edit');
+    expect(preplanning).toContain('bash');
+  });
+
+  it('carries over the scripts-first/editor-last ordering rule from the old auto-plan.ts heuristic', () => {
+    expect(preplanning).toContain('scripts first, editor last');
+    expect(preplanning.toLowerCase()).toContain('before any step that drives the unity editor');
+  });
+
+  it('documents ask_user with the same batching/limit rules as plan-planning', () => {
+    expect(preplanning).toContain('ask_user');
+    expect(preplanning).toContain('never ask more than twice');
+  });
+
+  it('ends with a short summary of intended approach, not a plan document', () => {
+    expect(preplanning).toContain('2-3 sentence summary');
+    expect(preplanning).toContain('no plan document');
+  });
+
+  it('omits the difficulty-tagging instruction when difficultyTags is false', () => {
+    expect(preplanning).not.toContain('difficulty');
+  });
+
+  it('includes the easy/hard difficulty instruction when difficultyTags is true', () => {
+    expect(withDifficulty).toContain('difficulty');
+    expect(withDifficulty).toContain('`easy`');
+    expect(withDifficulty).toContain('`hard`');
+    expect(withDifficulty.toLowerCase()).toContain('same-difficulty');
+  });
+
+  // `buildSystemPrompt` itself can't be exercised here: `prompts/index.ts`
+  // statically imports `stores/workspace.ts` (for the frozen-decoration
+  // capture), which transitively touches `document` at module-eval time —
+  // fatal under plain `bun test`, same constraint `arcane-stream.test.ts`'s
+  // header documents for `stores/ai`. A source-text assertion sidesteps that
+  // (same technique `session-persistence.test.ts`'s `AI_STORE_SRC` uses) and
+  // is exactly as precise: it fails the instant the wiring changes.
+  it('index.ts wires buildSystemPrompt\'s "preplanning" case to difficultyTags: effort === "high"', () => {
+    const src = readFileSync(path.resolve(import.meta.dir, './index.ts'), 'utf8');
+    const match = src.match(/case 'preplanning':\s*\n\s*return decorate\(\s*\n\s*buildPreplanningPrompt\(workspacePath, \{ difficultyTags: effort === 'high' \}\)/);
+    expect(match).not.toBeNull();
   });
 });

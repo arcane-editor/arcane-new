@@ -23,6 +23,7 @@ import { useWorkspaceStore } from '../../../stores/workspace';
 import { getChatBackend, sendChatMessage } from '../services/chat-backend';
 import { getAgentService } from '../services/agent-service';
 import { planController } from '../services/plan-controller';
+import { agentModeController } from '../services/preplan-controller';
 import { shouldRouteToQuestion } from '../services/question-routing';
 import LexicalChatInput, { type LexicalChatInputHandle } from './LexicalChatInput';
 import ModeSelector from './ModeSelector';
@@ -96,6 +97,13 @@ function ChatInput() {
       // point would otherwise become an unhandled rejection.
       void planController
         .sendPlanModeMessage(text, attachments)
+        .catch((e) => useAiStore.getState().setError(String(e)));
+    } else if (mode === 'agent') {
+      // Preplanning flow (Task 11): on tiers with it enabled and no live todo
+      // list, this runs a read-only context-gathering pass first, then
+      // chains into execution — see preplan-controller.ts.
+      void agentModeController
+        .sendAgentModeMessage(text, attachments)
         .catch((e) => useAiStore.getState().setError(String(e)));
     } else {
       void getAgentService()

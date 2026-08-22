@@ -8,6 +8,7 @@
 
 import { buildAskPrompt } from './ask';
 import { buildAgentPrompt } from './agent';
+import { buildPreplanningPrompt } from './preplanning';
 import { buildPlanPlanningPrompt } from './plan-planning';
 import {
   buildPlanExecutionPrompt,
@@ -111,12 +112,11 @@ export function buildSystemPrompt(
     case 'agent':
       return decorate(buildAgentPrompt(workspacePath), effort, conversationId);
     case 'preplanning':
-      // TEMPORARY: preplanning has no prompt of its own yet — reuse
-      // plan-planning's persona so the mode is wired end-to-end (server
-      // accepts metadata.planPhase: 'preplanning' already) ahead of the real
-      // prompt landing.
-      // Task 11 replaces this with `prompts/preplanning.ts`.
-      return decorate(buildPlanPlanningPrompt(workspacePath), effort, conversationId);
+      return decorate(
+        buildPreplanningPrompt(workspacePath, { difficultyTags: effort === 'high' }),
+        effort,
+        conversationId,
+      );
     case 'plan-planning':
       return decorate(buildPlanPlanningPrompt(workspacePath), effort, conversationId);
     case 'plan-execution':
