@@ -11,7 +11,7 @@ import {
 } from '../lib/db.ts';
 import { hashPassword, digestsMatch } from '../lib/crypto.ts';
 import {
-    readConfigDoc, putConfigDoc, getEffectivePricing,
+    readConfigDoc, putConfigDoc, getModelRouting, getEffectivePricing,
     validateModelRoutingDoc, validateModelPricingDoc,
 } from '../lib/app-config.ts';
 import type { ModelRoutingDoc, ModelPricingDoc } from '../lib/app-config.ts';
@@ -196,33 +196,14 @@ adminRouter.put('/v1/admin/config/pricing', async (c) => {
     // resolve once this doc replaces the pricing overrides — otherwise the
     // very next request routed to it would have no catalog entry to price.
     //
-    // Deliberately NOT the cached getModelRouting(db) getter here: that
-    // getter re-validates the stored doc against the STATIC MODEL_CATALOG
-    // only (see app-config.ts's getModelRouting — a documented, Task-2
-    // design choice), so a routing doc that legitimately references a
-    // model resolvable only through a pricing override (exactly the case
-    // this orphan check exists to protect) would already fail ITS
-    // validation and silently fall back to DEFAULT_MODEL_ROUTING — masking
-    // the very reference we need to see, and logging a spurious anomaly on
-    // every unrelated pricing PUT. Instead, read the raw stored doc and
-    // validate it against the catalog effective RIGHT NOW (before this PUT
-    // overwrites it) — the same effectiveCatalog basis PUT /config/models
-    // itself validates against, so "currently routed" here means exactly
-    // what the last accepted PUT /config/models call considered valid.
-    const { catalog: currentCatalog } = await getEffectivePricing(c.env.arcane_db);
-    const routingRow = await readConfigDoc(c.env.arcane_db, 'model_routing');
-    let routing: ModelRoutingDoc = DEFAULT_MODEL_ROUTING;
-    if (routingRow) {
-        try {
-            const parsedRouting: unknown = JSON.parse(routingRow.raw);
-            if (validateModelRoutingDoc(parsedRouting, currentCatalog) === null) {
-                routing = parsedRouting as ModelRoutingDoc;
-            }
-        } catch {
-            // malformed JSON -> treat as "no live routing doc", same as getModelRouting
-        }
-    }
-
+    // getModelRouting(db) now validates against the EFFECTIVE (pricing-
+    // merged) catalog itself (see app-config.ts) — called here BEFORE
+    // putConfigDoc below overwrites model_pricing, it resolves against the
+    // catalog still in effect right now, so a routing doc referencing a
+    // model that exists only via the CURRENT pricing doc (the one this PUT
+    // is about to replace) comes back correctly, not silently reverted to
+    // DEFAULT_MODEL_ROUTING.
+    const routing = await getModelRouting(c.env.arcane_db);
     const mergedCatalog = { ...MODEL_CATALOG, ...(body as ModelPricingDoc).models };
 
     const referenced = new Set<string>([routing.inline]);

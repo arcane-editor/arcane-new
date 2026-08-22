@@ -17,6 +17,12 @@
 // putConfigDoc invalidates THIS isolate's cache immediately; other isolates
 // pick up the change within TTL_MS. That staleness window is accepted: an
 // admin price/routing change does not need to be instant.
+//
+// The two docs are NOT independent: getModelRouting validates the stored
+// routing doc against the EFFECTIVE (pricing-merged) catalog, so a
+// model_pricing write can change whether a cached model_routing doc is still
+// considered valid. putConfigDoc therefore invalidates BOTH cache keys on
+// every write, regardless of which doc was written.
 import { MODEL_CATALOG, type ModelInfo, type LongContextRates } from './costs.ts';
 import { GATEWAY_FEE, MARGIN } from '../config/tiers.ts';
 import { DEFAULT_MODEL_ROUTING } from '../config/plans.ts';
@@ -94,15 +100,24 @@ export async function readConfigDoc(
     return { raw: row.value, updatedAt: row.updated_at };
 }
 
-/** Upsert one config document (admin PUT path — a later task exposes this
- *  over HTTP). Invalidates this isolate's cache immediately; see module
- *  comment for the cross-isolate staleness window. */
+/** Upsert one config document (admin PUT path — the admin routes in
+ *  routes/admin.ts expose this over HTTP). Invalidates this isolate's cache
+ *  immediately; see module comment for the cross-isolate staleness window.
+ *
+ *  Invalidates BOTH keys, not just the one written: getModelRouting's cached
+ *  value is validated against the EFFECTIVE (pricing-merged) catalog, so a
+ *  model_pricing write can flip a cached model_routing doc's validity in
+ *  either direction (a custom model newly available to route to, or one just
+ *  removed that a cached "valid" routing doc depended on). Cross-invalidating
+ *  is cheap — config writes are rare admin actions, not hot-path traffic —
+ *  and keeps the two caches coherent with each other. */
 export async function putConfigDoc(db: D1Database, key: ConfigKey, value: object): Promise<void> {
     await db.prepare(
         `INSERT INTO app_config (key, value, updated_at) VALUES (?1, ?2, datetime('now'))
          ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
     ).bind(key, JSON.stringify(value)).run();
-    cache.delete(key);
+    cache.delete('model_routing');
+    cache.delete('model_pricing');
 }
 
 /** Shared read → JSON.parse → validate pipeline for both getters below.
@@ -131,13 +146,22 @@ async function readAndValidate(
 /** Which model each effort tier routes to, plus the inline model. Falls back
  *  to DEFAULT_MODEL_ROUTING (plans.ts) when the table has no row (silently —
  *  the normal state of a fresh deploy) or when the row fails to parse or
- *  fails validateModelRoutingDoc (an anomaly — logged). */
+ *  fails validateModelRoutingDoc (an anomaly — logged).
+ *
+ *  Validates against the EFFECTIVE catalog (getEffectivePricing's merged
+ *  MODEL_CATALOG + model_pricing overrides), NOT the static MODEL_CATALOG
+ *  alone — an admin adding a custom model via PUT /admin/config/pricing and
+ *  then routing a tier at it via PUT /admin/config/models must have that
+ *  model actually SERVE, not silently revert to defaults here because this
+ *  getter checked a narrower catalog than the one that accepted the write.
+ *  No cycle: getEffectivePricing never calls back into this function. */
 export async function getModelRouting(db: D1Database): Promise<ModelRoutingDoc> {
     const cached = readCache<ModelRoutingDoc>('model_routing');
     if (cached) return cached;
 
+    const { catalog } = await getEffectivePricing(db);
     const { doc, error } = await readAndValidate(
-        db, 'model_routing', (parsed) => validateModelRoutingDoc(parsed, MODEL_CATALOG),
+        db, 'model_routing', (parsed) => validateModelRoutingDoc(parsed, catalog),
     );
     if (error) logInvalid('model_routing', error);
 
@@ -169,8 +193,11 @@ export async function getEffectivePricing(db: D1Database): Promise<EffectivePric
 /**
  * Validates a parsed `model_routing` doc. `catalog` is the model id → info
  * map every referenced model (each tier's planner/executor/executorHard, and
- * `inline`) must exist in — the code path passes MODEL_CATALOG; tests may
- * pass a fixture. Returns an error message, or null when the doc is valid.
+ * `inline`) must exist in — getModelRouting's code path passes the EFFECTIVE
+ * (pricing-merged) catalog from getEffectivePricing, not static MODEL_CATALOG
+ * alone (a custom model that only exists via a model_pricing override must
+ * still validate here); tests may pass any fixture catalog. Returns an error
+ * message, or null when the doc is valid.
  */
 export function validateModelRoutingDoc(x: unknown, catalog: Record<string, ModelInfo>): string | null {
     if (typeof x !== 'object' || x === null) return 'doc is not an object';

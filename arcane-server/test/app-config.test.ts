@@ -5,10 +5,11 @@ import {
     validateModelRoutingDoc, validateModelPricingDoc,
 } from '../src/lib/app-config.ts';
 import type { ModelRoutingDoc, ModelPricingDoc, EffectivePricing } from '../src/lib/app-config.ts';
-import { MODEL_CATALOG, estimateCost } from '../src/lib/costs.ts';
+import { MODEL_CATALOG, estimateCost, type ModelInfo } from '../src/lib/costs.ts';
 import { billedMicro } from '../src/lib/usage.ts';
 import { usdToMicro } from '../src/config/tiers.ts';
 import { DEFAULT_MODEL_ROUTING } from '../src/config/plans.ts';
+import { resolveModelForSend } from '../src/config/routing.ts';
 
 // A valid routing doc built entirely from real catalog entries — reused as
 // the "known-good" fixture across the cache/put/read tests below.
@@ -261,6 +262,99 @@ describe('merged pricing math (integration)', () => {
 
         expect(directMicro).toBe(usdToMicro(estimateCost(directModel, 1_000_000, 0, 0) * 1 /* fee waived */));
         expect(workersMicro).toBe(usdToMicro(estimateCost(workersModel, 1_000_000, 0, 0) * 2 /* fee applied */));
+    });
+});
+
+// A custom model that exists ONLY via a model_pricing override — never in
+// static MODEL_CATALOG. This is the exact admin workflow this task's
+// getModelRouting fix protects: an owner adds a brand-new model's rates via
+// PUT /admin/config/pricing, then points a tier at it via PUT
+// /admin/config/models — both writes go through putConfigDoc directly here
+// (the HTTP routes are covered end-to-end in test/admin-config.test.ts).
+const CUSTOM_MODEL_ID = 'test/custom-model-x';
+const CUSTOM_MODEL_INFO: ModelInfo = { ...MODEL_CATALOG['@cf/zai-org/glm-5.2']! };
+
+describe('getModelRouting validates against the EFFECTIVE (pricing-merged) catalog', () => {
+    it('a routing doc referencing a model that exists only via a pricing override round-trips (NOT DEFAULT_MODEL_ROUTING), and both resolveModelForSend + the serve guard resolve it', async () => {
+        await putConfigDoc(env.arcane_db, 'model_pricing', {
+            models: { [CUSTOM_MODEL_ID]: CUSTOM_MODEL_INFO }, gatewayFee: 1.05, margin: 1.0,
+        });
+
+        const routingDoc: ModelRoutingDoc = {
+            tiers: {
+                low:  { planner: '@cf/zai-org/glm-5.2', executor: '@cf/zai-org/glm-5.2' },
+                mid:  { planner: 'xai/grok-4.6', executor: CUSTOM_MODEL_ID },
+                high: { planner: 'openai/gpt-5.6-luna', executor: '@cf/zai-org/glm-5.2', executorHard: 'xai/grok-4.6' },
+            },
+            inline: '@cf/qwen/qwen3-30b-a3b-fp8',
+        };
+        await putConfigDoc(env.arcane_db, 'model_routing', routingDoc);
+        clearConfigCache();
+
+        // Before the fix, getModelRouting validated against static
+        // MODEL_CATALOG only: CUSTOM_MODEL_ID would fail that check, fall
+        // back to DEFAULT_MODEL_ROUTING, and log a spurious anomaly.
+        const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        const routing = await getModelRouting(env.arcane_db);
+        expect(routing).toEqual(routingDoc);
+        expect(spy).not.toHaveBeenCalled();
+        spy.mockRestore();
+
+        // Runtime promise end-to-end (unit level, mirroring chat.ts's actual
+        // call sequence): resolveModelForSend picks the custom model for the
+        // mid tier's executor slot...
+        const decision = resolveModelForSend('mid', {}, routing);
+        expect(decision.model).toBe(CUSTOM_MODEL_ID);
+        expect(decision.reason).toBe('executor');
+
+        // ...and chat.ts's serve guard (pricing.catalog[decision.model]) finds
+        // it, so the request would actually be served rather than 503
+        // model_unconfigured.
+        const pricing = await getEffectivePricing(env.arcane_db);
+        expect(pricing.catalog[decision.model]).toBeDefined();
+    });
+});
+
+describe('putConfigDoc cross-invalidates both cache keys', () => {
+    it('a model_pricing write also invalidates the cached model_routing value', async () => {
+        await putConfigDoc(env.arcane_db, 'model_routing', VALID_ROUTING_DOC);
+        const first = await getModelRouting(env.arcane_db); // populates the model_routing cache
+        expect(first).toEqual(VALID_ROUTING_DOC);
+
+        // An unrelated pricing write should still bust the routing cache —
+        // getModelRouting's cached validity now depends on the effective
+        // (pricing-merged) catalog, so a pricing change can flip it.
+        await putConfigDoc(env.arcane_db, 'model_pricing', VALID_PRICING_DOC);
+
+        // Prove the routing cache was actually invalidated (not coincidentally
+        // still correct): mutate the model_routing row directly via raw SQL,
+        // bypassing putConfigDoc entirely (which would invalidate it anyway).
+        const bumped: ModelRoutingDoc = {
+            tiers: { ...VALID_ROUTING_DOC.tiers, low: { planner: 'xai/grok-4.6', executor: 'xai/grok-4.6' } },
+            inline: '@cf/qwen/qwen3-30b-a3b-fp8',
+        };
+        await env.arcane_db.prepare("UPDATE app_config SET value = ?1 WHERE key = 'model_routing'")
+            .bind(JSON.stringify(bumped)).run();
+
+        const afterPricingWrite = await getModelRouting(env.arcane_db);
+        // If the pricing write had NOT invalidated the routing cache, this
+        // would still equal `first` (the stale cached VALID_ROUTING_DOC).
+        expect(afterPricingWrite).toEqual(bumped);
+    });
+
+    it('a model_routing write also invalidates the cached model_pricing value', async () => {
+        await putConfigDoc(env.arcane_db, 'model_pricing', VALID_PRICING_DOC);
+        const first = await getEffectivePricing(env.arcane_db);
+        expect(first.gatewayFee).toBe(1.05);
+
+        await putConfigDoc(env.arcane_db, 'model_routing', VALID_ROUTING_DOC);
+
+        const bumped: ModelPricingDoc = { ...VALID_PRICING_DOC, gatewayFee: 1.2 };
+        await env.arcane_db.prepare("UPDATE app_config SET value = ?1 WHERE key = 'model_pricing'")
+            .bind(JSON.stringify(bumped)).run();
+
+        const afterRoutingWrite = await getEffectivePricing(env.arcane_db);
+        expect(afterRoutingWrite.gatewayFee).toBe(1.2);
     });
 });
 
