@@ -118,7 +118,11 @@ export function buildSystemPrompt(
         conversationId,
       );
     case 'plan-planning':
-      return decorate(buildPlanPlanningPrompt(workspacePath), effort, conversationId);
+      return decorate(
+        buildPlanPlanningPrompt(workspacePath, { difficultyTags: effort === 'high' }),
+        effort,
+        conversationId,
+      );
     case 'plan-execution':
       if (!opts?.planExecution) {
         throw new Error('plan-execution prompt requires planPath and planContent');

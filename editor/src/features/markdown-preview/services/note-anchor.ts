@@ -63,6 +63,18 @@ export function reanchorNotes(notes: PlanNote[], doc: string): PlanNote[] {
 }
 
 /**
+ * Strips the plan-planning template's (Task 12) `T<n> [easy|hard]` bookkeeping
+ * prefix from a checkbox line's captured text, so progress bars / PlanList
+ * show just the human-readable title (`T2 [hard] Refactor X` -> `Refactor
+ * X`). Display-only: `planStepsOf`'s counting/anchoring above already ran on
+ * the raw captured text, so this never changes step counts or which text
+ * `createNote`/`reanchorNotes` match against.
+ */
+function stripTodoPrefix(title: string): string {
+  return title.replace(/^T\d+\s+(?:\[(?:easy|hard)\]\s+)?/, '').trim();
+}
+
+/**
  * The steps a plan declares, with their completion state.
  *
  * Task-list items win over headings: a plan using `- [ ]` is tracking its own
@@ -72,7 +84,10 @@ export function reanchorNotes(notes: PlanNote[], doc: string): PlanNote[] {
 export function planStepsOf(doc: string): PlanStep[] {
   const tasks = [...doc.matchAll(/^\s*[-*]\s+\[( |x|X)\]\s+(.+)$/gm)];
   if (tasks.length > 0) {
-    return tasks.map((m) => ({ title: m[2].trim(), done: m[1].toLowerCase() === 'x' }));
+    return tasks.map((m) => ({
+      title: stripTodoPrefix(m[2].trim()),
+      done: m[1].toLowerCase() === 'x',
+    }));
   }
 
   // Numbered headings (`## 2. Wire NavMeshAgent`) are the shape the planning

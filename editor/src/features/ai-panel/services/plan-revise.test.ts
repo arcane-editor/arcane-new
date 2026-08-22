@@ -41,4 +41,15 @@ describe('buildReviseNotesPrompt', () => {
     const p = buildReviseNotesPrompt('/p.md', 'plan', [note({ anchored: false })]);
     expect(p).toContain('no longer in the plan');
   });
+
+  // Task 12: the plan-planning system prompt already says "never reset
+  // completed work" for a revise (same promptMode as planning), but the
+  // difficulty tags are new — this reply-text instruction is what extends
+  // that existing rule to also cover them.
+  it('instructs keeping checked todos checked and carrying tags forward unchanged', () => {
+    const p = buildReviseNotesPrompt('/p.md', 'plan', [note()]);
+    expect(p.toLowerCase()).toContain('already-checked');
+    expect(p).toContain('[easy]');
+    expect(p).toContain('[hard]');
+  });
 });

@@ -25,8 +25,9 @@ export function buildRegeneratePrompt(originalPrompt: string, priorPlan: PriorPl
     `${originalPrompt}\n\n` +
     `## Previous plan (${priorPlan.path}) — its progress marks are authoritative\n\n` +
     `${priorPlan.content}\n\n` +
-    `Re-plan the remaining work. Carry every step already checked \`- [x]\` above into the new plan ` +
-    `pre-checked \`- [x]\` (keep its title, summarized), and break down only the unfinished work into ` +
-    `new steps. Do not reset completed work to unchecked.`
+    `Re-plan the remaining work. Carry every todo already checked \`- [x]\` above into the new plan ` +
+    `pre-checked \`- [x]\` (keep its \`T<n>\` id and title, summarized), and break down only the unfinished ` +
+    `work into new todos. Do not reset completed work to unchecked, and carry forward each kept todo's ` +
+    `\`[easy]\`/\`[hard]\` difficulty tag unchanged.`
   );
 }

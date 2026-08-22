@@ -39,7 +39,9 @@ export function buildReviseNotesPrompt(
     `Revise the plan below to address these suggestions. Reply with the FULL ` +
     `revised plan in the same markdown format — your reply becomes the new ` +
     `content of ${planPath}, so include every part of the plan (updated), ` +
-    `with no commentary before or after it.\n\n` +
+    `with no commentary before or after it. Leave already-checked \`- [x]\` todos ` +
+    `checked, and carry forward each kept todo's \`T<n>\` id and \`[easy]\`/\`[hard]\` ` +
+    `difficulty tag unchanged.\n\n` +
     `Suggestions:\n${body}\n\n--- Current plan (${planPath}) ---\n${planContent}`
   );
 }

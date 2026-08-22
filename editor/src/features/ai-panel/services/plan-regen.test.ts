@@ -26,4 +26,13 @@ describe('buildRegeneratePrompt', () => {
     expect(out).toContain('pre-checked');
     expect(out.toLowerCase()).toContain('do not reset completed');
   });
+
+  // Task 12: difficulty tags must survive a re-plan the same way checked
+  // state already does — otherwise Regenerate silently strips them.
+  it('instructs carrying each kept todo\'s [easy]/[hard] tag forward unchanged', () => {
+    const out = buildRegeneratePrompt('build a game', PRIOR);
+    expect(out).toContain('[easy]');
+    expect(out).toContain('[hard]');
+    expect(out.toLowerCase()).toContain('carry forward');
+  });
 });

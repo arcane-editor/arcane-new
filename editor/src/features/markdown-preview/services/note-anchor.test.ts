@@ -116,4 +116,67 @@ describe('planStepsOf', () => {
   it('returns nothing for a document with no steps', () => {
     expect(planStepsOf('Just a paragraph.')).toEqual([]);
   });
+
+  /**
+   * Task 12's plan-planning template (`## Todos` with `- [ ] T<n> [easy|hard]
+   * <title>` lines) must parse to the same step count/done-detection as the
+   * old `**Step N: …**` format — `plan-controller.ts`'s all-ticked
+   * done-detection and this file's own display consumers both depend on it.
+   */
+  describe('Task 12 plan-planning template (Todos + difficulty tags)', () => {
+    const TAGGED_DOC = `# Add Enemy AI
+
+## Goal
+Give enemies chase behaviour.
+
+## Todos
+- [ ] T1 [easy] Create EnemyController.cs
+- [x] T2 [hard] Wire NavMeshAgent
+
+## Guide
+
+### T1: Create EnemyController.cs
+Add a MonoBehaviour under Assets/Scripts.
+
+### T2: Wire NavMeshAgent
+Set the agent's destination each frame toward the player target.
+
+## Risks
+- Pathfinding may stall on unbaked navmesh.
+`;
+
+    it('counts the same number of steps as the old format, honoring checkbox state', () => {
+      const steps = planStepsOf(TAGGED_DOC);
+      expect(steps).toHaveLength(2);
+      expect(steps.map((s) => s.done)).toEqual([false, true]);
+    });
+
+    it('strips the T<n> [easy|hard] bookkeeping prefix from the display title', () => {
+      expect(planStepsOf(TAGGED_DOC).map((s) => s.title)).toEqual([
+        'Create EnemyController.cs',
+        'Wire NavMeshAgent',
+      ]);
+    });
+
+    it('strips a bare T<n> prefix (no difficulty tag) too, for untagged-tier plans', () => {
+      const untagged = '- [ ] T1 Create EnemyController.cs\n- [x] T2 Wire NavMeshAgent\n';
+      expect(planStepsOf(untagged).map((s) => s.title)).toEqual([
+        'Create EnemyController.cs',
+        'Wire NavMeshAgent',
+      ]);
+    });
+
+    it('reports all-done once every T<n> checkbox is ticked (plan-controller done-detection)', () => {
+      const allDone = TAGGED_DOC.replace('- [ ] T1 [easy]', '- [x] T1 [easy]');
+      const steps = planStepsOf(allDone);
+      expect(steps.length).toBeGreaterThan(0);
+      expect(steps.every((s) => s.done)).toBe(true);
+    });
+
+    it('leaves an old-format (no T<n> id) title untouched by the strip', () => {
+      expect(planStepsOf(DOC).map((s) => s.title)[0]).toBe(
+        '**Step 1: Create EnemyController.cs** — Add a MonoBehaviour under Assets/Scripts.',
+      );
+    });
+  });
 });

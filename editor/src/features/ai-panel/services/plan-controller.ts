@@ -22,6 +22,7 @@ import { getAgentService } from './agent-service';
 import { routePlanSend } from './plan-route';
 import { buildRegeneratePrompt, type PriorPlan } from './plan-regen';
 import { buildReviseNotesPrompt } from './plan-revise';
+import { parsePlanTodos, planTodosToArcanePlan } from './plan-todos';
 import {
   buildPlanPath,
   openPlanInEditor,
@@ -184,6 +185,15 @@ async function runExecution(planPath: string, sendText: string): Promise<void> {
   // not whatever stale activePlanPath an earlier planning run left behind.
   store.setActivePlanPath(planPath);
   setPlanRefStatus(planPath, 'executing');
+
+  // Seed arcanePlan from the plan file's current Todos/checkbox state BEFORE
+  // the send below, so the FIRST plan-execution request already carries the
+  // current todo's difficulty — the metadata resolver (difficulty.ts's
+  // difficultyForRequest) reads arcanePlan off the store, and without this
+  // seed the first send would go out untagged until the model's own first
+  // todo_update call caught up. The todo-tool merge (mergeTodoDifficulty)
+  // keeps these tags authoritative for every send after this one.
+  store.setArcanePlan(planTodosToArcanePlan(parsePlanTodos(planContent)));
 
   try {
     await getAgentService().sendMessage(sendText, {

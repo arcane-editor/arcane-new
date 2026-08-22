@@ -51,7 +51,7 @@ describe('todo_update instructions (T9)', () => {
 
 describe('ask_user instructions (Task 2 — agent/plan-planning/plan-execution only, not ask)', () => {
   const agent = buildAgentPrompt('/proj');
-  const planPlanning = buildPlanPlanningPrompt('/proj');
+  const planPlanning = buildPlanPlanningPrompt('/proj', { difficultyTags: false });
   const planExecution = buildPlanExecutionPrompt({
     workspacePath: '/proj',
     planPath: '/proj/.arcane/plans/plan.md',
@@ -101,22 +101,22 @@ import { buildPlanPlanningPrompt as planningPromptFor } from './plan-planning';
 import { buildPlanExecutionPrompt as executionPromptFor } from './plan-execution';
 
 describe('bridge-independence + step ordering (plan prompts)', () => {
-  const planning = planningPromptFor('/proj');
+  const planning = planningPromptFor('/proj', { difficultyTags: false });
   const execution = executionPromptFor({ workspacePath: '/proj', planPath: '/proj/.arcane/plans/p.md' });
 
-  it('planning orders all script steps before any editor-side steps', () => {
+  it('planning orders all script todos before any editor-side todos', () => {
     expect(planning).toContain('scripts first, editor last');
-    expect(planning.toLowerCase()).toContain('before any step that drives the unity editor');
+    expect(planning.toLowerCase()).toContain('before any todo that drives the unity editor');
   });
 
   it('execution says bridge loss is not a failure and script work continues', () => {
     expect(execution.toLowerCase()).toContain('not required');
-    expect(execution).toContain('NOT a step failure');
+    expect(execution).toContain('NOT a todo failure');
     expect(execution.toLowerCase()).toContain('reconnects automatically');
   });
 
-  it('execution prefers remaining script steps while the editor is unavailable', () => {
-    expect(execution.toLowerCase()).toContain('script steps first');
+  it('execution prefers remaining script todos while the editor is unavailable', () => {
+    expect(execution.toLowerCase()).toContain('script todos first');
   });
 });
 
@@ -126,7 +126,7 @@ describe('bridge-independence + step ordering (plan prompts)', () => {
 // regenerate wiped the visible progress of everything already completed.
 // ---------------------------------------------------------------------------
 describe('plan progress carry-over (regenerate edge case)', () => {
-  const planning = planningPromptFor('/proj');
+  const planning = planningPromptFor('/proj', { difficultyTags: false });
   const execution = executionPromptFor({ workspacePath: '/proj', planPath: '/proj/.arcane/plans/p.md' });
 
   it('planning carries completed steps forward pre-checked, never resetting them', () => {
@@ -138,6 +138,62 @@ describe('plan progress carry-over (regenerate edge case)', () => {
     expect(execution).toContain('mirror the plan');
     expect(execution).not.toContain('all `pending`');
     expect(execution.toLowerCase()).toContain('already checked');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Plan template v2 (Task 12) — Goal/Context/Todos/Guide/Risks with optional
+// `[easy]`/`[hard]` difficulty tags on high tier, and the execution prompt's
+// matching tag-preservation instruction for ticking checkboxes.
+// ---------------------------------------------------------------------------
+describe('plan-planning template v2 (Task 12)', () => {
+  const withoutTags = planningPromptFor('/proj', { difficultyTags: false });
+  const withTags = planningPromptFor('/proj', { difficultyTags: true });
+
+  it('template contains all five required sections', () => {
+    for (const heading of ['## Goal', '## Context', '## Todos', '## Guide', '## Risks']) {
+      expect(withoutTags).toContain(heading);
+      expect(withTags).toContain(heading);
+    }
+  });
+
+  it('shows untagged Todos example lines when difficultyTags is false', () => {
+    expect(withoutTags).toContain('- [ ] T1 <verb-led title>');
+    expect(withoutTags).not.toContain('[easy]');
+    expect(withoutTags).not.toContain('[hard]');
+  });
+
+  it('shows tagged Todos example lines and tagging guidance when difficultyTags is true', () => {
+    expect(withTags).toContain('- [ ] T1 [easy] <verb-led title>');
+    expect(withTags).toContain('- [ ] T2 [hard] <verb-led title>');
+    expect(withTags.toLowerCase()).toContain('tag every todo');
+    expect(withTags.toLowerCase()).toContain('same-difficulty');
+  });
+
+  it('keeps the checkbox grammar (`- [ ] ` / `- [x] ` at line start) either way', () => {
+    expect(withoutTags).toMatch(/- \[ \] T1/);
+    expect(withTags).toMatch(/- \[ \] T1/);
+  });
+
+  it('index.ts wires buildSystemPrompt\'s "plan-planning" case to difficultyTags: effort === "high"', () => {
+    const src = readFileSync(path.resolve(import.meta.dir, './index.ts'), 'utf8');
+    const match = src.match(/case 'plan-planning':\s*\n\s*return decorate\(\s*\n\s*buildPlanPlanningPrompt\(workspacePath, \{ difficultyTags: effort === 'high' \}\)/);
+    expect(match).not.toBeNull();
+  });
+});
+
+describe('plan-execution tag-preservation instruction (Task 12)', () => {
+  const execution = executionPromptFor({ workspacePath: '/proj', planPath: '/proj/.arcane/plans/p.md' });
+
+  it('instructs mirroring each plan todo\'s difficulty into todo_update', () => {
+    expect(execution.toLowerCase()).toContain('difficulty');
+    expect(execution).toContain('todo_update');
+  });
+
+  it('instructs preserving the T<n> [easy|hard] prefix verbatim when ticking a checkbox', () => {
+    expect(execution).toContain('T<n>');
+    expect(execution.toLowerCase()).toContain('verbatim');
+    expect(execution).toContain('T2 [hard] Refactor NavMeshAgent wiring');
   });
 });
 
