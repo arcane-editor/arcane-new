@@ -70,19 +70,12 @@ async function api(path: string, init?: RequestInit): Promise<any> {
     return text ? JSON.parse(text) : null;
 }
 
-/** Extract the price in cents and recurrence kind from a product response.
- * Handles both recurring_price and one_time_price fields. */
+/** Extract the price in cents and recurrence kind from a Dodo GET /products response.
+ * Dodo schema: is_recurring (boolean), price (number, cents), price_detail?.price (number).
+ * If both price sources are undefined, returns 0 cents (non-matching). */
 function extractPriceInfo(product: any): { cents: number; recurring: boolean } {
     const recurring = product.is_recurring ?? false;
-    let cents = 0;
-    if (recurring && product.recurring_price !== undefined) {
-        cents = product.recurring_price;
-    } else if (!recurring && product.one_time_price !== undefined) {
-        cents = product.one_time_price;
-    } else if (product.price !== undefined) {
-        // Fallback: try the generic price field
-        cents = product.price;
-    }
+    const cents = product.price ?? product.price_detail?.price ?? 0;
     return { cents, recurring };
 }
 
@@ -104,7 +97,7 @@ if (DRY) {
 }
 console.log('');
 
-const results: { varName: string; name: string; id: string; status: string }[] = [];
+const results: { varName: string; id: string; status: string }[] = [];
 
 for (const s of SPECS) {
     // Find existing product matching name + price + recurrence (idempotency key).
@@ -118,13 +111,14 @@ for (const s of SPECS) {
                 break;
             } else {
                 nameCollision = p;
+                break;
             }
         }
     }
 
     if (exactMatch) {
         console.log(`SKIP   ${s.name} — already exists as ${exactMatch.product_id}`);
-        results.push({ varName: s.varName, name: s.name, id: exactMatch.product_id, status: 'existing' });
+        results.push({ varName: s.varName, id: exactMatch.product_id, status: 'existing' });
         continue;
     }
 
@@ -148,7 +142,7 @@ for (const s of SPECS) {
         }),
     });
     console.log(`CREATE ${s.name} → ${p.product_id}`);
-    results.push({ varName: s.varName, name: s.name, id: p.product_id, status: 'created' });
+    results.push({ varName: s.varName, id: p.product_id, status: 'created' });
 }
 
 if (DRY) {
