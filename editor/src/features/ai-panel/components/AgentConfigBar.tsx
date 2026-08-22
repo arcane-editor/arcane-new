@@ -26,7 +26,17 @@ import type { SessionConfigOption } from '../../acp';
 import { useAiStore } from '../../../stores/ai';
 import { getClaudeBackend } from '../services/claude-backend';
 
-const POPOVER_WIDTH = 240;
+/* Wider than the mode menu's 240. The rows here carry the AGENT's own
+   descriptions, not ours, and they run long — "Most capable for your hardest
+   and longest-running tasks · Requires usage credits" is one option's subtitle.
+   At 240 that wrapped to six lines per row. */
+const POPOVER_WIDTH = 268;
+
+/** Breathing room kept between the menu and the top edge of the window. */
+const VIEWPORT_MARGIN = 12;
+
+/** Below this a scrolling menu is more frustrating than a clipped one. */
+const MIN_MENU_HEIGHT = 180;
 
 function AgentConfigBar() {
   const options = useAiStore((s) => s.agentConfigOptions);
@@ -117,6 +127,11 @@ function SelectOption({ option }: { option: Extract<SessionConfigOption, { type:
         bottom: window.innerHeight - anchorRect.top + 4,
         left: Math.max(8, Math.min(window.innerWidth - POPOVER_WIDTH - 8, anchorRect.left)),
         width: POPOVER_WIDTH,
+        // How many options an agent advertises is the AGENT's decision, not
+        // ours — so the menu is capped by the room actually above the pill and
+        // scrolls past that. Without this a long model list grew straight off
+        // the top of the window and covered the editor.
+        maxHeight: Math.max(MIN_MENU_HEIGHT, anchorRect.top - VIEWPORT_MARGIN),
         zIndex: 1000,
       }
     : null;
@@ -140,7 +155,12 @@ function SelectOption({ option }: { option: Extract<SessionConfigOption, { type:
       {open &&
         popoverStyle &&
         createPortal(
-          <div ref={popoverRef} className="ai-panel-mode-menu" style={popoverStyle} role="menu">
+          <div
+            ref={popoverRef}
+            className="ai-panel-mode-menu ai-panel-config-menu"
+            style={popoverStyle}
+            role="menu"
+          >
             <div className="ai-panel-agent-menu-section">{option.name}</div>
             {option.options.map((choice) => {
               const selected = choice.value === option.currentValue;

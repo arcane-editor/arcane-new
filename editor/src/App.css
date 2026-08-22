@@ -4000,6 +4000,14 @@ html, body, #root {
   display: flex;
   flex-direction: column;
   gap: 1px;
+  /* The menu opens UPWARD out of the composer, so an over-tall one runs off
+     the top of the window rather than merely looking wrong. ModeSelector has
+     exactly three items and never surfaced this; an ACP agent advertises as
+     many models as it likes. The cap itself is set per-instance in JS from the
+     anchor's distance to the top edge — this is the scroll behaviour that cap
+     needs, and a floor so a cramped window still shows something usable. */
+  overflow-y: auto;
+  min-height: 0;
   animation: ai-panel-menu-in 120ms ease-out;
 }
 
@@ -4014,6 +4022,10 @@ html, body, #root {
   }
 }
 
+/* Positional layout: column 1 is the icon, 2 the text, 3 the check. Any menu
+   whose rows DON'T carry an icon must say so (see .ai-panel-config-menu) —
+   otherwise its label silently lands in the 22px icon column and wraps to one
+   word per line. */
 .ai-panel-mode-menu-item {
   display: grid;
   grid-template-columns: 22px 1fr 14px;
@@ -4067,6 +4079,21 @@ html, body, #root {
 
 .ai-panel-mode-menu-check {
   color: var(--accent);
+}
+
+/* An external agent's own settings (model, mode, effort). Two columns, not
+   three: these rows are agent-owned and carry no icon — Claude's models have
+   no glyph, and inventing one would assert something about them we have no
+   business asserting. Wider than the mode menu because the descriptions are
+   the agent's words, not ours, and they run long ("Most capable for your
+   hardest and longest-running tasks · Requires usage credits"). */
+.ai-panel-config-menu .ai-panel-mode-menu-item {
+  grid-template-columns: 1fr 14px;
+  align-items: start;
+}
+
+.ai-panel-config-menu .ai-panel-mode-menu-check {
+  margin-top: 1px;
 }
 
 /* ---- Effort: ascending bars (graph style) ---- */
@@ -6879,9 +6906,14 @@ html, body, #root {
 .ai-panel-mode-menu-item[data-mode='agent'] { --mode-accent: var(--mode-agent); }
 .ai-panel-mode-menu-item[data-mode='plan'] { --mode-accent: var(--mode-plan); }
 
-.ai-panel-mode-menu-item .ai-panel-mode-menu-icon { color: var(--mode-accent); }
-.ai-panel-mode-menu-item.is-selected { box-shadow: inset 2px 0 0 var(--mode-accent); }
-.ai-panel-mode-menu-item .ai-panel-mode-menu-check { color: var(--mode-accent); }
+/* `--mode-accent` is set by the [data-mode] rules above, which only the Arcane
+   mode menu carries. These three are unscoped, so in an agent's config menu the
+   property is undefined and the value is invalid — the selected row lost its
+   marker and its tick lost its colour. The fallback keeps one rule serving both
+   menus rather than duplicating it per menu and letting the two drift. */
+.ai-panel-mode-menu-item .ai-panel-mode-menu-icon { color: var(--mode-accent, var(--accent)); }
+.ai-panel-mode-menu-item.is-selected { box-shadow: inset 2px 0 0 var(--mode-accent, var(--accent)); }
+.ai-panel-mode-menu-item .ai-panel-mode-menu-check { color: var(--mode-accent, var(--accent)); }
 
 /* The composer had a 2px mode-coloured gradient rule across its top edge, to
    make the mode readable while typing. It read as a stray progress bar, and
