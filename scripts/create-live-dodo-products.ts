@@ -158,7 +158,12 @@ if (DRY) {
 console.log('\n─── paste into the PROD [vars] block of arcane-server/wrangler.toml ───');
 for (const r of results) console.log(`${r.varName} = "${r.id}"`);
 console.log('───────────────────────────────────────────────────────────────────────');
-// Also print the dev block hint
-console.log('\n─── also paste into the DEV [vars] block ───');
-for (const r of results) console.log(`${r.varName} = "${r.id}"`);
+// The dev worker talks to test.dodopayments.com, not live.dodopayments.com —
+// these LIVE-mode ids would 404 every checkout there. Do NOT paste them into
+// [env.dev.vars]; DEV needs its own TEST-mode products, created separately
+// with the test API key (owner checklist).
+console.log('\n─── do NOT paste these into the DEV [env.dev.vars] block ───');
+console.log('DEV uses TEST-mode products (dev worker talks to test.dodopayments.com;');
+console.log('these are LIVE-mode ids — they would 404 every checkout there). Provision');
+console.log('DEV\'s products separately with the TEST-mode API key (owner checklist).');
 console.log('───────────────────────────────────────────────────────────────────────');

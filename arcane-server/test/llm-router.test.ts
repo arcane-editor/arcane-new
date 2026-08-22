@@ -3,7 +3,7 @@ import {
     resolveModel, classifyStreamError, convertMessages, describeStreamError, streamCompletion,
     LlmConfigError, type LlmEnv,
 } from '../src/services/llm-router.ts';
-import { SPARK_MODEL } from '../src/config/plans.ts';
+import { SPARK_MODEL, DEFAULT_MODEL_ROUTING } from '../src/config/plans.ts';
 import type { ChatCompletionRequest, ChatMessage, StreamEvent } from '../src/types.ts';
 import type { ModelInfo } from '../src/lib/costs.ts';
 
@@ -50,6 +50,23 @@ describe('resolveModel: spark direct provider', () => {
         // `${name}.${modelType}` (e.g. 'spark.chat') — verified against the
         // installed 2.0.30 source (openai-compatible-provider.ts
         // getCommonModelConfig). The `name` half is what we configured.
+        expect(model.provider.split('.')[0]).toBe('spark');
+    });
+
+    // Regression guard for Finding 1 (2026-08-22 final-review fix wave):
+    // graph.ts's /v1/graph/enrich route serves `routing.tiers.mid.executor`
+    // — under the code-default routing table (empty app_config) that's
+    // SPARK_MODEL, a 'direct'-route id `workersAiProvider` alone cannot serve
+    // (it only knows the Workers AI binding's own catalog). The route must
+    // go through `resolveModel`, which routes a `spark/…` id to the direct
+    // OpenAI-compatible provider instead. This pins the exact id graph.ts's
+    // default mid.executor resolves to, so a future DEFAULT_MODEL_ROUTING
+    // edit that points mid.executor somewhere `resolveModel` can't serve
+    // fails here first, not in production.
+    it('DEFAULT_MODEL_ROUTING.tiers.mid.executor (graph enrich\'s default model) resolves through the spark direct provider', () => {
+        expect(DEFAULT_MODEL_ROUTING.tiers.mid.executor).toBe(SPARK_MODEL);
+        const model = resolveModel(DEFAULT_MODEL_ROUTING.tiers.mid.executor, SPARK_ENV);
+        expect(model.modelId).toBe('muse-spark-1.2-contributor');
         expect(model.provider.split('.')[0]).toBe('spark');
     });
 });

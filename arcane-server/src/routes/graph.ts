@@ -4,8 +4,8 @@ import type { AppEnv } from '../types.ts';
 import type { AuthPayload } from '../middleware/auth.ts';
 import { checkAiBudget } from '../lib/credits.ts';
 import { recordUsage } from '../lib/usage.ts';
-import { getModelRouting } from '../lib/app-config.ts';
-import { workersAiProvider } from '../services/llm-router.ts';
+import { getModelRouting, getEffectivePricing } from '../lib/app-config.ts';
+import { resolveModel } from '../services/llm-router.ts';
 
 export const graphRouter = new Hono<AppEnv>();
 
@@ -92,9 +92,23 @@ graphRouter.post('/v1/graph/enrich', async (c) => {
     const routing = await getModelRouting(c.env.arcane_db);
     const enrichModel = routing.tiers.mid.executor;
 
+    // Serve guard: mirrors chat.ts — a routing doc (or the code-default
+    // fallback) can only be trusted once cross-checked against the EFFECTIVE
+    // pricing catalog. Without this, a mid.executor pointed at a 'direct'
+    // (e.g. spark/…) or otherwise-unconfigured model would either 500 deep
+    // inside the provider call below or silently bill $0 (see usage.ts).
+    const pricing = await getEffectivePricing(c.env.arcane_db);
+    if (!pricing.catalog[enrichModel]) {
+        console.error(JSON.stringify({ event: 'model_unconfigured', model: enrichModel }));
+        return c.json({ error: 'This model is not configured. Contact support.', code: 'model_unconfigured' }, 503);
+    }
+
     // Generative enrichment, like chat, is sampled (temperature 0.2) — skip the
     // gateway cache so a repeat call doesn't replay a stale sampled response.
-    const model = workersAiProvider(c.env, { skipCache: true })(enrichModel);
+    // resolveModel (not workersAiProvider directly) so a 'direct'-route model
+    // (spark/…) — the shipped default mid.executor — is servable here too,
+    // not just @cf/ Workers AI catalog ids.
+    const model = resolveModel(enrichModel, c.env, { skipCache: true });
 
     const system = [
         'You are a code-architecture summarizer. You are given a structural code',

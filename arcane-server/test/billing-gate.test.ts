@@ -4,6 +4,31 @@ import { seedPasswordUser, tokenFor } from './helpers.ts';
 import { createUser } from '../src/lib/db.ts';
 import { checkAiBudget } from '../src/lib/credits.ts';
 import { SIGNUP_TRIAL_MICRO } from '../src/config/tiers.ts';
+import { clearConfigCache, putConfigDoc } from '../src/lib/app-config.ts';
+import type { ModelRoutingDoc } from '../src/lib/app-config.ts';
+
+// Routed at a '@cf/...' id (not DEFAULT_MODEL_ROUTING's spark/... mid
+// executor) for the same reason chat-metering.test.ts/tier-gate.test.ts pin
+// their spark-adjacent request to CF_ONLY_ROUTING: resolveModel's 'direct'
+// (spark/...) route makes a REAL fetch to the RFC-2606 spark.invalid host on
+// generateText, which still errors correctly but makes Miniflare/workerd log
+// a spurious "uncaught exception" line — noisy, not a correctness issue. A
+// '@cf/...' id fails synchronously instead (no AI binding in the test env,
+// see wrangler.test.toml), so this test stays on the credit-gate question
+// only, with no fetch noise.
+const CF_ONLY_ROUTING: ModelRoutingDoc = {
+    tiers: {
+        low: { planner: '@cf/zai-org/glm-5.2', executor: '@cf/zai-org/glm-5.2' },
+        mid: { planner: '@cf/zai-org/glm-5.2', executor: '@cf/zai-org/glm-5.2' },
+        high: { planner: '@cf/zai-org/glm-5.2', executor: '@cf/zai-org/glm-5.2', executorHard: 'xai/grok-4.6' },
+    },
+    inline: '@cf/qwen/qwen3-30b-a3b-fp8',
+};
+
+async function resetModelRouting(): Promise<void> {
+    await env.arcane_db.prepare("DELETE FROM app_config WHERE key = 'model_routing'").run();
+    clearConfigCache();
+}
 
 // End-to-end enforcement: the credit gate runs inside each AI route, BEFORE any
 // model call, so an out-of-credits user is rejected with 402 even though the
@@ -38,8 +63,18 @@ describe('credit gate on AI routes', () => {
         ).bind(user.id).run();
         const token = await tokenFor(user);
 
-        const res = await post('/v1/graph/enrich', token, { stats: { nodes: 1, edges: 0, communities: 0 }, communities: [], godNodes: [] });
-        expect(res.status).not.toBe(402);
+        await putConfigDoc(env.arcane_db, 'model_routing', CF_ONLY_ROUTING);
+        try {
+            const res = await post('/v1/graph/enrich', token, { stats: { nodes: 1, edges: 0, communities: 0 }, communities: [], godNodes: [] });
+            expect(res.status).not.toBe(402);
+            // Strengthened alongside the graph.ts model_unconfigured serve
+            // guard (Finding 1): the gate passing must not be masked by a
+            // *different* failure this suite would otherwise never notice —
+            // a properly-catalogued '@cf/...' executor must not 503 either.
+            expect(res.status).not.toBe(503);
+        } finally {
+            await resetModelRouting();
+        }
     });
 });
 
