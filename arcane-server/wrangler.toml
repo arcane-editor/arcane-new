@@ -57,14 +57,14 @@ WEB_BASE_URL = "https://arcaneai.org"
 API_BASE_URL = "https://api.arcaneai.org"
 # Verified sender on the onboarded arcaneai.org Email Service domain.
 EMAIL_FROM = "no-reply@arcaneai.org"
-# Dodo Payments product ids (per tier / top-up pack). Empty until the owner
-# creates the LIVE products; billing routes 503 while unset. Secrets
+# Dodo Payments LIVE product ids (per tier / top-up pack), provisioned
+# 2026-08-22 (old Pro/Pro+/Ultra + credit packs archived). Secrets
 # DODO_API_KEY + DODO_WEBHOOK_SECRET are set via `wrangler secret put`.
-DODO_PRODUCT_STARTER = ""
-DODO_PRODUCT_PRO = ""
-DODO_PRODUCT_MAX = ""
-DODO_PRODUCT_TOPUP_16 = ""
-DODO_PRODUCT_TOPUP_75 = ""
+DODO_PRODUCT_STARTER = "pdt_0NlwPDYbUz00JROS1Et0L"
+DODO_PRODUCT_PRO = "pdt_0NlwPDacvAVEMYd4bvzFU"
+DODO_PRODUCT_MAX = "pdt_0NlwPDbltsef7FkTyLMzJ"
+DODO_PRODUCT_TOPUP_16 = "pdt_0NlwPDdr7WL5ONR4Y5qRm"
+DODO_PRODUCT_TOPUP_75 = "pdt_0NlwPDfBR7ti2u1BdgqVU"
 
 [observability]
 enabled = true
