@@ -6255,11 +6255,18 @@ html, body, #root {
   font-size: 12px;
   font-family: var(--font-mono, 'Fira Code', monospace);
 }
+/* Wraps rather than scrolls. This panel is ~400px wide and scrolls VERTICALLY;
+   a block that also scrolls sideways clips mid-word and hides the clipped half
+   behind a gesture nobody makes inside a transcript. A wrapped line is legible
+   and a clipped one is not. `overflow-x` stays as the fallback for the content
+   that genuinely cannot wrap — wide tables, long unbroken tokens. */
 .ai-message-content pre {
   background: var(--bg-primary);
-  padding: 10px;
-  border-radius: 4px;
+  padding: 10px 12px;
+  border-radius: 6px;
   overflow-x: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   margin: 8px 0;
   border: 1px solid var(--border);
 }

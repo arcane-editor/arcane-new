@@ -135,12 +135,33 @@ side:
 |---|---|
 | `elicitation.form` | Claude puts `AskUserQuestion` on its **disallowed-tools** list. The model stops asking and starts guessing. |
 | `session.configOptions.boolean` | Boolean settings (Fast mode) degrade to a two-value select. |
-| `fs` | The agent writes to disk directly; edits lose checkpoints, review rows and the sandbox. |
+| `fs` | The agent writes to disk directly, so edits land with no checkpoint and "restore this turn" stops working for its turns. |
 | `auth.terminal` | No terminal sign-in method is offered, so a signed-out user has no way in. |
 
 `acp-translate.test.ts` guards each one, and `verify:acp` proves the boolean
 capability took effect by asserting `fast` comes back typed as a boolean rather
 than as a select.
+
+**The external agent is not driven like the Arcane one.** It runs its own loop,
+its own tools and its own permission modes, so Arcane deliberately does NOT
+wrap it in the Arcane agent's policy (see
+`docs/superpowers/specs/2026-08-22-external-agent-autonomy-design.md`):
+
+- **Reads are unconfined; writes stay inside the workspace** (`acp-fs.ts`,
+  `computeExternalAgentWriteRoots`). The old read sandbox narrowed a Unity
+  project to `Assets/` while `acp-terminals.ts` handed the same agent an
+  unconfined shell — it caged the legible path and left the illegible one open.
+  Do not "restore" that check without also sandboxing the terminal.
+- **Writes get a checkpoint but no review row.** `recordPreWrite` stays (it
+  records bytes, and per-turn restore is built on it); `useEditReviewStore` is
+  gone (it is a workflow built for the Arcane agent's `auto` apply mode).
+- **`session/request_permission` is the AGENT asking**, governed by its own
+  `mode` config option. Render it; never add a second Arcane-side prompt on the
+  same edit.
+- **Arcane-only chrome is gated on the active agent.** `planPhase`,
+  `activePlanPath` and `PlanActions` belong to Arcane's plan controller; an
+  external agent never sets them, so switching agents mid-thread used to leave
+  an Execute/Regenerate card under a Claude header.
 
 One related trap in the same request family: `session/set_config_option` is a
 discriminated union, and a boolean value **must** carry `type: 'boolean'`.

@@ -113,6 +113,7 @@ const MessageRow = memo(function MessageRow({
 function MessageList() {
   const messages = useAiStore((s) => s.messages);
   const planPhase = useAiStore((s) => s.planPhase);
+  const selectedAgent = useAiStore((s) => s.selectedAgent);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -191,7 +192,13 @@ function MessageList() {
     }
   }
 
-  const showPlanActions = planPhase === 'awaiting-execute';
+  // Gated on the ACTIVE agent, not just the plan phase. `planPhase` and
+  // `activePlanPath` belong to Arcane's plan controller, which writes
+  // `.arcane/plans/*.md`; an external agent runs its own loop and never touches
+  // them. Without this check, switching agents mid-thread left Arcane's
+  // Execute / Regenerate / Open card sitting under a "Claude Code" header,
+  // offering to execute a plan the selected agent did not write and cannot run.
+  const showPlanActions = planPhase === 'awaiting-execute' && selectedAgent === 'arcane';
 
   // P5.1: track the most recent preceding user message id so ToolCallBlock's
   // per-file Revert can look up the right checkpoint turn
