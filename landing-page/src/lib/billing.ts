@@ -32,6 +32,27 @@ export function canBuyTopups(plan: string, tiers: PlanTier[]): boolean {
     return tier !== undefined && tier.priceUsd > 0;
 }
 
+/**
+ * Percent of `grant` that has been spent, as a clamped integer 0-100.
+ * Callers derive "N% left" as `100 - usagePercent(...)` — this always reports
+ * the *used* share so BillingPanel's "N% used" / "N% left" pair can never
+ * drift out of sync with each other.
+ *
+ * `grant <= 0` is a guard state (no monthly grant to measure against, e.g. an
+ * unknown/legacy plan): reports 100% used only when `balance` is also <= 0
+ * (nothing left either way), else 0% — there's no grant to divide by, so
+ * treating unexplained balance as "fully used" would be actively misleading.
+ *
+ * A `balance` above `grant` (a race that briefly overcredits) or below 0 (a
+ * race that overdrafts — see db.ts's topup debt comment) both clamp into
+ * range rather than reporting a nonsensical negative or >100% figure.
+ */
+export function usagePercent(grant: number, balance: number): number {
+    if (grant <= 0) return balance <= 0 ? 100 : 0;
+    const pct = Math.round((100 * (grant - balance)) / grant);
+    return Math.max(0, Math.min(100, pct));
+}
+
 export interface UsageResponse {
     plan: string;
     credits: { balance: number; plan: number; topup: number };

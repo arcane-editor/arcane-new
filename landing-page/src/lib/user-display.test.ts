@@ -40,9 +40,9 @@ describe('initialsFromEmail', () => {
 describe('planLabel', () => {
     it('maps every server plan id to its display name', () => {
         expect(planLabel('free')).toBe('Free');
+        expect(planLabel('starter')).toBe('Starter');
         expect(planLabel('pro')).toBe('Pro');
-        expect(planLabel('proplus')).toBe('Pro+');
-        expect(planLabel('ultra')).toBe('Ultra');
+        expect(planLabel('max')).toBe('Max');
     });
 
     it('treats a missing plan as Free, matching the server default', () => {

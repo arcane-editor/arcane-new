@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { getStoredToken, clearStoredToken } from "@/lib/auth";
 import { Skeleton, SkeletonGroup } from "@/components/ui/skeleton";
 import {
-    apiGetUsage, apiGetPlans, apiStartCheckout, apiOpenPortal, canBuyTopups,
+    apiGetUsage, apiGetPlans, apiStartCheckout, apiOpenPortal, canBuyTopups, usagePercent,
     BillingError, type UsageResponse, type PlanTier, type TopupPack,
 } from "@/lib/billing";
 
@@ -140,7 +140,11 @@ export default function BillingPanel() {
     const canBuy = canBuyTopups(usage.plan, tiers);
     const monthlyGrant = tiers.find(t => t.id === usage.plan)?.monthlyCredits ?? 0;
     const planRemaining = usage.credits.plan;
-    const pct = monthlyGrant > 0 ? Math.max(0, Math.min(100, (planRemaining / monthlyGrant) * 100)) : 0;
+    // OWNER DIRECTIVE: user-facing surfaces never show raw credit numbers —
+    // only percentages. usedPct/leftPct always sum to 100 by construction.
+    const usedPct = usagePercent(monthlyGrant, planRemaining);
+    const leftPct = 100 - usedPct;
+    const topupPct = monthlyGrant > 0 ? Math.max(0, Math.round((100 * usage.credits.topup) / monthlyGrant)) : 0;
 
     const rowClass = "flex items-center justify-between py-3 border-b border-border/30";
     const labelClass = "text-sm text-muted-foreground";
@@ -167,18 +171,18 @@ export default function BillingPanel() {
                 </div>
 
                 <div className="mb-2 flex items-baseline justify-between">
-                    <span className="text-sm text-muted-foreground">Credits remaining</span>
+                    <span className="text-sm text-muted-foreground">Usage this period</span>
                     <span className="font-mono text-sm text-foreground">
-                        {Math.round(usage.credits.balance).toLocaleString()}
-                        {monthlyGrant > 0 && <span className="text-muted-foreground"> / {monthlyGrant.toLocaleString()} plan</span>}
+                        {usedPct}% used
+                        <span className="text-muted-foreground"> · {leftPct}% left</span>
                     </span>
                 </div>
                 <div className="h-2 w-full rounded-full bg-muted/40 overflow-hidden">
-                    <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${pct}%` }} />
+                    <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${leftPct}%` }} />
                 </div>
                 {usage.credits.topup > 0 && (
                     <p className="text-xs text-muted-foreground mt-2">
-                        + {Math.round(usage.credits.topup).toLocaleString()} top-up credits (never expire)
+                        +{topupPct}% extra usage available (never expires)
                     </p>
                 )}
 
@@ -213,8 +217,8 @@ export default function BillingPanel() {
                     <h2 className="font-display text-lg font-bold mb-1">Buy extra credits</h2>
                     <p className="text-muted-foreground text-sm mb-4">
                         {canBuy
-                            ? "One-time top-ups that never expire — used after your plan credits run out."
-                            : "One-time top-ups that never expire. Available on paid plans."}
+                            ? "One-time usage packs that never expire — used after your plan usage runs out."
+                            : "One-time usage packs that never expire. Available on paid plans."}
                     </p>
                     <div className="flex flex-wrap gap-3">
                         {topups.map(p => (
@@ -225,8 +229,10 @@ export default function BillingPanel() {
                                 title={canBuy ? undefined : "Upgrade to a paid plan to buy credits"}
                                 className={`flex-1 min-w-[150px] glass rounded-xl p-4 text-left transition-all disabled:opacity-50 ${canBuy ? "hover:border-primary/40" : "cursor-not-allowed"}`}
                             >
-                                <div className="font-mono text-base font-bold text-foreground">{p.credits.toLocaleString()} credits</div>
-                                <div className="text-sm text-primary font-semibold mt-1">{busy === p.id ? "Starting…" : `$${p.priceUsd}`}</div>
+                                <div className="font-mono text-base font-bold text-foreground">${p.priceUsd} usage pack</div>
+                                <div className="text-sm text-primary font-semibold mt-1">
+                                    {busy === p.id ? "Starting…" : "Extends your monthly AI usage"}
+                                </div>
                             </button>
                         ))}
                     </div>

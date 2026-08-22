@@ -167,7 +167,7 @@ const Navbar = () => {
 
             {auth.state === "signed-in" && (
               <div className="mt-2 border-t border-border/50 pt-2">
-                <AccountSummaryBlock email={auth.email} me={auth.me} meFailed={auth.meFailed} />
+                <AccountSummaryBlock email={auth.email} me={auth.me} meFailed={auth.meFailed} tiers={auth.tiers} />
                 <a
                   href="/account"
                   onClick={() => setOpen(false)}

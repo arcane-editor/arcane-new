@@ -5,12 +5,12 @@
 // the email — so everything here derives from that. If GitHub's `name` /
 // `avatar_url` are ever persisted at sign-in, the avatar should prefer them.
 
-/** Plan ids come from `arcane-server/src/config/tiers.ts`. */
+/** Plan ids come from `arcane-server/src/config/tiers.ts` (free/starter/pro/max). */
 const PLAN_NAMES: Record<string, string> = {
     free: 'Free',
+    starter: 'Starter',
     pro: 'Pro',
-    proplus: 'Pro+',
-    ultra: 'Ultra',
+    max: 'Max',
 };
 
 /**

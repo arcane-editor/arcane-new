@@ -3,6 +3,7 @@ import { ChevronDown, CreditCard, LogOut, Settings, ShieldAlert } from "lucide-r
 import {
     getStoredToken, clearStoredToken, decodeToken, apiGetMe, type MeResponse,
 } from "@/lib/auth";
+import { apiGetPlans, usagePercent, type PlanTier } from "@/lib/billing";
 import { initialsFromEmail, planLabel } from "@/lib/user-display";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -17,6 +18,10 @@ export interface AuthSummary {
     email: string;
     me: MeResponse | null;
     meFailed: boolean;
+    /** The tier ladder — fetched alongside `me` only so the credits line can
+     *  be rendered as a percentage (see AccountSummaryBlock). Public endpoint,
+     *  so a failure here never blocks signing the plan/credits fetch. */
+    tiers: PlanTier[];
     /** Idempotent: fetches once, then serves the cached result. */
     loadMe: () => void;
     signOut: () => void;
@@ -36,6 +41,7 @@ export function useAuthSummary(): AuthSummary {
     const [email, setEmail] = useState("");
     const [me, setMe] = useState<MeResponse | null>(null);
     const [meFailed, setMeFailed] = useState(false);
+    const [tiers, setTiers] = useState<PlanTier[]>([]);
     const fetching = useRef(false);
 
     useEffect(() => {
@@ -64,8 +70,15 @@ export function useAuthSummary(): AuthSummary {
         const token = getStoredToken();
         if (!token) return;
         fetching.current = true;
-        void apiGetMe(token)
-            .then(data => { setMe(data); setMeFailed(false); })
+        // apiGetPlans() is public and swallows its own failure — a plans
+        // outage must not turn into a spurious "me failed" state (it only
+        // means the credits line falls back to unavailable).
+        void Promise.all([apiGetMe(token), apiGetPlans().catch(() => null)])
+            .then(([data, plans]) => {
+                setMe(data);
+                setMeFailed(false);
+                if (plans) setTiers(plans.tiers);
+            })
             .catch((err: { status?: number }) => {
                 if (err.status === 401 || err.status === 403) {
                     // Server says the token is dead — actually sign out.
@@ -84,7 +97,7 @@ export function useAuthSummary(): AuthSummary {
         window.location.href = "/";
     }, []);
 
-    return { state, email, me, meFailed, loadMe, signOut };
+    return { state, email, me, meFailed, tiers, loadMe, signOut };
 }
 
 export function Avatar({ email, className = "" }: { email: string; className?: string }) {
@@ -112,7 +125,15 @@ const itemClass =
     "flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-sm text-muted-foreground transition-colors hover:bg-primary/10 hover:text-foreground focus-visible:bg-primary/10 focus-visible:text-foreground focus-visible:outline-none";
 
 /** Identity block + credits, shared by the desktop popover and the mobile sheet. */
-export function AccountSummaryBlock({ email, me, meFailed }: Pick<AuthSummary, "email" | "me" | "meFailed">) {
+export function AccountSummaryBlock({ email, me, meFailed, tiers }: Pick<AuthSummary, "email" | "me" | "meFailed" | "tiers">) {
+    // OWNER DIRECTIVE: user-facing surfaces never show raw credit numbers —
+    // only usage percentages. `grant` is the signed-in user's plan's monthly
+    // credit allotment; falls back to "unavailable" when the tier ladder
+    // hasn't loaded (or the plan is unrecognised) rather than showing 0%,
+    // which would misleadingly read as "fully used".
+    const grant = me ? tiers.find(t => t.id === me.user.plan)?.monthlyCredits ?? 0 : 0;
+    const pctLeft = grant > 0 ? 100 - usagePercent(grant, me?.user.credits ?? 0) : null;
+
     return (
         <>
             <div className="flex items-center gap-3 px-1 py-2">
@@ -126,10 +147,10 @@ export function AccountSummaryBlock({ email, me, meFailed }: Pick<AuthSummary, "
             </div>
 
             <div className="flex items-center justify-between px-2.5 py-2">
-                <span className="text-xs text-muted-foreground">AI credits</span>
+                <span className="text-xs text-muted-foreground">AI usage</span>
                 {me ? (
                     <span className="font-mono text-sm text-foreground">
-                        {Math.round(me.user.credits ?? 0).toLocaleString()}
+                        {pctLeft !== null ? `${pctLeft}% left` : "unavailable"}
                     </span>
                 ) : meFailed ? (
                     <span className="text-xs text-muted-foreground">unavailable</span>
@@ -152,7 +173,7 @@ export function AccountSummaryBlock({ email, me, meFailed }: Pick<AuthSummary, "
 }
 
 /** Desktop avatar trigger + popover. */
-export default function AccountMenu({ email, me, meFailed, loadMe, signOut }: Omit<AuthSummary, "state">) {
+export default function AccountMenu({ email, me, meFailed, tiers, loadMe, signOut }: Omit<AuthSummary, "state">) {
     const [open, setOpen] = useState(false);
     const triggerRef = useRef<HTMLButtonElement>(null);
     const panelRef = useRef<HTMLDivElement>(null);
@@ -216,7 +237,7 @@ export default function AccountMenu({ email, me, meFailed, loadMe, signOut }: Om
                     aria-label="Account"
                     className="glass-strong absolute right-0 top-full z-50 mt-2 w-64 rounded-xl p-1.5 shadow-2xl"
                 >
-                    <AccountSummaryBlock email={email} me={me} meFailed={meFailed} />
+                    <AccountSummaryBlock email={email} me={me} meFailed={meFailed} tiers={tiers} />
 
                     <div className="my-1 h-px bg-border/50" />
 

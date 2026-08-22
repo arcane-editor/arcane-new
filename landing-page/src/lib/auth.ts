@@ -286,7 +286,35 @@ function adminHeaders(token: string) {
     };
 }
 
-export async function adminGetUsers(token: string) {
+/** POST /v1/admin/login — mints the env-admin JWT (role: 'admin' via the
+ *  `adm: true` claim). 503 `admin_unconfigured` and the uniform 401 both flow
+ *  through readErrorMessage, which already surfaces the server's `error`
+ *  string verbatim — the 503 fallback below just keeps that message sane if
+ *  the body is ever unreadable (e.g. an edge 5xx HTML page). */
+export async function adminLogin(email: string, password: string): Promise<{ token: string }> {
+    const res = await fetch(`${API_URL}/v1/admin/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+    });
+    if (!res.ok) {
+        const fallback = res.status === 503 ? 'Admin login is not configured' : 'Login failed';
+        throw new Error(await readErrorMessage(res, fallback));
+    }
+    return res.json();
+}
+
+export interface AdminUserRow {
+    id: number;
+    email: string;
+    role: string;
+    createdAt: string;
+    plan: string;
+    credits: number;
+    usage: { totalRequests: number };
+}
+
+export async function adminGetUsers(token: string): Promise<AdminUserRow[]> {
     const res = await fetch(`${API_URL}/v1/admin/users`, { headers: adminHeaders(token) });
     if (!res.ok) throw new Error('Failed to fetch users');
     return res.json();
@@ -326,5 +354,107 @@ export async function adminDeleteUser(token: string, id: number) {
 export async function adminGetFeedback(token: string) {
     const res = await fetch(`${API_URL}/v1/admin/feedback`, { headers: adminHeaders(token) });
     if (!res.ok) throw new Error('Failed to fetch feedback');
+    return res.json();
+}
+
+// ─── Admin: model routing + pricing config ───────────────────
+// Shapes mirror arcane-server/src/lib/app-config.ts (ModelRoutingDoc /
+// ModelPricingDoc) — kept as a parallel client-side definition rather than a
+// shared package, matching how the rest of this file re-declares server
+// response shapes (AuthUser, MeResponse, ...).
+
+export interface TierRouting {
+    planner: string;
+    executor: string;
+    executorHard?: string;
+}
+
+export interface ModelRoutingDoc {
+    tiers: Record<'low' | 'mid' | 'high', TierRouting>;
+    inline: string;
+}
+
+export interface LongContextRates {
+    thresholdTokens: number;
+    inputCostPer1M: number;
+    outputCostPer1M: number;
+    cachedInputCostPer1M: number;
+}
+
+export interface ModelInfo {
+    route: 'workers-ai' | 'unified' | 'direct';
+    wireFormat?: 'chat' | 'responses';
+    inputCostPer1M: number;
+    outputCostPer1M: number;
+    cachedInputCostPer1M: number;
+    contextWindow: number;
+    maxOutput: number;
+    /** Never rendered/edited by the Pricing tab (YAGNI) — preserved untouched
+     *  when an existing doc round-trips through GET → edit → PUT. */
+    longContext?: LongContextRates;
+}
+
+export interface ModelPricingDoc {
+    models: Record<string, ModelInfo>;
+    gatewayFee: number;
+    margin: number;
+}
+
+export interface AdminConfigResponse<T> {
+    value: T;
+    isDefault: boolean;
+    updatedAt: string | null;
+}
+
+export async function adminGetModelConfig(token: string): Promise<AdminConfigResponse<ModelRoutingDoc>> {
+    const res = await fetch(`${API_URL}/v1/admin/config/models`, { headers: adminHeaders(token) });
+    if (!res.ok) throw new Error(await readErrorMessage(res, 'Failed to fetch model config'));
+    return res.json();
+}
+
+/** PUT validation failures return {error, code:'invalid_config'} naming the
+ *  offending model/field — readErrorMessage surfaces that `error` verbatim. */
+export async function adminPutModelConfig(token: string, doc: ModelRoutingDoc): Promise<{ ok: true }> {
+    const res = await fetch(`${API_URL}/v1/admin/config/models`, {
+        method: 'PUT',
+        headers: adminHeaders(token),
+        body: JSON.stringify(doc),
+    });
+    if (!res.ok) throw new Error(await readErrorMessage(res, 'Failed to save model config'));
+    return res.json();
+}
+
+export async function adminGetPricingConfig(token: string): Promise<AdminConfigResponse<ModelPricingDoc>> {
+    const res = await fetch(`${API_URL}/v1/admin/config/pricing`, { headers: adminHeaders(token) });
+    if (!res.ok) throw new Error(await readErrorMessage(res, 'Failed to fetch pricing config'));
+    return res.json();
+}
+
+export async function adminPutPricingConfig(token: string, doc: ModelPricingDoc): Promise<{ ok: true }> {
+    const res = await fetch(`${API_URL}/v1/admin/config/pricing`, {
+        method: 'PUT',
+        headers: adminHeaders(token),
+        body: JSON.stringify(doc),
+    });
+    if (!res.ok) throw new Error(await readErrorMessage(res, 'Failed to save pricing config'));
+    return res.json();
+}
+
+export interface AdminGrantResponse {
+    ok: true;
+    userId: number;
+    plan: string;
+    periodEnd: string;
+}
+
+export async function adminGrant(
+    token: string, data: { email: string; tier: string },
+): Promise<AdminGrantResponse> {
+    const res = await fetch(`${API_URL}/v1/admin/grants`, {
+        method: 'POST',
+        headers: adminHeaders(token),
+        body: JSON.stringify(data),
+    });
+    if (!res.ok) throw new Error(await readErrorMessage(res, 'Failed to grant plan'));
     return res.json();
 }

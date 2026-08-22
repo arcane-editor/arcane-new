@@ -1,11 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { canBuyTopups, type PlanTier } from "./billing";
+import { canBuyTopups, usagePercent, type PlanTier } from "./billing";
 
 const TIERS: PlanTier[] = [
     { id: "free", name: "Free", priceUsd: 0, monthlyCredits: 150, order: 0 },
-    { id: "pro", name: "Pro", priceUsd: 20, monthlyCredits: 2000, order: 1 },
-    { id: "proplus", name: "Pro+", priceUsd: 50, monthlyCredits: 5000, order: 2 },
-    { id: "ultra", name: "Ultra", priceUsd: 200, monthlyCredits: 20000, order: 3 },
+    { id: "starter", name: "Starter", priceUsd: 5, monthlyCredits: 387, order: 1 },
+    { id: "pro", name: "Pro", priceUsd: 25, monthlyCredits: 2097, order: 2 },
+    { id: "max", name: "Max", priceUsd: 50, monthlyCredits: 4235, order: 3 },
 ];
 
 describe("canBuyTopups", () => {
@@ -14,9 +14,9 @@ describe("canBuyTopups", () => {
     });
 
     it("is true on every paid plan", () => {
+        expect(canBuyTopups("starter", TIERS)).toBe(true);
         expect(canBuyTopups("pro", TIERS)).toBe(true);
-        expect(canBuyTopups("proplus", TIERS)).toBe(true);
-        expect(canBuyTopups("ultra", TIERS)).toBe(true);
+        expect(canBuyTopups("max", TIERS)).toBe(true);
     });
 
     it("fails closed on an unknown plan", () => {
@@ -26,5 +26,34 @@ describe("canBuyTopups", () => {
 
     it("fails closed when the tier ladder could not be loaded", () => {
         expect(canBuyTopups("pro", [])).toBe(false);
+    });
+});
+
+describe("usagePercent", () => {
+    it("reports the used share, rounded to an integer", () => {
+        expect(usagePercent(100, 50)).toBe(50);
+        expect(usagePercent(387, 87)).toBe(78); // 300/387 = 77.5...% -> rounds to 78
+        expect(usagePercent(100, 100)).toBe(0); // untouched grant -> 0% used
+        expect(usagePercent(100, 0)).toBe(100); // fully spent -> 100% used
+    });
+
+    it("treats a zero grant as 100% used only when the balance is also zero", () => {
+        expect(usagePercent(0, 0)).toBe(100);
+        expect(usagePercent(0, 50)).toBe(0);
+    });
+
+    it("clamps a balance above the grant to 0% used", () => {
+        // A race (e.g. a plan renewal landing before a debit is recorded) can
+        // briefly leave balance > grant — must never report negative usage.
+        expect(usagePercent(100, 150)).toBe(0);
+    });
+
+    it("clamps a negative balance (overdraft/topup debt) to 100% used", () => {
+        expect(usagePercent(100, -20)).toBe(100);
+    });
+
+    it("clamps a negative grant the same way a zero grant does", () => {
+        expect(usagePercent(-10, 0)).toBe(100);
+        expect(usagePercent(-10, 5)).toBe(0);
     });
 });

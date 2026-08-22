@@ -2,13 +2,33 @@ import { useState, useEffect } from "react";
 import { getStoredToken } from "@/lib/auth";
 import { apiGetPlans, apiStartCheckout, BillingError, type PlanTier } from "@/lib/billing";
 
-// Marketing blurb per tier (the credit numbers + prices come from the API so
-// they stay in sync with the server's src/config/tiers.ts).
+// Marketing blurb per tier (prices come from the API so they never drift
+// from the server's src/config/tiers.ts; the copy itself stays credit-free
+// per the owner directive — see AI_USAGE_COPY below).
 const TAGLINES: Record<string, string> = {
-    free: "Try the AI on us — no card required.",
-    pro: "For everyday Unity work with Arcane's AI.",
-    proplus: "More headroom for heavy agentic sessions.",
-    ultra: "Maximum monthly credits for power users.",
+    free: "Core IDE, plus a one-time AI trial to try it out.",
+    starter: "Everyday AI, tab completion, and external agents.",
+    pro: "Everything in Starter, plus Deep Think for tricky problems.",
+    max: "Everything, unlocked — including Max mode for the hardest sessions.",
+};
+
+/** OWNER DIRECTIVE: user-facing surfaces never show raw credit numbers — this
+ *  replaces the old `{monthlyCredits} credits/mo` line with credit-free copy
+ *  describing relative AI usage per tier. */
+const AI_USAGE_COPY: Record<string, string> = {
+    free: "One-time AI trial included",
+    starter: "Monthly AI usage included",
+    pro: "~5× Starter's AI usage",
+    max: "~11× Starter's AI usage",
+};
+
+/** Effort-tier access per the new ladder — mirrors the server's
+ *  ALLOWED_TIERS (free/starter -> low only, pro -> +mid, max -> +high). */
+const EFFORT_ACCESS_COPY: Record<string, string> = {
+    free: "Standard",
+    starter: "Standard",
+    pro: "Standard + Deep Think",
+    max: "Standard, Deep Think & Max",
 };
 
 /** `$0`, not "Free" — the tier is ALREADY named Free, so returning "Free"
@@ -136,17 +156,19 @@ export default function PricingTable({ variant = 'page' }: PricingTableProps) {
                                     <span className="font-display text-3xl font-bold">{fmtPrice(t.priceUsd)}</span>
                                     <span className="text-muted-foreground text-sm">/mo</span>
                                 </div>
+                                {/* Credit-free per the owner directive — no raw credit numbers
+                                    on user-facing surfaces (admin panel is exempt). */}
                                 <p className="text-sm text-foreground/80 font-mono">
-                                    {t.monthlyCredits.toLocaleString()} credits/mo
+                                    {AI_USAGE_COPY[t.id] ?? ""}
                                 </p>
                                 <p className="text-muted-foreground text-xs mt-3 min-h-[2.5rem]">
                                     {TAGLINES[t.id] ?? ""}
                                 </p>
                                 {/* Effort-tier access isn't in the API's PlanTier shape (it's a
                                     routing concept, not a billing one) — this mirrors the server's
-                                    ALLOWED_TIERS, which only ever grants "low" to Free. */}
+                                    ALLOWED_TIERS. */}
                                 <p className="text-foreground/70 text-xs font-mono mb-6">
-                                    {isFree ? "Standard" : "Standard, Deep Think, Max"}
+                                    {EFFORT_ACCESS_COPY[t.id] ?? ""}
                                 </p>
 
                                 {/* mt-auto, not mt-6: the grid stretches every card to the
