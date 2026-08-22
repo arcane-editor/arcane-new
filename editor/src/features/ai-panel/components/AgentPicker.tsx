@@ -63,16 +63,15 @@ function AgentPicker() {
 
   // Subscribed per field so the row's locked state follows a plan refresh or a
   // connectivity flip without the panel re-rendering for unrelated changes.
+  // `acpEnabled` subscribes to the DERIVED flag (not the whole config object)
+  // so a config change that doesn't affect this account's acp feature (or a
+  // stale config a plan mismatch invalidates — see `acpAllowed`'s guard)
+  // doesn't cause an extra re-render either.
   const loggedIn = useAuthStore((s) => s.loggedIn);
   const plan = useAuthStore((s) => s.plan);
   const online = useConnectivityStore((s) => s.online);
-  const serverConfig = useServerConfigStore((s) => s.config);
-  const externalStatus = externalAgentStatus({
-    loggedIn,
-    online,
-    plan,
-    acpEnabled: acpAllowed(serverConfig),
-  });
+  const acpEnabled = useServerConfigStore((s) => acpAllowed(s.config, plan));
+  const externalStatus = externalAgentStatus({ loggedIn, online, plan, acpEnabled });
   const externalAvailable = externalStatus === 'available';
 
   const [open, setOpen] = useState(false);

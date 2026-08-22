@@ -143,19 +143,57 @@ export function effectiveContextWindow(config: ServerConfig | null, effort: Effo
   return config?.tiers.find((t) => t.id === effort)?.contextWindow ?? FALLBACK_CONTEXT_WINDOW[effort];
 }
 
+/**
+ * STALE-CONFIG GUARD (entitlement-shaped accessors only — `allowedEfforts`,
+ * `maxAllowedEffort`, `inlineAllowed`, `acpAllowed`): `refresh()` keeps the
+ * previous config on any failure and never re-nulls it, so a config fetched
+ * under a HIGHER plan can outlive a downgrade — e.g. `refreshUsage()` sets
+ * `plan: 'free'` from `/v1/usage` but the fire-and-forget `/v1/config`
+ * refresh that follows it fails, leaving a stale `pro`-tier config still
+ * marking `mid` `allowed: true`. Trusting that config would silently
+ * re-authorize a tier the account no longer has, including letting
+ * `resolveSendEffort`'s escalation latch climb (and stay latched) past the
+ * account's real ceiling — exactly the bricked-session failure the ceiling
+ * exists to prevent.
+ *
+ * So every one of these accessors treats `config` as current only when its
+ * own `plan` field agrees with the caller's independently-sourced `plan`
+ * argument (from `useAuthStore`). A known, mismatched plan makes the config
+ * UNKNOWN for this call (fallback path). A `null`/`undefined` plan (no
+ * `/v1/usage` response yet) has nothing to contradict the config with, so a
+ * present config is still trusted — it is the best signal available.
+ *
+ * `shouldPreplanTier` deliberately does NOT take this guard (or a `plan` at
+ * all): preplanning is a per-tier product choice, not an entitlement, so a
+ * stale config can't leak extra access through it.
+ */
+function isConfigCurrent(config: ServerConfig | null, plan: string | null | undefined): config is ServerConfig {
+  return config !== null && (plan == null || config.plan === plan);
+}
+
 /** Every tier the account's plan may currently request. */
 export function allowedEfforts(
   config: ServerConfig | null,
   plan: string | null | undefined,
 ): Effort[] {
-  if (config) {
+  if (isConfigCurrent(config, plan)) {
     return config.tiers.filter((t) => t.allowed).map((t) => t.id);
   }
   const ceiling = fallbackMaxEntitledEffort(plan);
   return EFFORT_LADDER.slice(0, EFFORT_RANK[ceiling] + 1);
 }
 
-/** Highest tier the account's plan may currently request. */
+/**
+ * Highest tier the account's plan may currently request.
+ *
+ * The wire contract guarantees every plan's tier list includes `low`
+ * (`allowed: true` on at least the `low` row — see the brief's example and
+ * the server's `ALLOWED_TIERS`), and the offline fallback ladder always
+ * includes `low` too, so `allowedEfforts` is never actually empty in
+ * practice. `best` still starts at `'low'` defensively in case that ever
+ * stops holding — this never returns something LOWER than the wire/fallback
+ * guarantee, only degrades gracefully if the guarantee is ever violated.
+ */
 export function maxAllowedEffort(
   config: ServerConfig | null,
   plan: string | null | undefined,
@@ -167,21 +205,23 @@ export function maxAllowedEffort(
   return best;
 }
 
-/** Whether a tier runs its preplanning pass. */
+/** Whether a tier runs its preplanning pass. Config-first, unconditionally —
+ *  see the STALE-CONFIG GUARD note above for why this one is exempt. */
 export function shouldPreplanTier(config: ServerConfig | null, effort: Effort): boolean {
   return config?.tiers.find((t) => t.id === effort)?.hasPreplanning ?? effort !== 'low';
 }
 
-/** Whether inline completions are available. Unknown (no config yet) ⇒ true:
- *  the server 403s an actually-disabled account, and a startup race must not
- *  blank a paid user's completions before the first `/v1/config` lands. */
-export function inlineAllowed(config: ServerConfig | null): boolean {
-  return config?.features.inline ?? true;
+/** Whether inline completions are available. Unknown (no current config for
+ *  this plan) ⇒ true: the server 403s an actually-disabled account, and a
+ *  startup race (or a stale config from a since-downgraded plan) must not
+ *  blank a user's completions. */
+export function inlineAllowed(config: ServerConfig | null, plan: string | null | undefined): boolean {
+  return isConfigCurrent(config, plan) ? config.features.inline : true;
 }
 
-/** Whether external agents (ACP) are available. Unknown (no config yet) ⇒
- *  null — the ACP gate fails CLOSED on unknown, matching its current posture
- *  (see `external-agent-gate.ts`). */
-export function acpAllowed(config: ServerConfig | null): boolean | null {
-  return config?.features.acp ?? null;
+/** Whether external agents (ACP) are available. Unknown (no current config
+ *  for this plan) ⇒ null — the ACP gate fails CLOSED on unknown, matching
+ *  its current posture (see `external-agent-gate.ts`). */
+export function acpAllowed(config: ServerConfig | null, plan: string | null | undefined): boolean | null {
+  return isConfigCurrent(config, plan) ? config.features.acp : null;
 }

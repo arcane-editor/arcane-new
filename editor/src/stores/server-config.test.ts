@@ -129,8 +129,8 @@ describe('effectiveContextWindow', () => {
 });
 
 describe('allowedEfforts', () => {
-  it('uses the config tiers marked allowed when present', () => {
-    // VALID_CONFIG: low+mid allowed, high not.
+  it('uses the config tiers marked allowed when present and the plan matches', () => {
+    // VALID_CONFIG: plan 'pro', low+mid allowed, high not.
     expect(allowedEfforts(VALID_CONFIG, 'pro')).toEqual(['low', 'mid']);
   });
 
@@ -142,10 +142,22 @@ describe('allowedEfforts', () => {
     expect(allowedEfforts(null, null)).toEqual(['low']);
     expect(allowedEfforts(null, 'garbage')).toEqual(['low']);
   });
+
+  it('trusts a present config when plan is null (no independent signal to contradict it)', () => {
+    expect(allowedEfforts(VALID_CONFIG, null)).toEqual(['low', 'mid']);
+  });
+
+  it('treats a stale config (fetched under a since-downgraded plan) as unknown and falls back', () => {
+    // config.plan is still 'max' (allows all 3), but the caller's independently
+    // -sourced plan (e.g. from a fresh /v1/usage) says 'free' — the downgrade
+    // this store's fire-and-forget refresh() hasn't caught up with yet.
+    const staleMaxConfig: ServerConfig = { ...VALID_CONFIG, plan: 'max' };
+    expect(allowedEfforts(staleMaxConfig, 'free')).toEqual(['low']);
+  });
 });
 
 describe('maxAllowedEffort', () => {
-  it('picks the highest allowed tier from config', () => {
+  it('picks the highest allowed tier from config when the plan matches', () => {
     expect(maxAllowedEffort(VALID_CONFIG, 'pro')).toBe('mid');
   });
 
@@ -154,6 +166,15 @@ describe('maxAllowedEffort', () => {
     expect(maxAllowedEffort(null, 'pro')).toBe('mid');
     expect(maxAllowedEffort(null, 'max')).toBe('high');
     expect(maxAllowedEffort(null, 'proplus')).toBe('low');
+  });
+
+  it('trusts a present config when plan is null', () => {
+    expect(maxAllowedEffort(VALID_CONFIG, null)).toBe('mid');
+  });
+
+  it('a stale max-plan config does not outlive a downgrade to free (the bricked-escalation case)', () => {
+    const staleMaxConfig: ServerConfig = { ...VALID_CONFIG, plan: 'max' };
+    expect(maxAllowedEffort(staleMaxConfig, 'free')).toBe('low');
   });
 });
 
@@ -172,27 +193,48 @@ describe('shouldPreplanTier', () => {
 });
 
 describe('inlineAllowed', () => {
-  it('uses the config value when present', () => {
-    expect(inlineAllowed(VALID_CONFIG)).toBe(true);
+  it('uses the config value when present and the plan matches', () => {
+    expect(inlineAllowed(VALID_CONFIG, 'pro')).toBe(true);
     expect(
-      inlineAllowed({ ...VALID_CONFIG, features: { ...VALID_CONFIG.features, inline: false } }),
+      inlineAllowed({ ...VALID_CONFIG, features: { ...VALID_CONFIG.features, inline: false } }, 'pro'),
     ).toBe(false);
   });
 
   it('unknown (no config yet) fails OPEN — a startup race must not blank completions', () => {
-    expect(inlineAllowed(null)).toBe(true);
+    expect(inlineAllowed(null, 'pro')).toBe(true);
+  });
+
+  it('trusts a present config when plan is null', () => {
+    expect(inlineAllowed(VALID_CONFIG, null)).toBe(true);
+  });
+
+  it('a stale config from a since-downgraded plan is treated as unknown (fails OPEN, not the stale value)', () => {
+    const staleMaxConfig: ServerConfig = { ...VALID_CONFIG, plan: 'max', features: { ...VALID_CONFIG.features, inline: false } };
+    // Stale config says inline:false for 'max', but the account is really
+    // 'free' now — the mismatch discards it rather than trusting either the
+    // stale true or the stale false.
+    expect(inlineAllowed(staleMaxConfig, 'free')).toBe(true);
   });
 });
 
 describe('acpAllowed', () => {
-  it('uses the config value when present', () => {
-    expect(acpAllowed(VALID_CONFIG)).toBe(true);
+  it('uses the config value when present and the plan matches', () => {
+    expect(acpAllowed(VALID_CONFIG, 'pro')).toBe(true);
     expect(
-      acpAllowed({ ...VALID_CONFIG, features: { ...VALID_CONFIG.features, acp: false } }),
+      acpAllowed({ ...VALID_CONFIG, features: { ...VALID_CONFIG.features, acp: false } }, 'pro'),
     ).toBe(false);
   });
 
   it('unknown (no config yet) fails CLOSED — null, not true', () => {
-    expect(acpAllowed(null)).toBeNull();
+    expect(acpAllowed(null, 'pro')).toBeNull();
+  });
+
+  it('trusts a present config when plan is null', () => {
+    expect(acpAllowed(VALID_CONFIG, null)).toBe(true);
+  });
+
+  it('a stale config from a since-downgraded plan is treated as unknown (fails CLOSED)', () => {
+    const staleMaxConfig: ServerConfig = { ...VALID_CONFIG, plan: 'max' };
+    expect(acpAllowed(staleMaxConfig, 'free')).toBeNull();
   });
 });

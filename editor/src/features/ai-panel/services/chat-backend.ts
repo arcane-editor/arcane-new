@@ -52,7 +52,7 @@ export function readExternalAgentGate(): ExternalAgentGate {
     loggedIn: auth.loggedIn,
     online: useConnectivityStore.getState().online,
     plan: auth.plan,
-    acpEnabled: acpAllowed(useServerConfigStore.getState().config),
+    acpEnabled: acpAllowed(useServerConfigStore.getState().config, auth.plan),
   };
 }
 
