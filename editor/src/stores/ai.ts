@@ -18,6 +18,7 @@ import {
   type AssistantMessage,
   type Attachment,
   type ChatMode,
+  type ClaudeConnectState,
   type Effort,
   type PlanRef,
   type SaveSessionInput,
@@ -264,8 +265,13 @@ interface AiState {
    * no method we can drive is a dead end we must say so about.
    */
   agentAuthMethods: AuthMethod[];
-  /** The agent refused to start a session until the user signs in to it. */
-  agentNeedsAuth: boolean;
+  /**
+   * Why the external agent cannot answer a prompt yet — or `ready` when it
+   * can. One field rather than a boolean per reason: sign-in, a missing Node
+   * and a crashed subprocess are mutually exclusive states with mutually
+   * exclusive answers, and `ClaudeSetupGate` renders exactly one card.
+   */
+  agentConnect: ClaudeConnectState;
   /** Whether the agent subprocess is currently alive. */
   agentBridgeRunning: boolean;
   /**
@@ -333,7 +339,7 @@ interface AiState {
   setAgentAvailableCommands: (commands: AvailableCommand[]) => void;
   setAgentContextUsage: (usage: AcpSessionUsage | null) => void;
   setAgentAuthMethods: (methods: AuthMethod[]) => void;
-  setAgentNeedsAuth: (needsAuth: boolean) => void;
+  setAgentConnect: (state: ClaudeConnectState) => void;
   setAgentBridgeRunning: (running: boolean) => void;
   /** Clear everything tied to one agent connection, keeping the transcript. */
   resetExternalAgentSession: () => void;
@@ -451,7 +457,7 @@ let saveTimer: ReturnType<typeof setTimeout> | null = null;
  */
 function externalAgentReset(): Pick<
   AiState,
-  'acpSessionId' | 'agentConfigOptions' | 'agentAvailableCommands' | 'agentAuthMethods' | 'agentNeedsAuth'
+  'acpSessionId' | 'agentConfigOptions' | 'agentAvailableCommands' | 'agentAuthMethods' | 'agentConnect'
 > {
   // Fresh arrays each call rather than a shared frozen constant: these land in
   // store state, and handing every reset the same array instance would let one
@@ -461,7 +467,7 @@ function externalAgentReset(): Pick<
     agentConfigOptions: [],
     agentAvailableCommands: [],
     agentAuthMethods: [],
-    agentNeedsAuth: false,
+    agentConnect: { kind: 'idle' },
   };
 }
 
@@ -584,7 +590,7 @@ export const useAiStore = create<AiState>((set, get) => ({
   agentConfigOptions: [],
   agentAvailableCommands: [],
   agentAuthMethods: [],
-  agentNeedsAuth: false,
+  agentConnect: { kind: 'idle' },
   agentBridgeRunning: false,
   agentContextUsage: null,
   arcanePlan: null,
@@ -929,7 +935,7 @@ export const useAiStore = create<AiState>((set, get) => ({
   setAgentAvailableCommands: (commands: AvailableCommand[]) =>
     set({ agentAvailableCommands: commands }),
   setAgentAuthMethods: (methods: AuthMethod[]) => set({ agentAuthMethods: methods }),
-  setAgentNeedsAuth: (needsAuth: boolean) => set({ agentNeedsAuth: needsAuth }),
+  setAgentConnect: (state: ClaudeConnectState) => set({ agentConnect: state }),
   setAgentBridgeRunning: (running: boolean) => set({ agentBridgeRunning: running }),
 
   setAgentContextUsage: (usage) => set({ agentContextUsage: usage }),

@@ -6,7 +6,8 @@
  * verifying lives outside the React wiring.
  */
 
-import type { ChatMode } from '../services/types';
+import type { AgentKind, ChatMode } from '../services/types';
+import { isExternalAgent } from '../services/types';
 
 /**
  * Opening prompts, per mode.
@@ -34,6 +35,36 @@ export const STARTERS: Record<ChatMode, string[]> = {
     'Write EditMode tests for the damage math.',
   ],
 };
+
+/**
+ * Opening prompts for an EXTERNAL agent — one set, not three.
+ *
+ * Arcane's `mode` is a property of Arcane's own loop: it swaps the toolset and
+ * the system prompt before the vendor call. An external agent receives none of
+ * that — it runs its own loop, and exposes its own equivalent (plan mode,
+ * accept-edits, …) as session config options rendered in the composer. So the
+ * mode the user last left the Arcane pill on says nothing about what an
+ * external agent will do with a starter, and picking starters by it was
+ * describing a setting that isn't in the request.
+ *
+ * Deliberately disjoint from `STARTERS`: a shared string would make the two
+ * sets look interchangeable, which is exactly the confusion being fixed.
+ */
+export const EXTERNAL_STARTERS: string[] = [
+  'Walk me through how this project is structured.',
+  'Find the performance problems in this scene and fix them.',
+  'Add a dash ability with a cooldown, then test it.',
+];
+
+/**
+ * The starters to offer, given who is going to answer.
+ *
+ * `mode` is only consulted for the Arcane agent, because it is only real for
+ * the Arcane agent.
+ */
+export function startersFor(agent: AgentKind, mode: ChatMode): string[] {
+  return isExternalAgent(agent) ? EXTERNAL_STARTERS : STARTERS[mode];
+}
 
 export type IndexStatus = 'idle' | 'building' | 'ready' | 'error';
 

@@ -16,6 +16,14 @@
  * for and did not really solve. An empty panel is the one moment there is room
  * to answer it properly, and it costs nothing: this is gone the instant a
  * conversation starts.
+ *
+ * It is also the part that must NOT be shown for an external agent. Ask / Plan
+ * / Agent are Arcane's own loop — they swap its toolset and its system prompt
+ * before the vendor call — and an external agent receives none of that. Offering
+ * that ladder beside "Claude Code" promised a control over Claude's behaviour
+ * that does not exist and could not be honoured; Claude's real equivalents
+ * arrive as session config options and are rendered by `AgentConfigBar` in the
+ * composer. So (2) is replaced, not merely relabelled.
  */
 
 import { useAiStore } from '../../../stores/ai';
@@ -23,8 +31,9 @@ import { useProjectContextStore } from '../../../stores/project-context';
 import { useUnityIndexStore } from '../../../stores/unity-index';
 import { useWorkspaceStore } from '../../../stores/workspace';
 import type { ChatMode } from '../services/types';
+import { isExternalAgent } from '../services/types';
 import { MODE_LADDER } from '../data/modes';
-import { STARTERS, groundingLabel } from '../data/empty-state';
+import { groundingLabel, startersFor } from '../data/empty-state';
 
 /** Folder name from a full path, for the grounding line. */
 function basename(p: string): string {
@@ -34,6 +43,7 @@ function basename(p: string): string {
 function EmptyState() {
   const mode = useAiStore((s) => s.mode);
   const setMode = useAiStore((s) => s.setMode);
+  const selectedAgent = useAiStore((s) => s.selectedAgent);
   const workspacePath = useWorkspaceStore((s) => s.workspacePath);
   const isUnityProject = useProjectContextStore((s) => s.isUnityProject);
   const unityVersion = useProjectContextStore((s) => s.unityVersion);
@@ -56,6 +66,8 @@ function EmptyState() {
     window.dispatchEvent(new CustomEvent('ai-compose-prefill', { detail: { text } }));
   }
 
+  const external = isExternalAgent(selectedAgent);
+
   return (
     <div className="ai-panel-empty">
       <p className="ai-panel-empty-grounding">
@@ -69,6 +81,16 @@ function EmptyState() {
 
       {workspacePath && (
         <>
+          {external ? (
+            <section className="ai-panel-empty-block">
+              <h2 className="ai-panel-empty-eyebrow">On send</h2>
+              <p className="ai-panel-empty-agent-note">
+                Claude Code runs its own agent loop with your Anthropic account. Its
+                mode, model and permissions are its own — set them in the toolbar
+                below the composer.
+              </p>
+            </section>
+          ) : (
           <section className="ai-panel-empty-block">
             <h2 className="ai-panel-empty-eyebrow">On send</h2>
             <div className="ai-panel-empty-modes" role="radiogroup" aria-label="Chat mode">
@@ -93,11 +115,12 @@ function EmptyState() {
               })}
             </div>
           </section>
+          )}
 
           <section className="ai-panel-empty-block">
             <h2 className="ai-panel-empty-eyebrow">Try</h2>
             <div className="ai-panel-empty-starters">
-              {STARTERS[mode].map((text) => (
+              {startersFor(selectedAgent, mode).map((text) => (
                 <button
                   key={text}
                   type="button"

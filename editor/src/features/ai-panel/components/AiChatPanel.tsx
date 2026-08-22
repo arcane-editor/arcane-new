@@ -10,7 +10,7 @@ import { useAiStore } from '../../../stores/ai';
 import { useAuthStore } from '../../../stores/auth';
 import { useWorkspaceStore } from '../../../stores/workspace';
 import { ARCANE_FILE_MIME, parseFileDrag } from '../../../utils/drag-mime';
-import { resetAgentService } from '../services/agent-service';
+import { resetChatBackend } from '../services/chat-backend';
 import { buildFileAttachment, isAlreadyStaged } from '../services/stage-file';
 import MessageList from './MessageList';
 import ClaudeSetupGate from './ClaudeSetupGate';
@@ -43,7 +43,9 @@ function AiChatPanel() {
 
   function handleNewChat() {
     resetConversation();
-    resetAgentService();
+    // Whichever backend is selected — an external agent kept running here
+    // would answer the "new" chat with the old thread's context.
+    resetChatBackend();
   }
 
   // The header buttons and the mod+shift+L / mod+shift+H chords must do the

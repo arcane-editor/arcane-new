@@ -25,6 +25,7 @@ import { getAgentService } from '../services/agent-service';
 import { planController } from '../services/plan-controller';
 import { agentModeController } from '../services/preplan-controller';
 import { shouldRouteToQuestion } from '../services/question-routing';
+import { composerPlaceholder } from '../data/composer-copy';
 import LexicalChatInput, { type LexicalChatInputHandle } from './LexicalChatInput';
 import ModeSelector from './ModeSelector';
 import EffortSelector from './EffortSelector';
@@ -123,15 +124,15 @@ function ChatInput() {
 
   const planResumePending =
     mode === 'plan' && !!activePlanPath && (planPhase === 'awaiting-execute' || planPhase === 'executing');
-  const placeholder = pendingQuestion
-    ? "Answer the agent's question — or click an option above."
-    : mode === 'ask'
-      ? 'Ask a question about your Unity project. @ for context, ⏎ to send.'
-      : mode === 'plan'
-        ? planResumePending
-          ? 'Message continues the current plan — Regenerate to re-plan. ⏎ to send.'
-          : 'Describe what you want to build. @ for context, ⏎ to plan.'
-        : 'Plan, build, edit. @ for context, ⏎ to send.';
+  // The placeholder is a promise about what Enter does, so it has to know who
+  // is receiving the message — `mode` is Arcane's and an external agent never
+  // reads it. See `data/composer-copy.ts`.
+  const placeholder = composerPlaceholder({
+    agent: selectedAgent,
+    mode,
+    planResumePending,
+    pendingQuestion: !!pendingQuestion,
+  });
 
   return (
     <div className="ai-panel-input-area">

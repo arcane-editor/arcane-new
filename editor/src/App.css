@@ -4294,6 +4294,18 @@ html, body, #root {
   color: color-mix(in srgb, var(--text-secondary) 75%, transparent);
 }
 
+/* External agent: no mode column, because the agent owns its own modes. One
+   line of prose in its place, at the same left edge as the mode rows so the
+   block still reads as an answer to the same "on send" question. */
+.ai-panel-empty-agent-note {
+  margin: 0;
+  padding-left: calc(2px + var(--space-2));
+  border-left: 2px solid color-mix(in srgb, var(--text-secondary) 30%, transparent);
+  font-size: var(--text-sm);
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
 /* ---- Mode column: ordered by how much each mode may touch ----
    All three rules stay visible so the escalation is readable at rest; the
    active row is the only one at full strength. The gap is load-bearing: at

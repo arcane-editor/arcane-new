@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'bun:test';
-import { STARTERS, groundingLabel, type GroundingInput } from './empty-state';
+import {
+  EXTERNAL_STARTERS,
+  STARTERS,
+  groundingLabel,
+  startersFor,
+  type GroundingInput,
+} from './empty-state';
 import { MODES, MODE_LADDER } from './modes';
 
 const base: GroundingInput = {
@@ -86,5 +92,30 @@ describe('MODE_LADDER', () => {
    */
   it('leaves the menu order alone, since ModeSelector falls back to MODES[1]', () => {
     expect(MODES[1].value).toBe('agent');
+  });
+});
+
+describe('startersFor', () => {
+  it('gives the Arcane agent the starters written for its current mode', () => {
+    for (const mode of ['ask', 'plan', 'agent'] as const) {
+      expect(startersFor('arcane', mode)).toEqual(STARTERS[mode]);
+    }
+  });
+
+  /**
+   * The reported bug: with Claude Code selected the empty state still offered
+   * Arcane's PLAN starters under an "On send / Plan" ladder Claude does not
+   * read. An external agent has one set of starters, because Arcane's mode is
+   * not part of the request it receives.
+   */
+  it('gives an external agent one mode-independent set', () => {
+    const seen = (['ask', 'plan', 'agent'] as const).map((mode) => startersFor('claude', mode));
+    for (const set of seen) expect(set).toEqual(EXTERNAL_STARTERS);
+    expect(EXTERNAL_STARTERS.length).toBeGreaterThan(0);
+  });
+
+  it('does not hand an external agent starters phrased for an Arcane mode', () => {
+    const arcaneOnly = new Set(Object.values(STARTERS).flat());
+    for (const text of EXTERNAL_STARTERS) expect(arcaneOnly.has(text)).toBe(false);
   });
 });

@@ -28,6 +28,7 @@ export {
   type ExternalAgentGate,
   type ExternalAgentStatus,
 } from './services/external-agent-gate';
+export type { ClaudeConnectState } from './services/claude-connect';
 export { fixConsoleError } from './services/fix-console-error';
 export { isAiComposerFocused } from './services/composer-focus';
 export { EFFORT_ORDER, nextEffort, clampEffort, restoreEffort } from './data/effort';

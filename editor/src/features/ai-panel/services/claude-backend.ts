@@ -39,7 +39,6 @@ import {
   resolveSetupState,
   toMessage,
   type AcpProbe,
-  type AcpSetupState,
   type ContentBlock,
   type FsReadParams,
   type FsWriteParams,
@@ -92,6 +91,11 @@ import {
 import { requestUserQuestion } from './question-gate';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { classifyTurnError } from './turn-errors';
+import {
+  ClaudeSetupRequiredError,
+  classifyConnectError,
+  type ClaudeConnectState,
+} from './claude-connect';
 import type { Attachment } from './types';
 import type { AgentToolResult, AssistantMessage, TextContent } from './vendor/types';
 
@@ -101,21 +105,10 @@ const AGENT_ID = 'claude';
 /** Reported to the agent in `clientInfo`; shows up in its own logs. */
 const APP_VERSION = '0.2.2';
 
-/** Raised when the agent needs the user to sign in before it will do anything. */
-export class ClaudeAuthRequiredError extends Error {
-  constructor() {
-    super('Sign in to Claude to continue.');
-    this.name = 'ClaudeAuthRequiredError';
-  }
-}
-
-/** Raised when the machine is not ready to run the agent yet. */
-export class ClaudeSetupRequiredError extends Error {
-  constructor(readonly state: AcpSetupState) {
-    super('Claude Code is not set up yet.');
-    this.name = 'ClaudeSetupRequiredError';
-  }
-}
+// `ClaudeSetupRequiredError` is declared in `claude-connect.ts` alongside the
+// state it maps to, and re-exported here because this is where callers expect
+// the backend's errors to live.
+export { ClaudeSetupRequiredError } from './claude-connect';
 
 export class ClaudeBackend {
   readonly kind = 'claude' as const;
@@ -159,13 +152,14 @@ export class ClaudeBackend {
     const ai = useAiStore.getState();
     this.abortRequested = false;
 
-    try {
-      await this.ensureSession();
-    } catch (e) {
-      // Setup and auth are states the UI renders as a card, not errors in the
-      // transcript — rethrow so the caller can route them.
-      if (e instanceof ClaudeSetupRequiredError || e instanceof ClaudeAuthRequiredError) throw e;
-      ai.addTurnError(classifyTurnError(toMessage(e)));
+    const connection = await this.connect();
+    if (connection.kind !== 'ready') {
+      // `connect` has already written the reason to the store, and
+      // `ClaudeSetupGate` renders it as a card with the one button that fixes
+      // it. Only a genuine fault also belongs in the transcript: duplicating
+      // "sign in" or "install Node" as a red error block beside the card that
+      // says the same thing is noise, and neither has a Retry that could work.
+      if (connection.kind === 'failed') ai.addTurnError(classifyTurnError(connection.message));
       return;
     }
 
@@ -205,6 +199,56 @@ export class ClaudeBackend {
       useCheckpointsStore.getState().endTurn();
       useAiStore.getState().handleAgentEvent({ type: 'agent_end', messages: [] });
     }
+  }
+
+  /**
+   * Bring the agent up, and record WHY if it cannot come up.
+   *
+   * Called on two paths, and it must behave identically on both:
+   *
+   *  - eagerly, by `ClaudeSetupGate` the moment Claude Code is the selected
+   *    agent, so a signed-out user is offered a sign-in button instead of a
+   *    blank panel, and so the agent's own modes and models are on screen
+   *    before the first message rather than after it. Nothing else in the
+   *    editor can discover any of that — it all arrives from `initialize` and
+   *    `session/new`, which only happen once the subprocess is running.
+   *  - lazily, from `sendMessage`, because a send must still work if the panel
+   *    was never opened (a restored session, a command, a retried turn).
+   *
+   * Never throws: every reason is a state the UI renders, and `ensureSession`
+   * de-duplicates concurrent callers so the two paths cannot race into two
+   * subprocesses.
+   */
+  async connect(): Promise<ClaudeConnectState> {
+    const ai = useAiStore.getState();
+
+    // No folder is not a failure to report — the composer is disabled anyway,
+    // and an agent's cwd is fixed at `session/new`, so there is nothing to
+    // connect to yet.
+    if (!useWorkspaceStore.getState().workspacePath) {
+      ai.setAgentConnect({ kind: 'idle' });
+      return { kind: 'idle' };
+    }
+
+    if (this.sessionIsCurrent()) {
+      ai.setAgentConnect({ kind: 'ready' });
+      return { kind: 'ready' };
+    }
+
+    ai.setAgentConnect({ kind: 'connecting' });
+    try {
+      await this.ensureSession();
+    } catch (e) {
+      const failure = classifyConnectError(e);
+      // `enterAuthRequired` also populates the sign-in methods the agent
+      // advertised, which the card needs to offer a button at all.
+      if (failure.kind === 'auth-required') this.enterAuthRequired();
+      else useAiStore.getState().setAgentConnect(failure);
+      return failure;
+    }
+    // Re-read: the handshake wrote to the store on the way through.
+    useAiStore.getState().setAgentConnect({ kind: 'ready' });
+    return { kind: 'ready' };
   }
 
   abort(): void {
@@ -250,6 +294,12 @@ export class ClaudeBackend {
     this.sessionCwd = null;
     this.resetStreamState();
     useAiStore.getState().setAgentBridgeRunning(false);
+    // `agentConnect` is deliberately NOT cleared here. `dispose` is also the
+    // first step of a RECONNECT (`doStart` tears down a session pinned to the
+    // old cwd), and dropping to `idle` mid-connect would pull the "Starting…"
+    // card out from under a connection that is still in progress. The two
+    // callers for which teardown really is final — `resetClaudeBackend` and
+    // `resetConversation` — clear it themselves.
     await client?.stop().catch(() => {});
   }
 
@@ -271,7 +321,7 @@ export class ClaudeBackend {
 
   /** Idempotent, and safe to call concurrently: callers share one attempt. */
   private async ensureSession(): Promise<void> {
-    if (this.client?.isRunning && this.acpSessionId && this.cwdUnchanged()) return;
+    if (this.sessionIsCurrent()) return;
     if (this.startInFlight) return this.startInFlight;
 
     this.startInFlight = this.doStart().finally(() => {
@@ -282,6 +332,27 @@ export class ClaudeBackend {
 
   private cwdUnchanged(): boolean {
     return this.sessionCwd === useWorkspaceStore.getState().workspacePath;
+  }
+
+  /**
+   * True when the live subprocess is serving the session the STORE is showing.
+   *
+   * The store's `acpSessionId` is the deciding half, and it is not redundant
+   * with our own. New Chat and picking a different thread from the history both
+   * change it without going anywhere near this class — so without this check a
+   * reused connection would answer the new transcript with the old thread's
+   * context, and the config options that arrive with `session/new` would never
+   * be re-fetched, leaving the composer's model and mode pills empty. Making it
+   * a precondition here means every caller gets that right by default instead of
+   * having to remember to tear the agent down first.
+   */
+  private sessionIsCurrent(): boolean {
+    return (
+      !!this.client?.isRunning &&
+      !!this.acpSessionId &&
+      this.cwdUnchanged() &&
+      useAiStore.getState().acpSessionId === this.acpSessionId
+    );
   }
 
   private async doStart(): Promise<void> {
@@ -380,22 +451,21 @@ export class ClaudeBackend {
     const ai = useAiStore.getState();
     ai.setAcpSessionId(result.sessionId);
     ai.setAgentConfigOptions(result.configOptions ?? []);
-    ai.setAgentNeedsAuth(false);
+    ai.setAgentConnect({ kind: 'ready' });
   }
 
   private enterAuthRequired(): void {
     const ai = useAiStore.getState();
-    ai.setAgentNeedsAuth(true);
+    ai.setAgentConnect({ kind: 'auth-required' });
     ai.setAgentAuthMethods(this.initResult?.authMethods ?? []);
   }
 
   /** Re-run the session handshake after the user has signed in. */
-  async retryAfterAuth(): Promise<void> {
-    useAiStore.getState().setAgentNeedsAuth(false);
+  async retryAfterAuth(): Promise<ClaudeConnectState> {
     // The agent caches its unauthenticated state, so restart rather than
     // retrying `session/new` on the same process.
     await this.dispose();
-    await this.ensureSession();
+    return this.connect();
   }
 
   // ── Prompt construction ───────────────────────────────────────
@@ -817,6 +887,11 @@ export class ClaudeBackend {
 
     const ai = useAiStore.getState();
     ai.setAgentBridgeRunning(false);
+    // `agentConnect` is left alone on purpose. A crash is reported as the turn
+    // error below, and `connect` starts a fresh subprocess on the next send
+    // because `this.client` is now null — whereas flipping to `idle` here would
+    // have the gate respawn the agent immediately, turning a repeatable crash
+    // into a spawn loop the user cannot interrupt.
     // Every card waiting on an answer is now waiting on a dead process.
     cancelExternalAgentApprovals();
     this.finalizeStreaming('error');
@@ -859,5 +934,10 @@ export function getClaudeBackend(): ClaudeBackend {
 export async function resetClaudeBackend(): Promise<void> {
   const current = instance;
   instance = null;
+  // Final, unlike `dispose`'s other callers: this is an agent switch, a
+  // workspace change, a sign-out or a new chat. `idle` (rather than `failed`)
+  // because nothing went wrong — and because it is what tells `ClaudeSetupGate`
+  // to connect again when Claude is still the selected agent.
+  useAiStore.getState().setAgentConnect({ kind: 'idle' });
   await current?.dispose();
 }

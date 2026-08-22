@@ -15,7 +15,7 @@ import { useAiStore } from '../../../stores/ai';
 import { useAuthStore } from '../../../stores/auth';
 import { useConnectivityStore } from '../../../stores/connectivity';
 import { useServerConfigStore, acpAllowed } from '../../../stores/server-config';
-import { getAgentService, type SendMessageOptions } from './agent-service';
+import { getAgentService, resetAgentService, type SendMessageOptions } from './agent-service';
 import { getClaudeBackend, resetClaudeBackend } from './claude-backend';
 import {
   externalAgentStatus,
@@ -94,4 +94,22 @@ export async function sendChatMessage(text: string, opts: SendMessageOptions): P
  */
 export async function disposeExternalBackends(): Promise<void> {
   await resetClaudeBackend();
+}
+
+/**
+ * Start a new conversation on whichever backend is selected.
+ *
+ * New Chat used to reset only the Arcane service, which left an external agent
+ * holding the PREVIOUS session while the store had already forgotten its id and
+ * its config options. The result looked exactly like a fresh chat and was not:
+ * the agent still had the old thread's context, and the composer had lost the
+ * model and mode pills that came with `session/new`.
+ *
+ * Arcane's reset runs unconditionally (it is idempotent, and the user may
+ * switch back), and the external agent is torn down so its next connection
+ * opens a genuinely new session.
+ */
+export function resetChatBackend(): void {
+  resetAgentService();
+  if (useAiStore.getState().selectedAgent !== 'arcane') void disposeExternalBackends();
 }

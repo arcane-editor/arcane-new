@@ -1,10 +1,21 @@
 /**
- * The card shown when Claude Code is selected but cannot run yet.
+ * The card shown when Claude Code is selected but cannot run yet — and the one
+ * place that brings it up.
  *
- * There are five distinct reasons, and they need five distinct answers — a
- * single "Claude isn't available" message would leave the user guessing which
- * of Node, npm, the adapter, or their Claude account is the problem. Each state
- * therefore names what is missing and offers the one action that fixes it.
+ * There are several distinct reasons it cannot run, and they need distinct
+ * answers: a single "Claude isn't available" message would leave the user
+ * guessing which of Node, npm, the adapter, or their Claude account is the
+ * problem. Each state names what is missing and offers the one action that
+ * fixes it.
+ *
+ * **This component connects.** Selecting Claude Code used to do nothing at all
+ * until the first message was sent, which is what made the panel look broken:
+ * sign-in methods arrive from `initialize` and the agent's own modes and models
+ * arrive from `session/new`, so with no subprocess running there was no login
+ * button to offer, no model picker to draw, and no way to tell a signed-out
+ * user from a ready one. Mounting is the right trigger — this component only
+ * exists while the AI panel is on screen with Claude selected, which is exactly
+ * when the user is waiting to see one of those two things.
  *
  * Renders `null` once everything is ready, so `AiChatPanel` can mount it
  * unconditionally. That matters: `AiChatPanel`'s hooks must not sit behind a
@@ -13,10 +24,11 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { AlertTriangle, Download, LogIn, RefreshCw, Terminal } from 'lucide-react';
+import { AlertTriangle, Download, LoaderCircle, LogIn, Plug, RefreshCw, Terminal } from 'lucide-react';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import {
   installClaudeAgent,
+  isLaunchable,
   probeClaudeAgent,
   resolveSetupState,
   toMessage,
@@ -35,7 +47,7 @@ const NODE_DOWNLOAD_URL = 'https://nodejs.org/en/download';
 
 function ClaudeSetupGate() {
   const selectedAgent = useAiStore((s) => s.selectedAgent);
-  const needsAuth = useAiStore((s) => s.agentNeedsAuth);
+  const connect = useAiStore((s) => s.agentConnect);
   const authMethods = useAiStore((s) => s.agentAuthMethods);
   const workspacePath = useWorkspaceStore((s) => s.workspacePath);
 
@@ -45,21 +57,49 @@ function ClaudeSetupGate() {
   const [progress, setProgress] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const refresh = useCallback(async () => {
+  /** Re-read the machine, and connect if it is now able to run the agent. */
+  const refresh = useCallback(async (): Promise<AcpSetupState | null> => {
     try {
       const next = await probeClaudeAgent();
       setProbe(next);
-      setSetup(resolveSetupState(next));
+      const state = resolveSetupState(next);
+      setSetup(state);
       setError(null);
+      return state;
     } catch (e) {
       setError(toMessage(e));
+      return null;
     }
   }, []);
 
+  // Probe, then start the agent. Both halves are needed and neither implies
+  // the other: the probe answers "could it run?" (a local filesystem check),
+  // and only a running agent answers "will it, for this user?" — which is
+  // where sign-in and the agent's own settings come from.
   useEffect(() => {
-    if (selectedAgent !== 'claude') return;
-    void refresh();
-  }, [selectedAgent, refresh]);
+    if (selectedAgent !== 'claude' || !workspacePath) return;
+    // `idle` is the ONLY state that wants a connection attempt, and keying the
+    // effect on it is what makes this self-healing rather than once-per-mount:
+    // New Chat, an agent switch and a workspace change all end at `idle`
+    // (`externalAgentReset`, `resetClaudeBackend`), so each one reconnects
+    // here instead of leaving a panel that looks connected and is not. Every
+    // other state is terminal until the user acts — `failed` and
+    // `auth-required` have their own buttons, and retrying them on a timer
+    // would spawn a subprocess per render.
+    if (connect.kind !== 'idle') return;
+    let cancelled = false;
+    void (async () => {
+      const state = await refresh();
+      // A setup problem has its own card and its own button; launching into a
+      // missing Node just to produce a spawn error would replace an actionable
+      // message with a worse one.
+      if (cancelled || !state || !isLaunchable(state)) return;
+      await getClaudeBackend().connect();
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedAgent, workspacePath, connect.kind, refresh]);
 
   // Live npm output while installing. Subscribed only during an install so the
   // panel isn't listening to a Tauri event for the whole session.
@@ -91,7 +131,11 @@ function ClaudeSetupGate() {
       // native download, and it is the binary their existing login belongs to.
       const next = await installClaudeAgent(!!probe?.claudePath);
       setProbe(next);
-      setSetup(resolveSetupState(next));
+      const state = resolveSetupState(next);
+      setSetup(state);
+      // Straight into the connection rather than leaving the user on a card
+      // that has nothing left to say — a fresh install still has to sign in.
+      if (isLaunchable(state)) await getClaudeBackend().connect();
     } catch (e) {
       setError(toMessage(e));
     } finally {
@@ -132,11 +176,29 @@ function ClaudeSetupGate() {
     ui.setBottomPanelVisible(true);
   }
 
+  /** Re-probe and re-launch after a failed start. */
+  async function reconnect() {
+    setBusy(true);
+    setError(null);
+    try {
+      const state = await refresh();
+      if (state && isLaunchable(state)) await getClaudeBackend().connect();
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function retryAfterSignIn() {
     setBusy(true);
     setError(null);
     try {
-      await getClaudeBackend().retryAfterAuth();
+      const state = await getClaudeBackend().retryAfterAuth();
+      // Still refusing means the sign-in did not take — say so, rather than
+      // re-rendering the same card with no acknowledgement that anything
+      // happened.
+      if (state.kind === 'auth-required') {
+        setError('Claude still reports you as signed out. Finish the sign-in in the terminal, then try again.');
+      }
     } catch (e) {
       setError(toMessage(e));
     } finally {
@@ -148,7 +210,7 @@ function ClaudeSetupGate() {
 
   // Auth outranks setup: the agent only reports `auth_required` once it is
   // installed and running, so there is nothing left to install at this point.
-  if (needsAuth) {
+  if (connect.kind === 'auth-required') {
     return (
       <Card
         icon={<LogIn size={16} />}
@@ -181,9 +243,70 @@ function ClaudeSetupGate() {
     );
   }
 
+  // Nothing on the machine is missing. What is left is the connection itself —
+  // checked AFTER the setup switch below would have fired, so a real
+  // "install Node" never loses to a stale "could not start".
   if (!setup || setup.kind === 'ready' || setup.kind === 'outdated') {
     // `outdated` still runs. Nagging someone mid-task about a version bump they
     // may not be able to download right now would be worse than the drift.
+
+    // No folder: the composer is disabled and says so, but the picker says
+    // "Claude Code", so name the piece that is actually missing.
+    if (!workspacePath) {
+      return (
+        <Card
+          icon={<Plug size={16} />}
+          title="Open a folder"
+          body="Claude Code runs inside a project folder — open one and it will connect."
+          error={error}
+        />
+      );
+    }
+
+    // Worth showing rather than leaving blank: a first launch installs nothing
+    // but still spends several seconds spawning Node and negotiating the
+    // session, and an empty panel for that long reads as a dead feature rather
+    // than a slow one.
+    if (connect.kind === 'connecting') {
+      return (
+        <Card
+          icon={<LoaderCircle size={16} className="spin" />}
+          title="Starting Claude Code…"
+          body="Launching the agent and opening a session for this folder."
+          error={error}
+        />
+      );
+    }
+
+    // The handshake failed, or the subprocess would not stay up. Distinct from
+    // a setup problem: nothing is missing, so there is nothing to install and
+    // the only useful action is to try again.
+    if (connect.kind === 'failed') {
+      return (
+        <Card
+          icon={<AlertTriangle size={16} />}
+          title="Claude Code could not start"
+          body={connect.message}
+          error={error}
+        >
+          <button type="button" style={primaryBtnStyle} disabled={busy} onClick={() => void reconnect()}>
+            <RefreshCw size={13} />
+            {busy ? 'Connecting…' : 'Try again'}
+          </button>
+        </Card>
+      );
+    }
+
+    // The probe itself threw — rare, but it means we know nothing about the
+    // machine, so failing silently would leave the panel dead with no reason.
+    if (error) {
+      return (
+        <Card icon={<AlertTriangle size={16} />} title="Could not check for Claude Code" body={error} error={null}>
+          <RetryButton onClick={() => void reconnect()} label="Check again" />
+        </Card>
+      );
+    }
+
     return null;
   }
 
@@ -261,7 +384,8 @@ function Card(props: {
   title: string;
   body: string;
   error: string | null;
-  children: React.ReactNode;
+  /** Optional: some states are pure status and have no action to offer. */
+  children?: React.ReactNode;
 }) {
   return (
     <div style={containerStyle}>
