@@ -95,3 +95,9 @@ dev/
 # scratch: the branch history is the record, not these directories.
 .claude/worktrees/
 .superpowers/
+
+# ── Provisioning secrets ─────────────────────────────────────────────────────
+# scripts/create-live-dodo-webhook.ts drops the Dodo signing secret here so it
+# can be piped into `wrangler secret put` without crossing a terminal
+# transcript. Delete it once the secret is set — it must never be committed.
+.dodo-webhook-secret.txt
