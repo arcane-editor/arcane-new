@@ -4,11 +4,13 @@
 //                      plus the inline (tab-completion) model.
 //   'model_pricing' — per-model rate overrides merged OVER the code-default
 //                      MODEL_CATALOG, plus the gatewayFee/margin multipliers.
-// Both are optional: an empty table — or a row that fails to parse/validate —
-// falls back to the code defaults (DEFAULT_MODEL_ROUTING / {MODEL_CATALOG,
-// GATEWAY_FEE, MARGIN}), so a bad admin write degrades to shipped behaviour
-// rather than breaking AI requests. Every fallback path logs one structured
-// line so a bad doc is visible in the tail without throwing.
+// Both are optional: an empty table falls back to the code defaults
+// (DEFAULT_MODEL_ROUTING / {MODEL_CATALOG, GATEWAY_FEE, MARGIN}) SILENTLY —
+// that is the normal, defaults-active state of every fresh deploy, not an
+// anomaly. A row that EXISTS but fails to parse or fails validation ALSO
+// falls back to the same defaults, but that IS an anomaly (someone stored a
+// bad doc) — that path logs one structured line so it's visible in the tail
+// without throwing.
 //
 // Reads are cached per-isolate for TTL_MS (60s) to keep this off the hot
 // path — one D1 read per doc per isolate per minute, not per request.
@@ -104,13 +106,15 @@ export async function putConfigDoc(db: D1Database, key: ConfigKey, value: object
 }
 
 /** Shared read → JSON.parse → validate pipeline for both getters below.
- *  Returns the parsed (validated) doc, or — on ANY failure: missing row, bad
- *  JSON, or a doc that fails `validate` — null plus the failure reason. */
+ *  Returns the parsed (validated) doc, or null. `error` is set ONLY for an
+ *  ANOMALY — a row that exists but fails JSON.parse or fails `validate` —
+ *  never for a plain missing row, which is the normal, defaults-active state
+ *  of every fresh deploy and must not be treated as a failure to log. */
 async function readAndValidate(
     db: D1Database, key: ConfigKey, validate: (parsed: unknown) => string | null,
 ): Promise<{ doc: unknown; error: string | null }> {
     const row = await db.prepare('SELECT value FROM app_config WHERE key = ?1').bind(key).first<{ value: string }>();
-    if (!row) return { doc: null, error: 'missing row' };
+    if (!row) return { doc: null, error: null }; // no row yet — silent default, not an anomaly
 
     let parsed: unknown;
     try {
@@ -125,8 +129,9 @@ async function readAndValidate(
 }
 
 /** Which model each effort tier routes to, plus the inline model. Falls back
- *  to DEFAULT_MODEL_ROUTING (plans.ts) on ANY failure — missing row, bad
- *  JSON, or a doc that fails validateModelRoutingDoc — logging the reason. */
+ *  to DEFAULT_MODEL_ROUTING (plans.ts) when the table has no row (silently —
+ *  the normal state of a fresh deploy) or when the row fails to parse or
+ *  fails validateModelRoutingDoc (an anomaly — logged). */
 export async function getModelRouting(db: D1Database): Promise<ModelRoutingDoc> {
     const cached = readCache<ModelRoutingDoc>('model_routing');
     if (cached) return cached;
@@ -143,8 +148,9 @@ export async function getModelRouting(db: D1Database): Promise<ModelRoutingDoc> 
 
 /** Effective pricing: MODEL_CATALOG with any admin `model_pricing` overrides
  *  merged in, plus the effective gatewayFee/margin. Falls back to
- *  {MODEL_CATALOG, GATEWAY_FEE, MARGIN} on ANY failure — missing row, bad
- *  JSON, or a doc that fails validateModelPricingDoc — logging the reason. */
+ *  {MODEL_CATALOG, GATEWAY_FEE, MARGIN} when the table has no row (silently —
+ *  the normal state of a fresh deploy) or when the row fails to parse or
+ *  fails validateModelPricingDoc (an anomaly — logged). */
 export async function getEffectivePricing(db: D1Database): Promise<EffectivePricing> {
     const cached = readCache<EffectivePricing>('model_pricing');
     if (cached) return cached;

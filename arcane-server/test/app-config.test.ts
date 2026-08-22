@@ -36,9 +36,14 @@ beforeEach(() => clearConfigCache());
 afterEach(() => clearConfigCache());
 
 describe('getModelRouting', () => {
-    it('returns DEFAULT_MODEL_ROUTING when the table has no model_routing row', async () => {
+    it('returns DEFAULT_MODEL_ROUTING when the table has no model_routing row, SILENTLY (no error log)', async () => {
+        const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
         const routing = await getModelRouting(env.arcane_db);
         expect(routing).toEqual(DEFAULT_MODEL_ROUTING);
+        // A missing row is the normal, defaults-active state of a fresh deploy —
+        // NOT an anomaly — so it must not log.
+        expect(spy).not.toHaveBeenCalled();
+        spy.mockRestore();
     });
 
     it('does not throw on an empty table', async () => {
@@ -135,11 +140,16 @@ describe('getModelRouting', () => {
 });
 
 describe('getEffectivePricing', () => {
-    it('returns {MODEL_CATALOG, GATEWAY_FEE, MARGIN} when the table has no model_pricing row', async () => {
+    it('returns {MODEL_CATALOG, GATEWAY_FEE, MARGIN} when the table has no model_pricing row, SILENTLY (no error log)', async () => {
+        const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
         const pricing = await getEffectivePricing(env.arcane_db);
         expect(pricing.catalog).toBe(MODEL_CATALOG);
         expect(pricing.gatewayFee).toBe(1.05);
         expect(pricing.margin).toBe(1.0);
+        // A missing row is the normal, defaults-active state of a fresh deploy —
+        // NOT an anomaly — so it must not log.
+        expect(spy).not.toHaveBeenCalled();
+        spy.mockRestore();
     });
 
     it('does not throw on an empty table', async () => {
