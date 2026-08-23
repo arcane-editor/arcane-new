@@ -26,7 +26,7 @@ import MetaChoiceDialog from './MetaChoiceDialog';
 import { applyUnityTreeView } from '../services/unity-tree-view';
 import { ancestorDirs, consumePendingReveal } from '../services/reveal';
 import { copyIntoDir, existingMetaSiblings } from '../services/drop-target';
-import { ARCANE_FILE_MIME } from '../../../utils/drag-mime';
+import { startPointerDrag } from '../../../utils/pointer-drag';
 import { notify } from '../../../stores/notifications';
 
 // Asset/script kinds whose deletion can leave dangling references in scenes/prefabs.
@@ -108,16 +108,19 @@ function NodeRenderer({
       // a target ever reaches this element.
       data-path={node.data.id}
       data-is-dir={node.data.isDir ? 'true' : 'false'}
-      // In-webview drag *out* of the tree — HTML5 DnD is unaffected by the
-      // native interception above. react-arborist's own drag stays disabled;
-      // this only exports the node to drop zones like the AI panel.
-      draggable={!isRenaming}
-      onDragStart={(e) => {
-        e.dataTransfer.setData(
-          ARCANE_FILE_MIME,
-          JSON.stringify({ path: node.data.id, isDir: node.data.isDir }),
-        );
-        e.dataTransfer.effectAllowed = 'copy';
+      // Drag *out* of the tree, to zones like the AI panel. Pointer-based, NOT
+      // HTML5: Tauri's native drag-drop handler swallows every drag before the
+      // webview sees it, so `dragstart` never fires in this app — the previous
+      // comment here claimed the opposite and was wrong. See
+      // `utils/pointer-drag.ts`. react-arborist's own drag stays disabled.
+      onPointerDown={(e) => {
+        if (isRenaming || node.data.isDir) return;
+        startPointerDrag(e.nativeEvent, {
+          path: node.data.id,
+          isDir: node.data.isDir,
+          origin: 'explorer',
+          label: node.data.name ?? node.data.id.split('/').pop() ?? node.data.id,
+        });
       }}
       onClick={isRenaming ? undefined : handleClick}
       onContextMenu={(e) => {

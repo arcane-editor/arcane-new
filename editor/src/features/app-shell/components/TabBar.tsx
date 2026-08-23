@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { X, GitCompare, Copy, FolderSymlink, Search } from 'lucide-react';
 import { revealItemInDir } from '@tauri-apps/plugin-opener';
 import { useWorkspaceStore } from '../../../stores/workspace';
@@ -9,14 +9,15 @@ import { confirmCloseDirty } from '../../../utils/dirty-guard';
 import { toRelativePath } from '../../../utils/relative-path';
 import { isVirtualPath } from '../../../utils/virtual-path';
 import { isMac } from '../../../utils/platform';
-import { ARCANE_FILE_MIME, EDITOR_TAB_MIME, serializeFileDrag } from '../../../utils/drag-mime';
+import {
+  POINTER_DRAG_DROP,
+  startPointerDrag,
+  type PointerDragDropDetail,
+} from '../../../utils/pointer-drag';
 import { useClampedMenuPosition } from '../../../hooks/useClampedMenuPosition';
 import type { OpenFile } from '../../../types';
 import { fileUri } from '../../lsp';
 
-// Re-exported name kept local for readability; the constant itself lives in
-// `utils/drag-mime.ts` so drop zones outside the tab strip can read it.
-const DRAG_MIME = EDITOR_TAB_MIME;
 
 interface TabContextMenu {
   x: number;
@@ -63,6 +64,22 @@ function TabBar() {
   const diagnosticsMap = useUiStore((s) => s.diagnostics);
   const executeCommand = useCommandsStore((s) => s.executeCommand);
   const [dropTargetPath, setDropTargetPath] = useState<string | null>(null);
+
+  // Reorder. The drop arrives on `window` from `utils/pointer-drag.ts` rather
+  // than as a DOM drop event, because Tauri's native handler swallows HTML5
+  // drags before the webview sees them — `dragstart` never fires in this app.
+  useEffect(() => {
+    function onDrop(e: Event) {
+      const { payload, zoneId, zoneEl } = (e as CustomEvent<PointerDragDropDetail>).detail;
+      setDropTargetPath(null);
+      if (zoneId !== 'tab' || payload.origin !== 'tab') return;
+      const toPath = zoneEl.getAttribute('data-tab-path');
+      if (!toPath || toPath === payload.path) return;
+      reorderTabs(payload.path, toPath);
+    }
+    window.addEventListener(POINTER_DRAG_DROP, onDrop);
+    return () => window.removeEventListener(POINTER_DRAG_DROP, onDrop);
+  }, [reorderTabs]);
   const [contextMenu, setContextMenu] = useState<TabContextMenu | null>(null);
 
   if (openFiles.length === 0) return null;
@@ -93,42 +110,22 @@ function TabBar() {
                 setActiveFile(file.path);
                 setContextMenu({ x: e.clientX, y: e.clientY, path: file.path });
               }}
-              draggable
-              onDragStart={(e) => {
-                e.dataTransfer.setData(DRAG_MIME, file.path);
-                // Second payload, for drop zones outside the tab strip (the AI
-                // panel takes it as context). Carried alongside rather than
-                // instead of DRAG_MIME so reordering is unaffected: each drop
-                // zone checks for the MIME it understands and ignores the
-                // other, which is also what stops an explorer drag from
-                // reordering tabs.
+              // Pointer-based, NOT HTML5 drag: Tauri's native drag-drop
+              // handler swallows every drag before the webview sees it, so
+              // `dragstart` never fires anywhere in this app. See
+              // `utils/pointer-drag.ts` for the mechanism and the evidence.
+              onPointerDown={(e) => {
                 const real = resolveRealPath(file, workspacePath);
-                if (real) {
-                  e.dataTransfer.setData(
-                    ARCANE_FILE_MIME,
-                    serializeFileDrag({ path: real, isDir: false }),
-                  );
-                }
-                e.dataTransfer.effectAllowed = 'copyMove';
+                if (!real) return; // a virtual tab names no file on disk
+                startPointerDrag(e.nativeEvent, {
+                  path: real,
+                  isDir: false,
+                  origin: 'tab',
+                  label: file.name,
+                });
               }}
-              onDragOver={(e) => {
-                if (!e.dataTransfer.types.includes(DRAG_MIME)) return;
-                e.preventDefault();
-                e.dataTransfer.dropEffect = 'move';
-                if (dropTargetPath !== file.path) setDropTargetPath(file.path);
-              }}
-              onDragLeave={() => {
-                if (dropTargetPath === file.path) setDropTargetPath(null);
-              }}
-              onDrop={(e) => {
-                const fromPath = e.dataTransfer.getData(DRAG_MIME);
-                setDropTargetPath(null);
-                if (fromPath && fromPath !== file.path) {
-                  e.preventDefault();
-                  reorderTabs(fromPath, file.path);
-                }
-              }}
-              onDragEnd={() => setDropTargetPath(null)}
+              data-drop-zone="tab"
+              data-tab-path={file.path}
               title=""
             >
               <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>

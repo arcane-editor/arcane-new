@@ -184,6 +184,40 @@ pass** — set `ARCANE_ACP_E2E=required` to turn a skip into a failure, and
 `ARCANE_ACP_ADAPTER=<path to dist/index.js>` to point it at an adapter outside
 the managed install.
 
+## Drag and drop: HTML5 DnD does not work here
+
+`dragstart` never fires anywhere in this app. Tauri installs a native drag-drop
+handler on the webview (`dragDropEnabled`, default **true**, never set in
+`tauri.conf.json`), and `tauri-runtime-wry`'s handler returns `true`
+unconditionally. On macOS wry only forwards a drag to WKWebView's own handling
+when that listener returns `false`:
+
+```rust
+if !listener(DragDropEvent::Enter { .. }) {
+  msg_send![super(this), draggingEntered: drag_info]   // OS default → HTML5 DnD
+} else {
+  NSDragOperation::Copy                                 // intercepted
+}
+```
+
+So there are two separate mechanisms, and neither is HTML5 DnD:
+
+| Drag | Mechanism |
+|---|---|
+| In-app (tab reorder, tab/tree → AI panel) | `utils/pointer-drag.ts` — pointer events, `data-drop-zone`, a `window` drop event |
+| OS / Finder file drop | Tauri `onDragDropEvent` in `App.tsx`, hit-tested by coordinate (`utils/drop-point.ts`) |
+
+**Do not add `draggable` / `onDragStart` / `onDrop` handlers.** They compile,
+they look right in review, and they never run. Tab reorder and drag-to-context
+both shipped this way and were dead from the first commit — for months, behind
+comments that asserted in-webview drags were "unaffected by Tauri's native
+interception". They are not.
+
+Turning `dragDropEnabled` off would revive HTML5 DnD, but `onDragDropEvent`
+would stop firing and macOS `File` objects carry no filesystem path — so it
+trades the terminal drop, the explorer copy-drop and Finder → chat for the
+in-app ones. Not a fix.
+
 ## Keybindings: always check both sides
 
 A keyboard chord can be owned in **two independent places**, and changing one does not change the other:

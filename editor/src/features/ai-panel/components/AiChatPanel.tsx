@@ -9,7 +9,10 @@ import { RotateCcw, History, Paperclip } from 'lucide-react';
 import { useAiStore } from '../../../stores/ai';
 import { useAuthStore } from '../../../stores/auth';
 import { useWorkspaceStore } from '../../../stores/workspace';
-import { hasFileDrag, readFileDrag } from '../../../utils/drag-mime';
+import {
+  POINTER_DRAG_DROP,
+  type PointerDragDropDetail,
+} from '../../../utils/pointer-drag';
 import { resetChatBackend } from '../services/chat-backend';
 import { buildFileAttachment, isAlreadyStaged } from '../services/stage-file';
 import MessageList from './MessageList';
@@ -32,7 +35,6 @@ function AiChatPanel() {
   const setAuthNotice = useAiStore((s) => s.setAuthNotice);
   const verificationRequired = useAiStore((s) => s.verificationRequired);
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [dragOver, setDragOver] = useState(false);
 
   // T5: the notice explaining WHY the user was signed out (arcane-stream's
   // 401/403 path) should disappear once they've actually logged back in,
@@ -73,7 +75,27 @@ function AiChatPanel() {
       }
     }
     window.addEventListener('ai-stage-paths', onStagePaths);
-    return () => window.removeEventListener('ai-stage-paths', onStagePaths);
+
+    // In-app drags (a tab, a tree row). These arrive on `window` from
+    // `utils/pointer-drag.ts` rather than as DOM drop events, because Tauri's
+    // native handler swallows HTML5 drags before the webview sees them.
+    function onPointerDrop(e: Event) {
+      const { payload, zoneId } = (e as CustomEvent<PointerDragDropDetail>).detail;
+      if (zoneId !== 'ai-panel') return;
+      if (payload.isDir) {
+        useAiStore.getState().setError('Folders cannot be attached as context — drop a file instead.');
+        return;
+      }
+      window.dispatchEvent(
+        new CustomEvent('ai-stage-paths', { detail: { paths: [payload.path] } }),
+      );
+    }
+    window.addEventListener(POINTER_DRAG_DROP, onPointerDrop);
+
+    return () => {
+      window.removeEventListener('ai-stage-paths', onStagePaths);
+      window.removeEventListener(POINTER_DRAG_DROP, onPointerDrop);
+    };
   }, []);
 
   // The header buttons and the mod+shift+L / mod+shift+H chords must do the
@@ -122,49 +144,13 @@ function AiChatPanel() {
   // Files dragged in from the explorer tree or the tab bar. These are
   // in-webview HTML5 drags, unaffected by Tauri's native interception of OS
   // file drops — those still open as editor tabs via App.tsx.
-  function handleDragOver(e: React.DragEvent) {
-    // Accepts EITHER payload. The tab bar attaches its reorder path plus a
-    // second file payload, and keying only on the second meant a tab drag was
-    // silently ignored while an explorer drag worked — see `readFileDrag`.
-    if (!hasFileDrag(e.dataTransfer.types)) return;
-    // Without preventDefault the browser refuses the drop outright.
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'copy';
-    if (!dragOver) setDragOver(true);
-  }
-
-  function handleDragLeave(e: React.DragEvent) {
-    // dragleave also fires when crossing between children, which would flicker
-    // the overlay; only a leave that exits the panel entirely counts.
-    if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
-    setDragOver(false);
-  }
-
-  function handleDrop(e: React.DragEvent) {
-    setDragOver(false);
-    const payload = readFileDrag(e.dataTransfer);
-    if (!payload) return;
-    e.preventDefault();
-
-    if (payload.isDir) {
-      setError('Folders cannot be attached as context — drop a file instead.');
-      return;
-    }
-
-    const { attachments, addAttachment } = useAiStore.getState();
-    // Re-dropping a staged file is a no-op rather than a duplicate chip.
-    if (isAlreadyStaged(attachments, payload.path)) return;
-
-    const workspacePath = useWorkspaceStore.getState().workspacePath;
-    addAttachment(buildFileAttachment(payload.path, workspacePath));
-  }
-
   return (
     <div
-      className={`ai-panel${dragOver ? ' ai-panel--drop-over' : ''}`}
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
-      onDrop={handleDrop}
+      className="ai-panel"
+      // Both drop paths land here. OS drops are hit-tested by coordinate in
+      // App.tsx (Tauri handles those natively); in-app drags resolve this zone
+      // through `data-drop-zone`. `data-drag-over` is set by pointer-drag.ts.
+      data-drop-zone="ai-panel"
     >
       {/* Header */}
       <div className="ai-panel-header">
@@ -222,17 +208,19 @@ function AiChatPanel() {
       {/* Input */}
       <ChatInput />
 
-      {/* Drop affordance. `pointer-events: none` in CSS is load-bearing: the
-          overlay sits above the panel, and intercepting the pointer would
-          swallow the very drop it is advertising. */}
-      {dragOver && (
-        <div className="ai-panel-drop-overlay">
-          <div className="ai-panel-drop-overlay-label">
-            <Paperclip size={14} />
-            <span>Drop to add as context</span>
-          </div>
+      {/* Drop affordance. Always mounted and shown by CSS, because the two
+          drop paths signal differently and neither goes through React state:
+          an in-app drag sets `data-drag-over` (pointer-drag.ts) and an OS drag
+          sets `.ai-panel--drop-over` (App.tsx's coordinate hit-test).
+          `pointer-events: none` is load-bearing — the overlay sits above the
+          panel, and intercepting the pointer would swallow the very drop it is
+          advertising, and break `elementFromPoint`. */}
+      <div className="ai-panel-drop-overlay">
+        <div className="ai-panel-drop-overlay-label">
+          <Paperclip size={14} />
+          <span>Drop to add as context</span>
         </div>
-      )}
+      </div>
     </div>
   );
 }

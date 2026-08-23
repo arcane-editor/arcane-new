@@ -3740,7 +3740,16 @@ html, body, #root {
 }
 
 /* ---- AI Panel: drag a file in as context ---- */
+/* Always mounted, shown only while a drag is over the panel. Two selectors
+   because the two drop paths signal differently and neither runs through React
+   state: an in-app pointer drag sets `data-drag-over` (utils/pointer-drag.ts),
+   an OS drag sets the class from App.tsx's coordinate hit-test. */
 .ai-panel-drop-overlay {
+  display: none;
+}
+
+.ai-panel[data-drag-over] .ai-panel-drop-overlay,
+.ai-panel--drop-over .ai-panel-drop-overlay {
   position: absolute;
   inset: 0;
   z-index: 30;
@@ -7659,3 +7668,32 @@ html, body, #root {
 /* The anchor itself pulses once, so the eye is drawn to what is described
    rather than only to the words. */
 .activity-bar-icon[data-coach] { position: relative; }
+
+/* The floating label that follows the cursor during an in-app drag. Fixed at
+   the origin and moved with `transform`, so a pointermove costs a compositor
+   update rather than a layout. `pointer-events: none` is load-bearing: the
+   preview sits under the cursor, and `elementFromPoint` would otherwise hit it
+   instead of the drop zone beneath. */
+.pointer-drag-preview {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 2000;
+  pointer-events: none;
+  padding: 4px 9px;
+  border-radius: 5px;
+  background: var(--bg-input);
+  border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+  color: var(--text-primary);
+  font-size: 11.5px;
+  white-space: nowrap;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* A tab being dragged over as a reorder target. */
+.tab[data-drag-over] {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
