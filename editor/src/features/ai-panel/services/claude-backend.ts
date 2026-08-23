@@ -91,6 +91,7 @@ import {
 import { requestUserQuestion } from './question-gate';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { classifyTurnError } from './turn-errors';
+import { isReplayableContent } from './replay-filter';
 import {
   ClaudeSetupRequiredError,
   classifyConnectError,
@@ -424,12 +425,25 @@ export class ClaudeBackend {
         // agent replays its history as `session/update`s, which would duplicate
         // every message. Suppress them and keep only the resumed context.
         this.suppressReplay = true;
-        await this.client!.request(AGENT_METHOD.sessionLoad, {
+        const loaded = await this.client!.request<{
+          configOptions?: SessionConfigOption[] | null;
+        }>(AGENT_METHOD.sessionLoad, {
           sessionId: previous,
           cwd,
           mcpServers,
         });
         this.acpSessionId = previous;
+        // Two possible sources, because the agent may use either: the response
+        // itself, or a `config_option_update` notification during the load.
+        // Taken here only when non-empty, so a response that omits them does
+        // not clobber what the notification already delivered.
+        if (loaded?.configOptions?.length) {
+          useAiStore.getState().setAgentConfigOptions(loaded.configOptions);
+        }
+        // The `session/new` path below sets these on the way out; the resume
+        // path returned without them, so a restored session was left looking
+        // connected while the store still said `idle`.
+        useAiStore.getState().setAgentConnect({ kind: 'ready' });
         return;
       } catch (e) {
         if (isAuthRequired(e)) throw e;
@@ -646,7 +660,11 @@ export class ClaudeBackend {
     if (method !== CLIENT_METHOD.sessionUpdate) return;
     const payload = params as SessionNotification | undefined;
     if (!payload?.update) return;
-    if (this.suppressReplay) return;
+    // Selective, not wholesale. A `session/load` replay carries the thread we
+    // are already rendering AND the loaded session's settings; dropping the
+    // whole channel took the settings with it and left a resumed chat with no
+    // model, mode or effort controls at all. See `replay-filter.ts`.
+    if (this.suppressReplay && isReplayableContent(payload.update.sessionUpdate)) return;
     this.applyUpdate(payload.update);
   }
 
