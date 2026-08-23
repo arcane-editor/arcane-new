@@ -198,10 +198,18 @@ makes the silent model workable across both platforms:
   time. Zero clicks.
 - **Windows**: the NSIS installer closes the app to apply, per the plugin's own
   documentation ("this function exits the app after launching the updater
-  installer successfully"). The downloaded artifact is therefore held, and
-  `install()` waits for an explicit restart. A quiet, dismissible "Update ready —
-  Restart" affordance appears; ignoring it means the update applies at the next
-  restart anyway.
+  installer successfully"). Downloading cannot be followed by installing, so
+  Windows only *detects* in the background and shows a dismissible "Update
+  available — Restart" notice; the download runs when the restart is clicked.
+
+  Pre-downloading on Windows was considered and rejected. `Update::download()`
+  returns the artifact as an in-memory `Vec<u8>`, and an NSIS installer carrying
+  the PyInstaller and LSP sidecars runs to hundreds of megabytes — holding that
+  resident for hours to save a few seconds at restart is a bad trade. Staging it
+  to a temp file instead would work, but brings partial-write handling, stale-file
+  cleanup, and a superseded-version case for no user-visible gain. Windows users
+  wait for the download when they click Restart; they were going to wait for a
+  restart regardless.
 
 The check runs once per app process, not once per window — the app opens a
 `welcome` window plus `editor-*` windows, all sharing one process.
