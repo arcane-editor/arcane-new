@@ -1,20 +1,55 @@
 ---
-import { downloadUrls } from "../lib/releases";
+import { readFileSync } from "node:fs";
+import { downloadUrls, manifestUrls, versionFromManifest, type UpdatePlatform } from "../lib/releases";
 
 // Stable "latest" links — the Release workflow uploads each installer to both
 // arcane-releases/<tag>/ and arcane-releases/latest/, so these never need editing
-// per release. Bump `version` (display only) when you cut a new tag.
+// per release.
 //
 // The channel follows the environment this site was built for: the dev site
 // links to the "Arcane Dev" installers, never the production ones.
-const isDev = (import.meta.env.PUBLIC_API_URL ?? "").includes("api-dev");
-const urls = downloadUrls(import.meta.env.PUBLIC_API_URL ?? "");
-const version = isDev ? "dev build" : "v0.2.0";
+const apiUrl = import.meta.env.PUBLIC_API_URL ?? "";
+const isDev = apiUrl.includes("api-dev");
+const urls = downloadUrls(apiUrl);
+const manifests = manifestUrls(apiUrl);
+
+/** The version in the repo — used when the manifest cannot be reached, so a
+ *  network blip during CI degrades to a slightly stale number instead of
+ *  failing the site build. */
+const fallbackVersion: string = JSON.parse(
+  readFileSync(new URL("../../../editor/package.json", import.meta.url), "utf8"),
+).version;
+
+/**
+ * The version this platform can actually download, read at build time.
+ *
+ * Reads the same manifest the app's updater polls, so a card cannot advertise
+ * a release that was never published — which is exactly how this section sat
+ * on a hardcoded "v0.2.0" through two releases. Per-platform rather than one
+ * shared number because it is strictly more honest: if a Windows build fails
+ * during a release, its card keeps showing what Windows can actually get.
+ *
+ * Every failure falls back rather than throwing: this runs inside `astro build`.
+ */
+async function shippedVersion(url: string, platform: UpdatePlatform): Promise<string> {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return fallbackVersion;
+    return versionFromManifest(await res.json(), platform) ?? fallbackVersion;
+  } catch {
+    return fallbackVersion;
+  }
+}
+
+// The dev channel rebuilds several times a day; a version string there is
+// noise, so it keeps the existing "dev build" label.
+const macVersion = isDev ? "dev build" : `v${await shippedVersion(manifests.macArm, "darwin-aarch64")}`;
+const winVersion = isDev ? "dev build" : `v${await shippedVersion(manifests.windows, "windows-x86_64")}`;
 const osCards = [
   {
     id: "macos-arm",
     name: "macOS",
-    version,
+    version: macVersion,
     ext: ".dmg",
     subtitle: "Apple Silicon (M1+)",
     href: urls.macArm,
@@ -23,7 +58,7 @@ const osCards = [
   {
     id: "windows",
     name: "Windows",
-    version,
+    version: winVersion,
     ext: ".exe",
     subtitle: "Windows 10+ (64-bit)",
     href: urls.windows,
