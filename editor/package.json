@@ -9,6 +9,7 @@
     "build:dev-env": "tsc && vite build --mode development",
     "check:modules": "bun run scripts/check-deep-modules.mjs",
     "check:invoke": "node scripts/check-invoke-args.mjs",
+    "check:version": "node scripts/check-version-sync.mjs",
     "sync:bridge": "node scripts/sync-unity-bridge.mjs",
     "sync:icons": "node scripts/sync-material-icons.mjs",
     "preview": "vite preview",
@@ -20,7 +21,7 @@
     "test:isolated": "bun test ./src/stores/search-tab-lifecycle.exec.ts && bun test ./src/stores/search-invalidation.exec.ts && bun test ./src/stores/search-editing.exec.ts",
     "verify:intellisense": "node scripts/verify-csharp-intellisense.mjs",
     "verify:acp": "node scripts/verify-acp.mjs",
-    "verify": "tsc --noEmit && bun run check:modules && bun run check:invoke && bun test src && bun run test:isolated && (cd src-tauri && cargo test --lib) && bun run verify:intellisense && bun run verify:acp",
+    "verify": "tsc --noEmit && bun run check:modules && bun run check:invoke && bun run check:version && bun test src && bun test scripts && bun run test:isolated && (cd src-tauri && cargo test --lib) && bun run verify:intellisense && bun run verify:acp",
     "eval": "bun tooling/unity-eval/run-eval.ts"
   },
   "dependencies": {
