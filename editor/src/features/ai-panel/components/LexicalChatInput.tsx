@@ -33,6 +33,7 @@ import MentionTriggerPlugin from './lexical/MentionTriggerPlugin';
 import SlashTriggerPlugin from './lexical/SlashTriggerPlugin';
 import { MentionNode } from './lexical/MentionNode';
 import PasteImagePlugin from './lexical/PasteImagePlugin';
+import PasteTextPlugin from './lexical/PasteTextPlugin';
 import DropImagePlugin from './lexical/DropImagePlugin';
 
 export interface LexicalChatInputHandle {
@@ -143,6 +144,9 @@ const LexicalChatInput = forwardRef<LexicalChatInputHandle, Props>(
           <MentionTriggerPlugin />
           <SlashTriggerPlugin />
           <PasteImagePlugin />
+          {/* AFTER the image plugin: a paste carrying both an image and its
+              alt text must reach the image handler first. */}
+          <PasteTextPlugin />
           <DropImagePlugin />
         </LexicalComposer>
       </div>

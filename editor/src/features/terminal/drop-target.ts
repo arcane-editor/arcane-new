@@ -1,3 +1,4 @@
+import { toCssPoint } from '../../utils/drop-point';
 import { invoke } from '@tauri-apps/api/core';
 import { escapePathForShell } from './shell-escape';
 import { focusTerminalById } from './terminal-registry';
@@ -27,18 +28,6 @@ function terminalAtPoint(cssX: number, cssY: number): { id: number; el: HTMLElem
   return null;
 }
 
-/**
- * Converts a Tauri drag-drop position to CSS pixels.
- *
- * The payload is a PhysicalPosition while `getBoundingClientRect()` is in CSS
- * pixels — on a Retina display those differ by 2x, so skipping this puts every
- * drop in the wrong quadrant of the window.
- */
-function toCssPoint(position: { x: number; y: number }): { x: number; y: number } {
-  const dpr = window.devicePixelRatio || 1;
-  return { x: position.x / dpr, y: position.y / dpr };
-}
-
 function clearHighlight(): void {
   document
     .querySelectorAll<HTMLElement>(`.${DROP_OVER_CLASS}`)
@@ -47,7 +36,7 @@ function clearHighlight(): void {
 
 /** Highlights the pane under the cursor while a drag is over the window. */
 export function highlightTerminalDropTarget(position: { x: number; y: number }): void {
-  const { x, y } = toCssPoint(position);
+  const { x, y } = toCssPoint(position, window.devicePixelRatio);
   const hit = terminalAtPoint(x, y);
   clearHighlight();
   hit?.el.classList.add(DROP_OVER_CLASS);
@@ -72,7 +61,7 @@ export async function handleTerminalDrop(
   clearHighlight();
   if (paths.length === 0) return false;
 
-  const { x, y } = toCssPoint(position);
+  const { x, y } = toCssPoint(position, window.devicePixelRatio);
   const hit = terminalAtPoint(x, y);
   if (!hit) return false;
 

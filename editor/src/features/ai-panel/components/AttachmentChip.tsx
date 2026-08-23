@@ -8,11 +8,12 @@
  * most disambiguating — segment survives the truncation.
  */
 
-import { BookOpen, Image as ImageIcon, Boxes, Box, X } from 'lucide-react';
+import { BookOpen, ClipboardList, Image as ImageIcon, Boxes, Box, X } from 'lucide-react';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { useWorkspaceStore } from '../../../stores/workspace';
 import { useAiStore } from '../../../stores/ai';
 import { FileIcon } from '../../../utils/file-icons';
+import { pasteChipLabel } from '../data/paste-chip';
 import type { Attachment } from '../services/types';
 
 interface Props {
@@ -49,6 +50,8 @@ function AttachmentChip({ attachment: a, removable = true }: Props) {
   let icon: React.ReactNode;
   let label: string;
   let dir = '';
+  /** Leading content of a pasted slab. Truncates from the END, unlike `dir`. */
+  let preview = '';
   let title: string;
 
   switch (a.kind) {
@@ -88,6 +91,18 @@ function AttachmentChip({ attachment: a, removable = true }: Props) {
       label = a.name;
       title = `Live GameObject "${a.name}" (resolved when sent)`;
       break;
+    case 'pasted-text':
+      icon = <ClipboardList size={12} />;
+      label = pasteChipLabel(a.text);
+      // The opening of the paste, so the chip is identifiable when three are
+      // staged at once — "Pasted 40 lines" three times over says nothing.
+      //
+      // NOT in `dir`: that span is `direction: rtl` so a path truncates from
+      // the left and keeps its deepest segment. Right for a path, exactly
+      // backwards for a code preview, which is identified by how it STARTS.
+      preview = a.text.split('\n', 1)[0].trim().slice(0, 80);
+      title = a.text.slice(0, 400) + (a.text.length > 400 ? '\n…' : '');
+      break;
   }
 
   return (
@@ -104,6 +119,7 @@ function AttachmentChip({ attachment: a, removable = true }: Props) {
       )}
       <span className="ai-panel-attachment-label">{label}</span>
       {dir && <span className="ai-panel-attachment-dir">{dir}</span>}
+      {preview && <span className="ai-panel-attachment-preview">{preview}</span>}
       {removable && (
         <span
           role="button"

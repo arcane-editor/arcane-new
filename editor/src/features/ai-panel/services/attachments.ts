@@ -53,6 +53,15 @@ export async function resolveAttachments(
       continue;
     }
 
+    if (a.kind === 'pasted-text') {
+      // Fenced, so the model reads it as a quoted artefact rather than as part
+      // of the user's sentence — which is exactly the distinction the chip
+      // makes visually in the composer.
+      blocks.push(`Pasted content (${a.lineCount} lines):\n\n\`\`\`\n${a.text}\n\`\`\``);
+      totalBytes += a.text.length;
+      continue;
+    }
+
     if (a.kind === 'unity-context') {
       const block = await resolveUnityContext(a.verb);
       if (block) blocks.push(block);

@@ -9,12 +9,14 @@ import { confirmCloseDirty } from '../../../utils/dirty-guard';
 import { toRelativePath } from '../../../utils/relative-path';
 import { isVirtualPath } from '../../../utils/virtual-path';
 import { isMac } from '../../../utils/platform';
-import { ARCANE_FILE_MIME, serializeFileDrag } from '../../../utils/drag-mime';
+import { ARCANE_FILE_MIME, EDITOR_TAB_MIME, serializeFileDrag } from '../../../utils/drag-mime';
 import { useClampedMenuPosition } from '../../../hooks/useClampedMenuPosition';
 import type { OpenFile } from '../../../types';
 import { fileUri } from '../../lsp';
 
-const DRAG_MIME = 'application/x-editor-tab-path';
+// Re-exported name kept local for readability; the constant itself lives in
+// `utils/drag-mime.ts` so drop zones outside the tab strip can read it.
+const DRAG_MIME = EDITOR_TAB_MIME;
 
 interface TabContextMenu {
   x: number;

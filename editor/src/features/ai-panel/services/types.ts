@@ -98,6 +98,16 @@ export type Attachment =
       instanceId?: number;
     }
   | {
+      /**
+       * A slab of text pasted into the composer, held as context instead of
+       * burying the message you were writing. See `data/paste-chip.ts`.
+       */
+      kind: 'pasted-text';
+      id: string;
+      text: string;
+      lineCount: number;
+    }
+  | {
       /** A Unity asset (scene/prefab/material/etc.) from the GUID index, resolved at send time. */
       kind: 'unity-asset';
       id: string;

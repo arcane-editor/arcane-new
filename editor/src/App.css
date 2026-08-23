@@ -4635,6 +4635,59 @@ html, body, #root {
   border-bottom: none;
 }
 
+/* An inline file reference inside assistant prose. Same vocabulary as
+   `.ai-panel-attachment-chip` — a file should look like a file everywhere in
+   this panel — but pitched quieter, because this one sits mid-sentence rather
+   than in a rail of its own: no filled background at rest, and it inherits the
+   line's own metrics so a paragraph containing three of them still sets on an
+   even baseline. The hover is where it admits to being a control. */
+.ai-file-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  padding: 0 4px;
+  margin: 0 1px;
+  background: transparent;
+  /* No border: a 1px one adds 2px to the height of every line that contains a
+     chip, so a paragraph mentioning three files sets looser than the one above
+     it. The hover ring is a box-shadow instead, which does not affect layout. */
+  border: 0;
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-family: var(--font-mono, 'Fira Code', monospace);
+  font-size: 0.92em;
+  line-height: inherit;
+  cursor: pointer;
+  vertical-align: baseline;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  text-underline-offset: 2px;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.ai-file-chip:hover {
+  background: var(--bg-input);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent);
+  text-decoration-color: transparent;
+}
+
+.ai-file-chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* The icon is a 12px raster sitting in a baseline-aligned row; nudging it down
+   a hair is what stops it riding above the text it labels. */
+.ai-file-chip img,
+.ai-file-chip svg {
+  transform: translateY(2px);
+  flex-shrink: 0;
+}
+
+.ai-file-chip-label {
+  white-space: nowrap;
+}
+
 .ai-panel-attachment-chip {
   display: inline-flex;
   align-items: center;
@@ -4691,6 +4744,22 @@ html, body, #root {
    `direction: rtl` above and truncates from the right again. Verified in a
    browser: with it, `a/very/deeply/nested/path` renders `a/very/deeply/nes…`
    instead of `…/deeply/nested/path`. */
+/* The opening of a pasted slab, so two "Pasted 40 lines" chips are
+   distinguishable. Truncates from the END — the mirror of `.dir` above, which
+   is rtl so a path keeps its deepest segment. A code preview is identified by
+   how it starts, so it keeps its head instead. */
+.ai-panel-attachment-preview {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 0 1 auto;
+  font-family: var(--font-mono, 'Fira Code', monospace);
+  font-size: 10px;
+  color: var(--text-secondary);
+  opacity: 0.8;
+}
+
 .ai-panel-attachment-dir {
   direction: rtl;
   text-align: left;

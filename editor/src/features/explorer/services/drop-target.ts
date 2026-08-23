@@ -9,6 +9,7 @@
  */
 
 import { invoke } from '@tauri-apps/api/core';
+import { toCssPoint } from '../../../utils/drop-point';
 
 const DROP_OVER_CLASS = 'tree-node--drop-over';
 const ROOT_DROP_OVER_CLASS = 'sidebar-tree--drop-over';
@@ -18,20 +19,10 @@ export interface DropRow {
   isDir: boolean;
 }
 
-/**
- * Converts a Tauri drag-drop position to CSS pixels.
- *
- * The payload is a PhysicalPosition while `getBoundingClientRect()` is in CSS
- * pixels — on a Retina display those differ by 2x, so skipping this puts every
- * drop in the wrong quadrant of the window.
- */
-export function toCssPoint(
-  position: { x: number; y: number },
-  devicePixelRatio: number,
-): { x: number; y: number } {
-  const dpr = devicePixelRatio || 1;
-  return { x: position.x / dpr, y: position.y / dpr };
-}
+// Re-exported: this module's own callers and its test both import it from
+// here, and the implementation now lives in `utils/` because the terminal and
+// the AI panel need the same conversion. See `utils/drop-point.ts`.
+export { toCssPoint };
 
 /** The directory a drop on `row` should land in. */
 export function targetDirFor(row: DropRow | null, treeRoot: string): string {

@@ -9,7 +9,7 @@ import { RotateCcw, History, Paperclip } from 'lucide-react';
 import { useAiStore } from '../../../stores/ai';
 import { useAuthStore } from '../../../stores/auth';
 import { useWorkspaceStore } from '../../../stores/workspace';
-import { ARCANE_FILE_MIME, parseFileDrag } from '../../../utils/drag-mime';
+import { hasFileDrag, readFileDrag } from '../../../utils/drag-mime';
 import { resetChatBackend } from '../services/chat-backend';
 import { buildFileAttachment, isAlreadyStaged } from '../services/stage-file';
 import MessageList from './MessageList';
@@ -47,6 +47,34 @@ function AiChatPanel() {
     // would answer the "new" chat with the old thread's context.
     resetChatBackend();
   }
+
+  // OS file drops. Tauri intercepts those natively, so no DOM drop event ever
+  // reaches this element and App.tsx's window-level handler hit-tests the
+  // coordinate instead (`services/drop-target.ts`) and forwards the paths
+  // here. In-webview drags — explorer tree, tab bar — take the React handlers
+  // further down instead.
+  useEffect(() => {
+    function onStagePaths(e: Event) {
+      const paths = (e as CustomEvent<{ paths?: string[] }>).detail?.paths;
+      if (!Array.isArray(paths) || paths.length === 0) return;
+
+      const { attachments, addAttachment } = useAiStore.getState();
+      const workspacePath = useWorkspaceStore.getState().workspacePath;
+
+      // Staged inside one getState() read, then de-duplicated against the list
+      // as it grows: dropping the same file twice in one gesture would
+      // otherwise produce two identical chips.
+      const staged = [...attachments];
+      for (const path of paths) {
+        if (isAlreadyStaged(staged, path)) continue;
+        const attachment = buildFileAttachment(path, workspacePath);
+        staged.push(attachment);
+        addAttachment(attachment);
+      }
+    }
+    window.addEventListener('ai-stage-paths', onStagePaths);
+    return () => window.removeEventListener('ai-stage-paths', onStagePaths);
+  }, []);
 
   // The header buttons and the mod+shift+L / mod+shift+H chords must do the
   // same thing, so the commands dispatch these events rather than duplicating
@@ -95,7 +123,10 @@ function AiChatPanel() {
   // in-webview HTML5 drags, unaffected by Tauri's native interception of OS
   // file drops — those still open as editor tabs via App.tsx.
   function handleDragOver(e: React.DragEvent) {
-    if (!e.dataTransfer.types.includes(ARCANE_FILE_MIME)) return;
+    // Accepts EITHER payload. The tab bar attaches its reorder path plus a
+    // second file payload, and keying only on the second meant a tab drag was
+    // silently ignored while an explorer drag worked — see `readFileDrag`.
+    if (!hasFileDrag(e.dataTransfer.types)) return;
     // Without preventDefault the browser refuses the drop outright.
     e.preventDefault();
     e.dataTransfer.dropEffect = 'copy';
@@ -111,7 +142,7 @@ function AiChatPanel() {
 
   function handleDrop(e: React.DragEvent) {
     setDragOver(false);
-    const payload = parseFileDrag(e.dataTransfer.getData(ARCANE_FILE_MIME));
+    const payload = readFileDrag(e.dataTransfer);
     if (!payload) return;
     e.preventDefault();
 

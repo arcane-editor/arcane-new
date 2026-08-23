@@ -29,6 +29,11 @@ export {
   type ExternalAgentStatus,
 } from './services/external-agent-gate';
 export type { ClaudeConnectState } from './services/claude-connect';
+export {
+  clearAiPanelDropTarget,
+  highlightAiPanelDropTarget,
+  isDropOnAiPanel,
+} from './services/drop-target';
 export { fixConsoleError } from './services/fix-console-error';
 export { isAiComposerFocused } from './services/composer-focus';
 export { EFFORT_ORDER, nextEffort, clampEffort, restoreEffort } from './data/effort';

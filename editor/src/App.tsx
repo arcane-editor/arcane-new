@@ -73,6 +73,11 @@ import {
   highlightExplorerDropTarget,
   clearExplorerDropTarget,
 } from './features/explorer';
+import {
+  clearAiPanelDropTarget,
+  highlightAiPanelDropTarget,
+  isDropOnAiPanel,
+} from './features/ai-panel';
 import { useUnitySceneStore } from './stores/unity-scene';
 import { useRegisterCommands } from './hooks/useRegisterCommands';
 import { useAutoSave } from './hooks/useAutoSave';
@@ -674,17 +679,31 @@ function App() {
         if (event.payload.type === 'enter' || event.payload.type === 'over') {
           highlightTerminalDropTarget(event.payload.position);
           highlightExplorerDropTarget(event.payload.position);
+          highlightAiPanelDropTarget(event.payload.position);
           return;
         }
         if (event.payload.type === 'leave') {
           clearTerminalDropTarget();
           clearExplorerDropTarget();
+          clearAiPanelDropTarget();
           return;
         }
 
         const paths = event.payload.paths;
         clearExplorerDropTarget();
+        clearAiPanelDropTarget();
         if (await handleTerminalDrop(event.payload.position, paths)) return;
+
+        // Dropped on the AI panel: stage as chat context rather than opening
+        // editor tabs. Checked ahead of the explorer and of the open-as-tab
+        // fallback at the bottom, because the panel is the most specific target
+        // under the cursor — that fallback is what every OS drop did until now,
+        // and it is why dragging a file from Finder onto the chat opened it in
+        // the editor instead of attaching it.
+        if (isDropOnAiPanel(event.payload.position)) {
+          window.dispatchEvent(new CustomEvent('ai-stage-paths', { detail: { paths } }));
+          return;
+        }
 
         // Dropped on the file tree: copy into the folder under the cursor.
         // The explorer owns the rest (the Unity .meta question, the copy

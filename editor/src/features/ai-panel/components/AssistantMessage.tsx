@@ -11,6 +11,8 @@ import type { AiMessage } from '../../../stores/ai';
 import type { TextContent, ThinkingContent, ToolCall } from '../services/vendor/types';
 import { hasRenderableContent } from '../services/turn-errors';
 import { modelShortName } from '../data/served-model';
+import { parseFileRef } from '../data/file-ref';
+import FilePathChip from './FilePathChip';
 import ThinkingBlock from './ThinkingBlock';
 import ToolCallBlock from './ToolCallBlock';
 import StreamingIndicator from './StreamingIndicator';
@@ -20,11 +22,46 @@ import StreamingIndicator from './StreamingIndicator';
 // every render, which its own internal memoization can't see through.
 const REMARK_PLUGINS = [remarkGfm];
 
+/**
+ * Inline code that names a file becomes an openable chip; everything else
+ * renders as ordinary `<code>`.
+ *
+ * Scoped to INLINE code only. A fenced block arrives here with `node.position`
+ * spanning multiple lines and, more importantly, is content rather than
+ * reference — chipping a line inside a code sample would be nonsense. The
+ * `className` check is how react-markdown distinguishes them: a fenced block
+ * carries `language-*`, inline code carries nothing.
+ *
+ * `parseFileRef` owns the "is this a path" decision and errs toward no, which
+ * is what keeps `useState` from becoming a chip that opens nothing.
+ */
+const MARKDOWN_COMPONENTS = {
+  code({ className, children, ...props }: {
+    className?: string;
+    children?: React.ReactNode;
+  } & React.HTMLAttributes<HTMLElement>) {
+    const isFenced = typeof className === 'string' && className.includes('language-');
+    if (!isFenced && typeof children === 'string') {
+      const ref = parseFileRef(children);
+      if (ref) return <FilePathChip refr={ref} label={children} />;
+    }
+    return (
+      <code className={className} {...props}>
+        {children}
+      </code>
+    );
+  },
+};
+
 // R2-T4: isolate each text block's markdown parse behind its own memo so a
 // sibling block re-rendering (or the parent AssistantMessage re-rendering
 // for an unrelated reason) doesn't re-parse markdown that hasn't changed.
 const MarkdownBlock = memo(function MarkdownBlock({ text }: { text: string }) {
-  return <Markdown remarkPlugins={REMARK_PLUGINS}>{text}</Markdown>;
+  return (
+    <Markdown remarkPlugins={REMARK_PLUGINS} components={MARKDOWN_COMPONENTS}>
+      {text}
+    </Markdown>
+  );
 });
 
 interface AssistantMessageProps {
