@@ -1,13 +1,13 @@
 import { describe, it, expect } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { isSuccessfulWrite } from '../write-approval-gate';
 
 // `analyzer-gate.ts` itself can't be imported under Bun (it reaches
 // `tool-operations.ts` → the workspace store → the theme store → `document`),
 // so the wiring is asserted against its source text — same convention as
 // `agent-service-wiring.test.ts` and `session-persistence.test.ts`.
-const SRC = await Bun.file(
-  new URL('./analyzer-gate.ts', import.meta.url).pathname,
-).text();
+const SRC = readFileSync(path.resolve(import.meta.dir, './analyzer-gate.ts'), 'utf8');
 
 describe('isSuccessfulWrite', () => {
   it('is true only for the vendor tools’ literal success prefix', () => {

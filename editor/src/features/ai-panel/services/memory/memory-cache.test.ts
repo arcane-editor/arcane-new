@@ -1,9 +1,11 @@
 import { describe, it, expect } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 
 // `memory-cache.ts` can't be imported under Bun (it reaches the workspace store
 // → the theme store → `document`), so the wiring is asserted against its source
 // — same convention as `agent-service-wiring.test.ts`.
-const SRC = await Bun.file(new URL('./memory-cache.ts', import.meta.url).pathname).text();
+const SRC = readFileSync(path.resolve(import.meta.dir, './memory-cache.ts'), 'utf8');
 
 describe('memory-cache workspace subscriber', () => {
   // The subscriber has no selector, so it fires on EVERY workspace-store
