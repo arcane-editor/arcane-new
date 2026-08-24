@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
     resolveModel, classifyStreamError, convertMessages, describeStreamError, streamCompletion,
+    isToolChoiceRejection,
     LlmConfigError, type LlmEnv,
 } from '../src/services/llm-router.ts';
 import { SPARK_MODEL, DEFAULT_MODEL_ROUTING } from '../src/config/plans.ts';
@@ -184,6 +185,24 @@ describe('describeStreamError', () => {
     });
 });
 
+describe('isToolChoiceRejection', () => {
+    it('recognizes the refusal from the message', () => {
+        expect(isToolChoiceRejection(new Error('only "auto" is supported for tool_choice.'))).toBe(true);
+    });
+
+    it('recognizes it from the OpenAI-shaped error body alone', () => {
+        expect(isToolChoiceRejection(Object.assign(new Error('Bad Request'), {
+            statusCode: 400,
+            responseBody: '{"error":{"message":"unsupported","param":"tool_choice"}}',
+        }))).toBe(true);
+    });
+
+    it('does not claim unrelated failures', () => {
+        expect(isToolChoiceRejection(new Error('rate limited'))).toBe(false);
+        expect(isToolChoiceRejection(new Error("Invalid 'input[2].call_id'"))).toBe(false);
+    });
+});
+
 // `streamCompletion` folded `streamOnce` back into itself once the fallback
 // machinery was deleted (Task 5); this is the one behavioral test for the
 // resulting generator, using the `streamTextImpl` injection seam to feed a
@@ -238,6 +257,104 @@ describe('streamCompletion event mapping', () => {
 
         expect(seen[0].toolChoice).toBe('none');
         expect('toolChoice' in seen[1]).toBe(false);
+    });
+
+    // The refusal verbatim from the field (2026-08-24). The provider 400s the
+    // WHOLE request rather than ignoring the unsupported field, so a governed
+    // turn used to die at exactly the cap it was being asked to wrap up at.
+    const TOOL_CHOICE_400 = Object.assign(
+        new Error('only "auto" is supported for tool_choice. "none", "required", and named function '
+            + 'choices are not currently supported'),
+        {
+            statusCode: 400,
+            responseBody: '{"error":{"code":null,"message":"only \\"auto\\" is supported for tool_choice.'
+                + '","param":"tool_choice","type":"invalid_request_error"}}',
+        },
+    );
+
+    const REQ_WITH_TOOLS: ChatCompletionRequest = {
+        ...REQ,
+        tools: [{
+            type: 'function',
+            function: { name: 'read_file', description: 'read a file', parameters: { type: 'object', properties: {} } },
+        }],
+    };
+
+    /** streamText double scripting a DIFFERENT fullStream per call, so the
+     *  fallback pass can be told apart from the first attempt. */
+    function scriptedStreamText(calls: Array<Array<Record<string, unknown>>>) {
+        const seen: Array<Record<string, unknown>> = [];
+        const fn = (args: Record<string, unknown>) => {
+            const parts = calls[seen.length] ?? [];
+            seen.push(args);
+            return { fullStream: (async function* () { for (const p of parts) yield p; })() };
+        };
+        return { impl: fn as unknown as typeof import('ai').streamText, seen };
+    }
+
+    it('retries with tools withheld when the provider rejects tool_choice, instead of killing the turn', async () => {
+        const { impl, seen } = scriptedStreamText([
+            [{ type: 'error', error: TOOL_CHOICE_400 }],
+            [{ type: 'text-delta', text: 'wrapping up' }],
+        ]);
+
+        const events: StreamEvent[] = [];
+        for await (const e of streamCompletion({ ...REQ_WITH_TOOLS, tool_choice: 'none' }, ENV, impl)) events.push(e);
+
+        // The 400 never reaches the client — the turn completes.
+        expect(events).toEqual([{ type: 'text', content: 'wrapping up' }]);
+        // And the retry drops the tools as well as the rejected field, so the
+        // model still cannot call one: that guarantee is what tool_choice
+        // 'none' was buying, and the agent loop only exits on a tool-free turn.
+        expect(seen).toHaveLength(2);
+        expect(seen[0].toolChoice).toBe('none');
+        expect(seen[0].tools).toBeDefined();
+        expect('toolChoice' in seen[1]).toBe(false);
+        expect('tools' in seen[1]).toBe(false);
+    });
+
+    it('does not retry when tool_choice was never sent', async () => {
+        const { impl, seen } = scriptedStreamText([
+            [{ type: 'error', error: TOOL_CHOICE_400 }],
+            [{ type: 'text-delta', text: 'must not run' }],
+        ]);
+
+        const events: StreamEvent[] = [];
+        for await (const e of streamCompletion(REQ_WITH_TOOLS, ENV, impl)) events.push(e);
+
+        expect(seen).toHaveLength(1);
+        expect(events).toHaveLength(1);
+        expect(events[0].type).toBe('error');
+    });
+
+    it('surfaces an unrelated upstream error without retrying', async () => {
+        const { impl, seen } = scriptedStreamText([
+            [{ type: 'error', error: Object.assign(new Error('rate limited'), { statusCode: 429 }) }],
+            [{ type: 'text-delta', text: 'must not run' }],
+        ]);
+
+        const events: StreamEvent[] = [];
+        for await (const e of streamCompletion({ ...REQ_WITH_TOOLS, tool_choice: 'none' }, ENV, impl)) events.push(e);
+
+        expect(seen).toHaveLength(1);
+        expect(events).toEqual([
+            { type: 'error', code: 'rate_limit', message: 'Error: rate limited [status 429]' },
+        ]);
+    });
+
+    it('does not retry once output has been delivered — a replay would duplicate it', async () => {
+        const { impl, seen } = scriptedStreamText([
+            [{ type: 'text-delta', text: 'half a turn' }, { type: 'error', error: TOOL_CHOICE_400 }],
+            [{ type: 'text-delta', text: 'must not run' }],
+        ]);
+
+        const events: StreamEvent[] = [];
+        for await (const e of streamCompletion({ ...REQ_WITH_TOOLS, tool_choice: 'none' }, ENV, impl)) events.push(e);
+
+        expect(seen).toHaveLength(1);
+        expect(events).toHaveLength(2);
+        expect(events[0]).toEqual({ type: 'text', content: 'half a turn' });
+        expect(events[1].type).toBe('error');
     });
 
     it('forwards the abort signal to streamText so a client Stop cancels the provider call', async () => {

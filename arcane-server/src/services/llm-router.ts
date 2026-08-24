@@ -248,6 +248,24 @@ export function describeStreamError(error: unknown): string {
     return `${String(error)}${status}${body}`;
 }
 
+/**
+ * Did the provider reject our `tool_choice` field outright? Several
+ * OpenAI-compatible endpoints reachable through this router implement only
+ * `"auto"` and 400 the whole request on anything else:
+ *
+ *     only "auto" is supported for tool_choice. "none", "required", and
+ *     named function choices are not currently supported
+ *
+ * We send exactly one value ('none') and only when the editor's turn governor
+ * reaches its per-send call cap, so an upstream error naming the field is that
+ * disagreement and nothing else. The match is on the FIELD NAME — which every
+ * OpenAI-shaped error body repeats in `param` — not on the sentence, so a
+ * provider that words the refusal differently is still recognized.
+ */
+export function isToolChoiceRejection(error: unknown): boolean {
+    return /tool_?choice/i.test(describeStreamError(error));
+}
+
 // Workers AI binding errors are normalized by workers-ai-provider into an
 // APICallError whose `statusCode` carries the mapped HTTP status (internal
 // codes 3036/3040 -> 429), so check that first — the stringified message
@@ -287,12 +305,9 @@ export async function* streamCompletion(
     const tools = convertTools(req.tools);
     const maxOutputTokens = Math.min(req.max_tokens ?? 8192, getMaxOutput(req.model, catalog));
 
-    const result = streamTextImpl({
-        model, messages, ...(tools ? { tools } : {}),
-        // 'none' keeps the tools block in the prompt (cached prefix) while
-        // forbidding tool calls — the editor's turn governor sends it at the
-        // per-send call cap.
-        ...(req.tool_choice === 'none' ? { toolChoice: 'none' as const } : {}),
+    const forbidTools = req.tool_choice === 'none';
+    const baseArgs = {
+        model, messages,
         ...(cacheKey && req.model.startsWith('openai/')
             ? { providerOptions: { openai: { promptCacheKey: cacheKey } } }
             : {}),
@@ -300,42 +315,83 @@ export async function* streamCompletion(
         // billed) the full generation after the user stopped reading.
         ...(signal ? { abortSignal: signal } : {}),
         maxOutputTokens, temperature: req.temperature,
-    });
+    };
 
-    for await (const part of result.fullStream) {
-        switch (part.type) {
-            case 'text-delta':
-                yield { type: 'text', content: part.text };
+    // At most two passes. The first sends what the caller asked for: with
+    // `tool_choice: 'none'` the tools block stays in the prompt (heading the
+    // provider's cached prefix) while tool calls are forbidden — the editor's
+    // turn governor sends exactly that at the per-send call cap.
+    //
+    // Providers disagree about the field, and the ones that don't implement it
+    // reject the ENTIRE request rather than ignoring it (see
+    // isToolChoiceRejection) — so the turn died at precisely the moment the
+    // agent was being told to wrap up. The second pass honours the same "no
+    // tool calls" contract the only other way there is: by withholding
+    // `tools`. That forfeits the cached prefix — the exact cost
+    // `tool_choice: 'none'` exists to avoid — so it runs only after the
+    // provider has actually refused the field, never speculatively.
+    let emitted = false;
+    for (let attempt = 0; attempt < 2; attempt++) {
+        const sendToolChoice = attempt === 0;
+        const result = streamTextImpl(sendToolChoice
+            ? {
+                ...baseArgs,
+                ...(tools ? { tools } : {}),
+                ...(forbidTools ? { toolChoice: 'none' as const } : {}),
+            }
+            : baseArgs);
+        let rejected = false;
+
+        for await (const part of result.fullStream) {
+            // A provider that refuses `tool_choice` refuses it at request
+            // validation, so this lands before the first token and `emitted` is
+            // false. Check it anyway: retrying a half-delivered turn would replay
+            // text the client has already rendered.
+            if (part.type === 'error' && sendToolChoice && forbidTools && !emitted
+                && isToolChoiceRejection(part.error)) {
+                rejected = true;
                 break;
-            case 'tool-call':
-                yield {
-                    type: 'tool_call', id: part.toolCallId, name: part.toolName,
-                    arguments: JSON.stringify(part.input), finished: true,
-                };
-                break;
-            case 'finish':
-                yield {
-                    type: 'usage',
-                    // The model actually served (post-routing) — lets the
-                    // editor surface what ran without trusting its request.
-                    model: req.model,
-                    input_tokens: part.totalUsage.inputTokens ?? 0,
-                    output_tokens: part.totalUsage.outputTokens ?? 0,
-                    // AI SDK v5: `totalUsage.cachedInputTokens` is deprecated in favor
-                    // of `inputTokenDetails.cacheReadTokens` (checked against the
-                    // installed `ai` package's types). 0/undefined for Workers AI
-                    // today — no prefix-caching provider is wired up yet (see
-                    // AI-SPEC.md "Prompt caching status") — plumbed through now so
-                    // request_logs.cached_input_tokens lights up the day one is.
-                    cached_input_tokens: part.totalUsage.inputTokenDetails.cacheReadTokens ?? 0,
-                };
-                break;
-            case 'reasoning-delta':
-                yield { type: 'thinking', thought: part.text, signature: '' };
-                break;
-            case 'error':
-                yield { type: 'error', code: classifyStreamError(part.error), message: describeStreamError(part.error) };
-                break;
+            }
+            switch (part.type) {
+                case 'text-delta':
+                    emitted = true;
+                    yield { type: 'text', content: part.text };
+                    break;
+                case 'tool-call':
+                    emitted = true;
+                    yield {
+                        type: 'tool_call', id: part.toolCallId, name: part.toolName,
+                        arguments: JSON.stringify(part.input), finished: true,
+                    };
+                    break;
+                case 'finish':
+                    emitted = true;
+                    yield {
+                        type: 'usage',
+                        // The model actually served (post-routing) — lets the
+                        // editor surface what ran without trusting its request.
+                        model: req.model,
+                        input_tokens: part.totalUsage.inputTokens ?? 0,
+                        output_tokens: part.totalUsage.outputTokens ?? 0,
+                        // AI SDK v5: `totalUsage.cachedInputTokens` is deprecated in favor
+                        // of `inputTokenDetails.cacheReadTokens` (checked against the
+                        // installed `ai` package's types). 0/undefined for Workers AI
+                        // today — no prefix-caching provider is wired up yet (see
+                        // AI-SPEC.md "Prompt caching status") — plumbed through now so
+                        // request_logs.cached_input_tokens lights up the day one is.
+                        cached_input_tokens: part.totalUsage.inputTokenDetails.cacheReadTokens ?? 0,
+                    };
+                    break;
+                case 'reasoning-delta':
+                    emitted = true;
+                    yield { type: 'thinking', thought: part.text, signature: '' };
+                    break;
+                case 'error':
+                    emitted = true;
+                    yield { type: 'error', code: classifyStreamError(part.error), message: describeStreamError(part.error) };
+                    break;
+            }
         }
+        if (!rejected) return;
     }
 }

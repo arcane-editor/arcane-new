@@ -76,6 +76,10 @@ export interface ChatCompletionRequest {
      * OpenAI-style tool choice. The editor's turn governor sends 'none' at
      * the call cap so the model answers tool-free while the `tools` block
      * stays byte-identical for provider prompt-prefix caches.
+     *
+     * Best-effort: providers that implement only `"auto"` reject the whole
+     * request on 'none', and llm-router then falls back to withholding
+     * `tools` — same tool-free guarantee, cached prefix lost.
      */
     tool_choice?: 'none' | 'auto';
     metadata?: {
