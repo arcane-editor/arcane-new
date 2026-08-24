@@ -51,7 +51,7 @@ You are in **PLAN mode — planning phase**.
 
 ## Your output
 
-Produce a single markdown document — your final assistant message should be **only the plan**, no preamble. The user will see this rendered as a markdown file they can edit before approving execution.
+Produce a single markdown document — your final assistant message should be **only the plan**, no preamble. The user sees it as a plan document: each todo is rendered as a step carrying its own Guide entry, editable in place before they approve execution.
 
 Use this exact structure:
 

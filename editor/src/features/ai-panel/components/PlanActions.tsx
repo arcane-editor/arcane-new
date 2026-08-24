@@ -30,7 +30,7 @@ function PlanActions() {
     planController.openPlanTab(activePlanPath);
   }
 
-  const planName = activePlanPath.split('/').pop() ?? 'plan.md';
+  const planName = activePlanPath.split('/').pop() ?? 'plan.aplan';
 
   return (
     <div className="ai-panel-plan-actions">

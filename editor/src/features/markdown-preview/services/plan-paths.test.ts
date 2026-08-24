@@ -16,10 +16,20 @@ describe('isMarkdownPath', () => {
 
 describe('isPlanPath', () => {
   it('matches a plan written by plan mode', () => {
-    expect(isPlanPath('/Users/me/Game/.arcane/plans/20260810-1432-add-enemy.md')).toBe(true);
+    expect(isPlanPath('/Users/me/Game/.arcane/plans/20260810-1432-add-enemy.aplan')).toBe(true);
   });
 
-  it('matches the same path with Windows separators', () => {
+  /** The extension is the signal, so a plan stays a plan wherever it is moved. */
+  it('matches a .aplan anywhere, case-insensitively', () => {
+    expect(isPlanPath('/Users/me/Game/Assets/notes.aplan')).toBe(true);
+    expect(isPlanPath(String.raw`C:\Game\scratch\draft.APLAN`)).toBe(true);
+  });
+
+  // Plans written before the extension existed still open as plans: they parse
+  // identically, and demoting them to prose would take Execute away from work
+  // that was already planned.
+  it('still matches a legacy .md plan inside .arcane/plans/', () => {
+    expect(isPlanPath('/Users/me/Game/.arcane/plans/20260810-1432-add-enemy.md')).toBe(true);
     expect(isPlanPath(String.raw`C:\Game\.arcane\plans\20260810-1432-add-enemy.md`)).toBe(true);
   });
 
@@ -29,7 +39,12 @@ describe('isPlanPath', () => {
     expect(isPlanPath('/Users/me/Game/docs/plans/thing.md')).toBe(false);
   });
 
-  it('does not match a non-markdown file inside the plans folder', () => {
+  it('does not match some other file inside the plans folder', () => {
     expect(isPlanPath('/Users/me/Game/.arcane/plans/notes.txt')).toBe(false);
+  });
+
+  /** `.aplan` is not markdown by name — EditorPanel must route on isPlanPath. */
+  it('is not reported as a markdown path', () => {
+    expect(isMarkdownPath('20260810-1432-add-enemy.aplan')).toBe(false);
   });
 });

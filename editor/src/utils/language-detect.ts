@@ -123,6 +123,10 @@ const SPECS: readonly LangSpec[] = [
   { extensions: ['uss'], monacoId: 'css', displayName: 'USS (UI Toolkit)' },
   { extensions: ['uxml'], monacoId: 'xml', displayName: 'UXML (UI Toolkit)' },
   { extensions: ['md'], monacoId: 'markdown', displayName: 'Markdown' },
+  // Plan documents. Markdown inside — the status bar says "Plan" because that
+  // is what the file is for, and Monaco only ever sees one in the fallback
+  // path (the plan view renders them itself).
+  { extensions: ['aplan'], monacoId: 'markdown', displayName: 'Plan' },
   { extensions: ['rs'], monacoId: 'rust', displayName: 'Rust' },
   { extensions: ['toml'], monacoId: 'toml', displayName: 'TOML' },
   { extensions: ['yaml', 'yml'], monacoId: 'yaml', displayName: 'YAML' },

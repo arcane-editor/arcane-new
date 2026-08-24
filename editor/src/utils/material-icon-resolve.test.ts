@@ -186,6 +186,24 @@ describe('light theme overrides', () => {
   });
 });
 
+// A plan is one of the most-opened files in the app; the generic document
+// icon made it indistinguishable from every other text file in the tree.
+describe('resolveFileIconId — Arcane file types', () => {
+  it('gives a plan its own icon', () => {
+    const id = resolveFileIconId('20260810-1432-add-enemy.aplan', false);
+    expect(id).toBe('todo');
+    expect(id).not.toBe(resolveFileIconId('notes.txt', false));
+  });
+
+  it('resolves that icon to a real SVG', () => {
+    expect(ICON_PATHS[resolveFileIconId('a.aplan', false)]).toBeDefined();
+  });
+
+  it('is case-insensitive, like every other extension', () => {
+    expect(resolveFileIconId('A.APLAN', false)).toBe(resolveFileIconId('a.aplan', false));
+  });
+});
+
 describe('map integrity', () => {
   it('resolves every icon id the maps can produce to a real SVG', () => {
     const maps = require('./material-icon-map.generated');

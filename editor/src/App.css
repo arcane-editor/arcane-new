@@ -7312,6 +7312,10 @@ html, body, #root {
 }
 .md-preview-body h3 { font-size: 1.08em; margin: var(--space-5) 0 var(--space-2); }
 .md-preview-body p, .md-preview-body ul, .md-preview-body ol { margin: 0 0 var(--space-3); }
+/* The global reset zeroes list padding, which hangs every marker outside
+   its own text column. Put it back rather than leaving markers adrift. */
+.md-preview-body ul, .md-preview-body ol { padding-left: 1.35em; }
+.md-preview-body li::marker { color: var(--text-secondary); }
 .md-preview-body li { margin-bottom: var(--space-1); }
 .md-preview-body code {
   padding: 1px 5px;
@@ -7461,90 +7465,286 @@ html, body, #root {
 .md-note-quote { font-size: var(--text-xs); color: var(--text-secondary); font-style: italic; }
 .md-note-body { font-size: var(--text-sm); margin-top: 2px; }
 
-.plan-doc-header,
-.plan-doc-progress,
-.plan-doc-footer {
+/* ── Plan document ────────────────────────────────────────────────────────
+   An .aplan renders as a document with a spine, not as a file with chrome.
+   Everything above the page is one thin bar; the bar's bottom edge is the
+   progress rule, so a plan that shows its own steps ticking off never needs
+   a second widget to say the same thing. */
+
+.plan-doc-bar {
+  position: relative;
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
   flex-shrink: 0;
-}
-.plan-doc-header { border-bottom: 1px solid var(--border); }
-.plan-doc-title { font-size: var(--text-sm); font-weight: 500; }
-.plan-doc-modes { margin-left: auto; display: flex; gap: 2px; }
-.plan-doc-mode {
-  padding: 2px var(--space-2);
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-secondary);
-  font-size: var(--text-xs);
-  cursor: pointer;
-  transition: background var(--motion-fast) var(--ease-out), color var(--motion-fast) var(--ease-out);
-}
-.plan-doc-mode:hover { background: var(--hover); color: var(--text-primary); }
-.plan-doc-mode.is-active { background: var(--selected); color: var(--text-active); }
-
-.plan-doc-progress { border-bottom: 1px solid var(--border); font-size: var(--text-xs); }
-.plan-doc-progress-label { color: var(--text-secondary); white-space: nowrap; }
-.plan-doc-progress-track {
-  flex: 1;
-  height: 4px;
-  border-radius: var(--radius-full);
-  background: var(--bg-input);
-  overflow: hidden;
-}
-.plan-doc-progress-fill {
-  height: 100%;
-  background: var(--accent);
-  border-radius: var(--radius-full);
-  transition: width var(--motion-slow) var(--ease-out);
-}
-.plan-doc-progress-pct { color: var(--text-secondary); min-width: 34px; text-align: right; }
-
-.plan-doc-steps {
-  flex-shrink: 0;
-  max-height: 30%;
-  overflow-y: auto;
-  margin: 0;
   padding: var(--space-2) var(--space-3);
-  list-style: none;
   border-bottom: 1px solid var(--border);
+  background: var(--bg-sidebar);
 }
-.plan-doc-step {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-2);
-  padding: 2px 0;
-  font-size: var(--text-sm);
+
+/* Sits ON the border-bottom, filling left-to-right with completion. */
+.plan-doc-rule {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 1px;
+  transform-origin: left center;
+  background: var(--accent);
+  transition: transform var(--motion-slow) var(--ease-out);
+}
+
+.plan-doc-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
   color: var(--text-secondary);
 }
-.plan-doc-step-icon { flex-shrink: 0; margin-top: 2px; }
-.plan-doc-step--done { color: var(--success); }
-.plan-doc-step--running { color: var(--accent); }
-.plan-doc-step--done .plan-doc-step-text { text-decoration: line-through; opacity: 0.75; }
+.plan-doc-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: currentColor;
+}
+.plan-doc-status.is-running { color: var(--accent); }
+.plan-doc-status.is-running .plan-doc-status-dot { animation: plan-pulse 1.7s var(--ease-in-out) infinite; }
 
-.plan-doc-body { flex: 1; min-height: 0; overflow: auto; }
-.plan-doc-source {
-  margin: 0;
-  padding: var(--space-4);
+.plan-doc-count {
   font-family: var(--font-mono);
-  font-size: var(--text-sm);
-  white-space: pre-wrap;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+.plan-doc-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+/* Pending-suggestion count, worn by the Revise button it gates. */
+.plan-doc-btn-count {
+  min-width: 15px;
+  padding: 0 4px;
+  border-radius: var(--radius-full);
+  background: var(--badge-bg);
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 15px;
+  text-align: center;
+}
+
+.plan-doc-scroll { flex: 1; min-height: 0; overflow: auto; }
+.plan-doc-page {
+  max-width: 74ch;
+  margin: 0 auto;
+  padding: var(--space-8) var(--space-6);
+}
+
+/* The page owns the measure and the rhythm, so the previews nested inside it
+   (lead prose, each step's guide, the tail) drop their own. */
+.plan-doc-page .md-preview { overflow: visible; }
+.plan-doc-page .md-preview-body {
+  max-width: none;
+  margin: 0;
+  padding: 0;
+}
+
+.plan-doc-page .md-preview-body h1 {
+  font-size: 1.9em;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  margin: 0 0 var(--space-4);
+}
+
+/* Section labels become eyebrows. `## Goal` / `## Context` / `## Risks` are
+   framing, not content — quieting them lets the prose and the steps carry the
+   page. Same idiom as .md-notes-title, so it reads as part of this app. */
+.plan-doc-page .md-preview-body h2 {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-secondary);
+  border-bottom: none;
+  padding-bottom: 0;
+  margin: var(--space-6) 0 var(--space-2);
+}
+
+/* The notes panel moved inside the page, which already owns the measure. */
+.plan-doc-page .md-notes { max-width: none; margin: var(--space-6) 0 0; padding: 0; }
+
+.plan-doc-hint {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-top: var(--space-6);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  opacity: 0.7;
+}
+
+/* ── The spine ────────────────────────────────────────────────────────────
+   Each step is a marker on a vertical rail plus its own guide. The rail is
+   the progress display: filled behind what is done, live at what is running,
+   hairline ahead of it. */
+
+.plan-spine {
+  list-style: none;
+  margin: var(--space-6) 0;
+  padding: 0;
+}
+
+.plan-step {
+  --spine: var(--border);
+  display: grid;
+  grid-template-columns: 24px 1fr;
+  gap: var(--space-3);
+  padding-bottom: var(--space-5);
+}
+.plan-step:last-child { padding-bottom: 0; }
+.plan-step--done { --spine: var(--success); }
+.plan-step--running { --spine: var(--accent); }
+
+.plan-step-rail { position: relative; }
+/* The connector runs from under this marker to the next one. */
+.plan-step-rail::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 26px;
+  bottom: -2px;
+  width: 1.5px;
+  transform: translateX(-50%);
+  background: var(--spine);
+  transition: background var(--motion-slow) var(--ease-out);
+}
+.plan-step:last-child .plan-step-rail::after { display: none; }
+
+.plan-step-marker {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-full);
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: border-color var(--motion-base) var(--ease-out),
+    background var(--motion-base) var(--ease-out),
+    color var(--motion-base) var(--ease-out);
+}
+.plan-step-marker:disabled { cursor: default; }
+.plan-step-marker:hover:not(:disabled) { border-color: var(--text-secondary); color: var(--text-primary); }
+.plan-step-ord { font-family: var(--font-mono); font-size: 10px; line-height: 1; }
+
+.plan-step--done .plan-step-marker {
+  border-color: var(--success);
+  background: var(--success);
+  color: var(--bg-primary);
+}
+.plan-step--running .plan-step-marker {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.plan-step-pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+  background: var(--accent);
+  animation: plan-pulse 1.7s var(--ease-in-out) infinite;
+}
+
+@keyframes plan-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+.plan-step-main { min-width: 0; padding-top: 1px; }
+/* A finished step recedes; it does not get struck through. Line-through on a
+   wrapped title was the least readable thing in the old view. */
+.plan-step--done .plan-step-main { opacity: 0.6; }
+/* The running step is the only one with a ground, so the eye lands on it
+   without a second accent competing with the spine. */
+.plan-step--running .plan-step-main {
+  margin: calc(var(--space-2) * -1) calc(var(--space-3) * -1);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+
+.plan-step-head { display: flex; align-items: flex-start; gap: var(--space-2); }
+.plan-step-title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 1.02em;
+  font-weight: 550;
+  line-height: 1.45;
+  letter-spacing: -0.005em;
   color: var(--text-primary);
 }
+.plan-step-title.is-editable { cursor: text; border-radius: var(--radius-sm); }
+.plan-step-title.is-editable:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.plan-step-title code {
+  padding: 1px 4px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  font-weight: 400;
+}
+.plan-step--running .plan-step-title { color: var(--text-active); }
 
-.plan-doc-pill {
-  font-size: var(--text-xs);
-  color: var(--text-secondary);
-  background: var(--warning-bg, #4d3800);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 1px 8px;
-  white-space: nowrap;
+.plan-step-title-input {
+  flex: 1;
+  min-width: 0;
+  box-sizing: border-box;
+  resize: none;
+  padding: 2px 5px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--bg-sidebar);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  outline: none;
 }
 
+.plan-step-disclose {
+  flex-shrink: 0;
+  display: flex;
+  padding: 1px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  opacity: 0.4;
+  transition: opacity var(--motion-fast) var(--ease-out), color var(--motion-fast) var(--ease-out);
+}
+.plan-step:hover .plan-step-disclose,
+.plan-step-disclose:focus-visible { opacity: 1; }
+.plan-step-disclose:hover { color: var(--text-primary); }
+
+.plan-step-guide {
+  margin-top: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+.plan-step-guide .md-preview-body { font-size: var(--text-sm); line-height: 1.65; }
+.plan-step-guide .md-preview-body h3,
+.plan-step-guide .md-preview-body h4 { font-size: 1em; margin: var(--space-3) 0 var(--space-1); }
 /* Notion-style in-place block editing (plan preview) */
 .md-block-editable { cursor: text; border-radius: 4px; }
 .md-block-editable:hover { background: color-mix(in srgb, var(--accent) 6%, transparent); }
@@ -7567,8 +7767,6 @@ html, body, #root {
 }
 .md-block-editing:focus { border-color: var(--accent); }
 
-.plan-doc-footer { border-top: 1px solid var(--border); background: var(--bg-sidebar); }
-.plan-doc-footer-count { font-size: var(--text-xs); color: var(--text-secondary); margin-right: auto; }
 .plan-doc-btn {
   display: inline-flex;
   align-items: center;

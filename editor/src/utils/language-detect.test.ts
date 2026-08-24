@@ -22,6 +22,19 @@ describe('detectLanguage — extensions', () => {
 // "env", which isn't an extension anyone registers. Resolving these by BASENAME
 // is what makes Cmd+/ work in them: Monaco's comment action is a silent no-op
 // unless the language declares a lineComment, and plaintext declares none.
+// `.aplan` is markdown inside; the display name says what the file is FOR,
+// which is what the status bar should tell the user.
+describe('detectLanguage — plan documents', () => {
+  it('highlights .aplan as markdown but names it Plan', () => {
+    expect(detectLanguage('20260810-1432-add-enemy.aplan').monacoId).toBe('markdown');
+    expect(detectLanguage('20260810-1432-add-enemy.aplan').displayName).toBe('Plan');
+  });
+
+  it('does not disturb ordinary markdown', () => {
+    expect(detectLanguage('README.md').displayName).toBe('Markdown');
+  });
+});
+
 describe('detectLanguage — .env files', () => {
   it('resolves a bare .env', () => {
     expect(getMonacoLanguageId('.env')).toBe('dotenv');

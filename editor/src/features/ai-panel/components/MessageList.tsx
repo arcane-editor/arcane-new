@@ -194,7 +194,7 @@ function MessageList() {
 
   // Gated on the ACTIVE agent, not just the plan phase. `planPhase` and
   // `activePlanPath` belong to Arcane's plan controller, which writes
-  // `.arcane/plans/*.md`; an external agent runs its own loop and never touches
+  // `.arcane/plans/*.aplan`; an external agent runs its own loop and never touches
   // them. Without this check, switching agents mid-thread left Arcane's
   // Execute / Regenerate / Open card sitting under a "Claude Code" header,
   // offering to execute a plan the selected agent did not write and cannot run.

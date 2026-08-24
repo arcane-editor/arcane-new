@@ -22,6 +22,22 @@ interface MarkdownPreviewProps {
   editable?: boolean;
   onCommitBlockEdit?: (start: number, end: number, newText: string) => void;
   onToggleTask?: (offset: number) => void;
+  /**
+   * This preview is rendering a SLICE of a bigger document — the plan view
+   * shows a plan as several of these (lead prose, each step's guide, the tail)
+   * so the steps can be UI instead of headings.
+   *
+   * `base` is where `content` starts inside `document`. Everything that leaves
+   * this component is reported against `document`, not the slice: edit offsets
+   * are shifted by `base`, and notes anchor against the whole file so a quote
+   * still resolves after the model rewrites the plan.
+   *
+   * Slice mode also hands the notes CHROME to the parent — the notes list and
+   * the hint render once for the document, not once per slice — and with it
+   * the re-anchoring pass, which only the parent can do correctly because only
+   * the parent sees every slice.
+   */
+  slice?: { base: number; document: string };
 }
 
 interface PendingSelection {
@@ -61,6 +77,9 @@ function offsetsOf(node: PositionedNode | undefined): { start: number; end: numb
  * enters edit mode for that block when `editable` — selection always wins
  * over editing, so suggest keeps working. Raw HTML stays disabled (no
  * rehype-raw) — this renders model output.
+ *
+ * Can render a slice of a larger document rather than a whole one; see the
+ * `slice` prop.
  */
 function MarkdownPreview({
   content,
@@ -70,7 +89,13 @@ function MarkdownPreview({
   editable = false,
   onCommitBlockEdit,
   onToggleTask,
+  slice,
 }: MarkdownPreviewProps) {
+  // A slice reports positions in the whole document; a standalone preview IS
+  // the whole document, so both collapse to the identity case when unsliced.
+  const offsetBase = slice?.base ?? 0;
+  const anchorDoc = slice?.document ?? content;
+
   const [pending, setPending] = useState<PendingSelection | null>(null);
   const [draft, setDraft] = useState('');
   const [editing, setEditing] = useState<EditingBlock | null>(null);
@@ -80,11 +105,15 @@ function MarkdownPreview({
   const editRef = useRef<HTMLTextAreaElement>(null);
 
   // Re-locate notes whenever the document changes — a revise rewrites it all.
+  // Skipped in slice mode: re-anchoring against one slice would orphan every
+  // note pinned to any of the others. The parent owns it there.
   useEffect(() => {
+    if (slice) return;
     const next = reanchorNotes(notes, content);
     const changed = next.some((n, i) => n.anchored !== notes[i]?.anchored || n.headingPath !== notes[i]?.headingPath);
     if (changed) onNotesChange(next);
     // Intentionally keyed on `content` alone: re-running on `notes` would loop.
+    // `slice` is fixed for a given preview's lifetime, so it needs no key.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [content]);
 
@@ -127,7 +156,7 @@ function MarkdownPreview({
 
   function addNote() {
     if (!pending || !draft.trim()) return;
-    onNotesChange([...notes, createNote(content, pending.text, draft.trim())]);
+    onNotesChange([...notes, createNote(anchorDoc, pending.text, draft.trim())]);
     setPending(null);
     setDraft('');
     window.getSelection()?.removeAllRanges();
@@ -156,7 +185,7 @@ function MarkdownPreview({
     // drop the edit rather than splice at offsets that no longer mean anything.
     if (content.slice(start, end) !== original) return;
     if (editDraft === original) return;
-    onCommitBlockEdit?.(start, end, editDraft);
+    onCommitBlockEdit?.(start + offsetBase, end + offsetBase, editDraft);
   }
 
   function editorFor(editingBlock: EditingBlock): React.ReactNode {
@@ -238,7 +267,7 @@ function MarkdownPreview({
             {...rest}
             disabled={false}
             onChange={() => {
-              if (typeof start === 'number') onToggleTask(start);
+              if (typeof start === 'number') onToggleTask(start + offsetBase);
             }}
           />
         );
@@ -247,7 +276,7 @@ function MarkdownPreview({
     // beginBlockEdit/commitBlockEdit/editorFor close over content/editing/editDraft;
     // memo keys cover everything that changes their behavior.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [highlighted, editable, editing, editDraft, content, onCommitBlockEdit, onToggleTask]);
+  }, [highlighted, editable, editing, editDraft, content, offsetBase, onCommitBlockEdit, onToggleTask]);
 
   return (
     <div className="md-preview" onMouseUp={onMouseUp}>
@@ -290,7 +319,7 @@ function MarkdownPreview({
         </div>
       )}
 
-      {notes.length > 0 && (
+      {!slice && notes.length > 0 && (
         <div className="md-notes">
           <div className="md-notes-title">
             {notes.length} suggestion{notes.length === 1 ? '' : 's'}
@@ -323,7 +352,7 @@ function MarkdownPreview({
         </div>
       )}
 
-      {allowNotes && notes.length === 0 && (
+      {!slice && allowNotes && notes.length === 0 && (
         <div className="md-preview-hint">
           <MessageSquarePlus size={12} />
           {editable ? 'Click a block to edit it, or select text to suggest a change.' : 'Select any text to suggest a change.'}

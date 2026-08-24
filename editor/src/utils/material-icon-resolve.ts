@@ -74,6 +74,19 @@ const UNITY_EXTENSION_OVERRIDES: Record<string, string> = {
  * Values are base ids; the `-open` variant is derived, and both are asserted to
  * exist in `ICON_PATHS` by the unit tests.
  */
+/**
+ * Arcane's own file types. Kept separate from the Unity overlay above because
+ * they are a different vocabulary with a different reason to exist, and folding
+ * them together would make that map's name a lie.
+ *
+ * Asserted to exist in `ICON_PATHS` by the unit tests, same as the Unity map.
+ */
+const ARCANE_EXTENSION_OVERRIDES: Record<string, string> = {
+  // A plan is a checklist first; `todo` is the closest thing the vendored set
+  // has, and it reads as one at 16px.
+  aplan: 'todo',
+};
+
 const UNITY_FOLDER_OVERRIDES: Record<string, string> = {
   prefabs: 'folder-unity',
   scenes: 'folder-unity',
@@ -130,7 +143,7 @@ export function resolveFileIconId(filename: string, isLight: boolean): string {
   // probes `gitignore`. Ascending i yields longest-suffix-first.
   for (let i = 1; i < segments.length; i++) {
     const suffix = segments.slice(i).join('.');
-    const override = UNITY_EXTENSION_OVERRIDES[suffix];
+    const override = ARCANE_EXTENSION_OVERRIDES[suffix] ?? UNITY_EXTENSION_OVERRIDES[suffix];
     if (override) return override;
     const byExt = pick(suffix, FILE_EXTENSIONS, LIGHT_FILE_EXTENSIONS, isLight);
     if (byExt) return byExt;

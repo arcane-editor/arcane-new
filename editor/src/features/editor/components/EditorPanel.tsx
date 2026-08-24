@@ -194,14 +194,16 @@ function EditorPanel() {
   // rather than in Monaco is that a plan is something you act on, and sending
   // the user to a raw text buffer to do that was the gap.
   //
-  // A plan is matched BEFORE the view-mode gate: PlanDocumentView owns both
-  // modes itself (its Source mode embeds Monaco inside the plan chrome). The
-  // old ordering gated on mode === 'preview' first, which made the Source
-  // button a one-way door into the bare Monaco fallback below — with no
-  // control anywhere to get back to the preview.
+  // A plan is matched on its PATH, not on being markdown: `.aplan` carries
+  // markdown but is not a `.md`, and the legacy `.arcane/plans/*.md` clause in
+  // isPlanPath still has to win over the plain-markdown branch below.
+  //
+  // There is no view-mode gate on this branch. A plan has one mode — the
+  // document — and every part of it is edited in place; the Monaco fallback
+  // further down is reachable only for files this never claims.
   const isPlainMarkdown =
     isMarkdownPath(activeFile.name) && !activeFile.diff && !isPlanPath(activeFile.path);
-  if (isMarkdownPath(activeFile.name) && !activeFile.diff && isPlanPath(activeFile.path)) {
+  if (isPlanPath(activeFile.path) && !activeFile.diff) {
     return (
       <PlanDocumentView
         path={activeFile.path}
