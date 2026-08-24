@@ -22,6 +22,7 @@ export type TurnErrorKind =
   | 'network'
   | 'timeout'
   | 'corrupted'
+  | 'context_overflow'
   | 'crash'
   | 'empty'
   | 'unknown';
@@ -55,10 +56,49 @@ const CODE_MARKER = /^\[code:([a-z_]+)\]\s*/;
  * code maps directly to a kind/title; an unrecognized code falls through to
  * the table on the stripped remainder.
  */
+/**
+ * A context-length rejection is DETERMINISTIC — the same history overflows the
+ * same window every time — but it reaches us as the server's generic
+ * `model_error`, which maps to kind 'server' and tells the user "this is
+ * usually temporary — try again in a moment". The one error where retrying is
+ * guaranteed to fail was the one the UI pushed hardest to retry.
+ *
+ * Matched on the provider's own wording because there is no structured code for
+ * it: the server's `classifyStreamError` only ever emits `rate_limit` or
+ * `model_error`. Patterns are deliberately specific — "token" alone appears in
+ * plenty of unrelated failures.
+ */
+const CONTEXT_OVERFLOW_PATTERNS = [
+  /context[_ ]length/i,
+  /maximum context/i,
+  /context window/i,
+  /prompt is too long/i,
+  /too many tokens/i,
+  /reduce the length of the messages/i,
+  /input validation error[\s\S]*tokens/i,
+];
+
+function contextOverflowError(raw: string): TurnError | null {
+  if (!CONTEXT_OVERFLOW_PATTERNS.some((re) => re.test(raw))) return null;
+  return {
+    kind: 'context_overflow',
+    title: 'Conversation too long',
+    detail:
+      'This conversation no longer fits the model\'s context window. Start a new chat, ' +
+      'or remove large attachments, and send a shorter message.',
+    raw,
+    retriable: false,
+  };
+}
+
 export function classifyTurnError(raw: string): TurnError {
   const codeMatch = CODE_MARKER.exec(raw);
   if (codeMatch) {
     const stripped = raw.slice(codeMatch[0].length);
+    // Before the code mapping: a context overflow arrives tagged `model_error`,
+    // which would otherwise return the retriable 'server' branch below.
+    const overflow = contextOverflowError(stripped);
+    if (overflow) return overflow;
     const kind = classifyServerCode(codeMatch[1]);
     if (kind === 'rate_limit') {
       return {
@@ -101,7 +141,7 @@ export function classifyTurnError(raw: string): TurnError {
     }
     return classifyTurnErrorTable(stripped);
   }
-  return classifyTurnErrorTable(raw);
+  return contextOverflowError(raw) ?? classifyTurnErrorTable(raw);
 }
 
 /** Substring-based classification table — first match wins (T3 brief). */

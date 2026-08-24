@@ -48,25 +48,66 @@ function blocks<T>(content: T[] | null | undefined): T[] {
  */
 function repairToolPairs(messages: OpenAIMessage[]): OpenAIMessage[] {
   const out: OpenAIMessage[] = [];
+  /**
+   * Every tool-call id handed to the provider, across the WHOLE conversation.
+   * Outstanding calls used to be tracked in a per-message `Set`, so two calls
+   * sharing an id collapsed to one entry: the first result deleted it, the
+   * second was dropped as a stray, and the assistant message still advertised
+   * two calls — an unanswered pair, which is precisely the 400 this function
+   * exists to prevent, made permanent because the broken history replays on
+   * every send. Duplicate ids are not hypothetical: the server's
+   * `sanitizeToolCallId` normalises ids to `[A-Za-z0-9_-]`, which can flatten
+   * two distinct ids into the same string.
+   */
+  const usedIds = new Set<string>();
+
+  function uniqueId(id: string): string {
+    if (!usedIds.has(id)) {
+      usedIds.add(id);
+      return id;
+    }
+    let n = 2;
+    while (usedIds.has(`${id}_${n}`)) n++;
+    const fresh = `${id}_${n}`;
+    usedIds.add(fresh);
+    return fresh;
+  }
+
   let i = 0;
   while (i < messages.length) {
     const m = messages[i];
     if (m.role === 'assistant' && m.tool_calls && m.tool_calls.length > 0) {
-      out.push(m);
-      const expected = new Set(m.tool_calls.map((tc) => tc.id));
+      // Give every call a distinct id, remembering the rename so its result can
+      // follow. Slots are filled in arrival order, which is the only ordering
+      // information a duplicated id leaves us.
+      const slots = m.tool_calls.map((tc) => {
+        const to = uniqueId(tc.id);
+        return { from: tc.id, to, filled: false };
+      });
+      const renamed = slots.some((sl) => sl.from !== sl.to);
+      out.push(
+        renamed
+          ? { ...m, tool_calls: m.tool_calls.map((tc, idx) => ({ ...tc, id: slots[idx].to })) }
+          : m,
+      );
       i++;
+
       while (i < messages.length && messages[i].role === 'tool') {
         const t = messages[i];
-        if (t.tool_call_id && expected.has(t.tool_call_id)) {
-          expected.delete(t.tool_call_id);
-          out.push(t);
+        const slot = slots.find((sl) => !sl.filled && sl.from === t.tool_call_id);
+        if (slot) {
+          slot.filled = true;
+          out.push(slot.to === t.tool_call_id ? t : { ...t, tool_call_id: slot.to });
         }
+        // else: stray result with no live tool_call — drop (providers reject it)
         i++;
       }
-      for (const id of expected) {
+
+      for (const slot of slots) {
+        if (slot.filled) continue;
         out.push({
           role: 'tool',
-          tool_call_id: id,
+          tool_call_id: slot.to,
           content: '[interrupted — no result produced]',
         });
       }

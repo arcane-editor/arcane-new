@@ -486,3 +486,38 @@ describe('server codes + credits/tier-gated kinds', () => {
     expect(e.retriable).toBe(false);
   });
 });
+
+// A context-length rejection is DETERMINISTIC: the same history will overflow
+// the same window every time. It used to fall through to the generic
+// `model_error` → kind 'server' branch, which tells the user "this is usually
+// temporary — try again in a moment" and offers a Retry that cannot ever
+// succeed. The one error where retrying is guaranteed to fail was the one the
+// UI pushed hardest to retry.
+describe('classifyTurnError — context overflow', () => {
+  const phrasings = [
+    'This model\'s maximum context length is 131072 tokens, however you requested 140000',
+    'prompt is too long: 210000 tokens > 200000 maximum',
+    'Input validation error: `inputs` tokens + `max_new_tokens` must be <= 131072',
+    'context_length_exceeded',
+    'too many tokens in the request',
+  ];
+
+  for (const raw of phrasings) {
+    it(`classifies "${raw.slice(0, 40)}…" as a non-retriable overflow`, () => {
+      const e = classifyTurnError(raw);
+      expect(e.kind).toBe('context_overflow');
+      expect(e.retriable).toBe(false);
+    });
+  }
+
+  it('tells the user what actually clears it, not "try again"', () => {
+    const e = classifyTurnError('context_length_exceeded');
+    expect((e.detail ?? '').toLowerCase()).not.toContain('try again');
+    expect((e.detail ?? '').toLowerCase()).toMatch(/new chat|shorter|attachment/);
+  });
+
+  it('does not hijack an unrelated error that merely mentions tokens', () => {
+    const e = classifyTurnError('Server error (500): token service unavailable');
+    expect(e.kind).not.toBe('context_overflow');
+  });
+});

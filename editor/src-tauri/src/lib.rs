@@ -449,6 +449,48 @@ pub struct CommandOutput {
     pub exit_code: i32,
 }
 
+/// Per-stream capture ceiling for `execute_command`.
+///
+/// `wait_with_output()` buffered the ENTIRE output before the JS side got a
+/// chance to truncate it, so one `find /` from the agent could balloon the app's
+/// memory. The frontend caps what the model sees at 50KB anyway
+/// (`vendor/tools/truncate.ts`); this is the much looser backstop that keeps a
+/// runaway command from taking the process down.
+const MAX_CAPTURE_BYTES: usize = 2 * 1024 * 1024;
+
+/// Drain a child pipe, keeping at most `cap` bytes. Returns the bytes and
+/// whether anything was dropped. Reading continues past the cap so the child
+/// never blocks on a full pipe (which would hang it instead of killing it).
+async fn read_capped<R: tokio::io::AsyncRead + Unpin>(mut reader: R, cap: usize) -> (Vec<u8>, bool) {
+    use tokio::io::AsyncReadExt;
+
+    let mut out: Vec<u8> = Vec::new();
+    let mut chunk = [0u8; 8192];
+    let mut truncated = false;
+
+    loop {
+        match reader.read(&mut chunk).await {
+            Ok(0) => break,
+            Ok(n) => {
+                if out.len() >= cap {
+                    truncated = true;
+                    continue;
+                }
+                let take = std::cmp::min(n, cap - out.len());
+                out.extend_from_slice(&chunk[..take]);
+                if take < n {
+                    truncated = true;
+                }
+            }
+            Err(_) => break,
+        }
+    }
+
+    (out, truncated)
+}
+
+const CAPTURE_TRUNCATED_NOTE: &str = "\n[output truncated by Arcane: exceeded 2 MiB]";
+
 #[tauri::command]
 async fn execute_command(
     command: String,
@@ -459,23 +501,92 @@ async fn execute_command(
 
     let timeout = std::time::Duration::from_millis(timeout_ms.unwrap_or(30000));
 
-    let child = crate::process_util::async_command(if cfg!(target_os = "windows") { "cmd" } else { "sh" })
-        .args(if cfg!(target_os = "windows") { vec!["/C", &command] } else { vec!["-c", &command] })
+    let mut cmd =
+        crate::process_util::async_command(if cfg!(target_os = "windows") { "cmd" } else { "sh" });
+    cmd.args(if cfg!(target_os = "windows") { vec!["/C", &command] } else { vec!["-c", &command] })
         .current_dir(&cwd)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
+        // Dropping the timed-out future must not leave the shell running. This
+        // was missing here while `acp.rs` and `lsp.rs` both set it, so every
+        // overrunning agent command (a Unity build, `bun test`) leaked a
+        // detached process that kept burning CPU — and turns stacked them up.
+        .kill_on_drop(true);
+
+    // `kill_on_drop` only reaches the `sh` leader. The commands the agent runs
+    // spawn their own children, which outlive it. Putting the shell in its own
+    // process group lets the timeout path below kill the whole tree.
+    #[cfg(unix)]
+    unsafe {
+        cmd.pre_exec(|| {
+            libc::setpgid(0, 0);
+            Ok(())
+        });
+    }
+
+    let mut child = cmd
         .spawn()
         .map_err(|e| format!("Failed to spawn command: {}", e))?;
 
-    let output = tokio::time::timeout(timeout, child.wait_with_output())
-        .await
-        .map_err(|_| format!("Command timed out after {}ms", timeout.as_millis()))?
-        .map_err(|e| format!("Command failed: {}", e))?;
+    // Captured BEFORE the child moves into the future below, so the timeout arm
+    // can still address the group after the future (and the child) is dropped.
+    #[cfg(unix)]
+    let pgid = child.id().map(|id| id as i32);
+
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+
+    let run = async move {
+        let (out, err, status) = tokio::join!(
+            async {
+                match stdout {
+                    Some(s) => read_capped(s, MAX_CAPTURE_BYTES).await,
+                    None => (Vec::new(), false),
+                }
+            },
+            async {
+                match stderr {
+                    Some(s) => read_capped(s, MAX_CAPTURE_BYTES).await,
+                    None => (Vec::new(), false),
+                }
+            },
+            child.wait(),
+        );
+        (out, err, status)
+    };
+
+    let ((out_bytes, out_truncated), (err_bytes, err_truncated), status) =
+        match tokio::time::timeout(timeout, run).await {
+            Ok(v) => v,
+            Err(_) => {
+                // The future (and with it the child) has been dropped, so
+                // `kill_on_drop` has already signalled the leader. Take out any
+                // grandchildren it left behind.
+                #[cfg(unix)]
+                if let Some(pgid) = pgid {
+                    unsafe {
+                        libc::killpg(pgid, libc::SIGKILL);
+                    }
+                }
+                return Err(format!("Command timed out after {}ms", timeout.as_millis()));
+            }
+        };
+
+    let status = status.map_err(|e| format!("Command failed: {}", e))?;
+
+    let mut stdout_text = String::from_utf8_lossy(&out_bytes).to_string();
+    if out_truncated {
+        stdout_text.push_str(CAPTURE_TRUNCATED_NOTE);
+    }
+    let mut stderr_text = String::from_utf8_lossy(&err_bytes).to_string();
+    if err_truncated {
+        stderr_text.push_str(CAPTURE_TRUNCATED_NOTE);
+    }
 
     Ok(CommandOutput {
-        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        exit_code: output.status.code().unwrap_or(-1),
+        stdout: stdout_text,
+        stderr: stderr_text,
+        exit_code: status.code().unwrap_or(-1),
     })
 }
 
@@ -707,13 +818,13 @@ pub fn run() {
 
     builder
         .plugin(tauri_plugin_window_state::Builder::default().build())
-        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(cli::PendingGoto::default())
         .manage(lsp::LspState::new())
         .manage(terminal::TerminalState::new())
@@ -1222,5 +1333,119 @@ mod canonicalize_path_tests {
             canonicalize_path(missing.clone()),
             crate::path_util::to_ui_path(&missing),
         );
+    }
+}
+
+/// `execute_command` is the bash tool's backend. Two properties matter and
+/// neither was true before: a timeout must not leave work running, and a
+/// runaway command must not be buffered without limit.
+#[cfg(test)]
+mod execute_command_tests {
+    use super::*;
+
+    fn tmpdir() -> tempfile::TempDir {
+        tempfile::tempdir().expect("temp dir")
+    }
+
+    #[tokio::test]
+    async fn returns_stdout_and_exit_code_for_a_normal_command() {
+        let dir = tmpdir();
+        let out = execute_command(
+            "echo hello".to_string(),
+            dir.path().to_string_lossy().to_string(),
+            Some(10_000),
+        )
+        .await
+        .expect("command should run");
+
+        assert_eq!(out.stdout.trim(), "hello");
+        assert_eq!(out.exit_code, 0);
+    }
+
+    #[tokio::test]
+    async fn reports_a_non_zero_exit_code_without_erroring() {
+        let dir = tmpdir();
+        let out = execute_command(
+            "exit 3".to_string(),
+            dir.path().to_string_lossy().to_string(),
+            Some(10_000),
+        )
+        .await
+        .expect("a failing command is still a successful invocation");
+
+        assert_eq!(out.exit_code, 3);
+    }
+
+    #[tokio::test]
+    async fn a_timeout_is_reported_as_an_error() {
+        let dir = tmpdir();
+        let err = execute_command(
+            "sleep 30".to_string(),
+            dir.path().to_string_lossy().to_string(),
+            Some(200),
+        )
+        .await
+        .expect_err("should time out");
+
+        assert!(err.contains("timed out"), "unexpected error: {}", err);
+    }
+
+    /// The regression this whole rewrite exists for. `kill_on_drop` was absent
+    /// AND only reaches the `sh` leader anyway, so a timed-out agent command
+    /// left its real work (a Unity build, `bun test`) running detached.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_timeout_kills_the_whole_process_group_not_just_the_shell() {
+        let dir = tmpdir();
+        let pidfile = dir.path().join("grandchild.pid");
+        // A grandchild that would outlive `sh`: records its pid, then sleeps.
+        let script = format!(
+            "sh -c 'echo $$ > {} ; sleep 30' & sleep 30",
+            pidfile.display()
+        );
+
+        let err = execute_command(script, dir.path().to_string_lossy().to_string(), Some(500))
+            .await
+            .expect_err("should time out");
+        assert!(err.contains("timed out"), "unexpected error: {}", err);
+
+        let pid: i32 = std::fs::read_to_string(&pidfile)
+            .expect("grandchild should have recorded its pid")
+            .trim()
+            .parse()
+            .expect("pid should parse");
+
+        // `kill(pid, 0)` probes liveness without signalling. Poll briefly: the
+        // grandchild is reparented on the leader's death and reaped by init.
+        let mut alive = true;
+        for _ in 0..40 {
+            alive = unsafe { libc::kill(pid, 0) } == 0;
+            if !alive {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        assert!(!alive, "grandchild {} survived the timeout", pid);
+    }
+
+    #[tokio::test]
+    async fn oversized_output_is_capped_and_says_so() {
+        let dir = tmpdir();
+        // ~4 MiB, comfortably past MAX_CAPTURE_BYTES.
+        let out = execute_command(
+            "yes 0123456789012345678901234567890123456789 | head -n 110000".to_string(),
+            dir.path().to_string_lossy().to_string(),
+            Some(30_000),
+        )
+        .await
+        .expect("command should run");
+
+        assert!(
+            out.stdout.len() <= MAX_CAPTURE_BYTES + CAPTURE_TRUNCATED_NOTE.len(),
+            "captured {} bytes, cap is {}",
+            out.stdout.len(),
+            MAX_CAPTURE_BYTES
+        );
+        assert!(out.stdout.contains("output truncated by Arcane"));
     }
 }

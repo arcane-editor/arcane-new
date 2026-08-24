@@ -7,14 +7,24 @@
  */
 
 import { useState } from 'react';
-import { ChevronRight, ChevronDown, Check, X, Minus, ShieldCheck, ShieldAlert } from 'lucide-react';
+import {
+  ChevronRight,
+  ChevronDown,
+  Check,
+  X,
+  Minus,
+  ShieldCheck,
+  ShieldAlert,
+  ShieldQuestion,
+} from 'lucide-react';
 import type { AiMessage } from '../../../stores/ai';
+import { verifiedVerdict, verdictTitle } from '../services/verified-verdict';
 
 interface Props {
   message: AiMessage;
 }
 
-type Marker = 'ok' | 'bad' | 'skip';
+import type { CheckMarker as Marker } from '../services/verified-verdict';
 
 function MarkerIcon({ marker }: { marker: Marker }) {
   switch (marker) {
@@ -59,12 +69,14 @@ function VerifiedCard({ message }: Props) {
         ? 'GUIDs ok'
         : plural(guids.missing.length, 'GUID missing');
 
-  const allOk = compileMarker !== 'bad' && analyzersMarker !== 'bad' && guidsMarker !== 'bad';
+  // A skipped check is NOT a passing one: when the bridge is down and the budget
+  // runs out, all three skip — and this used to render a green "Verified".
+  const verdict = verifiedVerdict([compileMarker, analyzersMarker, guidsMarker]);
   const missingGuids = guids !== 'skipped' && guids !== 'intact' ? guids.missing : [];
   const hasDetail = touchedFiles.length > 0 || missingGuids.length > 0;
 
   return (
-    <div className={`ai-verified-card ${allOk ? 'is-ok' : 'is-bad'}`}>
+    <div className={`ai-verified-card is-${verdict}`}>
       <button
         type="button"
         className="ai-verified-header"
@@ -80,12 +92,14 @@ function VerifiedCard({ message }: Props) {
         ) : (
           <span className="ai-verified-chevron-spacer" />
         )}
-        {allOk ? (
+        {verdict === 'passed' ? (
           <ShieldCheck size={13} strokeWidth={2} className="ai-verified-icon-ok" />
+        ) : verdict === 'unverified' ? (
+          <ShieldQuestion size={13} strokeWidth={2} className="ai-verified-icon-skip" />
         ) : (
           <ShieldAlert size={13} strokeWidth={2} className="ai-verified-icon-bad" />
         )}
-        <span className="ai-verified-title">Verified</span>
+        <span className="ai-verified-title">{verdictTitle(verdict)}</span>
         <span className="ai-verified-summary">
           <span className="ai-verified-item">
             <MarkerIcon marker={compileMarker} />

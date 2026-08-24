@@ -1,7 +1,12 @@
 import { describe, it, expect } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { buildSessionData, parseSessionData } from './session-persistence';
+import {
+  buildSessionData,
+  parseSessionData,
+  settleDanglingRequests,
+  STALE_PERMISSION_OPTION_ID,
+} from './session-persistence';
 import type { SaveSessionInput, SessionData } from './session-persistence';
 import type { AiMessage, ArcanePlanEntry } from '../../../stores/ai';
 
@@ -197,5 +202,77 @@ describe('stores/ai — plan-state save/restore wiring', () => {
 
   it('loadSessionIntoStore restores through normalizePlanRestore, never raw', () => {
     expect(AI_STORE_SRC).toMatch(/normalizePlanRestore\(session\.planPhase,\s*session\.activePlanPath\)/);
+  });
+});
+
+// The `pending` map in approval-gate.ts is module state that dies with the
+// process, but the request MESSAGES are persisted with the transcript. A session
+// saved while an approval was on screen came back with a live-looking, clickable
+// card whose resolver no longer existed: Allow marked it answered and did
+// nothing, for a turn that ended when the app closed.
+describe('settleDanglingRequests', () => {
+  const permission = (resolvedOptionId?: string) => ({
+    id: 'm1',
+    role: 'permissionRequest' as const,
+    timestamp: 1,
+    permissionRequest: {
+      toolCallId: 'c1',
+      toolName: 'write',
+      options: [
+        { optionId: 'approve', name: 'Allow', kind: 'allow_once' },
+        { optionId: 'reject', name: 'Reject', kind: 'reject_once' },
+      ],
+      ...(resolvedOptionId ? { resolvedOptionId } : {}),
+    },
+  });
+
+  const question = (extra: Record<string, unknown> = {}) => ({
+    id: 'm2',
+    role: 'questionRequest' as const,
+    timestamp: 2,
+    questionRequest: { toolCallId: 'c2', question: 'Which one?', ...extra },
+  });
+
+  it('marks an unanswered permission request expired', () => {
+    const [m] = settleDanglingRequests([permission()] as never);
+    expect((m as never as { permissionRequest: { resolvedOptionId: string } }).permissionRequest.resolvedOptionId)
+      .toBe(STALE_PERMISSION_OPTION_ID);
+  });
+
+  it('uses a sentinel that matches no real option, so the card shows "expired" not "Chosen"', () => {
+    const [m] = settleDanglingRequests([permission()] as never);
+    const req = (m as never as { permissionRequest: { options: { optionId: string }[]; resolvedOptionId: string } })
+      .permissionRequest;
+    expect(req.options.some((o) => o.optionId === req.resolvedOptionId)).toBe(false);
+  });
+
+  it('leaves an already-answered permission request alone', () => {
+    const [m] = settleDanglingRequests([permission('approve')] as never);
+    expect((m as never as { permissionRequest: { resolvedOptionId: string } }).permissionRequest.resolvedOptionId)
+      .toBe('approve');
+  });
+
+  it('cancels an unanswered question request', () => {
+    const [m] = settleDanglingRequests([question()] as never);
+    expect((m as never as { questionRequest: { cancelled: boolean } }).questionRequest.cancelled).toBe(true);
+  });
+
+  it('leaves an answered question request alone', () => {
+    const [m] = settleDanglingRequests([question({ resolvedAnswer: 'A' })] as never);
+    expect((m as never as { questionRequest: { cancelled?: boolean } }).questionRequest.cancelled).toBeUndefined();
+  });
+
+  it('passes ordinary messages through untouched', () => {
+    const msgs = [{ id: 'u1', role: 'user', text: 'hi', timestamp: 1 }] as never;
+    expect(settleDanglingRequests(msgs)).toEqual(msgs);
+  });
+
+  it('is applied by parseSessionData, so sessions saved before the fix are repaired', () => {
+    const json = JSON.stringify({ id: 's', messages: [permission()], agentKind: 'arcane' });
+    const data = parseSessionData(json);
+    expect(
+      (data.messages[0] as never as { permissionRequest: { resolvedOptionId: string } }).permissionRequest
+        .resolvedOptionId,
+    ).toBe(STALE_PERMISSION_OPTION_ID);
   });
 });

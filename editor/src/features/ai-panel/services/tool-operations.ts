@@ -10,6 +10,7 @@ import type { WriteOperations } from './vendor/tools/write';
 import type { EditOperations } from './vendor/tools/edit';
 import type { BashOperations } from './vendor/tools/bash';
 import type { ListOperations } from './vendor/tools/list';
+import type { RealPathOps } from './vendor/tools/real-path-guard';
 
 // ---- Read Operations ----
 
@@ -19,8 +20,12 @@ export const tauriReadOperations: ReadOperations = {
   },
 
   access: async (absolutePath: string): Promise<void> => {
-    // Attempt to read; throws if file doesn't exist
-    await invoke<string>('read_file', { path: absolutePath });
+    // A real existence probe. This used to be a full `read_file`, which made
+    // every successful read decode the file TWICE and — worse — made a binary
+    // file fail the probe, so `read` answered "File not found" for a file that
+    // exists (see the decode branch in vendor/tools/read.ts).
+    const exists = await invoke<boolean>('path_exists', { path: absolutePath });
+    if (!exists) throw new Error(`File not found: ${absolutePath}`);
   },
 };
 
@@ -123,3 +128,23 @@ export function onFileWritten(absolutePath: string): void {
 export function onFileEdited(absolutePath: string): void {
   onFileWritten(absolutePath);
 }
+
+// ---- Real-path (symlink) Operations ----
+
+/**
+ * Backs `withRealPathGuard`. `path_exists` is `is_file()`-only by design, so a
+ * directory ancestor needs `dir_exists` as well — the guard walks ancestors, and
+ * those are directories.
+ */
+export const tauriRealPathOperations: RealPathOps = {
+  canonicalize: async (absPath: string): Promise<string> => {
+    return invoke<string>('canonicalize_path', { path: absPath });
+  },
+  exists: async (absPath: string): Promise<boolean> => {
+    const [isFile, isDir] = await Promise.all([
+      invoke<boolean>('path_exists', { path: absPath }),
+      invoke<boolean>('dir_exists', { path: absPath }),
+    ]);
+    return isFile || isDir;
+  },
+};

@@ -44,6 +44,8 @@ function SessionHistory({ open, onClose }: Props) {
   // sync with the guard inside `openSession` itself (belt-and-suspenders: the
   // guard is what actually prevents the hang if this render is stale).
   const isAgentRunning = useAiStore((s) => s.isAgentRunning);
+  // Needed to notice a delete of the session that is currently OPEN.
+  const activeSessionId = useAiStore((s) => s.sessionId);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [loading, setLoading] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -90,6 +92,25 @@ function SessionHistory({ open, onClose }: Props) {
       onClose();
     },
     [loadSessionIntoStore, onClose],
+  );
+
+  /**
+   * Deleting the session that is currently OPEN has to start a new chat.
+   * `deleteSession` co-deletes the checkpoint and review files, but the live
+   * stores keep their in-memory copies and their `sessionId` — so the next
+   * autosave recreated the session file and the next `recordPreWrite` rewrote
+   * the checkpoints, leaving the delete half-applied and "Restore this turn"
+   * pointing at pre-images the user had just thrown away.
+   */
+  const handleDelete = useCallback(
+    async (sessionId: string) => {
+      await deleteSession(sessionId);
+      if (sessionId === activeSessionId) {
+        window.dispatchEvent(new CustomEvent('ai-new-chat'));
+      }
+      await refresh();
+    },
+    [activeSessionId, refresh],
   );
 
   if (!open) return null;
@@ -182,7 +203,7 @@ function SessionHistory({ open, onClose }: Props) {
                 <button
                   className="ai-history-action"
                   title="Delete"
-                  onClick={() => void deleteSession(s.id).then(refresh)}
+                  onClick={() => void handleDelete(s.id)}
                 >
                   <Trash2 size={12} />
                 </button>

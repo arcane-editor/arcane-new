@@ -18,7 +18,7 @@ import type { AgentTool } from '../vendor/types';
 import { runAnalyzersOnText } from '../../../unity-analyzers';
 import { tauriReadOperations } from '../tool-operations';
 import { resolveToCwd } from '../vendor/tools/path-utils';
-import { isRejectedWrite } from '../write-approval-gate';
+import { isRejectedWrite, isSuccessfulWrite } from '../write-approval-gate';
 
 export function withUnityAnalyzerGate(tool: AgentTool, cwd: string): AgentTool {
   return {
@@ -26,6 +26,11 @@ export function withUnityAnalyzerGate(tool: AgentTool, cwd: string): AgentTool {
     async execute(id, params, signal, onUpdate) {
       const res = await tool.execute(id, params, signal, onUpdate);
       if (isRejectedWrite(res)) return res;
+      // Only a write that LANDED is worth analyzing. Without this the `write`
+      // branch below analyzed `params.content` — the model's proposal — for
+      // writes that failed for any non-rejection reason, and reported the
+      // findings as "introduced by this C# write".
+      if (!isSuccessfulWrite(res)) return res;
       const p = (params as { path?: string }).path;
       if (!p || !p.toLowerCase().endsWith('.cs')) return res;
 

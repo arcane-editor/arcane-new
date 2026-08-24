@@ -29,6 +29,7 @@
 import type { AgentTool, AgentToolResult } from './vendor/types';
 import { recordLoopGuardHit } from './turn-telemetry';
 import { isRejectedWrite } from './write-approval-gate';
+import { resolveToCwd } from './vendor/tools/path-utils';
 
 /**
  * Deterministic JSON serialization — sorts object keys recursively so two
@@ -56,6 +57,39 @@ export function resetRepeatCallGuard(): void {
   writtenSincePaths.clear();
 }
 
+/** Argument keys whose string values name a filesystem location. */
+const PATH_KEYS = new Set(['path', 'cwd']);
+
+/**
+ * Resolve path-valued arguments to their absolute form before they are used as
+ * a repeat-call key.
+ *
+ * The guard keyed on the RAW argument text, so `./Foo.cs` and `Foo.cs` and
+ * `Assets/../Assets/Foo.cs` were three different calls — the model could loop
+ * on the same file forever just by varying the spelling. The same mismatch also
+ * broke the post-write read exemption, which is keyed on the path: a write to
+ * `./Foo.cs` never armed the re-read of `Foo.cs`.
+ *
+ * `cwd` is threaded from the workspace so a relative and an absolute spelling of
+ * the same file collapse, not just two relative ones.
+ */
+function normalizeArgPaths(params: unknown, cwd: string): unknown {
+  if (params === null || typeof params !== 'object' || Array.isArray(params)) return params;
+  const obj = params as Record<string, unknown>;
+  let changed = false;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (PATH_KEYS.has(k) && typeof v === 'string' && v) {
+      const resolved = resolveToCwd(v, cwd);
+      out[k] = resolved;
+      if (resolved !== v) changed = true;
+    } else {
+      out[k] = v;
+    }
+  }
+  return changed ? out : params;
+}
+
 function pathOf(params: unknown): string | undefined {
   const p = (params as { path?: unknown } | null)?.path;
   return typeof p === 'string' ? p : undefined;
@@ -80,12 +114,16 @@ function synthesizeRepeatResult(toolName: string): AgentToolResult {
  * checkpoint snapshot — so a suppressed call never reaches them (no phantom
  * snapshots, no gate feedback for a call that never ran).
  */
-export function withRepeatCallGuard(tool: AgentTool): AgentTool {
+export function withRepeatCallGuard(tool: AgentTool, cwd: string): AgentTool {
   return {
     ...tool,
     async execute(id, params, signal, onUpdate) {
-      const key = `${tool.name}::${stableStringify(params)}`;
-      const path = pathOf(params);
+      // Key on NORMALIZED paths: the raw text let the same file loop forever
+      // under different spellings. The inner tool still receives `params`
+      // untouched — it does its own resolution and sandboxing.
+      const normalized = normalizeArgPaths(params, cwd);
+      const key = `${tool.name}::${stableStringify(normalized)}`;
+      const path = pathOf(normalized);
       const seenCount = callCounts.get(key) ?? 0;
 
       if (seenCount > 0) {

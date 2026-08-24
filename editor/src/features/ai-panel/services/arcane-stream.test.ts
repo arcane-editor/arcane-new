@@ -837,3 +837,92 @@ describe('createArcaneStreamFn', () => {
     });
   });
 });
+
+describe('tool_call argument parsing', () => {
+  function toolCallSse(args: string | undefined, finished = true): string[] {
+    const event: Record<string, unknown> = { type: 'tool_call', id: 'tc_1', name: 'write', finished };
+    if (args !== undefined) event.arguments = args;
+    return [`data: ${JSON.stringify(event)}\n\n`, 'data: [DONE]\n\n'];
+  }
+
+  async function finalToolCall(lines: string[]) {
+    const streamFn = createArcaneStreamFn({ fetchImpl: (async () => sseResponse(lines)) as unknown as typeof fetch });
+    const events = await drain(streamFn(ctx, opts()));
+    const done = events.find((e) => e.type === 'done');
+    const content = (done as unknown as { message: { content: Array<Record<string, unknown>> } })
+      .message.content;
+    return content.find((b) => b.type === 'toolCall') as
+      | { arguments: Record<string, unknown>; rawArguments?: string }
+      | undefined;
+  }
+
+  it('parses well-formed arguments onto the block', async () => {
+    const block = await finalToolCall(toolCallSse('{"path":"A.cs","content":"x"}'));
+    expect(block?.arguments).toEqual({ path: 'A.cs', content: 'x' });
+    expect(block?.rawArguments).toBeUndefined();
+  });
+
+  // The `catch` here used to be empty, so `arguments` stayed at the `{}` set on
+  // block creation and the tool RAN on it. Keeping the raw text is what lets the
+  // loop refuse the call instead (see vendor/tools/validate-args.ts).
+  it('keeps the raw text when the arguments are not valid JSON, instead of silently using {}', async () => {
+    const block = await finalToolCall(toolCallSse('{"path":"A.cs","cont'));
+    expect(block?.rawArguments).toBe('{"path":"A.cs","cont');
+    expect(block?.arguments).toEqual({});
+  });
+
+  it('treats valid-but-scalar JSON as unusable rather than as arguments', async () => {
+    const block = await finalToolCall(toolCallSse('"just a string"'));
+    expect(block?.rawArguments).toBe('"just a string"');
+  });
+
+  // A zero-parameter tool (unity_play, unity_stop) legitimately arrives with no
+  // argument text. That must stay an empty call, not a parse failure.
+  it('treats absent argument text as a legitimate zero-argument call', async () => {
+    const block = await finalToolCall(toolCallSse(undefined));
+    expect(block?.arguments).toEqual({});
+    expect(block?.rawArguments).toBeUndefined();
+  });
+
+  it('closes the tool-call block even when no argument text arrives', async () => {
+    const streamFn = createArcaneStreamFn({
+      fetchImpl: (async () => sseResponse(toolCallSse(undefined))) as unknown as typeof fetch,
+    });
+    const events = await drain(streamFn(ctx, opts()));
+    // `toolcall_end` used to sit inside `if (event.arguments)`, so an
+    // argument-less call never emitted it.
+    expect(events.some((e) => e.type === 'toolcall_end')).toBe(true);
+  });
+});
+
+describe('429 rate-limit messaging', () => {
+  async function errorFrom(body: string): Promise<string> {
+    const fetchImpl = (async () => new Response(body, { status: 429 })) as unknown as typeof fetch;
+    // maxAttempts 1 so the transient-retry path doesn't consume the response.
+    const streamFn = createArcaneStreamFn({ fetchImpl, retryBaseDelayMs: 1, maxAttempts: 1 });
+    const events = await drain(streamFn(ctx, opts()));
+    const err = events.find((e) => e.type === 'error') as { error: Error } | undefined;
+    return err?.error.message ?? '';
+  }
+
+  // The server computes a real reset time for the hourly spend cap; the client
+  // replaced it with "wait a moment", which is wrong by up to an hour and sends
+  // the user straight back into another 429.
+  it('surfaces the server’s reset-time hint', async () => {
+    const msg = await errorFrom(
+      JSON.stringify({ code: 'rate_limited', error: 'Too many AI requests in a short window. Try again in ~47 minute(s).' }),
+    );
+    expect(msg).toContain('~47 minute(s)');
+  });
+
+  it('keeps the prefix that classifyTurnError routes on', async () => {
+    const msg = await errorFrom(JSON.stringify({ error: 'Try again in ~3 minute(s).' }));
+    expect(msg.toLowerCase()).toContain('rate limit');
+  });
+
+  it('falls back to the generic message when the body is not JSON', async () => {
+    const msg = await errorFrom('<html>429 Too Many Requests</html>');
+    expect(msg).toContain('Rate limit exceeded');
+    expect(msg).toContain('wait a moment');
+  });
+});

@@ -14,7 +14,8 @@ import { convertToLlm } from './vendor/messages';
 import { createReadTool } from './vendor/tools/read';
 import { createWriteTool } from './vendor/tools/write';
 import { createEditTool } from './vendor/tools/edit';
-import { createBashTool } from './vendor/tools/bash';
+import { createBashTool, BASH_TOOL_BUDGET_MS } from './vendor/tools/bash';
+import { withRealPathGuard } from './vendor/tools/real-path-guard';
 import { createListTool } from './vendor/tools/list';
 import { createTodoTool } from './todo-tool';
 import { createAskUserTool } from './ask-user-tool';
@@ -30,6 +31,7 @@ import {
   tauriWriteOperations,
   tauriEditOperations,
   tauriBashOperations,
+  tauriRealPathOperations,
   tauriListOperations,
   onFileWritten,
   onFileEdited,
@@ -213,11 +215,11 @@ function createToolsForPromptMode(mode: PromptMode, workspacePath: string, effor
   const unityRead: AgentTool[] = isUnity ? createUnityReadTools() : [];
 
   if (mode === 'ask') {
-    return [...readOnly, ...graphTools, ...memoryTools, ...unityRead].map(withRepeatCallGuard);
+    return [...readOnly, ...graphTools, ...memoryTools, ...unityRead].map((t) => withRepeatCallGuard(t, workspacePath));
   }
 
   if (mode === 'plan-planning') {
-    return [...readOnly, ...graphTools, ...memoryTools, ...unityRead, createAskUserTool()].map(withRepeatCallGuard);
+    return [...readOnly, ...graphTools, ...memoryTools, ...unityRead, createAskUserTool()].map((t) => withRepeatCallGuard(t, workspacePath));
   }
 
   if (mode === 'preplanning') {
@@ -228,7 +230,7 @@ function createToolsForPromptMode(mode: PromptMode, workspacePath: string, effor
       ...unityRead,
       createAskUserTool(),
       createTodoTool(),
-    ].map(withRepeatCallGuard);
+    ].map((t) => withRepeatCallGuard(t, workspacePath));
   }
 
   // Verified-pass (P3.4) registers every file the send touches by composing
@@ -289,7 +291,7 @@ function createToolsForPromptMode(mode: PromptMode, workspacePath: string, effor
   // Structured diffs (P5.1): `withResultDiffs` sits OUTSIDE the cs-gates (so
   // the diff it attaches reflects the FINAL result the gates have already
   // annotated) but stays INSIDE the repeat-call guard applied by the trailing
-  // `.map(withRepeatCallGuard)` below (so a suppressed repeat call never
+  // `.map((t) => withRepeatCallGuard(t, workspacePath))` below (so a suppressed repeat call never
   // triggers a redundant pair of diff reads).
   //
   // Edit review (T7): `withEditReview` sits OUTSIDE `withResultDiffs` — it
@@ -302,38 +304,57 @@ function createToolsForPromptMode(mode: PromptMode, workspacePath: string, effor
   // for why a gate hit silently drops `diffs` if a gate ever ends up outside
   // (wrapping) that decorator, and edit-review-decorator.ts's header for why
   // it must wrap outside `withResultDiffs` and inside the repeat-call guard.
+  // Symlink containment. `resolveWithinRoot` inside each tool is LEXICAL, so a
+  // symlink in Assets/ (a shared asset folder, a package under development —
+  // both normal Unity workflows) passed it and was then followed straight out
+  // of the project. This sits outside the whole gate stack so a refusal costs
+  // no approval prompt, no checkpoint pre-image and no compile round.
+  const guardRealPath = (t: AgentTool): AgentTool =>
+    withRealPathGuard(t, workspacePath, { allowedRoot, ops: tauriRealPathOperations });
+
   return [
-    ...readOnly,
+    ...readOnly.map(guardRealPath),
     ...graphTools,
     ...memoryTools,
     ...unityRead,
     ...(isUnity ? createUnityMutateTools() : []),
-    withEditReview(
-      withResultDiffs(
-        wrapCs(withWriteApproval(withCheckpoint(writeTool, workspacePath, { allowedRoot }), workspacePath, { allowedRoot })),
-        workspacePath,
-        { allowedRoot },
+    guardRealPath(
+      withEditReview(
+        withResultDiffs(
+          wrapCs(withWriteApproval(withCheckpoint(writeTool, workspacePath, { allowedRoot }), workspacePath, { allowedRoot })),
+          workspacePath,
+          { allowedRoot },
+        ),
       ),
     ),
-    withEditReview(
-      withResultDiffs(
-        wrapCs(withWriteApproval(withCheckpoint(editTool, workspacePath, { allowedRoot }), workspacePath, { allowedRoot })),
-        workspacePath,
-        { allowedRoot },
+    guardRealPath(
+      withEditReview(
+        withResultDiffs(
+          wrapCs(withWriteApproval(withCheckpoint(editTool, workspacePath, { allowedRoot }), workspacePath, { allowedRoot })),
+          workspacePath,
+          { allowedRoot },
+        ),
       ),
     ),
     {
-      // bash self-bounds each command (its own `timeout` param, default 30s);
-      // give the loop budget generous headroom over the longest legitimate run.
+      // bash self-bounds each command (its own `timeout` param). The loop
+      // budget is derived from that ceiling rather than restated here, so the
+      // backend timeout always fires first — see bash.ts for why the ordering
+      // matters.
       ...createBashTool(workspacePath, {
         operations: tauriBashOperations,
         allowedRoot,
+        // bash bypasses every write-side guarantee (checkpoint, compile gate,
+        // analyzer gate, verified pass). Record it so the turn's checkpoint row
+        // can say what it cannot restore.
+        onUncheckpointedChange: (command) =>
+          useCheckpointsStore.getState().recordUncheckpointedChange(command),
       }),
-      timeoutMs: 15 * 60_000,
+      timeoutMs: BASH_TOOL_BUDGET_MS,
     },
     ...(includesTodoTool(mode, effort) ? [createTodoTool()] : []),
     createAskUserTool(),
-  ].map(withRepeatCallGuard);
+  ].map((t) => withRepeatCallGuard(t, workspacePath));
 }
 
 let agentInstance: AgentService | null = null;

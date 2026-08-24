@@ -6,6 +6,7 @@
 import { Type, type Static } from '@sinclair/typebox';
 import type { AgentTool, AgentToolResult } from '../types';
 import { truncateTail } from './truncate';
+import { detectBashMutation, bashMutationNote } from './bash-mutation';
 import {
   resolveWithinRoot,
   PathOutsideRootError,
@@ -14,13 +15,37 @@ import {
   primaryRoot,
 } from './path-utils';
 
+/**
+ * Backend budget when the model does not ask for one. This was 30s, which
+ * killed perfectly ordinary agent commands (`bun test`, a build, a package
+ * install) mid-flight and reported them as failures.
+ */
+export const DEFAULT_COMMAND_TIMEOUT_MS = 120_000;
+
+/**
+ * Hard ceiling on any model-supplied `timeout`, and the value the loop's
+ * per-tool budget is derived from (`BASH_TOOL_BUDGET_MS`).
+ *
+ * The ordering is load-bearing: the BACKEND timeout must always fire before the
+ * loop's, or the loop abandons a command that is still running and tells the
+ * model it timed out — which is how a build ends up racing the retry the model
+ * then issues.
+ */
+export const MAX_COMMAND_TIMEOUT_MS = 14 * 60_000;
+
+/** The loop-level budget for the bash tool — deliberately outside the backend's. */
+export const BASH_TOOL_BUDGET_MS = 15 * 60_000;
+
 const bashSchema = Type.Object({
   command: Type.String({ description: 'The shell command to execute' }),
   cwd: Type.Optional(
     Type.String({ description: 'Working directory for the command (defaults to project root)' }),
   ),
   timeout: Type.Optional(
-    Type.Number({ description: 'Timeout in milliseconds (default: 30000)' }),
+    Type.Integer({
+      minimum: 1,
+      description: `Timeout in milliseconds (default: ${DEFAULT_COMMAND_TIMEOUT_MS}, max: ${MAX_COMMAND_TIMEOUT_MS})`,
+    }),
   ),
 });
 
@@ -43,6 +68,12 @@ export interface BashToolOptions {
    * guard in execute_command (see plan).
    */
   allowedRoot?: AllowedRoots;
+  /**
+   * Called when a command that appears to modify files completes successfully.
+   * Lets the UI mark the turn's checkpoint as incomplete: "Restore this turn"
+   * is built on write/edit pre-images and cannot undo what bash did.
+   */
+  onUncheckpointedChange?: (command: string, reason: string) => void;
 }
 
 export function createBashTool(cwd: string, options: BashToolOptions): AgentTool {
@@ -76,7 +107,7 @@ export function createBashTool(cwd: string, options: BashToolOptions): AgentTool
         }
         throw err;
       }
-      const timeout = paramTimeout ?? 30000;
+      const timeout = Math.min(paramTimeout ?? DEFAULT_COMMAND_TIMEOUT_MS, MAX_COMMAND_TIMEOUT_MS);
 
       try {
         const result = await ops.exec(command, workDir, { timeout });
@@ -105,6 +136,16 @@ export function createBashTool(cwd: string, options: BashToolOptions): AgentTool
 
         if (parts.length === 0) {
           parts.push('(no output)');
+        }
+
+        // Honesty rule (same as the compile gate): a bash file change gets none
+        // of the write/edit guarantees — no checkpoint, no compile or analyzer
+        // round, no entry in the verified pass. Say so instead of letting the
+        // model read a clean exit code as "changed and verified".
+        const mutation = result.exitCode === 0 ? detectBashMutation(command) : null;
+        if (mutation) {
+          parts.push(`\n${bashMutationNote(mutation)}`);
+          options.onUncheckpointedChange?.(command, mutation);
         }
 
         return {

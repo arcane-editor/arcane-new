@@ -157,3 +157,231 @@ describe('agentLoop crash containment', () => {
     expect(state.messages).toBe(final); // state advanced — not the pre-turn snapshot
   });
 });
+
+/** First LLM turn issues `call`; second turn stops cleanly. */
+function callThenStop(call: {
+  name: string;
+  arguments: Record<string, unknown>;
+  rawArguments?: string;
+}): StreamFn {
+  let n = 0;
+  return () => {
+    const s = new AssistantMessageEventStream();
+    s.push({ type: 'start' });
+    n++;
+    if (n === 1) {
+      s.push({
+        type: 'done',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'toolCall', id: 't1', ...call }],
+          stopReason: 'toolUse',
+          timestamp: 1,
+        },
+      });
+    } else {
+      s.push({
+        type: 'done',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'done' }],
+          stopReason: 'stop',
+          timestamp: 2,
+        },
+      });
+    }
+    return s;
+  };
+}
+
+describe('agent-loop tool-argument validation', () => {
+  // Before this, the loop handed whatever the model emitted straight to
+  // `tool.execute`. A malformed call ran and blew up inside the tool with a
+  // JS-internal message ("Cannot read properties of undefined") that the model
+  // could not act on — and for permissive tools it acted on garbage instead.
+  it('refuses a call missing a required argument, without executing the tool', async () => {
+    let executed = false;
+    const tool = baseTool({
+      name: 'write',
+      parameters: Type.Object({ path: Type.String(), content: Type.String() }),
+      execute: async () => {
+        executed = true;
+        return { content: [{ type: 'text', text: 'wrote' }] };
+      },
+    });
+
+    const messages = await run(
+      makeConfig(callThenStop({ name: 'write', arguments: { path: 'A.cs' } })),
+      [tool],
+    );
+    const result = toolResultOf(messages);
+
+    expect(executed).toBe(false);
+    expect(result?.isError).toBe(true);
+    expect(result?.content).toContain('content');
+  });
+
+  // The rejection must still be a NORMAL tool result: an assistant tool_call
+  // with no matching result is exactly what 400s the provider on the next send.
+  it('still answers the tool call, so the tool_use/tool_result pairing holds', async () => {
+    const tool = baseTool({
+      name: 'write',
+      parameters: Type.Object({ path: Type.String(), content: Type.String() }),
+      execute: async () => ({ content: [{ type: 'text', text: 'wrote' }] }),
+    });
+
+    const messages = await run(
+      makeConfig(callThenStop({ name: 'write', arguments: {} })),
+      [tool],
+    );
+    const results = messages.filter((m) => m.role === 'toolResult') as ToolResultMessage[];
+
+    expect(results).toHaveLength(1);
+    expect(results[0].toolCallId).toBe('t1');
+  });
+
+  it('refuses a call whose arguments never parsed as JSON, quoting what arrived', async () => {
+    let executed = false;
+    const tool = baseTool({
+      name: 'write',
+      parameters: Type.Object({ path: Type.String(), content: Type.String() }),
+      execute: async () => {
+        executed = true;
+        return { content: [{ type: 'text', text: 'wrote' }] };
+      },
+    });
+
+    const messages = await run(
+      makeConfig(
+        callThenStop({ name: 'write', arguments: {}, rawArguments: '{"path":"A.cs","cont' }),
+      ),
+      [tool],
+    );
+    const result = toolResultOf(messages);
+
+    expect(executed).toBe(false);
+    expect(result?.isError).toBe(true);
+    expect(result?.content).toContain('not valid JSON');
+    expect(result?.content).toContain('{"path":"A.cs","cont');
+  });
+
+  it('passes coerced arguments to the tool, but leaves history as the model wrote it', async () => {
+    let seen: unknown;
+    const tool = baseTool({
+      name: 'read',
+      parameters: Type.Object({ path: Type.String(), limit: Type.Optional(Type.Integer()) }),
+      execute: async (_id, params) => {
+        seen = params;
+        return { content: [{ type: 'text', text: 'ok' }] };
+      },
+    });
+
+    const messages = await run(
+      makeConfig(callThenStop({ name: 'read', arguments: { path: 'A.cs', limit: '200' } })),
+      [tool],
+    );
+
+    expect((seen as { limit: unknown }).limit).toBe(200);
+    const assistant = messages.find((m) => m.role === 'assistant');
+    const block = (assistant as { content: { type: string; arguments?: Record<string, unknown> }[] })
+      .content[0];
+    expect(block.arguments?.limit).toBe('200');
+  });
+
+  it('executes a well-formed call unchanged', async () => {
+    let executed = false;
+    const tool = baseTool({
+      name: 'write',
+      parameters: Type.Object({ path: Type.String(), content: Type.String() }),
+      execute: async () => {
+        executed = true;
+        return { content: [{ type: 'text', text: 'wrote' }] };
+      },
+    });
+
+    const messages = await run(
+      makeConfig(callThenStop({ name: 'write', arguments: { path: 'A.cs', content: 'x' } })),
+      [tool],
+    );
+
+    expect(executed).toBe(true);
+    expect(toolResultOf(messages)?.isError).toBe(false);
+  });
+});
+
+describe('agent-loop tool-result content', () => {
+  // `AgentToolResult.content` is `(TextContent | ImageContent)[]`, but the loop
+  // keeps only text when building the message the MODEL sees. No tool returns an
+  // image today, so this is a trap for the next one (a Unity scene screenshot)
+  // rather than a live bug — pinned here so the drop is a deliberate decision.
+  it('drops image blocks from the tool result the model sees (known limitation)', async () => {
+    const tool = baseTool({
+      name: 'shot',
+      parameters: Type.Object({}),
+      execute: async () => ({
+        content: [
+          { type: 'text', text: 'captured' },
+          { type: 'image', data: 'AAAA', mimeType: 'image/png' },
+        ],
+      }),
+    });
+
+    const messages = await run(makeConfig(callThenStop({ name: 'shot', arguments: {} })), [tool]);
+
+    expect(toolResultOf(messages)?.content).toBe('captured');
+  });
+});
+
+describe('agent-loop tool cancellation', () => {
+  // The loop used to just walk away from a timed-out tool's promise. The tool
+  // kept running, so its write could land AFTER the model had been told the
+  // call timed out and had already redone the work — a double write.
+  it('aborts the tool itself when its budget expires', async () => {
+    let sawAbort = false;
+    const tool = baseTool({
+      name: 'slow',
+      timeoutMs: 20,
+      execute: (_id, _params, signal) =>
+        new Promise((resolve) => {
+          signal?.addEventListener('abort', () => {
+            sawAbort = true;
+            resolve({ content: [{ type: 'text', text: 'stopped' }] });
+          });
+        }),
+    });
+
+    await run(makeConfig(callThenStop({ name: 'slow', arguments: {} })), [tool]);
+    expect(sawAbort).toBe(true);
+  });
+
+  it('tells the model the work may still have landed, not that it failed', async () => {
+    const tool = baseTool({ name: 'slow', timeoutMs: 20, execute: () => new Promise(() => {}) });
+
+    const messages = await run(makeConfig(callThenStop({ name: 'slow', arguments: {} })), [tool]);
+    const result = toolResultOf(messages);
+
+    expect(result?.isError).toBe(true);
+    expect(result?.content).toContain('cancelled');
+    expect(result?.content).toMatch(/may still complete/i);
+  });
+
+  it('propagates a loop-level abort to the running tool', async () => {
+    let sawAbort = false;
+    const controller = new AbortController();
+    const tool = baseTool({
+      name: 'slow',
+      timeoutMs: 5_000,
+      execute: (_id, _params, signal) =>
+        new Promise((resolve) => {
+          signal?.addEventListener('abort', () => {
+            sawAbort = true;
+            resolve({ content: [{ type: 'text', text: 'stopped' }] });
+          });
+          setTimeout(() => controller.abort(), 10);
+        }),
+    });
+
+    await run(makeConfig(callThenStop({ name: 'slow', arguments: {} }), controller.signal), [tool]);
+    expect(sawAbort).toBe(true);
+  });
+});

@@ -1,36 +1,26 @@
 /**
- * Plan file persistence — markdown plans live under
- * `<workspace>/.arcane/plans/<YYYYMMDD-HHmm>-<slug>.md`.
+ * Plan file persistence — plans live under
+ * `<workspace>/.arcane/plans/<YYYYMMDD-HHmm>-<slug>.aplan`.
  *
- * The plan file is the source of truth: planning writes it, the user can
- * edit it in Monaco, execution re-reads it from disk so any user edits are
- * honored.
+ * `.aplan` content is markdown; the extension exists so the editor can tell a
+ * plan from a document by name and give it the step view (`plan-paths.ts`).
+ *
+ * The plan file is the source of truth: planning writes it, the user edits it
+ * in place in the plan view, execution re-reads it from disk so any user edits
+ * are honored.
  */
 
 import { invoke } from '@tauri-apps/api/core';
 import { useWorkspaceStore } from '../../../stores/workspace';
 
-/** Convert a free-form prompt into a kebab-case slug, max 40 chars. */
-export function slugify(prompt: string): string {
-  const cleaned = prompt
-    .toLowerCase()
-    .replace(/[^a-z0-9\s-]+/g, ' ')
-    .trim()
-    .replace(/\s+/g, '-')
-    .slice(0, 40);
-  return cleaned || 'plan';
-}
-
-/** Build a YYYYMMDD-HHmm timestamp in local time. */
-function timestamp(): string {
-  const d = new Date();
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}`;
-}
-
-export function buildPlanPath(workspacePath: string, prompt: string): string {
-  return `${workspacePath}/.arcane/plans/${timestamp()}-${slugify(prompt)}.md`;
-}
+// Naming lives in a store-free module so it can be unit-tested under Bun;
+// re-exported here so callers keep one import site.
+export {
+  slugify,
+  buildPlanPath,
+  planPathVariant,
+  reservePlanPath,
+} from './plan-file-paths';
 
 export async function writePlan(absPath: string, markdown: string): Promise<void> {
   // Ensure .arcane/plans/ exists.
@@ -43,8 +33,8 @@ export async function readPlan(absPath: string): Promise<string> {
   return await invoke<string>('read_file', { path: absPath });
 }
 
-/** Open the plan file in a Monaco tab. */
+/** Open the plan file in an editor tab (the plan view renders it). */
 export function openPlanInEditor(absPath: string): void {
-  const name = absPath.split('/').pop() ?? 'plan.md';
+  const name = absPath.split('/').pop() ?? 'plan.aplan';
   useWorkspaceStore.getState().openFile(absPath, name);
 }

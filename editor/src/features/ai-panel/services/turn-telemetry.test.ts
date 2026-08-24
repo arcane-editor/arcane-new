@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
 import {
+  isRepairNote,
   resetTurnTelemetry,
   nextTurnTelemetry,
   recordTelemetryEvent,
@@ -73,7 +74,7 @@ describe('turn telemetry', () => {
     reset();
     rec({
       type: 'message_end',
-      message: { role: 'toolResult', toolCallId: 'c', toolName: 'write', content: '[Unity compile] 2 errors', isError: true, timestamp: 1 },
+      message: { role: 'toolResult', toolCallId: 'c', toolName: 'write', content: '[Unity compile] 2 compiler error(s) after writing Assets/A.cs', isError: true, timestamp: 1 },
     } as never);
     reset(); // snapshot happens here
     expect(getPreviousSendRepairCount()).toBe(1);
@@ -197,5 +198,41 @@ describe('nudge counts (T9, Part 4 — local-only, never sent to the server)', (
     // the one before it.
     resetTurnTelemetry();
     expect(getPreviousSendNudgeCounts()).toEqual({ mutatingCalls: 0, todoUpdateCalls: 0 });
+  });
+});
+
+// `repairCount` feeds `send-escalation.ts` (threshold 2), which latches the
+// conversation onto a costlier model tier for the rest of the session. The old
+// rule counted every note that wasn't literally "] Clean", so a user working
+// with Unity closed got escalated after two writes with nothing to repair.
+describe('isRepairNote', () => {
+  const repairs = [
+    '[Unity compile] 3 compiler error(s) after writing Assets/A.cs — fix before finishing:',
+    '[Unity compile] Still 2 compiler error(s) after 4 attempts — stop auto-fixing',
+    '[C# language server] 5 error(s) in Assets/A.cs:',
+    '[Unity analyzers] 2 error-severity issue(s) introduced by this C# write — fix them',
+  ];
+  for (const note of repairs) {
+    it(`counts "${note.slice(0, 44)}…"`, () => {
+      expect(isRepairNote(note)).toBe(true);
+    });
+  }
+
+  const notRepairs = [
+    '[Unity compile] Clean — no compiler errors.',
+    '[Unity compile] Unity bridge not connected — compile status unknown; the change was written.',
+    '[Unity compile] Assets refreshed — no recompile was needed.',
+    '[Unity compile] Compile status unknown (timeout). Retry the editor step after reconnect.',
+    '[Unity compile] Compile status unknown (bridge-lost).',
+  ];
+  for (const note of notRepairs) {
+    it(`does not count "${note.slice(0, 44)}…"`, () => {
+      expect(isRepairNote(note)).toBe(false);
+    });
+  }
+
+  it('ignores ordinary tool output that carries no gate marker', () => {
+    expect(isRepairNote('Successfully wrote 120 bytes (2 lines) to Assets/A.cs')).toBe(false);
+    expect(isRepairNote('found 3 error(s) in the log')).toBe(false);
   });
 });

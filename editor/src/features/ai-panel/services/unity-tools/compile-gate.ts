@@ -34,7 +34,7 @@ import { resolveToCwd } from '../vendor/tools/path-utils';
 import type { CompileWaitOutcome } from '../../../unity-bridge';
 import type { CompilerMessage } from '../../../../types/unity';
 import { buildCompileHints, type HintLookup } from './compile-hints';
-import { isRejectedWrite } from '../write-approval-gate';
+import { isRejectedWrite, isSuccessfulWrite } from '../write-approval-gate';
 
 const MAX_ATTEMPTS = 4;
 /** Hint lookups are best-effort garnish — never let them stall the loop. */
@@ -107,10 +107,7 @@ function appendNote(res: AgentToolResult, text: string): AgentToolResult {
  * write/edit tools never throw — the leading "Successfully wrote/edited" is
  * the only marker that the file on disk actually changed.
  */
-function isSuccessfulWrite(res: AgentToolResult): boolean {
-  const text = res.content.find((c): c is { type: 'text'; text: string } => c.type === 'text')?.text ?? '';
-  return /^Successfully (wrote|edited)\b/.test(text);
-}
+
 
 /** Race a promise against a timeout, resolving `fallback` on expiry. Timer always cleared. */
 function raceWithFallback<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {

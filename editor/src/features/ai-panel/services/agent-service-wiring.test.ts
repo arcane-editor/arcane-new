@@ -28,7 +28,7 @@ describe('agent-service.ts — createToolsForPromptMode wiring (Task 11)', () =>
 
   it("has its own early-return branch for 'preplanning' (read-only + ask_user + todo, no write/edit/bash)", () => {
     const match = SRC.match(
-      /if \(mode === 'preplanning'\) \{\s*return \[([\s\S]*?)\]\.map\(withRepeatCallGuard\);\s*\}/,
+      /if \(mode === 'preplanning'\) \{\s*return \[([\s\S]*?)\]\.map\(\(t\) => withRepeatCallGuard\(t, workspacePath\)\);\s*\}/,
     );
     expect(match).not.toBeNull();
     const branch = match![1];

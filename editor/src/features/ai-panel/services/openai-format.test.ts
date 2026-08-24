@@ -113,3 +113,63 @@ describe('convertToOpenAI orphan repair', () => {
     expect(out.filter((m) => m.role === 'tool')).toHaveLength(1);
   });
 });
+
+// `repairToolPairs` tracked outstanding calls in a `Set` of ids. Two calls
+// sharing an id collapsed to ONE entry: the first result deleted it and the
+// second was dropped as a stray — while the assistant message still carried two
+// calls. The provider then 400s on the unanswered one, and because the broken
+// history replays on every send, the conversation is poisoned permanently. That
+// is the exact failure this repair exists to prevent.
+//
+// Not hypothetical: the server's `sanitizeToolCallId` normalises ids to
+// `[A-Za-z0-9_-]`, so two distinct ids can be flattened into the same string.
+describe('convertToOpenAI — duplicate tool-call ids', () => {
+  const dupCallTurn = [
+    {
+      role: 'assistant',
+      timestamp: 1,
+      stopReason: 'toolUse',
+      content: [
+        { type: 'toolCall', id: 'c1', name: 'read', arguments: { path: 'a.cs' } },
+        { type: 'toolCall', id: 'c1', name: 'read', arguments: { path: 'b.cs' } },
+      ],
+    },
+    { role: 'toolResult', toolCallId: 'c1', toolName: 'read', content: 'A', isError: false, timestamp: 2 },
+    { role: 'toolResult', toolCallId: 'c1', toolName: 'read', content: 'B', isError: false, timestamp: 3 },
+  ];
+
+  it('answers every call when two share an id', () => {
+    const out = convertToOpenAI('SYS', dupCallTurn as never);
+    const assistant = out.find((m) => m.role === 'assistant');
+    const toolMsgs = out.filter((m) => m.role === 'tool');
+
+    expect(assistant?.tool_calls).toHaveLength(2);
+    expect(toolMsgs).toHaveLength(2);
+  });
+
+  it('gives each call a distinct id, so no result is ambiguous', () => {
+    const out = convertToOpenAI('SYS', dupCallTurn as never);
+    const ids = out.find((m) => m.role === 'assistant')!.tool_calls!.map((c) => c.id);
+    const resultIds = out.filter((m) => m.role === 'tool').map((m) => m.tool_call_id);
+
+    expect(new Set(ids).size).toBe(2);
+    expect(new Set(resultIds)).toEqual(new Set(ids));
+  });
+
+  it('keeps both results’ content — neither is silently discarded', () => {
+    const out = convertToOpenAI('SYS', dupCallTurn as never);
+    const contents = out.filter((m) => m.role === 'tool').map((m) => m.content);
+    expect(contents).toEqual(['A', 'B']);
+  });
+
+  it('still synthesises a result for a duplicated call that was never answered', () => {
+    const out = convertToOpenAI('SYS', [
+      dupCallTurn[0],
+      { role: 'toolResult', toolCallId: 'c1', toolName: 'read', content: 'A', isError: false, timestamp: 2 },
+    ] as never);
+    const toolMsgs = out.filter((m) => m.role === 'tool');
+
+    expect(toolMsgs).toHaveLength(2);
+    expect(toolMsgs[1].content).toContain('interrupted');
+  });
+});

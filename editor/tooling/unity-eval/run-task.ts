@@ -83,7 +83,7 @@ export function buildTools(
     createUnityApiSearchTool(groundingClient),
     createGetUnityDocsTool(() => unityVersion),
   ];
-  if (task.mode === 'ask') return [read, list, ...unityTools].map(withRepeatCallGuard);
+  if (task.mode === 'ask') return [read, list, ...unityTools].map((t) => withRepeatCallGuard(t, workDir));
   // Analyzer gate (eval analog of prod's F-5.3 `withUnityAnalyzerGate` /
   // `wrapCs` in `agent-service.ts`) wraps write/edit only — same tools prod
   // wraps, in the same order (gate applied first, closest to the raw tool).
@@ -117,7 +117,7 @@ export function buildTools(
     edit,
     createBashTool(workDir, { operations: localBashOperations }),
     todo,
-  ].map(withRepeatCallGuard);
+  ].map((t) => withRepeatCallGuard(t, workDir));
 }
 
 export async function runTask(

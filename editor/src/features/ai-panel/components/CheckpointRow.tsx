@@ -22,7 +22,7 @@
  */
 
 import { useState } from 'react';
-import { History, Loader2 } from 'lucide-react';
+import { History, Loader2, AlertTriangle } from 'lucide-react';
 import { useCheckpointsStore, type RestoreResult } from '../../../stores/checkpoints';
 import { selectCheckpointTurnsForMessage } from '../services/checkpoints/checkpoint-selection';
 import type { CheckpointTurn } from '../services/checkpoints/restore-plan';
@@ -65,6 +65,10 @@ function CheckpointRowEntry({ turn }: { turn: CheckpointTurn }) {
   const [result, setResult] = useState<string | null>(null);
 
   const count = turn.entries.length;
+  // bash bypasses the write/edit pre-image machinery entirely, so a restore of
+  // this turn cannot undo what those commands did. Saying "Restore" without
+  // saying that is the card promising more than it can deliver.
+  const uncheckpointed = turn.uncheckpointedCommands ?? [];
 
   async function handleClick() {
     if (!confirming) {
@@ -85,6 +89,15 @@ function CheckpointRowEntry({ turn }: { turn: CheckpointTurn }) {
     <div className="ai-checkpoint-row">
       <History size={12} className="ai-checkpoint-icon" />
       <span className="ai-checkpoint-label">Checkpoint · {plural(count, 'file')}</span>
+      {uncheckpointed.length > 0 && (
+        <span
+          className="ai-checkpoint-warning"
+          title={`Not covered by this checkpoint:\n${uncheckpointed.join('\n')}`}
+        >
+          <AlertTriangle size={11} />
+          {plural(uncheckpointed.length, 'shell change')} not restorable
+        </span>
+      )}
       {result ? (
         <span className="ai-checkpoint-result">{result}</span>
       ) : (

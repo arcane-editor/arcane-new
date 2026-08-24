@@ -5665,6 +5665,17 @@ html, body, #root {
     transform: rotate(360deg);
   }
 }
+/* bash changes are outside the checkpoint's reach (write/edit pre-images only).
+   Amber, not red: the turn's own files ARE restorable — this is a scope caveat. */
+.ai-checkpoint-warning {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--warning);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
 .ai-checkpoint-result {
   color: var(--text-secondary);
   opacity: 0.85;
@@ -5761,11 +5772,17 @@ html, body, #root {
   background: var(--bg-input);
   border: 1px solid var(--border);
 }
-.ai-verified-card.is-ok {
+.ai-verified-card.is-passed {
   border-color: color-mix(in srgb, var(--success) 30%, var(--border));
 }
-.ai-verified-card.is-bad {
+.ai-verified-card.is-failed {
   border-color: color-mix(in srgb, var(--error-text) 30%, var(--border));
+}
+/* Nothing actually ran (no Unity bridge, budget exhausted). Deliberately
+   neutral: a green border here is the card claiming a verification it never
+   performed. */
+.ai-verified-card.is-unverified {
+  border-color: var(--border);
 }
 .ai-verified-header {
   display: flex;

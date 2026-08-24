@@ -41,7 +41,7 @@ import { invoke } from '@tauri-apps/api/core';
 import type { AgentTool, AgentToolResult } from '../vendor/types';
 import { resolveToCwd } from '../vendor/tools/path-utils';
 import type { FileDiag } from '../../../lsp';
-import { isRejectedWrite } from '../write-approval-gate';
+import { isRejectedWrite, isSuccessfulWrite } from '../write-approval-gate';
 
 export type DiagnosticsFetcher = (
   absPath: string,
@@ -67,10 +67,7 @@ async function defaultFetchDiagnostics(
  * search-and-replace) means the file on disk wasn't actually changed by this
  * call, so there's nothing new for csharp-ls to see.
  */
-function isSuccessfulWrite(res: AgentToolResult): boolean {
-  const text = res.content.find((c): c is { type: 'text'; text: string } => c.type === 'text')?.text ?? '';
-  return /^Successfully (wrote|edited)\b/.test(text);
-}
+
 
 /** Best-effort path relative to the workspace root, for a shorter model-facing note. */
 function toRelativePath(absPath: string, cwd: string): string {

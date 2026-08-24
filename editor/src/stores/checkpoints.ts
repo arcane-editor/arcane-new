@@ -85,6 +85,13 @@ interface CheckpointsState {
    * to the (userMessageId, path) heuristic when absent.
    */
   recordPreWrite: (path: string, beforeContent: string | null, toolCallId?: string) => void;
+  /**
+   * Record that a `bash` command in the open turn appears to have changed files.
+   * Checkpoints only ever hold write/edit pre-images, so those changes cannot be
+   * restored — the UI has to say so rather than offer a restore that silently
+   * covers less than the user thinks.
+   */
+  recordUncheckpointedChange: (command: string) => void;
   /** Restore every path touched by `turnId` (and every turn after it) to its pre-turn-N state. */
   restoreTurn: (turnId: string) => Promise<RestoreResult>;
   /** Same as `restoreTurn`, scoped to a single path. */
@@ -238,6 +245,22 @@ export const useCheckpointsStore = create<CheckpointsState>((set, get) => ({
             : { path, kind: 'modified', beforeContent, timestamp: Date.now(), toolCallId };
 
       const updatedTurn: CheckpointTurn = { ...last, entries: [...last.entries, entry] };
+      return { turns: [...s.turns.slice(0, -1), updatedTurn] };
+    });
+    schedulePersist();
+  },
+
+  recordUncheckpointedChange: (command) => {
+    set((s) => {
+      if (!s.activeTurnId) return s; // no turn open for THIS send — discard
+      const last = s.turns[s.turns.length - 1];
+      if (!last || last.turnId !== s.activeTurnId) return s;
+      const existing = last.uncheckpointedCommands ?? [];
+      if (existing.includes(command)) return s;
+      const updatedTurn: CheckpointTurn = {
+        ...last,
+        uncheckpointedCommands: [...existing, command],
+      };
       return { turns: [...s.turns.slice(0, -1), updatedTurn] };
     });
     schedulePersist();

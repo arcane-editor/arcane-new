@@ -57,8 +57,15 @@ export function resetMemoryCache(): void {
 // deferred-subscription pattern as unity-facts.ts — see its comment on TDZ
 // safety), and immediately for a workspace already open at module load.
 queueMicrotask(() => {
-  useWorkspaceStore.subscribe((state) => {
-    if (state.workspacePath) void primeMemory(state.workspacePath);
+  useWorkspaceStore.subscribe((state, prev) => {
+    // ONLY on an actual workspace change. This subscriber has no selector, so
+    // it fires on every workspace-store mutation — including the `editedPaths`
+    // churn of ordinary typing — and `primeMemory`'s in-flight guard is cleared
+    // in its `finally`, so each one re-scanned the memory directory and re-read
+    // every entry. The explicit re-prime after distillation calls `primeMemory`
+    // directly and is deliberately not gated here.
+    if (!state.workspacePath || state.workspacePath === prev.workspacePath) return;
+    void primeMemory(state.workspacePath);
   });
   const wp = useWorkspaceStore.getState().workspacePath;
   if (wp) void primeMemory(wp);

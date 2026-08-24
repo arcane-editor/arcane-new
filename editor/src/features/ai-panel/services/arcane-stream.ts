@@ -435,7 +435,22 @@ async function doStream(
 
       const errorText = await attemptResponse.text().catch(() => 'Unknown error');
       if (attemptResponse.status === 429) {
-        throw new Error('Rate limit exceeded. Please wait a moment and try again.');
+        // The server computes an actual reset time for the hourly spend cap
+        // ("Try again in ~47 minute(s)") and this threw it away in favour of
+        // "wait a moment" — which is wrong by up to an hour and sends the user
+        // back to retry immediately. Keep the "Rate limit exceeded." prefix:
+        // `classifyTurnError` substring-matches it to route the rate_limit kind.
+        let detail: string | undefined;
+        try {
+          detail = (JSON.parse(errorText) as { error?: string }).error;
+        } catch {
+          // Not JSON (a proxy or gateway 429) — fall back to the generic text.
+        }
+        throw new Error(
+          detail
+            ? `Rate limit exceeded. ${detail}`
+            : 'Rate limit exceeded. Please wait a moment and try again.',
+        );
       }
       throw new Error(`Server error (${attemptResponse.status}): ${errorText}`);
     }
@@ -579,26 +594,46 @@ async function doStream(
               });
             }
 
+            const idx = toolCallIndices.get(tcId)!;
             if (event.arguments) {
-              const idx = toolCallIndices.get(tcId)!;
               stream.push({
                 type: 'toolcall_delta',
                 index: idx,
                 arguments: event.arguments,
               });
+            }
 
-              // Try to parse final arguments
-              if (event.finished) {
-                const block = contentBlocks[idx];
-                if (block.type === 'toolCall') {
+            // `toolcall_end` must fire on `finished` REGARDLESS of whether any
+            // argument text arrived — it used to sit inside `if (event.arguments)`,
+            // so an argument-less call never closed its block.
+            if (event.finished) {
+              const block = contentBlocks[idx];
+              if (block.type === 'toolCall') {
+                const raw = event.arguments ?? '';
+                if (!raw.trim()) {
+                  // No argument text at all: a legitimate zero-parameter call
+                  // (unity_play, unity_stop). Schema validation still has the
+                  // final say for tools that DO require arguments.
+                  block.arguments = {};
+                } else {
                   try {
-                    block.arguments = JSON.parse(event.arguments);
+                    const parsed = JSON.parse(raw);
+                    if (parsed !== null && typeof parsed === 'object') {
+                      block.arguments = parsed as Record<string, unknown>;
+                    } else {
+                      // Valid JSON, but a bare scalar — no tool takes that shape.
+                      block.rawArguments = raw;
+                    }
                   } catch {
-                    // Keep existing arguments
+                    // The blob never parsed. This `catch` used to be empty, which
+                    // left `arguments` at the `{}` set on block creation and ran
+                    // the tool on it silently. Record the text so the loop can
+                    // refuse the call and quote back what the model actually sent.
+                    block.rawArguments = raw;
                   }
                 }
-                stream.push({ type: 'toolcall_end', index: idx });
               }
+              stream.push({ type: 'toolcall_end', index: idx });
             }
             break;
           }

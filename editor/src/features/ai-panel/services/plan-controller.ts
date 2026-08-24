@@ -5,7 +5,8 @@
  *   - Send the user prompt with the plan-planning system prompt + read-only
  *     tool subset.
  *   - On agent_end, extract the assistant's last text content (the markdown
- *     plan), write it to .arcane/plans/<ts>-<slug>.md, open in Monaco.
+ *     plan), write it to .arcane/plans/<ts>-<slug>.aplan, open it in the
+ *     plan view (PlanDocumentView, not Monaco — a plan is edited in place).
  *   - Set planPhase='awaiting-execute' and stash pendingPrompt + lastAttachments.
  *
  * Phase B (execution):
@@ -24,7 +25,7 @@ import { buildRegeneratePrompt, type PriorPlan } from './plan-regen';
 import { buildReviseNotesPrompt } from './plan-revise';
 import { parsePlanTodos, planTodosToArcanePlan } from './plan-todos';
 import {
-  buildPlanPath,
+  reservePlanPath,
   openPlanInEditor,
   readPlan,
   writePlan,
@@ -109,7 +110,7 @@ async function startPlanning(
     return;
   }
 
-  const planPath = buildPlanPath(workspacePath, prompt);
+  const planPath = await reservePlanPath(workspacePath, prompt);
   try {
     await writePlan(planPath, planMarkdown);
   } catch (err) {

@@ -54,6 +54,13 @@ export interface CheckpointTurn {
   timestamp: number;
   /** Chronological within the turn. */
   entries: CheckpointEntry[];
+  /**
+   * Commands run through the `bash` tool during this turn that looked like they
+   * modified files. Checkpoints are built from write/edit pre-images only, so
+   * anything bash changed is NOT restorable — the row says so rather than
+   * offering a restore that quietly covers less than the user believes.
+   */
+  uncheckpointedCommands?: string[];
 }
 
 export interface RestorePlanEntry {

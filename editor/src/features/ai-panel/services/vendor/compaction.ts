@@ -86,25 +86,95 @@ function hasRepairSentinel(content: string | (TextContent | ImageContent)[]): bo
 }
 
 /**
+ * Smallest budget we will ever compact toward. Without a floor, a system prompt
+ * larger than the window produces a zero or negative budget and every message
+ * gets shredded to nothing.
+ */
+const MIN_BUDGET_TOKENS = 4096;
+/** Characters left on a message when the last-resort text truncation runs. */
+const TRUNCATE_KEEP_CHARS = [400, 80];
+const TRUNCATED_SUFFIX = ' […truncated to fit context]';
+const IMAGE_SHED_MARKER = '[image removed to fit context]';
+
+export interface CompactionOptions {
+  contextWindow: number;
+  triggerRatio?: number;
+  /**
+   * Tokens the request spends before a single message is counted: the system
+   * prompt (Unity facts + context pack + graph snapshot) and every tool's JSON
+   * schema. Compaction used to ignore both while comparing against 80% of the
+   * FULL window, so a request could pass 100% of the window while compaction
+   * believed it sat at 79%.
+   */
+  reservedTokens?: number;
+}
+
+/** Token cost of everything that rides on a request besides the messages. */
+export function estimateReservedTokens(
+  systemPrompt: string,
+  tools: ReadonlyArray<{ name: string; description: string; parameters: unknown }>,
+): number {
+  let chars = systemPrompt.length;
+  for (const t of tools) {
+    chars += t.name.length + t.description.length;
+    try {
+      chars += JSON.stringify(t.parameters)?.length ?? 0;
+    } catch {
+      // A non-serializable schema is not worth crashing a send over.
+    }
+  }
+  return Math.ceil(chars / CHARS_PER_TOKEN);
+}
+
+/**
  * Return a compacted view of `messages` for sending to the LLM. Below the
  * trigger threshold the input is returned unchanged (zero overhead, stable
  * prefix preserved).
+ *
+ * Above it, elision escalates in stages and RE-CHECKS after each one. The old
+ * implementation ran a single stage that could only shrink tool results, then
+ * returned whatever it had — so a conversation whose weight was user text,
+ * attachments or assistant prose came back still over the window, and nothing
+ * noticed. The send then died at the provider with a context-length rejection.
+ *
+ * Every stage shrinks `content` in place; no stage ever removes a message, so
+ * the tool_call ↔ tool_result pairing this file has always guaranteed still
+ * holds at the end (an orphaned pair 400s the request).
  */
 export function compactMessages(
   messages: AgentMessage[],
-  opts: { contextWindow: number; triggerRatio?: number },
+  opts: CompactionOptions,
 ): AgentMessage[] {
+  const budget = Math.max(opts.contextWindow - (opts.reservedTokens ?? 0), MIN_BUDGET_TOKENS);
   const triggerRatio = opts.triggerRatio ?? DEFAULT_TRIGGER_RATIO;
-  if (estimateTokens(messages) <= opts.contextWindow * triggerRatio) {
+
+  if (estimateTokens(messages) <= budget * triggerRatio) {
     return messages;
   }
 
+  let out = elideStaleToolResults(messages);
+  if (estimateTokens(out) <= budget) return out;
+
+  out = clearAllButNewestToolResults(out);
+  if (estimateTokens(out) <= budget) return out;
+
+  out = shedImages(out);
+  if (estimateTokens(out) <= budget) return out;
+
+  return truncateOldestText(out, budget);
+}
+
+/**
+ * Stage 1 (unchanged behaviour): microcompaction of stale non-`read` tool
+ * output, plus file-read dedup by path.
+ */
+function elideStaleToolResults(messages: AgentMessage[]): AgentMessage[] {
   // Map every read tool_call id → its file path (from the preceding assistant
   // messages), so we can dedup read results by path.
   const pathByCallId = new Map<string, string>();
   for (const m of messages) {
     if (m.role !== 'assistant') continue;
-    for (const b of m.content) {
+    for (const b of m.content ?? []) {
       if (b.type === 'toolCall' && b.name === 'read') {
         const p = (b.arguments as { path?: string }).path;
         if (typeof p === 'string') pathByCallId.set(b.id, p);
@@ -150,4 +220,100 @@ export function compactMessages(
     if (i < oldCutoff) return { ...m, content: CLEARED_MARKER };
     return m;
   });
+}
+
+/**
+ * Stage 2: clear EVERY tool result except those belonging to the most recent
+ * assistant turn — the model just called those and still needs to read them.
+ * Open repair tasks stay verbatim; they are the whole point of the next turn.
+ */
+function clearAllButNewestToolResults(messages: AgentMessage[]): AgentMessage[] {
+  let lastAssistantIdx = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === 'assistant') {
+      lastAssistantIdx = i;
+      break;
+    }
+  }
+
+  return messages.map((m, i) => {
+    if (m.role !== 'toolResult') return m;
+    if (i > lastAssistantIdx) return m;
+    if (hasRepairSentinel(m.content)) return m;
+    if (m.content === CLEARED_MARKER) return m;
+    return { ...m, content: CLEARED_MARKER };
+  });
+}
+
+/**
+ * Stage 3: drop image payloads. `IMAGE_CHARS_ESTIMATE` keeps an image from
+ * dominating the ESTIMATE, but an image still costs real tokens on the wire and
+ * compaction had no way to shed one — so a conversation carrying several
+ * screenshots could not be brought under any budget. The newest message keeps
+ * its images (it is likely what the user just asked about).
+ */
+function shedImages(messages: AgentMessage[]): AgentMessage[] {
+  const last = messages.length - 1;
+  return messages.map((m, i) => {
+    if (i === last) return m;
+    if (m.role !== 'user' || !Array.isArray(m.content)) return m;
+    if (!m.content.some((b) => b.type === 'image')) return m;
+    return {
+      ...m,
+      content: m.content.map((b) =>
+        b.type === 'image' ? { type: 'text' as const, text: IMAGE_SHED_MARKER } : b,
+      ),
+    };
+  });
+}
+
+function truncateText(text: string, keep: number): string {
+  return text.length <= keep ? text : text.slice(0, keep) + TRUNCATED_SUFFIX;
+}
+
+/** Shrink one message's text, leaving `toolCall` blocks (and ids) untouched. */
+function shrinkMessage(m: AgentMessage, keep: number): AgentMessage {
+  switch (m.role) {
+    case 'user':
+      if (typeof m.content === 'string') return { ...m, content: truncateText(m.content, keep) };
+      if (!Array.isArray(m.content)) return m;
+      return {
+        ...m,
+        content: m.content.map((b) =>
+          b.type === 'text' ? { ...b, text: truncateText(b.text, keep) } : b,
+        ),
+      };
+    case 'toolResult':
+      if (typeof m.content !== 'string') return m;
+      return { ...m, content: truncateText(m.content, keep) };
+    case 'assistant':
+      return {
+        ...m,
+        content: (m.content ?? []).map((b) => {
+          if (b.type === 'text') return { ...b, text: truncateText(b.text, keep) };
+          if (b.type === 'thinking') return { ...b, thinking: truncateText(b.thinking, keep) };
+          return b; // toolCall — never touched, the pairing depends on it
+        }),
+      };
+    case 'bashExecution':
+      return { ...m, output: truncateText(m.output, keep) };
+    default:
+      return m;
+  }
+}
+
+/**
+ * Stage 4, last resort: head-truncate the oldest messages until the whole thing
+ * fits. The NEWEST message is never touched — it is the turn being answered.
+ */
+function truncateOldestText(messages: AgentMessage[], budget: number): AgentMessage[] {
+  const out = [...messages];
+  for (const keep of TRUNCATE_KEEP_CHARS) {
+    for (let i = 0; i < out.length - 1; i++) {
+      if (estimateTokens(out) <= budget) return out;
+      out[i] = shrinkMessage(out[i], keep);
+    }
+    if (estimateTokens(out) <= budget) return out;
+  }
+  return out;
 }

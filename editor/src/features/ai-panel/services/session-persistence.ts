@@ -213,9 +213,56 @@ export function normalizePlanRestore(
  * Pure — parses a saved session JSON string, applying the `agentKind`
  * migration coercion (see module doc). No Tauri calls.
  */
+/**
+ * Sentinel written into a restored, never-answered permission request.
+ *
+ * It matches no real `optionId`, so `PermissionRequestBlock` renders the card
+ * inert and shows the "expired" note instead of "Chosen: …".
+ */
+export const STALE_PERMISSION_OPTION_ID = '__expired_on_restart__';
+
+/**
+ * Settle interactive requests that can never be answered again.
+ *
+ * The `pending` map in `approval-gate.ts` (and the question gate's equivalent)
+ * is module state that dies with the process, but the request MESSAGES are
+ * persisted with the rest of the transcript. So a session saved while a write
+ * approval was on screen came back with a live-looking, clickable card whose
+ * resolver no longer exists: pressing Allow marked it answered in the store and
+ * did nothing else, for a turn that ended when the app closed.
+ *
+ * Applied on load rather than on save so sessions written before this fix are
+ * repaired too.
+ */
+export function settleDanglingRequests(messages: AiMessage[]): AiMessage[] {
+  return messages.map((m) => {
+    if (m.role === 'permissionRequest' && m.permissionRequest && !m.permissionRequest.resolvedOptionId) {
+      return {
+        ...m,
+        permissionRequest: {
+          ...m.permissionRequest,
+          resolvedOptionId: STALE_PERMISSION_OPTION_ID,
+        },
+      };
+    }
+    if (
+      m.role === 'questionRequest' &&
+      m.questionRequest &&
+      m.questionRequest.resolvedAnswer === undefined &&
+      !m.questionRequest.cancelled
+    ) {
+      return { ...m, questionRequest: { ...m.questionRequest, cancelled: true } };
+    }
+    return m;
+  });
+}
+
 export function parseSessionData(json: string): SessionData {
   const data = JSON.parse(json) as SessionData;
   data.agentKind = coerceAgentKind(data.agentKind);
+  if (Array.isArray(data.messages)) {
+    data.messages = settleDanglingRequests(data.messages);
+  }
   return data;
 }
 
@@ -308,11 +355,26 @@ export async function listSessions(workspacePath?: string | null): Promise<Sessi
   }
 
   const files = entries.filter((e) => e.name && e.name.endsWith('.json'));
+
+  // One IPC round trip for every session file, not one PER file. This used to
+  // be a `for` loop awaiting a single-file read on each iteration, so opening
+  // the history panel with a few hundred sessions meant a few hundred
+  // sequential round trips (each parsing a full transcript) before the first
+  // row rendered. `read_files_bulk` drops unreadable files silently, which
+  // matches the per-file `catch` this replaces.
+  let contents: { path: string; content: string }[];
+  try {
+    contents = await invoke<{ path: string; content: string }[]>('read_files_bulk', {
+      paths: files.map((f) => `${dir}/${f.name}`),
+    });
+  } catch {
+    return [];
+  }
+
   const summaries: SessionSummary[] = [];
-  for (const f of files) {
+  for (const f of contents) {
     try {
-      const content = await invoke<string>('read_file', { path: `${dir}/${f.name}` });
-      const data = JSON.parse(content) as SessionData;
+      const data = JSON.parse(f.content) as SessionData;
       if (!data?.id) continue;
       summaries.push({
         id: data.id,

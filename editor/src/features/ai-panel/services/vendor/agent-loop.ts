@@ -18,7 +18,8 @@ import type {
   AgentToolResult,
 } from './types';
 import { EventStream } from './event-stream';
-import { compactMessages } from './compaction';
+import { compactMessages, estimateReservedTokens } from './compaction';
+import { validateToolArgs } from './tools/validate-args';
 
 /** Conservative default — the smallest model tier's window (qwen low). */
 const DEFAULT_CONTEXT_WINDOW = 32768;
@@ -34,8 +35,15 @@ export const DEFAULT_TOOL_TIMEOUT_MS = 120_000;
 
 /**
  * Race a tool execution against its timeout and the loop's abort signal.
- * The losing `execute` promise is left running (its work may still land),
- * but the LOOP moves on — that is the whole point.
+ *
+ * Each call gets its OWN `AbortController`, chained to the loop's signal. The
+ * loop used to simply walk away from the losing promise — the tool kept
+ * running, so a write could land on disk *after* the model had been told the
+ * call timed out and had already redone the work. Now the budget expiring
+ * actually cancels the call for every tool that observes its signal.
+ *
+ * A tool that ignores its signal still cannot be stopped, so the timeout
+ * message says so rather than implying the work definitely failed.
  */
 function executeToolBounded(
   tool: AgentTool,
@@ -47,6 +55,8 @@ function executeToolBounded(
   return new Promise<AgentToolResult>((resolve, reject) => {
     let settled = false;
     let onAbort: (() => void) | null = null;
+    /** Per-call cancellation, so a timeout can reach the tool itself. */
+    const callAbort = new AbortController();
     // `timeoutMs: Infinity` opts a tool out of the budget entirely — used by
     // tools that legitimately wait on a HUMAN (write/edit approval, ask_user,
     // approval-gated Unity mutations). Those still race the abort signal, so
@@ -55,8 +65,15 @@ function executeToolBounded(
     // skip must be explicit.
     const timer = Number.isFinite(budgetMs)
       ? setTimeout(() => {
+          callAbort.abort();
           settle(() =>
-            reject(new Error(`Tool "${toolCall.name}" timed out after ${Math.round(budgetMs / 1000)}s`)),
+            reject(
+              new Error(
+                `Tool "${toolCall.name}" timed out after ${Math.round(budgetMs / 1000)}s and was ` +
+                  `cancelled. Work it had already started may still complete — check the current ` +
+                  `state before retrying rather than assuming nothing happened.`,
+              ),
+            ),
           );
         }, budgetMs)
       : null;
@@ -70,7 +87,10 @@ function executeToolBounded(
     }
 
     if (signal) {
-      onAbort = () => settle(() => reject(new Error(`Tool "${toolCall.name}" aborted`)));
+      onAbort = () => {
+        callAbort.abort();
+        settle(() => reject(new Error(`Tool "${toolCall.name}" aborted`)));
+      };
       if (signal.aborted) {
         onAbort();
       } else {
@@ -78,7 +98,7 @@ function executeToolBounded(
       }
     }
 
-    tool.execute(toolCall.id, toolCall.arguments, signal, onUpdate).then(
+    tool.execute(toolCall.id, toolCall.arguments, callAbort.signal, onUpdate).then(
       (result) => settle(() => resolve(result)),
       (error) => settle(() => reject(error)),
     );
@@ -140,6 +160,10 @@ async function runLoop(
       // compacted view so weak-model context never grows unbounded.
       const visible = compactMessages(allMessages, {
         contextWindow: config.contextWindow ?? DEFAULT_CONTEXT_WINDOW,
+        // The system prompt and the tool schemas ride on every request. Leaving
+        // them out of the budget let a send pass 100% of the window while
+        // compaction believed it was at 79% of it.
+        reservedTokens: estimateReservedTokens(state.systemPrompt, state.tools),
       });
       const assistantMessage = await streamAssistantResponse(
         config,
@@ -197,22 +221,43 @@ async function runLoop(
         let result: AgentToolResult;
         let isError = false;
 
-        try {
-          result = await executeToolBounded(tool, toolCall, config.signal, (partialResult) => {
-            stream.push({
-              type: 'tool_execution_update',
-              toolCallId: toolCall.id,
-              toolName: toolCall.name,
-              result: partialResult,
-            });
-          });
-        } catch (error) {
+        // Nothing used to check the call against the schema the tool declares,
+        // so a malformed call ran anyway and failed deep inside the tool with a
+        // JS-internal message the model could not act on. Reject it here, in the
+        // shape of an ordinary tool result — which keeps the tool_use/tool_result
+        // pairing intact (an unanswered call 400s the provider on the next send)
+        // and gives the model a correction it can apply.
+        const validated = validateToolArgs(
+          tool.name,
+          tool.parameters,
+          toolCall.arguments,
+          toolCall.rawArguments,
+        );
+
+        if (!validated.ok) {
           isError = true;
-          result = {
-            content: [
-              { type: 'text', text: `Error: ${error instanceof Error ? error.message : String(error)}` },
-            ],
-          };
+          result = { content: [{ type: 'text', text: validated.message }] };
+        } else {
+          // Execute with the coerced value, but leave the assistant message
+          // holding exactly what the model produced.
+          const call = { ...toolCall, arguments: validated.value };
+          try {
+            result = await executeToolBounded(tool, call, config.signal, (partialResult) => {
+              stream.push({
+                type: 'tool_execution_update',
+                toolCallId: toolCall.id,
+                toolName: toolCall.name,
+                result: partialResult,
+              });
+            });
+          } catch (error) {
+            isError = true;
+            result = {
+              content: [
+                { type: 'text', text: `Error: ${error instanceof Error ? error.message : String(error)}` },
+              ],
+            };
+          }
         }
 
         stream.push({
@@ -365,15 +410,22 @@ function updateAssistantMessage(
     case 'toolcall_delta': {
       const last = content[content.length - 1];
       if (last?.type === 'toolCall') {
-        const existing = (last as any)._rawArgs ?? '';
-        const raw = existing + event.arguments;
+        // Accumulate on the typed `rawArguments` field. This used to stash the
+        // partial blob on an `any`-cast `_rawArgs` property that was MUTATED
+        // onto the content block, so it rode along into the persisted session
+        // transcript and into `convertToLlm`. The accumulator is also the
+        // authoritative record when the blob never becomes valid JSON — the
+        // loop refuses such a call rather than running it on `{}`.
+        const raw = (last.rawArguments ?? '') + event.arguments;
         try {
           const parsed = JSON.parse(raw);
-          content[content.length - 1] = { ...last, arguments: parsed };
+          content[content.length - 1] =
+            parsed !== null && typeof parsed === 'object'
+              ? { ...last, arguments: parsed as Record<string, unknown>, rawArguments: undefined }
+              : { ...last, rawArguments: raw };
         } catch {
-          // Partial JSON — keep raw for next delta
-          content[content.length - 1] = { ...last };
-          (content[content.length - 1] as any)._rawArgs = raw;
+          // Partial JSON — keep the raw text for the next delta.
+          content[content.length - 1] = { ...last, rawArguments: raw };
         }
       }
       break;

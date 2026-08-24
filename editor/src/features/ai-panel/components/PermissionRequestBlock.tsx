@@ -108,6 +108,11 @@ function PermissionRequestBlock({ message }: Props) {
         })}
       </div>
 
+      {resolved && !selectedOption && (
+        <div className="ai-panel-permission-chosen">
+          Expired — this request ended when the app restarted.
+        </div>
+      )}
       {resolved && selectedOption && (
         <div className="ai-panel-permission-resolved">
           Chosen: {selectedOption.name}

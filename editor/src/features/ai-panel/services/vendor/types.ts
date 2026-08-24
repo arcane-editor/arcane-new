@@ -33,6 +33,14 @@ export interface ToolCall {
   id: string;
   name: string;
   arguments: Record<string, unknown>;
+  /**
+   * The model's raw argument text, set ONLY when it could not be parsed into an
+   * object. `arguments` then still holds the `{}` the block was created with,
+   * which is exactly the state that used to reach `tool.execute` unnoticed —
+   * so the loop treats the presence of this field as "do not run this call"
+   * and reports it (see vendor/tools/validate-args.ts).
+   */
+  rawArguments?: string;
 }
 
 // =========================================================================

@@ -4,6 +4,8 @@ import { withRepeatCallGuard, resetRepeatCallGuard, stableStringify } from './to
 import { resetTurnTelemetry, nextTurnTelemetry } from './turn-telemetry';
 import type { AgentTool, AgentToolResult } from './vendor/types';
 
+const WS = '/ws';
+
 function fakeTool(name: string, resultText = `${name}-result`): { tool: AgentTool; calls: () => number } {
   let calls = 0;
   const tool: AgentTool = {
@@ -37,7 +39,7 @@ describe('withRepeatCallGuard', () => {
 
   it('suppresses an exact repeat call without executing the inner tool', async () => {
     const { tool, calls } = fakeTool('bash');
-    const guarded = withRepeatCallGuard(tool);
+    const guarded = withRepeatCallGuard(tool, WS);
 
     const first = await guarded.execute('c1', { command: 'ls' });
     const second = await guarded.execute('c2', { command: 'ls' });
@@ -50,7 +52,7 @@ describe('withRepeatCallGuard', () => {
 
   it('executes when arguments differ', async () => {
     const { tool, calls } = fakeTool('bash');
-    const guarded = withRepeatCallGuard(tool);
+    const guarded = withRepeatCallGuard(tool, WS);
 
     await guarded.execute('c1', { command: 'ls' });
     await guarded.execute('c2', { command: 'pwd' });
@@ -61,8 +63,8 @@ describe('withRepeatCallGuard', () => {
   it('exempts a read of a path that was written since the previous identical read', async () => {
     const read = fakeTool('read');
     const write = fakeTool('write');
-    const guardedRead = withRepeatCallGuard(read.tool);
-    const guardedWrite = withRepeatCallGuard(write.tool);
+    const guardedRead = withRepeatCallGuard(read.tool, WS);
+    const guardedWrite = withRepeatCallGuard(write.tool, WS);
 
     await guardedRead.execute('c1', { path: 'Foo.cs' }); // first read
     await guardedWrite.execute('c2', { path: 'Foo.cs', content: 'x' }); // write marks it
@@ -75,8 +77,8 @@ describe('withRepeatCallGuard', () => {
   it('suppresses a THIRD identical read when no new write happened after the exemption was consumed', async () => {
     const read = fakeTool('read');
     const write = fakeTool('write');
-    const guardedRead = withRepeatCallGuard(read.tool);
-    const guardedWrite = withRepeatCallGuard(write.tool);
+    const guardedRead = withRepeatCallGuard(read.tool, WS);
+    const guardedWrite = withRepeatCallGuard(write.tool, WS);
 
     await guardedRead.execute('c1', { path: 'Foo.cs' }); // first read
     await guardedWrite.execute('c2', { path: 'Foo.cs', content: 'x' }); // write marks it
@@ -90,7 +92,7 @@ describe('withRepeatCallGuard', () => {
 
   it('suppresses an identical write/edit repeat (no read exemption applies to writes)', async () => {
     const { tool, calls } = fakeTool('write');
-    const guarded = withRepeatCallGuard(tool);
+    const guarded = withRepeatCallGuard(tool, WS);
 
     await guarded.execute('c1', { path: 'Foo.cs', content: 'x' });
     await guarded.execute('c2', { path: 'Foo.cs', content: 'x' });
@@ -114,7 +116,7 @@ describe('withRepeatCallGuard', () => {
             } as AgentToolResult)
           : { content: [{ type: 'text', text: 'Successfully wrote file' }] };
       },
-    });
+    }, WS);
 
     const params = { path: 'Assets/A.cs', content: 'x' };
     await guarded.execute('c1', params);
@@ -126,7 +128,7 @@ describe('withRepeatCallGuard', () => {
 
   it('a rejected write does not arm the post-write read exemption', async () => {
     const read = fakeTool('read');
-    const guardedRead = withRepeatCallGuard(read.tool);
+    const guardedRead = withRepeatCallGuard(read.tool, WS);
     const guardedWrite = withRepeatCallGuard({
       name: 'write',
       label: 'write',
@@ -138,7 +140,7 @@ describe('withRepeatCallGuard', () => {
           rejected: true,
         } as AgentToolResult;
       },
-    });
+    }, WS);
 
     await guardedRead.execute('c1', { path: 'Assets/A.cs' });
     await guardedWrite.execute('c2', { path: 'Assets/A.cs', content: 'x' }); // rejected — no write landed
@@ -151,7 +153,7 @@ describe('withRepeatCallGuard', () => {
 
   it('reset clears both the call-count and written-since registries', async () => {
     const { tool, calls } = fakeTool('bash');
-    const guarded = withRepeatCallGuard(tool);
+    const guarded = withRepeatCallGuard(tool, WS);
 
     await guarded.execute('c1', { command: 'ls' });
     resetRepeatCallGuard();
@@ -162,12 +164,95 @@ describe('withRepeatCallGuard', () => {
 
   it('increments the loopGuardHits telemetry counter on each suppression', async () => {
     const { tool } = fakeTool('bash');
-    const guarded = withRepeatCallGuard(tool);
+    const guarded = withRepeatCallGuard(tool, WS);
 
     await guarded.execute('c1', { command: 'ls' });
     await guarded.execute('c2', { command: 'ls' });
     await guarded.execute('c3', { command: 'ls' });
 
     expect(nextTurnTelemetry().loopGuardHits).toBe(2);
+  });
+});
+
+// The guard keyed on the RAW argument text, so the same file under a different
+// spelling was a different call — the model could loop on it forever, and the
+// post-write read exemption (also path-keyed) never matched across spellings.
+describe('withRepeatCallGuard — path spelling', () => {
+  beforeEach(() => {
+    resetRepeatCallGuard();
+    resetTurnTelemetry();
+  });
+
+  it('treats "./Foo.cs" and "Foo.cs" as the same call', async () => {
+    const { tool, calls } = fakeTool('read');
+    const guarded = withRepeatCallGuard(tool, WS);
+
+    await guarded.execute('c1', { path: 'Assets/Foo.cs' });
+    await guarded.execute('c2', { path: './Assets/Foo.cs' });
+
+    expect(calls()).toBe(1);
+  });
+
+  it('collapses a relative and an absolute spelling of the same file', async () => {
+    const { tool, calls } = fakeTool('read');
+    const guarded = withRepeatCallGuard(tool, WS);
+
+    await guarded.execute('c1', { path: 'Assets/Foo.cs' });
+    await guarded.execute('c2', { path: '/ws/Assets/Foo.cs' });
+
+    expect(calls()).toBe(1);
+  });
+
+  it('collapses a path that walks through a parent segment', async () => {
+    const { tool, calls } = fakeTool('read');
+    const guarded = withRepeatCallGuard(tool, WS);
+
+    await guarded.execute('c1', { path: 'Assets/Foo.cs' });
+    await guarded.execute('c2', { path: 'Assets/Sub/../Foo.cs' });
+
+    expect(calls()).toBe(1);
+  });
+
+  it('still treats genuinely different files as different calls', async () => {
+    const { tool, calls } = fakeTool('read');
+    const guarded = withRepeatCallGuard(tool, WS);
+
+    await guarded.execute('c1', { path: 'Assets/Foo.cs' });
+    await guarded.execute('c2', { path: 'Assets/Bar.cs' });
+
+    expect(calls()).toBe(2);
+  });
+
+  it('arms the post-write read exemption across spellings', async () => {
+    const read = fakeTool('read');
+    const guardedRead = withRepeatCallGuard(read.tool, WS);
+    const write = fakeTool('write', 'Successfully wrote file');
+    const guardedWrite = withRepeatCallGuard(write.tool, WS);
+
+    await guardedRead.execute('c1', { path: 'Assets/A.cs' });
+    await guardedWrite.execute('c2', { path: './Assets/A.cs', content: 'x' });
+    // The re-read after a write must go through — under the old raw-text key
+    // the write armed './Assets/A.cs' and this read asked for 'Assets/A.cs'.
+    await guardedRead.execute('c3', { path: 'Assets/A.cs' });
+
+    expect(read.calls()).toBe(2);
+  });
+
+  it('passes the ORIGINAL params to the inner tool, not the normalized ones', async () => {
+    let seen: unknown;
+    const tool: AgentTool = {
+      name: 'read',
+      label: 'read',
+      description: 'fake',
+      parameters: Type.Object({}),
+      async execute(_id, params): Promise<AgentToolResult> {
+        seen = params;
+        return { content: [{ type: 'text', text: 'ok' }] };
+      },
+    };
+    const guarded = withRepeatCallGuard(tool, WS);
+
+    await guarded.execute('c1', { path: './Assets/Foo.cs' });
+    expect((seen as { path: string }).path).toBe('./Assets/Foo.cs');
   });
 });

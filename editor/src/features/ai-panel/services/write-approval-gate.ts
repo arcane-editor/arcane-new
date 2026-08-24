@@ -147,6 +147,24 @@ export function isRejectedWrite(res: AgentToolResult): boolean {
   return (res as WriteApprovalResult).rejected === true;
 }
 
+/**
+ * True only when the file on disk actually changed.
+ *
+ * The vendor write/edit tools never throw — every failure comes back as an
+ * ordinary text result — so this leading marker is the ONLY signal that the
+ * write landed. `compile-gate.ts` and `lsp-gate.ts` each carried a private copy
+ * of this check; `analyzer-gate.ts` had none and guarded on `isRejectedWrite`
+ * alone, so any OTHER failed write (a disk error, an out-of-sandbox path, a
+ * schema-invalid call, a symlink refusal) still got analyzed — against
+ * `params.content`, i.e. the content the model PROPOSED rather than anything
+ * on disk. It reported analyzer errors for a file that was never written.
+ */
+export function isSuccessfulWrite(res: AgentToolResult): boolean {
+  const text =
+    res.content.find((c): c is { type: 'text'; text: string } => c.type === 'text')?.text ?? '';
+  return /^Successfully (wrote|edited)\b/.test(text);
+}
+
 export interface WriteApprovalDeps {
   /** Reads the file's current content; resolves `null` if it doesn't exist (or is unreadable). */
   readFile: (absPath: string) => Promise<string | null>;

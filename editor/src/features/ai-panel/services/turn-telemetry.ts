@@ -168,6 +168,28 @@ export function nextTurnTelemetry(): TurnTelemetry {
 
 const REPAIR_MARKERS = ['[Unity compile]', '[Unity analyzers]', '[C# language server]'];
 
+/**
+ * A gate note counts as a REPAIR only when it reports problems to fix.
+ *
+ * The old rule was "carries a marker and doesn't say `] Clean`", which counted
+ * every DEGRADED outcome as a repair: "Unity bridge not connected — compile
+ * status unknown", "Assets refreshed — no recompile was needed", "Compile
+ * status unknown (timeout)". `repairCount` feeds `send-escalation.ts`
+ * (threshold 2), which latches the conversation onto a costlier model tier for
+ * the rest of the session — so simply working with Unity closed escalated the
+ * user after two writes, permanently, with nothing to repair.
+ *
+ * All three gates report counts the same way (`N compiler error(s)`,
+ * `N error(s) in <file>`, `N error-severity issue(s)`), and none of the neutral
+ * or degraded notes does — that literal `(s)` is the discriminator.
+ */
+const REPAIR_COUNT_PATTERN = /\d+\s[^\n]*?(?:error|issue)\(s\)/;
+
+export function isRepairNote(text: string): boolean {
+  if (!REPAIR_MARKERS.some((m) => text.includes(m))) return false;
+  return REPAIR_COUNT_PATTERN.test(text);
+}
+
 export function recordTelemetryEvent(event: AgentEvent): void {
   if (event.type === 'tool_execution_end') {
     if (event.isError) {
@@ -186,7 +208,7 @@ export function recordTelemetryEvent(event: AgentEvent): void {
   if (event.type === 'message_end' && event.message.role === 'toolResult') {
     const c = event.message.content;
     const text = typeof c === 'string' ? c : '';
-    if (REPAIR_MARKERS.some((m) => text.includes(m)) && !text.includes('] Clean')) {
+    if (isRepairNote(text)) {
       current.repairCount++;
     }
   }
