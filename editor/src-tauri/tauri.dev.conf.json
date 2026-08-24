@@ -10,6 +10,11 @@
       "desktop": {
         "schemes": ["arcane-dev"]
       }
+    },
+    "updater": {
+      "pubkey": "REPLACE_ME",
+      "endpoints": ["https://releases.arcaneai.org/dev/latest/{{target}}-{{arch}}.json"],
+      "windows": { "installMode": "passive" }
     }
   }
 }

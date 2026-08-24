@@ -34,10 +34,16 @@
       "desktop": {
         "schemes": ["arcane"]
       }
+    },
+    "updater": {
+      "pubkey": "REPLACE_ME",
+      "endpoints": ["https://releases.arcaneai.org/latest/{{target}}-{{arch}}.json"],
+      "windows": { "installMode": "passive" }
     }
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": "all",
     "externalBin": ["binaries/arcane-graph", "binaries/typescript-language-server"],
     "resources": { "../unity-bridge": "unity-bridge" },
