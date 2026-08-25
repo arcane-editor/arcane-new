@@ -39,8 +39,7 @@ import {
   AiChatPanel,
   MaximizedAiOverlay,
   isAiComposerFocused,
-  nextEffort,
-  clampEffort,
+  cycleEffort,
   restoreLatestSessionForWorkspace,
   resetAgentService,
   disposeExternalBackends,
@@ -100,7 +99,7 @@ import { initUnityTelemetry } from './features/unity-telemetry';
 import { useUnityStore } from './stores/unity';
 import { useDebugStore } from './stores/debug';
 import { useAuthStore } from './stores/auth';
-import { useServerConfigStore, maxAllowedEffort } from './stores/server-config';
+import { useServerConfigStore, allowedEfforts } from './stores/server-config';
 import { initConnectivityListeners } from './stores/connectivity';
 import { useSceneUsageStore } from './features/unity-context';
 import {
@@ -196,13 +195,14 @@ function cycleAiMode(): void {
 }
 
 /**
- * Step reasoning effort by `delta`, clamped both to the scale's ends
- * (`nextEffort`) and to the account's current ceiling (`maxAllowedEffort`) —
- * mirrors `EffortSelector`'s fail-closed bars, so the chord can't step past a
- * tier the plan doesn't allow even though the bars aren't what fired it.
- * No-op mid-run, like the bars.
+ * Cycle reasoning effort one level, wrapping at the top.
+ *
+ * Goes through the SAME allow-list the pill uses (`allowedEfforts`), so the
+ * chord can never land on a tier the plan cannot request even though the pill
+ * is not what fired it — cycling into a locked level would send the next turn
+ * straight into a 403. No-op mid-run, like the pill.
  */
-function stepEffort(delta: number): void {
+function cycleEffortCommand(): void {
   const ai = useAiStore.getState();
   if (ai.isAgentRunning) return;
   // Same reason as `cycleAiMode`: effort is an Arcane request parameter, and
@@ -210,8 +210,7 @@ function stepEffort(delta: number): void {
   if (ai.selectedAgent !== 'arcane') return;
   const config = useServerConfigStore.getState().config;
   const plan = useAuthStore.getState().plan;
-  const next = nextEffort(ai.effort, delta);
-  ai.setEffort(clampEffort(next, maxAllowedEffort(config, plan)));
+  ai.setEffort(cycleEffort(ai.effort, allowedEfforts(config, plan)));
 }
 
 function App() {
@@ -1292,22 +1291,23 @@ function App() {
     // the code editor — addCommand fires on the chord regardless of `when`,
     // which is exactly what that flag exists for.
     {
-      id: 'ai.effortUp',
-      label: 'Increase Reasoning Effort',
+      id: 'ai.effortCycle',
+      label: 'Cycle Reasoning Effort',
       category: 'AI',
-      keybinding: 'mod+right',
+      // Effort is a MODE, not a stepped scale, so it gets one cycling chord
+      // the way `ai.cycleMode` does — not a pair of arrows. Arrows were the
+      // problem: scoped to the composer, `mod+left/right` fired only inside a
+      // text box, and that IS the caret binding there (line start/end on
+      // macOS, word jump on Windows).
+      //
+      // `mod+d` is free in the registry and in the native menu, and unlike
+      // mod+b/i/u it is not a rich-text formatting chord in the Lexical
+      // composer, nor Ctrl+Y's redo on Windows. `skipMonacoBridge` keeps
+      // Monaco's own Ctrl+D (add selection to next match) intact.
+      keybinding: 'mod+d',
       when: () => isAiComposerFocused(),
       skipMonacoBridge: true,
-      handler: () => stepEffort(1),
-    },
-    {
-      id: 'ai.effortDown',
-      label: 'Decrease Reasoning Effort',
-      category: 'AI',
-      keybinding: 'mod+left',
-      when: () => isAiComposerFocused(),
-      skipMonacoBridge: true,
-      handler: () => stepEffort(-1),
+      handler: () => cycleEffortCommand(),
     },
     {
       id: 'ai.newChat',

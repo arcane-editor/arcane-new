@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { EFFORT_ORDER, nextEffort, clampEffort, effortLockMessage, restoreEffort } from './effort';
+import { EFFORT_ORDER, nextEffort, clampEffort, effortLockMessage, restoreEffort, cycleEffort } from './effort';
 import type { Effort } from '../services/types';
 
 describe('nextEffort', () => {
@@ -106,5 +106,54 @@ describe('restoreEffort', () => {
   it('is a no-op when the persisted effort is already within a known ceiling', () => {
     expect(restoreEffort('low', 'high')).toBe('low');
     expect(restoreEffort('mid', 'mid')).toBe('mid');
+  });
+});
+
+/**
+ * Effort became a MODE toggle rather than a stepped scale: one pill that
+ * cycles, driven by one chord. Cycling wraps where `nextEffort` clamps, and
+ * the reason `nextEffort` gives for clamping ("a held-down arrow that silently
+ * rolled Max back to Standard would spend a lot of somebody's money") is
+ * inverted here — wrapping off Max makes a turn CHEAPER, and the level it
+ * lands on is stated in the pill's colour and label.
+ *
+ * The load-bearing part is the allow-list: cycling into a level the plan
+ * cannot request would send a turn straight into a 403.
+ */
+describe('cycleEffort', () => {
+  const ALL: Effort[] = ['low', 'mid', 'high'];
+
+  it('advances one level', () => {
+    expect(cycleEffort('low', ALL)).toBe('mid');
+    expect(cycleEffort('mid', ALL)).toBe('high');
+  });
+
+  it('wraps from the top back to the bottom', () => {
+    expect(cycleEffort('high', ALL)).toBe('low');
+  });
+
+  it('only ever visits levels the plan allows', () => {
+    // Pro: Standard and Deep Think, never Max.
+    expect(cycleEffort('low', ['low', 'mid'])).toBe('mid');
+    expect(cycleEffort('mid', ['low', 'mid'])).toBe('low');
+  });
+
+  it('is a no-op on a plan with a single level', () => {
+    // Free: cycling must not offer a level the next send would be 403'd for.
+    expect(cycleEffort('low', ['low'])).toBe('low');
+  });
+
+  it('clamps down when the current level is above the ceiling', () => {
+    // A session restored under a since-downgraded plan.
+    expect(cycleEffort('high', ['low'])).toBe('low');
+    expect(cycleEffort('high', ['low', 'mid'])).toBe('low');
+  });
+
+  it('keeps the scale order regardless of how the allow-list is ordered', () => {
+    expect(cycleEffort('low', ['high', 'low', 'mid'])).toBe('mid');
+  });
+
+  it('falls back to the current level when nothing is allowed', () => {
+    expect(cycleEffort('low', [])).toBe('low');
   });
 });

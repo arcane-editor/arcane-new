@@ -30,6 +30,21 @@
 
   /* ── Type scale ──────────────────────────────────────────────────────
      Line heights are unitless so they inherit correctly into nested text. */
+  /* ---- Reasoning-effort ramp ----
+     Effort reads as a MODE, not a fill level: the old ascending bars lit 1 of
+     3 at the default and made Standard look like a weak product rather than
+     the right choice for most work. Each level gets an identity colour, and
+     the ramp is aliased HERE rather than per theme so a custom theme inherits
+     a coherent one from its own semantic palette for free.
+
+     `high` borrows the error hue because that is the only strong warm tone a
+     theme is guaranteed to define. It is used as a tint plus a dot, never as
+     a solid fill, and the label stays in the normal text colour — a real error
+     in this app is a full card, not a 7px dot. */
+  --effort-low: var(--success);
+  --effort-mid: var(--warning);
+  --effort-high: var(--error-border);
+
   --text-xs: 11px;
   --text-xs-lh: 1.45;
   --text-sm: 12px;

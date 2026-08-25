@@ -25,6 +25,33 @@ export function nextEffort(current: Effort, delta: number): Effort {
   return EFFORT_ORDER[target];
 }
 
+/**
+ * The next level a MODE toggle lands on: one step up the scale, wrapping at
+ * the top, and never leaving `allowed`.
+ *
+ * Wrapping where `nextEffort` clamps is deliberate and the reasoning inverts.
+ * `nextEffort` guards a held-down arrow rolling Max down to Standard; here the
+ * control is a single cycling pill whose colour and label state the level, and
+ * the wrap goes Max → Standard, which makes the next turn cheaper rather than
+ * more expensive.
+ *
+ * `allowed` is load-bearing, not decoration: cycling into a level the account
+ * cannot request would send the next turn straight into a 403. A single-level
+ * plan therefore cycles to itself, and a current level above the ceiling (a
+ * session restored under a since-downgraded plan) drops to the lowest allowed
+ * one rather than being carried along.
+ */
+export function cycleEffort(current: Effort, allowed: Effort[]): Effort {
+  // Scale order, not allow-list order — the caller builds that list from a
+  // config document and its ordering is not guaranteed.
+  const ring = EFFORT_ORDER.filter((e) => allowed.includes(e));
+  if (ring.length === 0) return current;
+
+  const at = ring.indexOf(current);
+  if (at === -1) return ring[0];
+  return ring[(at + 1) % ring.length];
+}
+
 function rank(effort: Effort): number {
   const index = EFFORT_ORDER.indexOf(effort);
   return index === -1 ? 0 : index;

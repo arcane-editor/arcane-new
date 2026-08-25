@@ -36,11 +36,14 @@ function HotkeyBinding({
     }
 
     // The `when` gate decides whether this chord is ours AT ALL right now, so
-    // it has to be consulted before preventDefault, not after. Commands scoped
-    // to one surface take chords the rest of the app needs — `ai.effortUp` is
-    // mod+right, which is line-end in every other text box — and swallowing
-    // the keystroke outside that surface would break the key everywhere while
-    // doing nothing.
+    // it has to be consulted before preventDefault, not after: swallowing a
+    // keystroke outside the surface that owns it would break the key
+    // everywhere while doing nothing.
+    //
+    // The gate bounds the damage, it does not remove it. `ai.effortUp` was
+    // `mod+right` — line-end on macOS, word-jump on Windows — scoped to the AI
+    // composer, so the only place it ever fired was a text box that needed
+    // that key. A composer-scoped chord must be one no text field owns.
     if (!enabled()) return;
 
     e.preventDefault();

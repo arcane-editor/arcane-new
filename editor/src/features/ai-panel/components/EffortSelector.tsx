@@ -1,34 +1,39 @@
 /**
- * EffortSelector — three ascending bars (Standard / Deep Think / Max) rendered
- * like an EQ / signal-strength indicator. Active level lights up that bar plus
- * all preceding bars. Each bar is independently clickable.
+ * EffortSelector — reasoning effort as a MODE, not a meter.
  *
- * Why bars rather than a segmented control?  The user wanted a "graph-style"
- * effort indicator that visually conveys the increasing intensity of the
- * steps. Bars with increasing heights match that intent and compress nicely
- * into the toolbar. The level is sent to the server as `reasoningLevel`; the
- * backend maps it to a concrete model.
+ * One pill, coloured by level, that cycles on click: Standard (green) → Deep
+ * Think (amber) → Max (rose) → Standard. `ai.effortCycle` (mod+d, App.tsx)
+ * does the same thing from the keyboard.
  *
- * The bars are not the only way to set it: `ai.effortUp` / `ai.effortDown`
- * (mod+right / mod+left, App.tsx) step the same scale from the composer.
+ * It used to be three ascending bars, EQ-style, with the active level lighting
+ * up that bar and all before it. That framing was the bug: a 1-of-3 filled
+ * meter says "you are on the weak setting", so the DEFAULT — the right choice
+ * for most work — read as a deficient one. A mode has a name and an identity
+ * colour; it does not have a fill level.
+ *
+ * No caret, because there is no menu: three values cycle faster than a popover
+ * opens, and the toolbar already carries bare pills (Fast mode) alongside
+ * pills that do open menus (the mode pill), so the absence of a caret is
+ * itself the signal.
+ *
+ * Colour is never the only carrier — the label always names the level, which
+ * is what a screen reader and a colour-blind user read.
  */
 
 import { useAiStore } from '../../../stores/ai';
 import { useAuthStore } from '../../../stores/auth';
 import { useServerConfigStore, allowedEfforts } from '../../../stores/server-config';
-import { useCommandsStore } from '../../../stores/commands';
-import { isMac } from '../../../utils/platform';
-import { effortChordLabel } from '../data/effort-chord';
-import { effortLockMessage } from '../data/effort';
+import Tooltip from '../../../components/Tooltip';
+import { cycleEffort, effortLockMessage } from '../data/effort';
 import type { Effort } from '../services/types';
 
 // Standard is first because it is the default: the server gates `mid`/`high`
 // behind paid plans, so a Free user who lands anywhere else is 403'd on their
 // first message.
-const LEVELS: { value: Effort; label: string; bars: number }[] = [
-  { value: 'low', label: 'Standard', bars: 1 },
-  { value: 'mid', label: 'Deep Think', bars: 2 },
-  { value: 'high', label: 'Max', bars: 3 },
+const LEVELS: { value: Effort; label: string; description: string }[] = [
+  { value: 'low', label: 'Standard', description: 'Standard reasoning — the right choice for most work.' },
+  { value: 'mid', label: 'Deep Think', description: 'Deep Think — more reasoning per turn, slower and costlier.' },
+  { value: 'high', label: 'Max', description: 'Max — the most reasoning this plan allows.' },
 ];
 
 function EffortSelector() {
@@ -45,69 +50,33 @@ function EffortSelector() {
   const plan = useAuthStore((s) => s.plan);
   const allowed = allowedEfforts(config, plan);
 
-  const activeLevel = LEVELS.find((l) => l.value === effort) ?? LEVELS[0];
-  const activeBars = activeLevel.bars;
+  const active = LEVELS.find((l) => l.value === effort) ?? LEVELS[0];
+  // Nothing to cycle TO — a Free account has one level, so the pill states the
+  // level and explains the lock instead of pretending to be a control.
+  const locked = allowed.length <= 1;
+  const next = LEVELS.find((l) => l.value === cycleEffort(effort, allowed));
 
-  // Select the Map itself, never a value derived from it — a selector that
-  // builds a fresh identity per call never compares equal under Zustand v5 and
-  // re-renders forever (see the note on `selectCommands` in Tooltip.tsx).
-  const commands = useCommandsStore((s) => s.commands);
-  const chord = effortChordLabel(
-    commands.get('ai.effortDown')?.keybinding,
-    commands.get('ai.effortUp')?.keybinding,
-    isMac(),
-  );
+  const label = locked
+    ? effortLockMessage('mid')
+    : `${active.description} Click to switch to ${next?.label ?? 'the next level'}.`;
 
   return (
-    // `aria-keyshortcuts` is the permanent half of surfacing these chords: it
-    // costs nothing visually and is always true, while the ChordHint keycap in
-    // the toolbar is the transient visual half. Meta+ArrowLeft/Right is the
-    // spelling ARIA expects, not the glyphs shown on screen.
-    <div
-      className="ai-panel-effort"
-      role="radiogroup"
-      aria-label="Reasoning effort"
-      aria-keyshortcuts="Meta+ArrowLeft Meta+ArrowRight"
-    >
-      <div className="ai-panel-effort-bars">
-        {[1, 2, 3].map((idx) => {
-          const lvl = LEVELS.find((l) => l.bars === idx)!;
-          const isActive = idx <= activeBars;
-          const locked = !allowed.includes(lvl.value);
-          const lockMessage = locked ? effortLockMessage(lvl.value) : null;
-          return (
-            <button
-              key={idx}
-              type="button"
-              role="radio"
-              aria-checked={effort === lvl.value}
-              aria-disabled={locked || undefined}
-              className={`ai-panel-effort-bar ai-panel-effort-bar--${idx} ${
-                isActive ? 'is-active' : ''
-              }`}
-              // Locked bars get NO click handler at all — not just a disabled
-              // attribute — so a stray click can never race a re-render that
-              // briefly clears `disabled`.
-              onClick={locked ? undefined : () => setEffort(lvl.value)}
-              disabled={isAgentRunning || locked}
-              // No `title` on an UNLOCKED bar: these carried a native tooltip
-              // each, plus one on the group, and hovering the toolbar flashed
-              // them constantly. A locked bar is the exception — it needs to
-              // explain WHY it's locked, so it gets a `title` (TooltipHost
-              // upgrades it to the styled tooltip on hover) alongside the
-              // `aria-label` screen readers rely on either way, since the
-              // button itself has no text.
-              title={lockMessage || undefined}
-              aria-label={lockMessage || `${lvl.label} reasoning`}
-            />
-          );
-        })}
-      </div>
-      <span className="ai-panel-effort-label">{activeLevel.label}</span>
-      {/* Permanent, so it is set as quietly as it can be and still be read.
-          Absent entirely when the bindings no longer compress to one cap. */}
-      {chord && <kbd className="ai-panel-effort-chord">{chord}</kbd>}
-    </div>
+    <Tooltip label={label} commandId={locked ? undefined : 'ai.effortCycle'} side="top">
+      <button
+        type="button"
+        className="ai-panel-effort"
+        data-effort={active.value}
+        onClick={locked ? undefined : () => setEffort(cycleEffort(effort, allowed))}
+        disabled={isAgentRunning || locked}
+        // Permanent, non-visual counterpart to the chord in the tooltip —
+        // the same pairing ModeSelector uses.
+        aria-keyshortcuts="Meta+D"
+        aria-label={`Reasoning effort: ${active.label}${locked ? '' : '. Activate to cycle.'}`}
+      >
+        <span className="ai-panel-effort-dot" aria-hidden="true" />
+        <span className="ai-panel-effort-label">{active.label}</span>
+      </button>
+    </Tooltip>
   );
 }
 

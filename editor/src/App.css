@@ -4106,82 +4106,65 @@ html, body, #root {
 }
 
 /* ---- Effort: ascending bars (graph style) ---- */
+/* ---- Reasoning effort: a mode pill, not a meter ----
+   Three ascending bars lit 1-of-3 at the default, which framed Standard — the
+   right choice for most work — as the weak setting. A mode has an identity
+   colour and a name; it has no fill level. Metrics deliberately match
+   `.ai-panel-mode-pill` so the toolbar stays one family; the missing caret is
+   what distinguishes a control that CYCLES from one that opens a menu. */
 .ai-panel-effort {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 3px 8px 3px 6px;
+  padding: 3px 9px 3px 8px;
   border-radius: 999px;
-  cursor: default;
-  transition: background 140ms ease;
-}
-
-.ai-panel-effort:hover {
-  background: color-mix(in srgb, var(--text-primary) 5%, transparent);
-}
-
-.ai-panel-effort-bars {
-  display: inline-flex;
-  align-items: flex-end;
-  gap: 2px;
-  height: 14px;
-}
-
-.ai-panel-effort-bar {
-  width: 3px;
-  background: color-mix(in srgb, var(--text-secondary) 40%, transparent);
-  border: none;
-  border-radius: 2px;
-  padding: 0;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 500;
   cursor: pointer;
+  /* Level colour drives tint, border and dot from one custom property. */
+  background: color-mix(in srgb, var(--effort-level) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--effort-level) 30%, transparent);
+  /* The LABEL stays normal text: colour is the state signal, not the content,
+     and a rose label at 11px would read as an error rather than a level. */
+  color: var(--text-primary);
   transition:
-    background 180ms cubic-bezier(0.2, 0.7, 0.2, 1),
-    transform 180ms cubic-bezier(0.2, 0.7, 0.2, 1),
-    box-shadow 180ms ease;
+    background var(--motion-fast) var(--ease-out),
+    border-color var(--motion-fast) var(--ease-out);
 }
 
-.ai-panel-effort-bar--1 { height: 5px; }
-.ai-panel-effort-bar--2 { height: 9px; }
-.ai-panel-effort-bar--3 { height: 13px; }
-.ai-panel-effort-bar--4 { height: 17px; }
+.ai-panel-effort[data-effort='low'] { --effort-level: var(--effort-low); }
+.ai-panel-effort[data-effort='mid'] { --effort-level: var(--effort-mid); }
+.ai-panel-effort[data-effort='high'] { --effort-level: var(--effort-high); }
 
-.ai-panel-effort-bar:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--text-primary) 60%, transparent);
+.ai-panel-effort:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--effort-level) 20%, transparent);
+  border-color: color-mix(in srgb, var(--effort-level) 45%, transparent);
 }
 
-.ai-panel-effort-bar.is-active {
-  background: var(--accent);
-  box-shadow: 0 0 6px color-mix(in srgb, var(--accent) 50%, transparent);
+.ai-panel-effort:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
-.ai-panel-effort-bar:disabled {
-  opacity: 0.4;
+.ai-panel-effort:disabled {
+  opacity: 0.45;
   cursor: not-allowed;
 }
 
-.ai-panel-effort-label {
-  font-size: 10.5px;
-  font-weight: 500;
-  color: var(--text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.6px;
+/* The traffic light. Haloed rather than flat so the three states are
+   separable in peripheral vision, which is the whole job of this control. */
+.ai-panel-effort-dot {
+  width: 7px;
+  height: 7px;
+  flex-shrink: 0;
+  border-radius: var(--radius-full);
+  background: var(--effort-level);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--effort-level) 22%, transparent);
 }
 
-/* The chord that drives the bars, stated rather than hidden behind a hover.
-   It is on screen permanently, so it is pitched below the level label it sits
-   beside: same size, no fill, no border, and a dimmer ink. It should be
-   findable when looked for and ignorable when not. Loose tracking keeps ←→
-   from fusing into one mark at this size. */
-.ai-panel-effort-chord {
-  /* A full step, not a half: at 4px the chord fused with the level label into
-     one run of text, and they say different kinds of thing. */
-  margin-left: var(--space-2);
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  line-height: 1;
-  letter-spacing: 0.06em;
-  white-space: nowrap;
-  color: color-mix(in srgb, var(--text-secondary) 65%, transparent);
+.ai-panel-effort-label {
+  letter-spacing: 0.1px;
 }
 
 /* ---- Toolbar icon button (image attach, etc.) ---- */
@@ -4577,8 +4560,9 @@ html, body, #root {
   padding-top: 3px;
 }
 
-/* Served-model footer (T13): same muted-metadata idiom as the effort chord
-   (.ai-panel-effort-chord) — quiet enough to ignore, findable when looked for. */
+/* Served-model footer (T13): muted-metadata idiom — quiet enough to ignore,
+   findable when looked for. (It used to cite the effort chord keycap, which
+   went away when effort became a cycling pill with the chord in its tooltip.) */
 .ai-message-served-model {
   margin-top: 4px;
   font-size: 10.5px;
