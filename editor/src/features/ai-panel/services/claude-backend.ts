@@ -98,7 +98,12 @@ import {
   type ClaudeConnectState,
 } from './claude-connect';
 import type { Attachment } from './types';
-import type { AgentToolResult, AssistantMessage, TextContent } from './vendor/types';
+import type {
+  AgentToolResult,
+  AssistantMessage,
+  TextContent,
+  ToolCall,
+} from './vendor/types';
 
 /** The agent id Rust keys this subprocess by, and the tag on every event. */
 const AGENT_ID = 'claude';
@@ -803,10 +808,6 @@ export class ClaudeBackend {
     const { toolCallId } = update;
     if (!toolCallId) return;
 
-    // A tool call interrupts the assistant bubble: close it so the tool renders
-    // between two messages rather than being appended to the one before it.
-    this.finalizeStreaming('toolUse');
-
     const name = toolDisplayName(update);
     const args = isRecord(update.rawInput) ? update.rawInput : {};
     this.toolNames.set(toolCallId, name);
@@ -818,6 +819,16 @@ export class ClaudeBackend {
       toolName: name,
       args,
     });
+    // The event above fills the `toolCalls` Map and nothing else, and a Map
+    // entry renders nowhere. `ToolCallBlock` is reached from a `toolCall`
+    // CONTENT BLOCK inside an assistant message, so the call has to join the
+    // bubble — exactly as Arcane's own loop does it.
+    //
+    // This used to `finalizeStreaming('toolUse')` here instead, on the belief
+    // that a tool renders between two messages. Nothing renders it there: the
+    // bubble closed, no block was ever added, and a turn that ran 27 tools
+    // showed one sentence and looked frozen.
+    this.upsertStreamingToolCall(toolCallId, name, args);
 
     // A tool call can arrive already finished (a cached read, an instant edit),
     // in which case there is no follow-up update to render its result.
@@ -854,10 +865,54 @@ export class ClaudeBackend {
         .getState()
         .handleAgentEvent({ type: 'tool_execution_start', toolCallId, toolName: name, args });
     }
+    // Also covers the case where the opening `tool_call` never arrived: the
+    // result would otherwise stream into a Map entry with no row to show it.
+    this.upsertStreamingToolCall(toolCallId, name, args);
 
     const status = toolStatusFor(update.status);
     const finished = status === 'complete' || status === 'error';
     this.emitToolResult(toolCallId, update, finished, status === 'error');
+  }
+
+  /**
+   * Add (or refresh) a tool call inside the streaming assistant message.
+   *
+   * Starts the bubble lazily, mirroring `appendStreamingText` — a tool can be
+   * the first thing a turn produces, and an empty bubble pulsing before it
+   * would be the same problem that method solves for text.
+   *
+   * Upsert, not append: the adapter opens a shell call as a generic "Terminal"
+   * with `rawInput: {}` and only fills in the real command once the model has
+   * finished streaming the arguments, so `updateToolCall` re-announces it.
+   * Matching on the block's id keeps that a rename of one row instead of a
+   * second row for the same call.
+   */
+  private upsertStreamingToolCall(
+    toolCallId: string,
+    name: string,
+    args: Record<string, unknown>,
+  ): void {
+    if (!this.streaming) {
+      this.streaming = { role: 'assistant', content: [], timestamp: Date.now() };
+    }
+
+    const existing = this.streaming.content.find(
+      (b): b is ToolCall => b.type === 'toolCall' && b.id === toolCallId,
+    );
+    if (existing) {
+      existing.name = name;
+      existing.arguments = args;
+    } else {
+      this.streaming.content.push({ type: 'toolCall', id: toolCallId, name, arguments: args });
+    }
+
+    const ai = useAiStore.getState();
+    if (!this.streamingStarted) {
+      this.streamingStarted = true;
+      ai.handleAgentEvent({ type: 'message_start', message: this.streaming });
+    } else {
+      ai.handleAgentEvent({ type: 'message_update', message: this.streaming });
+    }
   }
 
   private emitToolResult(
