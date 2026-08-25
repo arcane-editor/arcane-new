@@ -26,6 +26,7 @@ import type { HierarchyNode } from '../../unity-bridge';
 import { UNITY_API_LIST, UNITY_API_DEFAULTS } from '../../../data/unity-api-list';
 import { FileIcon } from '../../../utils/file-icons';
 import { relPathOf } from '../services/stage-file';
+import { scoreMentionMatch } from '../data/mention-search';
 
 type CategoryId = 'files' | 'unity-docs' | 'unity-console' | 'scene-objects' | 'assets';
 
@@ -228,16 +229,10 @@ function MentionPopover({ open, query, anchorRect, onPick, onClose }: Props) {
           score: 0,
         }));
     }
-    const q = query.toLowerCase();
     const scored: FileItem[] = [];
     for (const f of allFiles) {
-      const bn = f.basename.toLowerCase();
-      const rp = f.relPath.toLowerCase();
-      let score = -1;
-      if (bn.startsWith(q)) score = 100 - bn.length;
-      else if (bn.includes(q)) score = 50 - bn.length;
-      else if (rp.includes(q)) score = 25 - rp.length;
-      if (score >= 0) scored.push({ ...f, score });
+      const score = scoreMentionMatch(query, f.basename, f.relPath);
+      if (score !== null) scored.push({ ...f, score });
     }
     scored.sort((a, b) => b.score - a.score);
     return scored.slice(0, MAX_PER_SECTION);
@@ -262,16 +257,10 @@ function MentionPopover({ open, query, anchorRect, onPick, onClose }: Props) {
   const assetItems = useMemo<AssetItem[]>(() => {
     if (!isUnityProject) return [];
     if (!query) return allAssets.slice(0, MAX_PER_SECTION).map((a) => ({ ...a, score: 0 }));
-    const q = query.toLowerCase();
     const scored: AssetItem[] = [];
     for (const a of allAssets) {
-      const bn = a.basename.toLowerCase();
-      const rp = a.relPath.toLowerCase();
-      let score = -1;
-      if (bn.startsWith(q)) score = 100 - bn.length;
-      else if (bn.includes(q)) score = 50 - bn.length;
-      else if (rp.includes(q)) score = 25 - rp.length;
-      if (score >= 0) scored.push({ ...a, score });
+      const score = scoreMentionMatch(query, a.basename, a.relPath);
+      if (score !== null) scored.push({ ...a, score });
     }
     scored.sort((a, b) => b.score - a.score);
     return scored.slice(0, MAX_PER_SECTION);
