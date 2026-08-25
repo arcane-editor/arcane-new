@@ -24,9 +24,16 @@ jobs:
         include:
           - os: macos-14          # Apple Silicon
             triple: aarch64-apple-darwin
-            bundles: dmg
+            # `app` as well as `dmg`: the DMG is what people download, but it is
+            # NOT an updater-enabled target, so building dmg alone produced
+            # "the bundler was configured to create updater artifacts but no
+            # updater-enabled targets were built" and no .app.tar.gz at all.
+            bundles: app,dmg
             asset: Arcane-arm64.dmg
             glob: editor/src-tauri/target/release/bundle/dmg/*.dmg
+            platform_key: darwin-aarch64
+            updater_asset: Arcane.app.tar.gz
+            updater_glob: editor/src-tauri/target/release/bundle/macos/*.app.tar.gz
           # macOS Intel (macos-13 / x86_64-apple-darwin / Arcane-x64.dmg)
           # dropped from distribution as of v0.2.0 — the download option is
           # gone from the landing page too. Restore a matrix entry here if
@@ -36,12 +43,31 @@ jobs:
             bundles: nsis
             asset: ArcaneSetup.exe
             glob: editor/src-tauri/target/release/bundle/nsis/*-setup.exe
+            # On Windows the updater artifact IS the installer — the same file,
+            # with a .sig written beside it.
+            platform_key: windows-x86_64
+            updater_asset: ArcaneSetup.exe
+            updater_glob: editor/src-tauri/target/release/bundle/nsis/*-setup.exe
     runs-on: ${{ matrix.os }}
     defaults:
       run:
         shell: bash   # bash on Windows too, so the `CI=` env-prefix works everywhere
     steps:
       - uses: actions/checkout@v4
+
+      # A tag that disagrees with package.json publishes a manifest claiming a
+      # version the binary does not report. Clients would update, still report
+      # the old version, and update again — every six hours, forever. Fail here
+      # instead.
+      - name: Assert the tag matches editor/package.json
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG=$(node -p "require('./editor/package.json').version")
+          if [[ "$TAG" != "$PKG" ]]; then
+            echo "tag $GITHUB_REF_NAME does not match editor/package.json version $PKG" >&2
+            exit 1
+          fi
 
       - uses: oven-sh/setup-bun@v2
 
@@ -114,10 +140,23 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: cd editor && bunx tauri build --bundles ${{ matrix.bundles }}
 
-      - name: Stage installer under its public name
+      - name: Stage installer and updater artifact
         run: |
           mkdir -p dist-release
           cp "$(ls ${{ matrix.glob }} | head -n1)" "dist-release/${{ matrix.asset }}"
+          UP="$(ls ${{ matrix.updater_glob }} | head -n1)"
+          cp "$UP"      "dist-release/${{ matrix.updater_asset }}"
+          cp "$UP.sig"  "dist-release/${{ matrix.updater_asset }}.sig"
+
+      - name: Write the update manifest
+        run: |
+          V="${GITHUB_REF_NAME:-dev}"
+          node editor/scripts/write-update-manifest.mjs \
+            --platform "${{ matrix.platform_key }}" \
+            --version  "${V#v}" \
+            --url      "https://releases.arcaneai.org/$V/${{ matrix.updater_asset }}" \
+            --sig      "dist-release/${{ matrix.updater_asset }}.sig" \
+            --out      "dist-release/${{ matrix.platform_key }}.json"
 
       # Keep a copy as a workflow artifact too (handy for manual download / debugging).
       - name: Upload build artifact
@@ -134,6 +173,12 @@ jobs:
           V="${GITHUB_REF_NAME:-dev}"
           bunx wrangler r2 object put "arcane-releases/$V/${{ matrix.asset }}"     --file "dist-release/${{ matrix.asset }}" --remote
           bunx wrangler r2 object put "arcane-releases/latest/${{ matrix.asset }}" --file "dist-release/${{ matrix.asset }}" --remote
+          bunx wrangler r2 object put "arcane-releases/$V/${{ matrix.updater_asset }}" --file "dist-release/${{ matrix.updater_asset }}" --remote
+          # The manifest is the one object that must never be served stale — it
+          # is how a rollback reaches clients. Short TTL, JSON content type.
+          bunx wrangler r2 object put "arcane-releases/latest/${{ matrix.platform_key }}.json" \
+            --file "dist-release/${{ matrix.platform_key }}.json" --remote \
+            --content-type application/json --cache-control "max-age=300"
 
   # Publishes the Unity UPM package (arcane-extension) to the same arcane-releases
   # bucket under unity-extension-releases/. Versioned by the extension's OWN

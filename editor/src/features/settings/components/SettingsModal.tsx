@@ -6,6 +6,7 @@ import { useAuthStore } from '../../../stores/auth';
 import { SETTING_DEFINITIONS } from '../data/definitions';
 import { ACCOUNT_SECTION, categoriesOf, filterSettings, isKnownSection } from '../data/nav';
 import SettingsSection from './SettingsSection';
+import { getVersion } from '@tauri-apps/api/app';
 import AccountSection from './AccountSection';
 
 /**
@@ -26,10 +27,20 @@ export function SettingsModal() {
   const loggedIn = useAuthStore((s) => s.loggedIn);
 
   const [search, setSearch] = useState('');
+  // The app displayed its version nowhere, which made "what version are you
+  // on?" unanswerable on a bug report. Best-effort: the settings modal must
+  // still open if this fails.
+  const [appVersion, setAppVersion] = useState('');
   const searchRef = useRef<HTMLInputElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
 
   const categories = useMemo(() => categoriesOf(SETTING_DEFINITIONS), []);
+
+  useEffect(() => {
+    getVersion()
+      .then(setAppVersion)
+      .catch(() => {});
+  }, []);
   const results = useMemo(() => filterSettings(SETTING_DEFINITIONS, search), [search]);
   const searching = search.trim().length > 0;
 
@@ -164,10 +175,15 @@ export function SettingsModal() {
           ) : activeSection === ACCOUNT_SECTION ? (
             <AccountSection />
           ) : (
-            <SettingsSection
-              title={activeSection}
-              definitions={SETTING_DEFINITIONS.filter((d) => d.category === activeSection)}
-            />
+            <>
+              {activeSection === 'Updates' && appVersion && (
+                <p className="settings-app-version">Arcane {appVersion}</p>
+              )}
+              <SettingsSection
+                title={activeSection}
+                definitions={SETTING_DEFINITIONS.filter((d) => d.category === activeSection)}
+              />
+            </>
           )}
         </div>
       </div>

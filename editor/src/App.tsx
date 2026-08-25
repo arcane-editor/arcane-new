@@ -35,6 +35,7 @@ import {
   initialBootSurface,
   consumePendingGotoForWorkspace,
 } from './features/project';
+import { startUpdateNotices } from './features/updates';
 import {
   AiChatPanel,
   MaximizedAiOverlay,
@@ -377,6 +378,17 @@ function App() {
       );
     }
   }, [sidebarVisible, rightSidebarVisible]);
+
+  // Sticky toast when the Rust watcher stages an update. Scheduling lives in
+  // Rust (one process); this is only the surface.
+  useEffect(() => {
+    // Returns an unlisten fn; the promise resolves after mount, so cleanup
+    // has to chain rather than return it directly.
+    const pending = startUpdateNotices();
+    return () => {
+      void pending.then((un) => un());
+    };
+  }, []);
 
   // Restore persisted state on mount
   useEffect(() => {

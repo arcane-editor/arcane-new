@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'bun:test';
 import { SETTING_DEFINITIONS } from './definitions';
+import { DEFAULT_SETTINGS } from '../../../stores/settings';
 
 /**
  * `SettingsSection` renders a select as `<option>{String(opt)}</option>`, so an
@@ -49,5 +50,21 @@ describe('setting definitions', () => {
       const value = typeof opt === 'object' ? opt.value : opt;
       expect(String(value).length).toBeGreaterThan(0);
     }
+  });
+});
+
+describe('updates settings', () => {
+  it('offers an auto-install toggle', () => {
+    const def = SETTING_DEFINITIONS.find((d) => d.key === 'updates.autoInstall');
+    expect(def).toBeDefined();
+    expect(def!.type).toBe('boolean');
+    expect(def!.category).toBe('Updates');
+  });
+
+  it('defaults auto-install on', () => {
+    // Must agree with `auto_install_from_settings` in src-tauri/src/updates.rs,
+    // which also defaults true. If these two disagree, the checkbox shows one
+    // thing and the backend does another.
+    expect(DEFAULT_SETTINGS['updates.autoInstall']).toBe(true);
   });
 });

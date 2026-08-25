@@ -4106,6 +4106,15 @@ html, body, #root {
 }
 
 /* ---- Effort: ascending bars (graph style) ---- */
+/* The running version, shown above the Updates settings. Quiet metadata: it
+   answers "what version are you on?" on a bug report and is otherwise ignorable. */
+.settings-app-version {
+  margin: 0 0 var(--space-4);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: color-mix(in srgb, var(--text-secondary) 75%, transparent);
+}
+
 /* ---- Reasoning effort: a mode pill, not a meter ----
    Three ascending bars lit 1-of-3 at the default, which framed Standard — the
    right choice for most work — as the weak setting. A mode has an identity
