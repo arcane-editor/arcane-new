@@ -6,6 +6,9 @@ const problems = checkVersionSync({
   pkg: readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
   tauriConf: readFileSync(new URL('../src-tauri/tauri.conf.json', import.meta.url), 'utf8'),
   cargoToml: readFileSync(new URL('../src-tauri/Cargo.toml', import.meta.url), 'utf8'),
+  // The dev channel ships its own installers through `dev-build.yml` and needs
+  // the same pubkey guarantee as production.
+  tauriDevConf: readFileSync(new URL('../src-tauri/tauri.dev.conf.json', import.meta.url), 'utf8'),
 });
 
 if (problems.length > 0) {

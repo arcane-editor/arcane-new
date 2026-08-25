@@ -14,10 +14,10 @@
 const PLACEHOLDER_PUBKEYS = new Set(['', 'REPLACE_ME', 'TODO', 'CHANGEME']);
 
 /**
- * @param {{pkg: string, tauriConf: string, cargoToml: string}} sources
+ * @param {{pkg: string, tauriConf: string, cargoToml: string, tauriDevConf?: string}} sources
  * @returns {string[]} human-readable problems; empty means the tree is correct
  */
-export function checkVersionSync({ pkg, tauriConf, cargoToml }) {
+export function checkVersionSync({ pkg, tauriConf, cargoToml, tauriDevConf }) {
   const problems = [];
 
   const pkgVersion = JSON.parse(pkg).version;
@@ -41,11 +41,24 @@ export function checkVersionSync({ pkg, tauriConf, cargoToml }) {
     );
   }
 
-  const pubkey = conf.plugins?.updater?.pubkey ?? '';
-  if (PLACEHOLDER_PUBKEYS.has(pubkey.trim())) {
-    problems.push(
-      'updater pubkey is empty or a placeholder — a build shipped this way can never auto-update, on any install that receives it, and there is no remote fix',
-    );
+  // BOTH channels, not just production. The dev config carries its own full
+  // updater block (deliberately — see the plan's Task 3 Step 4: duplicating the
+  // pubkey removes Tauri's config merge depth as a silent failure mode), so it
+  // needs its own check. Checking only `tauri.conf.json` is how a real
+  // placeholder survived here: production was filled in, the dev channel was
+  // not, `verify` went green, and `dev-build.yml` would have shipped Arcane Dev
+  // installers that can never auto-update.
+  for (const [name, source] of [
+    ['tauri.conf.json', tauriConf],
+    ['tauri.dev.conf.json', tauriDevConf],
+  ]) {
+    if (!source) continue; // dev config is optional for callers/tests
+    const pubkey = JSON.parse(source).plugins?.updater?.pubkey ?? '';
+    if (PLACEHOLDER_PUBKEYS.has(pubkey.trim())) {
+      problems.push(
+        `${name}: updater pubkey is empty or a placeholder — a build shipped this way can never auto-update, on any install that receives it, and there is no remote fix`,
+      );
+    }
   }
 
   return problems;

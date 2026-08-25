@@ -12,7 +12,7 @@
       }
     },
     "updater": {
-      "pubkey": "REPLACE_ME",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDJFN0NFMDI0MUE0N0VCMjUKUldRbDYwY2FKT0I4THJaWG4zRytBeGw0clZUcW1wejA3S1NubzZPU0VxUmpabmJMQTdCYXFleUkK",
       "endpoints": ["https://releases.arcaneai.org/dev/latest/{{target}}-{{arch}}.json"],
       "windows": { "installMode": "passive" }
     }
