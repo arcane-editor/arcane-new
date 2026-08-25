@@ -95,13 +95,23 @@ jobs:
       # Use the tauri BINARY (`bunx tauri`), NOT `bun run tauri` — the npm script
       # re-runs build-lsp-sidecars under CI=true (all targets). The frontend build
       # is handled by tauri's beforeBuildCommand. ad-hoc mac / unsigned Windows
-      # are the defaults, so no signing config is needed here.
+      # are the defaults, so no INSTALLER signing config is needed here — but the
+      # UPDATER artifacts are signed, see below.
       - name: Build Tauri app
         env:
           # Monaco makes vite's build memory-heavy; give V8 headroom so it doesn't
           # abort on the smaller (~7 GB) Apple-Silicon runner. Propagates into the
           # `vite build` that tauri runs via beforeBuildCommand.
           NODE_OPTIONS: --max-old-space-size=4096
+          # `createUpdaterArtifacts` is on, so tauri signs the update bundle with
+          # this key and every client verifies it against the `pubkey` baked into
+          # tauri.conf.json. The two are one keypair and must stay that way: an
+          # install whose update feed it cannot verify can never auto-update, and
+          # there is no remote fix once it is on someone's machine. That is what
+          # `check:version` guards by rejecting a placeholder pubkey — and this
+          # env block is the half that was missing when it was first turned on.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: cd editor && bunx tauri build --bundles ${{ matrix.bundles }}
 
       - name: Stage installer under its public name
