@@ -217,6 +217,8 @@ export interface SettingsSchema {
    * window comes back zoomed, which is what VS Code's `window.zoomLevel` does.
    */
   'window.zoomLevel': number;
+  /** Download and install new versions in the background. */
+  'updates.autoInstall': boolean;
 }
 
 /**

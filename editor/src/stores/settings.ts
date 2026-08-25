@@ -59,6 +59,7 @@ const DEFAULT_SETTINGS: SettingsSchema = {
   'search.seedQueryFromCursor': 'selection',
   'search.useSmartcase': true,
   'window.zoomLevel': 0,
+  'updates.autoInstall': true,
 };
 
 interface SettingsState {
