@@ -62,6 +62,41 @@ export const EXTERNAL_STARTERS: string[] = [
  * `mode` is only consulted for the Arcane agent, because it is only real for
  * the Arcane agent.
  */
+/**
+ * What to say in place of the mode ladder when an external agent will answer.
+ *
+ * The ladder answers "what will pressing Enter do?" with three rungs the user
+ * can pick between. An external agent gives that answer itself, so the slot
+ * gets the two facts that actually change how the next send behaves — whose
+ * account it spends and where its controls live — rather than a paragraph
+ * about agent loops, which is a description of our plumbing and not something
+ * the user operates.
+ *
+ * The name is data rather than literal copy so the block does not go stale the
+ * way hardcoded Claude specifics have before (see CLAUDE.md on the previous
+ * integration).
+ */
+export interface ExternalAgentBrief {
+  name: string;
+  /** One clause each; rendered as separate lines, so no sentence runs long. */
+  facts: string[];
+}
+
+const EXTERNAL_BRIEFS: Record<string, ExternalAgentBrief> = {
+  claude: {
+    name: 'Claude Code',
+    facts: [
+      'Runs on your Anthropic account, with its own tools and permissions.',
+      'Set its mode, model and effort in the toolbar below.',
+    ],
+  },
+};
+
+/** The brief for an external agent, or `null` when Arcane's own loop answers. */
+export function externalAgentBrief(agent: AgentKind): ExternalAgentBrief | null {
+  return isExternalAgent(agent) ? (EXTERNAL_BRIEFS[agent] ?? null) : null;
+}
+
 export function startersFor(agent: AgentKind, mode: ChatMode): string[] {
   return isExternalAgent(agent) ? EXTERNAL_STARTERS : STARTERS[mode];
 }

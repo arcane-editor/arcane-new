@@ -4330,16 +4330,46 @@ html, body, #root {
   color: color-mix(in srgb, var(--text-secondary) 75%, transparent);
 }
 
-/* External agent: no mode column, because the agent owns its own modes. One
-   line of prose in its place, at the same left edge as the mode rows so the
-   block still reads as an answer to the same "on send" question. */
-.ai-panel-empty-agent-note {
+/* ---- External agent: the mode ladder's slot, filled by its owner ----
+   No mode column, because the agent owns its own modes. What used to sit here
+   was a grey paragraph behind a grey rule — the one slot that carries the
+   panel's colour and structure for Arcane went flat and read as a disclaimer.
+   This keeps the ladder's grammar (a left rule at the same left edge, so the
+   block still answers the same "on send" question) and takes the accent the
+   agent pill in the header already uses, so the two read as the same subject.
+
+   Deliberately INERT: no hover, no pointer, not a button. The mode rows this
+   replaces are pressable, and anything here that borrowed their affordance
+   would promise a control this agent does not hand over. */
+.ai-panel-empty-agent {
+  padding: var(--space-2) var(--space-3);
+  border-left: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+}
+
+/* Sentence case, not the mono uppercase used by every other label in this
+   panel: it is a NAME, and set as an eyebrow it collided with the real
+   eyebrow directly above it. */
+.ai-panel-empty-agent-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 5px;
+  font-size: var(--text-base);
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  color: var(--accent);
+}
+
+.ai-panel-empty-agent-fact {
   margin: 0;
-  padding-left: calc(2px + var(--space-2));
-  border-left: 2px solid color-mix(in srgb, var(--text-secondary) 30%, transparent);
   font-size: var(--text-sm);
-  line-height: 1.55;
+  line-height: var(--text-sm-lh);
   color: var(--text-secondary);
+}
+
+.ai-panel-empty-agent-fact + .ai-panel-empty-agent-fact {
+  margin-top: 3px;
 }
 
 /* ---- Mode column: ordered by how much each mode may touch ----

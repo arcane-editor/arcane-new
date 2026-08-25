@@ -1,11 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import {
-  EXTERNAL_STARTERS,
-  STARTERS,
-  groundingLabel,
-  startersFor,
-  type GroundingInput,
-} from './empty-state';
+import { EXTERNAL_STARTERS, STARTERS, groundingLabel, startersFor, type GroundingInput, externalAgentBrief } from './empty-state';
 import { MODES, MODE_LADDER } from './modes';
 
 const base: GroundingInput = {
@@ -117,5 +111,44 @@ describe('startersFor', () => {
   it('does not hand an external agent starters phrased for an Arcane mode', () => {
     const arcaneOnly = new Set(Object.values(STARTERS).flat());
     for (const text of EXTERNAL_STARTERS) expect(arcaneOnly.has(text)).toBe(false);
+  });
+});
+
+describe('externalAgentBrief', () => {
+  it('is null for Arcane — its own loop answers with the mode ladder', () => {
+    expect(externalAgentBrief('arcane')).toBeNull();
+  });
+
+  it('names the agent, so the block cannot go stale against the picker', () => {
+    expect(externalAgentBrief('claude')?.name).toBe('Claude Code');
+  });
+
+  // The slot the mode ladder used to fill answers "what will pressing Enter
+  // do?". For an external agent the two things that actually change the answer
+  // are whose account it spends and where its controls are — not a description
+  // of our agent loop, which the user does not operate.
+  it('says whose account the send spends', () => {
+    const facts = externalAgentBrief('claude')?.facts ?? [];
+    expect(facts.some((f) => /your Anthropic account/i.test(f))).toBe(true);
+  });
+
+  it('points at the toolbar, in words the toolbar itself uses', () => {
+    const facts = externalAgentBrief('claude')?.facts ?? [];
+    const pointer = facts.find((f) => /toolbar/i.test(f)) ?? '';
+    expect(pointer).toMatch(/mode/i);
+    expect(pointer).toMatch(/model/i);
+    expect(pointer).toMatch(/effort/i);
+  });
+
+  it('keeps each fact to one line-length clause', () => {
+    for (const fact of externalAgentBrief('claude')?.facts ?? []) {
+      expect(fact.length).toBeLessThanOrEqual(72);
+      expect(fact.endsWith('.')).toBe(true);
+    }
+  });
+
+  it('never claims a control Arcane owns — no Ask/Plan/Agent ladder here', () => {
+    const all = (externalAgentBrief('claude')?.facts ?? []).join(' ');
+    expect(all).not.toMatch(/\b(Ask|Plan mode|Agent mode)\b/);
   });
 });

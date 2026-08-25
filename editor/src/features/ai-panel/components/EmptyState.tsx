@@ -26,6 +26,7 @@
  * composer. So (2) is replaced, not merely relabelled.
  */
 
+import { Sparkles } from 'lucide-react';
 import { useAiStore } from '../../../stores/ai';
 import { useProjectContextStore } from '../../../stores/project-context';
 import { useUnityIndexStore } from '../../../stores/unity-index';
@@ -33,7 +34,7 @@ import { useWorkspaceStore } from '../../../stores/workspace';
 import type { ChatMode } from '../services/types';
 import { isExternalAgent } from '../services/types';
 import { MODE_LADDER } from '../data/modes';
-import { groundingLabel, startersFor } from '../data/empty-state';
+import { groundingLabel, startersFor, externalAgentBrief } from '../data/empty-state';
 
 /** Folder name from a full path, for the grounding line. */
 function basename(p: string): string {
@@ -67,6 +68,7 @@ function EmptyState() {
   }
 
   const external = isExternalAgent(selectedAgent);
+  const brief = externalAgentBrief(selectedAgent);
 
   return (
     <div className="ai-panel-empty">
@@ -84,11 +86,21 @@ function EmptyState() {
           {external ? (
             <section className="ai-panel-empty-block">
               <h2 className="ai-panel-empty-eyebrow">On send</h2>
-              <p className="ai-panel-empty-agent-note">
-                Claude Code runs its own agent loop with your Anthropic account. Its
-                mode, model and permissions are its own — set them in the toolbar
-                below the composer.
-              </p>
+              {/* The ladder's slot, filled by the agent that owns the answer.
+                  Deliberately inert: the mode rows beside it are buttons, so
+                  anything here that borrowed their hover would promise a
+                  control this agent does not hand over. */}
+              <div className="ai-panel-empty-agent">
+                <p className="ai-panel-empty-agent-name">
+                  <Sparkles size={12} strokeWidth={2.25} aria-hidden="true" />
+                  {brief?.name ?? 'External agent'}
+                </p>
+                {(brief?.facts ?? []).map((fact) => (
+                  <p key={fact} className="ai-panel-empty-agent-fact">
+                    {fact}
+                  </p>
+                ))}
+              </div>
             </section>
           ) : (
           <section className="ai-panel-empty-block">
