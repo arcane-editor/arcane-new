@@ -2,6 +2,7 @@ mod git;
 mod lsp;
 mod terminal;
 mod settings;
+mod updates;
 mod search;
 mod file_scanner;
 mod file_index;
@@ -857,6 +858,7 @@ pub fn run() {
             debug_panic_async,
             settings::read_settings,
             settings::write_settings,
+            updates::updates_apply_and_restart,
             search::start_content_search,
             search::cancel_content_search,
             lsp::lsp_start,
@@ -981,6 +983,11 @@ pub fn run() {
             cli::claim_pending_goto,
         ])
         .setup(|_app| {
+            // Background update watcher — once per process, never per window.
+            // Each Tauri window runs its own JS context, so scheduling this
+            // from the frontend would check (and download) once per window.
+            updates::spawn_watcher(_app.handle());
+
             // Cold start: the same `--goto` Unity passes on a second launch
             // also arrives on the first one, and is likewise ignored unless
             // read here. Stored rather than emitted — no window is listening
