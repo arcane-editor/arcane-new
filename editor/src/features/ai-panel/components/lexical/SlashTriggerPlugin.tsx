@@ -22,6 +22,7 @@ import {
 } from 'lexical';
 import SlashCommandPopover from '../SlashCommandPopover';
 import { useAiStore } from '../../../../stores/ai';
+import { parseSlashQuery } from '../../data/slash-command';
 
 interface TriggerState {
   query: string;
@@ -44,12 +45,12 @@ function SlashTriggerPlugin() {
       const sel = $getSelection();
       if (!$isRangeSelection(sel) || !sel.isCollapsed()) return;
       const full = $getRoot().getTextContent();
-      const m = full.match(/^\/(\w*)$/);
-      if (!m) return;
+      const q = parseSlashQuery(full);
+      if (q === null) return;
       const dom = window.getSelection();
       if (!dom || dom.rangeCount === 0) return;
       const rect = dom.getRangeAt(0).cloneRange().getBoundingClientRect();
-      res = { query: m[1], anchorRect: rect };
+      res = { query: q, anchorRect: rect };
     });
     if (res) setTrigger(res);
     else setTrigger((t) => (t ? null : t));
