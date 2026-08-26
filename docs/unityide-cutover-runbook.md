@@ -21,13 +21,18 @@ The zone `unityide.app` is already delegated to the same Cloudflare account
 Do **P1 first**: DKIM propagation is the slowest thing on this list and
 everything about email waits on it.
 
+Two prerequisites that a reading of the code implies are blockers turn out not to
+be, because the features behind them were never switched on. Both are struck
+through below with the evidence, so nobody re-adds them from the source alone.
+**The only genuine owner-gated step left is P6, the GitHub OAuth Apps.**
+
 | # | What | Where | Blocks |
 |---|---|---|---|
 | **P1** | Onboard `unityide.app` in **Email Sending**. Add the MX/SPF on `cf-bounce`, DKIM on `cf-bounce._domainkey`, DMARC on `_dmarc`, and confirm all four verify. **Do not offboard `arcaneai.org`** — the hard cut removes product hostnames, not the zone. | Cloudflare → Compute → Email Service | worker deploy |
-| **P2** | Add `unityide.app`, `www.unityide.app`, `dev.unityide.app` to the **existing** Turnstile widget's hostname list (keep the old entries and localhost). Same site key, so `PUBLIC_TURNSTILE_SITE_KEY` needs no change. | Cloudflare → Turnstile | landing deploy |
+| **P2** | ~~Turnstile hostnames~~ — **not applicable.** Verified 2026-08-26: the account has no Turnstile widget, the repo has no `PUBLIC_TURNSTILE_SITE_KEY` Actions variable, and neither worker has a `TURNSTILE_SECRET`. Turnstile was never provisioned, so the graceful-degradation path is live and signup does not depend on it. If it is ever turned on, the new hostnames must be on the widget from the start. | — | nothing |
 | **P3** | Attach `releases.unityide.app` as a custom domain on the **`arcane-releases`** bucket (bucket name unchanged). | Cloudflare → R2 | release build |
 | **P4** | Add `dev.unityide.app` to Pages project `arcane-landing-dev`; add `unityide.app` + `www.unityide.app` to `arcane-landing`. Project names unchanged. | Cloudflare → Pages | landing deploy |
-| **P5** | **ADD** (do not replace) `https://api.unityide.app/v1/auth/google/callback` and `https://api-dev.unityide.app/v1/auth/google/callback`. Google allows many redirect URIs, so this is zero-downtime — and it takes minutes to hours to propagate, so do it early. Also update the consent screen name/homepage. | Google Cloud Console | Google sign-in |
+| **P5** | ~~Google redirect URIs~~ — **not applicable.** Verified 2026-08-26: neither worker has `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`, so `/v1/auth/google/start` already answers `google_not_configured` and the button is dead on both channels today. Nothing to migrate. When Google sign-in is set up, register the `unityide.app` callbacks then. | — | nothing |
 | **P6** | Two OAuth Apps, one per environment, because GitHub allows exactly one callback each. Point dev at `https://api-dev.unityide.app/v1/auth/github/callback` and prod at the `api.unityide.app` equivalent. Update Homepage URL too. Edit at the moment of the matching worker deploy — see the window note below. | GitHub → Developer settings | GitHub sign-in |
 
 **Do not hand-create DNS records** for the apex, `www`, `dev`, `api`, `api-dev`
