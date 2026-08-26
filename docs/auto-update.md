@@ -187,6 +187,24 @@ reinstall; v0.3.3 will be the first release the loop actually carries.
 v0.3.2 was also force-retagged, so installers downloaded before 2026-08-25 differ
 from the ones under that name now.
 
+### v0.3.2 names two different products
+
+The Arcane → UnityIDE rebrand ships under the **same** v0.3.2 tag, force-retagged
+again. So "0.3.2" now refers to either the last Arcane build or the first UnityIDE
+one, and the version string alone cannot tell them apart. Check the app name or
+the bundle identifier (`com.inno.editor` vs `app.unityide.desktop`) instead.
+
+`arcane-releases/v0.3.2/` and `latest/` consequently hold BOTH sets of artifacts
+— `Arcane-arm64.dmg` beside `UnityIDE-arm64.dmg`, and so on. `wrangler r2 object
+put` never deletes, so the Arcane ones stay until removed by hand. They are
+unreachable once `releases.arcaneai.org` is detached, just confusing.
+
+This is deliberate, and it has one upside worth recording: because the version
+does not move, an install already on 0.3.2 is never *offered* 0.3.2-UnityIDE.
+The rebrand therefore cannot half-migrate an existing Arcane install in place —
+the failure mode you would otherwise get from an unchanged signing key plus a
+version bump. Every UnityIDE install is a deliberate fresh download.
+
 ---
 
 ## Changing any of this

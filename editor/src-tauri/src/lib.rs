@@ -983,6 +983,18 @@ pub fn run() {
             cli::claim_pending_goto,
         ])
         .setup(|_app| {
+            // FIRST, before anything reads the config dir — the update watcher
+            // below reads settings out of it, and the frontend's very first
+            // `get_config_home_dir` follows shortly after. A one-time copy
+            // forward of the pre-rename ~/.arcane: the identifier changed, so
+            // the OS gave this app an empty webview store, and that directory
+            // (auth token, AI history, checkpoints, cached graphs) is the only
+            // state we can carry across. Never fatal — a fresh start is a
+            // worse experience, not a broken app.
+            if let Err(e) = auth::migrate_legacy_config_dir(_app.handle()) {
+                eprintln!("[UnityIDE] config migration skipped: {e}");
+            }
+
             // Background update watcher — once per process, never per window.
             // Each Tauri window runs its own JS context, so scheduling this
             // from the frontend would check (and download) once per window.
