@@ -36,7 +36,7 @@ function AiChatPanel() {
   const verificationRequired = useAiStore((s) => s.verificationRequired);
   const [historyOpen, setHistoryOpen] = useState(false);
 
-  // T5: the notice explaining WHY the user was signed out (arcane-stream's
+  // T5: the notice explaining WHY the user was signed out (hosted-stream's
   // 401/403 path) should disappear once they've actually logged back in,
   // rather than lingering into the next signed-in session.
   useEffect(() => {

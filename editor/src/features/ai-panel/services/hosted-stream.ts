@@ -34,7 +34,7 @@ import { difficultyForRequest } from './difficulty';
 import { combineSignals, computeBackoffMs, isTransient, raceWithTimeout, sleep, TimeoutRaceError } from './stream-retry';
 import { ARCANE_API_URL } from '../../../config/api';
 
-const ARCANE_SERVER_URL = ARCANE_API_URL;
+const HOSTED_SERVER_URL = ARCANE_API_URL;
 
 /**
  * First-token watchdog default: abort if no SSE chunk arrives at all within
@@ -46,7 +46,7 @@ const ARCANE_SERVER_URL = ARCANE_API_URL;
  */
 const FIRST_TOKEN_TIMEOUT_MS = 25_000;
 
-interface ArcaneStreamEvent {
+interface HostedStreamEvent {
   type: 'text' | 'tool_call' | 'thinking' | 'usage' | 'error';
   content?: string;
   id?: string;
@@ -81,7 +81,7 @@ interface ArcaneStreamEvent {
   code?: 'model_error' | 'rate_limit' | 'server_error';
 }
 
-export interface ArcaneStreamHardeningConfig {
+export interface HostedStreamHardeningConfig {
   /** Injectable for tests; defaults to global `fetch`. Production call sites never pass this. */
   fetchImpl?: typeof fetch;
   /** Total attempts (including the first) for the initial connect phase, before any SSE byte is read. Default 3. */
@@ -103,7 +103,7 @@ export interface ArcaneStreamHardeningConfig {
   firstTokenTimeoutMs?: number;
 }
 
-interface ResolvedArcaneStreamConfig {
+interface ResolvedHostedStreamConfig {
   fetchImpl: typeof fetch;
   maxAttempts: number;
   retryBaseDelayMs: number;
@@ -146,12 +146,12 @@ function corruptionErrorEvent(
 /**
  * Builds a StreamFn against the Arcane server with the given hardening
  * config. Exists mainly so tests can inject a fake `fetch` and tiny
- * timeouts/attempt counts; production uses the pre-built `arcaneStream`
+ * timeouts/attempt counts; production uses the pre-built `hostedStream`
  * below (defaults only, real `fetch`) so the `agent-service.ts` call site
- * (`streamFn: arcaneStream`) never changes.
+ * (`streamFn: hostedStream`) never changes.
  */
-export function createArcaneStreamFn(config: ArcaneStreamHardeningConfig = {}): StreamFn {
-  const resolved: ResolvedArcaneStreamConfig = {
+export function createHostedStreamFn(config: HostedStreamHardeningConfig = {}): StreamFn {
+  const resolved: ResolvedHostedStreamConfig = {
     // Bound to the global on the way in. This lands on a config object and is
     // then invoked as `cfg.fetchImpl(...)` below — a method call, so an unbound
     // `fetch` would receive `cfg` as its `this`. WKWebView (Tauri's macOS
@@ -181,13 +181,13 @@ export function createArcaneStreamFn(config: ArcaneStreamHardeningConfig = {}): 
 }
 
 /** Production StreamFn — default hardening config, real `fetch`. */
-export const arcaneStream: StreamFn = createArcaneStreamFn();
+export const hostedStream: StreamFn = createHostedStreamFn();
 
 async function doStream(
   context: Context,
   options: StreamOptions,
   stream: AssistantMessageEventStream,
-  cfg: ResolvedArcaneStreamConfig,
+  cfg: ResolvedHostedStreamConfig,
 ): Promise<void> {
   // Wall-clock start for this request's `lastTurnLatencyMs` telemetry (P4) —
   // covers the full request including any connect retries, since a retried
@@ -319,7 +319,7 @@ async function doStream(
     let attemptResponse: Response;
     try {
       try {
-        attemptResponse = await cfg.fetchImpl(`${ARCANE_SERVER_URL}/v1/chat/completions`, {
+        attemptResponse = await cfg.fetchImpl(`${HOSTED_SERVER_URL}/v1/chat/completions`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -537,7 +537,7 @@ async function doStream(
           return;
         }
 
-        let event: ArcaneStreamEvent;
+        let event: HostedStreamEvent;
         try {
           event = JSON.parse(data);
         } catch {

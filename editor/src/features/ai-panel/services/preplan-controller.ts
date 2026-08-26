@@ -12,9 +12,9 @@
  * reaching for `useAiStore`/`getAgentService()` directly at module scope, the
  * way `plan-controller.ts` does: that file has no test of its own precisely
  * because `stores/ai.ts` and `agent-service.ts` both pull in a DOM-touching
- * import graph that plain `bun test` cannot load (see `arcane-stream.test.ts`
+ * import graph that plain `bun test` cannot load (see `hosted-stream.test.ts`
  * and `session-persistence.test.ts`'s headers), and `stores/ai` is already
- * `mock.module`'d — process-globally — by `arcane-stream.test.ts`, so a
+ * `mock.module`'d — process-globally — by `hosted-stream.test.ts`, so a
  * second, differently-shaped mock for it here would collide (same landmine
  * `stores/checkpoints.test.ts`'s header documents for the ai-panel barrel).
  * Injecting the three live accessors this controller needs sidesteps both

@@ -8,7 +8,7 @@ import { describe, it, expect, beforeEach, mock } from 'bun:test';
 // import graph is never loaded. Static imports are hoisted above these
 // statements, so the mocks must be registered first and the module under
 // test imported via a dynamic `import()` afterwards (same pattern as
-// features/ai-panel/services/arcane-stream.test.ts).
+// features/ai-panel/services/hosted-stream.test.ts).
 type WorkspaceListener = (state: { workspacePath: string | null }) => void;
 
 let workspaceState: { workspacePath: string | null } = { workspacePath: '/ws' };

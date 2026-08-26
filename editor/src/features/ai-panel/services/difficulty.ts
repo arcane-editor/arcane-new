@@ -1,10 +1,10 @@
 /**
  * Pure resolver for the per-request `difficulty` FACT the stream layer sends
- * to the server (`arcane-stream.ts`'s metadata builder). Difficulty tags an
+ * to the server (`hosted-stream.ts`'s metadata builder). Difficulty tags an
  * agent/plan-execution todo item as 'easy' | 'hard' (`todo-tool.ts`) so the
  * server's routing layer (high tier only) can route the executor model per
  * segment rather than per request — see the model-stickiness comment in
- * `arcane-stream.ts` for the billing rationale.
+ * `hosted-stream.ts` for the billing rationale.
  *
  * Structural plan-entry type (`{ status, difficulty? }`) rather than importing
  * `ArcanePlanEntry` from the store keeps this module store-free/Bun-testable,

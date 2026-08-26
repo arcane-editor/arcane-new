@@ -25,7 +25,7 @@ interface TurnTelemetry {
   groundingUnavailable: number;
   /**
    * Wall-clock latency (ms) of the most recently completed LLM request this
-   * send (P4, `arcane-stream.ts`'s `usage` event handling). `null` until the
+   * send (P4, `hosted-stream.ts`'s `usage` event handling). `null` until the
    * first request of the send completes — reported one request "behind" by
    * construction, since the telemetry snapshot for request N is built before
    * request N's own `usage` event arrives.
@@ -135,7 +135,7 @@ export function recordGroundingUnavailable(): void {
 
 /**
  * Records the most recently completed LLM request's wall-clock latency this
- * send (P4, `arcane-stream.ts`'s `usage` event handling). Overwrites on every
+ * send (P4, `hosted-stream.ts`'s `usage` event handling). Overwrites on every
  * call — only the LATEST completed request's latency is kept.
  */
 export function recordTurnLatency(latencyMs: number): void {

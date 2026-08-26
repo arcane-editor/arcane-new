@@ -150,7 +150,7 @@ export interface AiMessage {
   verifiedPass?: VerifiedCardData;
   /**
    * The model id the server actually served this turn (from the `usage` SSE
-   * event's `model` field, `arcane-stream.ts`), stamped on at `message_end`
+   * event's `model` field, `hosted-stream.ts`), stamped on at `message_end`
    * (`role: 'assistant'` only) via `pendingServedModel`. Undefined for a
    * session saved before this field existed, or for any non-assistant role.
    */
@@ -193,7 +193,7 @@ export type PlanPhase = 'idle' | 'planning' | 'awaiting-execute' | 'executing';
 
 /**
  * Session-cumulative token usage (P4) — accumulated from the Arcane server's
- * `usage` SSE events (`arcane-stream.ts`), which were previously skipped
+ * `usage` SSE events (`hosted-stream.ts`), which were previously skipped
  * client-side entirely. Purely for later surfacing (e.g. a cost/usage
  * indicator); nothing renders it yet.
  */
@@ -213,7 +213,7 @@ interface AiState {
   toolCalls: Map<string, ToolCallStatus>;
   errorMessage: string | null;
   /**
-   * Set by `arcane-stream.ts` right before a 401/403-triggered logout, so
+   * Set by `hosted-stream.ts` right before a 401/403-triggered logout, so
    * the sign-in gate that replaces the timeline can explain why the user
    * was signed out. Survives the logout-induced UI switch (unlike a
    * transient toast) because it lives in this store, not a dismissed one.
@@ -225,7 +225,7 @@ interface AiState {
    * Deliberately distinct from `authNotice`: that one explains a session that
    * ENDED, whereas this is a session that is perfectly VALID and simply has
    * an unconfirmed mailbox. Conflating the two is what trapped every
-   * email/password signup in a sign-in loop — see arcane-stream.ts.
+   * email/password signup in a sign-in loop — see hosted-stream.ts.
    */
   verificationRequired: boolean;
 
@@ -289,7 +289,7 @@ interface AiState {
   arcanePlan: ArcanePlanEntry[] | null;
   /**
    * Transient per-turn holder for the served `model` id reported by the
-   * in-flight request's `usage` SSE event (`arcane-stream.ts`'s
+   * in-flight request's `usage` SSE event (`hosted-stream.ts`'s
    * `recordServedModel`) — mirrors `streamingMessageId`'s lifecycle. Copied
    * onto the finalized assistant message as `servedModel` at `message_end`
    * and reset to `null` immediately after, since usage events always precede
@@ -394,7 +394,7 @@ interface AiState {
   setSessionPlans: (plans: PlanRef[]) => void;
   setPendingPrompt: (prompt: string | null) => void;
   setLastAttachments: (attachments: Attachment[]) => void;
-  /** Accumulates a completed request's token usage into `sessionUsage` (P4, `arcane-stream.ts`). */
+  /** Accumulates a completed request's token usage into `sessionUsage` (P4, `hosted-stream.ts`). */
   recordSessionUsage: (inputTokens: number, outputTokens: number) => void;
   /** Stashes the in-flight request's served model id, read back at `message_end` (see `pendingServedModel`). */
   recordServedModel: (model: string) => void;

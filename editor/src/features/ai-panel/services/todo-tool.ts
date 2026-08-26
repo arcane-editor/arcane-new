@@ -81,7 +81,7 @@ function normalizeTodoText(text: string): string {
  * Pure merge: an incoming item WITHOUT its own difficulty inherits the tag of
  * a `prev` entry whose normalized text matches; an incoming item WITH its own
  * difficulty keeps it; no match leaves it untagged. Called by the store-push
- * path (`pushToArcaneStore`) before `setArcanePlan`, so a weak model that
+ * path (`pushToHostedStore`) before `setArcanePlan`, so a weak model that
  * restates the list without repeating a tag it already set doesn't silently
  * lose it on the next full-list-replace.
  */
@@ -106,7 +106,7 @@ export function mergeTodoDifficulty(prev: ArcanePlanEntry[] | null, next: TodoIt
  * the ai store. Loaded via dynamic import so this file stays statically
  * Bun-safe — see the module doc comment.
  */
-async function pushToArcaneStore(items: TodoItem[]): Promise<void> {
+async function pushToHostedStore(items: TodoItem[]): Promise<void> {
   const { useAiStore } = await import('../../../stores/ai');
   const prev = useAiStore.getState().arcanePlan;
   useAiStore.getState().setArcanePlan(mergeTodoDifficulty(prev, items));
@@ -115,10 +115,10 @@ async function pushToArcaneStore(items: TodoItem[]): Promise<void> {
 /**
  * `onUpdate` is injectable (tests + the eval harness's state-capturing no-op,
  * for tool-list parity — see `run-task.ts`'s `buildTools`). Defaults to
- * `pushToArcaneStore` for production use.
+ * `pushToHostedStore` for production use.
  */
 export function createTodoTool(
-  onUpdate: TodoUpdateCallback = (items) => void pushToArcaneStore(items),
+  onUpdate: TodoUpdateCallback = (items) => void pushToHostedStore(items),
 ): AgentTool {
   return {
     name: 'todo_update',

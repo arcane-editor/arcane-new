@@ -109,8 +109,8 @@ describe('startersFor', () => {
   });
 
   it('does not hand an external agent starters phrased for an Arcane mode', () => {
-    const arcaneOnly = new Set(Object.values(STARTERS).flat());
-    for (const text of EXTERNAL_STARTERS) expect(arcaneOnly.has(text)).toBe(false);
+    const hostedOnly = new Set(Object.values(STARTERS).flat());
+    for (const text of EXTERNAL_STARTERS) expect(hostedOnly.has(text)).toBe(false);
   });
 });
 

@@ -45,7 +45,7 @@ const NETWORK_SUBSTRINGS = [
 ];
 
 /** Matches a leading `[code:<x>]` marker (server-side SSE error code, T4's
- * `arcane-stream.ts`), e.g. `[code:rate_limit] slow down`. */
+ * `hosted-stream.ts`), e.g. `[code:rate_limit] slow down`. */
 const CODE_MARKER = /^\[code:([a-z_]+)\]\s*/;
 
 /**
@@ -252,10 +252,10 @@ function classifyTurnErrorTable(raw: string): TurnError {
 /**
  * Maps a structured error code to a `TurnErrorKind`, for callers that have a
  * code available (rather than substring-matching a message) — the SSE
- * `{type:'error', code?, message}` event (T4's `arcane-stream.ts`) for
+ * `{type:'error', code?, message}` event (T4's `hosted-stream.ts`) for
  * `rate_limit`/`model_error`/`server_error`, and the pre-flight 403
  * `tier_not_available` gate (also folded into a `[code:<x>]` marker by
- * `arcane-stream.ts` before reaching here). Returns `null` for an
+ * `hosted-stream.ts` before reaching here). Returns `null` for an
  * absent/unrecognized code, so the caller falls back to
  * `classifyTurnError(message)`.
  *
@@ -330,9 +330,9 @@ function turnHasToolCall(newMessages: AgentMessage[]): boolean {
  *     message this turn ever produced a `toolCall` block -> error, with a
  *     fixed `'Empty response from the model'` `raw` (classified by
  *     `classifyTurnError` into the `empty` kind below). VERIFIED against
- *     `agent-loop.ts`/`arcane-stream.ts`: the loop only re-enters (appending
+ *     `agent-loop.ts`/`hosted-stream.ts`: the loop only re-enters (appending
  *     another assistant message) when the PREVIOUS assistant message carried
- *     a toolCall — and `arcane-stream.ts` only ever sets `stopReason:
+ *     a toolCall — and `hosted-stream.ts` only ever sets `stopReason:
  *     'toolUse'` on a message whose OWN content has a toolCall block. So a
  *     tail message with `stopReason` other than `'toolUse'` provably has no
  *     toolCall in its own content, but an EARLIER message in the same turn

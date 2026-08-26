@@ -111,7 +111,7 @@ async function exchangeAndApply(
   const result = await authClient.exchangeEditorCode(code, verifier);
   if (result.success && result.user) {
     // exchangeEditorCode saved the token to disk; read it back for
-    // in-memory API clients (arcane-stream etc. read store.token).
+    // in-memory API clients (hosted-stream etc. read store.token).
     const stored = await authClient.loadFromDisk().catch(() => null);
     set({
       loggedIn: true,

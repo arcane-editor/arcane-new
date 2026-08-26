@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
 
 // browser-login.ts imports Tauri APIs that don't exist under plain `bun test`
-// (no webview). Same pattern as arcane-stream.test.ts: register module mocks
+// (no webview). Same pattern as hosted-stream.test.ts: register module mocks
 // BEFORE dynamically importing the module under test, and capture calls.
 let invokeCalls: string[] = [];
 const scheme = 'arcane-dev';

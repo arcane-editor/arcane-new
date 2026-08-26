@@ -13,7 +13,7 @@
 // Invariants:
 //  - Messages are NEVER deleted, only their `content` is shrunk — so every
 //    assistant tool_call keeps its matching tool result (the OpenAI request
-//    400s on an orphaned pair, see arcane-stream.ts convertToOpenAI).
+//    400s on an orphaned pair, see hosted-stream.ts convertToOpenAI).
 //  - Open repair tasks (compile/analyzer diagnostics) are never cleared.
 //  - The original array is not mutated; callers keep it as the full record and
 //    send only the returned, compacted view to the LLM.

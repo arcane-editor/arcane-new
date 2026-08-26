@@ -79,8 +79,8 @@ describe('buildSessionData / parseSessionData — arcanePlan round-trip (T9)', (
 // `stores/ai.ts` can't be imported here to assert on its live state: its
 // module graph (the ai-panel barrel's `AiChatPanel`/`MaximizedAiOverlay`
 // exports, plus `stores/workspace.ts`) transitively touches `document` at
-// module-eval time, fatal under plain `bun test` (see arcane-stream.test.ts's
-// header for the same chain). Worse, `arcane-stream.test.ts` (same directory,
+// module-eval time, fatal under plain `bun test` (see hosted-stream.test.ts's
+// header for the same chain). Worse, `hosted-stream.test.ts` (same directory,
 // loaded in the same process) permanently `mock.module`'s `stores/ai` itself
 // with no restore, and Bun's module mocks are process-global — so once that
 // file has run, EVERY later `import('../../../stores/ai')` anywhere in the

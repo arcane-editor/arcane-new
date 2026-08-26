@@ -247,7 +247,7 @@ describe('preplanning prompt (Task 11)', () => {
   // `buildSystemPrompt` itself can't be exercised here: `prompts/index.ts`
   // statically imports `stores/workspace.ts` (for the frozen-decoration
   // capture), which transitively touches `document` at module-eval time —
-  // fatal under plain `bun test`, same constraint `arcane-stream.test.ts`'s
+  // fatal under plain `bun test`, same constraint `hosted-stream.test.ts`'s
   // header documents for `stores/ai`. A source-text assertion sidesteps that
   // (same technique `session-persistence.test.ts`'s `AI_STORE_SRC` uses) and
   // is exactly as precise: it fails the instant the wiring changes.

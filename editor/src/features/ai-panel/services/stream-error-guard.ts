@@ -4,7 +4,7 @@
  * composed inside it — `withTurnGovernor`/`withTurnEscalation` build a
  * modified request before calling through) and converts it into a stream
  * that has already been pushed an `{type:'error', error}` event, mirroring
- * how `arcane-stream.ts` reports failures encountered mid-stream (it never
+ * how `hosted-stream.ts` reports failures encountered mid-stream (it never
  * throws synchronously itself — `doStream` runs as a detached promise whose
  * rejection is caught and pushed as an error event — but a decorator ABOVE
  * it could still throw before ever reaching that point).
@@ -15,7 +15,7 @@
  * (agent-service.ts's outcome-detection choke point) expects to classify.
  *
  * Composed OUTERMOST at the `Agent`'s `streamFn` construction site in
- * `agent-service.ts`: `withStreamErrorGuard(withTurnGovernor(withTurnEscalation(arcaneStream)))`,
+ * `agent-service.ts`: `withStreamErrorGuard(withTurnGovernor(withTurnEscalation(hostedStream)))`,
  * so it catches a throw from any layer beneath it.
  */
 

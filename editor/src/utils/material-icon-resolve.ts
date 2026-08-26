@@ -81,7 +81,7 @@ const UNITY_EXTENSION_OVERRIDES: Record<string, string> = {
  *
  * Asserted to exist in `ICON_PATHS` by the unit tests, same as the Unity map.
  */
-const ARCANE_EXTENSION_OVERRIDES: Record<string, string> = {
+const IDE_EXTENSION_OVERRIDES: Record<string, string> = {
   // A plan is a checklist first; `todo` is the closest thing the vendored set
   // has, and it reads as one at 16px.
   aplan: 'todo',
@@ -143,7 +143,7 @@ export function resolveFileIconId(filename: string, isLight: boolean): string {
   // probes `gitignore`. Ascending i yields longest-suffix-first.
   for (let i = 1; i < segments.length; i++) {
     const suffix = segments.slice(i).join('.');
-    const override = ARCANE_EXTENSION_OVERRIDES[suffix] ?? UNITY_EXTENSION_OVERRIDES[suffix];
+    const override = IDE_EXTENSION_OVERRIDES[suffix] ?? UNITY_EXTENSION_OVERRIDES[suffix];
     if (override) return override;
     const byExt = pick(suffix, FILE_EXTENSIONS, LIGHT_FILE_EXTENSIONS, isLight);
     if (byExt) return byExt;

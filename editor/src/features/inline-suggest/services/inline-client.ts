@@ -1,5 +1,5 @@
 // Fetch wrapper for POST /v1/completions/inline. Deliberately NOT
-// arcane-stream: no retries (a late completion is a wrong completion), 4s
+// hosted-stream: no retries (a late completion is a wrong completion), 4s
 // hard timeout, single-flight (a new request aborts the previous one).
 import { ARCANE_API_URL } from '../../../config/api';
 import { useAuthStore } from '../../../stores/auth';

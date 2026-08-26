@@ -4,10 +4,10 @@ import { sleep } from './stream-retry';
 import { resetTurnTelemetry, nextTurnTelemetry } from './turn-telemetry';
 import { useConnectivityStore } from '../../../stores/connectivity';
 
-// arcane-stream.ts pulls in `useAuthStore` / `useAiStore`, which (via the
+// hosted-stream.ts pulls in `useAuthStore` / `useAiStore`, which (via the
 // ai-panel barrel / theme store) transitively touch `document` — fine in the
 // real Tauri webview, fatal under plain `bun test` (no DOM). Mock both
-// stores at the module level *before* dynamically importing arcane-stream,
+// stores at the module level *before* dynamically importing hosted-stream,
 // so its real import graph (and any DOM-touching side effects in it) is
 // never loaded. Static imports are hoisted above these statements, so the
 // mocks must be registered first and the module under test imported via a
@@ -53,7 +53,7 @@ mock.module('../../../stores/ai', () => ({
   },
 }));
 
-const { createArcaneStreamFn } = await import('./arcane-stream');
+const { createHostedStreamFn } = await import('./hosted-stream');
 const { resetSendContext, setSendPromptMode } = await import('./send-context');
 
 const ctx: Context = { systemPrompt: 'SYS', messages: [], tools: [] };
@@ -150,7 +150,7 @@ beforeEach(() => {
   useConnectivityStore.getState().setOnline(true);
 });
 
-describe('createArcaneStreamFn', () => {
+describe('createHostedStreamFn', () => {
   it('retries once after a transient 500 and succeeds on the second attempt', async () => {
     let calls = 0;
     const fetchImpl = (async () => {
@@ -159,7 +159,7 @@ describe('createArcaneStreamFn', () => {
       return sseResponse(['data: {"type":"text","content":"hello"}\n\n', 'data: [DONE]\n\n']);
     }) as unknown as typeof fetch;
 
-    const streamFn = createArcaneStreamFn({ fetchImpl, retryBaseDelayMs: 1 });
+    const streamFn = createHostedStreamFn({ fetchImpl, retryBaseDelayMs: 1 });
     const events = await drain(streamFn(ctx, opts()));
 
     const done = events.find((e) => e.type === 'done') as Extract<AssistantMessageEvent, { type: 'done' }>;
@@ -177,7 +177,7 @@ describe('createArcaneStreamFn', () => {
       return sseResponse(['data: {"type":"text","content":"hello"}\n\n', 'data: [DONE]\n\n']);
     }) as unknown as typeof fetch;
 
-    const streamFn = createArcaneStreamFn({ fetchImpl, retryBaseDelayMs: 1 });
+    const streamFn = createHostedStreamFn({ fetchImpl, retryBaseDelayMs: 1 });
     const events = await drain(streamFn(ctx, opts()));
 
     const done = events.find((e) => e.type === 'done') as Extract<AssistantMessageEvent, { type: 'done' }>;
@@ -192,7 +192,7 @@ describe('createArcaneStreamFn', () => {
       return new Response('error code: 1031', { status: 502 });
     }) as unknown as typeof fetch;
 
-    const streamFn = createArcaneStreamFn({ fetchImpl, retryBaseDelayMs: 1, maxAttempts: 3 });
+    const streamFn = createHostedStreamFn({ fetchImpl, retryBaseDelayMs: 1, maxAttempts: 3 });
     const events = await drain(streamFn(ctx, opts()));
 
     expect(events.some((e) => e.type === 'done')).toBe(false);
@@ -207,7 +207,7 @@ describe('createArcaneStreamFn', () => {
       return new Response('bad request', { status: 400 });
     }) as unknown as typeof fetch;
 
-    const streamFn = createArcaneStreamFn({ fetchImpl, retryBaseDelayMs: 1 });
+    const streamFn = createHostedStreamFn({ fetchImpl, retryBaseDelayMs: 1 });
     const events = await drain(streamFn(ctx, opts()));
 
     expect(calls).toBe(1);
@@ -222,7 +222,7 @@ describe('createArcaneStreamFn', () => {
       return new Response('unauthorized', { status: 401 });
     }) as unknown as typeof fetch;
 
-    const streamFn = createArcaneStreamFn({ fetchImpl, retryBaseDelayMs: 1 });
+    const streamFn = createHostedStreamFn({ fetchImpl, retryBaseDelayMs: 1 });
     const events = await drain(streamFn(ctx, opts()));
 
     expect(calls).toBe(1);
@@ -245,7 +245,7 @@ describe('createArcaneStreamFn', () => {
       return new Response(JSON.stringify({ error: 'email_unverified' }), { status: 403 });
     }) as unknown as typeof fetch;
 
-    const streamFn = createArcaneStreamFn({ fetchImpl, retryBaseDelayMs: 1 });
+    const streamFn = createHostedStreamFn({ fetchImpl, retryBaseDelayMs: 1 });
     const events = await drain(streamFn(ctx, opts()));
 
     expect(calls).toBe(1);
@@ -274,7 +274,7 @@ describe('createArcaneStreamFn', () => {
       );
     }) as unknown as typeof fetch;
 
-    const streamFn = createArcaneStreamFn({ fetchImpl, retryBaseDelayMs: 1 });
+    const streamFn = createHostedStreamFn({ fetchImpl, retryBaseDelayMs: 1 });
     const events = await drain(streamFn(ctx, opts()));
 
     expect(calls).toBe(1);
@@ -293,7 +293,7 @@ describe('createArcaneStreamFn', () => {
       return new Response(JSON.stringify({ error: 'forbidden_resource' }), { status: 403 });
     }) as unknown as typeof fetch;
 
-    const streamFn = createArcaneStreamFn({ fetchImpl, retryBaseDelayMs: 1 });
+    const streamFn = createHostedStreamFn({ fetchImpl, retryBaseDelayMs: 1 });
     const events = await drain(streamFn(ctx, opts()));
 
     expect(calls).toBe(1);
@@ -306,7 +306,7 @@ describe('createArcaneStreamFn', () => {
     const fetchImpl = (async () =>
       new Response('forbidden', { status: 403 })) as unknown as typeof fetch;
 
-    const streamFn = createArcaneStreamFn({ fetchImpl, retryBaseDelayMs: 1 });
+    const streamFn = createHostedStreamFn({ fetchImpl, retryBaseDelayMs: 1 });
     const events = await drain(streamFn(ctx, opts()));
 
     expect(logoutCalls).toBe(0);
@@ -322,7 +322,7 @@ describe('createArcaneStreamFn', () => {
       throw new DOMException('The operation was aborted.', 'AbortError');
     }) as unknown as typeof fetch;
 
-    const streamFn = createArcaneStreamFn({ fetchImpl, retryBaseDelayMs: 1 });
+    const streamFn = createHostedStreamFn({ fetchImpl, retryBaseDelayMs: 1 });
     const events = await drain(streamFn(ctx, opts(controller.signal)));
 
     expect(calls).toBe(1);
@@ -340,7 +340,7 @@ describe('createArcaneStreamFn', () => {
     const controller = new AbortController();
     setTimeout(() => controller.abort(), 20);
 
-    const streamFn = createArcaneStreamFn({ fetchImpl, retryBaseDelayMs: 500 });
+    const streamFn = createHostedStreamFn({ fetchImpl, retryBaseDelayMs: 500 });
     const events = await drain(streamFn(ctx, opts(controller.signal)));
 
     expect(calls).toBe(1); // second attempt never happened — abort fired during the backoff sleep
@@ -365,7 +365,7 @@ describe('createArcaneStreamFn', () => {
       return new Response(body, { status: 200 });
     }) as unknown as typeof fetch;
 
-    const streamFn = createArcaneStreamFn({ fetchImpl, idleTimeoutMs: 20 });
+    const streamFn = createHostedStreamFn({ fetchImpl, idleTimeoutMs: 20 });
     const events = await drain(streamFn(ctx, opts()));
 
     const errorEvent = events.find((e) => e.type === 'error') as Extract<AssistantMessageEvent, { type: 'error' }>;
@@ -387,7 +387,7 @@ describe('createArcaneStreamFn', () => {
       return new Response(body, { status: 200 });
     }) as unknown as typeof fetch;
 
-    const streamFn = createArcaneStreamFn({ fetchImpl, firstTokenTimeoutMs: 20 });
+    const streamFn = createHostedStreamFn({ fetchImpl, firstTokenTimeoutMs: 20 });
     const events = await drain(streamFn(ctx, opts()));
 
     const errorEvent = events.find((e) => e.type === 'error') as Extract<AssistantMessageEvent, { type: 'error' }>;
@@ -416,7 +416,7 @@ describe('createArcaneStreamFn', () => {
       return new Response(body, { status: 200 });
     }) as unknown as typeof fetch;
 
-    const streamFn = createArcaneStreamFn({ fetchImpl, retryBaseDelayMs: 1 });
+    const streamFn = createHostedStreamFn({ fetchImpl, retryBaseDelayMs: 1 });
     const events = await drain(streamFn(ctx, opts()));
 
     expect(calls).toBe(1); // no retry attempted — first byte was already consumed
@@ -453,7 +453,7 @@ describe('createArcaneStreamFn', () => {
       );
     }) as unknown as typeof fetch;
 
-    const streamFn = createArcaneStreamFn({ fetchImpl, connectTimeoutMs: 50 });
+    const streamFn = createHostedStreamFn({ fetchImpl, connectTimeoutMs: 50 });
     const events = await drain(streamFn(ctx, opts()));
 
     expect(calls).toBe(1); // never retried — the connect timer never fired after a successful connect
@@ -485,7 +485,7 @@ describe('createArcaneStreamFn', () => {
       });
     }) as unknown as typeof fetch;
 
-    const streamFn = createArcaneStreamFn({ fetchImpl, connectTimeoutMs: 20, retryBaseDelayMs: 1 });
+    const streamFn = createHostedStreamFn({ fetchImpl, connectTimeoutMs: 20, retryBaseDelayMs: 1 });
     const events = await drain(streamFn(ctx, opts()));
 
     expect(calls).toBe(2); // first attempt's connect-phase timeout fired -> retried, not treated as a caller abort
@@ -502,7 +502,7 @@ describe('createArcaneStreamFn', () => {
         'data: [DONE]\n\n',
       ])) as unknown as typeof fetch;
 
-    const streamFn = createArcaneStreamFn({ fetchImpl });
+    const streamFn = createHostedStreamFn({ fetchImpl });
     const events = await drain(streamFn(ctx, opts()));
 
     expect(events.some((e) => e.type === 'done')).toBe(true);
@@ -521,7 +521,7 @@ describe('createArcaneStreamFn', () => {
         'data: [DONE]\n\n',
       ])) as unknown as typeof fetch;
 
-    const streamFn = createArcaneStreamFn({ fetchImpl });
+    const streamFn = createHostedStreamFn({ fetchImpl });
     await drain(streamFn(ctx, opts()));
 
     expect(sessionUsageCalls).toEqual([
@@ -539,7 +539,7 @@ describe('createArcaneStreamFn', () => {
         'data: [DONE]\n\n',
       ])) as unknown as typeof fetch;
 
-    const streamFn = createArcaneStreamFn({ fetchImpl });
+    const streamFn = createHostedStreamFn({ fetchImpl });
     const events = await drain(streamFn(ctx, opts()));
 
     expect(events.some((e) => e.type === 'done')).toBe(false);
@@ -558,7 +558,7 @@ describe('createArcaneStreamFn', () => {
         'data: [DONE]\n\n',
       ])) as unknown as typeof fetch;
 
-    const streamFn = createArcaneStreamFn({ fetchImpl });
+    const streamFn = createHostedStreamFn({ fetchImpl });
     const events = await drain(streamFn(ctx, opts()));
 
     expect(events.some((e) => e.type === 'error')).toBe(false);
@@ -575,7 +575,7 @@ describe('createArcaneStreamFn', () => {
     const fetchImpl = (async () =>
       sseResponse(['data: {"type":"text","content":"Half an ans"}\n\n'])) as unknown as typeof fetch;
 
-    const streamFn = createArcaneStreamFn({ fetchImpl });
+    const streamFn = createHostedStreamFn({ fetchImpl });
     const events = await drain(streamFn(ctx, opts()));
 
     expect(events.some((e) => e.type === 'done')).toBe(false);
@@ -589,7 +589,7 @@ describe('createArcaneStreamFn', () => {
   it('an empty stream without [DONE] still finalizes as an empty stop (rescued as empty-response downstream)', async () => {
     const fetchImpl = (async () => sseResponse([])) as unknown as typeof fetch;
 
-    const streamFn = createArcaneStreamFn({ fetchImpl });
+    const streamFn = createHostedStreamFn({ fetchImpl });
     const events = await drain(streamFn(ctx, opts()));
 
     const done = events.find((e) => e.type === 'done') as Extract<AssistantMessageEvent, { type: 'done' }>;
@@ -602,7 +602,7 @@ describe('createArcaneStreamFn', () => {
     const fetchImpl = (async () =>
       sseResponse(['data: not json\n\n', 'data: also bad\n\n'])) as unknown as typeof fetch;
 
-    const streamFn = createArcaneStreamFn({ fetchImpl });
+    const streamFn = createHostedStreamFn({ fetchImpl });
     const events = await drain(streamFn(ctx, opts()));
 
     expect(events.some((e) => e.type === 'done')).toBe(false);
@@ -617,7 +617,7 @@ describe('createArcaneStreamFn', () => {
         'data: {"type":"error","code":"rate_limit","message":"slow down"}\n\n',
       ])) as unknown as typeof fetch;
 
-    const streamFn = createArcaneStreamFn({ fetchImpl });
+    const streamFn = createHostedStreamFn({ fetchImpl });
     const events = await drain(streamFn(ctx, opts()));
 
     const errorEvent = events.find((e) => e.type === 'error') as Extract<AssistantMessageEvent, { type: 'error' }>;
@@ -632,7 +632,7 @@ describe('createArcaneStreamFn', () => {
     const fetchImpl = (async () =>
       sseResponse(['data: {"type":"error","code":"rate_limit"}\n\n'])) as unknown as typeof fetch;
 
-    const streamFn = createArcaneStreamFn({ fetchImpl });
+    const streamFn = createHostedStreamFn({ fetchImpl });
     const events = await drain(streamFn(ctx, opts()));
 
     const errorEvent = events.find((e) => e.type === 'error') as Extract<AssistantMessageEvent, { type: 'error' }>;
@@ -648,7 +648,7 @@ describe('createArcaneStreamFn', () => {
       return sseResponse(['data: [DONE]\n\n']);
     }) as unknown as typeof fetch;
 
-    const streamFn = createArcaneStreamFn({ fetchImpl });
+    const streamFn = createHostedStreamFn({ fetchImpl });
     const events = await drain(streamFn(ctx, opts()));
 
     expect(calls).toBe(0);
@@ -665,7 +665,7 @@ describe('createArcaneStreamFn', () => {
         throw new Error('unreachable');
       }) as unknown as typeof fetch;
 
-      const streamFn = createArcaneStreamFn({ fetchImpl });
+      const streamFn = createHostedStreamFn({ fetchImpl });
       const events = await drain(streamFn(ctx, opts()));
 
       const errorEvent = events.find((e) => e.type === 'error') as Extract<AssistantMessageEvent, { type: 'error' }>;
@@ -684,7 +684,7 @@ describe('createArcaneStreamFn', () => {
         throw new TypeError('fetch failed');
       }) as unknown as typeof fetch;
 
-      const streamFn = createArcaneStreamFn({ fetchImpl, maxAttempts: 1 });
+      const streamFn = createHostedStreamFn({ fetchImpl, maxAttempts: 1 });
       await drain(streamFn(ctx, opts()));
 
       expect(useConnectivityStore.getState().online).toBe(false);
@@ -714,7 +714,7 @@ describe('createArcaneStreamFn', () => {
         return Promise.reject(new Error('expected the combined signal to already be aborted'));
       }) as unknown as typeof fetch;
 
-      const streamFn = createArcaneStreamFn({ fetchImpl, maxAttempts: 1 });
+      const streamFn = createHostedStreamFn({ fetchImpl, maxAttempts: 1 });
       const events = await drain(streamFn(ctx, opts(controller.signal)));
 
       expect(useConnectivityStore.getState().online).toBe(true);
@@ -741,7 +741,7 @@ describe('createArcaneStreamFn', () => {
     } as unknown as typeof fetch;
 
     try {
-      const streamFn = createArcaneStreamFn();
+      const streamFn = createHostedStreamFn();
       await drain(streamFn(ctx, opts()));
     } finally {
       globalThis.fetch = original;
@@ -760,7 +760,7 @@ describe('createArcaneStreamFn', () => {
           'data: [DONE]\n\n',
         ])) as unknown as typeof fetch;
 
-      const streamFn = createArcaneStreamFn({ fetchImpl });
+      const streamFn = createHostedStreamFn({ fetchImpl });
       await drain(streamFn(ctx, opts()));
 
       expect(servedModelCalls).toEqual(['sol-large']);
@@ -773,7 +773,7 @@ describe('createArcaneStreamFn', () => {
           'data: [DONE]\n\n',
         ])) as unknown as typeof fetch;
 
-      const streamFn = createArcaneStreamFn({ fetchImpl });
+      const streamFn = createHostedStreamFn({ fetchImpl });
       await drain(streamFn(ctx, opts()));
 
       expect(servedModelCalls).toEqual([]);
@@ -786,7 +786,7 @@ describe('createArcaneStreamFn', () => {
       aiState.arcanePlan = [{ status: 'in_progress', difficulty: 'hard' }];
       const { fetchImpl, bodies } = capturingFetchImpl(sseResponse(['data: [DONE]\n\n']));
 
-      const streamFn = createArcaneStreamFn({ fetchImpl });
+      const streamFn = createHostedStreamFn({ fetchImpl });
       await drain(streamFn(ctx, opts(undefined, 'high')));
 
       expect(bodies[0].metadata.difficulty).toBe('hard');
@@ -797,7 +797,7 @@ describe('createArcaneStreamFn', () => {
       aiState.arcanePlan = [{ status: 'pending', difficulty: 'easy' }];
       const { fetchImpl, bodies } = capturingFetchImpl(sseResponse(['data: [DONE]\n\n']));
 
-      const streamFn = createArcaneStreamFn({ fetchImpl });
+      const streamFn = createHostedStreamFn({ fetchImpl });
       await drain(streamFn(ctx, opts(undefined, 'high')));
 
       expect(bodies[0].metadata.difficulty).toBe('easy');
@@ -808,7 +808,7 @@ describe('createArcaneStreamFn', () => {
       aiState.arcanePlan = [{ status: 'in_progress', difficulty: 'hard' }];
       const { fetchImpl, bodies } = capturingFetchImpl(sseResponse(['data: [DONE]\n\n']));
 
-      const streamFn = createArcaneStreamFn({ fetchImpl });
+      const streamFn = createHostedStreamFn({ fetchImpl });
       await drain(streamFn(ctx, opts(undefined, 'mid')));
 
       expect(bodies[0].metadata).not.toHaveProperty('difficulty');
@@ -819,7 +819,7 @@ describe('createArcaneStreamFn', () => {
       aiState.arcanePlan = [{ status: 'in_progress', difficulty: 'hard' }];
       const { fetchImpl, bodies } = capturingFetchImpl(sseResponse(['data: [DONE]\n\n']));
 
-      const streamFn = createArcaneStreamFn({ fetchImpl });
+      const streamFn = createHostedStreamFn({ fetchImpl });
       await drain(streamFn(ctx, opts(undefined, 'high')));
 
       expect(bodies[0].metadata).not.toHaveProperty('difficulty');
@@ -830,7 +830,7 @@ describe('createArcaneStreamFn', () => {
       aiState.arcanePlan = [{ status: 'done', difficulty: 'hard' }];
       const { fetchImpl, bodies } = capturingFetchImpl(sseResponse(['data: [DONE]\n\n']));
 
-      const streamFn = createArcaneStreamFn({ fetchImpl });
+      const streamFn = createHostedStreamFn({ fetchImpl });
       await drain(streamFn(ctx, opts(undefined, 'high')));
 
       expect(bodies[0].metadata).not.toHaveProperty('difficulty');
@@ -846,7 +846,7 @@ describe('tool_call argument parsing', () => {
   }
 
   async function finalToolCall(lines: string[]) {
-    const streamFn = createArcaneStreamFn({ fetchImpl: (async () => sseResponse(lines)) as unknown as typeof fetch });
+    const streamFn = createHostedStreamFn({ fetchImpl: (async () => sseResponse(lines)) as unknown as typeof fetch });
     const events = await drain(streamFn(ctx, opts()));
     const done = events.find((e) => e.type === 'done');
     const content = (done as unknown as { message: { content: Array<Record<string, unknown>> } })
@@ -885,7 +885,7 @@ describe('tool_call argument parsing', () => {
   });
 
   it('closes the tool-call block even when no argument text arrives', async () => {
-    const streamFn = createArcaneStreamFn({
+    const streamFn = createHostedStreamFn({
       fetchImpl: (async () => sseResponse(toolCallSse(undefined))) as unknown as typeof fetch,
     });
     const events = await drain(streamFn(ctx, opts()));
@@ -899,7 +899,7 @@ describe('429 rate-limit messaging', () => {
   async function errorFrom(body: string): Promise<string> {
     const fetchImpl = (async () => new Response(body, { status: 429 })) as unknown as typeof fetch;
     // maxAttempts 1 so the transient-retry path doesn't consume the response.
-    const streamFn = createArcaneStreamFn({ fetchImpl, retryBaseDelayMs: 1, maxAttempts: 1 });
+    const streamFn = createHostedStreamFn({ fetchImpl, retryBaseDelayMs: 1, maxAttempts: 1 });
     const events = await drain(streamFn(ctx, opts()));
     const err = events.find((e) => e.type === 'error') as { error: Error } | undefined;
     return err?.error.message ?? '';
