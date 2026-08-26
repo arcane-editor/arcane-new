@@ -14,10 +14,10 @@
 const PLACEHOLDER_PUBKEYS = new Set(['', 'REPLACE_ME', 'TODO', 'CHANGEME']);
 
 /**
- * @param {{pkg: string, tauriConf: string, cargoToml: string, tauriDevConf?: string}} sources
+ * @param {{pkg: string, tauriConf: string, cargoToml: string, tauriDevConf?: string, claudeBackend?: string}} sources
  * @returns {string[]} human-readable problems; empty means the tree is correct
  */
-export function checkVersionSync({ pkg, tauriConf, cargoToml, tauriDevConf }) {
+export function checkVersionSync({ pkg, tauriConf, cargoToml, tauriDevConf, claudeBackend }) {
   const problems = [];
 
   const pkgVersion = JSON.parse(pkg).version;
@@ -57,6 +57,20 @@ export function checkVersionSync({ pkg, tauriConf, cargoToml, tauriDevConf }) {
     if (PLACEHOLDER_PUBKEYS.has(pubkey.trim())) {
       problems.push(
         `${name}: updater pubkey is empty or a placeholder — a build shipped this way can never auto-update, on any install that receives it, and there is no remote fix`,
+      );
+    }
+  }
+
+  // The ACP handshake reports a version to the external agent, and it is a
+  // literal because the handshake is synchronous — it cannot await Tauri's
+  // getVersion(). Nothing tied it to package.json, so it silently sat at
+  // 0.2.2 while the app shipped 0.3.2, and every Claude agent log recorded
+  // the wrong client version. Assert it here rather than trusting a comment.
+  if (claudeBackend) {
+    const acpVersion = /^\s*const APP_VERSION = '([^']+)';/m.exec(claudeBackend)?.[1];
+    if (acpVersion !== pkgVersion) {
+      problems.push(
+        `claude-backend.ts APP_VERSION ${acpVersion} does not match package.json ${pkgVersion}`,
       );
     }
   }

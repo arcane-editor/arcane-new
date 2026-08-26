@@ -108,8 +108,14 @@ import type {
 /** The agent id Rust keys this subprocess by, and the tag on every event. */
 const AGENT_ID = 'claude';
 
-/** Reported to the agent in `clientInfo`; shows up in its own logs. */
-const APP_VERSION = '0.2.2';
+/**
+ * Reported to the agent in `clientInfo`; shows up in its own logs.
+ *
+ * A literal rather than Tauri's `getVersion()` because the handshake below is
+ * synchronous. It drifted two minors behind before anyone noticed, so
+ * `check:version` now asserts this equals package.json — keep them together.
+ */
+const APP_VERSION = '0.3.2';
 
 // `ClaudeSetupRequiredError` is declared in `claude-connect.ts` alongside the
 // state it maps to, and re-exported here because this is where callers expect

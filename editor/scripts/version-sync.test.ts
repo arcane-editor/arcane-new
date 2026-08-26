@@ -87,3 +87,33 @@ describe('checkVersionSync — dev channel', () => {
     expect(checkVersionSync(OK)).toEqual([]);
   });
 });
+
+/**
+ * `claude-backend.ts` reports APP_VERSION to external ACP agents in the
+ * `clientInfo` handshake. It has to be a literal — the handshake is
+ * synchronous and cannot await Tauri's `getVersion()` — so nothing tied it to
+ * package.json and it silently sat at 0.2.2 while the app shipped 0.3.2.
+ */
+describe('checkVersionSync — ACP clientInfo version', () => {
+  const BACKEND_OK = "const AGENT_ID = 'claude';\nconst APP_VERSION = '0.3.1';\n";
+
+  it('accepts a backend whose APP_VERSION matches package.json', () => {
+    expect(checkVersionSync({ ...OK, claudeBackend: BACKEND_OK })).toEqual([]);
+  });
+
+  it('rejects an APP_VERSION that has drifted behind package.json', () => {
+    const stale = BACKEND_OK.replace("'0.3.1'", "'0.2.2'");
+    expect(checkVersionSync({ ...OK, claudeBackend: stale }).join(' '))
+      .toContain('claude-backend.ts APP_VERSION 0.2.2');
+  });
+
+  it('rejects a backend where the constant has been removed or renamed', () => {
+    const gone = BACKEND_OK.replace('const APP_VERSION', 'const CLIENT_VERSION');
+    expect(checkVersionSync({ ...OK, claudeBackend: gone }).join(' '))
+      .toContain('claude-backend.ts APP_VERSION');
+  });
+
+  it('stays valid for callers that pass no backend source at all', () => {
+    expect(checkVersionSync(OK)).toEqual([]);
+  });
+});

@@ -9,6 +9,12 @@ const problems = checkVersionSync({
   // The dev channel ships its own installers through `dev-build.yml` and needs
   // the same pubkey guarantee as production.
   tauriDevConf: readFileSync(new URL('../src-tauri/tauri.dev.conf.json', import.meta.url), 'utf8'),
+  // Reported to external ACP agents in `clientInfo`. A literal, because the
+  // handshake cannot await Tauri's async getVersion() — so it needs a guard.
+  claudeBackend: readFileSync(
+    new URL('../src/features/ai-panel/services/claude-backend.ts', import.meta.url),
+    'utf8',
+  ),
 });
 
 if (problems.length > 0) {
