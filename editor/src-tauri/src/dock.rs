@@ -79,7 +79,7 @@ define_class!(
     // `Retained<DockMenuTarget>` `Send + Sync` and thus storable in a static.
     // Its one method is still only ever invoked on the main thread by AppKit.
     #[unsafe(super(objc2::runtime::NSObject))]
-    #[name = "ArcaneDockMenuTarget"]
+    #[name = "UnityIDEDockMenuTarget"]
     struct DockMenuTarget;
 
     impl DockMenuTarget {

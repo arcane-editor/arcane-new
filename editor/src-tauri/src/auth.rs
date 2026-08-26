@@ -13,7 +13,7 @@ pub struct AuthToken {
 /// Directory NAME for per-app config under $HOME, keyed off the bundle
 /// identifier so the side-by-side dev build (com.inno.editor.dev) never
 /// shares tokens/sessions/graphs with the prod app.
-pub fn arcane_dir_name(identifier: &str) -> &'static str {
+pub fn config_dir_name(identifier: &str) -> &'static str {
     if identifier.ends_with(".dev") {
         ".arcane-dev"
     } else {
@@ -22,17 +22,17 @@ pub fn arcane_dir_name(identifier: &str) -> &'static str {
 }
 
 /// Absolute per-app config dir: ~/.arcane (prod) or ~/.arcane-dev (dev build).
-pub fn arcane_home_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+pub fn config_home_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let home = dirs::home_dir()
         .ok_or_else(|| "Could not resolve home directory".to_string())?;
-    Ok(home.join(arcane_dir_name(&app.config().identifier)))
+    Ok(home.join(config_dir_name(&app.config().identifier)))
 }
 
 fn auth_file_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    Ok(arcane_home_dir(app)?.join("auth.json"))
+    Ok(config_home_dir(app)?.join("auth.json"))
 }
 
-/// Read the stored auth token from the per-app config dir (see `arcane_home_dir`)
+/// Read the stored auth token from the per-app config dir (see `config_home_dir`)
 #[tauri::command]
 pub fn auth_read_token(app: tauri::AppHandle) -> Result<Option<AuthToken>, String> {
     let path = auth_file_path(&app)?;
@@ -44,7 +44,7 @@ pub fn auth_read_token(app: tauri::AppHandle) -> Result<Option<AuthToken>, Strin
     Ok(Some(token))
 }
 
-/// Write auth token to the per-app config dir (see `arcane_home_dir`) with 0600 permissions
+/// Write auth token to the per-app config dir (see `config_home_dir`) with 0600 permissions
 #[tauri::command]
 pub fn auth_write_token(app: tauri::AppHandle, token: String, email: String) -> Result<(), String> {
     let path = auth_file_path(&app)?;
@@ -86,8 +86,8 @@ pub fn auth_delete_token(app: tauri::AppHandle) -> Result<(), String> {
 /// Absolute path of the per-app config dir (~/.arcane or ~/.arcane-dev),
 /// for frontend code that persists files (e.g. AI session history).
 #[tauri::command]
-pub fn get_arcane_home_dir(app: tauri::AppHandle) -> Result<String, String> {
-    arcane_home_dir(&app).map(|p| p.to_string_lossy().to_string())
+pub fn get_config_home_dir(app: tauri::AppHandle) -> Result<String, String> {
+    config_home_dir(&app).map(|p| p.to_string_lossy().to_string())
 }
 
 /// First deep-link scheme from the MERGED tauri config
@@ -125,7 +125,7 @@ pub fn deep_link_scheme(app: &tauri::AppHandle) -> String {
 /// Production endpoint. The only API URL that belongs to the prod channel.
 const PROD_API_URL: &str = "https://api.arcaneai.org";
 
-/// Channel implied by the bundle identifier — the same signal `arcane_dir_name`
+/// Channel implied by the bundle identifier — the same signal `config_dir_name`
 /// keys the config dir off.
 pub fn channel_for_identifier(identifier: &str) -> &'static str {
     if identifier.ends_with(".dev") {
@@ -163,7 +163,7 @@ pub fn auth_check_channel(app: tauri::AppHandle, api_url: String) -> Result<(), 
          Run the dev app with `bun run tauri:dev-app`, or build with the matching config.",
         identifier,
         by_id,
-        arcane_dir_name(identifier),
+        config_dir_name(identifier),
         api_url,
         by_url,
     );
@@ -181,7 +181,7 @@ pub fn auth_deep_link_scheme(app: tauri::AppHandle) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        arcane_dir_name, channel_for_api_url, channel_for_identifier, scheme_from_plugin_config,
+        config_dir_name, channel_for_api_url, channel_for_identifier, scheme_from_plugin_config,
         PROD_API_URL,
     };
     use serde_json::json;
@@ -238,12 +238,12 @@ mod tests {
 
     #[test]
     fn prod_identifier_uses_arcane() {
-        assert_eq!(arcane_dir_name("com.inno.editor"), ".arcane");
+        assert_eq!(config_dir_name("com.inno.editor"), ".arcane");
     }
 
     #[test]
     fn dev_identifier_uses_arcane_dev() {
-        assert_eq!(arcane_dir_name("com.inno.editor.dev"), ".arcane-dev");
+        assert_eq!(config_dir_name("com.inno.editor.dev"), ".arcane-dev");
     }
 
     #[test]

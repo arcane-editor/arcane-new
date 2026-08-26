@@ -816,18 +816,18 @@ fn find_asmdef_assemblies(assets: &Path) -> Vec<String> {
 /// and every UnityEngine/UnityEditor module. We then top up with the
 /// `Library/ScriptAssemblies/*.dll` outputs from package and asmdef
 /// compilation, replacing the ProjectReferences Roslyn can't resolve.
-fn generate_arcane_csproj(workspace: &Path) -> Result<bool, String> {
+fn generate_ide_csproj(workspace: &Path) -> Result<bool, String> {
     let scripting_root = workspace_scripting_root(workspace);
-    generate_arcane_csproj_from(workspace, scripting_root.as_deref())
+    generate_ide_csproj_from(workspace, scripting_root.as_deref())
 }
 
-/// Body of [`generate_arcane_csproj`] with the Unity install injected rather
+/// Body of [`generate_ide_csproj`] with the Unity install injected rather
 /// than resolved from the machine.
 ///
 /// The split exists so the "Unity generated no csprojs" case — the one that
 /// silently cost every Unity project its C# IntelliSense — can be reproduced
 /// hermetically against a fixture install, with no Unity on the box.
-fn generate_arcane_csproj_from(
+fn generate_ide_csproj_from(
     workspace: &Path,
     scripting_root: Option<&Path>,
 ) -> Result<bool, String> {
@@ -1001,7 +1001,7 @@ fn generate_arcane_csproj_from(
 /// Generate a `.arcane.sln` at the workspace root pointing to our
 /// self-contained `.arcane.csproj`.
 fn generate_solution(workspace_path: &Path) -> Result<Option<String>, String> {
-    if !generate_arcane_csproj(workspace_path)? {
+    if !generate_ide_csproj(workspace_path)? {
         return Ok(None);
     }
 
@@ -1516,7 +1516,7 @@ mod tests {
         assert!(!workspace.join("Assembly-CSharp-Editor.csproj").exists());
 
         let generated =
-            generate_arcane_csproj_from(&workspace, Some(root.as_path())).expect("generate ok");
+            generate_ide_csproj_from(&workspace, Some(root.as_path())).expect("generate ok");
         assert!(generated, "must generate even with no Unity csproj present");
 
         let content = fs::read_to_string(workspace.join(".arcane.csproj")).expect("read csproj");
@@ -1558,7 +1558,7 @@ mod tests {
         let app = make_unity_install(&dir, true);
         let root = unity_scripting_root(&app).unwrap();
 
-        generate_arcane_csproj_from(&workspace, Some(root.as_path())).expect("generate ok");
+        generate_ide_csproj_from(&workspace, Some(root.as_path())).expect("generate ok");
         let content = fs::read_to_string(workspace.join(".arcane.csproj")).expect("read csproj");
 
         assert!(
@@ -1596,7 +1596,7 @@ mod tests {
         let workspace = dir.join("project");
         make_unity_project(&workspace, "6000.3.5f2");
 
-        let generated = generate_arcane_csproj_from(&workspace, None).expect("generate ok");
+        let generated = generate_ide_csproj_from(&workspace, None).expect("generate ok");
         assert!(!generated, "must not generate a reference-less project");
         assert!(!workspace.join(".arcane.csproj").exists());
 
@@ -1627,7 +1627,7 @@ mod tests {
 
         let app = make_unity_install(&dir, true);
         let root = unity_scripting_root(&app).unwrap();
-        generate_arcane_csproj_from(&workspace, Some(root.as_path())).expect("generate ok");
+        generate_ide_csproj_from(&workspace, Some(root.as_path())).expect("generate ok");
 
         let content = fs::read_to_string(workspace.join(".arcane.csproj")).unwrap();
         assert!(
@@ -1668,13 +1668,13 @@ mod tests {
     }
 
     #[test]
-    fn smoke_generate_arcane_csproj() {
+    fn smoke_generate_ide_csproj() {
         let _guard = crate::sync_util::lock_recover(&SMOKE_WORKSPACE);
         let workspace = match smoke_workspace() {
             Some(w) => w,
             None => return,
         };
-        let result = generate_arcane_csproj(&workspace).expect("generate ok");
+        let result = generate_ide_csproj(&workspace).expect("generate ok");
         assert!(result, "csproj should have been generated");
 
         let content = fs::read_to_string(workspace.join(".arcane.csproj")).expect("read csproj");
@@ -1707,7 +1707,7 @@ mod tests {
             Some(w) => w,
             None => return,
         };
-        generate_arcane_csproj(&workspace).expect("generate ok");
+        generate_ide_csproj(&workspace).expect("generate ok");
         let content = fs::read_to_string(workspace.join(".arcane.csproj")).expect("read csproj");
 
         let re = Regex::new(r"<HintPath>([^<]+)</HintPath>").unwrap();

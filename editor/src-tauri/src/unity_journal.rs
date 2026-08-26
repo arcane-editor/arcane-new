@@ -337,7 +337,7 @@ mod tests {
     /// directory would have tests deleting each other's fixtures.
     fn tmp() -> PathBuf {
         let n = COUNTER.fetch_add(1, Ordering::SeqCst);
-        let d = std::env::temp_dir().join(format!("arcane-journal-{}-{}", std::process::id(), n));
+        let d = std::env::temp_dir().join(format!("unityide-journal-{}-{}", std::process::id(), n));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d

@@ -120,8 +120,8 @@ async function getSessionsDir(): Promise<string> {
   if (!sessionsDir) {
     // Per-app dir (~/.arcane or ~/.arcane-dev) so the side-by-side dev
     // build never shares/corrupts the prod app's session files.
-    const arcaneHome = await invoke<string>('get_arcane_home_dir');
-    sessionsDir = await join(arcaneHome, 'sessions');
+    const configHome = await invoke<string>('get_config_home_dir');
+    sessionsDir = await join(configHome, 'sessions');
     try {
       await ensureSessionsDirExists(sessionsDir);
     } catch (error) {

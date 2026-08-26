@@ -886,7 +886,7 @@ pub fn terminal_clipboard_image_to_temp(app_handle: AppHandle) -> Result<Option<
         return Ok(None);
     }
 
-    let dir = std::env::temp_dir().join("arcane-terminal-paste");
+    let dir = std::env::temp_dir().join("unityide-terminal-paste");
     std::fs::create_dir_all(&dir).map_err(|e| format!("Failed to create paste dir: {}", e))?;
 
     // Nanos keep repeated pastes from clobbering each other; a previously

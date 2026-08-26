@@ -3,7 +3,7 @@
 //! traversal; this module shells out to it and streams progress events
 //! back to the frontend.
 //!
-//! Graph artifacts live under the per-app config dir (see `auth::arcane_home_dir`)
+//! Graph artifacts live under the per-app config dir (see `auth::config_home_dir`)
 //! at `<arcane-home>/graphs/<sha1(workspace)>/graph.json` — i.e.
 //! `~/.arcane/graphs/<sha1>/` for prod builds and `~/.arcane-dev/graphs/<sha1>/`
 //! for dev builds — outside the user's project tree so we never pollute their
@@ -38,7 +38,7 @@ fn graph_dir_for(app: &AppHandle, workspace_path: &str) -> Result<PathBuf, Strin
     let mut hasher = Sha1::new();
     hasher.update(workspace_path.as_bytes());
     let hash = hex::encode_short(&hasher.finalize());
-    Ok(crate::auth::arcane_home_dir(app)?.join("graphs").join(hash))
+    Ok(crate::auth::config_home_dir(app)?.join("graphs").join(hash))
 }
 
 fn graph_json_path(app: &AppHandle, workspace_path: &str) -> Result<PathBuf, String> {

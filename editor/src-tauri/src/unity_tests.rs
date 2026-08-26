@@ -436,7 +436,7 @@ mod tests {
 
     #[test]
     fn discovers_tests_in_test_assembly() {
-        let tmp = std::env::temp_dir().join(format!("arcane-tests-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("unityide-tests-{}", std::process::id()));
         let _ = fs::remove_dir_all(&tmp);
         let asm_dir = tmp.join("Assets/Tests");
         write(
@@ -471,7 +471,7 @@ mod tests {
 
     #[test]
     fn non_test_assembly_ignored() {
-        let tmp = std::env::temp_dir().join(format!("arcane-tests2-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("unityide-tests2-{}", std::process::id()));
         let _ = fs::remove_dir_all(&tmp);
         write(
             &tmp,

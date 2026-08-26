@@ -237,7 +237,7 @@ async fn find_in_path(name: &str) -> Option<PathBuf> {
 /// elevated permissions, cannot collide with the user's own tooling, and is
 /// removable by deleting one directory.
 fn agent_dir(app: &AppHandle, agent_id: &str) -> Result<PathBuf, String> {
-    Ok(crate::auth::arcane_home_dir(app)?
+    Ok(crate::auth::config_home_dir(app)?
         .join("agents")
         .join(agent_id))
 }

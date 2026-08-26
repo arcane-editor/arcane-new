@@ -947,7 +947,7 @@ pub fn run() {
             auth::auth_read_token,
             auth::auth_write_token,
             auth::auth_delete_token,
-            auth::get_arcane_home_dir,
+            auth::get_config_home_dir,
             auth::auth_deep_link_scheme,
             auth::auth_check_channel,
             auth_loopback::auth_loopback_start,

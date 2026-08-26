@@ -1159,7 +1159,7 @@ mod tests {
         use std::sync::atomic::AtomicU32;
         static N: AtomicU32 = AtomicU32::new(0);
         let d = std::env::temp_dir().join(format!(
-            "arcane-{}-{}-{}",
+            "unityide-{}-{}-{}",
             tag,
             std::process::id(),
             N.fetch_add(1, Ordering::SeqCst)
