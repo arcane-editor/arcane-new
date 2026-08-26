@@ -4,10 +4,10 @@
 // Fallbacks are the PRODUCTION endpoints so a build with missing env vars
 // fails safe.
 export const API_URL: string =
-  import.meta.env.VITE_API_URL ?? 'https://api.arcaneai.org';
+  import.meta.env.VITE_API_URL ?? 'https://api.unityide.app';
 
 export const WEB_URL: string =
-  import.meta.env.VITE_WEB_URL ?? 'https://arcaneai.org';
+  import.meta.env.VITE_WEB_URL ?? 'https://unityide.app';
 
 /**
  * Assert that the endpoints this build targets match the channel the Rust side

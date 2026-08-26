@@ -115,7 +115,7 @@ async function jsonOrNull<T>(res: Response): Promise<T | null> {
  *
  * Only an email that is BOTH primary and verified is accepted. Substituting a
  * verified secondary when the primary is unverified would let the GitHub user
- * steer which Arcane account they land on; refusing is the safe default and is
+ * steer which UnityIDE account they land on; refusing is the safe default and is
  * the one failure here a user can fix themselves.
  *
  * fetchImpl is injectable so the whole path is unit-testable without network.
@@ -231,7 +231,7 @@ authGithubRouter.get('/v1/auth/github/callback', async (c) => {
     });
     if (!token.ok) { return fail('token_exchange'); }
 
-    // The access token is used for these two calls and then dropped — Arcane
+    // The access token is used for these two calls and then dropped — UnityIDE
     // signs people in with GitHub, it does not act on GitHub for them.
     const identity = await fetchGitHubIdentity(token.accessToken);
     if (!identity.ok) {

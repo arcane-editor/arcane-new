@@ -5,14 +5,12 @@
     "description": "Connects Unity Editor to the UnityIDE for AI-powered game development. Provides real-time IPC communication, console log streaming, play mode controls, build management, Inspector field sync, and test runner integration.",
     "unity": "2021.3",
     "unityRelease": "0f1",
-    "documentationUrl": "https://docs.arcaneai.org/unity-extension",
-    "changelogUrl": "https://docs.arcaneai.org/unity-extension/changelog",
-    "licensesUrl": "https://github.com/arcane-ide/arcane-extension/blob/main/LICENSE.md",
+    "documentationUrl": "https://unityide.app/docs/getting-started/unity-extension/",
     "dependencies": {},
     "author": {
         "name": "UnityIDE",
-        "email": "support@arcaneai.org",
-        "url": "https://arcaneai.org"
+        "email": "support@unityide.app",
+        "url": "https://unityide.app"
     },
     "keywords": [
         "ide",

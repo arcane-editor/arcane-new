@@ -76,7 +76,7 @@ npm run db:migrate:local    # Create tables in local D1
 npm run dev
 ```
 
-Server starts at `https://api.arcaneai.org`. It uses a local D1 SQLite database stored in `.wrangler/state/`.
+Server starts at `https://api.unityide.app`. It uses a local D1 SQLite database stored in `.wrangler/state/`.
 
 ### Verify it works
 

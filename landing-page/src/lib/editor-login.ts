@@ -7,7 +7,7 @@
  * ADDITIVE across the rename, deliberately. The website deploys on its own and
  * takes effect for everyone the moment it does, while the app it talks to is
  * whatever each user happens to have installed — so for the whole window where
- * arcaneai.org still serves this build, an un-updated app is still sending
+ * unityide.app still serves this build, an un-updated app is still sending
  * `scheme=arcane`. Swapping rather than appending would break sign-in for every
  * one of those users on deploy day, and the failure would look like the site's
  * fault rather than a version skew.
@@ -216,7 +216,7 @@ export function sanitizeInternalReturn(raw: string | null): string | null {
     // `%2F%5Cevil.com`) becomes the protocol-relative `//evil.com`.
     if (raw.includes('\\')) return null;
     if (!raw.startsWith('/') || raw.startsWith('//')) return null;
-    const BASE = 'https://arcaneai.org';
+    const BASE = 'https://unityide.app';
     let u: URL;
     try {
         u = new URL(raw, BASE);

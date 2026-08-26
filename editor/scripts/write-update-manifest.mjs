@@ -2,7 +2,7 @@
 // Usage:
 //   node editor/scripts/write-update-manifest.mjs \
 //     --platform darwin-aarch64 --version 0.3.2 \
-//     --url https://releases.arcaneai.org/v0.3.2/UnityIDE.app.tar.gz \
+//     --url https://releases.unityide.app/v0.3.2/UnityIDE.app.tar.gz \
 //     --sig dist-release/UnityIDE.app.tar.gz.sig \
 //     --out dist-release/darwin-aarch64.json
 import { readFileSync, writeFileSync } from 'node:fs';

@@ -4,7 +4,7 @@ import { buildManifest } from './update-manifest.mjs';
 const OK = {
   platform: 'darwin-aarch64',
   version: '0.3.2',
-  url: 'https://releases.arcaneai.org/v0.3.2/UnityIDE.app.tar.gz',
+  url: 'https://releases.unityide.app/v0.3.2/UnityIDE.app.tar.gz',
   signature: 'dW50cnVzdGVkIGNvbW1lbnQ6...\n',
   pubDate: '2026-08-23T00:00:00Z',
 };
@@ -17,7 +17,7 @@ describe('buildManifest', () => {
       platforms: {
         'darwin-aarch64': {
           signature: 'dW50cnVzdGVkIGNvbW1lbnQ6...',
-          url: 'https://releases.arcaneai.org/v0.3.2/UnityIDE.app.tar.gz',
+          url: 'https://releases.unityide.app/v0.3.2/UnityIDE.app.tar.gz',
         },
       },
     });
@@ -27,7 +27,7 @@ describe('buildManifest', () => {
     // A manifest must name an immutable path. Pointing at /latest/ means a
     // download already in flight can be swapped out by the next release —
     // the client would verify a signature against different bytes.
-    expect(() => buildManifest({ ...OK, url: 'https://releases.arcaneai.org/latest/UnityIDE.app.tar.gz' }))
+    expect(() => buildManifest({ ...OK, url: 'https://releases.unityide.app/latest/UnityIDE.app.tar.gz' }))
       .toThrow(/versioned/);
   });
 

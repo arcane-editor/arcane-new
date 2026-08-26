@@ -55,7 +55,7 @@ ArcaneIDE connects to the Unity Editor through a lightweight Unity package. Inst
 
 ### Option 1 — Download & Import (Recommended)
 
-1. Download the package: [com.arcane.editor.tgz](https://releases.arcaneai.org/unity-extension-releases/latest/com.arcane.editor.tgz)
+1. Download the package: [com.arcane.editor.tgz](https://releases.unityide.app/unity-extension-releases/latest/com.arcane.editor.tgz)
 2. In Unity, go to **Window > Package Manager**
 3. Click **+** > **Add package from tarball...**
 4. Browse to the downloaded `.tgz` file and click **Open**
@@ -65,7 +65,7 @@ ArcaneIDE connects to the Unity Editor through a lightweight Unity package. Inst
 Open your Unity project's `Packages/manifest.json` and add this line to the `"dependencies"` block:
 
 ```json
-"com.arcane.editor": "https://releases.arcaneai.org/unity-extension-releases/latest/com.arcane.editor.tgz"
+"com.arcane.editor": "https://releases.unityide.app/unity-extension-releases/latest/com.arcane.editor.tgz"
 ```
 
 Save the file. Unity will download and install the package automatically.
@@ -75,7 +75,7 @@ Save the file. Unity will download and install the package automatically.
 1. Open Unity Editor
 2. Go to **Window > Package Manager**
 3. Click the **+** button > **Add package by name...**
-4. Paste: `https://releases.arcaneai.org/unity-extension-releases/latest/com.arcane.editor.tgz`
+4. Paste: `https://releases.unityide.app/unity-extension-releases/latest/com.arcane.editor.tgz`
 5. Click **Add**
 
 ### Setup

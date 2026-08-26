@@ -105,17 +105,17 @@ git tag v0.3.3 && git push origin v0.3.3
   ├─ sign    TAURI_SIGNING_PRIVATE_KEY → <artifact>.sig
   │
   └─ upload to the `arcane-releases` R2 bucket:
-        v0.3.3/Arcane-arm64.dmg          what people download
-        v0.3.3/Arcane.app.tar.gz         what the macOS updater fetches
-        v0.3.3/ArcaneSetup.exe           both, on Windows
+        v0.3.3/UnityIDE-arm64.dmg          what people download
+        v0.3.3/UnityIDE.app.tar.gz         what the macOS updater fetches
+        v0.3.3/UnityIDESetup.exe           both, on Windows
         latest/darwin-aarch64.json       the manifest  (max-age=300)
         latest/windows-x86_64.json
 ```
 
 The app polls the `endpoints` in its config:
 
-- production — `https://releases.arcaneai.org/latest/{{target}}-{{arch}}.json`
-- dev — `https://releases.arcaneai.org/dev/latest/{{target}}-{{arch}}.json`
+- production — `https://releases.unityide.app/latest/{{target}}-{{arch}}.json`
+- dev — `https://releases.unityide.app/dev/latest/{{target}}-{{arch}}.json`
 
 `{{target}}-{{arch}}` resolves to `darwin-aarch64` or `windows-x86_64`.
 
@@ -129,7 +129,7 @@ core in `update-manifest.mjs`:
   "version": "0.3.3",
   "pub_date": "2026-08-25T08:01:04.947Z",
   "platforms": {
-    "darwin-aarch64": { "signature": "<minisign>", "url": "https://…/v0.3.3/Arcane.app.tar.gz" }
+    "darwin-aarch64": { "signature": "<minisign>", "url": "https://…/v0.3.3/UnityIDE.app.tar.gz" }
   }
 }
 ```
@@ -152,11 +152,11 @@ Signed manifests fail *quietly*, so check rather than assume:
 
 ```bash
 # 1. Both manifests exist and are JSON
-curl -sSI https://releases.arcaneai.org/latest/darwin-aarch64.json | head -1
-curl -sSI https://releases.arcaneai.org/latest/windows-x86_64.json | head -1
+curl -sSI https://releases.unityide.app/latest/darwin-aarch64.json | head -1
+curl -sSI https://releases.unityide.app/latest/windows-x86_64.json | head -1
 
 # 2. The url inside each one resolves
-curl -sS https://releases.arcaneai.org/latest/darwin-aarch64.json | grep url
+curl -sS https://releases.unityide.app/latest/darwin-aarch64.json | grep url
 curl -sSI "<that url>" | head -1
 
 # 3. The app agrees: Settings → Updates shows the running version

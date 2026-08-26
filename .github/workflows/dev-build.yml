@@ -89,8 +89,8 @@ jobs:
           NODE_OPTIONS: --max-old-space-size=4096
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          VITE_API_URL: https://api-dev.arcaneai.org
-          VITE_WEB_URL: https://dev.arcaneai.org
+          VITE_API_URL: https://api-dev.unityide.app
+          VITE_WEB_URL: https://dev.unityide.app
         run: cd editor && bunx tauri build --bundles ${{ matrix.bundles }} --config src-tauri/tauri.dev.conf.json
 
       - name: Stage installer under its public name

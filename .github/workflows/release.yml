@@ -154,7 +154,7 @@ jobs:
           node editor/scripts/write-update-manifest.mjs \
             --platform "${{ matrix.platform_key }}" \
             --version  "${V#v}" \
-            --url      "https://releases.arcaneai.org/$V/${{ matrix.updater_asset }}" \
+            --url      "https://releases.unityide.app/$V/${{ matrix.updater_asset }}" \
             --sig      "dist-release/${{ matrix.updater_asset }}.sig" \
             --out      "dist-release/${{ matrix.platform_key }}.json"
 

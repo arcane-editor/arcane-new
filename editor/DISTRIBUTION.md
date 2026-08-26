@@ -113,7 +113,7 @@ Everything that would otherwise collide is keyed off the overlay:
 | Bundle id | `com.inno.editor` | `com.inno.editor.dev` |
 | Deep-link scheme | `arcane://` | `arcane-dev://` |
 | Config dir | `~/.arcane` | `~/.arcane-dev` |
-| API / web | `api.arcaneai.org` | `api-dev.arcaneai.org` |
+| API / web | `api.unityide.app` | `api-dev.unityide.app` |
 
 Window titles come from `productName` via `window_title()` in
 `src-tauri/src/lib.rs` — both for the programmatic welcome window and, in
@@ -165,7 +165,7 @@ scripts/upload-release.sh v0.1.0
 
 It uploads to the same `<tag>/` + `latest/` paths. Auth via `wrangler login` or the `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID` env vars.
 
-> **Note:** the previous `arcane-release-worker` (resumable multipart upload Worker) has been removed — current builds are small enough for `wrangler r2 object put`. The `releases.arcaneai.org` domain and the `arcane-releases` bucket stay as-is.
+> **Note:** the previous `arcane-release-worker` (resumable multipart upload Worker) has been removed — current builds are small enough for `wrangler r2 object put`. The `releases.unityide.app` domain and the `arcane-releases` bucket stay as-is.
 
 ## Upgrade path
 

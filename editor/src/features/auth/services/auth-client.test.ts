@@ -93,7 +93,7 @@ describe('exchangeEditorCode', () => {
     });
 
     expect(fetchCalls).toHaveLength(1);
-    expect(fetchCalls[0].url).toBe('https://api.arcaneai.org/v1/auth/editor/exchange');
+    expect(fetchCalls[0].url).toBe('https://api.unityide.app/v1/auth/editor/exchange');
     expect(fetchCalls[0].init?.method).toBe('POST');
     expect(fetchCalls[0].init?.headers).toEqual({ 'Content-Type': 'application/json' });
     expect(JSON.parse(fetchCalls[0].init?.body as string)).toEqual({

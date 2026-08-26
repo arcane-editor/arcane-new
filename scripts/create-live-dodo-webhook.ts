@@ -17,7 +17,7 @@
  */
 
 const BASE = 'https://live.dodopayments.com';
-const TARGET_URL = 'https://api.arcaneai.org/v1/billing/webhook';
+const TARGET_URL = 'https://api.unityide.app/v1/billing/webhook';
 const KEY = process.env.DODO_LIVE_API_KEY;
 
 const outArg = process.argv.indexOf('--out');

@@ -123,7 +123,7 @@ pub fn deep_link_scheme(app: &tauri::AppHandle) -> String {
 // disagreed, silently.
 
 /// Production endpoint. The only API URL that belongs to the prod channel.
-const PROD_API_URL: &str = "https://api.arcaneai.org";
+const PROD_API_URL: &str = "https://api.unityide.app";
 
 /// Channel implied by the bundle identifier — the same signal `config_dir_name`
 /// keys the config dir off.
@@ -192,9 +192,9 @@ mod tests {
         assert_eq!(channel_for_identifier("app.unityide.desktop.dev"), "dev");
 
         assert_eq!(channel_for_api_url(PROD_API_URL), "prod");
-        assert_eq!(channel_for_api_url("https://api.arcaneai.org/"), "prod");
+        assert_eq!(channel_for_api_url("https://api.unityide.app/"), "prod");
         // Everything else is non-production and must not touch ~/.unityide.
-        assert_eq!(channel_for_api_url("https://api-dev.arcaneai.org"), "dev");
+        assert_eq!(channel_for_api_url("https://api-dev.unityide.app"), "dev");
         assert_eq!(channel_for_api_url("http://localhost:8787"), "dev");
         assert_eq!(channel_for_api_url(""), "dev");
     }

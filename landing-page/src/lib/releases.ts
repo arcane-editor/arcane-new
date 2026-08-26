@@ -1,12 +1,12 @@
 // Installer download links, per environment.
 //
 // The dev site MUST NOT link to production installers. It did, and the failure
-// is silent: you download from dev.arcaneai.org, get the production app —
+// is silent: you download from dev.unityide.app, get the production app —
 // same name, same bundle id, pointed at the production API — and nothing tells
 // you until it behaves like prod. The dev channel ships "Arcane Dev", which
 // installs alongside prod rather than over it.
 
-const RELEASES_ORIGIN = 'https://releases.arcaneai.org';
+const RELEASES_ORIGIN = 'https://releases.unityide.app';
 
 export interface DownloadUrls {
     macArm: string;
@@ -44,7 +44,7 @@ export interface ManifestUrls {
  *  a card showing a dev version beside a production download link would be
  *  worse than either being wrong on its own. */
 function isDevChannel(apiUrl: string): boolean {
-    return apiUrl.includes('api-dev.arcaneai.org')
+    return apiUrl.includes('api-dev.unityide.app')
         || apiUrl.includes('localhost')
         || apiUrl.includes('127.0.0.1');
 }

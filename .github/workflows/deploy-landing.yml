@@ -1,8 +1,8 @@
 name: Deploy Landing
 
 # landing-page (Astro, Cloudflare Pages) deploys.
-#  - push to dev touching landing-page/ -> arcane-landing-dev (dev.arcaneai.org)
-#  - manual dispatch with environment=production -> arcane-landing (arcaneai.org)
+#  - push to dev touching landing-page/ -> arcane-landing-dev (dev.unityide.app)
+#  - manual dispatch with environment=production -> arcane-landing (unityide.app)
 # Both Pages projects use production branch "main" — always pass --branch main.
 # The load-bearing landing-page/.npmrc (entities hoist exclusion) is picked up
 # automatically because pnpm runs inside landing-page/.
@@ -59,7 +59,7 @@ jobs:
         run: pnpm test
       - name: Build (dev API baked in)
         env:
-          PUBLIC_API_URL: https://api-dev.arcaneai.org
+          PUBLIC_API_URL: https://api-dev.unityide.app
           PUBLIC_TURNSTILE_SITE_KEY: ${{ vars.PUBLIC_TURNSTILE_SITE_KEY }}
         run: pnpm build
       - name: Deploy to arcane-landing-dev
@@ -95,7 +95,7 @@ jobs:
         run: pnpm test
       - name: Build (prod API baked in)
         env:
-          PUBLIC_API_URL: https://api.arcaneai.org
+          PUBLIC_API_URL: https://api.unityide.app
           PUBLIC_TURNSTILE_SITE_KEY: ${{ vars.PUBLIC_TURNSTILE_SITE_KEY }}
         run: pnpm build
       - name: Deploy to arcane-landing (production)

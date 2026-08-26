@@ -1,12 +1,12 @@
 # UnityIDE — Unity Extension
 
-Connects your Unity Editor to [UnityIDE](https://arcaneai.org) for AI-powered game development. Real-time bidirectional communication lets you control Unity directly from the IDE.
+Connects your Unity Editor to [UnityIDE](https://unityide.app) for AI-powered game development. Real-time bidirectional communication lets you control Unity directly from the IDE.
 
 ## Installation
 
 ### Option 1 — Download & Import (Recommended)
 
-1. Download the package: [com.unityide.editor-0.0.1.tgz](https://releases.arcaneai.org/unity-extension-releases/com.unityide.editor-0.0.1.tgz)
+1. Download the package: [com.unityide.editor-0.0.1.tgz](https://releases.unityide.app/unity-extension-releases/com.unityide.editor-0.0.1.tgz)
 2. In Unity, go to **Window > Package Manager**
 3. Click **+** > **Add package from tarball...**
 4. Browse to the downloaded `.tgz` file and click **Open**
@@ -16,7 +16,7 @@ Connects your Unity Editor to [UnityIDE](https://arcaneai.org) for AI-powered ga
 Open your Unity project's `Packages/manifest.json` and add this line to the `"dependencies"` block:
 
 ```json
-"com.unityide.editor": "https://releases.arcaneai.org/unity-extension-releases/com.unityide.editor-0.0.1.tgz"
+"com.unityide.editor": "https://releases.unityide.app/unity-extension-releases/com.unityide.editor-0.0.1.tgz"
 ```
 
 Save the file. Unity will download and install the package automatically.
@@ -28,7 +28,7 @@ Save the file. Unity will download and install the package automatically.
 3. Click the **+** button (top-left) > **Add package by name...**
 4. Paste the URL:
    ```
-   https://releases.arcaneai.org/unity-extension-releases/com.unityide.editor-0.0.1.tgz
+   https://releases.unityide.app/unity-extension-releases/com.unityide.editor-0.0.1.tgz
    ```
 5. Click **Add**
 
@@ -61,7 +61,7 @@ The extension auto-detects UnityIDE from these default locations:
 ## Requirements
 
 - **Unity 2021.3 LTS** or later (2022.3 LTS and Unity 6 also supported)
-- **UnityIDE** installed — [download here](https://arcaneai.org)
+- **UnityIDE** installed — [download here](https://unityide.app)
 
 ## Troubleshooting
 
@@ -76,7 +76,7 @@ Add `UNITYIDE_VERBOSE` to **Player Settings > Scripting Define Symbols** to enab
 
 ## Documentation
 
-Full docs: [https://docs.arcaneai.org](https://docs.arcaneai.org)
+Full docs: [https://unityide.app/docs](https://unityide.app/docs)
 
 ## License
 

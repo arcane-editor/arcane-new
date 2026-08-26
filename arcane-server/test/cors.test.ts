@@ -2,9 +2,9 @@ import { describe, it, expect } from 'vitest';
 import { SELF } from 'cloudflare:test';
 
 const ALLOWED = [
-    'https://arcaneai.org',
-    'https://www.arcaneai.org',
-    'https://dev.arcaneai.org',
+    'https://unityide.app',
+    'https://www.unityide.app',
+    'https://dev.unityide.app',
     'http://localhost:4321',
     'http://localhost:1420',
     'tauri://localhost',
@@ -31,7 +31,7 @@ describe('CORS allowlist', () => {
         const res = await SELF.fetch('https://example.com/v1/auth/login', {
             method: 'OPTIONS',
             headers: {
-                Origin: 'https://arcaneai.org',
+                Origin: 'https://unityide.app',
                 'Access-Control-Request-Method': 'POST',
                 'Access-Control-Request-Headers': 'Authorization, Content-Type',
             },
