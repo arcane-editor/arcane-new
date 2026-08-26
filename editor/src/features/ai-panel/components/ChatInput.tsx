@@ -79,7 +79,7 @@ function ChatInput() {
     // The ONE place the panel branches on which agent is selected. An external
     // agent runs its own loop and exposes its own modes (plan, accept-edits, …)
     // as session config options, so Arcane's plan controller — which writes
-    // .arcane/plans/*.aplan and swaps prompt modes on the vendor loop — has no
+    // .unityide/plans/*.aplan and swaps prompt modes on the vendor loop — has no
     // meaning for it and is skipped entirely.
     if (selectedAgent !== 'arcane') {
       void sendChatMessage(text, { mode, effort, attachments }).catch((e) =>

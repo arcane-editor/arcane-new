@@ -76,8 +76,14 @@ if (nodeMajor < MIN_NODE_MAJOR) {
   skip(`this script is running on Node ${process.versions.node}; the adapter needs >= ${MIN_NODE_MAJOR}`);
 }
 
+// The two legacy dirs are the pre-rename names, kept as fallbacks so this
+// check still RUNS on a machine that has not migrated yet. Dropping them would
+// turn a real verification into a skip on every such machine — and a skip here
+// reads exactly like a pass while proving nothing.
 const candidates = [
   process.env.ARCANE_ACP_ADAPTER,
+  path.join(os.homedir(), '.unityide', 'agents', 'claude', ADAPTER_REL),
+  path.join(os.homedir(), '.unityide-dev', 'agents', 'claude', ADAPTER_REL),
   path.join(os.homedir(), '.arcane', 'agents', 'claude', ADAPTER_REL),
   path.join(os.homedir(), '.arcane-dev', 'agents', 'claude', ADAPTER_REL),
 ].filter(Boolean);
@@ -92,7 +98,7 @@ if (!adapter) {
 
 // Version drift is a warning, not a failure: the app deliberately keeps running
 // an outdated adapter rather than nagging mid-task.
-const manifest = path.join(adapter.split(`${path.sep}node_modules${path.sep}`)[0], '.arcane-agent.json');
+const manifest = path.join(adapter.split(`${path.sep}node_modules${path.sep}`)[0], '.unityide-agent.json');
 if (fs.existsSync(manifest)) {
   try {
     const installed = JSON.parse(fs.readFileSync(manifest, 'utf8')).version;

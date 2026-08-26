@@ -195,7 +195,7 @@ function EditorPanel() {
   // the user to a raw text buffer to do that was the gap.
   //
   // A plan is matched on its PATH, not on being markdown: `.aplan` carries
-  // markdown but is not a `.md`, and the legacy `.arcane/plans/*.md` clause in
+  // markdown but is not a `.md`, and the legacy `.unityide/plans/*.md` clause in
   // isPlanPath still has to win over the plain-markdown branch below.
   //
   // There is no view-mode gate on this branch. A plan has one mode — the

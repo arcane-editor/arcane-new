@@ -7,11 +7,11 @@ import { routePlanSend } from './plan-route';
 // model couldn't resume even if it wanted to). Routing must consult the phase.
 describe('routePlanSend', () => {
   it('resumes when a plan is awaiting execution', () => {
-    expect(routePlanSend('awaiting-execute', '/ws/.arcane/plans/p.md')).toBe('resume');
+    expect(routePlanSend('awaiting-execute', '/ws/.unityide/plans/p.md')).toBe('resume');
   });
 
   it('resumes when the phase is stuck at executing (recovery after a crashed send)', () => {
-    expect(routePlanSend('executing', '/ws/.arcane/plans/p.md')).toBe('resume');
+    expect(routePlanSend('executing', '/ws/.unityide/plans/p.md')).toBe('resume');
   });
 
   it('plans fresh when there is no active plan file, whatever the phase says', () => {
@@ -20,8 +20,8 @@ describe('routePlanSend', () => {
   });
 
   it('plans fresh from idle and while planning', () => {
-    expect(routePlanSend('idle', '/ws/.arcane/plans/p.md')).toBe('plan');
-    expect(routePlanSend('planning', '/ws/.arcane/plans/p.md')).toBe('plan');
+    expect(routePlanSend('idle', '/ws/.unityide/plans/p.md')).toBe('plan');
+    expect(routePlanSend('planning', '/ws/.unityide/plans/p.md')).toBe('plan');
     expect(routePlanSend('idle', null)).toBe('plan');
   });
 });

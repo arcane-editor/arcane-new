@@ -145,12 +145,12 @@ describe('plan-state persistence', () => {
         buildSessionData({
           ...(baseInput as object),
           planPhase: 'awaiting-execute',
-          activePlanPath: '/ws/.arcane/plans/x.md',
+          activePlanPath: '/ws/.unityide/plans/x.md',
         } as never),
       ),
     );
     expect(data.planPhase).toBe('awaiting-execute');
-    expect(data.activePlanPath).toBe('/ws/.arcane/plans/x.md');
+    expect(data.activePlanPath).toBe('/ws/.unityide/plans/x.md');
   });
 
   it('omits the keys entirely for a session with no plan (file shape unchanged)', () => {

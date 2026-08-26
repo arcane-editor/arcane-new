@@ -163,7 +163,7 @@ function getCurrentWorkspacePath(): string {
 function createToolsForPromptMode(mode: PromptMode, workspacePath: string, effort: Effort): AgentTool[] {
   const isUnity = useProjectContextStore.getState().isUnityProject;
   // Sandbox roots per workspace shape — see sandbox-roots.ts. Unity confines
-  // file operations to Assets/ (+ .arcane/ plan files + Packages/ for
+  // file operations to Assets/ (+ .unityide/ plan files + Packages/ for
   // manifest.json, which the agent prompt allows after confirming); non-Unity
   // workspaces confine to the workspace itself (they used to get NO sandbox);
   // no workspace open denies file tools entirely.

@@ -1,7 +1,7 @@
 /**
  * Edit-review persistence (T6) — mirrors `checkpoints/checkpoint-store-io.ts`
  * exactly: one JSON file per session, this time at
- * `~/.arcane/reviews/<sessionId>.json`, written on whatever debounce cadence
+ * `~/.unityide/reviews/<sessionId>.json`, written on whatever debounce cadence
  * the T7 review store schedules (this module stays synchronous-per-call,
  * same as the checkpoint io — debouncing is the STORE's job, not io's).
  *
@@ -33,7 +33,7 @@ async function ensureReviewsDirExists(path: string): Promise<void> {
 async function getReviewsDir(): Promise<string> {
   if (!reviewsDir) {
     const home = await homeDir();
-    reviewsDir = await join(home, '.arcane', 'reviews');
+    reviewsDir = await join(home, '.unityide', 'reviews');
     try {
       await ensureReviewsDirExists(reviewsDir);
     } catch (error) {

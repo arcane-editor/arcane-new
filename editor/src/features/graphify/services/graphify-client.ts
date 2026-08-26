@@ -3,7 +3,7 @@
  *
  * The sidecar is a PyInstaller binary that runs graphify's structural
  * extraction (AST only, no LLM). Graph artifacts live at
- * `~/.arcane/graphs/<sha1>/graph.json` on the host filesystem.
+ * `~/.unityide/graphs/<sha1>/graph.json` on the host filesystem.
  */
 
 import { invoke } from '@tauri-apps/api/core';

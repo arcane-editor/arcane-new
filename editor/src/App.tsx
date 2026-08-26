@@ -519,7 +519,7 @@ function App() {
   }, [workspacePath]);
 
   // Refuse to run silently with mismatched halves of "dev-ness": dev endpoints
-  // under the production identifier write dev-API tokens into ~/.arcane, which
+  // under the production identifier write dev-API tokens into ~/.unityide, which
   // the real app then presents to the production API.
   useEffect(() => {
     void checkReleaseChannel(invoke).then((problem) => {

@@ -95,7 +95,7 @@ const gen = spawnSync(
 );
 if (gen.status !== 0) fail('project-file generation failed', gen.stderr || gen.stdout);
 
-const solution = path.join(project, '.arcane.sln');
+const solution = path.join(project, '.unityide.sln');
 if (!fs.existsSync(solution)) {
   fail(
     `generation produced no ${path.basename(solution)}`,
@@ -275,7 +275,7 @@ try {
     fail(
       `csharp-ls reports ${corelib.length} corelib error(s) — the project declares more than one corelib`,
       corelib.slice(0, 5).map((d) => `    ${d.code}: ${d.message}`).join('\n') +
-        '\n  Check <NoStdLib> in the generated .arcane.csproj (unity.rs): with the\n' +
+        '\n  Check <NoStdLib> in the generated .unityide.csproj (unity.rs): with the\n' +
         '  netstandard reference set AND FrameworkPathOverride both present, it must\n' +
         '  be true, or MSBuild adds a second mscorlib on top of netstandard.',
     );

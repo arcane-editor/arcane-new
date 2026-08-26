@@ -5,7 +5,7 @@
 //!
 //! Graph artifacts live under the per-app config dir (see `auth::config_home_dir`)
 //! at `<arcane-home>/graphs/<sha1(workspace)>/graph.json` — i.e.
-//! `~/.arcane/graphs/<sha1>/` for prod builds and `~/.arcane-dev/graphs/<sha1>/`
+//! `~/.unityide/graphs/<sha1>/` for prod builds and `~/.unityide-dev/graphs/<sha1>/`
 //! for dev builds — outside the user's project tree so we never pollute their
 //! working directory or .gitignore.
 

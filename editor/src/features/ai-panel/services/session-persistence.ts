@@ -1,7 +1,7 @@
 /**
  * Session persistence — saves/loads AI chat sessions as JSON files.
- * Location: <per-app config dir>/sessions/<sessionId>.json — i.e. ~/.arcane/sessions
- * for prod builds, ~/.arcane-dev/sessions for dev builds (see `getSessionsDir`).
+ * Location: <per-app config dir>/sessions/<sessionId>.json — i.e. ~/.unityide/sessions
+ * for prod builds, ~/.unityide-dev/sessions for dev builds (see `getSessionsDir`).
  *
  * Each record carries the agent kind, workspace path, a human title, and the
  * transcript. Older records on disk may still carry a now-removed agent kind
@@ -118,7 +118,7 @@ async function ensureSessionsDirExists(path: string): Promise<void> {
 
 async function getSessionsDir(): Promise<string> {
   if (!sessionsDir) {
-    // Per-app dir (~/.arcane or ~/.arcane-dev) so the side-by-side dev
+    // Per-app dir (~/.unityide or ~/.unityide-dev) so the side-by-side dev
     // build never shares/corrupts the prod app's session files.
     const configHome = await invoke<string>('get_config_home_dir');
     sessionsDir = await join(configHome, 'sessions');
@@ -339,8 +339,8 @@ export async function renameSession(sessionId: string, title: string): Promise<v
 
 /**
  * List saved sessions as summaries, newest first. Optionally scoped to a
- * workspace. Enumerates the per-app config dir's `sessions` folder (`~/.arcane/sessions`
- * or `~/.arcane-dev/sessions`) via the custom `read_directory` Rust command
+ * workspace. Enumerates the per-app config dir's `sessions` folder (`~/.unityide/sessions`
+ * or `~/.unityide-dev/sessions`) via the custom `read_directory` Rust command
  * (scope-exempt, unlike plugin-fs `readDir` which is blocked by the empty fs
  * scope). Session files are named `session_*.json` — not hidden — so the
  * command's hidden-name skip doesn't drop them.

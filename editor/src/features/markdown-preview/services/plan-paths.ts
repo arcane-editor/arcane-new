@@ -12,7 +12,7 @@ export function isMarkdownPath(name: string): boolean {
  * instead of a prose render, and it means a plan stays a plan wherever the
  * user moves it, rather than only inside the folder that produced it.
  *
- * Legacy `.md` plans under `.arcane/plans/` still open as plans: they were
+ * Legacy `.md` plans under `.unityide/plans/` still open as plans: they were
  * written before the extension existed, they parse identically, and silently
  * demoting them to prose would take the Execute button away from work already
  * planned. That clause is matched on the DIRECTORY, so a user's own `plan.md`
@@ -23,5 +23,5 @@ export function isMarkdownPath(name: string): boolean {
  */
 export function isPlanPath(path: string): boolean {
   if (/\.aplan$/i.test(path)) return true;
-  return /[/\\]\.arcane[/\\]plans[/\\][^/\\]+\.md$/i.test(path);
+  return /[/\\]\.unityide[/\\]plans[/\\][^/\\]+\.md$/i.test(path);
 }

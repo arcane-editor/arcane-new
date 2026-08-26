@@ -5,7 +5,7 @@
  *   - Send the user prompt with the plan-planning system prompt + read-only
  *     tool subset.
  *   - On agent_end, extract the assistant's last text content (the markdown
- *     plan), write it to .arcane/plans/<ts>-<slug>.aplan, open it in the
+ *     plan), write it to .unityide/plans/<ts>-<slug>.aplan, open it in the
  *     plan view (PlanDocumentView, not Monaco — a plan is edited in place).
  *   - Set planPhase='awaiting-execute' and stash pendingPrompt + lastAttachments.
  *

@@ -34,7 +34,7 @@ describe('todo_update instructions (T9)', () => {
   const agent = buildAgentPrompt('/proj');
   const planExecution = buildPlanExecutionPrompt({
     workspacePath: '/proj',
-    planPath: '/proj/.arcane/plans/plan.md',
+    planPath: '/proj/.unityide/plans/plan.md',
   });
 
   it('agent prompt has a Task tracking section requiring todo_update for multi-step work', () => {
@@ -54,7 +54,7 @@ describe('ask_user instructions (Task 2 — agent/plan-planning/plan-execution o
   const planPlanning = buildPlanPlanningPrompt('/proj', { difficultyTags: false });
   const planExecution = buildPlanExecutionPrompt({
     workspacePath: '/proj',
-    planPath: '/proj/.arcane/plans/plan.md',
+    planPath: '/proj/.unityide/plans/plan.md',
   });
 
   it('agent, plan-planning, and plan-execution prompts all document ask_user', () => {
@@ -69,7 +69,7 @@ describe('ask_user instructions (Task 2 — agent/plan-planning/plan-execution o
 });
 
 describe('plan-execution prompt is cache-stable (cache activation §1)', () => {
-  const planPath = '/proj/.arcane/plans/plan.md';
+  const planPath = '/proj/.unityide/plans/plan.md';
   const planContent = '## Steps\n\n- [ ] Step 1: Add ZebraQuantumPickup component';
   const prompt = buildPlanExecutionPrompt({ workspacePath: '/proj', planPath });
 
@@ -102,7 +102,7 @@ import { buildPlanExecutionPrompt as executionPromptFor } from './plan-execution
 
 describe('bridge-independence + step ordering (plan prompts)', () => {
   const planning = planningPromptFor('/proj', { difficultyTags: false });
-  const execution = executionPromptFor({ workspacePath: '/proj', planPath: '/proj/.arcane/plans/p.md' });
+  const execution = executionPromptFor({ workspacePath: '/proj', planPath: '/proj/.unityide/plans/p.md' });
 
   it('planning orders all script todos before any editor-side todos', () => {
     expect(planning).toContain('scripts first, editor last');
@@ -127,7 +127,7 @@ describe('bridge-independence + step ordering (plan prompts)', () => {
 // ---------------------------------------------------------------------------
 describe('plan progress carry-over (regenerate edge case)', () => {
   const planning = planningPromptFor('/proj', { difficultyTags: false });
-  const execution = executionPromptFor({ workspacePath: '/proj', planPath: '/proj/.arcane/plans/p.md' });
+  const execution = executionPromptFor({ workspacePath: '/proj', planPath: '/proj/.unityide/plans/p.md' });
 
   it('planning carries completed steps forward pre-checked, never resetting them', () => {
     expect(planning).toContain('Never reset completed work');
@@ -183,7 +183,7 @@ describe('plan-planning template v2 (Task 12)', () => {
 });
 
 describe('plan-execution tag-preservation instruction (Task 12)', () => {
-  const execution = executionPromptFor({ workspacePath: '/proj', planPath: '/proj/.arcane/plans/p.md' });
+  const execution = executionPromptFor({ workspacePath: '/proj', planPath: '/proj/.unityide/plans/p.md' });
 
   it('instructs mirroring each plan todo\'s difficulty into todo_update', () => {
     expect(execution.toLowerCase()).toContain('difficulty');

@@ -12,12 +12,12 @@ export const WEB_URL: string =
 /**
  * Assert that the endpoints this build targets match the channel the Rust side
  * derived from the bundle identifier — which is what picks the config dir
- * (`~/.arcane` vs `~/.arcane-dev`) and the deep-link scheme.
+ * (`~/.unityide` vs `~/.unityide-dev`) and the deep-link scheme.
  *
  * These two are set by different tooling: Vite's mode picks the URLs above, the
  * Tauri config file picks the identifier. A plain `tauri dev` took the dev
  * endpoints with the PRODUCTION identifier, so a token minted against the dev
- * API landed in `~/.arcane` and the real app then presented it to the
+ * API landed in `~/.unityide` and the real app then presented it to the
  * production API. Nothing surfaced that, which is the whole reason this exists.
  *
  * Resolves to an error message on mismatch, or null when consistent.

@@ -15,13 +15,13 @@ pub struct AuthToken {
 /// shares tokens/sessions/graphs with the prod app.
 pub fn config_dir_name(identifier: &str) -> &'static str {
     if identifier.ends_with(".dev") {
-        ".arcane-dev"
+        ".unityide-dev"
     } else {
-        ".arcane"
+        ".unityide"
     }
 }
 
-/// Absolute per-app config dir: ~/.arcane (prod) or ~/.arcane-dev (dev build).
+/// Absolute per-app config dir: ~/.unityide (prod) or ~/.unityide-dev (dev build).
 pub fn config_home_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let home = dirs::home_dir()
         .ok_or_else(|| "Could not resolve home directory".to_string())?;
@@ -83,7 +83,7 @@ pub fn auth_delete_token(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Absolute path of the per-app config dir (~/.arcane or ~/.arcane-dev),
+/// Absolute path of the per-app config dir (~/.unityide or ~/.unityide-dev),
 /// for frontend code that persists files (e.g. AI session history).
 #[tauri::command]
 pub fn get_config_home_dir(app: tauri::AppHandle) -> Result<String, String> {
@@ -118,7 +118,7 @@ pub fn deep_link_scheme(app: &tauri::AppHandle) -> String {
 // endpoints, and the Tauri config file picks the bundle identifier (and with it
 // the config dir and the deep-link scheme). A plain `tauri dev` used to take the
 // dev endpoints with the PRODUCTION identifier, so a token minted against the
-// dev API was written into ~/.arcane — where the real app then found it and
+// dev API was written into ~/.unityide — where the real app then found it and
 // presented it to the production API. Nothing surfaced that; the two halves just
 // disagreed, silently.
 
@@ -193,7 +193,7 @@ mod tests {
 
         assert_eq!(channel_for_api_url(PROD_API_URL), "prod");
         assert_eq!(channel_for_api_url("https://api.arcaneai.org/"), "prod");
-        // Everything else is non-production and must not touch ~/.arcane.
+        // Everything else is non-production and must not touch ~/.unityide.
         assert_eq!(channel_for_api_url("https://api-dev.arcaneai.org"), "dev");
         assert_eq!(channel_for_api_url("http://localhost:8787"), "dev");
         assert_eq!(channel_for_api_url(""), "dev");
@@ -216,7 +216,7 @@ mod tests {
             channel_for_identifier(identifier),
             "dev",
             "tauri.dev.conf.json must carry a `.dev` identifier, or the dev build \
-             shares ~/.arcane with production"
+             shares ~/.unityide with production"
         );
 
         let env_file = std::fs::read_to_string(root.join("../.env.development")).unwrap();
@@ -238,12 +238,12 @@ mod tests {
 
     #[test]
     fn prod_identifier_uses_arcane() {
-        assert_eq!(config_dir_name("com.inno.editor"), ".arcane");
+        assert_eq!(config_dir_name("com.inno.editor"), ".unityide");
     }
 
     #[test]
     fn dev_identifier_uses_arcane_dev() {
-        assert_eq!(config_dir_name("com.inno.editor.dev"), ".arcane-dev");
+        assert_eq!(config_dir_name("com.inno.editor.dev"), ".unityide-dev");
     }
 
     #[test]

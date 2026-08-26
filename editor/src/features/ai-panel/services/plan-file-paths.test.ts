@@ -16,21 +16,21 @@ describe('slugify', () => {
 
 describe('planPathVariant', () => {
   it('returns the base name for n <= 1', () => {
-    expect(planPathVariant('/p/.arcane/plans/20260824-1200-x.aplan', 1)).toBe(
-      '/p/.arcane/plans/20260824-1200-x.aplan',
+    expect(planPathVariant('/p/.unityide/plans/20260824-1200-x.aplan', 1)).toBe(
+      '/p/.unityide/plans/20260824-1200-x.aplan',
     );
   });
 
   it('inserts the counter before the extension, not after it', () => {
-    expect(planPathVariant('/p/.arcane/plans/20260824-1200-x.aplan', 2)).toBe(
-      '/p/.arcane/plans/20260824-1200-x-2.aplan',
+    expect(planPathVariant('/p/.unityide/plans/20260824-1200-x.aplan', 2)).toBe(
+      '/p/.unityide/plans/20260824-1200-x-2.aplan',
     );
   });
 
-  it('is not confused by the dot in the .arcane directory', () => {
-    const v = planPathVariant('/p/.arcane/plans/20260824-1200-x.aplan', 3);
+  it('is not confused by the dot in the .unityide directory', () => {
+    const v = planPathVariant('/p/.unityide/plans/20260824-1200-x.aplan', 3);
     expect(v.endsWith('.aplan')).toBe(true);
-    expect(v).toContain('/.arcane/');
+    expect(v).toContain('/.unityide/');
   });
 });
 
