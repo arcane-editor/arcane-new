@@ -603,7 +603,7 @@ function App() {
     let unlisten: (() => void) | null = null;
     let cancelled = false;
     (async () => {
-      const fn = await listenScoped('arcane-goto-pending', () => {
+      const fn = await listenScoped('unityide-goto-pending', () => {
         void consumePendingGotoForWorkspace(useWorkspaceStore.getState().workspacePath);
       });
       if (cancelled) safeUnlisten(fn);

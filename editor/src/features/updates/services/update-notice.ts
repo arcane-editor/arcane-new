@@ -30,7 +30,7 @@ export function updateReadyMessage({ version, installed }: UpdateReadyPayload): 
  * reach a natural stopping point.
  */
 export async function startUpdateNotices(): Promise<UnlistenFn> {
-  return listen<UpdateReadyPayload>('arcane-update-ready', (event) => {
+  return listen<UpdateReadyPayload>('unityide-update-ready', (event) => {
     useNotificationsStore.getState().addNotification({
       type: 'info',
       message: updateReadyMessage(event.payload),

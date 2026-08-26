@@ -810,7 +810,7 @@ pub fn run() {
             // Nudge every live window: one of them may already have this
             // project open and can act immediately. The welcome window is the
             // fallback surface when none can.
-            let _ = app.emit("arcane-goto-pending", ());
+            let _ = app.emit("unityide-goto-pending", ());
         }
         open_or_focus_welcome(app);
     }));

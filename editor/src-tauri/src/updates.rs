@@ -12,7 +12,7 @@ use tauri::{AppHandle, Emitter};
 use tauri_plugin_updater::UpdaterExt;
 
 /// Event the frontend listens on once an update is staged.
-pub const UPDATE_READY_EVENT: &str = "arcane-update-ready";
+pub const UPDATE_READY_EVENT: &str = "unityide-update-ready";
 
 /// Delay before the first check. Startup is already contended — Monaco, the
 /// LSP sidecars and the file index all boot at once — so the check waits
