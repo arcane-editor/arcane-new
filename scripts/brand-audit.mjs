@@ -64,8 +64,17 @@ const EXCLUDE = [
   ':(exclude)scripts/brand-audit.mjs',
 ];
 
-/** A maximal identifier-ish run containing "arcane", in any casing. */
-const TOKEN = /[A-Za-z0-9_.-]*[Aa]rcane[A-Za-z0-9_.-]*/g;
+/**
+ * A maximal identifier-ish run containing "arcane", in ANY casing.
+ *
+ * The `i` flag matters and was missing at first: written as `[Aa]rcane` this
+ * silently ignored every SCREAMING_CASE occurrence, so the eight ARCANE_* build
+ * and test env vars never appeared in the remaining count and the audit
+ * reported no change across the commit that renamed them. A completeness gate
+ * that cannot see a whole casing class is worse than none, because it reads as
+ * reassurance.
+ */
+const TOKEN = /[A-Za-z0-9_.-]*arcane[A-Za-z0-9_.-]*/gi;
 
 function trackedFiles() {
   const out = execFileSync('git', ['ls-files', '-z', '--', '.', ...EXCLUDE], {
