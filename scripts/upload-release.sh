@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Upload Arcane installers to the `arcane-releases` R2 bucket — the simple,
+# Upload UnityIDE installers to the `arcane-releases` R2 bucket — the simple,
 # manual counterpart to .github/workflows/release.yml. Useful for the macOS
 # Apple-Silicon build you can produce locally (`cd editor && bun run tauri build`).
 #
@@ -11,7 +11,7 @@
 #   [dir]       directory holding the installers (default: ./dist-release).
 #
 # Expected filenames in <dir> (whichever exist get uploaded):
-#   Arcane-arm64.dmg   Arcane-x64.dmg   ArcaneSetup.exe
+#   UnityIDE-arm64.dmg   UnityIDE-x64.dmg   UnityIDESetup.exe
 #
 # Each file is uploaded to BOTH:
 #   arcane-releases/<version>/<file>   (archived, immutable)
@@ -22,14 +22,14 @@
 #   CLOUDFLARE_ACCOUNT_ID
 #
 # Note: `wrangler r2 object put` does a single-part upload (~300 MiB ceiling).
-# Arcane installers are well under that. If a file ever exceeds it, switch that
+# UnityIDE installers are well under that. If a file ever exceeds it, switch that
 # upload to the R2 S3 API via `rclone` or `aws s3 cp` (both do multipart).
 set -euo pipefail
 
 VERSION="${1:?usage: scripts/upload-release.sh <version> [dir]}"
 DIR="${2:-dist-release}"
 BUCKET="arcane-releases"
-ASSETS=(Arcane-arm64.dmg Arcane-x64.dmg ArcaneSetup.exe)
+ASSETS=(UnityIDE-arm64.dmg UnityIDE-x64.dmg UnityIDESetup.exe)
 
 uploaded=0
 for asset in "${ASSETS[@]}"; do

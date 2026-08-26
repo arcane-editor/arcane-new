@@ -9,8 +9,8 @@ function fakeEnv(capture: SentMessage[], sendImpl?: EmailSender['send']) {
         EMAIL: {
             send: sendImpl ?? (async (m: SentMessage) => { capture.push(m); return { messageId: 'mid-1' }; }),
         },
-        WEB_BASE_URL: 'https://dev.arcaneai.org',
-        EMAIL_FROM: 'no-reply@arcaneai.org',
+        WEB_BASE_URL: 'https://dev.unityide.app',
+        EMAIL_FROM: 'no-reply@unityide.app',
     };
 }
 
@@ -20,9 +20,9 @@ describe('email lib', () => {
         await sendVerificationEmail(fakeEnv(calls), 'user@test.dev', '481920');
         expect(calls).toHaveLength(1);
         expect(calls[0]!.to).toBe('user@test.dev');
-        expect(calls[0]!.from).toEqual({ email: 'no-reply@arcaneai.org', name: 'Arcane' });
+        expect(calls[0]!.from).toEqual({ email: 'no-reply@unityide.app', name: 'UnityIDE' });
         // Leading the subject with the code lets clients preview it unopened.
-        expect(calls[0]!.subject).toBe('481920 is your Arcane verification code');
+        expect(calls[0]!.subject).toBe('481920 is your UnityIDE verification code');
         expect(calls[0]!.text).toContain('481920');
         expect(calls[0]!.html).toContain('481920');
         // The code is typed back into the signup tab — a link would defeat that.
@@ -32,9 +32,9 @@ describe('email lib', () => {
     it('sendPasswordResetEmail links to /reset', async () => {
         const calls: SentMessage[] = [];
         await sendPasswordResetEmail(fakeEnv(calls), 'user@test.dev', 'tok456');
-        expect(calls[0]!.subject).toBe('Reset your Arcane password');
-        expect(calls[0]!.text).toContain('https://dev.arcaneai.org/reset?token=tok456');
-        expect(calls[0]!.html).toContain('https://dev.arcaneai.org/reset?token=tok456');
+        expect(calls[0]!.subject).toBe('Reset your UnityIDE password');
+        expect(calls[0]!.text).toContain('https://dev.unityide.app/reset?token=tok456');
+        expect(calls[0]!.html).toContain('https://dev.unityide.app/reset?token=tok456');
     });
 
     it('never throws when the binding rejects (waitUntil safety)', async () => {
@@ -45,7 +45,7 @@ describe('email lib', () => {
     });
 
     it('no-ops without the EMAIL binding (tests / local dev)', async () => {
-        const env = { EMAIL: undefined, WEB_BASE_URL: 'https://dev.arcaneai.org', EMAIL_FROM: 'no-reply@arcaneai.org' };
+        const env = { EMAIL: undefined, WEB_BASE_URL: 'https://dev.unityide.app', EMAIL_FROM: 'no-reply@unityide.app' };
         await expect(sendVerificationEmail(env, 'user@test.dev', 't')).resolves.toBeUndefined();
     });
 });

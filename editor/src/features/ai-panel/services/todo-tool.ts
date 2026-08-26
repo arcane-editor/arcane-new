@@ -23,7 +23,7 @@ import type { Difficulty } from './difficulty';
 // shape doesn't pull the store (or its DOM-touching import graph, see the
 // module doc comment above) into this Bun-safe module. Same discipline
 // `stores/server-config.ts` documents for its own type-only `Effort` import.
-import type { ArcanePlanEntry } from '../../../stores/ai';
+import type { HostedPlanEntry } from '../../../stores/ai';
 
 export const TODO_STATUSES = ['pending', 'in_progress', 'done'] as const;
 export type TodoStatus = (typeof TODO_STATUSES)[number];
@@ -81,11 +81,11 @@ function normalizeTodoText(text: string): string {
  * Pure merge: an incoming item WITHOUT its own difficulty inherits the tag of
  * a `prev` entry whose normalized text matches; an incoming item WITH its own
  * difficulty keeps it; no match leaves it untagged. Called by the store-push
- * path (`pushToArcaneStore`) before `setArcanePlan`, so a weak model that
+ * path (`pushToHostedStore`) before `setHostedPlan`, so a weak model that
  * restates the list without repeating a tag it already set doesn't silently
  * lose it on the next full-list-replace.
  */
-export function mergeTodoDifficulty(prev: ArcanePlanEntry[] | null, next: TodoItem[]): TodoItem[] {
+export function mergeTodoDifficulty(prev: HostedPlanEntry[] | null, next: TodoItem[]): TodoItem[] {
   if (!prev || prev.length === 0) return next;
 
   const prevDifficultyByText = new Map<string, Difficulty | undefined>();
@@ -102,23 +102,23 @@ export function mergeTodoDifficulty(prev: ArcanePlanEntry[] | null, next: TodoIt
 
 /**
  * Production default: merges in inherited difficulty tags (see
- * `mergeTodoDifficulty`), then pushes the result straight to `arcanePlan` in
+ * `mergeTodoDifficulty`), then pushes the result straight to `hostedPlan` in
  * the ai store. Loaded via dynamic import so this file stays statically
  * Bun-safe — see the module doc comment.
  */
-async function pushToArcaneStore(items: TodoItem[]): Promise<void> {
+async function pushToHostedStore(items: TodoItem[]): Promise<void> {
   const { useAiStore } = await import('../../../stores/ai');
-  const prev = useAiStore.getState().arcanePlan;
-  useAiStore.getState().setArcanePlan(mergeTodoDifficulty(prev, items));
+  const prev = useAiStore.getState().hostedPlan;
+  useAiStore.getState().setHostedPlan(mergeTodoDifficulty(prev, items));
 }
 
 /**
  * `onUpdate` is injectable (tests + the eval harness's state-capturing no-op,
  * for tool-list parity — see `run-task.ts`'s `buildTools`). Defaults to
- * `pushToArcaneStore` for production use.
+ * `pushToHostedStore` for production use.
  */
 export function createTodoTool(
-  onUpdate: TodoUpdateCallback = (items) => void pushToArcaneStore(items),
+  onUpdate: TodoUpdateCallback = (items) => void pushToHostedStore(items),
 ): AgentTool {
   return {
     name: 'todo_update',

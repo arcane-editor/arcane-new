@@ -7,7 +7,7 @@ import path from 'node:path';
 // (for `assetsRootPath`/`getCurrentWorkspacePath`), which transitively pulls
 // in `stores/theme.ts` → `features/theme/apply.ts`, which touches `document`
 // at module-eval time — fatal under plain `bun test` (no DOM), the same
-// constraint `arcane-stream.test.ts`'s header documents for `stores/ai` and
+// constraint `hosted-stream.test.ts`'s header documents for `stores/ai` and
 // `session-persistence.test.ts`'s header documents for the ai-panel barrel.
 // A source-text assertion sidesteps this entirely (same technique
 // `session-persistence.test.ts`'s `AI_STORE_SRC` uses) and is exactly as

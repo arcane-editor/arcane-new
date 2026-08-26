@@ -21,8 +21,8 @@ export function resolveToCwd(filePath: string, cwd: string): string {
 
 /**
  * The tool sandbox: a single root, several roots, or none. Unity projects use
- * `[<ws>/Assets, <ws>/.arcane]` — Assets for game files, plus the IDE's own
- * `.arcane/` workspace dir, which holds the plan files the executor must
+ * `[<ws>/Assets, <ws>/.unityide]` — Assets for game files, plus the IDE's own
+ * `.unityide/` workspace dir, which holds the plan files the executor must
  * re-read and tick (`- [ ]` → `- [x]`). Assets-only blocked exactly that:
  * resume sends couldn't re-read the plan and every plan sat at 0/N done.
  */
@@ -43,7 +43,7 @@ function rootList(roots: AllowedRoots): string[] {
 
 /**
  * Raised when a path resolves outside every allowed root (the Assets +
- * .arcane sandbox for Unity projects). Tools catch this and return a
+ * .unityide sandbox for Unity projects). Tools catch this and return a
  * model-visible error result.
  */
 export class PathOutsideRootError extends Error {

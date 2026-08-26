@@ -1,5 +1,5 @@
 #!/bin/bash
-# Prepares the Arcane Unity extension for production / Asset Store deployment.
+# Prepares the UnityIDE Unity extension for production / Asset Store deployment.
 # Validates package structure, checks .meta files, cleans artifacts, and builds a UPM tarball.
 # Usage: ./deploy-prod.sh
 
@@ -15,7 +15,7 @@ NC='\033[0m'
 
 ERRORS=0
 
-echo "=== Arcane Extension — Production Deploy ==="
+echo "=== UnityIDE Extension — Production Deploy ==="
 echo ""
 
 # --- 1. Validate required files ---
@@ -24,8 +24,8 @@ REQUIRED_FILES=(
     "package.json"
     "LICENSE.md"
     "CHANGELOG.md"
-    "Editor/Arcane.Editor.asmdef"
-    "Documentation~/arcane-extension.md"
+    "Editor/UnityIDE.Editor.asmdef"
+    "Documentation~/unityide-extension.md"
 )
 
 for file in "${REQUIRED_FILES[@]}"; do
@@ -146,7 +146,7 @@ else
         --exclude='*.tgz' \
         --exclude='install-dev.sh' \
         --exclude='deploy-prod.sh' \
-        --exclude='.arcane-dev-path' \
+        --exclude='.unityide-dev-path' \
         package.json \
         LICENSE.md LICENSE.md.meta \
         CHANGELOG.md CHANGELOG.md.meta \

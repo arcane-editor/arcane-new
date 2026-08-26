@@ -220,7 +220,7 @@ describe('reconcileToolCall', () => {
 });
 
 describe('CLIENT_CAPABILITIES', () => {
-  // These are not descriptions of Arcane, they are switches on the agent. Each
+  // These are not descriptions of UnityIDE, they are switches on the agent. Each
   // assertion below names a feature that disappears — with no error anywhere —
   // if the capability stops being advertised.
   it('advertises form elicitation, or the agent stops asking questions entirely', () => {

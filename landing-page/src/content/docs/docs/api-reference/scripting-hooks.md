@@ -1,6 +1,6 @@
 ---
 title: Scripting Hooks
-description: Hook into ArcaneIDE events with the scripting API.
+description: Hook into UnityIDE events with the scripting API.
 ---
 
 Scripting hooks let you automate tasks and respond to editor events.
@@ -16,7 +16,7 @@ Scripting hooks let you automate tasks and respond to editor events.
 ## Example
 
 ```typescript
-import { hooks } from '@arcaneide/api';
+import { hooks } from '@unityide/api';
 
 hooks.onFileSave(async (file) => {
   console.log(`Saving ${file.path}`);
@@ -26,4 +26,4 @@ hooks.onFileSave(async (file) => {
 
 ## Configuration
 
-Hooks can be registered in your extension's `activate()` function or in a project-level `.arcane/hooks.ts` file.
+Hooks can be registered in your extension's `activate()` function or in a project-level `.unityide/hooks.ts` file.

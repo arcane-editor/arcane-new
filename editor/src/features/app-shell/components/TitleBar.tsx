@@ -26,7 +26,7 @@ function TitleBar() {
   return (
     <div className="title-bar" data-tauri-drag-region>
       <div className="title-bar-left" data-tauri-drag-region>
-        <span className="title-bar-app-name" data-tauri-drag-region>ARCANE</span>
+        <span className="title-bar-app-name" data-tauri-drag-region>UNITYIDE</span>
       </div>
       <div className="title-bar-center" data-tauri-drag-region>
         {isUnityProject && (

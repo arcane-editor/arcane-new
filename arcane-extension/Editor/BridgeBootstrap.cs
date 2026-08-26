@@ -27,24 +27,24 @@ using UnityEditor.Compilation;
 using UnityEngine;
 using Debug = UnityEngine.Debug;
 
-namespace Arcane.Bridge
+namespace UnityIDE.Bridge
 {
     [InitializeOnLoad]
     internal static class BridgeBootstrap
     {
         // SessionState survives domain reloads (but not editor restart). We use it
         // only to avoid logging "connected" on every reload while a session stays up.
-        private const string SessionConnectedKey = "Arcane.Bridge.AnnouncedConnected";
+        private const string SessionConnectedKey = "UnityIDE.Bridge.AnnouncedConnected";
 
         // Identity + read position, persisted across domain reloads so a script
         // recompile resumes the journal mid-stream instead of re-handshaking.
         // This is what removes the disconnect flicker the socket transport had on
         // every recompile. The epoch travels with the offset: if the IDE rotated
         // its journal while we were reloading, the offset alone would be a lie.
-        private const string SessionUnityIdKey = "Arcane.Bridge.UnitySessionId";
-        private const string SessionIdeIdKey = "Arcane.Bridge.IdeSessionId";
-        private const string SessionOffsetKey = "Arcane.Bridge.ReadOffset";
-        private const string SessionEpochKey = "Arcane.Bridge.ReadEpoch";
+        private const string SessionUnityIdKey = "UnityIDE.Bridge.UnitySessionId";
+        private const string SessionIdeIdKey = "UnityIDE.Bridge.IdeSessionId";
+        private const string SessionOffsetKey = "UnityIDE.Bridge.ReadOffset";
+        private const string SessionEpochKey = "UnityIDE.Bridge.ReadEpoch";
 
         /// <summary>
         /// Mirrors "version" in package.json. Reported in connection_init so the
@@ -72,7 +72,7 @@ namespace Arcane.Bridge
             }
             catch (Exception e)
             {
-                Debug.LogError("[ArcaneBridge] startup failed: " + e);
+                Debug.LogError("[UnityIDEBridge] startup failed: " + e);
             }
         }
 
@@ -150,7 +150,7 @@ namespace Arcane.Bridge
             }
             catch (Exception e)
             {
-                Debug.LogWarning("[ArcaneBridge] compile-result replay failed: " + e.Message);
+                Debug.LogWarning("[UnityIDEBridge] compile-result replay failed: " + e.Message);
             }
         }
 
@@ -170,7 +170,7 @@ namespace Arcane.Bridge
             {
                 // Never let the pump throw — it would stop ALL EditorApplication.update
                 // subscribers. Log and keep going.
-                Debug.LogError("[ArcaneBridge] update pump error: " + e);
+                Debug.LogError("[UnityIDEBridge] update pump error: " + e);
             }
         }
 
@@ -233,7 +233,7 @@ namespace Arcane.Bridge
                 if (!announced)
                 {
                     SessionState.SetBool(SessionConnectedKey, true);
-                    Debug.Log("[ArcaneBridge] Connected to Arcane IDE.");
+                    Debug.Log("[UnityIDEBridge] Connected to UnityIDE.");
                 }
             }
             else
@@ -309,7 +309,7 @@ namespace Arcane.Bridge
             }
             catch (Exception e)
             {
-                Debug.LogError("[ArcaneBridge] shutdown error: " + e);
+                Debug.LogError("[UnityIDEBridge] shutdown error: " + e);
             }
             finally
             {

@@ -50,7 +50,7 @@ export default function AuthHub() {
             // discard it now so it can't linger into a later, unrelated login.
             clearPostAuthReturn();
             setState("boot");
-            setBootMessage("Connecting to Arcane…");
+            setBootMessage("Connecting to UnityIDE…");
             try {
                 const grant = await apiEditorGrant(token, {
                     attemptId: pending.attemptId,
@@ -66,7 +66,7 @@ export default function AuthHub() {
                 clearEditorLoginRequest();
                 setHardError(
                     `Couldn't finish signing in to the editor: ${authErrorMessage((err as Error).message)} ` +
-                    "You are signed in on this site — return to Arcane and click Sign in again."
+                    "You are signed in on this site — return to UnityIDE and click Sign in again."
                 );
                 setState("hard-error");
             }
@@ -288,8 +288,8 @@ export default function AuthHub() {
             </h1>
             <p className="text-muted-foreground text-sm mb-6 text-center">
                 {editorPending
-                    ? "The Arcane editor is asking to sign in. Finish here and you'll be sent back to the app."
-                    : "Sign in to Arcane to use AI features"}
+                    ? "The UnityIDE editor is asking to sign in. Finish here and you'll be sent back to the app."
+                    : "Sign in to UnityIDE to use AI features"}
             </p>
 
             {banner && <div className={authErrorBannerClass}>{banner}</div>}

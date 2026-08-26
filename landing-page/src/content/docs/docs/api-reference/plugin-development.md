@@ -1,6 +1,6 @@
 ---
 title: Plugin Development
-description: Develop plugins that extend ArcaneIDE's core functionality.
+description: Develop plugins that extend UnityIDE's core functionality.
 ---
 
 Plugins provide deeper integration than extensions, with access to internal APIs.
@@ -17,9 +17,9 @@ Plugins provide deeper integration than extensions, with access to internal APIs
 ## Getting Started
 
 ```bash
-arcane plugin init my-plugin
+unityide plugin init my-plugin
 cd my-plugin
-arcane plugin dev
+unityide plugin dev
 ```
 
 ## Plugin Lifecycle

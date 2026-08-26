@@ -34,7 +34,7 @@ export const ACP_PROMPT_TIMEOUT_MS = 30 * 60_000;
 
 /**
  * Everything this client needs from the outside world. Extracted so tests can
- * drive the protocol without a webview, exactly as `arcane-stream.ts` takes an
+ * drive the protocol without a webview, exactly as `hosted-stream.ts` takes an
  * injectable `fetchImpl`. Production always uses `tauriAcpTransport`.
  */
 export interface AcpTransport {

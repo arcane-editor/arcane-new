@@ -108,7 +108,7 @@ describe('memory consolidation', () => {
 });
 
 describe('memory dir helper', () => {
-  it('lives under Library/ArcaneIDE', () => {
-    expect(memoryDir('/ws')).toBe('/ws/Library/ArcaneIDE/memory');
+  it('lives under Library/UnityIDE', () => {
+    expect(memoryDir('/ws')).toBe('/ws/Library/UnityIDE/memory');
   });
 });

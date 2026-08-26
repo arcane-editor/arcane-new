@@ -6,7 +6,7 @@
  */
 
 import { useAuthStore } from '../../../../stores/auth';
-import { ARCANE_API_URL } from '../../../../config/api';
+import { API_URL } from '../../../../config/api';
 
 const SIDE_TASK_TIMEOUT_MS = 30_000;
 
@@ -14,7 +14,7 @@ export async function sideTaskRequest(prompt: string): Promise<string> {
   const token = useAuthStore.getState().token;
   if (!token) throw new Error('not signed in');
 
-  const res = await fetch(`${ARCANE_API_URL}/v1/chat/completions`, {
+  const res = await fetch(`${API_URL}/v1/chat/completions`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

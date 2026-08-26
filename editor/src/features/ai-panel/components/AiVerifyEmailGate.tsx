@@ -9,7 +9,7 @@ import { authClient } from '../../auth';
  *
  * The session is VALID here — this panel must never offer or trigger a sign
  * out. That conflation is exactly what trapped new signups in a loop before
- * arcane-stream learned to tell 401 from 403.
+ * hosted-stream learned to tell 401 from 403.
  */
 function AiVerifyEmailGate() {
   const email = useAuthStore((s) => s.email);

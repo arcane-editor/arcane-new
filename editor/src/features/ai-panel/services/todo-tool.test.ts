@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'bun:test';
 import { createTodoTool, mergeTodoDifficulty, MAX_TODO_ITEMS, type TodoItem } from './todo-tool';
-import type { ArcanePlanEntry } from '../../../stores/ai';
+import type { HostedPlanEntry } from '../../../stores/ai';
 
 function textOf(result: { content: { type: string; text?: string }[] }): string {
   return result.content.map((c) => c.text ?? '').join('\n');
@@ -178,7 +178,7 @@ describe('todo_update tool', () => {
     });
 
     it('inherits difficulty from a prev entry when the incoming item has none, matching by normalized text', () => {
-      const prev: ArcanePlanEntry[] = [{ text: 'Write the tool', status: 'done', difficulty: 'hard' }];
+      const prev: HostedPlanEntry[] = [{ text: 'Write the tool', status: 'done', difficulty: 'hard' }];
       const next: TodoItem[] = [{ text: '  Write   THE tool  ', status: 'in_progress' }];
 
       expect(mergeTodoDifficulty(prev, next)).toEqual([
@@ -187,7 +187,7 @@ describe('todo_update tool', () => {
     });
 
     it('keeps an incoming item\'s own difficulty rather than the prev entry\'s', () => {
-      const prev: ArcanePlanEntry[] = [{ text: 'Write the tool', status: 'done', difficulty: 'hard' }];
+      const prev: HostedPlanEntry[] = [{ text: 'Write the tool', status: 'done', difficulty: 'hard' }];
       const next: TodoItem[] = [{ text: 'Write the tool', status: 'in_progress', difficulty: 'easy' }];
 
       expect(mergeTodoDifficulty(prev, next)).toEqual([
@@ -196,21 +196,21 @@ describe('todo_update tool', () => {
     });
 
     it('leaves an incoming item untagged when no prev entry matches its text', () => {
-      const prev: ArcanePlanEntry[] = [{ text: 'Write the tool', status: 'done', difficulty: 'hard' }];
+      const prev: HostedPlanEntry[] = [{ text: 'Write the tool', status: 'done', difficulty: 'hard' }];
       const next: TodoItem[] = [{ text: 'A completely different task', status: 'pending' }];
 
       expect(mergeTodoDifficulty(prev, next)).toEqual([{ text: 'A completely different task', status: 'pending' }]);
     });
 
     it('leaves an incoming item untagged when the matching prev entry itself has no difficulty', () => {
-      const prev: ArcanePlanEntry[] = [{ text: 'Write the tool', status: 'done' }];
+      const prev: HostedPlanEntry[] = [{ text: 'Write the tool', status: 'done' }];
       const next: TodoItem[] = [{ text: 'Write the tool', status: 'in_progress' }];
 
       expect(mergeTodoDifficulty(prev, next)).toEqual([{ text: 'Write the tool', status: 'in_progress' }]);
     });
 
     it('normalizes on trim, case, and internal whitespace collapse for matching', () => {
-      const prev: ArcanePlanEntry[] = [{ text: 'Ship   the  Eval Stub', status: 'pending', difficulty: 'easy' }];
+      const prev: HostedPlanEntry[] = [{ text: 'Ship   the  Eval Stub', status: 'pending', difficulty: 'easy' }];
       const next: TodoItem[] = [{ text: '  ship the eval stub', status: 'pending' }];
 
       expect(mergeTodoDifficulty(prev, next)).toEqual([
@@ -219,7 +219,7 @@ describe('todo_update tool', () => {
     });
 
     it('merges a full matrix in one call: inherit, keep-own, no-match, and untagged-prev side by side', () => {
-      const prev: ArcanePlanEntry[] = [
+      const prev: HostedPlanEntry[] = [
         { text: 'Inherit me', status: 'done', difficulty: 'hard' },
         { text: 'Untagged prev', status: 'done' },
       ];

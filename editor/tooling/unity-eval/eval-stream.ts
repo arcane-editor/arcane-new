@@ -57,7 +57,7 @@ export interface UsageTotals {
  * Mutable per-request `max_tokens` override, read fresh on every HTTP
  * request. A single `StreamFn` (built once per `run-eval.ts` invocation) is
  * shared across every task in the run, including repeats — but production's
- * `max_tokens` cap varies by task type (`arcane-stream.ts`'s
+ * `max_tokens` cap varies by task type (`hosted-stream.ts`'s
  * `maxTokensByTask`), so `run-task.ts` mutates `.maxTokens` on this shared
  * object (via `maxTokensForMode`) right before each `agent.prompt()` call,
  * the same "shared mutable object read at call time" shape `usage` already

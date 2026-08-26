@@ -24,7 +24,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::{Mutex, OnceCell};
 
-/// The adapter Arcane installs for the `claude` agent.
+/// The adapter UnityIDE installs for the `claude` agent.
 ///
 /// Pinned deliberately. `@latest` drifts under users mid-session, and the
 /// protocol surface an agent advertises changes between releases; a pin means a
@@ -37,7 +37,7 @@ pub const CLAUDE_AGENT_VERSION: &str = "0.70.0";
 
 /// Written only after a successful install, so a crashed or half-finished one
 /// reads back as "not installed" and simply reinstalls.
-const MANIFEST_NAME: &str = ".arcane-agent.json";
+const MANIFEST_NAME: &str = ".unityide-agent.json";
 
 // ── Per-window registry ─────────────────────────────────────────
 
@@ -231,13 +231,13 @@ async fn find_in_path(name: &str) -> Option<PathBuf> {
 
 // ── Install layout ──────────────────────────────────────────────
 
-/// `~/.arcane/agents/<id>` (or `~/.arcane-dev/...` on a dev build).
+/// `~/.unityide/agents/<id>` (or `~/.unityide-dev/...` on a dev build).
 ///
 /// A private npm prefix, deliberately not a global install: it needs no
 /// elevated permissions, cannot collide with the user's own tooling, and is
 /// removable by deleting one directory.
 fn agent_dir(app: &AppHandle, agent_id: &str) -> Result<PathBuf, String> {
-    Ok(crate::auth::arcane_home_dir(app)?
+    Ok(crate::auth::config_home_dir(app)?
         .join("agents")
         .join(agent_id))
 }
@@ -692,7 +692,7 @@ fn trace_file() -> &'static std::sync::Mutex<Option<std::fs::File>> {
     TRACE.get_or_init(|| {
         let path = match dirs::cache_dir() {
             Some(dir) => {
-                let dir = dir.join("editor-arcane");
+                let dir = dir.join("editor-unityide");
                 let _ = std::fs::create_dir_all(&dir);
                 dir.join("acp-trace.log")
             }
@@ -720,7 +720,7 @@ fn trace_append(agent_id: &str, direction: &str, body: &str) {
 #[tauri::command]
 pub fn acp_trace_path() -> Option<String> {
     dirs::cache_dir().map(|d| {
-        d.join("editor-arcane")
+        d.join("editor-unityide")
             .join("acp-trace.log")
             .to_string_lossy()
             .to_string()
@@ -749,7 +749,7 @@ mod tests {
 
     #[test]
     fn adapter_entry_points_at_the_renamed_package() {
-        let entry = adapter_entry(Path::new("/home/u/.arcane/agents/claude"));
+        let entry = adapter_entry(Path::new("/home/u/.unityide/agents/claude"));
         let as_str = entry.to_string_lossy().replace('\\', "/");
         // Guards the rename: @zed-industries/claude-code-acp is deprecated.
         assert!(as_str.ends_with(

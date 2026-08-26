@@ -1,10 +1,10 @@
 /**
- * Turning an ACP form elicitation into questions Arcane already knows how to
+ * Turning an ACP form elicitation into questions UnityIDE already knows how to
  * ask, and turning the answers back into the shape the agent expects.
  *
  * This is how Claude Code's `AskUserQuestion` reaches the user. Rather than
  * building a second question UI, an elicitation is decomposed into the same
- * `ask_user` questions the Arcane agent raises, so both agents render through
+ * `ask_user` questions the UnityIDE agent raises, so both agents render through
  * `QuestionBlock`, answer through the composer, and cancel through the same
  * gate. A chat transcript is sequential anyway: asking two questions in a row
  * reads better than a form, and costs no new UI.

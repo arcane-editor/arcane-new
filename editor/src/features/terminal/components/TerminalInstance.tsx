@@ -152,7 +152,7 @@ function TerminalInstance({ id }: Props) {
 
         // Shift+Enter -> Meta+Enter, so a TUI can distinguish it from Enter.
         // This is what Claude Code's `/terminal-setup` would install for us if
-        // it knew what Arcane was; it only knows how to edit the config files
+        // it knew what UnityIDE was; it only knows how to edit the config files
         // of terminals it recognises, so it refuses. Doing it here means the
         // command is never needed. See key-sequences.ts for the full why.
         const override = overrideKeySequence(e);

@@ -1,6 +1,6 @@
 /**
  * Plan file persistence — plans live under
- * `<workspace>/.arcane/plans/<YYYYMMDD-HHmm>-<slug>.aplan`.
+ * `<workspace>/.unityide/plans/<YYYYMMDD-HHmm>-<slug>.aplan`.
  *
  * `.aplan` content is markdown; the extension exists so the editor can tell a
  * plan from a document by name and give it the step view (`plan-paths.ts`).
@@ -23,7 +23,7 @@ export {
 } from './plan-file-paths';
 
 export async function writePlan(absPath: string, markdown: string): Promise<void> {
-  // Ensure .arcane/plans/ exists.
+  // Ensure .unityide/plans/ exists.
   const dir = absPath.slice(0, absPath.lastIndexOf('/'));
   await invoke('create_directory_recursive', { path: dir });
   await invoke('write_file', { path: absPath, contents: markdown });

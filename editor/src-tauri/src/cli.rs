@@ -1,8 +1,8 @@
-//! Command-line arguments Arcane is launched with.
+//! Command-line arguments UnityIDE is launched with.
 //!
 //! Unity invokes the configured external script editor as
-//! `Arcane.exe --goto "<file>:<line>:<col>" "<projectPath>"` (see
-//! `ArcaneEditor.cs`). Nothing read argv, so double-clicking a script in
+//! `UnityIDE.exe --goto "<file>:<line>:<col>" "<projectPath>"` (see
+//! `UnityIDEEditor.cs`). Nothing read argv, so double-clicking a script in
 //! Unity's Project window opened the 720x480 Welcome window instead of the
 //! file — on every platform. That is the core Unity-to-IDE workflow.
 
@@ -153,7 +153,7 @@ mod tests {
     #[test]
     fn parses_a_posix_goto() {
         let t = parse_goto(&argv(&[
-            "arcane",
+            "unityide",
             "--goto",
             "/Users/me/Proj/Assets/Player.cs:42:7",
             "/Users/me/Proj",
@@ -169,7 +169,7 @@ mod tests {
     #[test]
     fn parses_a_windows_goto_with_a_drive_letter() {
         let t = parse_goto(&argv(&[
-            "Arcane.exe",
+            "UnityIDE.exe",
             "--goto",
             r"C:\Proj\Assets\Player.cs:42:1",
             r"C:\Proj",
@@ -183,7 +183,7 @@ mod tests {
 
     #[test]
     fn tolerates_a_missing_column() {
-        let t = parse_goto(&argv(&["arcane", "--goto", "/a/b.cs:9"])).expect("parsed");
+        let t = parse_goto(&argv(&["unityide", "--goto", "/a/b.cs:9"])).expect("parsed");
         assert_eq!(t.file, "/a/b.cs");
         assert_eq!(t.line, 9);
         assert_eq!(t.column, 1);
@@ -191,7 +191,7 @@ mod tests {
 
     #[test]
     fn tolerates_a_bare_path_with_no_position() {
-        let t = parse_goto(&argv(&["arcane", "--goto", "/a/b.cs"])).expect("parsed");
+        let t = parse_goto(&argv(&["unityide", "--goto", "/a/b.cs"])).expect("parsed");
         assert_eq!(t.file, "/a/b.cs");
         assert_eq!(t.line, 1);
         assert_eq!(t.column, 1);
@@ -200,32 +200,32 @@ mod tests {
     /// A drive-lettered path with no :line:col must not lose its drive.
     #[test]
     fn a_bare_windows_path_keeps_its_drive() {
-        let t = parse_goto(&argv(&["Arcane.exe", "--goto", r"D:\Unity\Player.cs"])).expect("parsed");
+        let t = parse_goto(&argv(&["UnityIDE.exe", "--goto", r"D:\Unity\Player.cs"])).expect("parsed");
         assert_eq!(t.file, r"D:\Unity\Player.cs");
         assert_eq!(t.line, 1);
     }
 
     #[test]
     fn returns_none_without_the_flag() {
-        assert!(parse_goto(&argv(&["arcane"])).is_none());
-        assert!(parse_goto(&argv(&["arcane", "/some/project"])).is_none());
+        assert!(parse_goto(&argv(&["unityide"])).is_none());
+        assert!(parse_goto(&argv(&["unityide", "/some/project"])).is_none());
     }
 
     #[test]
     fn returns_none_when_the_flag_has_no_value() {
-        assert!(parse_goto(&argv(&["arcane", "--goto"])).is_none());
+        assert!(parse_goto(&argv(&["unityide", "--goto"])).is_none());
     }
 
     #[test]
     fn treats_a_following_flag_as_not_a_project_path() {
-        let t = parse_goto(&argv(&["arcane", "--goto", "/a/b.cs:3:4", "--other"])).expect("parsed");
+        let t = parse_goto(&argv(&["unityide", "--goto", "/a/b.cs:3:4", "--other"])).expect("parsed");
         assert_eq!(t.project, None);
     }
 
     /// A deep link must not be mistaken for a goto target.
     #[test]
     fn ignores_argv_without_the_goto_flag_even_if_it_has_colons() {
-        assert!(parse_goto(&argv(&["arcane", "arcane://auth/callback?code=1"])).is_none());
+        assert!(parse_goto(&argv(&["unityide", "unityide://auth/callback?code=1"])).is_none());
     }
 
     #[test]

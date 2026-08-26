@@ -17,8 +17,8 @@ describe('TIER_CONTEXT_WINDOWS', () => {
 });
 
 describe('coerceAgentKind (persisted-session migration)', () => {
-  it('passes through the live "arcane" kind', () => {
-    expect(coerceAgentKind('arcane')).toBe('arcane');
+  it('passes through the live "hosted" kind', () => {
+    expect(coerceAgentKind('hosted')).toBe('hosted');
   });
 
   it('round-trips the "claude" kind now that external agents are back', () => {
@@ -26,28 +26,39 @@ describe('coerceAgentKind (persisted-session migration)', () => {
   });
 
   it('restores a Claude transcript regardless of entitlement', () => {
-    // Guards a tempting shortcut: coercing 'claude' -> 'arcane' for free-plan
+    // Guards a tempting shortcut: coercing 'claude' -> 'hosted' for free-plan
     // users would silently relabel whose turns those were. The gate belongs on
     // the composer, not on history.
     expect(coerceAgentKind('claude')).toBe('claude');
   });
 
-  it('coerces any unknown / future kind to "arcane"', () => {
-    expect(coerceAgentKind('gemini')).toBe('arcane');
-    expect(coerceAgentKind('codex')).toBe('arcane');
+  /**
+   * The pre-rename spelling of the hosted kind, sitting in every session file
+   * written before this release. It needs no dedicated migration BECAUSE the
+   * unknown-value fallback lands on exactly the right answer — those sessions
+   * really were the hosted agent — but that is a coincidence worth pinning, so
+   * a future change to the fallback cannot silently relabel old transcripts.
+   */
+  it('restores a pre-rename "arcane" session as the hosted agent', () => {
+    expect(coerceAgentKind('arcane')).toBe('hosted');
   });
 
-  it('coerces missing / non-string values to "arcane" (never crashes)', () => {
-    expect(coerceAgentKind(undefined)).toBe('arcane');
-    expect(coerceAgentKind(null)).toBe('arcane');
-    expect(coerceAgentKind(42)).toBe('arcane');
-    expect(coerceAgentKind({})).toBe('arcane');
+  it('coerces any unknown / future kind to "hosted"', () => {
+    expect(coerceAgentKind('gemini')).toBe('hosted');
+    expect(coerceAgentKind('codex')).toBe('hosted');
+  });
+
+  it('coerces missing / non-string values to "hosted" (never crashes)', () => {
+    expect(coerceAgentKind(undefined)).toBe('hosted');
+    expect(coerceAgentKind(null)).toBe('hosted');
+    expect(coerceAgentKind(42)).toBe('hosted');
+    expect(coerceAgentKind({})).toBe('hosted');
   });
 });
 
 describe('isExternalAgent', () => {
   it('is false for the hosted agent and true for everything else', () => {
-    expect(isExternalAgent('arcane')).toBe(false);
+    expect(isExternalAgent('hosted')).toBe(false);
     expect(isExternalAgent('claude')).toBe(true);
   });
 });

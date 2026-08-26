@@ -494,19 +494,50 @@ fn bridge_source_dir(app: &AppHandle) -> Option<PathBuf> {
     None
 }
 
-/// Install the Arcane Unity bridge package into the project's `Packages/` folder
-/// as an embedded package (`Packages/com.arcane.editor/`). Unity auto-discovers
+/// Install the UnityIDE Unity bridge package into the project's `Packages/` folder
+/// as an embedded package (`Packages/com.unityide.editor/`). Unity auto-discovers
 /// embedded packages — no manifest.json edit needed. Returns the install path.
 #[tauri::command]
 pub fn unity_install_bridge(app: AppHandle, workspace_path: String) -> Result<String, String> {
     let src = bridge_source_dir(&app)
         .ok_or_else(|| "Bridge package source not found (resource dir + dev fallback both missing)".to_string())?;
-    let dest = Path::new(&workspace_path)
-        .join("Packages")
-        .join("com.arcane.editor");
+    let packages = Path::new(&workspace_path).join("Packages");
+    let dest = packages.join("com.unityide.editor");
     copy_dir_recursive(&src, &dest)
         .map_err(|e| format!("Failed to copy bridge package to {}: {}", dest.display(), e))?;
+
+    remove_legacy_bridge_package(&packages);
+
     Ok(dest.to_string_lossy().to_string())
+}
+
+/// The embedded package id this bridge shipped under before the rename.
+const LEGACY_BRIDGE_PACKAGE: &str = "com.arcane.editor";
+
+/// Remove the pre-rename embedded package once the new one is in place.
+///
+/// This is not tidiness. The C# files keep their original `.meta` GUIDs across
+/// the rename — deliberately, so asmdef references by GUID survive — which
+/// means leaving the old directory in place gives Unity two embedded packages
+/// declaring the SAME asset GUIDs. Unity reports that as a GUID conflict and
+/// picks a winner arbitrarily. On top of that both packages register an
+/// `IExternalCodeEditor` and both start a `BridgeClient` against one journal.
+///
+/// Best-effort: install has already succeeded by this point, and failing the
+/// whole command over a leftover directory would be worse than the leftover.
+fn remove_legacy_bridge_package(packages_dir: &Path) {
+    let legacy = packages_dir.join(LEGACY_BRIDGE_PACKAGE);
+    if !legacy.is_dir() {
+        return;
+    }
+    match fs::remove_dir_all(&legacy) {
+        Ok(()) => eprintln!("[UnityIDE] removed legacy bridge package {}", legacy.display()),
+        Err(e) => eprintln!(
+            "[UnityIDE] could not remove legacy bridge package {} — Unity may report \
+             duplicate asset GUIDs until it is deleted by hand: {e}",
+            legacy.display()
+        ),
+    }
 }
 
 /// Scan all .meta files in a Unity project and extract GUID -> asset path mappings.
@@ -661,7 +692,7 @@ fn unity_install_references(scripting_root: &Path) -> Vec<(String, PathBuf)> {
 ///
 /// Falls back to the Unity install's own `UnityReferenceAssemblies` directory
 /// when Unity hasn't generated its csprojs — which is the normal state when
-/// Arcane is registered as Unity's external script editor, since Unity then
+/// UnityIDE is registered as Unity's external script editor, since Unity then
 /// stops asking the Visual Studio/Rider packages to generate them.
 fn find_unity_framework_path(workspace_path: &Path, scripting_root: Option<&Path>) -> Option<String> {
     let candidates = [
@@ -798,7 +829,7 @@ fn find_asmdef_assemblies(assets: &Path) -> Vec<String> {
     out
 }
 
-/// Generate a self-contained `.arcane.csproj` at the workspace root that
+/// Generate a self-contained `.unityide.csproj` at the workspace root that
 /// pulls in every `.cs` file under `Assets/` plus all relevant Unity DLLs.
 ///
 /// Why this exists: Unity's auto-generated `Assembly-CSharp.csproj` often
@@ -816,18 +847,18 @@ fn find_asmdef_assemblies(assets: &Path) -> Vec<String> {
 /// and every UnityEngine/UnityEditor module. We then top up with the
 /// `Library/ScriptAssemblies/*.dll` outputs from package and asmdef
 /// compilation, replacing the ProjectReferences Roslyn can't resolve.
-fn generate_arcane_csproj(workspace: &Path) -> Result<bool, String> {
+fn generate_ide_csproj(workspace: &Path) -> Result<bool, String> {
     let scripting_root = workspace_scripting_root(workspace);
-    generate_arcane_csproj_from(workspace, scripting_root.as_deref())
+    generate_ide_csproj_from(workspace, scripting_root.as_deref())
 }
 
-/// Body of [`generate_arcane_csproj`] with the Unity install injected rather
+/// Body of [`generate_ide_csproj`] with the Unity install injected rather
 /// than resolved from the machine.
 ///
 /// The split exists so the "Unity generated no csprojs" case — the one that
 /// silently cost every Unity project its C# IntelliSense — can be reproduced
 /// hermetically against a fixture install, with no Unity on the box.
-fn generate_arcane_csproj_from(
+fn generate_ide_csproj_from(
     workspace: &Path,
     scripting_root: Option<&Path>,
 ) -> Result<bool, String> {
@@ -848,7 +879,7 @@ fn generate_arcane_csproj_from(
         }
     }
 
-    // Unity's csprojs are frequently absent — notably whenever Arcane is the
+    // Unity's csprojs are frequently absent — notably whenever UnityIDE is the
     // registered external script editor, because Unity then never asks the
     // Visual Studio/Rider packages to generate them. Fill the reference set
     // straight from the Unity install so IntelliSense works cold: with Unity
@@ -942,7 +973,7 @@ fn generate_arcane_csproj_from(
     // itself compiles Assembly-CSharp with.
     let mut xml = String::new();
     xml.push_str(r#"<?xml version="1.0" encoding="utf-8"?>
-<!-- Auto-generated by Arcane Editor for IntelliSense. Regenerated on every workspace open. -->
+<!-- Auto-generated by UnityIDE Editor for IntelliSense. Regenerated on every workspace open. -->
 <Project ToolsVersion="Current" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <PropertyGroup>
     <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
@@ -950,7 +981,7 @@ fn generate_arcane_csproj_from(
     <ProjectGuid>{6F2E5C4B-1A3D-4E8F-9C7A-2B5D8E1F4C6A}</ProjectGuid>
     <OutputType>Library</OutputType>
     <RootNamespace></RootNamespace>
-    <AssemblyName>arcane</AssemblyName>
+    <AssemblyName>unityide</AssemblyName>
     <TargetFrameworkVersion>v4.7.1</TargetFrameworkVersion>
     <LangVersion>9.0</LangVersion>
     <FileAlignment>512</FileAlignment>
@@ -991,29 +1022,56 @@ fn generate_arcane_csproj_from(
     xml.push_str("  <Import Project=\"$(MSBuildToolsPath)\\Microsoft.CSharp.targets\" />\n");
     xml.push_str("</Project>\n");
 
-    let csproj_path = workspace.join(".arcane.csproj");
+    let csproj_path = workspace.join(".unityide.csproj");
     fs::write(&csproj_path, xml)
-        .map_err(|e| format!("Failed to write .arcane.csproj: {}", e))?;
+        .map_err(|e| format!("Failed to write .unityide.csproj: {}", e))?;
+
+    remove_legacy_project_files(workspace);
 
     Ok(true)
 }
 
-/// Generate a `.arcane.sln` at the workspace root pointing to our
-/// self-contained `.arcane.csproj`.
+/// Names these files carried before the rename. Both live at the workspace
+/// root — i.e. in the user's Unity project, which the rename does not touch.
+const LEGACY_PROJECT_FILES: &[&str] = &[".arcane.csproj", ".arcane.sln"];
+
+/// Delete the pre-rename project pair once the new one has been written.
+///
+/// Leaving them behind is not cosmetic: Unity and Rider both scan the project
+/// root for a `.sln`, and a stale `.arcane.sln` points at a `.arcane.csproj`
+/// that nothing regenerates any more. The user gets IntelliSense off a
+/// progressively more wrong project file, with no indication which of the two
+/// solutions their editor picked.
+///
+/// Best-effort on purpose: a failure here must not fail project generation,
+/// which is the thing IntelliSense actually depends on.
+fn remove_legacy_project_files(workspace: &Path) {
+    for name in LEGACY_PROJECT_FILES {
+        let path = workspace.join(name);
+        if path.exists() {
+            if let Err(e) = fs::remove_file(&path) {
+                eprintln!("[UnityIDE] could not remove legacy {name}: {e}");
+            }
+        }
+    }
+}
+
+/// Generate a `.unityide.sln` at the workspace root pointing to our
+/// self-contained `.unityide.csproj`.
 fn generate_solution(workspace_path: &Path) -> Result<Option<String>, String> {
-    if !generate_arcane_csproj(workspace_path)? {
+    if !generate_ide_csproj(workspace_path)? {
         return Ok(None);
     }
 
     let solution_guid = "{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}";
-    let project_name = "arcane";
+    let project_name = "unityide";
     let project_guid = deterministic_guid(project_name);
 
     let mut sln = String::new();
     sln.push_str("Microsoft Visual Studio Solution File, Format Version 12.00\n");
     sln.push_str("# Visual Studio Version 17\n");
     sln.push_str(&format!(
-        "Project(\"{}\") = \"{}\", \".arcane.csproj\", \"{}\"\n",
+        "Project(\"{}\") = \"{}\", \".unityide.csproj\", \"{}\"\n",
         solution_guid, project_name, project_guid
     ));
     sln.push_str("EndProject\n");
@@ -1042,19 +1100,19 @@ fn generate_solution(workspace_path: &Path) -> Result<Option<String>, String> {
     sln.push_str("    EndGlobalSection\n");
     sln.push_str("EndGlobal\n");
 
-    let sln_path = workspace_path.join(".arcane.sln");
+    let sln_path = workspace_path.join(".unityide.sln");
     fs::write(&sln_path, &sln)
-        .map_err(|e| format!("Failed to write .arcane.sln: {}", e))?;
+        .map_err(|e| format!("Failed to write .unityide.sln: {}", e))?;
 
-    Ok(Some(".arcane.sln".to_string()))
+    Ok(Some(".unityide.sln".to_string()))
 }
 
 /// Set up a Unity workspace for LSP usage: generate a self-contained
-/// `.arcane.csproj` and the `.arcane.sln` that points at it, if the workspace
+/// `.unityide.csproj` and the `.unityide.sln` that points at it, if the workspace
 /// is a Unity project. Returns the solution file path on success.
 ///
 /// The generated project carries its own `FrameworkPathOverride`, so this
-/// writes nothing outside the two `.arcane.*` files — earlier versions also
+/// writes nothing outside the two `.unityide.*` files — earlier versions also
 /// dropped a `Directory.Build.props` at the workspace root, which every other
 /// csproj in the user's project silently inherited.
 #[tauri::command]
@@ -1149,7 +1207,7 @@ mod tests {
     /// Serialises the smoke tests below.
     ///
     /// They operate on a real workspace on disk and both regenerate
-    /// `.arcane.csproj` there, so run concurrently — which is cargo's default —
+    /// `.unityide.csproj` there, so run concurrently — which is cargo's default —
     /// one can read the file while the other is rewriting it and see a partial
     /// document. That made the suite intermittently fail with no connection to
     /// whatever change was being tested. Sharing a real file is what makes them
@@ -1494,8 +1552,79 @@ mod tests {
         fs::remove_dir_all(&dir).ok();
     }
 
+    /// After the package id change, installing the bridge into a project that
+    /// already had the old one would leave BOTH embedded packages in place.
+    /// The C# files keep their original .meta GUIDs across the rename (on
+    /// purpose — asmdef references by GUID depend on it), so two embedded
+    /// packages would declare the same asset GUIDs and Unity picks a winner
+    /// arbitrarily. Both would also register an IExternalCodeEditor and run a
+    /// BridgeClient against the same journal.
+    #[test]
+    fn installing_the_bridge_removes_the_pre_rename_package() {
+        let dir = make_temp_dir("_legacy_bridge_pkg");
+        let packages = dir.join("Packages");
+        let legacy = packages.join("com.arcane.editor").join("Editor");
+        fs::create_dir_all(&legacy).unwrap();
+        fs::write(legacy.join("UnityIDEEditor.cs"), "// stale").unwrap();
+        assert!(packages.join("com.arcane.editor").is_dir());
+
+        remove_legacy_bridge_package(&packages);
+
+        assert!(
+            !packages.join("com.arcane.editor").exists(),
+            "legacy embedded package must be removed, or Unity sees duplicate asset GUIDs"
+        );
+    }
+
+    /// Must be a no-op — and specifically must not fail — on the overwhelmingly
+    /// common case of a project that never had the old package.
+    #[test]
+    fn removing_the_legacy_bridge_package_is_a_noop_when_absent() {
+        let dir = make_temp_dir("_no_legacy_bridge_pkg");
+        let packages = dir.join("Packages");
+        fs::create_dir_all(packages.join("com.unityide.editor")).unwrap();
+
+        remove_legacy_bridge_package(&packages);
+
+        assert!(packages.join("com.unityide.editor").is_dir(), "must not touch the current package");
+    }
+
+    /// The rename left `.arcane.csproj` / `.arcane.sln` sitting at the root of
+    /// every Unity project that had ever been opened — that directory is the
+    /// USER'S project, so nothing about renaming the app removes them.
+    ///
+    /// They cannot simply be ignored: Unity and Rider both scan the project
+    /// root for a `.sln`, and the stale one points at a csproj nothing
+    /// regenerates. The user then gets IntelliSense off a progressively more
+    /// wrong project file with no clue which solution their editor picked.
+    #[test]
+    fn generating_the_project_removes_the_pre_rename_pair() {
+        let dir = make_temp_dir("_legacy_project_files");
+        let workspace = dir.join("project");
+        make_unity_project(&workspace, "6000.3.5f2");
+        fs::write(workspace.join("Assets").join("Player.cs"), "class Player {}").unwrap();
+
+        // The shape every pre-rename install leaves behind.
+        fs::write(workspace.join(".arcane.csproj"), "<Project/>").unwrap();
+        fs::write(workspace.join(".arcane.sln"), "stale").unwrap();
+
+        let app = make_unity_install(&dir, true);
+        let root = unity_scripting_root(&app).unwrap();
+        assert!(generate_ide_csproj_from(&workspace, Some(root.as_path())).expect("generate ok"));
+
+        assert!(workspace.join(".unityide.csproj").exists(), "new csproj must be written");
+        assert!(
+            !workspace.join(".arcane.csproj").exists(),
+            "legacy csproj must be removed, or two project files describe the same workspace"
+        );
+        assert!(
+            !workspace.join(".arcane.sln").exists(),
+            "legacy sln must be removed, or Unity/Rider may open the stale solution"
+        );
+    }
+
     /// The regression test for the outage: Unity has generated **no** csproj
-    /// files (the normal state when Arcane is the registered external script
+    /// files (the normal state when UnityIDE is the registered external script
     /// editor), and the generated project must still carry a complete
     /// reference set. Before the fix this produced nothing at all, csharp-ls
     /// launched with no solution, and every completion/hover returned null.
@@ -1516,10 +1645,10 @@ mod tests {
         assert!(!workspace.join("Assembly-CSharp-Editor.csproj").exists());
 
         let generated =
-            generate_arcane_csproj_from(&workspace, Some(root.as_path())).expect("generate ok");
+            generate_ide_csproj_from(&workspace, Some(root.as_path())).expect("generate ok");
         assert!(generated, "must generate even with no Unity csproj present");
 
-        let content = fs::read_to_string(workspace.join(".arcane.csproj")).expect("read csproj");
+        let content = fs::read_to_string(workspace.join(".unityide.csproj")).expect("read csproj");
         for needed in [
             "Reference Include=\"UnityEngine\"",
             "Reference Include=\"UnityEditor\"",
@@ -1558,8 +1687,8 @@ mod tests {
         let app = make_unity_install(&dir, true);
         let root = unity_scripting_root(&app).unwrap();
 
-        generate_arcane_csproj_from(&workspace, Some(root.as_path())).expect("generate ok");
-        let content = fs::read_to_string(workspace.join(".arcane.csproj")).expect("read csproj");
+        generate_ide_csproj_from(&workspace, Some(root.as_path())).expect("generate ok");
+        let content = fs::read_to_string(workspace.join(".unityide.csproj")).expect("read csproj");
 
         assert!(
             content.contains("<NoStdLib>true</NoStdLib>"),
@@ -1596,9 +1725,9 @@ mod tests {
         let workspace = dir.join("project");
         make_unity_project(&workspace, "6000.3.5f2");
 
-        let generated = generate_arcane_csproj_from(&workspace, None).expect("generate ok");
+        let generated = generate_ide_csproj_from(&workspace, None).expect("generate ok");
         assert!(!generated, "must not generate a reference-less project");
-        assert!(!workspace.join(".arcane.csproj").exists());
+        assert!(!workspace.join(".unityide.csproj").exists());
 
         fs::remove_dir_all(&dir).ok();
     }
@@ -1627,9 +1756,9 @@ mod tests {
 
         let app = make_unity_install(&dir, true);
         let root = unity_scripting_root(&app).unwrap();
-        generate_arcane_csproj_from(&workspace, Some(root.as_path())).expect("generate ok");
+        generate_ide_csproj_from(&workspace, Some(root.as_path())).expect("generate ok");
 
-        let content = fs::read_to_string(workspace.join(".arcane.csproj")).unwrap();
+        let content = fs::read_to_string(workspace.join(".unityide.csproj")).unwrap();
         assert!(
             content.contains(&vendored_engine.to_string_lossy().to_string()),
             "Unity's own UnityEngine hint path should have won"
@@ -1652,32 +1781,40 @@ mod tests {
 
     /// Locate a real Unity project to smoke-test against.
     ///
-    /// `ARCANE_SMOKE_UNITY_PROJECT` overrides; otherwise we try a couple of
+    /// `UNITYIDE_SMOKE_UNITY_PROJECT` overrides; otherwise we try a couple of
     /// known local projects. These tests are opt-in by nature — but a hardcoded
     /// path that has since been deleted makes them *silently* vacuous, which is
     /// how a total IntelliSense outage stayed green through a full suite.
     fn smoke_workspace() -> Option<PathBuf> {
-        if let Ok(p) = env::var("ARCANE_SMOKE_UNITY_PROJECT") {
+        if let Ok(p) = env::var("UNITYIDE_SMOKE_UNITY_PROJECT") {
             let path = PathBuf::from(p);
             return path.join("Assets").is_dir().then_some(path);
         }
-        ["/Users/inno/Arcane Demo", "/Users/inno/My project"]
-            .iter()
-            .map(PathBuf::from)
-            .find(|p| p.join("Assets").is_dir())
+        // Real directories on a developer's disk, not brand strings. The rename
+        // sweep rewrote "Arcane Demo" here and the smoke test silently went back
+        // to returning None — which is exactly the "skipped looks like passed"
+        // failure this suite already got burned by once. Both spellings stay.
+        [
+            "/Users/inno/UnityIDE Demo",
+            "/Users/inno/Arcane Demo",
+            "/Users/inno/My project",
+        ]
+        .iter()
+        .map(PathBuf::from)
+        .find(|p| p.join("Assets").is_dir())
     }
 
     #[test]
-    fn smoke_generate_arcane_csproj() {
+    fn smoke_generate_ide_csproj() {
         let _guard = crate::sync_util::lock_recover(&SMOKE_WORKSPACE);
         let workspace = match smoke_workspace() {
             Some(w) => w,
             None => return,
         };
-        let result = generate_arcane_csproj(&workspace).expect("generate ok");
+        let result = generate_ide_csproj(&workspace).expect("generate ok");
         assert!(result, "csproj should have been generated");
 
-        let content = fs::read_to_string(workspace.join(".arcane.csproj")).expect("read csproj");
+        let content = fs::read_to_string(workspace.join(".unityide.csproj")).expect("read csproj");
         assert!(content.contains("<Compile Include=\"Assets/**/*.cs\""));
         assert!(content.contains("Reference Include=\"UnityEngine\""));
         assert!(content.contains("UnityEngine.dll</HintPath>"));
@@ -1707,8 +1844,8 @@ mod tests {
             Some(w) => w,
             None => return,
         };
-        generate_arcane_csproj(&workspace).expect("generate ok");
-        let content = fs::read_to_string(workspace.join(".arcane.csproj")).expect("read csproj");
+        generate_ide_csproj(&workspace).expect("generate ok");
+        let content = fs::read_to_string(workspace.join(".unityide.csproj")).expect("read csproj");
 
         let re = Regex::new(r"<HintPath>([^<]+)</HintPath>").unwrap();
         let mut checked = 0;
@@ -1728,8 +1865,8 @@ mod tests {
             None => return,
         };
         let sln = unity_setup_lsp(workspace.to_string_lossy().to_string()).expect("setup ok");
-        assert_eq!(sln.as_deref(), Some(".arcane.sln"));
-        assert!(workspace.join(".arcane.sln").exists());
-        assert!(workspace.join(".arcane.csproj").exists());
+        assert_eq!(sln.as_deref(), Some(".unityide.sln"));
+        assert!(workspace.join(".unityide.sln").exists());
+        assert!(workspace.join(".unityide.csproj").exists());
     }
 }

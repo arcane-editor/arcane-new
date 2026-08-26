@@ -11,7 +11,7 @@
 //     MainThreadDispatcher. We never touch Unity APIs on the worker thread.
 //
 // TRANSPORT
-//   Two append-only newline-delimited JSON files under Library/ArcaneIDE/. Only
+//   Two append-only newline-delimited JSON files under Library/UnityIDE/. Only
 //   System.IO is involved, so this works at EVERY Unity API Compatibility Level —
 //   unlike UnixDomainSocketEndPoint, which does not exist on the .NET Framework
 //   profile and cannot be shimmed, reflected around, or polyfilled.
@@ -28,7 +28,7 @@ using System.Collections.Generic;
 using System.Threading;
 using UnityEngine;
 
-namespace Arcane.Bridge
+namespace UnityIDE.Bridge
 {
     /// <summary>Why the bridge is stopping — decides what the IDE is told.</summary>
     internal enum StopReason
@@ -121,7 +121,7 @@ namespace Arcane.Bridge
             _running = true;
             _worker = new Thread(WorkerLoop)
             {
-                Name = "ArcaneBridgeClient",
+                Name = "UnityIDEBridgeClient",
                 IsBackground = true, // never block editor shutdown
             };
             _worker.Start();
@@ -197,7 +197,7 @@ namespace Arcane.Bridge
             try { line = envelope.Serialize(); }
             catch (Exception e)
             {
-                Debug.LogWarning("[ArcaneBridge] failed to serialize outbound message: " + e.Message);
+                Debug.LogWarning("[UnityIDEBridge] failed to serialize outbound message: " + e.Message);
                 return;
             }
             lock (_sendLock) { _outbox.Enqueue(line); }
@@ -230,9 +230,9 @@ namespace Arcane.Bridge
                         if (disc.ProtocolVersion > Discovery.ProtocolVersion)
                         {
                             WarnOnce(ref _warnedProtocol,
-                                "[ArcaneBridge] The Arcane IDE speaks bridge protocol v" +
+                                "[UnityIDEBridge] The UnityIDE speaks bridge protocol v" +
                                 disc.ProtocolVersion + " but this package speaks v" +
-                                Discovery.ProtocolVersion + ". Update the com.arcane.editor package.");
+                                Discovery.ProtocolVersion + ". Update the com.unityide.editor package.");
                             if (!SleepInterruptible(DiscoveryPollMs)) break;
                             continue;
                         }
@@ -251,7 +251,7 @@ namespace Arcane.Bridge
                     }
                     catch (Exception e)
                     {
-                        if (_running) Debug.LogWarning("[ArcaneBridge] journal error: " + e.Message);
+                        if (_running) Debug.LogWarning("[UnityIDEBridge] journal error: " + e.Message);
                         CloseJournals();
                         SetConnected(false);
                         if (!SleepInterruptible(DiscoveryPollMs)) break;
@@ -312,7 +312,7 @@ namespace Arcane.Bridge
                 if (!_writer.Open())
                 {
                     WarnOnce(ref _warnedUnwritable,
-                        "[ArcaneBridge] cannot write " + Discovery.BridgeDir(_projectRoot) +
+                        "[UnityIDEBridge] cannot write " + Discovery.BridgeDir(_projectRoot) +
                         " — the bridge stays idle until that path is writable.");
                     CloseJournals();
                     return false;
@@ -428,7 +428,7 @@ namespace Arcane.Bridge
                     line = _outbox.Dequeue();
                 }
                 if (!_writer.Append(line))
-                    Debug.LogWarning("[ArcaneBridge] outbound message exceeds the 16 MB cap — dropped.");
+                    Debug.LogWarning("[UnityIDEBridge] outbound message exceeds the 16 MB cap — dropped.");
                 else
                     wrote = true;
             }
@@ -480,7 +480,7 @@ namespace Arcane.Bridge
             }
             catch (Exception e)
             {
-                Debug.LogWarning("[ArcaneBridge] failed to build connection_init payload: " + e.Message);
+                Debug.LogWarning("[UnityIDEBridge] failed to build connection_init payload: " + e.Message);
                 payload = JsonValue.NewObject();
             }
             // The handshake: the IDE writes nothing back until it sees its own
@@ -569,7 +569,7 @@ namespace Arcane.Bridge
         private static void Raise(Action<bool> handler, bool value)
         {
             try { handler(value); }
-            catch (Exception e) { Debug.LogError("[ArcaneBridge] ConnectionStateChanged handler threw: " + e); }
+            catch (Exception e) { Debug.LogError("[UnityIDEBridge] ConnectionStateChanged handler threw: " + e); }
         }
 
         private static void WarnOnce(ref bool flag, string message)

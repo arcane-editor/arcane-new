@@ -112,7 +112,7 @@ export const useGraphifyStore = create<GraphifyState>((set, get) => ({
     let unlisten: UnlistenFn | null = null;
     try {
       unlisten = await listenScoped<string>('graphify-build-progress', (event) => {
-        const line = String(event.payload ?? '').replace(/^\[arcane-graph\]\s*/, '');
+        const line = String(event.payload ?? '').replace(/^\[unityide-graph\]\s*/, '');
         if (line) set({ progressMessage: line });
       });
     } catch {

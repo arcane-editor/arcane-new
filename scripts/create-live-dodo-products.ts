@@ -35,11 +35,11 @@ interface Spec {
 // top-ups $16/1333cr and $75/6250cr (TOPUP_PACKS).
 // Names do not state credit counts (owner directive: users never see them).
 const SPECS: Spec[] = [
-    { name: 'Arcane Starter', description: 'Arcane Starter — 387 credits / month', cents: 500, recurring: true, varName: 'DODO_PRODUCT_STARTER' },
-    { name: 'Arcane Pro', description: 'Arcane Pro — 2,097 credits / month', cents: 2500, recurring: true, varName: 'DODO_PRODUCT_PRO' },
-    { name: 'Arcane Max', description: 'Arcane Max — 4,235 credits / month', cents: 5000, recurring: true, varName: 'DODO_PRODUCT_MAX' },
-    { name: 'Arcane Usage Pack $16', description: 'One-time top-up of 1,333 credits', cents: 1600, recurring: false, varName: 'DODO_PRODUCT_TOPUP_16' },
-    { name: 'Arcane Usage Pack $75', description: 'One-time top-up of 6,250 credits', cents: 7500, recurring: false, varName: 'DODO_PRODUCT_TOPUP_75' },
+    { name: 'UnityIDE Starter', description: 'UnityIDE Starter — 387 credits / month', cents: 500, recurring: true, varName: 'DODO_PRODUCT_STARTER' },
+    { name: 'UnityIDE Pro', description: 'UnityIDE Pro — 2,097 credits / month', cents: 2500, recurring: true, varName: 'DODO_PRODUCT_PRO' },
+    { name: 'UnityIDE Max', description: 'UnityIDE Max — 4,235 credits / month', cents: 5000, recurring: true, varName: 'DODO_PRODUCT_MAX' },
+    { name: 'UnityIDE Usage Pack $16', description: 'One-time top-up of 1,333 credits', cents: 1600, recurring: false, varName: 'DODO_PRODUCT_TOPUP_16' },
+    { name: 'UnityIDE Usage Pack $75', description: 'One-time top-up of 6,250 credits', cents: 7500, recurring: false, varName: 'DODO_PRODUCT_TOPUP_75' },
 ];
 
 function priceBody(s: Spec): Record<string, unknown> {

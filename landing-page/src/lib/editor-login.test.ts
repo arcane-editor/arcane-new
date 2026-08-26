@@ -4,13 +4,46 @@ import {
     canonicalLoopbackRedirect,
     parseEditorLoginParams,
     buildCallbackUrl,
+    isAllowedScheme,
+    SCHEME_ALLOWLIST,
 } from './editor-login';
 
 // Mirrors the private CALLBACK_RE in editor-login.ts: any string that leaves
 // the loopback validator (and everything built from it) must satisfy this —
 // the literal ASCII 127.0.0.1 IPv4 form, nothing else (the listener is
 // IPv4-only, so [::1] is not accepted).
-const CALLBACK_RE = /^((arcane|arcane-dev):\/\/auth\/callback\?|http:\/\/127\.0\.0\.1:\d{4,5}\/callback\?)/;
+//
+// Built from SCHEME_ALLOWLIST rather than spelled out. It used to hardcode the
+// scheme alternation, which meant adding a scheme left this mirror silently
+// describing the old world while still passing.
+const CALLBACK_RE = new RegExp(
+    `^((${SCHEME_ALLOWLIST.join('|')})://auth/callback\\?|http://127\\.0\\.0\\.1:\\d{4,5}/callback\\?)`,
+);
+
+describe('SCHEME_ALLOWLIST', () => {
+    it('accepts the current schemes', () => {
+        expect(isAllowedScheme('unityide')).toBe(true);
+        expect(isAllowedScheme('unityide-dev')).toBe(true);
+    });
+
+    /**
+     * The website deploys independently and takes effect for everyone at once,
+     * while the app on the other end is whatever each user has installed. For
+     * as long as the old domain still serves this build, un-updated apps are
+     * still sending `scheme=arcane` — so dropping these turns sign-in off for
+     * every one of them, and it looks like the site broke rather than a skew.
+     */
+    it('still accepts the pre-rename schemes, so un-updated apps can sign in', () => {
+        expect(isAllowedScheme('arcane')).toBe(true);
+        expect(isAllowedScheme('arcane-dev')).toBe(true);
+    });
+
+    it('rejects anything else, including near-misses', () => {
+        for (const bad of ['unity', 'unityide-prod', 'arcane2', 'javascript', '', 'UnityIDE']) {
+            expect(isAllowedScheme(bad)).toBe(false);
+        }
+    });
+});
 
 describe('isValidLoopbackRedirect', () => {
     it('accepts the exact loopback callback shape', () => {
@@ -42,7 +75,7 @@ describe('isValidLoopbackRedirect', () => {
             'https://127.0.0.1:53411/callback',
             'file:///callback',
             'javascript:alert(1)//127.0.0.1/callback',
-            'arcane://127.0.0.1:53411/callback',
+            'unityide://127.0.0.1:53411/callback',
         ]) {
             expect(isValidLoopbackRedirect(raw), raw).toBe(false);
         }

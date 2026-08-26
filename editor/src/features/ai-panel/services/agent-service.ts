@@ -1,6 +1,6 @@
 /**
  * Agent service — singleton that orchestrates the PI agent loop
- * with the Arcane server StreamFn and Tauri-backed tools.
+ * with the UnityIDE server StreamFn and Tauri-backed tools.
  *
  * Per-call configuration: chat mode (ask/agent/plan) drives system prompt
  * + tool subset; effort (low/mid/high) drives reasoning level.
@@ -25,7 +25,7 @@ import {
   createGraphifyQueryTool,
   createProjectSymbolsTool,
 } from '../../graphify';
-import { arcaneStream } from './arcane-stream';
+import { hostedStream } from './hosted-stream';
 import {
   tauriReadOperations,
   tauriWriteOperations,
@@ -121,7 +121,7 @@ function restoreAgentMessages(messages: AiMessage[]): AgentMessage[] {
   return out;
 }
 
-const PLACEHOLDER_MODEL: Model = { id: 'auto', name: 'auto', provider: 'arcane' };
+const PLACEHOLDER_MODEL: Model = { id: 'auto', name: 'auto', provider: 'hosted' };
 
 /**
  * T9 Part 4: cheap harness nudge, prepended to the outgoing prompt text (same
@@ -163,7 +163,7 @@ function getCurrentWorkspacePath(): string {
 function createToolsForPromptMode(mode: PromptMode, workspacePath: string, effort: Effort): AgentTool[] {
   const isUnity = useProjectContextStore.getState().isUnityProject;
   // Sandbox roots per workspace shape — see sandbox-roots.ts. Unity confines
-  // file operations to Assets/ (+ .arcane/ plan files + Packages/ for
+  // file operations to Assets/ (+ .unityide/ plan files + Packages/ for
   // manifest.json, which the agent prompt allows after confirming); non-Unity
   // workspaces confine to the workspace itself (they used to get NO sandbox);
   // no workspace open denies file tools entirely.
@@ -393,7 +393,7 @@ export interface SendMessageOptions {
 
 export class AgentService {
   /** Identifies this backend to `chat-backend.ts`'s `ChatBackend` contract. */
-  readonly kind = 'arcane' as const;
+  readonly kind = 'hosted' as const;
 
   private agent: Agent;
   private unsubscribe: (() => void) | null = null;
@@ -421,10 +421,10 @@ export class AgentService {
       tools: createToolsForPromptMode('agent', workspacePath, 'mid'),
       // The stream-error guard (T5) sits OUTERMOST so it catches a
       // synchronous throw from the governor as well as the innermost
-      // `arcaneStream` itself. (Mid-send tier escalation was removed — model
+      // `hostedStream` itself. (Mid-send tier escalation was removed — model
       // switches inside a send reset the provider's prompt cache; escalation
       // now happens at send boundaries, see send-escalation.ts.)
-      streamFn: withStreamErrorGuard(withTurnGovernor(arcaneStream)),
+      streamFn: withStreamErrorGuard(withTurnGovernor(hostedStream)),
       convertToLlm,
       reasoning: 'mid',
       // Server picks the model per reasoningLevel; default to the smallest tier's
@@ -721,7 +721,7 @@ export class AgentService {
     }
 
     // T5 fix wave: a deliberate Stop mid-stream can leave an 'error' tail
-    // (the aborted fetch rejects reader.read(), so arcane-stream pushes an
+    // (the aborted fetch rejects reader.read(), so hosted-stream pushes an
     // error event rather than a clean 'aborted' done), and detectTurnOutcome
     // checks stopReason 'error' (rule 2) BEFORE abortRequested (rule 3) —
     // reordering those rules would break the toolUse-tail semantics other

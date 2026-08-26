@@ -104,5 +104,5 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
   { key: 'unity.shader.completions', type: 'boolean', category: 'Unity', label: 'Shader Completions', description: 'Provide ShaderLab/HLSL keyword completions and #include navigation.' },
   { key: 'unity.packages.manifestIntelligence', type: 'boolean', category: 'Unity', label: 'Packages: Manifest Intelligence', description: 'Enable completions and validation in Packages/manifest.json.' },
   { key: 'unity.index.enabled', type: 'boolean', category: 'Unity', label: 'Project Index', description: 'Build and maintain a background index of Unity assets for fast cross-file lookups.' },
-  { key: 'updates.autoInstall', type: 'boolean', category: 'Updates', label: 'Automatic Updates', description: 'Download and install new versions of Arcane in the background. Updates take effect when you restart.' },
+  { key: 'updates.autoInstall', type: 'boolean', category: 'Updates', label: 'Automatic Updates', description: 'Download and install new versions of UnityIDE in the background. Updates take effect when you restart.' },
 ];

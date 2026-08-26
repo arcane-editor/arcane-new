@@ -1,9 +1,9 @@
 ---
 title: Project Knowledge Graph
-description: How ArcaneIDE indexes your Unity project so the AI always has full context.
+description: How UnityIDE indexes your Unity project so the AI always has full context.
 ---
 
-When you open a Unity project, ArcaneIDE automatically builds a **knowledge graph** — a structured database of every entity in your project and how they relate to each other. This is what gives the AI deep, accurate answers instead of guesses.
+When you open a Unity project, UnityIDE automatically builds a **knowledge graph** — a structured database of every entity in your project and how they relate to each other. This is what gives the AI deep, accurate answers instead of guesses.
 
 ## What Gets Indexed
 
@@ -31,7 +31,7 @@ For large projects, the initial index can take a minute or two. Subsequent proje
 If you suspect the index is stale (e.g., after a large merge or an external tool modified many files), you can force a full rebuild:
 
 1. Open the Command Palette (`Cmd+Shift+P` / `Ctrl+Shift+P`)
-2. Search for **"Arcane: Reindex Project"**
+2. Search for **"UnityIDE: Reindex Project"**
 3. The index is wiped and rebuilt from scratch
 
 ## How the AI Uses the Graph

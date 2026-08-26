@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { parsePlanTodos, planTodosToArcanePlan, type PlanTodo } from './plan-todos';
+import { parsePlanTodos, planTodosToHostedPlan, type PlanTodo } from './plan-todos';
 
 describe('parsePlanTodos', () => {
   it('parses a strict line: id + difficulty tag + title, unchecked', () => {
@@ -139,24 +139,24 @@ Set the agent's destination each frame toward the player target.
   });
 });
 
-describe('planTodosToArcanePlan', () => {
-  it('maps a tagged, unfinished todo to a pending ArcanePlanEntry carrying its difficulty', () => {
+describe('planTodosToHostedPlan', () => {
+  it('maps a tagged, unfinished todo to a pending HostedPlanEntry carrying its difficulty', () => {
     const todos: PlanTodo[] = [{ id: 'T1', title: 'Add CoinPickup', difficulty: 'hard', done: false }];
-    expect(planTodosToArcanePlan(todos)).toEqual([
+    expect(planTodosToHostedPlan(todos)).toEqual([
       { text: 'Add CoinPickup', status: 'pending', difficulty: 'hard' },
     ]);
   });
 
-  it('maps a checked todo to a done ArcanePlanEntry', () => {
+  it('maps a checked todo to a done HostedPlanEntry', () => {
     const todos: PlanTodo[] = [{ id: 'T1', title: 'Add CoinPickup', difficulty: 'easy', done: true }];
-    expect(planTodosToArcanePlan(todos)).toEqual([
+    expect(planTodosToHostedPlan(todos)).toEqual([
       { text: 'Add CoinPickup', status: 'done', difficulty: 'easy' },
     ]);
   });
 
   it('maps an untagged todo to an entry with an undefined difficulty', () => {
     const todos: PlanTodo[] = [{ id: 'T1', title: 'Add CoinPickup', done: false }];
-    const mapped = planTodosToArcanePlan(todos);
+    const mapped = planTodosToHostedPlan(todos);
     expect(mapped).toEqual([{ text: 'Add CoinPickup', status: 'pending', difficulty: undefined }]);
     expect(mapped[0].difficulty).toBeUndefined();
   });
@@ -166,13 +166,13 @@ describe('planTodosToArcanePlan', () => {
       { id: 'T1', title: 'Already done', difficulty: 'easy', done: true },
       { id: 'T2', title: 'Still to do', difficulty: 'hard', done: false },
     ];
-    expect(planTodosToArcanePlan(todos)).toEqual([
+    expect(planTodosToHostedPlan(todos)).toEqual([
       { text: 'Already done', status: 'done', difficulty: 'easy' },
       { text: 'Still to do', status: 'pending', difficulty: 'hard' },
     ]);
   });
 
   it('returns [] for an empty todo list', () => {
-    expect(planTodosToArcanePlan([])).toEqual([]);
+    expect(planTodosToHostedPlan([])).toEqual([]);
   });
 });

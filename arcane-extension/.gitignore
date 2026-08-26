@@ -6,4 +6,4 @@ Thumbs.db
 *.tgz
 
 # Dev config (generated per-project, not part of source)
-.arcane-dev-path
+.unityide-dev-path

@@ -5,15 +5,15 @@ import { fileURLToPath } from 'node:url';
 
 /**
  * External agents run on the user's OWN provider account. A Claude turn is
- * billed by Anthropic, never by Arcane — it must not move the credit ledger,
- * must not hit Arcane's metered `/v1/chat/completions`, and must not accumulate
+ * billed by Anthropic, never by UnityIDE — it must not move the credit ledger,
+ * must not hit UnityIDE's metered `/v1/chat/completions`, and must not accumulate
  * into `sessionUsage`.
  *
  * That invariant is enforced statically rather than at runtime, for the same
  * reason `file-uri-single-source.test.ts` is: a mocked-store test proves one
  * code path did not bill, while a source scan proves no code path CAN. The
  * failure this guards against is a future refactor that "unifies" the two
- * backends by routing the external one through `arcane-stream.ts`.
+ * backends by routing the external one through `hosted-stream.ts`.
  */
 
 // `fileURLToPath`, never `new URL(...).pathname`: on Windows the latter yields
@@ -33,18 +33,18 @@ const EXTERNAL_AGENT_SOURCES = [
   path.join(SRC, 'features/ai-panel/services/mcp-config.ts'),
 ];
 
-/** Symbols that mean "Arcane is paying for this". */
+/** Symbols that mean "UnityIDE is paying for this". */
 const BILLING_MARKERS = [
   'recordSessionUsage',
-  'arcane-stream',
+  'hosted-stream',
   '/v1/chat/completions',
-  'ARCANE_SERVER_URL',
+  'HOSTED_SERVER_URL',
   'checkAiBudget',
 ];
 
 /**
  * Strip comments before scanning. The invariant is about what the code DOES —
- * a doc comment that names `arcane-stream.ts` as a precedent is not a billing
+ * a doc comment that names `hosted-stream.ts` as a precedent is not a billing
  * path, and failing on prose would just train people to delete the prose.
  */
 function code(file: string): string {
@@ -64,7 +64,7 @@ function collect(target: string): string[] {
   return readdirSync(target).flatMap((entry) => collect(path.join(target, entry)));
 }
 
-describe('external agents never bill Arcane credits', () => {
+describe('external agents never bill UnityIDE credits', () => {
   const files = EXTERNAL_AGENT_SOURCES.flatMap(collect).filter((f) => !f.endsWith('.test.ts'));
 
   it('scans a non-empty set of files (guards against the paths going stale)', () => {
@@ -78,9 +78,9 @@ describe('external agents never bill Arcane credits', () => {
     });
   }
 
-  it('only the Arcane stream records session usage', () => {
+  it('only the UnityIDE stream records session usage', () => {
     const all = collect(SRC).filter((f) => !f.endsWith('.test.ts'));
     const callers = all.filter((f) => /recordSessionUsage\s*\(/.test(code(f)));
-    expect(callers.map(rel).sort()).toEqual(['features/ai-panel/services/arcane-stream.ts']);
+    expect(callers.map(rel).sort()).toEqual(['features/ai-panel/services/hosted-stream.ts']);
   });
 });

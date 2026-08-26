@@ -13,6 +13,7 @@ import {
   saveSession,
   type AgentEvent,
   type AgentKind,
+  coerceAgentKind,
   type AskUserOption,
   type AskUserParams,
   type AssistantMessage,
@@ -118,7 +119,7 @@ export interface AiMessage {
      * One-line summary of the action being approved (P5.1), e.g. "enter Play
      * Mode" or "run EditMode tests" — passed through from `approval-gate.ts`'s
      * `requestEngineApproval` verb summary. Rendered under the title in
-     * `PermissionRequestBlock`. Only the engine-mutate (Arcane) approval path
+     * `PermissionRequestBlock`. Only the engine-mutate (UnityIDE) approval path
      * sets this today; other permission requests leave it undefined.
      */
     detail?: string;
@@ -150,7 +151,7 @@ export interface AiMessage {
   verifiedPass?: VerifiedCardData;
   /**
    * The model id the server actually served this turn (from the `usage` SSE
-   * event's `model` field, `arcane-stream.ts`), stamped on at `message_end`
+   * event's `model` field, `hosted-stream.ts`), stamped on at `message_end`
    * (`role: 'assistant'` only) via `pendingServedModel`. Undefined for a
    * session saved before this field existed, or for any non-assistant role.
    */
@@ -172,10 +173,10 @@ export interface ToolCallStatus {
 }
 
 /**
- * A single entry in Arcane's own in-loop todo list (`todo_update` tool calls,
+ * A single entry in UnityIDE's own in-loop todo list (`todo_update` tool calls,
  * P3.5).
  */
-export interface ArcanePlanEntry {
+export interface HostedPlanEntry {
   text: string;
   status: 'pending' | 'in_progress' | 'done';
   /**
@@ -192,8 +193,8 @@ export interface ArcanePlanEntry {
 export type PlanPhase = 'idle' | 'planning' | 'awaiting-execute' | 'executing';
 
 /**
- * Session-cumulative token usage (P4) — accumulated from the Arcane server's
- * `usage` SSE events (`arcane-stream.ts`), which were previously skipped
+ * Session-cumulative token usage (P4) — accumulated from the UnityIDE server's
+ * `usage` SSE events (`hosted-stream.ts`), which were previously skipped
  * client-side entirely. Purely for later surfacing (e.g. a cost/usage
  * indicator); nothing renders it yet.
  */
@@ -213,7 +214,7 @@ interface AiState {
   toolCalls: Map<string, ToolCallStatus>;
   errorMessage: string | null;
   /**
-   * Set by `arcane-stream.ts` right before a 401/403-triggered logout, so
+   * Set by `hosted-stream.ts` right before a 401/403-triggered logout, so
    * the sign-in gate that replaces the timeline can explain why the user
    * was signed out. Survives the logout-induced UI switch (unlike a
    * transient toast) because it lives in this store, not a dismissed one.
@@ -225,7 +226,7 @@ interface AiState {
    * Deliberately distinct from `authNotice`: that one explains a session that
    * ENDED, whereas this is a session that is perfectly VALID and simply has
    * an unconfirmed mailbox. Conflating the two is what trapped every
-   * email/password signup in a sign-in loop — see arcane-stream.ts.
+   * email/password signup in a sign-in loop — see hosted-stream.ts.
    */
   verificationRequired: boolean;
 
@@ -239,7 +240,7 @@ interface AiState {
 
   /**
    * External-agent (ACP) session state. All of it is scoped to one connected
-   * agent and is meaningless while `selectedAgent === 'arcane'`, but it lives
+   * agent and is meaningless while `selectedAgent === 'hosted'`, but it lives
    * flat here — rather than in a nested object — so the existing per-key
    * subscription pattern keeps working and a re-render is scoped to the field
    * that actually changed.
@@ -247,13 +248,13 @@ interface AiState {
 
   /**
    * The agent's own session id, needed to resume a thread with its full
-   * context via `session/load`. Distinct from `sessionId`, which is Arcane's
+   * context via `session/load`. Distinct from `sessionId`, which is UnityIDE's
    * transcript id, and persisted alongside it.
    */
   acpSessionId: string | null;
   /**
    * Settings the agent advertises (mode, model, effort, …). Rendered
-   * generically by `AgentConfigBar` — Arcane never hardcodes the ids or the
+   * generically by `AgentConfigBar` — UnityIDE never hardcodes the ids or the
    * values, because they change between agent releases.
    */
   agentConfigOptions: SessionConfigOption[];
@@ -281,15 +282,15 @@ interface AiState {
    */
   agentContextUsage: AcpSessionUsage | null;
   /**
-   * Arcane's own in-loop todo list, maintained via the `todo_update` tool
+   * UnityIDE's own in-loop todo list, maintained via the `todo_update` tool
    * (P3.5). `null` means "no list yet this conversation" (distinct from `[]`,
    * an explicit empty list) so `PlanList` can tell "nothing to show" apart
    * from a live-but-empty list.
    */
-  arcanePlan: ArcanePlanEntry[] | null;
+  hostedPlan: HostedPlanEntry[] | null;
   /**
    * Transient per-turn holder for the served `model` id reported by the
-   * in-flight request's `usage` SSE event (`arcane-stream.ts`'s
+   * in-flight request's `usage` SSE event (`hosted-stream.ts`'s
    * `recordServedModel`) — mirrors `streamingMessageId`'s lifecycle. Copied
    * onto the finalized assistant message as `servedModel` at `message_end`
    * and reset to `null` immediately after, since usage events always precede
@@ -343,7 +344,7 @@ interface AiState {
   setAgentBridgeRunning: (running: boolean) => void;
   /** Clear everything tied to one agent connection, keeping the transcript. */
   resetExternalAgentSession: () => void;
-  setArcanePlan: (plan: ArcanePlanEntry[] | null) => void;
+  setHostedPlan: (plan: HostedPlanEntry[] | null) => void;
   addAssistantTextMessage: (text: string) => string;
   addSystemMessage: (text: string) => string;
   addVerifiedPassMessage: (data: VerifiedCardData) => string;
@@ -394,7 +395,7 @@ interface AiState {
   setSessionPlans: (plans: PlanRef[]) => void;
   setPendingPrompt: (prompt: string | null) => void;
   setLastAttachments: (attachments: Attachment[]) => void;
-  /** Accumulates a completed request's token usage into `sessionUsage` (P4, `arcane-stream.ts`). */
+  /** Accumulates a completed request's token usage into `sessionUsage` (P4, `hosted-stream.ts`). */
   recordSessionUsage: (inputTokens: number, outputTokens: number) => void;
   /** Stashes the in-flight request's served model id, read back at `message_end` (see `pendingServedModel`). */
   recordServedModel: (model: string) => void;
@@ -482,7 +483,7 @@ function buildSaveInput(): SaveSessionInput | null {
     agentKind: state.selectedAgent,
     acpSessionId: state.acpSessionId,
     workspacePath: useWorkspaceStore.getState().workspacePath,
-    arcanePlan: state.arcanePlan,
+    hostedPlan: state.hostedPlan,
     plans: state.sessionPlans,
     planPhase: state.planPhase,
     activePlanPath: state.activePlanPath,
@@ -585,7 +586,7 @@ export const useAiStore = create<AiState>((set, get) => ({
   mode: 'agent',
   effort: 'low',
   sessionId: null,
-  selectedAgent: 'arcane',
+  selectedAgent: 'hosted',
   acpSessionId: null,
   agentConfigOptions: [],
   agentAvailableCommands: [],
@@ -593,7 +594,7 @@ export const useAiStore = create<AiState>((set, get) => ({
   agentConnect: { kind: 'idle' },
   agentBridgeRunning: false,
   agentContextUsage: null,
-  arcanePlan: null,
+  hostedPlan: null,
   pendingServedModel: null,
   attachments: [],
   planPhase: 'idle',
@@ -856,7 +857,7 @@ export const useAiStore = create<AiState>((set, get) => ({
       authNotice: null,
       verificationRequired: false,
       sessionId: null,
-      arcanePlan: null,
+      hostedPlan: null,
       pendingServedModel: null,
       sessionPlans: [],
       attachments: [],
@@ -890,13 +891,15 @@ export const useAiStore = create<AiState>((set, get) => ({
       // through, same treatment `agentKind` gets just below. See
       // `restoreSessionEffort`'s doc for the cold-start unclamped case.
       effort: restoreSessionEffort(session),
-      // agentKind is coerced to a live kind on load (see session-persistence);
-      // old non-Arcane sessions restore as read-only Arcane transcripts.
-      selectedAgent: session.agentKind ?? 'arcane',
+      // agentKind is already coerced to a live kind by parseSessionData, so
+      // this goes through coerceAgentKind rather than repeating the default
+      // literal — spelling it twice is how the two drift when the default
+      // changes, and the rename just moved it once.
+      selectedAgent: coerceAgentKind(session.agentKind),
       // T9: restore the persisted todo list rather than clearing it — a
       // session file saved before T9 lacks the key entirely (undefined),
       // which falls back to null same as a fresh conversation.
-      arcanePlan: session.arcanePlan ?? null,
+      hostedPlan: session.hostedPlan ?? null,
       // A restored transcript has no in-flight request to attribute — the
       // finalized messages already carry whatever `servedModel` they were
       // stamped with at save time.
@@ -940,8 +943,8 @@ export const useAiStore = create<AiState>((set, get) => ({
 
   setAgentContextUsage: (usage) => set({ agentContextUsage: usage }),
   resetExternalAgentSession: () => set(externalAgentReset()),
-  setArcanePlan: (plan: ArcanePlanEntry[] | null) => {
-    set({ arcanePlan: plan });
+  setHostedPlan: (plan: HostedPlanEntry[] | null) => {
+    set({ hostedPlan: plan });
     // T9: persist mid-turn todo_update calls (debounced) so a crash between
     // updates doesn't lose the list — agent_end's flushSave() still covers
     // normal turn completion.

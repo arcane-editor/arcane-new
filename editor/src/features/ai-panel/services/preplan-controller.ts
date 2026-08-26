@@ -12,9 +12,9 @@
  * reaching for `useAiStore`/`getAgentService()` directly at module scope, the
  * way `plan-controller.ts` does: that file has no test of its own precisely
  * because `stores/ai.ts` and `agent-service.ts` both pull in a DOM-touching
- * import graph that plain `bun test` cannot load (see `arcane-stream.test.ts`
+ * import graph that plain `bun test` cannot load (see `hosted-stream.test.ts`
  * and `session-persistence.test.ts`'s headers), and `stores/ai` is already
- * `mock.module`'d — process-globally — by `arcane-stream.test.ts`, so a
+ * `mock.module`'d — process-globally — by `hosted-stream.test.ts`, so a
  * second, differently-shaped mock for it here would collide (same landmine
  * `stores/checkpoints.test.ts`'s header documents for the ai-panel barrel).
  * Injecting the three live accessors this controller needs sidesteps both
@@ -30,8 +30,8 @@ import { routeAgentSend } from './preplan-route';
 import type { Attachment, ChatMode, Effort } from './types';
 // Type-only — erased at compile time, so this doesn't pull `stores/ai.ts`'s
 // DOM-touching import graph into this module. Same discipline `todo-tool.ts`
-// documents for its own type-only `ArcanePlanEntry` import.
-import type { ArcanePlanEntry } from '../../../stores/ai';
+// documents for its own type-only `HostedPlanEntry` import.
+import type { HostedPlanEntry } from '../../../stores/ai';
 
 /** The synthetic send-2 prompt: LLM-only history text, never a user bubble
  *  (this module never calls `addUserMessage` — see `runAgentModeSend`'s
@@ -59,7 +59,7 @@ export interface PreplanAgentService {
 export interface PreplanAiState {
   mode: ChatMode;
   effort: Effort;
-  arcanePlan: ArcanePlanEntry[] | null;
+  hostedPlan: HostedPlanEntry[] | null;
   /** Only `role` is read (the error-tail chain-guard) — kept structural so a
    *  fake in tests never needs the store's full `AiMessage` shape. */
   messages: ReadonlyArray<{ role: string }>;
@@ -72,10 +72,10 @@ export interface AgentModeDeps {
   getAgentService: () => PreplanAgentService;
 }
 
-/** "arcanePlan has no non-done items" — the same predicate `preplan-route.ts`
+/** "hostedPlan has no non-done items" — the same predicate `preplan-route.ts`
  *  uses to decide whether a preplanning pass is even needed, reused here to
  *  decide whether the pass that just ran actually produced anything. */
-function hasRemainingTodos(plan: ArcanePlanEntry[] | null): boolean {
+function hasRemainingTodos(plan: HostedPlanEntry[] | null): boolean {
   return !!plan && plan.some((item) => item.status !== 'done');
 }
 
@@ -91,8 +91,8 @@ export async function runAgentModeSend(
 ): Promise<void> {
   const state = deps.getAiState();
   // Caller guarantees: ChatInput's handleSubmit only reaches the agent-mode
-  // branch for `mode === 'agent'` on the Arcane backend (it already returns
-  // early for `selectedAgent !== 'arcane'` and routes 'plan' elsewhere) —
+  // branch for `mode === 'agent'` on the UnityIDE backend (it already returns
+  // early for `selectedAgent !== 'hosted'` and routes 'plan' elsewhere) —
   // assert cheaply rather than silently mis-sending on a future call site
   // that gets this wrong.
   console.assert(
@@ -102,7 +102,7 @@ export async function runAgentModeSend(
 
   const effort = state.effort;
   const agentService = deps.getAgentService();
-  const decision = routeAgentSend(shouldPreplanTier(deps.getServerConfig(), effort), state.arcanePlan);
+  const decision = routeAgentSend(shouldPreplanTier(deps.getServerConfig(), effort), state.hostedPlan);
 
   if (decision === 'execute') {
     await agentService.sendMessage(text, { mode: 'agent', effort, attachments });
@@ -135,12 +135,12 @@ export async function runAgentModeSend(
   // immediately) — still execute the user's request rather than stranding
   // it on an empty preplan. Attachments are NOT repeated: send 1 already
   // carried them into the conversation history.
-  if (!hasRemainingTodos(afterSend1.arcanePlan)) {
+  if (!hasRemainingTodos(afterSend1.hostedPlan)) {
     await agentService.sendMessage(text, { mode: 'agent', effort });
     return;
   }
 
-  const taskCount = afterSend1.arcanePlan!.filter((item) => item.status !== 'done').length;
+  const taskCount = afterSend1.hostedPlan!.filter((item) => item.status !== 'done').length;
   afterSend1.addSystemMessage(`Pre-planning complete — executing ${taskCount} tasks`);
 
   // Send 2: a synthetic pointer, not the user's own words. Never added as a

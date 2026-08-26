@@ -44,17 +44,17 @@ function WelcomeApp() {
 
   useEffect(() => { void reload(); }, [reload]);
 
-  // Unity launches us as `Arcane.exe --goto <file>:<line>:<col> <project>`.
+  // Unity launches us as `UnityIDE.exe --goto <file>:<line>:<col> <project>`.
   // When no window has that project open, this one routes it: open the project
   // window, which then claims the target itself on boot. Also re-checked on
-  // `arcane-goto-pending`, which the single-instance handler emits when an
+  // `unityide-goto-pending`, which the single-instance handler emits when an
   // already-running app is launched again by Unity.
   useEffect(() => {
     let unlisten: (() => void) | null = null;
     let cancelled = false;
     void routePendingGotoToProjectWindow();
     (async () => {
-      const fn = await listenScoped('arcane-goto-pending', () => {
+      const fn = await listenScoped('unityide-goto-pending', () => {
         void routePendingGotoToProjectWindow();
       });
       if (cancelled) safeUnlisten(fn);
@@ -178,7 +178,7 @@ function WelcomeApp() {
         padding: '12px 36px 32px',
       }}>
         <div style={{ marginBottom: 28, paddingLeft: 80 }}>
-          <h1 style={{ margin: 0, fontSize: 22, fontWeight: 600, letterSpacing: 2 }}>ARCANE</h1>
+          <h1 style={{ margin: 0, fontSize: 22, fontWeight: 600, letterSpacing: 2 }}>UNITYIDE</h1>
           <div style={{ marginTop: 4, fontSize: 13, color: 'var(--text-secondary)' }}>
             AI-assisted editor for Unity
           </div>

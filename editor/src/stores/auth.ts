@@ -11,7 +11,7 @@ import {
   planGrantsClient,
   type Session,
 } from '../features/auth';
-import { ARCANE_WEB_URL } from '../config/api';
+import { WEB_URL } from '../config/api';
 
 export type LoginStatus = 'idle' | 'waiting-browser' | 'exchanging' | 'error';
 
@@ -111,7 +111,7 @@ async function exchangeAndApply(
   const result = await authClient.exchangeEditorCode(code, verifier);
   if (result.success && result.user) {
     // exchangeEditorCode saved the token to disk; read it back for
-    // in-memory API clients (arcane-stream etc. read store.token).
+    // in-memory API clients (hosted-stream etc. read store.token).
     const stored = await authClient.loadFromDisk().catch(() => null);
     set({
       loggedIn: true,
@@ -300,6 +300,6 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   openBilling: async () => {
-    await openUrl(`${ARCANE_WEB_URL}/account`).catch(() => {});
+    await openUrl(`${WEB_URL}/account`).catch(() => {});
   },
 }));

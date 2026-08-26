@@ -72,9 +72,9 @@ describe('assertWithinRootReal', () => {
   });
 
   it('accepts a path under any of several roots', async () => {
-    const ops = fs(['/proj/Assets', '/proj/.arcane', '/proj/.arcane/plans/p.aplan']);
+    const ops = fs(['/proj/Assets', '/proj/.unityide', '/proj/.unityide/plans/p.aplan']);
     await expect(
-      assertWithinRootReal('/proj/.arcane/plans/p.aplan', ['/proj/Assets', '/proj/.arcane'], ops),
+      assertWithinRootReal('/proj/.unityide/plans/p.aplan', ['/proj/Assets', '/proj/.unityide'], ops),
     ).resolves.toBeUndefined();
   });
 

@@ -2,7 +2,7 @@
 //
 // **The bug this exists to prevent.** csharp-ls answers
 // `textDocument/diagnostic` from the moment it is initialized — including the
-// seconds while MSBuild is still expanding `.arcane.csproj` and Roslyn has not
+// seconds while MSBuild is still expanding `.unityide.csproj` and Roslyn has not
 // yet attached its metadata references. An answer computed in that window is
 // not "no errors yet"; it is a full, confident diagnostic report against a
 // compilation that has no corelib, so *every* predefined type fails to bind:

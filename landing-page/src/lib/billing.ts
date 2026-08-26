@@ -1,7 +1,7 @@
 // Billing API client — mirrors src/lib/auth.ts conventions (PUBLIC_API_URL,
 // status-carrying errors). Checkout/portal return a Dodo hosted URL the caller
 // redirects to; plans is public; usage carries the credit balance.
-const API_URL = import.meta.env.PUBLIC_API_URL || 'https://api.arcaneai.org';
+const API_URL = import.meta.env.PUBLIC_API_URL || 'https://api.unityide.app';
 
 export interface PlanTier {
     id: string;

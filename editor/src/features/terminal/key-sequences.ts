@@ -19,7 +19,7 @@ const META_ENTER = '\x1b\r';
  * others need nothing.
  *
  * That command can't help us: it writes into a *known* terminal's config file
- * and has no idea what Arcane is, so it refuses. But it isn't doing anything
+ * and has no idea what UnityIDE is, so it refuses. But it isn't doing anything
  * privileged — for VS Code it just binds Shift+Enter to send `\r`. We own
  * this terminal, so we send that ourselves and the command becomes unnecessary.
  *

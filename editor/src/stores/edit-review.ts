@@ -1,7 +1,7 @@
 /**
  * Edit-review store (T7) — Cursor-style auto-apply + Accept/Reject review:
  * tracks which files have an unreviewed auto-applied change pending, backed
- * by `~/.arcane/reviews/<sessionId>.json` (mirrors `stores/checkpoints.ts`'s
+ * by `~/.unityide/reviews/<sessionId>.json` (mirrors `stores/checkpoints.ts`'s
  * per-session JSON file + 600ms debounced persist, right down to the
  * flush/reset shape).
  *

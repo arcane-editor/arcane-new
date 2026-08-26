@@ -64,7 +64,7 @@ const ACCEPT_ERROR_BACKOFF: Duration = Duration::from_millis(100);
 const RESPONSE_BODY: &str = concat!(
     "<!doctype html><meta charset=\"utf-8\"><title>Signed in</title>",
     "<body style=\"font-family:system-ui;text-align:center;padding-top:4rem\">",
-    "<h1>You're signed in</h1><p>You can close this tab and return to Arcane.</p></body>"
+    "<h1>You're signed in</h1><p>You can close this tab and return to UnityIDE.</p></body>"
 );
 
 #[derive(Debug, Clone, Serialize, PartialEq)]

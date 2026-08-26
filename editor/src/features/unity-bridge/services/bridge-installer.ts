@@ -1,10 +1,10 @@
 import { invoke } from '@tauri-apps/api/core';
 
-const BRIDGE_PACKAGE_DIR = 'Packages/com.arcane.editor';
+const BRIDGE_PACKAGE_DIR = 'Packages/com.unityide.editor';
 
 /**
- * Whether the Arcane bridge package is already embedded in the project
- * (`Packages/com.arcane.editor/package.json` exists).
+ * Whether the UnityIDE bridge package is already embedded in the project
+ * (`Packages/com.unityide.editor/package.json` exists).
  */
 export async function isBridgeInstalled(workspacePath: string): Promise<boolean> {
   try {

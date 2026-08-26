@@ -2,7 +2,7 @@
  * Offline record/replay implementation of `UnityApiClient`
  * (`ai-panel/services/unity-tools/api-search-tool.ts`) for the eval harness.
  *
- * Production's `unity_api_search` tool hits `api.arcaneai.org` with a signed-
+ * Production's `unity_api_search` tool hits `api.unityide.app` with a signed-
  * in user's JWT — the eval must run offline, deterministic, and CI-safe.
  * Instead, the eval reads/writes committed JSON recordings:
  *

@@ -5,7 +5,7 @@
  *   - Send the user prompt with the plan-planning system prompt + read-only
  *     tool subset.
  *   - On agent_end, extract the assistant's last text content (the markdown
- *     plan), write it to .arcane/plans/<ts>-<slug>.aplan, open it in the
+ *     plan), write it to .unityide/plans/<ts>-<slug>.aplan, open it in the
  *     plan view (PlanDocumentView, not Monaco — a plan is edited in place).
  *   - Set planPhase='awaiting-execute' and stash pendingPrompt + lastAttachments.
  *
@@ -23,7 +23,7 @@ import { getAgentService } from './agent-service';
 import { routePlanSend } from './plan-route';
 import { buildRegeneratePrompt, type PriorPlan } from './plan-regen';
 import { buildReviseNotesPrompt } from './plan-revise';
-import { parsePlanTodos, planTodosToArcanePlan } from './plan-todos';
+import { parsePlanTodos, planTodosToHostedPlan } from './plan-todos';
 import {
   reservePlanPath,
   openPlanInEditor,
@@ -187,14 +187,14 @@ async function runExecution(planPath: string, sendText: string): Promise<void> {
   store.setActivePlanPath(planPath);
   setPlanRefStatus(planPath, 'executing');
 
-  // Seed arcanePlan from the plan file's current Todos/checkbox state BEFORE
+  // Seed hostedPlan from the plan file's current Todos/checkbox state BEFORE
   // the send below, so the FIRST plan-execution request already carries the
   // current todo's difficulty — the metadata resolver (difficulty.ts's
-  // difficultyForRequest) reads arcanePlan off the store, and without this
+  // difficultyForRequest) reads hostedPlan off the store, and without this
   // seed the first send would go out untagged until the model's own first
   // todo_update call caught up. The todo-tool merge (mergeTodoDifficulty)
   // keeps these tags authoritative for every send after this one.
-  store.setArcanePlan(planTodosToArcanePlan(parsePlanTodos(planContent)));
+  store.setHostedPlan(planTodosToHostedPlan(parsePlanTodos(planContent)));
 
   try {
     await getAgentService().sendMessage(sendText, {

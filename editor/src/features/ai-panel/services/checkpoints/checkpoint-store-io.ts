@@ -1,6 +1,6 @@
 /**
  * Checkpoint persistence (P5.2) — mirrors `session-persistence.ts`: one JSON
- * file per session at `~/.arcane/checkpoints/<sessionId>.json`, written on
+ * file per session at `~/.unityide/checkpoints/<sessionId>.json`, written on
  * the debounce cadence `stores/checkpoints.ts` schedules.
  *
  * GC: when a session is deleted (`deleteSession` in `session-persistence.ts`),
@@ -30,7 +30,7 @@ async function ensureCheckpointsDirExists(path: string): Promise<void> {
 async function getCheckpointsDir(): Promise<string> {
   if (!checkpointsDir) {
     const home = await homeDir();
-    checkpointsDir = await join(home, '.arcane', 'checkpoints');
+    checkpointsDir = await join(home, '.unityide', 'checkpoints');
     try {
       await ensureCheckpointsDirExists(checkpointsDir);
     } catch (error) {

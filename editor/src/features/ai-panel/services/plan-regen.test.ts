@@ -6,7 +6,7 @@ import { buildRegeneratePrompt } from './plan-regen';
 // unchecked and executing it reset every done todo to pending.
 describe('buildRegeneratePrompt', () => {
   const PRIOR = {
-    path: '/ws/.arcane/plans/20260816-0929-game.md',
+    path: '/ws/.unityide/plans/20260816-0929-game.md',
     content: '# Game\n\n## Steps\n- [x] **Step 1: Health.cs** — done\n- [ ] **Step 2: Enemy.cs** — todo\n',
   };
 

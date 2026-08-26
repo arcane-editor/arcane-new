@@ -82,7 +82,7 @@ while the entire test suite stayed green. Two properties made that possible and
 both still hold:
 
 1. **The break was environmental, not a code change.** Unity stops generating
-   `.csproj` files once Arcane is registered as its external script editor, and
+   `.csproj` files once UnityIDE is registered as its external script editor, and
    the generator used to read its Unity DLL paths out of those files. No diff
    introduced the bug, so no amount of reviewing a diff could have caught it.
    Only probing the running server detects this class of failure.
@@ -93,8 +93,8 @@ both still hold:
 So: when the check reports `SKIPPED`, that is **not** a pass — it means the
 check did not run, and the claim "IntelliSense works" is unsupported. Say so
 plainly rather than treating it as green. Set
-`ARCANE_INTELLISENSE_E2E=required` to turn a skip into a failure, and
-`ARCANE_SMOKE_UNITY_PROJECT=<path>` to point it at a Unity project.
+`UNITYIDE_INTELLISENSE_E2E=required` to turn a skip into a failure, and
+`UNITYIDE_SMOKE_UNITY_PROJECT=<path>` to point it at a Unity project.
 
 The generator must never depend on Unity's `Assembly-CSharp*.csproj` again; it
 derives its reference set from the Unity install (`unity.rs`,
@@ -103,7 +103,7 @@ is the hermetic regression test for that and needs no Unity installed.
 
 ## Two agent backends now, not one
 
-The AI panel talks to either the hosted **Arcane** agent or an **external agent
+The AI panel talks to either the hosted **UnityIDE** agent or an **external agent
 over ACP** (Agent Client Protocol — JSON-RPC 2.0 as newline-delimited JSON over a
 subprocess's stdio, the same idea as LSP but for agents). Claude Code is the only
 external agent shipped, and it is gated on a paid plan.
@@ -115,7 +115,7 @@ enough to delete (`bce889d`):
 1. **`getChatBackend()` (`ai-panel/services/chat-backend.ts`) is the only place
    that branches on the selected agent.** `ChatInput.handleSubmit` calls it;
    nothing else should need to know which agent is running. `getAgentService()`
-   stays Arcane-only, for Arcane-only internals (plan controller, retry-turn,
+   stays UnityIDE-only, for UnityIDE-only internals (plan controller, retry-turn,
    session restore).
 2. **Meaning lives in `ai-panel`, transport lives in `features/acp`.** The `acp`
    feature owns the protocol, the process and the install, and imports nothing
@@ -142,9 +142,9 @@ side:
 capability took effect by asserting `fast` comes back typed as a boolean rather
 than as a select.
 
-**The external agent is not driven like the Arcane one.** It runs its own loop,
-its own tools and its own permission modes, so Arcane deliberately does NOT
-wrap it in the Arcane agent's policy (see
+**The external agent is not driven like the UnityIDE one.** It runs its own loop,
+its own tools and its own permission modes, so UnityIDE deliberately does NOT
+wrap it in the UnityIDE agent's policy (see
 `docs/superpowers/specs/2026-08-22-external-agent-autonomy-design.md`):
 
 - **Reads are unconfined; writes stay inside the workspace** (`acp-fs.ts`,
@@ -154,12 +154,12 @@ wrap it in the Arcane agent's policy (see
   Do not "restore" that check without also sandboxing the terminal.
 - **Writes get a checkpoint but no review row.** `recordPreWrite` stays (it
   records bytes, and per-turn restore is built on it); `useEditReviewStore` is
-  gone (it is a workflow built for the Arcane agent's `auto` apply mode).
+  gone (it is a workflow built for the UnityIDE agent's `auto` apply mode).
 - **`session/request_permission` is the AGENT asking**, governed by its own
-  `mode` config option. Render it; never add a second Arcane-side prompt on the
+  `mode` config option. Render it; never add a second UnityIDE-side prompt on the
   same edit.
-- **Arcane-only chrome is gated on the active agent.** `planPhase`,
-  `activePlanPath` and `PlanActions` belong to Arcane's plan controller; an
+- **UnityIDE-only chrome is gated on the active agent.** `planPhase`,
+  `activePlanPath` and `PlanActions` belong to UnityIDE's plan controller; an
   external agent never sets them, so switching agents mid-thread used to leave
   an Execute/Regenerate card under a Claude header.
 
@@ -180,8 +180,8 @@ asserts the capabilities the editor depends on. It is the same class of check as
 integration has in the field is environmental (Node too old, half-finished
 install, renamed package, expired login, protocol bump), and none of those appear
 in a diff or break a mocked test. As with IntelliSense, **a `SKIPPED` is not a
-pass** — set `ARCANE_ACP_E2E=required` to turn a skip into a failure, and
-`ARCANE_ACP_ADAPTER=<path to dist/index.js>` to point it at an adapter outside
+pass** — set `UNITYIDE_ACP_E2E=required` to turn a skip into a failure, and
+`UNITYIDE_ACP_ADAPTER=<path to dist/index.js>` to point it at an adapter outside
 the managed install.
 
 ## Drag and drop: HTML5 DnD does not work here

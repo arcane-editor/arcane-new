@@ -1,6 +1,6 @@
 ---
 title: AI Tools
-description: The 15 tools available to the Arcane AI agent and what each one does.
+description: The 15 tools available to the UnityIDE AI agent and what each one does.
 ---
 
 When the AI responds to your messages, it can call **tools** to gather information or make changes. You'll see tool calls rendered in the chat as expandable blocks showing inputs and outputs.

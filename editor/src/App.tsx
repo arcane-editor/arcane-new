@@ -185,10 +185,10 @@ function stepZoom(delta: number): void {
 function cycleAiMode(): void {
   const ai = useAiStore.getState();
   if (ai.isAgentRunning) return;
-  // Mode belongs to the Arcane loop. Under an external agent the pill it
+  // Mode belongs to the UnityIDE loop. Under an external agent the pill it
   // cycles isn't even rendered (AgentConfigBar takes that slot), so firing
   // would silently change a hidden value that nothing reads.
-  if (ai.selectedAgent !== 'arcane') return;
+  if (ai.selectedAgent !== 'hosted') return;
   const order: Array<'ask' | 'agent' | 'plan'> = ['ask', 'agent', 'plan'];
   ai.setMode(order[(order.indexOf(ai.mode) + 1) % order.length]);
   useUiStore.getState().setActiveRightSidebarView('ai-panel');
@@ -206,9 +206,9 @@ function cycleAiMode(): void {
 function cycleEffortCommand(): void {
   const ai = useAiStore.getState();
   if (ai.isAgentRunning) return;
-  // Same reason as `cycleAiMode`: effort is an Arcane request parameter, and
+  // Same reason as `cycleAiMode`: effort is a UnityIDE request parameter, and
   // an external agent exposes its own via session config options instead.
-  if (ai.selectedAgent !== 'arcane') return;
+  if (ai.selectedAgent !== 'hosted') return;
   const config = useServerConfigStore.getState().config;
   const plan = useAuthStore.getState().plan;
   ai.setEffort(cycleEffort(ai.effort, allowedEfforts(config, plan)));
@@ -519,7 +519,7 @@ function App() {
   }, [workspacePath]);
 
   // Refuse to run silently with mismatched halves of "dev-ness": dev endpoints
-  // under the production identifier write dev-API tokens into ~/.arcane, which
+  // under the production identifier write dev-API tokens into ~/.unityide, which
   // the real app then presents to the production API.
   useEffect(() => {
     void checkReleaseChannel(invoke).then((problem) => {
@@ -603,7 +603,7 @@ function App() {
     let unlisten: (() => void) | null = null;
     let cancelled = false;
     (async () => {
-      const fn = await listenScoped('arcane-goto-pending', () => {
+      const fn = await listenScoped('unityide-goto-pending', () => {
         void consumePendingGotoForWorkspace(useWorkspaceStore.getState().workspacePath);
       });
       if (cancelled) safeUnlisten(fn);

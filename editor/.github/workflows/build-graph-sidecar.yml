@@ -1,9 +1,9 @@
-name: Build arcane-graph sidecar
+name: Build unityide-graph sidecar
 
 on:
   push:
     paths:
-      - 'tooling/arcane-graph-sidecar/**'
+      - 'tooling/unityide-graph-sidecar/**'
       - '.github/workflows/build-graph-sidecar.yml'
   workflow_dispatch:
 
@@ -38,7 +38,7 @@ jobs:
       - name: Build sidecar
         shell: bash
         run: |
-          cd tooling/arcane-graph-sidecar
+          cd tooling/unityide-graph-sidecar
           python -m venv .venv
           source .venv/bin/activate || source .venv/Scripts/activate
           pip install --upgrade pip
@@ -46,13 +46,13 @@ jobs:
           python -m PyInstaller pyinstaller.spec
           mkdir -p ../../src-tauri/binaries
           if [[ "$RUNNER_OS" == "Windows" ]]; then
-            cp dist/arcane-graph.exe "../../src-tauri/binaries/arcane-graph-${{ matrix.target }}.exe"
+            cp dist/unityide-graph.exe "../../src-tauri/binaries/unityide-graph-${{ matrix.target }}.exe"
           else
-            cp dist/arcane-graph "../../src-tauri/binaries/arcane-graph-${{ matrix.target }}"
+            cp dist/unityide-graph "../../src-tauri/binaries/unityide-graph-${{ matrix.target }}"
           fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: arcane-graph-${{ matrix.target }}
-          path: src-tauri/binaries/arcane-graph-${{ matrix.target }}*
+          name: unityide-graph-${{ matrix.target }}
+          path: src-tauri/binaries/unityide-graph-${{ matrix.target }}*

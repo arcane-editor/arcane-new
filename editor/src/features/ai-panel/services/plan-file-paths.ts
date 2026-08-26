@@ -30,7 +30,7 @@ function timestamp(): string {
 }
 
 export function buildPlanPath(workspacePath: string, prompt: string): string {
-  return `${workspacePath}/.arcane/plans/${timestamp()}-${slugify(prompt)}.aplan`;
+  return `${workspacePath}/.unityide/plans/${timestamp()}-${slugify(prompt)}.aplan`;
 }
 
 /** How many `-2`, `-3`… variants to try before falling back to a stamped name. */

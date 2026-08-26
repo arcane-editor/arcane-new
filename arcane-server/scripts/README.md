@@ -80,12 +80,12 @@ resumable batches with deterministic ids (re-runs overwrite, never duplicate).
 
 ```bash
 # exact (no model cost)
-curl -sX POST $ARCANE_SERVER_URL/v1/unity/api/lookup -H "authorization: Bearer $TOKEN" \
+curl -sX POST $UNITYIDE_SERVER_URL/v1/unity/api/lookup -H "authorization: Bearer $TOKEN" \
   -H 'content-type: application/json' \
   -d '{"unityVersion":"6000.0","type":"Rigidbody","member":"AddForce"}' | jq
 
 # semantic
-curl -sX POST $ARCANE_SERVER_URL/v1/unity/api/search -H "authorization: Bearer $TOKEN" \
+curl -sX POST $UNITYIDE_SERVER_URL/v1/unity/api/search -H "authorization: Bearer $TOKEN" \
   -H 'content-type: application/json' \
   -d '{"unityVersion":"6000.0","query":"apply force at a point"}' | jq
 ```

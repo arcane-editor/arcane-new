@@ -1,7 +1,7 @@
 /**
  * Agent Client Protocol (ACP) v1 wire types.
  *
- * Hand-written subset of the official schema, covering exactly what Arcane
+ * Hand-written subset of the official schema, covering exactly what UnityIDE
  * sends and receives. Source of truth: https://agentclientprotocol.com and the
  * generated types in `@agentclientprotocol/sdk` (`dist/schema/types.gen.d.ts`).
  *
@@ -19,7 +19,7 @@
  * NOT LSP-style `Content-Length` framing.
  */
 
-/** The protocol major version Arcane implements. */
+/** The protocol major version UnityIDE implements. */
 export const ACP_PROTOCOL_VERSION = 1;
 
 /** JSON-RPC: the agent needs the user to authenticate first. */
@@ -373,7 +373,7 @@ export interface ElicitationSchema {
 }
 
 export interface CreateElicitationParams {
-  /** 'form' is the only mode Arcane advertises; 'url' is answered by opening it. */
+  /** 'form' is the only mode UnityIDE advertises; 'url' is answered by opening it. */
   mode: string;
   sessionId?: string;
   toolCallId?: string | null;

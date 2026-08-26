@@ -4,7 +4,7 @@
  *
  * Mirrors the load+resume sequence in SessionHistory.openSession: load the
  * latest session for the workspace, rehydrate the store, then re-attach the
- * Arcane agent by replaying its history.
+ * UnityIDE agent by replaying its history.
  */
 
 import { useAiStore } from '../../../stores/ai';

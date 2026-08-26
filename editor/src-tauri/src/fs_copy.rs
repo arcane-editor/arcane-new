@@ -222,7 +222,7 @@ mod tests {
 
     fn tmp_dir(tag: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!(
-            "arcane-fs-copy-{tag}-{}-{:?}",
+            "unityide-fs-copy-{tag}-{}-{:?}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)

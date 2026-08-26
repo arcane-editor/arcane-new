@@ -3,10 +3,10 @@
 //
 // Why this exists: "dev-ness" is set in two independent places. Vite's mode
 // picks the API endpoints (`.env.development`), and the Tauri config file picks
-// the bundle identifier — which is what selects the config dir (`~/.arcane` vs
-// `~/.arcane-dev`) and the deep-link scheme. A plain `tauri dev` took the base
+// the bundle identifier — which is what selects the config dir (`~/.unityide` vs
+// `~/.unityide-dev`) and the deep-link scheme. A plain `tauri dev` took the base
 // config, so it ran the dev endpoints under the PRODUCTION identifier and wrote
-// dev-API tokens into the real app's `~/.arcane`.
+// dev-API tokens into the real app's `~/.unityide`.
 //
 // So `dev` defaults to the dev overlay. `build` is untouched: a release build
 // must stay production unless it explicitly asks for `tauri.dev.conf.json`

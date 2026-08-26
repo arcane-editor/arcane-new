@@ -1,0 +1,25 @@
+{
+    "name": "UnityIDE.Editor",
+    "rootNamespace": "UnityIDE",
+    "references": [
+        "UnityEditor.TestRunner",
+        "UnityEngine.TestRunner"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [
+        {
+            "name": "com.unity.test-framework",
+            "expression": "1.0.0",
+            "define": "UNITYIDE_HAS_TEST_FRAMEWORK"
+        }
+    ],
+    "noEngineReferences": false
+}

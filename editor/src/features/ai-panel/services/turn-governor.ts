@@ -109,7 +109,7 @@ function wrapUpMessage(): Message {
  * Default notice: an ai-store system message, matching the wording the
  * agent-service's other in-loop notices use (e.g. the grounding linter's
  * `addSystemMessage` call). `stores/ai.ts` transitively touches `document`
- * (via the ai-panel barrel / theme store — see `arcane-stream.test.ts`'s
+ * (via the ai-panel barrel / theme store — see `hosted-stream.test.ts`'s
  * header comment), which is fatal under Bun — so this reaches it via a
  * dynamic import, deferred until actually invoked. The eval harness (which
  * DOES load this module directly, for real, not just under test) always
@@ -128,7 +128,7 @@ function defaultOnCapReached(effort: Effort): void {
 
 /**
  * Wrap a `StreamFn` with the turn governor. Composed ONCE — e.g.
- * `withTurnGovernor(arcaneStream)` at Agent construction in
+ * `withTurnGovernor(hostedStream)` at Agent construction in
  * `agent-service.ts` — since per-send state lives at module scope (see
  * `resetTurnGovernor`).
  */

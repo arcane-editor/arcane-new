@@ -61,7 +61,7 @@ describe('FIM context clamp', () => {
 // ---------------------------------------------------------------------------
 // Plan lock. NOTE ON APPROACH: an end-to-end call through the registered
 // `provider.provideInlineCompletions(...)` would need to control
-// `useAuthStore` (for `gate.loggedIn`/`plan`) — but `arcane-stream.test.ts`
+// `useAuthStore` (for `gate.loggedIn`/`plan`) — but `hosted-stream.test.ts`
 // (loaded in the same `bun test` process) permanently `mock.module`'s
 // `stores/auth` with NO restore (same hazard its sibling `stores/ai.ts` mock
 // is documented against, see `session-persistence.test.ts`'s header), leaving

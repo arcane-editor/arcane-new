@@ -19,6 +19,12 @@
         // never a wrong final paint. Key must stay in sync with STORAGE_KEY in
         // stores/theme.ts.
         var THEMES = {
+          'unityide-dark':  ['dark',  '#16151F'],
+          'unityide-light': ['light', '#FCFAF3'],
+          // Pre-rename ids. They must live HERE as well as in the registry's
+          // alias map, because this block runs before the bundle does — on the
+          // first load after an upgrade the store has not migrated anything
+          // yet, and without these a light-theme user gets a dark flash.
           'arcane-dark':  ['dark',  '#16151F'],
           'arcane-light': ['light', '#FCFAF3'],
           'dark-plus':    ['dark',  '#1e1e1e'],
@@ -28,7 +34,7 @@
         };
         var id = null;
         try { id = localStorage.getItem('editor-theme-id-v2'); } catch(e) {}
-        var theme = THEMES[id] || THEMES['arcane-dark'];
+        var theme = THEMES[id] || THEMES['unityide-dark'];
         document.documentElement.setAttribute('data-theme-type', theme[0]);
         // Paint the theme's base colour before the bundle (and therefore the
         // stylesheet) has loaded. Without this the document keeps the UA

@@ -1,6 +1,6 @@
 # Auto-update
 
-How Arcane updates itself, why it is built this way, and the things that break
+How UnityIDE updates itself, why it is built this way, and the things that break
 it silently.
 
 Implemented by Tasks 3–7 of `docs/superpowers/plans/2026-08-23-auto-update.md`.
@@ -15,7 +15,7 @@ There is exactly **one keypair**, and it is the whole security story.
 
 | Half | Lives in | Used for |
 |---|---|---|
-| Private | `TAURI_SIGNING_PRIVATE_KEY` + `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (GitHub secrets), backed up in `~/.arcane-release-keys/` | CI signs each update bundle |
+| Private | `TAURI_SIGNING_PRIVATE_KEY` + `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (GitHub secrets), backed up in `~/.unityide-release-keys/` | CI signs each update bundle |
 | Public | `pubkey` in `tauri.conf.json` **and** `tauri.dev.conf.json` — compiled into the binary | The installed app verifies what it downloads |
 
 Current key id: `2E7CE0241A47EB25`.
@@ -27,7 +27,7 @@ consequences, all permanent:
   updates the moment you do, and there is no remote fix — each one has to be
   replaced by hand.
 - **Never lose the private key.** GitHub secrets are write-only; you cannot read
-  it back out. Losing `~/.arcane-release-keys/` means you can never publish an
+  it back out. Losing `~/.unityide-release-keys/` means you can never publish an
   update an installed build will accept.
 - **The two halves must match.** `bun run check:version` fails on a placeholder
   pubkey in *either* config for this reason. It is the only thing standing
@@ -74,7 +74,7 @@ is a lie the user notices when it sits there downloading.
 
 ### The notice
 
-Rust emits `arcane-update-ready` carrying `{ version, installed }`.
+Rust emits `unityide-update-ready` carrying `{ version, installed }`.
 `editor/src/features/updates/` listens and raises a **persistent** notification
 with a Restart action, which invokes `updates_apply_and_restart`.
 
@@ -105,17 +105,17 @@ git tag v0.3.3 && git push origin v0.3.3
   ├─ sign    TAURI_SIGNING_PRIVATE_KEY → <artifact>.sig
   │
   └─ upload to the `arcane-releases` R2 bucket:
-        v0.3.3/Arcane-arm64.dmg          what people download
-        v0.3.3/Arcane.app.tar.gz         what the macOS updater fetches
-        v0.3.3/ArcaneSetup.exe           both, on Windows
+        v0.3.3/UnityIDE-arm64.dmg          what people download
+        v0.3.3/UnityIDE.app.tar.gz         what the macOS updater fetches
+        v0.3.3/UnityIDESetup.exe           both, on Windows
         latest/darwin-aarch64.json       the manifest  (max-age=300)
         latest/windows-x86_64.json
 ```
 
 The app polls the `endpoints` in its config:
 
-- production — `https://releases.arcaneai.org/latest/{{target}}-{{arch}}.json`
-- dev — `https://releases.arcaneai.org/dev/latest/{{target}}-{{arch}}.json`
+- production — `https://releases.unityide.app/latest/{{target}}-{{arch}}.json`
+- dev — `https://releases.unityide.app/dev/latest/{{target}}-{{arch}}.json`
 
 `{{target}}-{{arch}}` resolves to `darwin-aarch64` or `windows-x86_64`.
 
@@ -129,7 +129,7 @@ core in `update-manifest.mjs`:
   "version": "0.3.3",
   "pub_date": "2026-08-25T08:01:04.947Z",
   "platforms": {
-    "darwin-aarch64": { "signature": "<minisign>", "url": "https://…/v0.3.3/Arcane.app.tar.gz" }
+    "darwin-aarch64": { "signature": "<minisign>", "url": "https://…/v0.3.3/UnityIDE.app.tar.gz" }
   }
 }
 ```
@@ -152,11 +152,11 @@ Signed manifests fail *quietly*, so check rather than assume:
 
 ```bash
 # 1. Both manifests exist and are JSON
-curl -sSI https://releases.arcaneai.org/latest/darwin-aarch64.json | head -1
-curl -sSI https://releases.arcaneai.org/latest/windows-x86_64.json | head -1
+curl -sSI https://releases.unityide.app/latest/darwin-aarch64.json | head -1
+curl -sSI https://releases.unityide.app/latest/windows-x86_64.json | head -1
 
 # 2. The url inside each one resolves
-curl -sS https://releases.arcaneai.org/latest/darwin-aarch64.json | grep url
+curl -sS https://releases.unityide.app/latest/darwin-aarch64.json | grep url
 curl -sSI "<that url>" | head -1
 
 # 3. The app agrees: Settings → Updates shows the running version
@@ -172,7 +172,7 @@ hear about.
 ## What is not built
 
 - **Task 8 — dev-channel manifests.** `tauri.dev.conf.json` has a valid pubkey
-  and an endpoint, but `dev-build.yml` publishes no manifests. Arcane Dev polls
+  and an endpoint, but `dev-build.yml` publishes no manifests. UnityIDE Dev polls
   and gets a 404: inert, not broken. Reuse `write-update-manifest.mjs`.
 - **Task 9 — refresh the production site on release.**
 - **Task 10 — the plan's own end-to-end verification pass.**
@@ -186,6 +186,24 @@ reinstall; v0.3.3 will be the first release the loop actually carries.
 
 v0.3.2 was also force-retagged, so installers downloaded before 2026-08-25 differ
 from the ones under that name now.
+
+### v0.3.2 names two different products
+
+The Arcane → UnityIDE rebrand ships under the **same** v0.3.2 tag, force-retagged
+again. So "0.3.2" now refers to either the last Arcane build or the first UnityIDE
+one, and the version string alone cannot tell them apart. Check the app name or
+the bundle identifier (`com.inno.editor` vs `app.unityide.desktop`) instead.
+
+`arcane-releases/v0.3.2/` and `latest/` consequently hold BOTH sets of artifacts
+— `Arcane-arm64.dmg` beside `UnityIDE-arm64.dmg`, and so on. `wrangler r2 object
+put` never deletes, so the Arcane ones stay until removed by hand. They are
+unreachable once `releases.arcaneai.org` is detached, just confusing.
+
+This is deliberate, and it has one upside worth recording: because the version
+does not move, an install already on 0.3.2 is never *offered* 0.3.2-UnityIDE.
+The rebrand therefore cannot half-migrate an existing Arcane install in place —
+the failure mode you would otherwise get from an unchanged signing key plus a
+version bump. Every UnityIDE install is a deliberate fresh download.
 
 ---
 

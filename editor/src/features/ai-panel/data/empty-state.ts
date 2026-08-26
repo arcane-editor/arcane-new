@@ -39,11 +39,11 @@ export const STARTERS: Record<ChatMode, string[]> = {
 /**
  * Opening prompts for an EXTERNAL agent — one set, not three.
  *
- * Arcane's `mode` is a property of Arcane's own loop: it swaps the toolset and
+ * UnityIDE's `mode` is a property of UnityIDE's own loop: it swaps the toolset and
  * the system prompt before the vendor call. An external agent receives none of
  * that — it runs its own loop, and exposes its own equivalent (plan mode,
  * accept-edits, …) as session config options rendered in the composer. So the
- * mode the user last left the Arcane pill on says nothing about what an
+ * mode the user last left the UnityIDE pill on says nothing about what an
  * external agent will do with a starter, and picking starters by it was
  * describing a setting that isn't in the request.
  *
@@ -59,8 +59,8 @@ export const EXTERNAL_STARTERS: string[] = [
 /**
  * The starters to offer, given who is going to answer.
  *
- * `mode` is only consulted for the Arcane agent, because it is only real for
- * the Arcane agent.
+ * `mode` is only consulted for the UnityIDE agent, because it is only real for
+ * the UnityIDE agent.
  */
 /**
  * What to say in place of the mode ladder when an external agent will answer.
@@ -92,7 +92,7 @@ const EXTERNAL_BRIEFS: Record<string, ExternalAgentBrief> = {
   },
 };
 
-/** The brief for an external agent, or `null` when Arcane's own loop answers. */
+/** The brief for an external agent, or `null` when UnityIDE's own loop answers. */
 export function externalAgentBrief(agent: AgentKind): ExternalAgentBrief | null {
   return isExternalAgent(agent) ? (EXTERNAL_BRIEFS[agent] ?? null) : null;
 }

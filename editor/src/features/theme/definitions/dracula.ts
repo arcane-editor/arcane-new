@@ -56,7 +56,7 @@ const dracula: ThemeDefinition = {
     'success': '#50fa7b',
     // Unity semantics, derived from this theme's own warning / info /
     // accent so no new palette decisions are made on its behalf. Inspector is
-    // the RAIL colour, not a text colour — see arcane-dark for why.
+    // the RAIL colour, not a text colour — see unityide-dark for why.
     'unity-lifecycle': '#f1fa8c',
     'unity-engine-type': '#8be9fd',
     'unity-inspector': '#bd93f9',

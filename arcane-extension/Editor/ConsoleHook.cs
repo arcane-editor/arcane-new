@@ -20,7 +20,7 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace Arcane.Bridge
+namespace UnityIDE.Bridge
 {
     internal static class ConsoleHook
     {

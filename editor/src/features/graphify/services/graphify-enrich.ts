@@ -12,10 +12,10 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { useAuthStore } from '../../../stores/auth';
-import { ARCANE_API_URL } from '../../../config/api';
+import { API_URL } from '../../../config/api';
 
-// Same host as the AI chat path (see ai-panel/services/arcane-stream.ts).
-const ARCANE_SERVER_URL = ARCANE_API_URL;
+// Same host as the AI chat path (see ai-panel/services/hosted-stream.ts).
+const HOSTED_SERVER_URL = API_URL;
 
 export interface GraphEnrichment {
   architectureSummary: string;
@@ -35,7 +35,7 @@ export async function enrichGraph(workspacePath: string): Promise<GraphEnrichmen
   }
 
   try {
-    const res = await fetch(`${ARCANE_SERVER_URL}/v1/graph/enrich`, {
+    const res = await fetch(`${HOSTED_SERVER_URL}/v1/graph/enrich`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

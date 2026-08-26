@@ -4,7 +4,7 @@ deploy-prod.sh
 .gitignore
 .npmignore
 .DS_Store
-.arcane-dev-path
+.unityide-dev-path
 *.tgz
 
 # Cloudflare Wrangler cache — holds the account id/name, not package content.

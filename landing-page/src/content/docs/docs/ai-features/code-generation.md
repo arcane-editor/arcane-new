@@ -1,15 +1,15 @@
 ---
 title: Settings & Configuration
-description: Configure API keys, model selection, and other ArcaneIDE settings.
+description: Configure API keys, model selection, and other UnityIDE settings.
 ---
 
 ## Opening Settings
 
-Open the Command Palette (`Cmd+Shift+P` / `Ctrl+Shift+P`) and search for **"Arcane: Settings"**. The settings panel opens in a tab.
+Open the Command Palette (`Cmd+Shift+P` / `Ctrl+Shift+P`) and search for **"UnityIDE: Settings"**. The settings panel opens in a tab.
 
 ## API Keys
 
-ArcaneIDE supports two AI providers. You need at least one API key.
+UnityIDE supports two AI providers. You need at least one API key.
 
 | Provider | Where to get a key |
 |----------|--------------------|
@@ -26,7 +26,7 @@ The default model is chosen automatically based on the current reasoning level. 
 
 ## Server URL
 
-By default, ArcaneIDE connects to a local LLM gateway server at `http://localhost:3001`. If you're running the Arcane server yourself (e.g. for shared team use), update this URL to point to your instance.
+By default, UnityIDE connects to a local LLM gateway server at `http://localhost:3001`. If you're running the UnityIDE server yourself (e.g. for shared team use), update this URL to point to your instance.
 
 Leave this at the default if you're using API keys directly.
 

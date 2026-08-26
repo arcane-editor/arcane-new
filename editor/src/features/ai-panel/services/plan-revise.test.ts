@@ -15,9 +15,9 @@ function note(overrides: Partial<PlanNote> = {}): PlanNote {
 
 describe('buildReviseNotesPrompt', () => {
   it('embeds the full current plan and its path', () => {
-    const p = buildReviseNotesPrompt('/ws/.arcane/plans/p.md', '# Plan\n- [ ] step', [note()]);
+    const p = buildReviseNotesPrompt('/ws/.unityide/plans/p.md', '# Plan\n- [ ] step', [note()]);
     expect(p).toContain('# Plan\n- [ ] step');
-    expect(p).toContain('/ws/.arcane/plans/p.md');
+    expect(p).toContain('/ws/.unityide/plans/p.md');
   });
 
   it('asks for the FULL plan as the reply — never an instruction to write files', () => {

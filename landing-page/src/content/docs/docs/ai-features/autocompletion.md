@@ -3,7 +3,7 @@ title: AI Chat Modes
 description: Understand Agent, Ask, and Plan modes — and how to choose between them.
 ---
 
-The AI in ArcaneIDE operates through a **chat panel** on the right side of the editor. It can answer questions, navigate your codebase, write code, run commands, and control the Unity Editor.
+The AI in UnityIDE operates through a **chat panel** on the right side of the editor. It can answer questions, navigate your codebase, write code, run commands, and control the Unity Editor.
 
 ## Three Modes
 

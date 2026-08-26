@@ -228,7 +228,7 @@ export function HierarchyPanel() {
           <>
             {packageIsOutdated && (
               <div className="hierarchy-note hierarchy-note--warning">
-                Update the Arcane Unity package to see scripts here — the installed
+                Update the UnityIDE Unity package to see scripts here — the installed
                 version does not report which components are project scripts.
               </div>
             )}

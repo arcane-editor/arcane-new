@@ -211,7 +211,7 @@ fn dir_exists(path: String) -> bool {
 /// Canonicalize a project path before `openProjectInNewWindow`
 /// (`src/features/project/services/multi-window.ts`) hashes it into a
 /// per-window label. The Unity bridge's journal files sit at a fixed location
-/// relative to the project (`<project>/Library/ArcaneIDE/`), so if the window
+/// relative to the project (`<project>/Library/UnityIDE/`), so if the window
 /// label were hashed from the RAW path instead, the same project opened via
 /// two different spellings (a symlink, a trailing slash, `..` segments) would
 /// get two different window labels while both windows' bridges wrote the SAME
@@ -490,7 +490,7 @@ async fn read_capped<R: tokio::io::AsyncRead + Unpin>(mut reader: R, cap: usize)
     (out, truncated)
 }
 
-const CAPTURE_TRUNCATED_NOTE: &str = "\n[output truncated by Arcane: exceeded 2 MiB]";
+const CAPTURE_TRUNCATED_NOTE: &str = "\n[output truncated by UnityIDE: exceeded 2 MiB]";
 
 #[tauri::command]
 async fn execute_command(
@@ -731,13 +731,13 @@ async fn debug_panic_async() {
 /// so a plain app re-launch opens a window in the running process instead of
 /// spawning a second process. (`tauri::Manager` is imported at module level.)
 /// Window title for this build, taken from the configured `productName` so the
-/// dev overlay shows "Arcane Dev" wherever a title is surfaced — the Window
+/// dev overlay shows "UnityIDE Dev" wherever a title is surfaced — the Window
 /// menu and Mission Control on macOS (where `hiddenTitle` keeps it out of the
 /// title bar itself), and the title bar proper on Windows and Linux.
 pub(crate) fn window_title(product_name: Option<&str>) -> String {
     product_name
         .filter(|s| !s.is_empty())
-        .unwrap_or("Arcane")
+        .unwrap_or("UnityIDE")
         .to_string()
 }
 
@@ -790,7 +790,7 @@ pub fn run() {
     // mean N processes; now one process — a plain re-launch (no deep-link
     // URL in argv) opens/focuses the welcome window instead, preserving the
     // visible "launch again = another window" UX (VS Code/Cursor pattern).
-    // The `deep-link` cargo feature forwards any `arcane://`/`arcane-dev://`
+    // The `deep-link` cargo feature forwards any `unityide://`/`unityide-dev://`
     // URL in the second instance's argv to the deep-link plugin — this is
     // how Windows/Linux deliver deep links to a running app.
     #[cfg(desktop)]
@@ -801,7 +801,7 @@ pub fn run() {
             return;
         }
         // Unity launches the external script editor as
-        // `Arcane.exe --goto <file>:<line>:<col> <project>`. argv was never
+        // `UnityIDE.exe --goto <file>:<line>:<col> <project>`. argv was never
         // read, so double-clicking a script in Unity's Project window showed
         // the Welcome window instead of the file.
         if let Some(target) = cli::parse_goto(argv.as_slice()) {
@@ -810,7 +810,7 @@ pub fn run() {
             // Nudge every live window: one of them may already have this
             // project open and can act immediately. The welcome window is the
             // fallback surface when none can.
-            let _ = app.emit("arcane-goto-pending", ());
+            let _ = app.emit("unityide-goto-pending", ());
         }
         open_or_focus_welcome(app);
     }));
@@ -947,7 +947,7 @@ pub fn run() {
             auth::auth_read_token,
             auth::auth_write_token,
             auth::auth_delete_token,
-            auth::get_arcane_home_dir,
+            auth::get_config_home_dir,
             auth::auth_deep_link_scheme,
             auth::auth_check_channel,
             auth_loopback::auth_loopback_start,
@@ -983,6 +983,18 @@ pub fn run() {
             cli::claim_pending_goto,
         ])
         .setup(|_app| {
+            // FIRST, before anything reads the config dir — the update watcher
+            // below reads settings out of it, and the frontend's very first
+            // `get_config_home_dir` follows shortly after. A one-time copy
+            // forward of the pre-rename ~/.arcane: the identifier changed, so
+            // the OS gave this app an empty webview store, and that directory
+            // (auth token, AI history, checkpoints, cached graphs) is the only
+            // state we can carry across. Never fatal — a fresh start is a
+            // worse experience, not a broken app.
+            if let Err(e) = auth::migrate_legacy_config_dir(_app.handle()) {
+                eprintln!("[UnityIDE] config migration skipped: {e}");
+            }
+
             // Background update watcher — once per process, never per window.
             // Each Tauri window runs its own JS context, so scheduling this
             // from the frontend would check (and download) once per window.
@@ -1154,14 +1166,14 @@ mod window_title_tests {
 
     #[test]
     fn uses_the_configured_product_name() {
-        assert_eq!(window_title(Some("Arcane Dev")), "Arcane Dev");
-        assert_eq!(window_title(Some("Arcane")), "Arcane");
+        assert_eq!(window_title(Some("UnityIDE Dev")), "UnityIDE Dev");
+        assert_eq!(window_title(Some("UnityIDE")), "UnityIDE");
     }
 
     #[test]
     fn falls_back_when_product_name_is_missing_or_blank() {
-        assert_eq!(window_title(None), "Arcane");
-        assert_eq!(window_title(Some("")), "Arcane");
+        assert_eq!(window_title(None), "UnityIDE");
+        assert_eq!(window_title(Some("")), "UnityIDE");
     }
 }
 
@@ -1453,6 +1465,6 @@ mod execute_command_tests {
             out.stdout.len(),
             MAX_CAPTURE_BYTES
         );
-        assert!(out.stdout.contains("output truncated by Arcane"));
+        assert!(out.stdout.contains("output truncated by UnityIDE"));
     }
 }

@@ -48,7 +48,7 @@ export async function openProjectInNewWindow(rawPath: string): Promise<void> {
   const url = `/index.html?view=editor&path=${encodeURIComponent(path)}`;
   const wnd = new WebviewWindow(label, {
     url,
-    title: `${basename(path)} — Arcane`,
+    title: `${basename(path)} — UnityIDE`,
     width: 1200,
     height: 800,
     minWidth: 800,
@@ -84,7 +84,7 @@ export async function openWelcomeWindow(): Promise<void> {
   }
   const wnd = new WebviewWindow('welcome', {
     url: '/index.html?view=welcome',
-    title: 'Arcane',
+    title: 'UnityIDE',
     width: 720,
     height: 480,
     minWidth: 600,
@@ -103,7 +103,7 @@ export async function openWelcomeWindow(): Promise<void> {
 export async function setProjectWindowTitle(path: string | null): Promise<void> {
   try {
     const w = getCurrentWebviewWindow();
-    if (path) await w.setTitle(`${basename(path)} — Arcane`);
-    else await w.setTitle('Arcane');
+    if (path) await w.setTitle(`${basename(path)} — UnityIDE`);
+    else await w.setTitle('UnityIDE');
   } catch { /* ignore */ }
 }

@@ -1,13 +1,13 @@
 ---
 title: Unity Editor Connection
-description: Connect ArcaneIDE to the live Unity Editor for play controls and console streaming.
+description: Connect UnityIDE to the live Unity Editor for play controls and console streaming.
 ---
 
-ArcaneIDE connects to the Unity Editor via a local IPC socket, giving you real-time control and log streaming without switching windows.
+UnityIDE connects to the Unity Editor via a local IPC socket, giving you real-time control and log streaming without switching windows.
 
 ## How the Connection Works
 
-When ArcaneIDE starts, it opens a Unix domain socket and waits for the Unity Editor to connect. You need the **Arcane Unity Plugin** installed in your Unity project for the two to talk.
+When UnityIDE starts, it opens a Unix domain socket and waits for the Unity Editor to connect. You need the **UnityIDE Unity Plugin** installed in your Unity project for the two to talk.
 
 Once connected, a status indicator appears in the toolbar showing the connection state.
 
@@ -38,7 +38,7 @@ The console deduplicates repeated messages and keeps up to 500 entries visible a
 
 ## C# Intelligence Features
 
-ArcaneIDE adds Unity-aware decorations to the Monaco editor for C# files:
+UnityIDE adds Unity-aware decorations to the Monaco editor for C# files:
 
 - **Lifecycle method highlighting** — `Awake`, `Start`, `Update`, `OnEnable`, and other MonoBehaviour methods are visually distinguished
 - **Serialization indicators** — Fields marked `[SerializeField]` or `public` are annotated in the gutter

@@ -21,7 +21,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
 
-namespace Arcane.Bridge
+namespace UnityIDE.Bridge
 {
     internal enum JsonType { Null, Bool, Number, String, Array, Object }
 

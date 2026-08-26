@@ -22,7 +22,7 @@
  * are found anywhere in the document.
  */
 
-import type { ArcanePlanEntry } from '../../../stores/ai';
+import type { HostedPlanEntry } from '../../../stores/ai';
 
 export interface PlanTodo {
   id: string | null;
@@ -57,18 +57,18 @@ export function parsePlanTodos(doc: string): PlanTodo[] {
 }
 
 /**
- * Maps parsed plan todos to the store's `ArcanePlanEntry` shape.
+ * Maps parsed plan todos to the store's `HostedPlanEntry` shape.
  *
- * Used by `plan-controller.ts`'s `runExecution` to seed `arcanePlan` from the
+ * Used by `plan-controller.ts`'s `runExecution` to seed `hostedPlan` from the
  * plan file BEFORE the first plan-execution send of a run, so the FIRST
  * request already carries the current todo's difficulty — the metadata
- * resolver (`difficulty.ts`'s `difficultyForRequest`) reads `arcanePlan` off
+ * resolver (`difficulty.ts`'s `difficultyForRequest`) reads `hostedPlan` off
  * the store, and without this the first send would go out untagged until the
  * model's own first `todo_update` call caught up. The todo-tool merge
  * (`todo-tool.ts`'s `mergeTodoDifficulty`) keeps these tags authoritative for
  * every send after that.
  */
-export function planTodosToArcanePlan(todos: PlanTodo[]): ArcanePlanEntry[] {
+export function planTodosToHostedPlan(todos: PlanTodo[]): HostedPlanEntry[] {
   return todos.map((t) => ({
     text: t.title,
     status: t.done ? 'done' : 'pending',

@@ -3,7 +3,7 @@
  * (Task 11), extracted out of `agent-service.ts` so the decisions are
  * directly Bun-testable: `agent-service.ts` itself pulls in the Tauri-coupled
  * `tool-operations.ts` → `stores/workspace.ts` → `stores/ai.ts` chain (the
- * same DOM-touching import graph `arcane-stream.test.ts`'s header documents
+ * same DOM-touching import graph `hosted-stream.test.ts`'s header documents
  * for `stores/ai` alone), so it cannot be imported directly under plain
  * `bun test`. `createToolsForPromptMode` and the nudge gate in
  * `agent-service.ts`'s `runSend` both call into this module rather than

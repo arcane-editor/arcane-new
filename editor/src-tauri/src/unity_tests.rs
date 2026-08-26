@@ -379,12 +379,12 @@ pub fn unity_tests_run_headless(
     let exe = editor_executable(&install.path);
 
     let results_path = Path::new(&workspace_path)
-        .join("Library/ArcaneIDE")
+        .join("Library/UnityIDE")
         .join("test-results.xml");
     if let Some(parent) = results_path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    let log_path = Path::new(&workspace_path).join("Library/ArcaneIDE/test-run.log");
+    let log_path = Path::new(&workspace_path).join("Library/UnityIDE/test-run.log");
 
     let test_platform = if mode.eq_ignore_ascii_case("PlayMode") {
         "PlayMode"
@@ -436,7 +436,7 @@ mod tests {
 
     #[test]
     fn discovers_tests_in_test_assembly() {
-        let tmp = std::env::temp_dir().join(format!("arcane-tests-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("unityide-tests-{}", std::process::id()));
         let _ = fs::remove_dir_all(&tmp);
         let asm_dir = tmp.join("Assets/Tests");
         write(
@@ -471,7 +471,7 @@ mod tests {
 
     #[test]
     fn non_test_assembly_ignored() {
-        let tmp = std::env::temp_dir().join(format!("arcane-tests2-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("unityide-tests2-{}", std::process::id()));
         let _ = fs::remove_dir_all(&tmp);
         write(
             &tmp,

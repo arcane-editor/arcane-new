@@ -37,7 +37,7 @@ export type AppEnv = {
         ENVIRONMENT: string;
         WEB_BASE_URL: string;        // user-facing website base (auth pages, email links)
         API_BASE_URL: string;        // this worker's public base (Google redirect_uri)
-        EMAIL_FROM: string;          // verified sender (no-reply@arcaneai.org)
+        EMAIL_FROM: string;          // verified sender (no-reply@unityide.app)
         EMAIL?: EmailSender;         // Email Service send binding (absent in tests)
         RL_AUTH_STRICT?: RateLimiter;   // 10/60s/IP (absent in tests → fail open)
         RL_AUTH_POLL?: RateLimiter;     // 60/60s/IP (absent in tests → fail open)

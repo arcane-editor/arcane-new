@@ -1,8 +1,8 @@
 /**
  * SessionHistory — a dropdown list of past chat sessions for the current
  * workspace. Opening a session loads its transcript and resumes it by replaying
- * history into the Arcane agent. Supports delete + rename. Older sessions saved
- * under a now-removed agent kind restore read-only as Arcane (agentKind is
+ * history into the UnityIDE agent. Supports delete + rename. Older sessions saved
+ * under a now-removed agent kind restore read-only as UnityIDE (agentKind is
  * coerced on load — see session-persistence).
  */
 

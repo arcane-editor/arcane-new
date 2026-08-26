@@ -7,7 +7,7 @@ import { openProjectInNewWindow } from './multi-window';
  * A `--goto` Unity passed on the command line, collected from the Rust side.
  *
  * Unity launches the configured external script editor as
- * `Arcane.exe --goto "<file>:<line>:<col>" "<projectPath>"`. Nothing read argv,
+ * `UnityIDE.exe --goto "<file>:<line>:<col>" "<projectPath>"`. Nothing read argv,
  * so double-clicking a script in Unity's Project window opened the 720x480
  * Welcome window instead of the file — the core Unity-to-IDE workflow, broken
  * on every platform.

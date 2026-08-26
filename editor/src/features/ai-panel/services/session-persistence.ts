@@ -1,18 +1,18 @@
 /**
  * Session persistence — saves/loads AI chat sessions as JSON files.
- * Location: <per-app config dir>/sessions/<sessionId>.json — i.e. ~/.arcane/sessions
- * for prod builds, ~/.arcane-dev/sessions for dev builds (see `getSessionsDir`).
+ * Location: <per-app config dir>/sessions/<sessionId>.json — i.e. ~/.unityide/sessions
+ * for prod builds, ~/.unityide-dev/sessions for dev builds (see `getSessionsDir`).
  *
  * Each record carries the agent kind, workspace path, a human title, and the
  * transcript. Older records on disk may still carry a now-removed agent kind
  * (e.g. `'claude'`) plus its extra fields; those extra JSON keys are ignored on
  * load and `agentKind` is coerced to a live kind via `coerceAgentKind`, so old
- * sessions restore read-only and run as Arcane.
+ * sessions restore read-only and run as UnityIDE.
  */
 
 import { invoke } from '@tauri-apps/api/core';
 import { join } from '@tauri-apps/api/path';
-import type { AiMessage, ArcanePlanEntry, PlanPhase } from '../../../stores/ai';
+import type { AiMessage, HostedPlanEntry, PlanPhase } from '../../../stores/ai';
 import { deleteCheckpointsFile } from './checkpoints/checkpoint-store-io';
 import { deleteReviewsFile } from './edit-review/review-store-io';
 import { coerceAgentKind, type AgentKind, type ChatMode, type Effort } from './types';
@@ -20,7 +20,7 @@ import { coerceAgentKind, type AgentKind, type ChatMode, type Effort } from './t
 /**
  * A plan produced by this session.
  *
- * Optional on both records, exactly like `arcanePlan`: session files written
+ * Optional on both records, exactly like `hostedPlan`: session files written
  * before this existed simply have no key, `JSON.parse` leaves it undefined,
  * and an old session loads unchanged.
  */
@@ -45,13 +45,13 @@ export interface SessionData {
   workspacePath: string | null;
   title: string;
   /**
-   * Arcane's in-loop todo list (`todo_update`, T9) — persisted so it survives
+   * UnityIDE's in-loop todo list (`todo_update`, T9) — persisted so it survives
    * reload/resume. Optional because session files written before T9 never
    * wrote this key: `JSON.parse` simply leaves it `undefined` on load, which
    * `loadSessionIntoStore` (stores/ai.ts) coerces to `null` — same as a
    * brand-new session with no plan yet.
    */
-  arcanePlan?: ArcanePlanEntry[] | null;
+  hostedPlan?: HostedPlanEntry[] | null;
   /**
    * Markdown plans this session produced, so they are reachable from chat
    * history rather than only from the conversation that made them. See
@@ -67,11 +67,11 @@ export interface SessionData {
   planPhase?: PlanPhase;
   activePlanPath?: string | null;
   /**
-   * The EXTERNAL agent's own session id (`agentKind !== 'arcane'`), so a
+   * The EXTERNAL agent's own session id (`agentKind !== 'hosted'`), so a
    * reopened transcript can be resumed with its full context via ACP
    * `session/load` rather than restarting cold.
    *
-   * Optional and omitted for Arcane sessions, so their files keep the exact
+   * Optional and omitted for UnityIDE sessions, so their files keep the exact
    * shape they had before external agents existed. A stale id is harmless:
    * `session/load` failing is a soft-resume, not an error.
    */
@@ -99,8 +99,8 @@ export interface SaveSessionInput {
   agentKind: AgentKind;
   workspacePath: string | null;
   title?: string;
-  /** See `SessionData.arcanePlan`. */
-  arcanePlan?: ArcanePlanEntry[] | null;
+  /** See `SessionData.hostedPlan`. */
+  hostedPlan?: HostedPlanEntry[] | null;
   /** See `SessionData.plans`. */
   plans?: PlanRef[];
   /** See `SessionData.planPhase` / `activePlanPath`. */
@@ -118,10 +118,10 @@ async function ensureSessionsDirExists(path: string): Promise<void> {
 
 async function getSessionsDir(): Promise<string> {
   if (!sessionsDir) {
-    // Per-app dir (~/.arcane or ~/.arcane-dev) so the side-by-side dev
+    // Per-app dir (~/.unityide or ~/.unityide-dev) so the side-by-side dev
     // build never shares/corrupts the prod app's session files.
-    const arcaneHome = await invoke<string>('get_arcane_home_dir');
-    sessionsDir = await join(arcaneHome, 'sessions');
+    const configHome = await invoke<string>('get_config_home_dir');
+    sessionsDir = await join(configHome, 'sessions');
     try {
       await ensureSessionsDirExists(sessionsDir);
     } catch (error) {
@@ -177,7 +177,7 @@ export function buildSessionData(input: SaveSessionInput): SessionData {
     agentKind: input.agentKind,
     workspacePath: input.workspacePath,
     title: input.title ?? deriveTitle(input.messages),
-    arcanePlan: input.arcanePlan ?? null,
+    hostedPlan: input.hostedPlan ?? null,
     // Omitted entirely when there are none, so a session file for a
     // plain chat is unchanged in shape.
     ...(input.plans && input.plans.length > 0 ? { plans: input.plans } : {}),
@@ -185,7 +185,7 @@ export function buildSessionData(input: SaveSessionInput): SessionData {
     ...(input.activePlanPath && input.planPhase && input.planPhase !== 'idle'
       ? { planPhase: input.planPhase, activePlanPath: input.activePlanPath }
       : {}),
-    // Same omission rule again: an Arcane session never carries an agent id.
+    // Same omission rule again: a UnityIDE session never carries an agent id.
     ...(input.acpSessionId ? { acpSessionId: input.acpSessionId } : {}),
   };
 }
@@ -260,6 +260,17 @@ export function settleDanglingRequests(messages: AiMessage[]): AiMessage[] {
 export function parseSessionData(json: string): SessionData {
   const data = JSON.parse(json) as SessionData;
   data.agentKind = coerceAgentKind(data.agentKind);
+
+  // `hostedPlan` was `arcanePlan` before the rename. Unlike `agentKind` there
+  // is no coercion step to absorb that, so an un-migrated session would load
+  // with its plan silently dropped — the thread restores, the plan card is
+  // simply gone. Read the old key when the new one is absent.
+  const legacy = (data as { arcanePlan?: HostedPlanEntry[] | null }).arcanePlan;
+  if (data.hostedPlan == null && legacy != null) {
+    data.hostedPlan = legacy;
+  }
+  delete (data as { arcanePlan?: unknown }).arcanePlan;
+
   if (Array.isArray(data.messages)) {
     data.messages = settleDanglingRequests(data.messages);
   }
@@ -299,7 +310,7 @@ export async function loadSession(sessionId: string): Promise<SessionData | null
   try {
     const content = await invoke<string>('read_file', { path: filePath });
     // parseSessionData applies the agentKind migration coercion (a now-removed
-    // agent kind like 'claude' restores as 'arcane' rather than crashing).
+    // agent kind like 'claude' restores as 'hosted' rather than crashing).
     return parseSessionData(content);
   } catch {
     return null;
@@ -339,8 +350,8 @@ export async function renameSession(sessionId: string, title: string): Promise<v
 
 /**
  * List saved sessions as summaries, newest first. Optionally scoped to a
- * workspace. Enumerates the per-app config dir's `sessions` folder (`~/.arcane/sessions`
- * or `~/.arcane-dev/sessions`) via the custom `read_directory` Rust command
+ * workspace. Enumerates the per-app config dir's `sessions` folder (`~/.unityide/sessions`
+ * or `~/.unityide-dev/sessions`) via the custom `read_directory` Rust command
  * (scope-exempt, unlike plugin-fs `readDir` which is blocked by the empty fs
  * scope). Session files are named `session_*.json` — not hidden — so the
  * command's hidden-name skip doesn't drop them.

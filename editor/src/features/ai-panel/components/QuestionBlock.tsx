@@ -58,7 +58,7 @@ function QuestionBlock({ message }: Props) {
   const chosenLabels = resolved ? splitAnswerLabels(req.resolvedAnswer!) : selected;
 
   // Layout follows the content. Bare labels stay a row of chips — compact, and
-  // what the Arcane agent's questions look like. Options that carry an
+  // what the UnityIDE agent's questions look like. Options that carry an
   // explanation or a preview get a stacked card each, because a choice whose
   // reasoning is hidden in a tooltip is a choice made blind.
   const detailed = !!req.options?.some((o) => o.description || o.preview);

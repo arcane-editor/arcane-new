@@ -1,9 +1,9 @@
 ---
 title: Navigation
-description: Navigate files, symbols, and the workspace in ArcaneIDE.
+description: Navigate files, symbols, and the workspace in UnityIDE.
 ---
 
-ArcaneIDE provides fast navigation tools to keep you in flow.
+UnityIDE provides fast navigation tools to keep you in flow.
 
 ## File Explorer
 
