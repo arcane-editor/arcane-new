@@ -23,8 +23,8 @@
  * value (the billing webhook only records the status), so those users stay
  * entitled here. That is deliberate and matches every other paid gate.
  *
- * Why the gate is client-side: running Claude Code costs Arcane nothing — the
- * user pays Anthropic directly and no Arcane API call is involved — so there is
+ * Why the gate is client-side: running Claude Code costs UnityIDE nothing — the
+ * user pays Anthropic directly and no UnityIDE API call is involved — so there is
  * no server response to hang a 403 on. What keeps it honest is that `plan` is
  * never persisted: it is non-null only after a successful `/v1/usage` in THIS
  * app session.
@@ -86,12 +86,12 @@ export const EXTERNAL_AGENT_STATUS_LABEL: Record<ExternalAgentStatus, string> = 
 /** Tooltip / description copy. Never upsell on a status we cannot verify. */
 export const EXTERNAL_AGENT_STATUS_TITLE: Record<ExternalAgentStatus, string> = {
   available: '',
-  'signed-out': 'Sign in to your Arcane account to use external agents.',
+  'signed-out': 'Sign in to your UnityIDE account to use external agents.',
   offline: 'Offline — reconnect to check your plan.',
   // Reached while `/v1/usage` is still in flight (plan is never persisted, so
   // every cold start passes through here) and after that call has failed. Both
   // mean "not confirmed yet", which is not the same as "you need to upgrade".
-  'plan-unknown': "Confirming your plan — this clears once Arcane can reach the server.",
+  'plan-unknown': "Confirming your plan — this clears once UnityIDE can reach the server.",
   'upgrade-required': 'Claude Code is available on paid plans.',
 };
 
@@ -120,7 +120,7 @@ export function refuseSendReason(
   agent: AgentKind,
   gate: ExternalAgentGate,
 ): string | null {
-  if (agent === 'arcane') return null;
+  if (agent === 'hosted') return null;
   const status = externalAgentStatus(gate);
   return status === 'available' ? null : EXTERNAL_AGENT_STATUS_TITLE[status];
 }

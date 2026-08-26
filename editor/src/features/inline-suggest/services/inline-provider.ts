@@ -28,7 +28,7 @@ let registered = false;
 
 // Exported (alongside `handleFailure` below) purely so both can be
 // unit-tested directly with an explicit gate object / result — neither reads
-// `stores/auth.ts`, which `arcane-stream.test.ts` permanently `mock.module`'s
+// `stores/auth.ts`, which `hosted-stream.test.ts` permanently `mock.module`'s
 // process-wide with no restore (see that file's header), so any test in this
 // SAME `bun test` process that exercised `provideInlineCompletions` end-to-end
 // would read a stubbed `useAuthStore.getState()` with no `loggedIn`/`plan`

@@ -317,9 +317,9 @@ export const useUnityStore = create<UnityState>((set, get) => ({
       // nowhere near the install being old, so name the versions explicitly.
       const message =
         reason === 'outdated'
-          ? `The Arcane Unity package is out of date (${installed ?? 'unknown'}; needs ${required}). ` +
+          ? `The UnityIDE Unity package is out of date (${installed ?? 'unknown'}; needs ${required}). ` +
             'Update it — a stale package fails in confusing ways.'
-          : 'Unity is running but the Arcane package is missing. Install it to connect the editor.';
+          : 'Unity is running but the UnityIDE package is missing. Install it to connect the editor.';
 
       const workspacePath = useWorkspaceStore.getState().workspacePath;
       useNotificationsStore.getState().addNotification({
@@ -334,9 +334,9 @@ export const useUnityStore = create<UnityState>((set, get) => ({
                   installBridge(workspacePath)
                     .then(() => {
                       set({ packageStale: false, bridgeInstalled: true });
-                      notify.success('Arcane package installed — Unity will connect shortly.');
+                      notify.success('UnityIDE package installed — Unity will connect shortly.');
                     })
-                    .catch((e) => notify.error(`Could not install the Arcane package: ${e}`));
+                    .catch((e) => notify.error(`Could not install the UnityIDE package: ${e}`));
                 },
               },
             ]

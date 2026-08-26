@@ -6,7 +6,7 @@
  * review finding) instead of the raw tool name + `JSON.stringify(arguments)`
  * dump — raw args are still available behind a "Show raw" sub-toggle. When
  * the tool result carries structured `diffs` (see `diff-decorator.ts` for how
- * the Arcane path populates that field; the Claude/ACP path already did), the
+ * the UnityIDE path populates that field; the Claude/ACP path already did), the
  * block auto-expands and each diff gets an "Open file" affordance.
  *
  * T8: with `ai.edits.applyMode` now defaulting to `'auto'`, most diffs arrive
@@ -235,7 +235,7 @@ function ToolCallBlock({ toolCall, turnUserMessageId }: ToolCallBlockProps) {
   // can relativize it instead of rendering a full filesystem path.
   const workspacePath = useWorkspaceStore((s) => s.workspacePath);
 
-  // Auto-expand the moment diffs arrive (the Arcane path only attaches them
+  // Auto-expand the moment diffs arrive (the UnityIDE path only attaches them
   // once the write/edit call finishes — the block is already mounted and
   // collapsed by then), without fighting a user who deliberately collapses
   // it afterward (the effect only re-fires when `hasDiffs` itself flips).

@@ -48,7 +48,7 @@ const CLIENT_CHANNEL_CAPACITY: usize = 256;
 /// How long to wait for the Unity package to show up before concluding it is
 /// missing or outdated (only when Unity itself is demonstrably running).
 const STALE_PACKAGE_AFTER_MS: u64 = 15_000;
-/// Oldest `com.arcane.editor` this IDE will work with. Must stay in lockstep
+/// Oldest `com.unityide.editor` this IDE will work with. Must stay in lockstep
 /// with `minPackageVersion` in `write_bridge_discovery` and `PackageVersion` in
 /// `arcane-extension/Editor/BridgeBootstrap.cs`.
 const MIN_PACKAGE_VERSION: &str = "0.1.0";
@@ -156,7 +156,7 @@ impl UnityIpcInner {
 /// another window's bridge, and Unity editor events are only ever routed to
 /// the window whose project produced them (see the `emit_to` call sites in
 /// `run_journal_session`/`route_message`). The journal files are per-project by
-/// construction (`<project>/Library/ArcaneIDE/`) and the frontend guarantees at
+/// construction (`<project>/Library/UnityIDE/`) and the frontend guarantees at
 /// most one window per project, so two sessions can never end up writing the
 /// same journal — which would violate the one-writer-per-file invariant the
 /// whole transport depends on.
@@ -236,7 +236,7 @@ async fn shutdown_inner(inner: &UnityIpcInner) {
 // not, so any project under a symlinked directory never connected.
 
 fn bridge_dir(workspace_path: &str) -> PathBuf {
-    Path::new(workspace_path).join("Library").join("ArcaneIDE")
+    Path::new(workspace_path).join("Library").join("UnityIDE")
 }
 
 fn now_ms() -> u64 {
@@ -267,7 +267,7 @@ fn new_session_id() -> String {
 /// holds a project — the same signal Rider and the VS Code extension use.
 ///
 /// Combined with "no `to-ide.jsonl` has appeared", this distinguishes *the user
-/// hasn't opened Unity* from *the com.arcane.editor package is missing or
+/// hasn't opened Unity* from *the com.unityide.editor package is missing or
 /// predates the journal transport*, turning an indefinite "waiting for Unity"
 /// into a prompt the user can act on.
 fn unity_editor_is_running(workspace_path: &str) -> bool {
@@ -304,7 +304,7 @@ fn process_is_alive(pid: u32) -> bool {
 }
 
 /// Write the discovery file the Unity package reads to find this IDE session.
-/// Lives under `Library/ArcaneIDE/bridge.json` (Library/ is VCS-ignored). Only
+/// Lives under `Library/UnityIDE/bridge.json` (Library/ is VCS-ignored). Only
 /// written for actual Unity projects (presence of `ProjectSettings/`).
 ///
 /// Deliberately NOT a Tauri command: `ide_session_id` must belong to a session
@@ -332,7 +332,7 @@ fn write_bridge_discovery(
         "ideVersion": env!("CARGO_PKG_VERSION"),
         "idePid": std::process::id(),
         "minPackageVersion": MIN_PACKAGE_VERSION,
-        "_note": "Arcane IDE bridge. If Unity is not connecting, update the com.arcane.editor package.",
+        "_note": "UnityIDE bridge. If Unity is not connecting, update the com.unityide.editor package.",
     });
     let serialized = serde_json::to_string_pretty(&content).map_err(|e| e.to_string())?;
 
@@ -1040,7 +1040,7 @@ mod tests {
         // No hashing, no canonicalization, nothing to disagree about — which is
         // what retired the sha1 path fallback and its symlink mismatch.
         let dir = bridge_dir("/x/proj");
-        assert_eq!(dir, PathBuf::from("/x/proj/Library/ArcaneIDE"));
+        assert_eq!(dir, PathBuf::from("/x/proj/Library/UnityIDE"));
     }
 
     #[test]
@@ -1159,7 +1159,7 @@ mod tests {
         use std::sync::atomic::AtomicU32;
         static N: AtomicU32 = AtomicU32::new(0);
         let d = std::env::temp_dir().join(format!(
-            "arcane-{}-{}-{}",
+            "unityide-{}-{}-{}",
             tag,
             std::process::id(),
             N.fetch_add(1, Ordering::SeqCst)

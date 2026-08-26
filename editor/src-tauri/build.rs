@@ -8,12 +8,12 @@ use std::os::unix::fs::PermissionsExt;
 /// Sidecars declared in `tauri.conf.json` (`bundle.externalBin`). Tauri's
 /// bundler requires `src-tauri/binaries/<name>-<target-triple>[.exe]` to
 /// exist at build time. The real binaries are produced by separate build
-/// pipelines (PyInstaller for arcane-graph; `bun run build:lsp-sidecars`
+/// pipelines (PyInstaller for unityide-graph; `bun run build:lsp-sidecars`
 /// for the LSP sidecars) and are gitignored. On a fresh clone or when a
 /// contributor hasn't run those scripts yet we drop a tiny stub at each
 /// expected path so `cargo check` and dev builds keep working.
 ///
-/// For arcane-graph the stub responds to `version` with `0.0.0-stub`; the
+/// For unityide-graph the stub responds to `version` with `0.0.0-stub`; the
 /// frontend's `graphify_check` command detects that sentinel and reports
 /// `available: false`, keeping the UI in the quiet "graph: unavailable"
 /// state. The LSP stubs simply exit with a non-zero code on any invocation
@@ -23,14 +23,14 @@ struct Sidecar {
     name: &'static str,
     /// Build script that produces the real binary (printed in warnings).
     build_hint: &'static str,
-    /// True if this sidecar responds to a `version` subcommand (arcane-graph).
+    /// True if this sidecar responds to a `version` subcommand (unityide-graph).
     version_subcommand: bool,
 }
 
 const SIDECARS: &[Sidecar] = &[
     Sidecar {
-        name: "arcane-graph",
-        build_hint: "tooling/arcane-graph-sidecar/build.sh",
+        name: "unityide-graph",
+        build_hint: "tooling/unityide-graph-sidecar/build.sh",
         version_subcommand: true,
     },
     Sidecar {

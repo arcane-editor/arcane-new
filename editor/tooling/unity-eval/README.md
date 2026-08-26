@@ -1,6 +1,6 @@
 # Unity eval
 
-Regression gate for Arcane's Unity agent: prompt, model, and routing changes
+Regression gate for UnityIDE's Unity agent: prompt, model, and routing changes
 must not silently make the agent worse at Unity work. Per the approved
 2026-07-07 design (`../../AI-SPEC.md` § Recommended Approach), this harness
 drives the **real** vendor agent loop (`src/features/ai-panel/services/vendor`)
@@ -368,7 +368,7 @@ but wrong ones.
 majority scoring.** Chat via Variant B (local `wrangler dev` arcane-server,
 tier via `--reasoning-level`, remote Workers AI binding = real production
 routing + the real frozen models); grounding recorded live from the
-**production** server (`--record --server-url https://api.arcaneai.org
+**production** server (`--record --server-url https://api.unityide.app
 --record-api-key-env PROD_JWT`) so `unity_api_search` served real
 Vectorize/D1 corpus data (zero record failures, zero cache misses). Result
 JSONs live in `results/baselines/` (the `2026-07-08T16*/17*` trio).

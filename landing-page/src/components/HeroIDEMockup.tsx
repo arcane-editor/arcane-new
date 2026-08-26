@@ -49,7 +49,7 @@ const HeroIDEMockup = () => {
             <div className="h-3 w-3 rounded-full bg-green-500/50" />
           </div>
           <span className="ml-2 font-mono text-xs text-muted-foreground">
-            PlayerController.cs — ArcaneIDE
+            PlayerController.cs — UnityIDE
           </span>
           <div className="ml-auto flex items-center gap-1">
             <img src="/icon.png" alt="" className="h-4 w-4 rounded-sm" />

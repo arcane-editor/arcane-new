@@ -159,7 +159,7 @@ export interface ExternalPermissionOption {
  * the option the user picked, or `null` if the request was cancelled (the turn
  * was stopped, or the agent died before the user answered).
  *
- * Unlike the two Arcane paths, the options come from the agent. They are
+ * Unlike the two UnityIDE paths, the options come from the agent. They are
  * passed through untouched — inventing or reordering choices here would
  * misrepresent what the user is actually agreeing to.
  */

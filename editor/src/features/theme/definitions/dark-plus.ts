@@ -56,7 +56,7 @@ const darkPlus: ThemeDefinition = {
     'success': '#73c991',
     // Unity semantics, derived from this theme's own warning / info /
     // accent so no new palette decisions are made on its behalf. Inspector is
-    // the RAIL colour, not a text colour — see arcane-dark for why.
+    // the RAIL colour, not a text colour — see unityide-dark for why.
     'unity-lifecycle': '#cca700',
     'unity-engine-type': '#75beff',
     'unity-inspector': '#007acc',

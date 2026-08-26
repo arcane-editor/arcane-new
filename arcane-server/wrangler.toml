@@ -7,7 +7,7 @@ compatibility_flags = ["nodejs_compat"]
 # with this block must be run MANUALLY (not from CI) — see the Phase 1 plan
 # Task 5 — in case wrangler asks to confirm adopting the existing domain.
 routes = [
-  { pattern = "api.arcaneai.org", custom_domain = true }
+  { pattern = "api.unityide.app", custom_domain = true }
 ]
 
 [[d1_databases]]
@@ -49,14 +49,24 @@ CF_AI_GATEWAY_ID = "arcane-ai-gateway"
 SPARK_BASE_URL = "https://api.meta.ai/v1"
 # Base URL of the user-facing website (auth pages live there). Phase 2 uses
 # this for the device-flow verification_uri and email links.
-WEB_BASE_URL = "https://arcaneai.org"
+WEB_BASE_URL = "https://unityide.app"
 # This worker's own public base URL — used as the OAuth redirect_uri host
 # (Google + GitHub) and anywhere the server must name itself. GitHub allows a
 # single callback URL per OAuth App, so prod and dev need one App each,
 # registered against their own API_BASE_URL.
-API_BASE_URL = "https://api.arcaneai.org"
-# Verified sender on the onboarded arcaneai.org Email Service domain.
-EMAIL_FROM = "no-reply@arcaneai.org"
+API_BASE_URL = "https://api.unityide.app"
+# Verified sender on the onboarded unityide.app Email Service domain.
+#
+# DEPLOY GATE: unityide.app must be onboarded in Cloudflare Email Sending with
+# MX/SPF on cf-bounce, DKIM on cf-bounce._domainkey and DMARC on _dmarc all
+# showing verified BEFORE this value ships. Email Service refuses to send from
+# an unverified domain, and sendEmail() (src/lib/email.ts) catches every throw
+# and returns normally — it runs inside waitUntil and must not fail the request.
+# So the failure mode is silent and total: signup returns 200, the code never
+# arrives, and requireVerifiedEmail() then locks that account out of every AI
+# route with nothing visible anywhere. Verify with a real signup on dev before
+# promoting to prod; a green dashboard tick is not the check.
+EMAIL_FROM = "no-reply@unityide.app"
 # Dodo Payments LIVE product ids (per tier / top-up pack), provisioned
 # 2026-08-22 (old Pro/Pro+/Ultra + credit packs archived). Secrets
 # DODO_API_KEY + DODO_WEBHOOK_SECRET are set via `wrangler secret put`.
@@ -70,7 +80,7 @@ DODO_PRODUCT_TOPUP_75 = "pdt_0NlwPDfBR7ti2u1BdgqVU"
 enabled = true
 head_sampling_rate = 1
 
-# Email Service send binding (domain arcaneai.org already onboarded:
+# Email Service send binding (domain unityide.app already onboarded:
 # SPF/DKIM/DMARC live). env.EMAIL.send({to, from, subject, html, text}).
 [[send_email]]
 name = "EMAIL"
@@ -98,11 +108,11 @@ simple = { limit = 30, period = 60 }
 # Deploy: wrangler deploy --env dev   (worker: arcane-server-dev)
 # NOTE: bindings/vars are NOT inherited into named envs — the full set is
 # repeated below. `routes` IS inherited, so it MUST be overridden here or a
-# dev deploy would claim api.arcaneai.org.
+# dev deploy would claim api.unityide.app.
 [env.dev]
 name = "arcane-server-dev"
 routes = [
-  { pattern = "api-dev.arcaneai.org", custom_domain = true }
+  { pattern = "api-dev.unityide.app", custom_domain = true }
 ]
 
 [[env.dev.d1_databases]]
@@ -124,9 +134,9 @@ ENVIRONMENT = "development"
 CF_AI_GATEWAY_ID = "arcane-ai-gateway-dev"
 # See the prod [vars] comment above — full duplicate, named envs don't inherit.
 SPARK_BASE_URL = "https://api.meta.ai/v1"
-WEB_BASE_URL = "https://dev.arcaneai.org"
-API_BASE_URL = "https://api-dev.arcaneai.org"
-EMAIL_FROM = "no-reply@arcaneai.org"
+WEB_BASE_URL = "https://dev.unityide.app"
+API_BASE_URL = "https://api-dev.unityide.app"
+EMAIL_FROM = "no-reply@unityide.app"
 # Dodo product ids are deliberately ABSENT from this block: on dev they are
 # SECRETS on the worker (`wrangler secret put DODO_PRODUCT_<SLOT> --env dev`).
 # A plaintext var of the same name SHADOWS the secret at deploy time, so

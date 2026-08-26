@@ -71,7 +71,7 @@ interface DebugState {
 }
 
 function bpStorageKey(workspace: string): string {
-  return `arcane.debug.breakpoints.${workspace}`;
+  return `unityide.debug.breakpoints.${workspace}`;
 }
 
 function loadBreakpoints(workspace: string): Map<string, Breakpoint[]> {
@@ -195,7 +195,7 @@ export const useDebugStore = create<DebugState>((set, get) => ({
       bindDapHandlers(set, get);
       await dapClient.start();
       await dapClient.request('initialize', {
-        clientID: 'arcane',
+        clientID: 'hosted',
         adapterID: 'mono',
         linesStartAt1: true,
         columnsStartAt1: true,

@@ -56,7 +56,7 @@ const monokai: ThemeDefinition = {
     'success': '#a6e22e',
     // Unity semantics, derived from this theme's own warning / info /
     // accent so no new palette decisions are made on its behalf. Inspector is
-    // the RAIL colour, not a text colour — see arcane-dark for why.
+    // the RAIL colour, not a text colour — see unityide-dark for why.
     'unity-lifecycle': '#e6db74',
     'unity-engine-type': '#66d9ef',
     'unity-inspector': '#a6e22e',

@@ -1,0 +1,14 @@
+User-agent: *
+Allow: /
+
+# Signed-in and one-time-token pages. These also send `noindex` from
+# LandingLayout and are filtered out of the sitemap — this is the third layer,
+# for crawlers that never fetch the page to read the meta tag.
+Disallow: /auth
+Disallow: /account
+Disallow: /admin
+Disallow: /forgot
+Disallow: /reset
+Disallow: /verify
+
+Sitemap: https://unityide.app/sitemap-index.xml

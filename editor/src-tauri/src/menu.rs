@@ -13,7 +13,7 @@ pub fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     let pkg_info = app_handle.package_info();
     let about = PredefinedMenuItem::about(
         &app_handle,
-        Some("About Arcane"),
+        Some("About UnityIDE"),
         Some(AboutMetadata {
             name: Some(pkg_info.name.clone()),
             version: Some(pkg_info.version.to_string()),

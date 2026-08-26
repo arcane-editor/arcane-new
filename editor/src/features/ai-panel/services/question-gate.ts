@@ -12,7 +12,7 @@
  *    still-clickable question behind.
  *
  * Bun-safety: `addQuestionRequest`/`markQuestionCancelled` reach the ai store
- * via a dynamic import, mirroring `todo-tool.ts`'s `pushToArcaneStore` seam —
+ * via a dynamic import, mirroring `todo-tool.ts`'s `pushToHostedStore` seam —
  * `stores/ai.ts` pulls in a chain (`stores/workspace.ts` → `features/editor`
  * → `@monaco-editor/react`, plus `stores/theme.ts`'s `document.documentElement`
  * side effect) that throws under Bun's DOM-less runtime. Since Task 2 landed

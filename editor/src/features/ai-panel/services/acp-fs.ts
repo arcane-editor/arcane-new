@@ -1,7 +1,7 @@
 /**
  * `fs/read_text_file` and `fs/write_text_file` on behalf of an external agent.
  *
- * Arcane advertises the ACP filesystem capabilities deliberately. An agent that
+ * UnityIDE advertises the ACP filesystem capabilities deliberately. An agent that
  * is NOT given them does its own file I/O behind our back, and its edits then
  * arrive with no checkpoint to undo them. Routing writes through here is what
  * keeps per-turn restore working for an agent that is otherwise autonomous.
@@ -20,7 +20,7 @@
  * What this file must NOT do is prompt. The agent has already asked the user
  * for permission through `session/request_permission` before calling us — that
  * ask is the AGENT's, governed by its own permission mode — and a second
- * Arcane-side approval on the same edit is a double prompt users read as a bug.
+ * UnityIDE-side approval on the same edit is a double prompt users read as a bug.
  */
 
 import { invoke } from '@tauri-apps/api/core';
@@ -37,7 +37,7 @@ import {
 /**
  * A ceiling on one IPC payload, not a context-budget policy.
  *
- * It used to be 256 KB, mirroring the Arcane agent's `read` cap. An external
+ * It used to be 256 KB, mirroring the UnityIDE agent's `read` cap. An external
  * agent manages its own context window and will window a large file itself, so
  * the low cap mostly bought a re-read in pieces. The cap is kept — not removed
  * — so a single call cannot push an unbounded string across the Tauri boundary.
@@ -116,8 +116,8 @@ export async function handleFsRead(params: FsReadParams): Promise<{ content: str
  *   3. write.
  *
  * There is deliberately no fourth step. Writes used to be registered with
- * `useEditReviewStore`, which put every one of the agent's edits in Arcane's
- * Accept/Reject queue — a workflow built around the Arcane agent's `auto` apply
+ * `useEditReviewStore`, which put every one of the agent's edits in UnityIDE's
+ * Accept/Reject queue — a workflow built around the UnityIDE agent's `auto` apply
  * mode, imposed on an agent that already decides for itself when to ask. The
  * checkpoint stays: it records bytes rather than workflow, and it is what
  * "restore this turn" is built on.

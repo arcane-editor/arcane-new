@@ -18,8 +18,8 @@ export interface UpdateReadyPayload {
  */
 export function updateReadyMessage({ version, installed }: UpdateReadyPayload): string {
   return installed
-    ? `Arcane ${version} is installed — restart whenever you're ready.`
-    : `Arcane ${version} is available — restarting will download and install it.`;
+    ? `UnityIDE ${version} is installed — restart whenever you're ready.`
+    : `UnityIDE ${version} is available — restarting will download and install it.`;
 }
 
 /**
@@ -30,7 +30,7 @@ export function updateReadyMessage({ version, installed }: UpdateReadyPayload): 
  * reach a natural stopping point.
  */
 export async function startUpdateNotices(): Promise<UnlistenFn> {
-  return listen<UpdateReadyPayload>('arcane-update-ready', (event) => {
+  return listen<UpdateReadyPayload>('unityide-update-ready', (event) => {
     useNotificationsStore.getState().addNotification({
       type: 'info',
       message: updateReadyMessage(event.payload),

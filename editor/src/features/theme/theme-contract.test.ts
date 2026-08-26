@@ -2,7 +2,7 @@
  * Executable version of the token contract documented in `types.ts`.
  *
  * Themes broke in the past not because a palette was ugly but because the
- * MECHANISM had no invariants: `--hover` was a 4% overlay in the Arcane themes
+ * MECHANISM had no invariants: `--hover` was a 4% overlay in the UnityIDE themes
  * and an opaque slab in the four VS Code-derived ones, so no single CSS rule
  * could be right in both; `--bg-hover` was referenced 19 times and defined by
  * nobody, so those hovers silently did nothing; `--overlay-shadow` was a bare
@@ -15,7 +15,7 @@
 import { describe, it, expect } from 'bun:test';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { getAllThemes } from './registry';
+import { getAllThemes, getTheme, resolveThemeId } from './registry';
 import { monacoThemeFor, RED_DEFAULT_MONACO_COLOR_IDS } from './apply';
 import type { ThemeDefinition } from './types';
 
@@ -139,7 +139,7 @@ describe('token contract is parseable', () => {
 
   it('registers all six themes', () => {
     expect(themes.map((t) => t.id).sort()).toEqual([
-      'arcane-dark', 'arcane-light', 'dark-plus', 'dracula', 'light-plus', 'monokai',
+      'dark-plus', 'dracula', 'light-plus', 'monokai', 'unityide-dark', 'unityide-light',
     ]);
   });
 });
@@ -271,15 +271,15 @@ describe.each(themes.map((t) => [t.id, t] as const))('%s', (_id, theme) => {
 //
 // The `ui` contrast tests above have existed for a while. `monaco.rules` and
 // `monaco.colors` never had any, which is how `comment` sat at 2.72:1 in
-// arcane-dark and 2.75:1 in arcane-light through a green suite — roughly 40%
+// unityide-dark and 2.75:1 in unityide-light through a green suite — roughly 40%
 // of a typical C# file rendered below the AA floor.
 //
-// Enforced for the Arcane themes ONLY. The other four are faithful ports and
+// Enforced for the UnityIDE themes ONLY. The other four are faithful ports and
 // their palettes are upstream's decision, not ours; an audit at the time of
 // writing found monokai with 11 rules under 4.5:1 (its signature #F92672 sits
 // at 3.93) and dracula's canonical comment blue #6272A4 at 3.03. Holding them
 // to AA would mean not shipping Monokai or Dracula.
-const CONTRAST_ENFORCED = new Set(['arcane-dark', 'arcane-light']);
+const CONTRAST_ENFORCED = new Set(['unityide-dark', 'unityide-light']);
 
 const enforced = themes.filter((t) => CONTRAST_ENFORCED.has(t.id));
 
@@ -318,7 +318,7 @@ describe.each(enforced.map((t) => [t.id, t] as const))('%s syntax contrast', (_i
     expect(ratio).toBeGreaterThanOrEqual(4.5);
   });
 
-  // The elevation ladder. Arcane Dark once had twelve surface tokens whose
+  // The elevation ladder. UnityIDE Dark once had twelve surface tokens whose
   // values sat within ~2% luminance of each other, so the whole window read as
   // one flat sheet and every region boundary depended on a 5%-white hairline.
   // These regions carry no border by design — the step IS the separator — so
@@ -425,10 +425,10 @@ describe('no theme leaves a red-defaulting Monaco colour to the default', () => 
   });
 
   it("a theme's own explicit choice still wins over the derived default", () => {
-    // arcane-dark deliberately states a rose that differs from its error-text.
-    const arcaneDark = themes.find((t) => t.id === 'arcane-dark')!;
-    expect(monacoThemeFor(arcaneDark).colors!['editorError.foreground']).toBe(
-      arcaneDark.monaco.colors!['editorError.foreground'],
+    // unityide-dark deliberately states a rose that differs from its error-text.
+    const unityideDark = themes.find((t) => t.id === 'unityide-dark')!;
+    expect(monacoThemeFor(unityideDark).colors!['editorError.foreground']).toBe(
+      unityideDark.monaco.colors!['editorError.foreground'],
     );
   });
 });
@@ -443,7 +443,7 @@ describe('no theme leaves a red-defaulting Monaco colour to the default', () => 
  * custom properties, the terminal block goes to xterm), silently becomes
  * OPAQUE #FF0000 in the editor.
  *
- * That is what "the weird red effect" was: arcane-dark and arcane-light wrote
+ * That is what "the weird red effect" was: unityide-dark and unityide-light wrote
  * 12 colours each as `rgba(...)`, so putting the cursor next to a word painted
  * it red (`editor.wordHighlightBackground`), the matching bracket went red
  * (`editorBracketMatch.background`), and the scrollbar slider became a red bar
@@ -471,5 +471,31 @@ describe('monaco colours are hex — rgba() silently renders as red', () => {
       }
     }
     expect(bad).toEqual([]);
+  });
+});
+
+/**
+ * The theme id is a persisted value twice over: localStorage under
+ * `editor-theme-id-v2`, and the `data-theme` attribute the stylesheet keys off.
+ * An unrecognised stored id falls through to DEFAULT_THEME_ID, so a missing
+ * alias does not error — it silently moves a light-theme user to dark, which is
+ * wrong in the most visible direction possible.
+ */
+describe('legacy theme ids', () => {
+  it('maps the pre-rename ids onto the current ones', () => {
+    expect(resolveThemeId('arcane-dark')).toBe('unityide-dark');
+    expect(resolveThemeId('arcane-light')).toBe('unityide-light');
+  });
+
+  it('resolves to a theme that is actually registered', () => {
+    for (const legacy of ['arcane-dark', 'arcane-light']) {
+      expect(getTheme(resolveThemeId(legacy))).toBeDefined();
+    }
+  });
+
+  it('leaves current and unknown ids untouched', () => {
+    expect(resolveThemeId('unityide-dark')).toBe('unityide-dark');
+    expect(resolveThemeId('monokai')).toBe('monokai');
+    expect(resolveThemeId('nonsense')).toBe('nonsense');
   });
 });

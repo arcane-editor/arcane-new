@@ -8,18 +8,18 @@ import {
 
 // The sandbox must accept a LIST of roots. In Unity projects it used to be
 // Assets/ alone, which blocked the agent from its own plan files under
-// <workspace>/.arcane/ — resume sends could not re-read the plan ("this
-// environment blocks access to .arcane/") and checkbox ticking silently never
+// <workspace>/.unityide/ — resume sends could not re-read the plan ("this
+// environment blocks access to .unityide/") and checkbox ticking silently never
 // worked (every plan stuck at 0/N done).
 describe('resolveWithinRoot with multiple roots', () => {
-  const ROOTS = ['/proj/Assets', '/proj/.arcane'] as const;
+  const ROOTS = ['/proj/Assets', '/proj/.unityide'] as const;
 
   it('accepts a path inside the first root', () => {
     expect(resolveWithinRoot('Assets/Scripts/Foo.cs', '/proj', ROOTS)).toBe('/proj/Assets/Scripts/Foo.cs');
   });
 
   it('accepts a path inside a later root (the plan file case)', () => {
-    expect(resolveWithinRoot('/proj/.arcane/plans/p.md', '/proj', ROOTS)).toBe('/proj/.arcane/plans/p.md');
+    expect(resolveWithinRoot('/proj/.unityide/plans/p.md', '/proj', ROOTS)).toBe('/proj/.unityide/plans/p.md');
   });
 
   it('rejects a path outside every root', () => {
@@ -36,7 +36,7 @@ describe('resolveWithinRoot with multiple roots', () => {
 
   it('containment is case-insensitive for every root', () => {
     expect(resolveWithinRoot('/proj/assets/A.cs', '/proj', ROOTS)).toBe('/proj/assets/A.cs');
-    expect(resolveWithinRoot('/proj/.ARCANE/plans/p.md', '/proj', ROOTS)).toBe('/proj/.ARCANE/plans/p.md');
+    expect(resolveWithinRoot('/proj/.UNITYIDE/plans/p.md', '/proj', ROOTS)).toBe('/proj/.UNITYIDE/plans/p.md');
   });
 
   it('the error names every allowed root so the model can self-correct', () => {
@@ -46,14 +46,14 @@ describe('resolveWithinRoot with multiple roots', () => {
     } catch (e) {
       const msg = pathOutsideRootMessage(e as PathOutsideRootError);
       expect(msg).toContain('/proj/Assets');
-      expect(msg).toContain('/proj/.arcane');
+      expect(msg).toContain('/proj/.unityide');
     }
   });
 });
 
 describe('primaryRoot', () => {
   it('returns the first root of a list, the string itself, or null', () => {
-    expect(primaryRoot(['/proj/Assets', '/proj/.arcane'])).toBe('/proj/Assets');
+    expect(primaryRoot(['/proj/Assets', '/proj/.unityide'])).toBe('/proj/Assets');
     expect(primaryRoot('/proj/Assets')).toBe('/proj/Assets');
     expect(primaryRoot(null)).toBeNull();
     expect(primaryRoot([])).toBeNull();

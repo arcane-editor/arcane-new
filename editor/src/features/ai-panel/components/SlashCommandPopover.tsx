@@ -5,7 +5,7 @@
  * `/<name> `, leaving the caret ready for any argument the command declares.
  *
  * The list is entirely agent-supplied: an agent's commands are its own, they
- * change with its configuration (project-local commands, plugins), and Arcane
+ * change with its configuration (project-local commands, plugins), and UnityIDE
  * neither interprets nor validates them — the text is sent as an ordinary
  * prompt and the agent does the rest.
  */

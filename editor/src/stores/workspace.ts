@@ -54,7 +54,7 @@ let unlistenContentChanged: (() => void) | null = null;
 let fileWatcherDebounce: ReturnType<typeof setTimeout> | null = null;
 
 // Unity-only: when .cs files are added/removed under Assets/, the generated
-// `.arcane.csproj` is stale until we regenerate it and nudge csharp-ls. Unity
+// `.unityide.csproj` is stale until we regenerate it and nudge csharp-ls. Unity
 // touches many files at once (it rewrites whole script folders on import), so
 // we coalesce the burst with a ~2s debounce and accumulate the net delta
 // across the window before doing the (expensive, Rust-side) csproj regen.
@@ -94,7 +94,7 @@ function clearUnityCsprojReload(): void {
 /**
  * Hot-reload the C# project model when .cs files are added/removed under a
  * Unity project's Assets/. Unity regenerates its own project files on every
- * import, but the IDE drives csharp-ls off its own generated `.arcane.csproj`
+ * import, but the IDE drives csharp-ls off its own generated `.unityide.csproj`
  * (globbed from `Assets/**​/*.cs`), so a new/removed script is invisible to
  * IntelliSense until we (1) regenerate that csproj and (2) tell csharp-ls.
  *
@@ -108,7 +108,7 @@ function clearUnityCsprojReload(): void {
  * The notification alone is not enough, and this was confirmed in live use:
  * a newly created script reported `CS0518: Predefined type 'System.Void' is
  * not defined` on every line until the window was reloaded. csharp-ls (Roslyn)
- * ignores didChangeWatchedFiles for project *structure*, and `.arcane.csproj`
+ * ignores didChangeWatchedFiles for project *structure*, and `.unityide.csproj`
  * globs `Assets/**​/*.cs` — MSBuild expands that glob at load, so a file
  * created afterwards belongs to no project at all. A file in no project has no
  * corelib reference, which is precisely what CS0518 reports.
@@ -163,7 +163,7 @@ async function runUnityCsprojReload(
   addedCs: string[],
   removedCs: string[],
 ): Promise<void> {
-  // Regenerate `.arcane.csproj`/`.arcane.sln` from the current Assets/ tree.
+  // Regenerate `.unityide.csproj`/`.unityide.sln` from the current Assets/ tree.
   // All the heavy lifting lives in Rust; the frontend just orchestrates.
   // Returns the solution path (or null if it couldn't be generated).
   let solutionPath: string | null;
@@ -185,7 +185,7 @@ async function runUnityCsprojReload(
   const changes: WatchedFileChange[] = [];
   // The regenerated project file itself changed. unity_setup_lsp returns the
   // .sln path; that's the concrete artifact we have a path for, and it sits
-  // next to the .arcane.csproj it generates — signal it as Changed so Roslyn
+  // next to the .unityide.csproj it generates — signal it as Changed so Roslyn
   // re-reads the project graph.
   if (solutionPath) {
     changes.push({ uri: fileUri(solutionPath), type: FILE_CHANGE_CHANGED });
@@ -1094,7 +1094,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         const unlisten = await listenScoped<FileIndexDelta>('file-index-changed', (event) => {
           const delta = event.payload;
           // Unity-only: keep the C# project model in sync when .cs files are
-          // added/removed under Assets/ (regenerate .arcane.csproj + nudge
+          // added/removed under Assets/ (regenerate .unityide.csproj + nudge
           // csharp-ls). Self-debounced (~2s) and self-gated to Unity projects;
           // a no-op everywhere else. Independent of the tree-refresh debounce
           // below so neither path starves the other.

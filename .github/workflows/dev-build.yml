@@ -1,7 +1,7 @@
 name: Dev Build
 
-# Builds the side-by-side "Arcane Dev" app (identifier com.inno.editor.dev,
-# scheme arcane-dev://, config dir ~/.arcane-dev) with the DEV API/web URLs
+# Builds the side-by-side "UnityIDE Dev" app (identifier com.inno.editor.dev,
+# scheme unityide-dev://, config dir ~/.unityide-dev) with the DEV API/web URLs
 # baked in, and uploads installers to arcane-releases under dev/.
 #
 # Mirrors release.yml step-for-step — keep the two in sync. Same two repo
@@ -27,12 +27,12 @@ jobs:
           - os: macos-14          # Apple Silicon
             triple: aarch64-apple-darwin
             bundles: dmg
-            asset: Arcane-Dev-arm64.dmg
+            asset: UnityIDE-Dev-arm64.dmg
             glob: editor/src-tauri/target/release/bundle/dmg/*.dmg
           - os: windows-latest    # Windows x64
             triple: x86_64-pc-windows-msvc
             bundles: nsis
-            asset: ArcaneDevSetup.exe
+            asset: UnityIDEDevSetup.exe
             glob: editor/src-tauri/target/release/bundle/nsis/*-setup.exe
     runs-on: ${{ matrix.os }}
     defaults:
@@ -56,9 +56,9 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Build arcane-graph sidecar
+      - name: Build unityide-graph sidecar
         run: |
-          cd editor/tooling/arcane-graph-sidecar
+          cd editor/tooling/unityide-graph-sidecar
           python -m venv .venv
           if [[ "$RUNNER_OS" == "Windows" ]]; then
             PY=".venv/Scripts/python.exe"
@@ -70,9 +70,9 @@ jobs:
           "$PY" -m PyInstaller pyinstaller.spec
           mkdir -p ../../src-tauri/binaries
           if [[ "$RUNNER_OS" == "Windows" ]]; then
-            cp dist/arcane-graph.exe "../../src-tauri/binaries/arcane-graph-${{ matrix.triple }}.exe"
+            cp dist/unityide-graph.exe "../../src-tauri/binaries/unityide-graph-${{ matrix.triple }}.exe"
           else
-            cp dist/arcane-graph "../../src-tauri/binaries/arcane-graph-${{ matrix.triple }}"
+            cp dist/unityide-graph "../../src-tauri/binaries/unityide-graph-${{ matrix.triple }}"
           fi
 
       - name: Install JS deps
@@ -89,8 +89,8 @@ jobs:
           NODE_OPTIONS: --max-old-space-size=4096
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          VITE_ARCANE_API_URL: https://api-dev.arcaneai.org
-          VITE_ARCANE_WEB_URL: https://dev.arcaneai.org
+          VITE_API_URL: https://api-dev.unityide.app
+          VITE_WEB_URL: https://dev.unityide.app
         run: cd editor && bunx tauri build --bundles ${{ matrix.bundles }} --config src-tauri/tauri.dev.conf.json
 
       - name: Stage installer under its public name

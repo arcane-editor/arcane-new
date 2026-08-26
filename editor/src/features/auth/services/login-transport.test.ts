@@ -8,7 +8,7 @@ let loopbackPort = 53411;
 mock.module('@tauri-apps/api/core', () => ({
   invoke: async (cmd: string) => {
     invokeCalls.push(cmd);
-    if (cmd === 'auth_deep_link_scheme') return 'arcane-dev';
+    if (cmd === 'auth_deep_link_scheme') return 'unityide-dev';
     if (cmd === 'auth_loopback_start') return loopbackPort;
     if (cmd === 'auth_loopback_stop') return undefined;
     throw new Error(`unexpected invoke: ${cmd}`);
@@ -61,10 +61,10 @@ describe('deepLinkTransport', () => {
       return true;
     });
 
-    expect(armed.params).toEqual({ scheme: 'arcane-dev' });
+    expect(armed.params).toEqual({ scheme: 'unityide-dev' });
     expect(invokeCalls).toEqual(['auth_deep_link_scheme']);
 
-    deepLinkHandler!(['arcane-dev://auth/callback?code=abc&state=xyz']);
+    deepLinkHandler!(['unityide-dev://auth/callback?code=abc&state=xyz']);
     expect(seen).toEqual([{ code: 'abc', state: 'xyz' }]);
   });
 
@@ -75,7 +75,7 @@ describe('deepLinkTransport', () => {
       return true;
     });
 
-    deepLinkHandler!(['arcane-dev://something-else', 'https://example.com/x']);
+    deepLinkHandler!(['unityide-dev://something-else', 'https://example.com/x']);
     expect(seen).toEqual([]);
   });
 
@@ -87,9 +87,9 @@ describe('deepLinkTransport', () => {
     });
 
     deepLinkHandler!([
-      'arcane-dev://auth/callback?code=a&state=no-match',
-      'arcane-dev://auth/callback?code=b&state=match',
-      'arcane-dev://auth/callback?code=c&state=match', // must NOT be inspected — scan stopped at b
+      'unityide-dev://auth/callback?code=a&state=no-match',
+      'unityide-dev://auth/callback?code=b&state=match',
+      'unityide-dev://auth/callback?code=c&state=match', // must NOT be inspected — scan stopped at b
     ]);
     expect(seen).toEqual([
       { code: 'a', state: 'no-match' },

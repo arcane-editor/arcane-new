@@ -62,7 +62,7 @@ describe('persistence', () => {
    * single most annoying possible failure mode.
    */
   it('treats an unreadable record as everything-seen', () => {
-    store.set('arcane.coachMarks.seen', '{not json');
+    store.set('unityide.coachMarks.seen', '{not json');
     for (const id of Object.keys(COACH_MARKS)) {
       expect(shouldShow(id, true, SETTLED)).toBe(false);
     }

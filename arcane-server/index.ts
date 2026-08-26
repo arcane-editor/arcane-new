@@ -26,9 +26,9 @@ const app = new Hono<AppEnv>();
 // (editor native fetch, curl, Google OAuth redirects) bypass CORS entirely —
 // this list only governs what browsers may read cross-origin.
 const ALLOWED_ORIGINS = [
-    'https://arcaneai.org',
-    'https://www.arcaneai.org',
-    'https://dev.arcaneai.org',
+    'https://unityide.app',
+    'https://www.unityide.app',
+    'https://dev.unityide.app',
     'http://localhost:4321',    // astro dev server
     'http://localhost:1420',    // tauri dev server
     'tauri://localhost',        // packaged app (macOS/Linux)

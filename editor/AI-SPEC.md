@@ -1,21 +1,21 @@
-# Optimizing the Arcane Agent for Unity — Claude-Code-level output on cheap models
+# Optimizing the UnityIDE Agent for Unity — Claude-Code-level output on cheap models
 
 > **Status: research complete, awaiting 4 constraints.** This file currently captures verified codebase facts + research synthesis. The *Recommended Approach* (phased roadmap + model shortlist) is filled in once the user answers the four constraint questions below. Do not treat this as final until the "Recommended Approach" and "Verification" sections are populated and approved.
 
 ## Context
 
-The user is building **Arcane**, an AI coding agent inside a Tauri + React Unity IDE. The goal: make it produce **Claude-Code-level agentic coding output, but specialized for Unity game development, at minimal cost** — explicitly *without* heavy reliance on frontier models (favoring open models like DeepSeek, Kimi K2.5, MiniMax, Qwen3-Coder, GLM). A `graphify` knowledge graph of the Unity project already exists and is partially wired in.
+The user is building **UnityIDE**, an AI coding agent inside a Tauri + React Unity IDE. The goal: make it produce **Claude-Code-level agentic coding output, but specialized for Unity game development, at minimal cost** — explicitly *without* heavy reliance on frontier models (favoring open models like DeepSeek, Kimi K2.5, MiniMax, Qwen3-Coder, GLM). A `graphify` knowledge graph of the Unity project already exists and is partially wired in.
 
 The central question this plan answers: **how do we close the quality gap to Claude Code using cheap/open models?** The research answer (two independent streams converged): *the harness and grounding matter more than the model.* ~70% of Claude Code's edge is a portable harness (small tools, compaction discipline, grounded verification, plan/todo tracking); only ~30% is raw model capability. So the plan invests primarily in **verification loops + Unity grounding + context/cost discipline**, and treats model choice as a swappable, secondary lever.
 
 ## Current architecture (verified from code)
 
-- **Two agent backends** (`src/stores/ai.ts`): an **Arcane path** (default) and a **Claude/ACP path**. Optimize the Arcane path; the Claude path is tightly coupled to Anthropic's bridge and not worth retargeting.
-- **Arcane loop is PI-derived and already OpenAI-compatible.** `vendor/agent-loop.ts` runs the loop; `vendor/agent.ts` wraps it with a **pluggable `streamFn`**; `arcane-stream.ts` POSTs OpenAI-format `chat/completions` (tools converted to `function` format, `tool_calls` parsed) to `api.arcaneai.org`. **Swapping models = change base URL + key + model name + settings UI.** No loop rewrite. Tool-calling is already OpenAI-style, not Anthropic `tool_use`.
+- **Two agent backends** (`src/stores/ai.ts`): an **UnityIDE path** (default) and a **Claude/ACP path**. Optimize the UnityIDE path; the Claude path is tightly coupled to Anthropic's bridge and not worth retargeting.
+- **UnityIDE loop is PI-derived and already OpenAI-compatible.** `vendor/agent-loop.ts` runs the loop; `vendor/agent.ts` wraps it with a **pluggable `streamFn`**; `hosted-stream.ts` POSTs OpenAI-format `chat/completions` (tools converted to `function` format, `tool_calls` parsed) to `api.unityide.app`. **Swapping models = change base URL + key + model name + settings UI.** No loop rewrite. Tool-calling is already OpenAI-style, not Anthropic `tool_use`.
 - **Mode-aware system prompts** (`services/prompts/`): ask / agent / plan-planning / plan-execution, each decorated with **Unity facts** (`unity-facts.ts` — version, URP/HDRP, input system, packages, `.ai/unity-rules.md`), a hardcoded **Unity context crib** (`unity-context.ts` — lifecycle/gotchas), and a **graphify snapshot** (`graphify/services/graph-context.ts`, capped ~1KB).
 - **Tools** (`vendor/tools/`): `read`, `list`, `write`, `edit`, `bash` (Typebox schema → OpenAI function), plus **graphify tools** (`graphify_query/explain/path`) and **Unity read/mutate tools** with an approval + compile gate (`withUnityAnalyzerGate`).
 - **graphify** = structural knowledge graph only (AST + LLM-extracted edges; NetworkX node-link JSON). **No embeddings / vector search anywhere in the repo.**
-- **MCP** is supported only on the Claude path today (`mcp-config.ts`, `~/.arcane/mcp-servers.json`); the Arcane loop has no native MCP.
+- **MCP** is supported only on the Claude path today (`mcp-config.ts`, `~/.unityide/mcp-servers.json`); the UnityIDE loop has no native MCP.
 - **Unity awareness today:** 67 lifecycle methods (`features/csharp/services/lifecycle-db.ts`), `csharp-ls` LSP, `UNITY_API_LIST` for @-mentions, live scene/console context.
 
 ## Gaps blocking "Claude Code level" (verified + research-confirmed)
@@ -59,7 +59,7 @@ Superseded by the approved design + plan (2026-07-07):
 - Design: `../docs/superpowers/specs/2026-07-07-unity-ai-differentiation-design.md`
 - Plan (Phases 0-1): `../docs/superpowers/plans/2026-07-07-ai-quick-wins-and-eval.md`
 
-Constraint answers (2026-07-06): privacy = open to any provider; deployment = hosted, Arcane pays (CF failover retained); priority = verified agentic edits, then grounded Q&A, then completion; retrieval = graphify + unity_api_search (no new embeddings infra).
+Constraint answers (2026-07-06): privacy = open to any provider; deployment = hosted, UnityIDE pays (CF failover retained); priority = verified agentic edits, then grounded Q&A, then completion; retrieval = graphify + unity_api_search (no new embeddings infra).
 Note: several "Gaps" above are now closed in code — compaction exists (`vendor/compaction.ts`), the verification loop exists (analyzer + compile gates feed diagnostics back), and `unity_api_search` provides version-accurate grounding. See the design doc §2 for the verified current state.
 
 ## Verification
@@ -86,4 +86,4 @@ Superseded the 2026-07 "deliberately off" record. Design + rollout:
 
 - **Context pack** (`prompts/context-pack.ts`, frozen per conversation): asmdef assembly map + graphify god-node key files + per-project memory digest, deterministic and effort-budgeted.
 - **`project_symbols` tool**: file/type symbol tables straight from graph.json (Rust `graphify_symbols`) — replaces whole-file reads used only to find a member.
-- **Per-project memory** (`services/memory/`): markdown entries under `Library/ArcaneIDE/memory` (user-visible/editable), written by a post-send distiller on the side-task lane, deduped-before-write, hard-capped per category with never-recalled-only eviction, consolidated near the cap, recalled via the digest + `memory_search`. Task context is one overwrite-only file. Setting: `ai.memory.enabled`.
+- **Per-project memory** (`services/memory/`): markdown entries under `Library/UnityIDE/memory` (user-visible/editable), written by a post-send distiller on the side-task lane, deduped-before-write, hard-capped per category with never-recalled-only eviction, consolidated near the cap, recalled via the digest + `memory_search`. Task context is one overwrite-only file. Setting: `ai.memory.enabled`.

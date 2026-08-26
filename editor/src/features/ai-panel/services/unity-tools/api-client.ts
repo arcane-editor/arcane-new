@@ -15,10 +15,10 @@ import { useAuthStore } from '../../../../stores/auth';
 import { postJsonWithTimeout } from './post-json';
 import { unityMajorMinor } from '../../../../data/unity-docs-index';
 import { getUnityGroundingContext } from '../prompts/unity-facts';
-import { ARCANE_API_URL } from '../../../../config/api';
+import { API_URL } from '../../../../config/api';
 
-// Same host as the AI chat path (see arcane-stream.ts / graphify-enrich.ts).
-const ARCANE_SERVER_URL = ARCANE_API_URL;
+// Same host as the AI chat path (see hosted-stream.ts / graphify-enrich.ts).
+const HOSTED_SERVER_URL = API_URL;
 
 /**
  * Discriminated result for the two version-accurate grounding calls
@@ -70,7 +70,7 @@ async function postJson<T>(path: string, body: unknown): Promise<GroundingResult
   if (!token) return { ok: false, reason: 'signed-out' };
   // Bounded (10s) — see post-json.ts. These calls run inside the agent's tool
   // loop; an unbounded fetch here once froze the whole agent mid-turn.
-  const result = await postJsonWithTimeout(`${ARCANE_SERVER_URL}${path}`, token, body);
+  const result = await postJsonWithTimeout(`${HOSTED_SERVER_URL}${path}`, token, body);
   if (!result.ok) return result;
   return { ok: true, data: result.json as T };
 }

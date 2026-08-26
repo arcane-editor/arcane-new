@@ -182,7 +182,7 @@ export default function PricingTable({ variant = 'page' }: PricingTableProps) {
                                             href="/#download"
                                             className="block text-center h-10 leading-10 rounded-md px-4 bg-secondary text-secondary-foreground text-sm font-semibold hover:bg-secondary/80 transition-all"
                                         >
-                                            Download Arcane
+                                            Download UnityIDE
                                         </a>
                                     ) : (
                                         <button

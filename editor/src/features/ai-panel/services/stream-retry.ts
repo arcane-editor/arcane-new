@@ -1,6 +1,6 @@
 /**
  * Shared, pure stream-hardening primitives used by both the production
- * `arcane-stream.ts` StreamFn and the eval harness's `eval-stream.ts`
+ * `hosted-stream.ts` StreamFn and the eval harness's `eval-stream.ts`
  * StreamFn (tooling/unity-eval). Extracted so the two don't drift: the
  * eval's retry/timeout behavior was hardened against real Cloudflare
  * Workers AI failures (rate-limit 3021, 502/1031 gateway errors, and a

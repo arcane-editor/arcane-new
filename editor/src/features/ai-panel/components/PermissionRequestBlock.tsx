@@ -1,7 +1,7 @@
 /**
  * PermissionRequestBlock — inline approval UI rendered in the message list
- * when an Arcane Unity engine-mutate tool asks before touching the live
- * editor (F-5.6), or Arcane's write/edit tools ask before touching a file
+ * when a UnityIDE Unity engine-mutate tool asks before touching the live
+ * editor (F-5.6), or UnityIDE's write/edit tools ask before touching a file
  * (P5.3, `write-approval-gate.ts`). After the user picks, the buttons lock
  * and show the chosen option.
  *
@@ -45,7 +45,7 @@ function PermissionRequestBlock({ message }: Props) {
 
   function pick(optionId: string) {
     if (resolved) return;
-    // The Arcane vendor loop (engine-mutate approvals AND P5.3's file-write
+    // The UnityIDE vendor loop (engine-mutate approvals AND P5.3's file-write
     // approvals) uses the shared approval-gate pending-map flow, which resolves
     // the pending promise and locks the buttons.
     resolvePendingApproval(req!.toolCallId, optionId);

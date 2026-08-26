@@ -1,10 +1,10 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
-using Arcane.Bridge;
+using UnityIDE.Bridge;
 using NUnit.Framework;
 
-namespace Arcane.Tests
+namespace UnityIDE.Tests
 {
     /// <summary>
     /// Pins the journal wire format so it cannot drift between C# and Rust.
@@ -35,7 +35,7 @@ namespace Arcane.Tests
         [SetUp]
         public void SetUp()
         {
-            _dir = Path.Combine(Path.GetTempPath(), "arcane-contract-" + Path.GetRandomFileName());
+            _dir = Path.Combine(Path.GetTempPath(), "unityide-contract-" + Path.GetRandomFileName());
             Directory.CreateDirectory(_dir);
         }
 

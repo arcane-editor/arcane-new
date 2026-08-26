@@ -7,7 +7,7 @@
 // The old X-Refreshed-Token handling was dead code (the server never sends
 // that header) and was removed with it (spec C6 optional cleanup).
 import { invoke } from '@tauri-apps/api/core';
-import { ARCANE_API_URL } from '../../../config/api';
+import { API_URL } from '../../../config/api';
 import type { SessionUser } from './session-types';
 
 /** Mirrors the server's makeUserResponse() exactly. `plan` and `credits` were
@@ -30,7 +30,7 @@ export interface UsageSummary {
 }
 
 export class AuthClient {
-  private serverUrl: string = ARCANE_API_URL;
+  private serverUrl: string = API_URL;
 
   /**
    * Redeem the one-time grant code from the browser flow (deep link or

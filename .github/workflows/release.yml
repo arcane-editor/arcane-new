@@ -1,6 +1,6 @@
 name: Release
 
-# Builds the Arcane editor for macOS (Apple Silicon) and Windows x64,
+# Builds the UnityIDE editor for macOS (Apple Silicon) and Windows x64,
 # then uploads the installers to the `arcane-releases` R2 bucket.
 #
 # Triggered by pushing a version tag (e.g. `git tag v0.1.0 && git push --tags`)
@@ -29,24 +29,24 @@ jobs:
             # "the bundler was configured to create updater artifacts but no
             # updater-enabled targets were built" and no .app.tar.gz at all.
             bundles: app,dmg
-            asset: Arcane-arm64.dmg
+            asset: UnityIDE-arm64.dmg
             glob: editor/src-tauri/target/release/bundle/dmg/*.dmg
             platform_key: darwin-aarch64
-            updater_asset: Arcane.app.tar.gz
+            updater_asset: UnityIDE.app.tar.gz
             updater_glob: editor/src-tauri/target/release/bundle/macos/*.app.tar.gz
-          # macOS Intel (macos-13 / x86_64-apple-darwin / Arcane-x64.dmg)
+          # macOS Intel (macos-13 / x86_64-apple-darwin / UnityIDE-x64.dmg)
           # dropped from distribution as of v0.2.0 — the download option is
           # gone from the landing page too. Restore a matrix entry here if
           # Intel support returns.
           - os: windows-latest    # Windows x64
             triple: x86_64-pc-windows-msvc
             bundles: nsis
-            asset: ArcaneSetup.exe
+            asset: UnityIDESetup.exe
             glob: editor/src-tauri/target/release/bundle/nsis/*-setup.exe
             # On Windows the updater artifact IS the installer — the same file,
             # with a .sig written beside it.
             platform_key: windows-x86_64
-            updater_asset: ArcaneSetup.exe
+            updater_asset: UnityIDESetup.exe
             updater_glob: editor/src-tauri/target/release/bundle/nsis/*-setup.exe
     runs-on: ${{ matrix.os }}
     defaults:
@@ -86,11 +86,11 @@ jobs:
         with:
           python-version: '3.11'
 
-      # arcane-graph sidecar (PyInstaller — native per runner). Mirrors the proven
+      # unityide-graph sidecar (PyInstaller — native per runner). Mirrors the proven
       # steps from editor/.github/workflows/build-graph-sidecar.yml.
-      - name: Build arcane-graph sidecar
+      - name: Build unityide-graph sidecar
         run: |
-          cd editor/tooling/arcane-graph-sidecar
+          cd editor/tooling/unityide-graph-sidecar
           python -m venv .venv
           # Call the venv's python directly instead of `activate` — works the same
           # on every OS, and `python -m pip` upgrades pip on Windows (the bare
@@ -105,9 +105,9 @@ jobs:
           "$PY" -m PyInstaller pyinstaller.spec
           mkdir -p ../../src-tauri/binaries
           if [[ "$RUNNER_OS" == "Windows" ]]; then
-            cp dist/arcane-graph.exe "../../src-tauri/binaries/arcane-graph-${{ matrix.triple }}.exe"
+            cp dist/unityide-graph.exe "../../src-tauri/binaries/unityide-graph-${{ matrix.triple }}.exe"
           else
-            cp dist/arcane-graph "../../src-tauri/binaries/arcane-graph-${{ matrix.triple }}"
+            cp dist/unityide-graph "../../src-tauri/binaries/unityide-graph-${{ matrix.triple }}"
           fi
 
       - name: Install JS deps
@@ -154,7 +154,7 @@ jobs:
           node editor/scripts/write-update-manifest.mjs \
             --platform "${{ matrix.platform_key }}" \
             --version  "${V#v}" \
-            --url      "https://releases.arcaneai.org/$V/${{ matrix.updater_asset }}" \
+            --url      "https://releases.unityide.app/$V/${{ matrix.updater_asset }}" \
             --sig      "dist-release/${{ matrix.updater_asset }}.sig" \
             --out      "dist-release/${{ matrix.platform_key }}.json"
 
@@ -200,7 +200,7 @@ jobs:
       - uses: oven-sh/setup-bun@v2
 
       # deploy-prod.sh validates package structure + .meta files, then `npm pack`s
-      # the tarball (com.arcane.editor-<version>.tgz).
+      # the tarball (com.unityide.editor-<version>.tgz).
       - name: Build UPM tarball
         run: cd arcane-extension && bash deploy-prod.sh
 
@@ -210,7 +210,13 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           cd arcane-extension
+          # Both the package id and the version come from package.json, which is
+          # also what `npm pack` names the tarball after. Hardcoding the id here
+          # meant the rename could rename the package and still upload under the
+          # old key — or, worse, upload nothing and fail on a missing file.
           V=$(node -p "require('./package.json').version")
-          TGZ="com.arcane.editor-${V}.tgz"
-          bunx wrangler r2 object put "arcane-releases/unity-extension-releases/${TGZ}"                       --file "$TGZ" --remote
-          bunx wrangler r2 object put "arcane-releases/unity-extension-releases/latest/com.arcane.editor.tgz" --file "$TGZ" --remote
+          NAME=$(node -p "require('./package.json').name")
+          TGZ="${NAME}-${V}.tgz"
+          test -f "$TGZ" || { echo "::error::expected $TGZ from deploy-prod.sh, not found"; exit 1; }
+          bunx wrangler r2 object put "arcane-releases/unity-extension-releases/${TGZ}"                --file "$TGZ" --remote
+          bunx wrangler r2 object put "arcane-releases/unity-extension-releases/latest/${NAME}.tgz"    --file "$TGZ" --remote

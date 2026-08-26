@@ -1,14 +1,14 @@
 // scripts/sync-unity-bridge.mjs
 //
 // Syncs the canonical Unity extension package — the single source of truth — from
-// the sibling `arcane` repo (`arcane/arcane-extension`, package `com.arcane.editor`)
-// into a local, gitignored `unity-bridge/` staging folder. Tauri bundles that folder
-// as an app resource (see tauri.conf.json `resources`), and the Rust backend
-// (`unity_install_bridge`) copies it into a user's `Packages/com.arcane.editor/`.
+// `arcane-extension/` at the repo root (package `com.unityide.editor`) into a local,
+// gitignored `unity-bridge/` staging folder. Tauri bundles that folder as an app
+// resource (see tauri.conf.json `resources`), and the Rust backend
+// (`unity_install_bridge`) copies it into a user's `Packages/com.unityide.editor/`.
 //
 // Runs automatically before `tauri dev` / `tauri build` (wired via tauri.conf.json
-// `beforeDevCommand` / `beforeBuildCommand`). The repos are expected side-by-side;
-// override the source location with the ARCANE_EXTENSION_DIR env var otherwise.
+// `beforeDevCommand` / `beforeBuildCommand`). Override the source location with the
+// UNITYIDE_EXTENSION_DIR env var.
 
 import { existsSync, rmSync, cpSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -18,14 +18,18 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, '..'); // editor/
 const dest = resolve(repoRoot, 'unity-bridge'); // editor/unity-bridge (gitignored staging)
 
-// Source resolution. ARCANE_EXTENSION_DIR overrides everything; otherwise try
-// the sibling `arcane` repo layout first, then the monorepo layout where the
-// extension sits at the repo root next to editor/ (…/arcane-editor/arcane-extension).
-const srcCandidates = process.env.ARCANE_EXTENSION_DIR
-  ? [resolve(process.env.ARCANE_EXTENSION_DIR)]
+// Source resolution. UNITYIDE_EXTENSION_DIR overrides everything; otherwise the
+// in-tree package at the repo root, which is where it actually lives.
+//
+// The pre-monorepo sibling-checkout layout is kept as a fallback but is tried
+// SECOND. It used to be first, which meant a stray `../arcane/arcane-extension`
+// on someone's disk would silently shadow the in-tree source and bundle a
+// different package than the one in this commit.
+const srcCandidates = process.env.UNITYIDE_EXTENSION_DIR
+  ? [resolve(process.env.UNITYIDE_EXTENSION_DIR)]
   : [
-      resolve(repoRoot, '../arcane/arcane-extension'), // sibling `arcane` repo
       resolve(repoRoot, '../arcane-extension'),        // monorepo (extension at repo root)
+      resolve(repoRoot, '../arcane/arcane-extension'), // legacy sibling checkout
     ];
 const src =
   srcCandidates.find((p) => existsSync(resolve(p, 'package.json'))) ??
@@ -58,7 +62,7 @@ function keep(sourcePath) {
 if (!existsSync(src) || !statSync(src).isDirectory()) {
   console.error(
     `[sync-unity-bridge] Unity extension source not found at:\n  ${src}\n` +
-      `Check out the 'arcane' repo next to this one, or set ARCANE_EXTENSION_DIR.`,
+      `Expected arcane-extension/ at the repo root, or set UNITYIDE_EXTENSION_DIR.`,
   );
   process.exit(1);
 }

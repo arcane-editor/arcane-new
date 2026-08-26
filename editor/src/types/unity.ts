@@ -1,4 +1,4 @@
-// Unity protocol types — ported from arcane-ui/src/common/unity/unity-protocol.ts
+// Unity protocol types — ported from unityide-ui/src/common/unity/unity-protocol.ts
 
 export type UnityLogType = 'Log' | 'Warning' | 'Error' | 'Assert' | 'Exception';
 export type UnityPlayMode = 'EditMode' | 'PlayMode';

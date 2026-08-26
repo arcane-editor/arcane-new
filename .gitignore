@@ -1,5 +1,5 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Arcane Editor — monorepo root .gitignore
+# UnityIDE Editor — monorepo root .gitignore
 #
 # Subfolders (arcane-server, arcane-release-worker, editor, landing-page,
 # arcane-extension) keep their own .gitignore for stack-specific artifacts.
@@ -49,7 +49,7 @@ gen/schemas/
 # ── Cloudflare Workers (arcane-server, arcane-release-worker) ────────────────
 .wrangler/
 
-# ── Python (editor/tooling/arcane-graph-sidecar) ─────────────────────────────
+# ── Python (editor/tooling/unityide-graph-sidecar) ─────────────────────────────
 __pycache__/
 *.py[cod]
 .venv/

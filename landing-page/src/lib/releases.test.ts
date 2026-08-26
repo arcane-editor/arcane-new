@@ -3,22 +3,22 @@ import { downloadUrls, manifestUrls, versionFromManifest } from './releases';
 
 describe('downloadUrls', () => {
     it('serves the dev channel when the site is built against the dev API', () => {
-        const urls = downloadUrls('https://api-dev.arcaneai.org');
-        expect(urls.macArm).toBe('https://releases.arcaneai.org/dev/latest/Arcane-Dev-arm64.dmg');
-        expect(urls.windows).toBe('https://releases.arcaneai.org/dev/latest/ArcaneDevSetup.exe');
+        const urls = downloadUrls('https://api-dev.unityide.app');
+        expect(urls.macArm).toBe('https://releases.unityide.app/dev/latest/UnityIDE-Dev-arm64.dmg');
+        expect(urls.windows).toBe('https://releases.unityide.app/dev/latest/UnityIDEDevSetup.exe');
     });
 
     it('serves the production channel for the production API', () => {
-        const urls = downloadUrls('https://api.arcaneai.org');
-        expect(urls.macArm).toBe('https://releases.arcaneai.org/latest/Arcane-arm64.dmg');
-        expect(urls.windows).toBe('https://releases.arcaneai.org/latest/ArcaneSetup.exe');
+        const urls = downloadUrls('https://api.unityide.app');
+        expect(urls.macArm).toBe('https://releases.unityide.app/latest/UnityIDE-arm64.dmg');
+        expect(urls.windows).toBe('https://releases.unityide.app/latest/UnityIDESetup.exe');
     });
 
     it('never hands the dev site a production installer', () => {
-        // The bug this guards: dev.arcaneai.org linked to /latest/, so anyone
+        // The bug this guards: dev.unityide.app linked to /latest/, so anyone
         // downloading from the dev site got the production app — same name,
         // same bundle id, no way to tell until it misbehaves.
-        const dev = downloadUrls('https://api-dev.arcaneai.org');
+        const dev = downloadUrls('https://api-dev.unityide.app');
         expect(dev.macArm).toContain('/dev/latest/');
         expect(dev.windows).toContain('/dev/latest/');
     });
@@ -26,7 +26,7 @@ describe('downloadUrls', () => {
     it('falls back to production for an unrecognised API host', () => {
         // Fail safe: an unknown host must not advertise dev builds publicly.
         expect(downloadUrls('https://example.test').macArm)
-            .toBe('https://releases.arcaneai.org/latest/Arcane-arm64.dmg');
+            .toBe('https://releases.unityide.app/latest/UnityIDE-arm64.dmg');
     });
 
     it('treats a localhost API as dev', () => {
@@ -36,15 +36,15 @@ describe('downloadUrls', () => {
 
 describe('manifestUrls', () => {
     it('points at the production channel manifests', () => {
-        const urls = manifestUrls('https://api.arcaneai.org');
-        expect(urls.macArm).toBe('https://releases.arcaneai.org/latest/darwin-aarch64.json');
-        expect(urls.windows).toBe('https://releases.arcaneai.org/latest/windows-x86_64.json');
+        const urls = manifestUrls('https://api.unityide.app');
+        expect(urls.macArm).toBe('https://releases.unityide.app/latest/darwin-aarch64.json');
+        expect(urls.windows).toBe('https://releases.unityide.app/latest/windows-x86_64.json');
     });
 
     it('points at the dev channel manifests for the dev site', () => {
-        const urls = manifestUrls('https://api-dev.arcaneai.org');
-        expect(urls.macArm).toBe('https://releases.arcaneai.org/dev/latest/darwin-aarch64.json');
-        expect(urls.windows).toBe('https://releases.arcaneai.org/dev/latest/windows-x86_64.json');
+        const urls = manifestUrls('https://api-dev.unityide.app');
+        expect(urls.macArm).toBe('https://releases.unityide.app/dev/latest/darwin-aarch64.json');
+        expect(urls.windows).toBe('https://releases.unityide.app/dev/latest/windows-x86_64.json');
     });
 
     it('uses the same channel rule as the installer links', () => {

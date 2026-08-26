@@ -52,7 +52,7 @@ function PlanDocumentView({
 }: PlanDocumentViewProps) {
   const isAgentRunning = useAiStore((s) => s.isAgentRunning);
   const planPhase = useAiStore((s) => s.planPhase);
-  const arcanePlan = useAiStore((s) => s.arcanePlan);
+  const hostedPlan = useAiStore((s) => s.hostedPlan);
   const effort = useAiStore((s) => s.effort);
   const setEffort = useAiStore((s) => s.setEffort);
 
@@ -66,8 +66,8 @@ function PlanDocumentView({
   // live todo list. Neither alone is enough: the file knows what finished, the
   // todo list knows what is happening right now.
   const runningTitle = useMemo(
-    () => arcanePlan?.find((e) => e.status === 'in_progress')?.text ?? null,
-    [arcanePlan],
+    () => hostedPlan?.find((e) => e.status === 'in_progress')?.text ?? null,
+    [hostedPlan],
   );
   const runningIndex = runningTitle
     ? doc.steps.findIndex((s) => !s.done && looselyMatches(s.title, runningTitle))

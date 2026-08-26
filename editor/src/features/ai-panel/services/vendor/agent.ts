@@ -100,7 +100,7 @@ export class Agent {
 
   /**
    * LOCAL: Send a user prompt with multi-part content (text + image blocks).
-   * Required for OpenAI-style vision input. The streamFn (arcaneStream) is
+   * Required for OpenAI-style vision input. The streamFn (hostedStream) is
    * responsible for emitting the OpenAI multi-part `content` array shape.
    */
   async promptStructured(

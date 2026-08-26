@@ -1,7 +1,7 @@
 /**
  * MCP server configuration for external agents.
  *
- * User-defined MCP servers are stored as JSON at ~/.arcane/mcp-servers.json and
+ * User-defined MCP servers are stored as JSON at ~/.unityide/mcp-servers.json and
  * passed to the bridge on `session/new` (and `session/load`). The shape mirrors
  * an ACP stdio `mcpServers` entry. Same file-IO pattern as session-persistence.
  *
@@ -26,7 +26,7 @@ let configPath: string | null = null;
 async function getConfigPath(): Promise<string> {
   if (!configPath) {
     const home = await homeDir();
-    const dir = await join(home, '.arcane');
+    const dir = await join(home, '.unityide');
     try {
       await invoke('create_directory_recursive', { path: dir });
     } catch {

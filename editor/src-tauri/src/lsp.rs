@@ -20,7 +20,7 @@ use tokio::sync::Mutex;
 static TRACE: OnceLock<StdMutex<Option<File>>> = OnceLock::new();
 
 fn trace_file_path() -> Option<PathBuf> {
-    Some(dirs::cache_dir()?.join("editor-arcane").join("lsp-trace.log"))
+    Some(dirs::cache_dir()?.join("editor-unityide").join("lsp-trace.log"))
 }
 
 /// Open the trace file. `truncate=true` starts a fresh session;

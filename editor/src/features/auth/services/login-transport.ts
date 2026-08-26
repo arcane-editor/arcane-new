@@ -4,7 +4,7 @@
 // in browser-login.ts and is identical for every platform. Only the channel the
 // callback arrives on varies, and that is what this module owns:
 //
-//   deepLinkTransport — `arcane://auth/callback?…` via the OS scheme handler.
+//   deepLinkTransport — `unityide://auth/callback?…` via the OS scheme handler.
 //     Primary. Needs OS-level registration.
 //   loopbackTransport — `http://127.0.0.1:<port>/callback?…` via a one-shot
 //     listener in Rust. Used wherever the scheme is not registered (notably
@@ -29,7 +29,7 @@ export function parseCallback(rawUrl: string, scheme: string): ParsedCallback | 
   const prefix = `${scheme}://auth/callback`;
   if (!rawUrl.startsWith(prefix)) return null;
   const rest = rawUrl.slice(prefix.length);
-  // Allow exactly "" or "?…" — rejects e.g. `arcane://auth/callback-evil`.
+  // Allow exactly "" or "?…" — rejects e.g. `unityide://auth/callback-evil`.
   if (rest !== '' && !rest.startsWith('?')) return null;
   const params = new URLSearchParams(rest.startsWith('?') ? rest.slice(1) : '');
   const code = params.get('code');

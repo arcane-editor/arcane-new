@@ -14,7 +14,7 @@ const ready: AcpProbe = {
   npmPath: '/usr/local/bin/npm',
   claudePath: '/Users/x/.local/bin/claude',
   installedVersion: '0.70.0',
-  adapterEntry: '/Users/x/.arcane/agents/claude/node_modules/@agentclientprotocol/claude-agent-acp/dist/index.js',
+  adapterEntry: '/Users/x/.unityide/agents/claude/node_modules/@agentclientprotocol/claude-agent-acp/dist/index.js',
   usesExternalCli: true,
   pinnedVersion: '0.70.0',
 };

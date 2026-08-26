@@ -7,7 +7,7 @@
  * downstream — the message list, tool blocks, permission cards, plan list,
  * checkpoints, review queue — stays backend-agnostic.
  *
- * The Arcane backend is `AgentService` unchanged; nothing about the hosted path
+ * The UnityIDE backend is `AgentService` unchanged; nothing about the hosted path
  * moves or is re-routed through here.
  */
 
@@ -29,7 +29,7 @@ import type { AgentKind } from './types';
  * What a chat message needs from whichever backend is selected.
  *
  * Deliberately narrow. `AgentService` has a much larger surface (resume, plan
- * execution, rewind, telemetry), but those are Arcane-loop concerns that
+ * execution, rewind, telemetry), but those are UnityIDE-loop concerns that
  * `plan-controller`, `retry-turn` and `session-restore` call directly and that
  * an external agent has no equivalent for.
  */
@@ -87,7 +87,7 @@ export async function sendChatMessage(text: string, opts: SendMessageOptions): P
 
 /**
  * Tear down every external agent — on workspace change, on sign-out, and when
- * the user switches back to the Arcane agent.
+ * the user switches back to the UnityIDE agent.
  *
  * A subprocess pinned to a workspace that is no longer open would answer the
  * next prompt with stale file context, so this is not merely tidiness.
@@ -99,17 +99,17 @@ export async function disposeExternalBackends(): Promise<void> {
 /**
  * Start a new conversation on whichever backend is selected.
  *
- * New Chat used to reset only the Arcane service, which left an external agent
+ * New Chat used to reset only the UnityIDE service, which left an external agent
  * holding the PREVIOUS session while the store had already forgotten its id and
  * its config options. The result looked exactly like a fresh chat and was not:
  * the agent still had the old thread's context, and the composer had lost the
  * model and mode pills that came with `session/new`.
  *
- * Arcane's reset runs unconditionally (it is idempotent, and the user may
+ * UnityIDE's reset runs unconditionally (it is idempotent, and the user may
  * switch back), and the external agent is torn down so its next connection
  * opens a genuinely new session.
  */
 export function resetChatBackend(): void {
   resetAgentService();
-  if (useAiStore.getState().selectedAgent !== 'arcane') void disposeExternalBackends();
+  if (useAiStore.getState().selectedAgent !== 'hosted') void disposeExternalBackends();
 }

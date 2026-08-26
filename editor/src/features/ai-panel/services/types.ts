@@ -12,7 +12,7 @@ export type Effort = 'low' | 'mid' | 'high';
 /**
  * Which agent backend the panel is talking to.
  *
- * - `'arcane'` — the hosted Arcane agent (the default, and the only one a free
+ * - `'hosted'` — the hosted UnityIDE agent (the default, and the only one a free
  *   plan can use).
  * - `'claude'` — Claude Code, driven locally over the Agent Client Protocol.
  *   Paid plans only; see `external-agent-gate.ts`.
@@ -21,20 +21,20 @@ export type Effort = 'low' | 'mid' | 'high';
  * add the literal here, add it to `KNOWN_AGENT_KINDS` below, and give it a row
  * in `AgentPicker`.
  */
-export type AgentKind = 'arcane' | 'claude';
+export type AgentKind = 'hosted' | 'claude';
 
 /** Every agent kind except the built-in hosted one. */
-export type ExternalAgentKind = Exclude<AgentKind, 'arcane'>;
+export type ExternalAgentKind = Exclude<AgentKind, 'hosted'>;
 
 export function isExternalAgent(kind: AgentKind): kind is ExternalAgentKind {
-  return kind !== 'arcane';
+  return kind !== 'hosted';
 }
 
 /**
  * Coerce a persisted `agentKind` value (an arbitrary string read off disk) to
  * a live `AgentKind`. Anything that isn't a currently-supported kind falls
- * back to `'arcane'`, so a session written by a newer build (or a corrupted
- * one) restores read-only as Arcane rather than crashing the history list or
+ * back to `'hosted'`, so a session written by a newer build (or a corrupted
+ * one) restores read-only as UnityIDE rather than crashing the history list or
  * restore path. Pure function.
  *
  * NOTE: `'claude'` now round-trips. Entitlement is deliberately NOT checked
@@ -42,10 +42,10 @@ export function isExternalAgent(kind: AgentKind): kind is ExternalAgentKind {
  * lapsed; the composer is what locks. Coercing on plan would silently rewrite
  * history and mislabel whose turns those were.
  */
-const KNOWN_AGENT_KINDS: readonly AgentKind[] = ['arcane', 'claude'];
+const KNOWN_AGENT_KINDS: readonly AgentKind[] = ['hosted', 'claude'];
 
 export function coerceAgentKind(value: unknown): AgentKind {
-  return KNOWN_AGENT_KINDS.includes(value as AgentKind) ? (value as AgentKind) : 'arcane';
+  return KNOWN_AGENT_KINDS.includes(value as AgentKind) ? (value as AgentKind) : 'hosted';
 }
 
 /**

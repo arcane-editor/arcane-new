@@ -1,7 +1,7 @@
 /**
  * Per-project AI memory (spec §4) — shared types and caps.
  *
- * Storage is plain markdown files under `<workspace>/Library/ArcaneIDE/memory`
+ * Storage is plain markdown files under `<workspace>/Library/UnityIDE/memory`
  * (machine-local; `Library/` is Unity-gitignored by convention, and the Rust
  * side already persists its index there). One entry per file, frontmatter +
  * body, so the user can open, edit, or delete any memory in the editor —
@@ -50,5 +50,5 @@ export interface MemoryFs {
 }
 
 export function memoryDir(workspacePath: string): string {
-  return `${workspacePath}/Library/ArcaneIDE/memory`;
+  return `${workspacePath}/Library/UnityIDE/memory`;
 }

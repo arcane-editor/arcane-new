@@ -27,7 +27,7 @@ import { openUrl } from '@tauri-apps/plugin-opener';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrent } from '@tauri-apps/plugin-deep-link';
 import type { UnlistenFn } from '@tauri-apps/api/event';
-import { ARCANE_API_URL, ARCANE_WEB_URL } from '../../../config/api';
+import { API_URL, WEB_URL } from '../../../config/api';
 import type { Session } from './session-types';
 import {
   savePendingAttempt,
@@ -103,7 +103,7 @@ export interface BrowserLoginHandlers {
 export type CreateAttemptFn = (challenge: string) => Promise<string>;
 
 const defaultCreateAttempt: CreateAttemptFn = async (challenge) => {
-  const res = await fetch(`${ARCANE_API_URL}/v1/auth/editor/attempt`, {
+  const res = await fetch(`${API_URL}/v1/auth/editor/attempt`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ challenge }),
@@ -124,7 +124,7 @@ export type PollResult =
 export type PollAttemptFn = (attemptId: string, verifier: string) => Promise<PollResult>;
 
 const defaultPollAttempt: PollAttemptFn = async (attemptId, verifier) => {
-  const res = await fetch(`${ARCANE_API_URL}/v1/auth/editor/poll`, {
+  const res = await fetch(`${API_URL}/v1/auth/editor/poll`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ attempt_id: attemptId, verifier }),
@@ -147,7 +147,7 @@ interface PendingAttempt {
   attemptId: string;
   state: string;
   verifier: string;
-  /** Full `${ARCANE_WEB_URL}/auth?…` URL, kept for "Open browser again". */
+  /** Full `${WEB_URL}/auth?…` URL, kept for "Open browser again". */
   url: string;
   handlers: BrowserLoginHandlers;
   unlisten: UnlistenFn | null;
@@ -318,7 +318,7 @@ export async function beginBrowserLogin(
   const params = new URLSearchParams({
     ...armed.params, flow: 'editor', state, challenge, attempt: attemptId,
   });
-  const url = `${ARCANE_WEB_URL}/auth?${params.toString()}`;
+  const url = `${WEB_URL}/auth?${params.toString()}`;
   pending.url = url;
 
   await openUrl(url);

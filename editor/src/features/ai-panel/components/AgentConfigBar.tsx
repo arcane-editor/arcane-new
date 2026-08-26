@@ -1,6 +1,6 @@
 /**
  * AgentConfigBar — renders whatever settings the connected external agent
- * advertises, and nothing Arcane decided in advance.
+ * advertises, and nothing UnityIDE decided in advance.
  *
  * The previous integration shipped three hardcoded pickers (model, effort,
  * permission mode) whose values were baked into the editor. They went stale the
@@ -11,7 +11,7 @@
  * needs no change here at all.
  *
  * Replaces ModeSelector + EffortSelector while an external agent is selected,
- * because those two control the Arcane loop specifically.
+ * because those two control the UnityIDE loop specifically.
  *
  * The context meter sits at the end of the same row. It is not a setting, but
  * it is the other thing that changes about a live session and the one number

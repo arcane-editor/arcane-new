@@ -1,7 +1,7 @@
 // Fetch wrapper for POST /v1/completions/inline. Deliberately NOT
-// arcane-stream: no retries (a late completion is a wrong completion), 4s
+// hosted-stream: no retries (a late completion is a wrong completion), 4s
 // hard timeout, single-flight (a new request aborts the previous one).
-import { ARCANE_API_URL } from '../../../config/api';
+import { API_URL } from '../../../config/api';
 import { useAuthStore } from '../../../stores/auth';
 
 export interface InlineRequest {
@@ -29,7 +29,7 @@ interface InlineClientConfig {
 export function createInlineClient(cfg: InlineClientConfig = {}) {
     const fetchImpl = cfg.fetchImpl ?? fetch;
     const getToken = cfg.getToken ?? (() => useAuthStore.getState().token);
-    const baseUrl = cfg.baseUrl ?? ARCANE_API_URL;
+    const baseUrl = cfg.baseUrl ?? API_URL;
     const timeoutMs = cfg.timeoutMs ?? 4_000;
 
     let inflight: AbortController | null = null;

@@ -40,7 +40,7 @@ export const COACH_MARKS: Record<string, CoachMark> = {
   firstCompileError: {
     id: 'firstCompileError',
     anchor: '[data-coach="problems"]',
-    message: 'Unity reported a compile error. Arcane can read it and propose a fix.',
+    message: 'Unity reported a compile error. UnityIDE can read it and propose a fix.',
   },
   firstPlanReady: {
     id: 'firstPlanReady',
@@ -49,7 +49,7 @@ export const COACH_MARKS: Record<string, CoachMark> = {
   },
 };
 
-const STORAGE_KEY = 'arcane.coachMarks.seen';
+const STORAGE_KEY = 'unityide.coachMarks.seen';
 
 function readSeen(): Set<string> {
   try {

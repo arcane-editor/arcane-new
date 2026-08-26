@@ -1,8 +1,8 @@
 /**
- * PlanList — renders Arcane's live in-loop plan/TODO checklist, populated by
- * the `todo_update` tool (P3.5, `arcanePlan`).
+ * PlanList — renders UnityIDE's live in-loop plan/TODO checklist, populated by
+ * the `todo_update` tool (P3.5, `hostedPlan`).
  *
- * Distinct from PlanActions (the Arcane markdown-plan workflow).
+ * Distinct from PlanActions (the UnityIDE markdown-plan workflow).
  *
  * T9: mounted in `AiChatPanel.tsx` (sticky, between the message list and the
  * composer) rather than inline at the bottom of `MessageList`, since the
@@ -23,10 +23,10 @@ interface PlanEntry {
 }
 
 function PlanList() {
-  const arcanePlan = useAiStore((s) => s.arcanePlan);
+  const hostedPlan = useAiStore((s) => s.hostedPlan);
   const [collapsed, setCollapsed] = useState(false);
 
-  const entries: PlanEntry[] = (arcanePlan ?? []).map((e) => ({
+  const entries: PlanEntry[] = (hostedPlan ?? []).map((e) => ({
     text: e.text,
     status: e.status === 'done' ? 'completed' : e.status,
   }));

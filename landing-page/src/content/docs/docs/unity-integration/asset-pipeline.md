@@ -1,9 +1,9 @@
 ---
 title: GUID & Asset Resolution
-description: How ArcaneIDE resolves Unity GUIDs and tracks asset references.
+description: How UnityIDE resolves Unity GUIDs and tracks asset references.
 ---
 
-Unity identifies every asset by a **GUID** stored in its `.meta` file. ArcaneIDE reads all `.meta` files during indexing to build a bidirectional map: GUID → asset path and asset path → GUID.
+Unity identifies every asset by a **GUID** stored in its `.meta` file. UnityIDE reads all `.meta` files during indexing to build a bidirectional map: GUID → asset path and asset path → GUID.
 
 ## Why This Matters
 
@@ -20,4 +20,4 @@ You can also access this directly from the Explorer: right-click any asset → *
 
 ## Asset Reimport
 
-To trigger Unity to reimport an asset, use the **Reveal in Unity** context menu option and reimport from within the Unity Editor directly. ArcaneIDE does not manage asset imports itself — it defers to Unity's asset pipeline.
+To trigger Unity to reimport an asset, use the **Reveal in Unity** context menu option and reimport from within the Unity Editor directly. UnityIDE does not manage asset imports itself — it defers to Unity's asset pipeline.

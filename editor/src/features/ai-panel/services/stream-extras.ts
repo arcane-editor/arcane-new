@@ -2,7 +2,7 @@
  * Out-of-band request extras carried on a vendor `Context` object without
  * modifying vendor types (vendor/ is frozen — everything composes from
  * outside). Decorators like the turn governor attach extras to the COPY of
- * the context they pass down; `arcane-stream.ts` reads them off and folds
+ * the context they pass down; `hosted-stream.ts` reads them off and folds
  * them into the wire request.
  *
  * Motivation (cache activation §1): the governor used to strip `tools: []`
@@ -19,7 +19,7 @@ export interface StreamExtras {
   toolChoice?: 'none';
 }
 
-const EXTRAS_FIELD = '__arcaneStreamExtras';
+const EXTRAS_FIELD = '__hostedStreamExtras';
 
 type ContextWithExtras = Context & { [EXTRAS_FIELD]?: StreamExtras };
 

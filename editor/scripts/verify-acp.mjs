@@ -18,8 +18,8 @@
  *   node scripts/verify-acp.mjs
  *
  * Env:
- *   ARCANE_ACP_ADAPTER   explicit path to the adapter's dist/index.js
- *   ARCANE_ACP_E2E       "required" → missing prerequisites fail (exit 1)
+ *   UNITYIDE_ACP_ADAPTER   explicit path to the adapter's dist/index.js
+ *   UNITYIDE_ACP_E2E       "required" → missing prerequisites fail (exit 1)
  *                        rather than skip. Use in pre-merge gates.
  */
 import { spawn, spawnSync } from 'node:child_process';
@@ -29,7 +29,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const EDITOR_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const REQUIRED = process.env.ARCANE_ACP_E2E === 'required';
+const REQUIRED = process.env.UNITYIDE_ACP_E2E === 'required';
 
 /** Must track `CLAUDE_AGENT_VERSION` / `REQUIRED_NODE_MAJOR` in src-tauri/src/acp.rs. */
 const RUST_ACP = path.join(EDITOR_DIR, 'src-tauri', 'src', 'acp.rs');
@@ -46,7 +46,7 @@ const HANDSHAKE_TIMEOUT_MS = 60_000;
 function skip(reason) {
   if (REQUIRED) {
     console.error(`\n  FAIL  ACP check could not run: ${reason}`);
-    console.error('        ARCANE_ACP_E2E=required forbids skipping.\n');
+    console.error('        UNITYIDE_ACP_E2E=required forbids skipping.\n');
     process.exit(1);
   }
   // Loud on purpose. A quiet skip reads exactly like a pass, which is how the
@@ -76,8 +76,14 @@ if (nodeMajor < MIN_NODE_MAJOR) {
   skip(`this script is running on Node ${process.versions.node}; the adapter needs >= ${MIN_NODE_MAJOR}`);
 }
 
+// The two legacy dirs are the pre-rename names, kept as fallbacks so this
+// check still RUNS on a machine that has not migrated yet. Dropping them would
+// turn a real verification into a skip on every such machine — and a skip here
+// reads exactly like a pass while proving nothing.
 const candidates = [
-  process.env.ARCANE_ACP_ADAPTER,
+  process.env.UNITYIDE_ACP_ADAPTER,
+  path.join(os.homedir(), '.unityide', 'agents', 'claude', ADAPTER_REL),
+  path.join(os.homedir(), '.unityide-dev', 'agents', 'claude', ADAPTER_REL),
   path.join(os.homedir(), '.arcane', 'agents', 'claude', ADAPTER_REL),
   path.join(os.homedir(), '.arcane-dev', 'agents', 'claude', ADAPTER_REL),
 ].filter(Boolean);
@@ -86,13 +92,13 @@ const adapter = candidates.find((p) => fs.existsSync(p));
 if (!adapter) {
   skip(
     'the managed adapter is not installed — open the AI panel, pick Claude Code and let it install, ' +
-      `or set ARCANE_ACP_ADAPTER (looked in: ${candidates.join(', ')})`,
+      `or set UNITYIDE_ACP_ADAPTER (looked in: ${candidates.join(', ')})`,
   );
 }
 
 // Version drift is a warning, not a failure: the app deliberately keeps running
 // an outdated adapter rather than nagging mid-task.
-const manifest = path.join(adapter.split(`${path.sep}node_modules${path.sep}`)[0], '.arcane-agent.json');
+const manifest = path.join(adapter.split(`${path.sep}node_modules${path.sep}`)[0], '.unityide-agent.json');
 if (fs.existsSync(manifest)) {
   try {
     const installed = JSON.parse(fs.readFileSync(manifest, 'utf8')).version;
@@ -179,7 +185,7 @@ try {
     protocolVersion: 1,
     // Must mirror CLIENT_CAPABILITIES in `acp-translate.ts`. Several of these
     // are feature switches on the agent, so probing with a different set would
-    // verify a session Arcane never actually opens.
+    // verify a session UnityIDE never actually opens.
     clientCapabilities: {
       fs: { readTextFile: true, writeTextFile: true },
       terminal: true,
@@ -188,7 +194,7 @@ try {
       session: { configOptions: { boolean: {} } },
       _meta: { 'terminal-auth': true },
     },
-    clientInfo: { name: 'arcane-verify', title: 'Arcane', version: '0.0.0' },
+    clientInfo: { name: 'unityide-verify', title: 'UnityIDE', version: '0.0.0' },
   });
 
   if (init.protocolVersion !== 1) {

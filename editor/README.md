@@ -29,8 +29,8 @@ will still load with Monaco's syntax highlighting and surface a one-time
 The `typescript-language-server` instance handles `.ts`, `.tsx`, `.js`, `.jsx`,
 `.mts`, and `.cts` from a single process.
 
-LSP traffic is logged to `~/Library/Caches/editor-arcane/lsp-trace.log`
-(macOS) / `~/.cache/editor-arcane/lsp-trace.log` (Linux); each line is
+LSP traffic is logged to `~/Library/Caches/editor-unityide/lsp-trace.log`
+(macOS) / `~/.cache/editor-unityide/lsp-trace.log` (Linux); each line is
 prefixed with the language so multi-language sessions stay readable.
 Click the LSP status indicator to open the trace in your default viewer.
 

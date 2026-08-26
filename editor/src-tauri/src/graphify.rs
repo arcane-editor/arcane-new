@@ -1,11 +1,11 @@
-//! Tauri command wrappers around the bundled `arcane-graph` PyInstaller
+//! Tauri command wrappers around the bundled `unityide-graph` PyInstaller
 //! sidecar. The sidecar does AST-only structural extraction and graph
 //! traversal; this module shells out to it and streams progress events
 //! back to the frontend.
 //!
-//! Graph artifacts live under the per-app config dir (see `auth::arcane_home_dir`)
-//! at `<arcane-home>/graphs/<sha1(workspace)>/graph.json` — i.e.
-//! `~/.arcane/graphs/<sha1>/` for prod builds and `~/.arcane-dev/graphs/<sha1>/`
+//! Graph artifacts live under the per-app config dir (see `auth::config_home_dir`)
+//! at `<unityide-home>/graphs/<sha1(workspace)>/graph.json` — i.e.
+//! `~/.unityide/graphs/<sha1>/` for prod builds and `~/.unityide-dev/graphs/<sha1>/`
 //! for dev builds — outside the user's project tree so we never pollute their
 //! working directory or .gitignore.
 
@@ -38,7 +38,7 @@ fn graph_dir_for(app: &AppHandle, workspace_path: &str) -> Result<PathBuf, Strin
     let mut hasher = Sha1::new();
     hasher.update(workspace_path.as_bytes());
     let hash = hex::encode_short(&hasher.finalize());
-    Ok(crate::auth::arcane_home_dir(app)?.join("graphs").join(hash))
+    Ok(crate::auth::config_home_dir(app)?.join("graphs").join(hash))
 }
 
 fn graph_json_path(app: &AppHandle, workspace_path: &str) -> Result<PathBuf, String> {
@@ -63,7 +63,7 @@ mod hex {
 
 #[tauri::command]
 pub async fn graphify_check(app: AppHandle) -> Result<GraphifyCheck, String> {
-    let sidecar = match app.shell().sidecar("arcane-graph") {
+    let sidecar = match app.shell().sidecar("unityide-graph") {
         Ok(s) => s,
         Err(_) => return Ok(GraphifyCheck { available: false, version: None }),
     };
@@ -87,7 +87,7 @@ pub async fn graphify_check(app: AppHandle) -> Result<GraphifyCheck, String> {
     }
 
     // A version string containing "stub" is the placeholder shell script
-    // we keep at src-tauri/binaries/arcane-graph-<triple> so cargo check can
+    // we keep at src-tauri/binaries/unityide-graph-<triple> so cargo check can
     // pass without the real PyInstaller binary. Treat it as unavailable so
     // the frontend renders the calm `graph: unavailable` state rather than
     // erroring as soon as a build is attempted.
@@ -130,7 +130,7 @@ pub async fn graphify_build(
 
     let sidecar = app
         .shell()
-        .sidecar("arcane-graph")
+        .sidecar("unityide-graph")
         .map_err(|e| format!("sidecar not bundled: {}", e))?;
 
     let mut args: Vec<String> = vec![
@@ -230,7 +230,7 @@ pub async fn graphify_query(
 
     let sidecar = app
         .shell()
-        .sidecar("arcane-graph")
+        .sidecar("unityide-graph")
         .map_err(|e| format!("sidecar not bundled: {}", e))?;
 
     let mut args: Vec<String> = vec![
@@ -286,7 +286,7 @@ pub async fn graphify_explain(
 
     let sidecar = app
         .shell()
-        .sidecar("arcane-graph")
+        .sidecar("unityide-graph")
         .map_err(|e| format!("sidecar not bundled: {}", e))?;
 
     let (mut rx, _child) = sidecar
@@ -322,7 +322,7 @@ pub async fn graphify_path(
 
     let sidecar = app
         .shell()
-        .sidecar("arcane-graph")
+        .sidecar("unityide-graph")
         .map_err(|e| format!("sidecar not bundled: {}", e))?;
 
     let (mut rx, _child) = sidecar
@@ -651,4 +651,81 @@ pub async fn graphify_enrich_payload(
         "communities": communities,
         "languages": languages.into_iter().collect::<Vec<_>>(),
     }))
+}
+
+#[cfg(test)]
+mod sidecar_wiring_tests {
+    use std::collections::BTreeSet;
+
+    /// Every sidecar name this module spawns, scraped from its own source.
+    /// Scraped rather than listed so the test cannot go stale behind a new
+    /// `sidecar(...)` call site that nobody remembered to register here.
+    fn spawned_names(src: &str) -> BTreeSet<String> {
+        let mut out = BTreeSet::new();
+        for (i, _) in src.match_indices(".sidecar(\"") {
+            let rest = &src[i + ".sidecar(\"".len()..];
+            if let Some(end) = rest.find('"') {
+                out.insert(rest[..end].to_string());
+            }
+        }
+        out
+    }
+
+    /// Renaming the graph sidecar means touching three files that no compiler
+    /// checks against each other: the spawn call here, `bundle.externalBin` in
+    /// tauri.conf.json, and the `shell:allow-spawn` allowlist in
+    /// capabilities/default.json.
+    ///
+    /// Miss the capability file and there is no build error and no test
+    /// failure — the binary is bundled, the code compiles, and the spawn is
+    /// denied at runtime in the packaged app only. This test is the thing that
+    /// turns that into a `cargo test` failure instead.
+    #[test]
+    fn spawned_sidecars_are_bundled_and_permitted() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let spawned = spawned_names(include_str!("graphify.rs"));
+        assert!(
+            !spawned.is_empty(),
+            "scraped no sidecar() calls — the scraper has drifted from the code"
+        );
+
+        let conf: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(root.join("tauri.conf.json")).unwrap())
+                .unwrap();
+        let bundled: BTreeSet<String> = conf["bundle"]["externalBin"]
+            .as_array()
+            .expect("tauri.conf.json bundle.externalBin must be an array")
+            .iter()
+            .filter_map(|v| v.as_str().map(str::to_string))
+            .collect();
+
+        let caps: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(root.join("capabilities/default.json")).unwrap(),
+        )
+        .unwrap();
+        let permitted: BTreeSet<String> = caps["permissions"]
+            .as_array()
+            .expect("capabilities/default.json must have a permissions array")
+            .iter()
+            .filter(|p| p["identifier"] == "shell:allow-spawn")
+            .filter_map(|p| p["allow"].as_array())
+            .flatten()
+            .filter_map(|a| a["name"].as_str().map(str::to_string))
+            .collect();
+
+        for name in &spawned {
+            let path = format!("binaries/{name}");
+            assert!(
+                bundled.contains(&path),
+                "graphify.rs spawns {name:?} but tauri.conf.json bundle.externalBin \
+                 does not list {path:?} — the binary would not ship. Bundled: {bundled:?}"
+            );
+            assert!(
+                permitted.contains(&path),
+                "graphify.rs spawns {name:?} but capabilities/default.json does not \
+                 allow {path:?} under shell:allow-spawn — this builds and tests clean, \
+                 then denies the spawn at runtime in the packaged app. Permitted: {permitted:?}"
+            );
+        }
+    }
 }

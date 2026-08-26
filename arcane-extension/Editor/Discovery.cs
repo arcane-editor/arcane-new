@@ -1,6 +1,6 @@
 // Discovery.cs — locate the IDE's journal directory and read its session identity.
 //
-// <projectRoot>/Library/ArcaneIDE/bridge.json is written by the IDE when it opens
+// <projectRoot>/Library/UnityIDE/bridge.json is written by the IDE when it opens
 // the project:
 //   { "transport":"journal", "protocolVersion":2, "ideSessionId":"…",
 //     "ideVersion":"x.y.z", "idePid":12345 }
@@ -17,7 +17,7 @@
 
 using System.IO;
 
-namespace Arcane.Bridge
+namespace UnityIDE.Bridge
 {
     internal struct BridgeDiscovery
     {
@@ -42,7 +42,7 @@ namespace Arcane.Bridge
 
         public static string BridgeDir(string projectRoot)
         {
-            return Path.Combine(Path.Combine(projectRoot, "Library"), "ArcaneIDE");
+            return Path.Combine(Path.Combine(projectRoot, "Library"), "UnityIDE");
         }
 
         public static string BridgeJsonPath(string projectRoot)

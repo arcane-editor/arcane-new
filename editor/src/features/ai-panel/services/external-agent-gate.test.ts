@@ -95,9 +95,9 @@ describe('externalAgentStatus: acpEnabled (server-config) decides', () => {
 });
 
 describe('refuseSendReason', () => {
-  it('never blocks the Arcane agent, whatever the plan', () => {
-    expect(refuseSendReason('arcane', g({ plan: 'free' }))).toBeNull();
-    expect(refuseSendReason('arcane', g({ loggedIn: false, plan: null }))).toBeNull();
+  it('never blocks the UnityIDE agent, whatever the plan', () => {
+    expect(refuseSendReason('hosted', g({ plan: 'free' }))).toBeNull();
+    expect(refuseSendReason('hosted', g({ loggedIn: false, plan: null }))).toBeNull();
   });
 
   it('allows an entitled external send', () => {

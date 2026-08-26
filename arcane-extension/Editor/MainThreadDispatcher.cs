@@ -21,7 +21,7 @@ using System.Collections.Concurrent;
 using System.Threading;
 using UnityEngine;
 
-namespace Arcane.Bridge
+namespace UnityIDE.Bridge
 {
     internal static class MainThreadDispatcher
     {
@@ -74,7 +74,7 @@ namespace Arcane.Bridge
             while (Queue.TryDequeue(out var action))
             {
                 try { action(); }
-                catch (Exception e) { Debug.LogError("[ArcaneBridge] main-thread action threw: " + e); }
+                catch (Exception e) { Debug.LogError("[UnityIDEBridge] main-thread action threw: " + e); }
             }
         }
 
@@ -110,7 +110,7 @@ namespace Arcane.Bridge
                 new WaitHandle[] { done.WaitHandle, Cancelled.WaitHandle }, timeoutMs);
 
             if (signalled == 1)
-                throw new OperationCanceledException("[ArcaneBridge] shutting down");
+                throw new OperationCanceledException("[UnityIDEBridge] shutting down");
             if (signalled == WaitHandle.WaitTimeout)
                 throw new TimeoutException("Main-thread RPC handler timed out after " + timeoutMs + "ms");
 

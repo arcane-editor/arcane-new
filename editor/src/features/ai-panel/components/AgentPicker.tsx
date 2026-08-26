@@ -1,5 +1,5 @@
 /**
- * AgentPicker — header dropdown for the chat agent: the hosted Arcane agent, or
+ * AgentPicker — header dropdown for the chat agent: the hosted UnityIDE agent, or
  * an external one connected over ACP.
  *
  * External agents are a paid-plan feature, and the row for one is always
@@ -39,9 +39,9 @@ interface AgentOption {
 
 const AGENTS: AgentOption[] = [
   {
-    value: 'arcane',
-    label: 'Arcane Agent',
-    description: 'Hosted agent using your Arcane account.',
+    value: 'hosted',
+    label: 'UnityIDE Agent',
+    description: 'Hosted agent using your UnityIDE account.',
     icon: Sparkles,
     external: false,
   },
@@ -128,7 +128,7 @@ function AgentPicker() {
       // Switching away from an external agent kills its subprocess. Leaving it
       // running would hold a workspace lock and an idle model session for a
       // conversation the user has moved on from.
-      if (selectedAgent !== 'arcane') void disposeExternalBackends();
+      if (selectedAgent !== 'hosted') void disposeExternalBackends();
       setSelectedAgent(value);
     }
     setOpen(false);
@@ -242,7 +242,7 @@ function AgentPicker() {
                   <span className="ai-panel-mode-menu-text">
                     <span className="ai-panel-mode-menu-label">Check again</span>
                     <span className="ai-panel-mode-menu-desc">
-                      Re-check your plan with the Arcane server.
+                      Re-check your plan with the UnityIDE server.
                     </span>
                   </span>
                 </button>

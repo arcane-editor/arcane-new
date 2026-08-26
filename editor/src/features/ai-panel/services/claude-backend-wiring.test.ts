@@ -22,7 +22,7 @@ const LIST = readFileSync(
  *
  * The ACP path only ever emitted `tool_execution_start`, which fills the Map
  * and nothing else, and then CLOSED the assistant bubble — so the calls had no
- * content block to render from and vanished. Arcane's own loop gets this right
+ * content block to render from and vanished. UnityIDE's own loop gets this right
  * because `agent-loop.ts` puts `toolCall` blocks in the assistant message.
  */
 describe('claude-backend — tool calls must become assistant content blocks', () => {

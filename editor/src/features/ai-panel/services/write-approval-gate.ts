@@ -1,8 +1,8 @@
 /**
- * Pre-apply write approval gate (P5.3) — the fix for the Arcane loop's
- * central trust asymmetry: before this gate, Arcane's write/edit tools
+ * Pre-apply write approval gate (P5.3) — the fix for the UnityIDE loop's
+ * central trust asymmetry: before this gate, UnityIDE's write/edit tools
  * applied file changes immediately and only the Claude/ACP path prompted
- * first. `withWriteApproval` makes the Arcane path approve-first too, for
+ * first. `withWriteApproval` makes the UnityIDE path approve-first too, for
  * whichever mode calls for it: `ai.edits.applyMode` now DEFAULTS to
  * `'auto'` (T8) — Cursor-style auto-apply followed by a post-hoc
  * Accept/Reject review queue (`stores/edit-review.ts`, `ReviewBar.tsx` /

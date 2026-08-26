@@ -80,7 +80,7 @@ jobs:
         run: cd editor && bun run sync:bridge
 
       # verify:intellisense is deliberately NOT run here. It needs a real Unity
-      # install, and its skip semantics (ARCANE_INTELLISENSE_E2E=required) make
+      # install, and its skip semantics (UNITYIDE_INTELLISENSE_E2E=required) make
       # a CI skip indistinguishable from a pass — which is precisely the failure
       # mode editor/CLAUDE.md documents. It stays a local gate via
       # `bun run verify`. Do NOT "fix" this by adding it with a quiet skip.

@@ -16,7 +16,7 @@ function GraphifyStatusBadge() {
   if (!workspacePath) return null;
   if (sidecarAvailable === false) {
     return (
-      <span style={baseStyle} title="The arcane-graph sidecar binary is not bundled with this build.">
+      <span style={baseStyle} title="The unityide-graph sidecar binary is not bundled with this build.">
         <Network size={12} />
         <span>graph: unavailable</span>
       </span>
