@@ -4,7 +4,7 @@ import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
 // (no webview). Same pattern as hosted-stream.test.ts: register module mocks
 // BEFORE dynamically importing the module under test, and capture calls.
 let invokeCalls: string[] = [];
-const scheme = 'arcane-dev';
+const scheme = 'unityide-dev';
 mock.module('@tauri-apps/api/core', () => ({
   invoke: async (cmd: string) => {
     invokeCalls.push(cmd);
@@ -161,21 +161,21 @@ describe('challengeS256', () => {
 describe('parseCallback', () => {
   it('parses a valid callback', () => {
     expect(
-      bl.parseCallback('arcane-dev://auth/callback?code=abc&state=xyz', 'arcane-dev'),
+      bl.parseCallback('unityide-dev://auth/callback?code=abc&state=xyz', 'unityide-dev'),
     ).toEqual({ code: 'abc', state: 'xyz' });
   });
 
   it.each([
-    ['wrong scheme', 'arcane://auth/callback?code=a&state=s'],
+    ['wrong scheme', 'unityide://auth/callback?code=a&state=s'],
     ['https scheme', 'https://auth/callback?code=a&state=s'],
-    ['wrong host', 'arcane-dev://evil/callback?code=a&state=s'],
-    ['wrong path', 'arcane-dev://auth/evil?code=a&state=s'],
-    ['path suffix', 'arcane-dev://auth/callback-evil?code=a&state=s'],
-    ['missing code', 'arcane-dev://auth/callback?state=s'],
-    ['missing state', 'arcane-dev://auth/callback?code=a'],
+    ['wrong host', 'unityide-dev://evil/callback?code=a&state=s'],
+    ['wrong path', 'unityide-dev://auth/evil?code=a&state=s'],
+    ['path suffix', 'unityide-dev://auth/callback-evil?code=a&state=s'],
+    ['missing code', 'unityide-dev://auth/callback?state=s'],
+    ['missing state', 'unityide-dev://auth/callback?code=a'],
     ['not a url at all', 'garbage'],
   ])('rejects %s', (_name, url) => {
-    expect(bl.parseCallback(url, 'arcane-dev')).toBeNull();
+    expect(bl.parseCallback(url, 'unityide-dev')).toBeNull();
   });
 });
 
@@ -193,7 +193,7 @@ describe('beginBrowserLogin', () => {
     const url = new URL(openedUrls[0]);
     expect(url.pathname).toBe('/auth');
     expect(url.searchParams.get('flow')).toBe('editor');
-    expect(url.searchParams.get('scheme')).toBe('arcane-dev');
+    expect(url.searchParams.get('scheme')).toBe('unityide-dev');
     expect(url.searchParams.get('state')).toMatch(/^[A-Za-z0-9_-]{22}$/);
     expect(url.searchParams.get('challenge')).toMatch(/^[A-Za-z0-9_-]{43}$/);
   });
@@ -202,7 +202,7 @@ describe('beginBrowserLogin', () => {
     const { calls, handlers } = makeHandlers();
     await bl.beginBrowserLogin(handlers);
     const h = deepLinkHandler!;
-    const url = `arcane-dev://auth/callback?code=C1&state=${sentState()}`;
+    const url = `unityide-dev://auth/callback?code=C1&state=${sentState()}`;
     h([url]);
     expect(calls).toHaveLength(1);
     expect(calls[0].code).toBe('C1');
@@ -217,9 +217,9 @@ describe('beginBrowserLogin', () => {
     const { calls, handlers } = makeHandlers();
     await bl.beginBrowserLogin(handlers);
     const h = deepLinkHandler!;
-    h(['arcane-dev://auth/callback?code=EVIL&state=WRONG']);
+    h(['unityide-dev://auth/callback?code=EVIL&state=WRONG']);
     expect(calls).toHaveLength(0);
-    h([`arcane-dev://auth/callback?code=C2&state=${sentState()}`]); // still pending
+    h([`unityide-dev://auth/callback?code=C2&state=${sentState()}`]); // still pending
     expect(calls).toHaveLength(1);
     expect(calls[0].code).toBe('C2');
   });
@@ -233,8 +233,8 @@ describe('beginBrowserLogin', () => {
     const h = deepLinkHandler!;
     const state = sentState();
     h([
-      `arcane-dev://auth/callback?code=EVIL&state=WRONG`,
-      `arcane-dev://auth/callback?code=GOOD&state=${state}`,
+      `unityide-dev://auth/callback?code=EVIL&state=WRONG`,
+      `unityide-dev://auth/callback?code=GOOD&state=${state}`,
     ]);
     expect(calls).toHaveLength(1);
     expect(calls[0].code).toBe('GOOD');
@@ -245,7 +245,7 @@ describe('beginBrowserLogin', () => {
     await bl.beginBrowserLogin(handlers);
     const h = deepLinkHandler!;
     const state = sentState();
-    h(['not-a-callback-url', `arcane-dev://auth/callback?code=GOOD2&state=${state}`]);
+    h(['not-a-callback-url', `unityide-dev://auth/callback?code=GOOD2&state=${state}`]);
     expect(calls).toHaveLength(1);
     expect(calls[0].code).toBe('GOOD2');
   });
@@ -256,7 +256,7 @@ describe('beginBrowserLogin', () => {
     const h = deepLinkHandler!;
     const state = sentState();
     bl.cancelBrowserLogin();
-    h([`arcane-dev://auth/callback?code=C3&state=${state}`]);
+    h([`unityide-dev://auth/callback?code=C3&state=${state}`]);
     expect(calls).toHaveLength(0);
   });
 
@@ -266,9 +266,9 @@ describe('beginBrowserLogin', () => {
     const firstState = sentState();
     await bl.beginBrowserLogin(handlers);
     const h = deepLinkHandler!;
-    h([`arcane-dev://auth/callback?code=OLD&state=${firstState}`]);
+    h([`unityide-dev://auth/callback?code=OLD&state=${firstState}`]);
     expect(calls).toHaveLength(0);
-    h([`arcane-dev://auth/callback?code=NEW&state=${sentState()}`]);
+    h([`unityide-dev://auth/callback?code=NEW&state=${sentState()}`]);
     expect(calls).toHaveLength(1);
     expect(calls[0].code).toBe('NEW');
   });

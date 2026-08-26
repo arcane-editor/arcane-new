@@ -24,7 +24,7 @@ function AiSignInGate() {
 
       <div style={containerStyle}>
         <div style={cardStyle}>
-          <div style={wordmarkStyle}>ARCANE</div>
+          <div style={wordmarkStyle}>UNITYIDE</div>
           <div style={titleStyle}>Sign in to use AI</div>
           <div style={subtitleStyle}>
             Connect your account to chat, edit code, and run agents in this workspace.

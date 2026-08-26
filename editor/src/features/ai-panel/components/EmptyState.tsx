@@ -18,7 +18,7 @@
  * conversation starts.
  *
  * It is also the part that must NOT be shown for an external agent. Ask / Plan
- * / Agent are Arcane's own loop — they swap its toolset and its system prompt
+ * / Agent are UnityIDE's own loop — they swap its toolset and its system prompt
  * before the vendor call — and an external agent receives none of that. Offering
  * that ladder beside "Claude Code" promised a control over Claude's behaviour
  * that does not exist and could not be honoured; Claude's real equivalents

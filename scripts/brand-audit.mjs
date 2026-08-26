@@ -37,14 +37,14 @@ import { readFileSync } from 'node:fs';
  */
 const ALLOWLIST = {
   'arcane-ai-gateway': 2,   // Cloudflare AI Gateway id (account-scoped resource)
-  // Repo folder name, deliberately kept. Walked 20 -> 19 -> 16 as non-folder
-  // uses of the string went away: first the UPM Documentation~ file was renamed
-  // to unityide-extension.md, then the three github.com/arcane-ide/
-  // arcane-extension URLs left with the domain move. All 16 remaining are
-  // genuine paths to the directory — CI working-dirs, two .gitignores, the
-  // bridge sync script, AGENTS.md and doc prose.
+  // Repo folder name, deliberately kept. Walked 20 -> 19 -> 16 -> 18: the UPM
+  // Documentation~ file was renamed, then the three github.com/arcane-ide/
+  // arcane-extension URLs left with the domain move, and then it went back UP
+  // by two when stale "sibling `arcane` repo" prose was corrected to name the
+  // actual in-tree directory. All 18 are genuine paths to it — CI working-dirs,
+  // two .gitignores, the bridge sync script, AGENTS.md, SPEC.md.
   // Adjust this deliberately and say why; never edit it to silence a surprise.
-  'arcane-extension': 16,
+  'arcane-extension': 18,
   'arcane-releases': 21,    // R2 bucket name, deliberately kept
   'arcane-landing': 6,      // Cloudflare Pages project names
   'arcane-server': 82,      // worker name + JWT_ISSUER + OAUTH_COOKIE_ISSUER + user agent

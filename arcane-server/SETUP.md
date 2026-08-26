@@ -1,4 +1,4 @@
-# Arcane Server — Setup & Deployment
+# UnityIDE Server — Setup & Deployment
 
 ## Prerequisites
 
@@ -140,7 +140,7 @@ Outputs a URL like `https://arcane-server.<account>.workers.dev`.
 ### 4. Custom domain (optional)
 
 1. Go to Cloudflare Dashboard → Workers & Pages → arcane-server → Settings → Domains
-2. Add your domain (e.g. `api.arcane.dev`)
+2. Add your domain (e.g. `api.unityide.app`)
 3. Cloudflare handles SSL automatically
 
 ## NPM Scripts Reference

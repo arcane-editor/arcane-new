@@ -1,5 +1,5 @@
 const API_URL = import.meta.env.PUBLIC_API_URL || 'https://api.unityide.app';
-const TOKEN_KEY = 'arcane_auth_token';
+const TOKEN_KEY = 'unityide_auth_token';
 
 export interface AuthUser {
     id: number;
@@ -48,7 +48,7 @@ const ERROR_MESSAGES: Record<string, string> = {
     invalid_token: 'This link is invalid or has expired. Request a new one and try again.',
     resend_throttled: "You've requested too many verification emails. Try again in an hour.",
     invalid_code: 'That code is incorrect or has expired. Request a new one.',
-    invalid_challenge: "The editor's sign-in request was invalid. Return to Arcane and click Sign in again.",
+    invalid_challenge: "The editor's sign-in request was invalid. Return to UnityIDE and click Sign in again.",
     no_password_set: 'This account has no password yet. Use "Set a password" on your account page.',
     turnstile_failed: 'Human verification failed. Refresh the page and try again.',
     google_not_configured: "Google sign-in isn't set up yet. Use email and password instead.",

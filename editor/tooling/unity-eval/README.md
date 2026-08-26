@@ -1,6 +1,6 @@
 # Unity eval
 
-Regression gate for Arcane's Unity agent: prompt, model, and routing changes
+Regression gate for UnityIDE's Unity agent: prompt, model, and routing changes
 must not silently make the agent worse at Unity work. Per the approved
 2026-07-07 design (`../../AI-SPEC.md` § Recommended Approach), this harness
 drives the **real** vendor agent loop (`src/features/ai-panel/services/vendor`)

@@ -56,7 +56,7 @@ export interface GroundingConfig {
   record?: { serverUrl: string; token: string };
 }
 
-// Mirrors production's per-task-type output ceiling (`arcane-stream.ts`'s
+// Mirrors production's per-task-type output ceiling (`hosted-stream.ts`'s
 // `maxTokensByTask`: chat 16384 / plan 24576 / edit 24576). The eval only has
 // two task modes (`ask` | `agent` — see `eval-types.ts`), so this collapses
 // prod's three-way split to two: `ask` maps to prod's chat/Q&A cap, `agent`

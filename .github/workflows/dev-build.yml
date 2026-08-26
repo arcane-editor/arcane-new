@@ -1,7 +1,7 @@
 name: Dev Build
 
-# Builds the side-by-side "Arcane Dev" app (identifier com.inno.editor.dev,
-# scheme arcane-dev://, config dir ~/.arcane-dev) with the DEV API/web URLs
+# Builds the side-by-side "UnityIDE Dev" app (identifier com.inno.editor.dev,
+# scheme unityide-dev://, config dir ~/.unityide-dev) with the DEV API/web URLs
 # baked in, and uploads installers to arcane-releases under dev/.
 #
 # Mirrors release.yml step-for-step — keep the two in sync. Same two repo

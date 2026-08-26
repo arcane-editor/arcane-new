@@ -1,6 +1,6 @@
-# Arcane Editor Monorepo
+# UnityIDE Editor Monorepo
 
-Arcane is a Unity-focused desktop IDE with supporting web, server, and Unity
+UnityIDE is a Unity-focused desktop IDE with supporting web, server, and Unity
 integration packages. There is no root package script; run commands from the
 package being changed.
 

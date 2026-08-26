@@ -1,9 +1,9 @@
 ---
 title: Keybindings
-description: Default keyboard shortcuts for ArcaneIDE, including Unity-specific controls.
+description: Default keyboard shortcuts for UnityIDE, including Unity-specific controls.
 ---
 
-ArcaneIDE is built on Eclipse Theia and inherits VS Code-compatible keybindings by default.
+UnityIDE is built on Eclipse Theia and inherits VS Code-compatible keybindings by default.
 
 ## General
 

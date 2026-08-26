@@ -46,7 +46,7 @@ export function checkVersionSync({ pkg, tauriConf, cargoToml, tauriDevConf, clau
   // pubkey removes Tauri's config merge depth as a silent failure mode), so it
   // needs its own check. Checking only `tauri.conf.json` is how a real
   // placeholder survived here: production was filled in, the dev channel was
-  // not, `verify` went green, and `dev-build.yml` would have shipped Arcane Dev
+  // not, `verify` went green, and `dev-build.yml` would have shipped UnityIDE Dev
   // installers that can never auto-update.
   for (const [name, source] of [
     ['tauri.conf.json', tauriConf],

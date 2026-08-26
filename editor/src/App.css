@@ -262,7 +262,7 @@ html, body, #root {
   padding-left: 2px;
   /* The wordmark is the only place the brand speaks, and it was doing it on a
      black field with nothing around it. A gold hairline gives it a right edge
-     to sit against, and the bloom is what "arcane" is supposed to feel like. */
+     to sit against, and the bloom is what "hosted" is supposed to feel like. */
   padding-right: 13px;
   text-shadow: 0 0 16px color-mix(in srgb, var(--accent) 30%, transparent);
 }
@@ -278,12 +278,12 @@ html, body, #root {
   background: color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
-:root[data-theme="arcane-light"] .title-bar-app-name {
+:root[data-theme="unityide-light"] .title-bar-app-name {
   color: var(--text-on-dark);
   text-shadow: 0 0 12px color-mix(in srgb, var(--accent) 25%, transparent);
 }
 
-:root[data-theme="arcane-light"] .title-bar-app-name::after {
+:root[data-theme="unityide-light"] .title-bar-app-name::after {
   background: color-mix(in srgb, var(--text-on-dark) 22%, transparent);
 }
 
@@ -313,22 +313,22 @@ html, body, #root {
   background: color-mix(in srgb, var(--text-primary) 9%, transparent);
 }
 
-/* In Arcane Light the titlebar is dark — adjust button text contrast */
-:root[data-theme="arcane-light"] .title-bar-btn {
+/* In UnityIDE Light the titlebar is dark — adjust button text contrast */
+:root[data-theme="unityide-light"] .title-bar-btn {
   color: color-mix(in srgb, var(--text-on-dark) 55%, transparent);
 }
-:root[data-theme="arcane-light"] .title-bar-btn:hover {
+:root[data-theme="unityide-light"] .title-bar-btn:hover {
   color: var(--text-on-dark);
   background: color-mix(in srgb, var(--text-on-dark) 10%, transparent);
 }
-:root[data-theme="arcane-light"] .activity-bar-icon {
+:root[data-theme="unityide-light"] .activity-bar-icon {
   color: color-mix(in srgb, var(--text-on-dark) 50%, transparent);
 }
-:root[data-theme="arcane-light"] .activity-bar-icon:hover {
+:root[data-theme="unityide-light"] .activity-bar-icon:hover {
   color: var(--text-on-dark);
   background: color-mix(in srgb, var(--text-on-dark) 8%, transparent);
 }
-:root[data-theme="arcane-light"] .activity-bar-icon.active {
+:root[data-theme="unityide-light"] .activity-bar-icon.active {
   color: var(--accent);
 }
 
@@ -522,26 +522,26 @@ html, body, #root {
   to { transform: rotate(360deg); }
 }
 
-/* Arcane Light keeps a dark title bar, so the deck's contents are on-dark. */
-:root[data-theme="arcane-light"] .unity-deck {
+/* UnityIDE Light keeps a dark title bar, so the deck's contents are on-dark. */
+:root[data-theme="unityide-light"] .unity-deck {
   background: color-mix(in srgb, var(--text-on-dark) 8%, transparent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text-on-dark) 12%, transparent);
 }
 
-:root[data-theme="arcane-light"] .unity-deck__btn {
+:root[data-theme="unityide-light"] .unity-deck__btn {
   color: color-mix(in srgb, var(--text-on-dark) 60%, transparent);
 }
 
-:root[data-theme="arcane-light"] .unity-deck__btn:hover:not(:disabled) {
+:root[data-theme="unityide-light"] .unity-deck__btn:hover:not(:disabled) {
   color: var(--text-on-dark);
   background: color-mix(in srgb, var(--text-on-dark) 12%, transparent);
 }
 
-:root[data-theme="arcane-light"] .unity-deck__divider {
+:root[data-theme="unityide-light"] .unity-deck__divider {
   background: color-mix(in srgb, var(--text-on-dark) 14%, transparent);
 }
 
-:root[data-theme="arcane-light"] .unity-deck__status {
+:root[data-theme="unityide-light"] .unity-deck__status {
   color: color-mix(in srgb, var(--text-on-dark) 70%, transparent);
 }
 
@@ -3697,7 +3697,7 @@ html, body, #root {
      the badge floating in empty space). Pill radius, not 50%: two-digit
      and "99+" counts must not render as a squished ellipse. Text uses
      --bg-primary, which stays readable on --accent in every bundled theme
-     (--text-active is near-invisible on the arcane-dark gold). The ring of
+     (--text-active is near-invisible on the unityide-dark gold). The ring of
      activity-bar background separates the badge from the glyph it overlaps. */
   position: absolute;
   bottom: 6px;
@@ -3970,7 +3970,7 @@ html, body, #root {
 }
 
 .ai-panel-context-meter.is-tight {
-  /* Not `--warning`: in the Arcane themes it is a gold within a few points of
+  /* Not `--warning`: in the UnityIDE themes it is a gold within a few points of
      `--accent`, so a warning drawn in it would be indistinguishable from the
      normal state. `--error-text` is the only token that reads as different at
      a glance — and the fill gets denser and the label heavier too, so the
@@ -4325,7 +4325,7 @@ html, body, #root {
 /* ---- External agent: the mode ladder's slot, filled by its owner ----
    No mode column, because the agent owns its own modes. What used to sit here
    was a grey paragraph behind a grey rule — the one slot that carries the
-   panel's colour and structure for Arcane went flat and read as a disclaimer.
+   panel's colour and structure for UnityIDE went flat and read as a disclaimer.
    This keeps the ladder's grammar (a left rule at the same left edge, so the
    block still answers the same "on send" question) and takes the accent the
    agent pill in the header already uses, so the two read as the same subject.
@@ -6215,7 +6215,7 @@ html, body, #root {
   opacity: 0.7;
 }
 
-/* ---- AI Panel: plan/TODO checklist (Arcane todo_update) ----
+/* ---- AI Panel: plan/TODO checklist (UnityIDE todo_update) ----
    T9: lives as its own sticky bar between the message list and the composer
    (mirrors .ai-review-bar's card look + .ai-panel-input-area's border-top
    divider) rather than inline at the bottom of the scrolling message list. */
@@ -7031,7 +7031,7 @@ html, body, #root {
 .ai-panel-mode-menu-item[data-mode='agent'] { --mode-accent: var(--mode-agent); }
 .ai-panel-mode-menu-item[data-mode='plan'] { --mode-accent: var(--mode-plan); }
 
-/* `--mode-accent` is set by the [data-mode] rules above, which only the Arcane
+/* `--mode-accent` is set by the [data-mode] rules above, which only the UnityIDE
    mode menu carries. These three are unscoped, so in an agent's config menu the
    property is undefined and the value is invalid — the selected row lost its
    marker and its tick lost its colour. The fallback keeps one rule serving both

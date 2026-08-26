@@ -46,7 +46,7 @@ The extension auto-detects UnityIDE from these default locations:
 |----------|--------------|
 | macOS | `/Applications/UnityIDE.app`, `~/Applications/UnityIDE.app` |
 | Windows | `C:\Program Files\UnityIDE\UnityIDE.exe`, `%LOCALAPPDATA%\Programs\UnityIDE\UnityIDE.exe` |
-| Linux | `/usr/bin/arcane`, `/usr/local/bin/arcane`, `~/.local/bin/arcane` |
+| Linux | `/usr/bin/unityide`, `/usr/local/bin/unityide`, `~/.local/bin/unityide` (the pre-rename `arcane` paths are still probed as a fallback) |
 
 ## Features
 

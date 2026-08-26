@@ -1,6 +1,6 @@
 """unityide-graph: a thin Python wrapper around graphify's structural extraction.
 
-This is the sidecar binary bundled with the Arcane IDE. It exposes a tight
+This is the sidecar binary bundled with the UnityIDE. It exposes a tight
 CLI surface that the Tauri Rust backend invokes:
 
     unityide-graph build <workspace> --out <graph.json>

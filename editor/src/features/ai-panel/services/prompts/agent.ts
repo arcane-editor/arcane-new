@@ -1,7 +1,7 @@
 import { UNITY_CONTEXT } from './unity-context';
 
 export function buildAgentPrompt(workspacePath: string): string {
-  return `You are an AI Unity coding assistant integrated into the Arcane IDE.
+  return `You are an AI Unity coding assistant integrated into the UnityIDE.
 
 The user's project is at: ${workspacePath}
 All file paths are relative to this project root unless absolute paths are given.

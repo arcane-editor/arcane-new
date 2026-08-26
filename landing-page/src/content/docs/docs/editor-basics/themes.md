@@ -1,9 +1,9 @@
 ---
 title: Themes
-description: Change the look and feel of ArcaneIDE.
+description: Change the look and feel of UnityIDE.
 ---
 
-ArcaneIDE is built on Eclipse Theia and supports the same theme ecosystem.
+UnityIDE is built on Eclipse Theia and supports the same theme ecosystem.
 
 ## Switching Themes
 
@@ -11,7 +11,7 @@ Open the Command Palette (`Cmd+Shift+P` / `Ctrl+Shift+P`) and type **"Color Them
 
 ## Default Theme
 
-Arcane ships with a dark theme enabled by default — deep navy background with orange accents, matching the branding.
+UnityIDE ships with a dark theme enabled by default — deep navy background with orange accents, matching the branding.
 
 ## Installing More Themes
 

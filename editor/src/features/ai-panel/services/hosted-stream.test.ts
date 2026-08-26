@@ -27,8 +27,8 @@ mock.module('../../../stores/auth', () => ({
 
 let aiState: {
   mode: 'ask' | 'agent' | 'plan';
-  arcanePlan: Array<{ status: string; difficulty?: 'easy' | 'hard' }> | null;
-} = { mode: 'ask', arcanePlan: null };
+  hostedPlan: Array<{ status: string; difficulty?: 'easy' | 'hard' }> | null;
+} = { mode: 'ask', hostedPlan: null };
 let sessionUsageCalls: Array<{ inputTokens: number; outputTokens: number }> = [];
 let authNoticeCalls: Array<string | null> = [];
 let verificationRequiredCalls: boolean[] = [];
@@ -58,7 +58,7 @@ const { resetSendContext, setSendPromptMode } = await import('./send-context');
 
 const ctx: Context = { systemPrompt: 'SYS', messages: [], tools: [] };
 function opts(signal?: AbortSignal, reasoning?: string): StreamOptions {
-  return { model: { id: 'm', name: 'm', provider: 'arcane' }, signal, reasoning };
+  return { model: { id: 'm', name: 'm', provider: 'hosted' }, signal, reasoning };
 }
 
 function sseResponse(lines: string[], status = 200): Response {
@@ -134,7 +134,7 @@ function delayedSseResponse(chunks: string[], chunkDelayMs: number, signal?: Abo
 beforeEach(() => {
   authState = { token: 'test-token' };
   logoutCalls = 0;
-  aiState = { mode: 'ask', arcanePlan: null };
+  aiState = { mode: 'ask', hostedPlan: null };
   sessionUsageCalls = [];
   authNoticeCalls = [];
   verificationRequiredCalls = [];
@@ -783,7 +783,7 @@ describe('createHostedStreamFn', () => {
   describe('difficulty metadata FACT (Task 10)', () => {
     it('includes difficulty for high effort + agent promptMode, from the tagged in_progress todo', async () => {
       setSendPromptMode('agent');
-      aiState.arcanePlan = [{ status: 'in_progress', difficulty: 'hard' }];
+      aiState.hostedPlan = [{ status: 'in_progress', difficulty: 'hard' }];
       const { fetchImpl, bodies } = capturingFetchImpl(sseResponse(['data: [DONE]\n\n']));
 
       const streamFn = createHostedStreamFn({ fetchImpl });
@@ -794,7 +794,7 @@ describe('createHostedStreamFn', () => {
 
     it('includes difficulty for plan-execution promptMode too, falling back to the first pending todo', async () => {
       setSendPromptMode('plan-execution');
-      aiState.arcanePlan = [{ status: 'pending', difficulty: 'easy' }];
+      aiState.hostedPlan = [{ status: 'pending', difficulty: 'easy' }];
       const { fetchImpl, bodies } = capturingFetchImpl(sseResponse(['data: [DONE]\n\n']));
 
       const streamFn = createHostedStreamFn({ fetchImpl });
@@ -805,7 +805,7 @@ describe('createHostedStreamFn', () => {
 
     it('omits the difficulty key entirely when effort is not high', async () => {
       setSendPromptMode('agent');
-      aiState.arcanePlan = [{ status: 'in_progress', difficulty: 'hard' }];
+      aiState.hostedPlan = [{ status: 'in_progress', difficulty: 'hard' }];
       const { fetchImpl, bodies } = capturingFetchImpl(sseResponse(['data: [DONE]\n\n']));
 
       const streamFn = createHostedStreamFn({ fetchImpl });
@@ -816,7 +816,7 @@ describe('createHostedStreamFn', () => {
 
     it('omits the difficulty key outside agent/plan-execution promptModes, even at high effort', async () => {
       setSendPromptMode('ask');
-      aiState.arcanePlan = [{ status: 'in_progress', difficulty: 'hard' }];
+      aiState.hostedPlan = [{ status: 'in_progress', difficulty: 'hard' }];
       const { fetchImpl, bodies } = capturingFetchImpl(sseResponse(['data: [DONE]\n\n']));
 
       const streamFn = createHostedStreamFn({ fetchImpl });
@@ -827,7 +827,7 @@ describe('createHostedStreamFn', () => {
 
     it('omits the difficulty key when the plan has no tagged in_progress/pending entry', async () => {
       setSendPromptMode('agent');
-      aiState.arcanePlan = [{ status: 'done', difficulty: 'hard' }];
+      aiState.hostedPlan = [{ status: 'done', difficulty: 'hard' }];
       const { fetchImpl, bodies } = capturingFetchImpl(sseResponse(['data: [DONE]\n\n']));
 
       const streamFn = createHostedStreamFn({ fetchImpl });

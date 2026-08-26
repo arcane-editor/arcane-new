@@ -1,5 +1,5 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Arcane Editor — monorepo root .gitignore
+# UnityIDE Editor — monorepo root .gitignore
 #
 # Subfolders (arcane-server, arcane-release-worker, editor, landing-page,
 # arcane-extension) keep their own .gitignore for stack-specific artifacts.

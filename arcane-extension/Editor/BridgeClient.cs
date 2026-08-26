@@ -121,7 +121,7 @@ namespace UnityIDE.Bridge
             _running = true;
             _worker = new Thread(WorkerLoop)
             {
-                Name = "ArcaneBridgeClient",
+                Name = "UnityIDEBridgeClient",
                 IsBackground = true, // never block editor shutdown
             };
             _worker.Start();

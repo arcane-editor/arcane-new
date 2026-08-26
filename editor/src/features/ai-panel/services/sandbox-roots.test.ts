@@ -44,14 +44,14 @@ describe('computeAllowedRoots', () => {
 describe('computeExternalAgentWriteRoots', () => {
   /**
    * An external agent runs its OWN harness. Confining its writes to a Unity
-   * project's `Assets/` is Arcane's tool policy, not a safety property — and it
+   * project's `Assets/` is UnityIDE's tool policy, not a safety property — and it
    * is not one the sandbox can enforce anyway, since `acp-terminals.ts` gives
    * the same agent an unconfined shell. What survives here is the one
    * confinement that does real work: writes stay inside the open project.
    */
   it('is the whole workspace, NOT the Unity triple', () => {
     expect(computeExternalAgentWriteRoots('/p')).toEqual(['/p']);
-    // The Arcane agent's own sandbox is unchanged — these must not converge.
+    // The UnityIDE agent's own sandbox is unchanged — these must not converge.
     expect(computeAllowedRoots('/p', true, '/p/Assets')).not.toEqual(
       computeExternalAgentWriteRoots('/p'),
     );

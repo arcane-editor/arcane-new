@@ -40,7 +40,7 @@ export function computeAllowedRoots(
 /**
  * Write roots for an EXTERNAL agent (Claude Code over ACP).
  *
- * Deliberately not `computeAllowedRoots`. That function encodes the Arcane
+ * Deliberately not `computeAllowedRoots`. That function encodes the UnityIDE
  * agent's tool policy — on a Unity project it narrows to
  * `[Assets, .unityide, Packages]` — and applying it to an agent that runs its own
  * harness cages the legible path without closing the illegible one:

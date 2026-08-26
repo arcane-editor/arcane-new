@@ -10,10 +10,10 @@
  *   │ └──────────────────────────────────────────────┘   │
  *   └────────────────────────────────────────────────────┘
  *
- * The toolbar's left side hosts the Arcane ModeSelector + EffortSelector — or,
+ * The toolbar's left side hosts the UnityIDE ModeSelector + EffortSelector — or,
  * when an external agent is selected, that agent's OWN advertised settings via
  * AgentConfigBar. The two are mutually exclusive: mode and effort configure the
- * Arcane loop, and an external agent neither reads them nor has an equivalent.
+ * UnityIDE loop, and an external agent neither reads them nor has an equivalent.
  */
 
 import { useEffect, useRef, useState } from 'react';
@@ -78,10 +78,10 @@ function ChatInput() {
 
     // The ONE place the panel branches on which agent is selected. An external
     // agent runs its own loop and exposes its own modes (plan, accept-edits, …)
-    // as session config options, so Arcane's plan controller — which writes
+    // as session config options, so UnityIDE's plan controller — which writes
     // .unityide/plans/*.aplan and swaps prompt modes on the vendor loop — has no
     // meaning for it and is skipped entirely.
-    if (selectedAgent !== 'arcane') {
+    if (selectedAgent !== 'hosted') {
       void sendChatMessage(text, { mode, effort, attachments }).catch((e) =>
         useAiStore.getState().setError(String(e)),
       );
@@ -125,7 +125,7 @@ function ChatInput() {
   const planResumePending =
     mode === 'plan' && !!activePlanPath && (planPhase === 'awaiting-execute' || planPhase === 'executing');
   // The placeholder is a promise about what Enter does, so it has to know who
-  // is receiving the message — `mode` is Arcane's and an external agent never
+  // is receiving the message — `mode` is UnityIDE's and an external agent never
   // reads it. See `data/composer-copy.ts`.
   const placeholder = composerPlaceholder({
     agent: selectedAgent,
@@ -154,7 +154,7 @@ function ChatInput() {
 
         <div className="ai-panel-composer-toolbar">
           <div className="ai-panel-composer-toolbar-left">
-            {selectedAgent === 'arcane' ? (
+            {selectedAgent === 'hosted' ? (
               <>
                 <ModeSelector />
                 <EffortSelector />

@@ -1,6 +1,6 @@
 /**
  * Agent service — singleton that orchestrates the PI agent loop
- * with the Arcane server StreamFn and Tauri-backed tools.
+ * with the UnityIDE server StreamFn and Tauri-backed tools.
  *
  * Per-call configuration: chat mode (ask/agent/plan) drives system prompt
  * + tool subset; effort (low/mid/high) drives reasoning level.
@@ -121,7 +121,7 @@ function restoreAgentMessages(messages: AiMessage[]): AgentMessage[] {
   return out;
 }
 
-const PLACEHOLDER_MODEL: Model = { id: 'auto', name: 'auto', provider: 'arcane' };
+const PLACEHOLDER_MODEL: Model = { id: 'auto', name: 'auto', provider: 'hosted' };
 
 /**
  * T9 Part 4: cheap harness nudge, prepended to the outgoing prompt text (same
@@ -393,7 +393,7 @@ export interface SendMessageOptions {
 
 export class AgentService {
   /** Identifies this backend to `chat-backend.ts`'s `ChatBackend` contract. */
-  readonly kind = 'arcane' as const;
+  readonly kind = 'hosted' as const;
 
   private agent: Agent;
   private unsubscribe: (() => void) | null = null;

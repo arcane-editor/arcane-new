@@ -24,7 +24,7 @@ namespace UnityIDE.Editor
         /// The app's name before the rename. Kept only so an already-installed
         /// build is still found; nothing new is ever written under it.
         /// </summary>
-        private const string LegacyAppName = "Arcane";
+        private const string LegacyAppName = "UnityIDE";
 
         // Each table lists the new-name locations first, then the pre-rename
         // ones. The extension and the IDE ship separately — a user can update
@@ -200,7 +200,7 @@ namespace UnityIDE.Editor
             // Launch (or focus) UnityIDE and navigate to the requested location. If UnityIDE
             // is already running, its single-instance lock relays the --goto argument to
             // the existing window; otherwise a new instance opens the project.
-            return LaunchArcane(filePath, line, column);
+            return LaunchIde(filePath, line, column);
         }
 
         public void SyncAll()
@@ -246,7 +246,7 @@ namespace UnityIDE.Editor
                 MessageType.Info);
         }
 
-        private bool LaunchArcane(string filePath, int line, int column)
+        private bool LaunchIde(string filePath, int line, int column)
         {
             string execPath = !string.IsNullOrEmpty(_installPath) ? _installPath : UnityIDESettings.InstallPath;
 

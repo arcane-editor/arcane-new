@@ -54,7 +54,7 @@ if (hook) {
 } else {
     hook = await api('/webhooks', {
         method: 'POST',
-        body: JSON.stringify({ url: TARGET_URL, description: 'Arcane prod worker (arcane-server)' }),
+        body: JSON.stringify({ url: TARGET_URL, description: 'UnityIDE prod worker (arcane-server)' }),
     });
     console.log(`\nCREATE ${TARGET_URL} → ${hook.id}`);
 }

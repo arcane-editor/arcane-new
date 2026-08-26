@@ -41,7 +41,7 @@ export default function AuthSuccess() {
                 <h1 className="font-display text-2xl font-bold mb-2 text-center">Nothing to hand off</h1>
                 <p className="text-muted-foreground text-sm text-center">
                     This page finishes an editor sign-in, but there's no pending sign-in here
-                    (codes are single-use). Start again from Arcane, or sign in on the site.
+                    (codes are single-use). Start again from UnityIDE, or sign in on the site.
                 </p>
                 <a href="/auth" className="block mt-4 text-center text-primary text-sm hover:underline">Go to sign in</a>
             </AuthShell>
@@ -62,20 +62,20 @@ export default function AuthSuccess() {
         <AuthShell wide>
             <h1 className="font-display text-2xl font-bold mb-2 text-center">You're signed in</h1>
             <p className="text-muted-foreground text-sm mb-6 text-center">
-                Sending you back to the Arcane editor…
+                Sending you back to the UnityIDE editor…
             </p>
 
             <button
                 className="h-11 w-full rounded-md bg-primary text-primary-foreground text-base font-semibold hover:bg-primary/90 glow-orange-sm transition-all"
                 onClick={() => { window.location.href = handoff.deepLink; }}
             >
-                Open Arcane
+                Open UnityIDE
             </button>
 
             <div className="mt-6 border-t border-border/50 pt-5">
                 <p className="text-sm font-medium text-foreground mb-2">Didn't open?</p>
                 <p className="text-muted-foreground text-xs mb-3">
-                    Paste this one-time code into Arcane instead. It works once and expires in about a minute.
+                    Paste this one-time code into UnityIDE instead. It works once and expires in about a minute.
                 </p>
                 <div className="flex gap-2">
                     <code className="flex-1 rounded-md border border-border bg-secondary/50 px-3 py-2 text-sm font-mono text-foreground break-all select-all">
@@ -89,7 +89,7 @@ export default function AuthSuccess() {
                     </button>
                 </div>
                 <p className="text-muted-foreground text-xs mt-2">
-                    Only paste this code into Arcane. Never share it with anyone.
+                    Only paste this code into UnityIDE. Never share it with anyone.
                 </p>
             </div>
 

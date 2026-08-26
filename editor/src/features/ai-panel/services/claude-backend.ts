@@ -2,12 +2,12 @@
  * Claude Code as a chat backend, driven over the Agent Client Protocol.
  *
  * Claude owns its own agent loop, its own tools and its own context window, so
- * unlike the Arcane path there is no `StreamFn` to swap and no vendor loop to
+ * unlike the UnityIDE path there is no `StreamFn` to swap and no vendor loop to
  * run. What this class does is translate: ACP `session/update` notifications
  * become `AgentEvent`s fed to `useAiStore.handleAgentEvent`, so `MessageList`,
  * `ToolCallBlock`, `PermissionRequestBlock`, `PlanList`, the per-turn
  * checkpoints and the Accept/Reject review queue all render a Claude turn
- * exactly as they render an Arcane one, with no branch of their own.
+ * exactly as they render a UnityIDE one, with no branch of their own.
  *
  * Lifecycle:
  *
@@ -409,15 +409,15 @@ export class ClaudeBackend {
     const result = await this.client!.request<InitializeResult>(AGENT_METHOD.initialize, {
       protocolVersion: ACP_PROTOCOL_VERSION,
       clientCapabilities: CLIENT_CAPABILITIES,
-      clientInfo: { name: 'arcane', title: 'Arcane', version: APP_VERSION },
+      clientInfo: { name: 'hosted', title: 'UnityIDE', version: APP_VERSION },
     });
 
     if (result.protocolVersion !== ACP_PROTOCOL_VERSION) {
       // Half-speaking a protocol produces failures far from their cause. Refuse
       // clearly instead, naming both versions so the fix is obvious.
       throw new Error(
-        `This Claude agent speaks ACP v${result.protocolVersion}, but Arcane speaks ` +
-          `v${ACP_PROTOCOL_VERSION}. Update Arcane, or reinstall the agent from Settings.`,
+        `This Claude agent speaks ACP v${result.protocolVersion}, but UnityIDE speaks ` +
+          `v${ACP_PROTOCOL_VERSION}. Update UnityIDE, or reinstall the agent from Settings.`,
       );
     }
 
@@ -597,7 +597,7 @@ export class ClaudeBackend {
    * `elicitation/create` — the agent asking the USER something, as opposed to
    * asking permission to act. Claude Code's `AskUserQuestion` arrives here.
    *
-   * Each field is asked as an ordinary Arcane question, in order, through the
+   * Each field is asked as an ordinary UnityIDE question, in order, through the
    * same gate the `ask_user` tool uses — so the user gets `QuestionBlock`'s
    * chips, the composer's answer mode, and the existing cancel semantics, with
    * no second question UI to build or keep consistent.
@@ -710,7 +710,7 @@ export class ClaudeBackend {
         break;
 
       case 'plan':
-        ai.setArcanePlan(planEntriesFor((update as { entries?: never }).entries));
+        ai.setHostedPlan(planEntriesFor((update as { entries?: never }).entries));
         break;
 
       case 'usage_update': {
@@ -828,7 +828,7 @@ export class ClaudeBackend {
     // The event above fills the `toolCalls` Map and nothing else, and a Map
     // entry renders nowhere. `ToolCallBlock` is reached from a `toolCall`
     // CONTENT BLOCK inside an assistant message, so the call has to join the
-    // bubble — exactly as Arcane's own loop does it.
+    // bubble — exactly as UnityIDE's own loop does it.
     //
     // This used to `finalizeStreaming('toolUse')` here instead, on the belief
     // that a tool renders between two messages. Nothing renders it there: the

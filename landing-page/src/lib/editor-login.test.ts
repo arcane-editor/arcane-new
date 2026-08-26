@@ -75,7 +75,7 @@ describe('isValidLoopbackRedirect', () => {
             'https://127.0.0.1:53411/callback',
             'file:///callback',
             'javascript:alert(1)//127.0.0.1/callback',
-            'arcane://127.0.0.1:53411/callback',
+            'unityide://127.0.0.1:53411/callback',
         ]) {
             expect(isValidLoopbackRedirect(raw), raw).toBe(false);
         }

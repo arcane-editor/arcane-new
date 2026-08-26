@@ -1,12 +1,12 @@
-# Distributing Arcane
+# Distributing UnityIDE
 
-Arcane ships for **macOS (Apple Silicon + Intel)** and **Windows x64**. Release builds are produced by the `Release` GitHub Actions workflow (`.github/workflows/release.yml`) and uploaded to the Cloudflare R2 bucket `arcane-releases` — see [Releasing (CI → Cloudflare R2)](#releasing-ci--cloudflare-r2) below. This doc covers what recipients see on each platform with the current **ad-hoc macOS / unsigned Windows** setup.
+UnityIDE ships for **macOS (Apple Silicon + Intel)** and **Windows x64**. Release builds are produced by the `Release` GitHub Actions workflow (`.github/workflows/release.yml`) and uploaded to the Cloudflare R2 bucket `arcane-releases` — see [Releasing (CI → Cloudflare R2)](#releasing-ci--cloudflare-r2) below. This doc covers what recipients see on each platform with the current **ad-hoc macOS / unsigned Windows** setup.
 
 ## macOS
 
 Builds are **ad-hoc signed** (`signingIdentity: "-"`). That's enough to run them on the Mac that built them, but recipients on other Macs will see:
 
-> **"Arcane" is damaged and can't be opened. You should move it to the Trash.**
+> **"UnityIDE" is damaged and can't be opened. You should move it to the Trash.**
 
 This is expected and the app is not actually damaged. Read on for what to do.
 
@@ -19,12 +19,12 @@ The signature itself is fine. The rejection is about **trust**, not validity. Th
 ## For recipients
 
 1. Download the `.dmg` and double-click to mount it.
-2. Drag `Arcane.app` into `/Applications` (or wherever you want to keep it).
+2. Drag `UnityIDE.app` into `/Applications` (or wherever you want to keep it).
 3. Open **Terminal** (⌘+Space → "Terminal").
 4. Paste this and hit Enter:
 
    ```bash
-   xattr -dr com.apple.quarantine /Applications/Arcane.app
+   xattr -dr com.apple.quarantine /Applications/UnityIDE.app
    ```
 
    If you put the app somewhere other than `/Applications`, change the path accordingly.
@@ -99,7 +99,7 @@ bun run tauri:dev-app          # iterate on code (see caveat below)
 **Only the packaged build is a real second app.** `tauri dev` runs the bare
 binary from `target/debug/` with no `.app` bundle, so there is no `Info.plist`
 — the app is not separately named, and macOS LaunchServices never learns about
-`arcane-dev://` (there is no runtime registration API for it, which is why
+`unityide-dev://` (there is no runtime registration API for it, which is why
 `setup()` only registers schemes at runtime on Windows and Linux). To get a
 side-by-side app in the Dock with working deep-link sign-in, **build and
 install it**; use `tauri:dev-app` only for fast iteration.
@@ -108,34 +108,34 @@ Everything that would otherwise collide is keyed off the overlay:
 
 | | prod | dev app |
 |---|---|---|
-| App name | Arcane | Arcane Dev |
-| Window title | Arcane | Arcane Dev |
+| App name | UnityIDE | UnityIDE Dev |
+| Window title | UnityIDE | UnityIDE Dev |
 | Bundle id | `com.inno.editor` | `com.inno.editor.dev` |
-| Deep-link scheme | `arcane://` | `arcane-dev://` |
-| Config dir | `~/.arcane` | `~/.arcane-dev` |
+| Deep-link scheme | `unityide://` | `unityide-dev://` |
+| Config dir | `~/.unityide` | `~/.unityide-dev` |
 | API / web | `api.unityide.app` | `api-dev.unityide.app` |
 
 Window titles come from `productName` via `window_title()` in
 `src-tauri/src/lib.rs` — both for the programmatic welcome window and, in
 `setup()`, for the one declared in `tauri.conf.json` (which is built before
-Rust runs and would otherwise keep that file's literal "Arcane"). Retitling
+Rust runs and would otherwise keep that file's literal "UnityIDE"). Retitling
 there beats duplicating the whole window block in the overlay to change one
 string. On macOS `hiddenTitle` keeps it out of the title bar, but it still
 shows in the Window menu and Mission Control; on Windows and Linux it is the
 title bar.
 
 The bundle id is what lets macOS treat them as different apps, and
-`arcane_dir_name()` (`src-tauri/src/auth.rs`) derives the config dir from it —
+`config_dir_name()` (`src-tauri/src/auth.rs`) derives the config dir from it —
 so the two never share tokens, sessions, or graphs. The deep-link scheme is
 read from the runtime config rather than hardcoded
 (`scheme_from_plugin_config`), so a dev build tells the website to call back to
-`arcane-dev://` and sign-in lands in the right app. The website accepts both
+`unityide-dev://` and sign-in lands in the right app. The website accepts both
 via `SCHEME_ALLOWLIST` in `landing-page/src/lib/editor-login.ts`.
 
 **The endpoints are the part that needs the extra script.** Vite only reads
 `.env.development` in development mode, and `tauri build` runs `vite build`,
 which is production mode — so a plain
-`tauri build --config src-tauri/tauri.dev.conf.json` would be *named* "Arcane
+`tauri build --config src-tauri/tauri.dev.conf.json` would be *named* "UnityIDE
 Dev" while talking to the **production** API. The overlay therefore points
 `beforeBuildCommand` at `build:dev-env` (`vite build --mode development`).
 Use the scripts above rather than invoking `tauri build --config` directly.
@@ -184,11 +184,11 @@ If you want recipients to open the app with a single double-click — no Termina
 4. After `bun run tauri build`, notarize and staple:
    ```bash
    xcrun notarytool submit \
-     src-tauri/target/release/bundle/dmg/Arcane_0.1.0_aarch64.dmg \
+     src-tauri/target/release/bundle/dmg/UnityIDE_0.3.2_aarch64.dmg \
      --apple-id "you@example.com" --team-id TEAMID --password APP_SPECIFIC_PASSWORD \
      --wait
    xcrun stapler staple \
-     src-tauri/target/release/bundle/dmg/Arcane_0.1.0_aarch64.dmg
+     src-tauri/target/release/bundle/dmg/UnityIDE_0.3.2_aarch64.dmg
    ```
 
 After that, recipients can mount and open the app with no warnings and no Terminal step. This is also a prerequisite if you ever add the in-app auto-updater (Gatekeeper blocks silent updates of ad-hoc-signed apps).

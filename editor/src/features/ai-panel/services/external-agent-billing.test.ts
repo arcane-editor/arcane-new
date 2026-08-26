@@ -5,8 +5,8 @@ import { fileURLToPath } from 'node:url';
 
 /**
  * External agents run on the user's OWN provider account. A Claude turn is
- * billed by Anthropic, never by Arcane — it must not move the credit ledger,
- * must not hit Arcane's metered `/v1/chat/completions`, and must not accumulate
+ * billed by Anthropic, never by UnityIDE — it must not move the credit ledger,
+ * must not hit UnityIDE's metered `/v1/chat/completions`, and must not accumulate
  * into `sessionUsage`.
  *
  * That invariant is enforced statically rather than at runtime, for the same
@@ -33,7 +33,7 @@ const EXTERNAL_AGENT_SOURCES = [
   path.join(SRC, 'features/ai-panel/services/mcp-config.ts'),
 ];
 
-/** Symbols that mean "Arcane is paying for this". */
+/** Symbols that mean "UnityIDE is paying for this". */
 const BILLING_MARKERS = [
   'recordSessionUsage',
   'hosted-stream',
@@ -64,7 +64,7 @@ function collect(target: string): string[] {
   return readdirSync(target).flatMap((entry) => collect(path.join(target, entry)));
 }
 
-describe('external agents never bill Arcane credits', () => {
+describe('external agents never bill UnityIDE credits', () => {
   const files = EXTERNAL_AGENT_SOURCES.flatMap(collect).filter((f) => !f.endsWith('.test.ts'));
 
   it('scans a non-empty set of files (guards against the paths going stale)', () => {
@@ -78,7 +78,7 @@ describe('external agents never bill Arcane credits', () => {
     });
   }
 
-  it('only the Arcane stream records session usage', () => {
+  it('only the UnityIDE stream records session usage', () => {
     const all = collect(SRC).filter((f) => !f.endsWith('.test.ts'));
     const callers = all.filter((f) => /recordSessionUsage\s*\(/.test(code(f)));
     expect(callers.map(rel).sort()).toEqual(['features/ai-panel/services/hosted-stream.ts']);

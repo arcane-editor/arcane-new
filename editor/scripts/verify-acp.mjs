@@ -185,7 +185,7 @@ try {
     protocolVersion: 1,
     // Must mirror CLIENT_CAPABILITIES in `acp-translate.ts`. Several of these
     // are feature switches on the agent, so probing with a different set would
-    // verify a session Arcane never actually opens.
+    // verify a session UnityIDE never actually opens.
     clientCapabilities: {
       fs: { readTextFile: true, writeTextFile: true },
       terminal: true,
@@ -194,7 +194,7 @@ try {
       session: { configOptions: { boolean: {} } },
       _meta: { 'terminal-auth': true },
     },
-    clientInfo: { name: 'arcane-verify', title: 'Arcane', version: '0.0.0' },
+    clientInfo: { name: 'unityide-verify', title: 'UnityIDE', version: '0.0.0' },
   });
 
   if (init.protocolVersion !== 1) {

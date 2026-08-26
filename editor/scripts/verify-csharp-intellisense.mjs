@@ -10,7 +10,7 @@
  * Why this exists: C# IntelliSense was completely dead for an unknown period
  * while every test in the repo stayed green. Nothing asserted the outcome, and
  * the failure was environmental (Unity stopped emitting .csproj files once
- * Arcane became its external script editor), so no diff could have caught it.
+ * UnityIDE became its external script editor), so no diff could have caught it.
  * Only probing the running server catches that class of break.
  *
  *   node scripts/verify-csharp-intellisense.mjs
@@ -29,8 +29,14 @@ const EDITOR_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '.
 const REQUIRED = process.env.UNITYIDE_INTELLISENSE_E2E === 'required';
 const MIN_COMPLETIONS = 20; // `transform.` alone yields ~98; 20 is "clearly working"
 
+// Developer-machine fallbacks, tried in order. These are real directories on
+// someone's disk, NOT brand strings — the rename sweep rewrote "Arcane Demo" to
+// "UnityIDE Demo" here and the check immediately stopped finding a project.
+// Both spellings stay listed so this keeps working whether or not a given
+// machine's demo folder has been renamed by hand.
 const CANDIDATE_PROJECTS = [
   process.env.UNITYIDE_SMOKE_UNITY_PROJECT,
+  '/Users/inno/UnityIDE Demo',
   '/Users/inno/Arcane Demo',
   '/Users/inno/My project',
 ].filter(Boolean);
@@ -181,7 +187,7 @@ try {
   const PROBE = [
     'using UnityEngine;',
     '',
-    'public class ArcaneIntelliSenseProbe : MonoBehaviour',
+    'public class UnityIDEIntelliSenseProbe : MonoBehaviour',
     '{',
     '    private void Update()',
     '    {',
@@ -191,6 +197,21 @@ try {
     '',
   ].join('\n');
   const CURSOR = { line: 6, character: '        transform.'.length };
+
+  // Derived from the probe text, never hardcoded. This was a literal
+  // `character: 40`, which silently stopped pointing at `MonoBehaviour` the
+  // moment the class name on that line changed length — and the check then
+  // reported "hover resolved nothing", i.e. a broken-IntelliSense failure, for
+  // a cursor problem entirely of its own making.
+  const CLASS_LINE_INDEX = PROBE.split('\n').findIndex((l) => l.startsWith('public class '));
+  const CLASS_LINE = PROBE.split('\n')[CLASS_LINE_INDEX];
+  const HOVER = {
+    line: CLASS_LINE_INDEX,
+    character: CLASS_LINE.indexOf('MonoBehaviour') + 1,
+  };
+  if (CLASS_LINE_INDEX < 0 || !CLASS_LINE.includes('MonoBehaviour')) {
+    fail('probe text no longer declares a class deriving from MonoBehaviour');
+  }
 
   // Wait for the solution BEFORE opening the document. A didOpen that lands
   // mid-load gets attached to Roslyn's miscellaneous-files workspace, which has
@@ -235,7 +256,7 @@ try {
 
   const hover = await request('textDocument/hover', {
     textDocument: { uri: uriOf(probeFile) },
-    position: { line: 2, character: 40 }, // MonoBehaviour in the base list
+    position: HOVER, // MonoBehaviour in the base list, located in the probe text
   });
   const hoverText = JSON.stringify(hover.result?.contents ?? '');
   if (!/MonoBehaviour/.test(hoverText)) {

@@ -6,7 +6,7 @@ describe('initialsFromEmail', () => {
         expect(initialsFromEmail('sourav.das120699@gmail.com')).toBe('SD');
         expect(initialsFromEmail('ada_lovelace@example.com')).toBe('AL');
         expect(initialsFromEmail('grace-hopper@navy.mil')).toBe('GH');
-        expect(initialsFromEmail('jean+arcane@example.com')).toBe('JA');
+        expect(initialsFromEmail('jean+alias@example.com')).toBe('JA');
     });
 
     it('uses a single letter when the local part is one word', () => {

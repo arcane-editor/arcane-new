@@ -1,14 +1,14 @@
 import type { ThemeDefinition } from '../types';
 
-// Arcane Dark — "Midnight Cathedral & Candle Gold".
+// UnityIDE Dark — "Midnight Cathedral & Candle Gold".
 // Cool violet-black canvas with one signature accent (candle gold) reserved
 // for active states, plus a magenta-ember used sparingly for errors / dirty
 // indicators / JSX tags. Body text is near-neutral with 1% warmth so the
 // overall gestalt reads as "dark IDE with a metallic accent" rather than
 // "orange-and-brown."
-const arcaneDark: ThemeDefinition = {
-  id: 'arcane-dark',
-  name: 'Arcane Dark',
+const unityideDark: ThemeDefinition = {
+  id: 'unityide-dark',
+  name: 'UnityIDE Dark',
   type: 'dark',
   ui: {
     // Recessed Chrome: chrome sinks, the editor is the brightest plane. The
@@ -206,7 +206,7 @@ const arcaneDark: ThemeDefinition = {
       'minimapSlider.background': '#FFFFFF14',
       'minimapSlider.hoverBackground': '#FFFFFF2E',
       // Monaco's unthemed defaults for these are a saturated #ff1212 — the one
-      // colour nothing else in Arcane uses. Squiggles inherit the palette's
+      // colour nothing else in UnityIDE uses. Squiggles inherit the palette's
       // rose/gold/blue instead, and the overview ruler entries are stated too
       // so re-enabling `overviewRulerLanes` cannot bring the red back.
       'editorError.foreground': '#C97A8A',
@@ -243,4 +243,4 @@ const arcaneDark: ThemeDefinition = {
   },
 };
 
-export default arcaneDark;
+export default unityideDark;

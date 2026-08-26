@@ -33,7 +33,7 @@ describe('acp-fs — reads are unconfined, writes are not', () => {
     expect(CODE).toContain('computeExternalAgentWriteRoots');
   });
 
-  it('no longer applies the Arcane agent\'s own tool sandbox', () => {
+  it('no longer applies the UnityIDE agent\'s own tool sandbox', () => {
     expect(CODE).not.toContain('computeAllowedRoots');
   });
 });
@@ -42,7 +42,7 @@ describe('acp-fs — undo survives, the review queue does not', () => {
   /**
    * The trade this module encodes: checkpoints record BYTES and are what
    * "restore this turn" is built on, so they stay. The Accept/Reject queue is a
-   * WORKFLOW built around the Arcane agent's `auto` apply mode, so it goes.
+   * WORKFLOW built around the UnityIDE agent's `auto` apply mode, so it goes.
    */
   it('keeps the pre-write checkpoint', () => {
     expect(CODE).toContain('recordPreWrite');

@@ -1,18 +1,18 @@
 import type { ThemeDefinition } from '../types';
 
-// Arcane Light — "Vellum & Iron-Gall Ink".
+// UnityIDE Light — "Vellum & Iron-Gall Ink".
 // Fully light (no dark titlebar) — vellum canvas, deep sepia ink, balanced
 // sienna accent like a rubricated capital in an illuminated manuscript.
 // Iron-rust reserved for errors / JSX tags / dirty-state, deep moss for
-// strings and added-lines. Different personality from Arcane Dark, not an
+// strings and added-lines. Different personality from UnityIDE Dark, not an
 // inverted-lightness flip.
-const arcaneLight: ThemeDefinition = {
-  id: 'arcane-light',
-  name: 'Arcane Light',
+const unityideLight: ThemeDefinition = {
+  id: 'unityide-light',
+  name: 'UnityIDE Light',
   type: 'light',
   ui: {
     // Recessed Chrome, mirrored: the editor is the brightest plane and the
-    // chrome steps down away from it. Same principle as Arcane Dark — the
+    // chrome steps down away from it. Same principle as UnityIDE Dark — the
     // luminance step is the separator, so no region needs a border.
     'bg-primary': '#FCFAF3',
     'bg-sidebar': '#F2EDE0',
@@ -40,7 +40,7 @@ const arcaneLight: ThemeDefinition = {
     'mode-ask': '#3A6680',
     'mode-agent': '#A8632A',
     'mode-plan': '#6E4E8F',
-    // Opaque per the fill-token contract in types.ts — see arcane-dark.
+    // Opaque per the fill-token contract in types.ts — see unityide-dark.
     'hover': '#EEEAE0',
     'selected': '#EEE4D5',
     'git-modified': '#9E7A1C',
@@ -72,7 +72,7 @@ const arcaneLight: ThemeDefinition = {
     // calls, slate for engine types, iron-rust for what reaches the Inspector.
     'unity-lifecycle': '#8A5A12',
     'unity-engine-type': '#2F5A73',
-    // The rail, not a text colour — see arcane-dark.
+    // The rail, not a text colour — see unityide-dark.
     'unity-inspector': '#A8632A',
     'unity-inspector-rail': 'rgba(168, 99, 42, 0.06)',
     'modal-backdrop': 'rgba(42, 38, 34, 0.30)',
@@ -94,7 +94,7 @@ const arcaneLight: ThemeDefinition = {
     base: 'vs',
     inherit: true,
     rules: [
-      // The same six-role structure as Arcane Dark, in Light's own ink. Not a
+      // The same six-role structure as UnityIDE Dark, in Light's own ink. Not a
       // darkened copy of the dark palette: this stays iron-gall and sienna on
       // vellum. The sienna accent (#A8632A) is gone from the code — it was
       // resolving five function-ish tokens at 4.38:1 while also being the
@@ -110,7 +110,7 @@ const arcaneLight: ThemeDefinition = {
       { token: 'parameter', foreground: '4A443C' },
       { token: 'property', foreground: '2F5A73' },
       // `tag` keeps the iron-rust for JSX/HTML; C# attributes take the type
-      // colour, because that is what they are — see arcane-dark.
+      // colour, because that is what they are — see unityide-dark.
       { token: 'tag', foreground: '8F3324' },
       { token: 'attribute.name', foreground: '2F5A73' },
       { token: 'attribute.value', foreground: '415C2F' },
@@ -189,7 +189,7 @@ const arcaneLight: ThemeDefinition = {
       'minimap.background': '#FCFAF3',
       'minimapSlider.background': '#2A262214',
       'minimapSlider.hoverBackground': '#2A26222E',
-      // See arcane-dark: keeps Monaco's default #ff1212 out of the editor.
+      // See unityide-dark: keeps Monaco's default #ff1212 out of the editor.
       'editorError.foreground': '#9E3A2C',
       'editorWarning.foreground': '#9E7A1C',
       'editorInfo.foreground': '#3A6280',
@@ -224,4 +224,4 @@ const arcaneLight: ThemeDefinition = {
   },
 };
 
-export default arcaneLight;
+export default unityideLight;

@@ -1,14 +1,14 @@
 /**
  * Diff decorator (P5.1) — attaches structured file diffs to write/edit tool
- * results on the ARCANE path.
+ * results on the UNITYIDE path.
  *
  * Design deviation from the original P5.1 plan (deliberate — see the brief):
  * `vendor/tools/edit.ts` / `write.ts` are NOT touched. They already embed a
  * human-readable diff in their TEXT result (for the model to read), but never
  * populate `AgentToolResult.diffs` — the field `DiffBlock` renders from (see
- * `vendor/types.ts`'s comment: "Arcane tools leave this undefined; only the
+ * `vendor/types.ts`'s comment: "UnityIDE tools leave this undefined; only the
  * Claude ACP path sets it"). This decorator closes that gap the same way
- * every other cross-cutting Arcane-tool behavior is added (analyzer-gate.ts,
+ * every other cross-cutting UnityIDE-tool behavior is added (analyzer-gate.ts,
  * compile-gate.ts, checkpoint-gate.ts): wrap, don't touch the vendor tool.
  *
  * Mechanism: read the target file BEFORE delegating (missing → '', so a

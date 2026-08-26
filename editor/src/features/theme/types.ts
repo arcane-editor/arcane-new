@@ -103,7 +103,7 @@ export interface UiColors {
   'info': string;
   'success': string;
   /** A method the engine calls — Awake, Update, OnTriggerEnter. Gold in the
-   *  Arcane themes: this is the accent's one job inside the editor. */
+   *  UnityIDE themes: this is the accent's one job inside the editor. */
   'unity-lifecycle': string;
   /** A UnityEngine type — MonoBehaviour, Vector3, Time — as distinct from a
    *  type the user wrote. */

@@ -1,6 +1,6 @@
 name: Release
 
-# Builds the Arcane editor for macOS (Apple Silicon) and Windows x64,
+# Builds the UnityIDE editor for macOS (Apple Silicon) and Windows x64,
 # then uploads the installers to the `arcane-releases` R2 bucket.
 #
 # Triggered by pushing a version tag (e.g. `git tag v0.1.0 && git push --tags`)

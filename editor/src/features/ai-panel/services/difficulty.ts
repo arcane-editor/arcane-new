@@ -7,7 +7,7 @@
  * `hosted-stream.ts` for the billing rationale.
  *
  * Structural plan-entry type (`{ status, difficulty? }`) rather than importing
- * `ArcanePlanEntry` from the store keeps this module store-free/Bun-testable,
+ * `HostedPlanEntry` from the store keeps this module store-free/Bun-testable,
  * matching `send-context.ts`'s and `todo-tool.ts`'s module-scope discipline.
  */
 

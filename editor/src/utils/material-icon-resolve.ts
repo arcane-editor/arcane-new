@@ -75,7 +75,7 @@ const UNITY_EXTENSION_OVERRIDES: Record<string, string> = {
  * exist in `ICON_PATHS` by the unit tests.
  */
 /**
- * Arcane's own file types. Kept separate from the Unity overlay above because
+ * UnityIDE's own file types. Kept separate from the Unity overlay above because
  * they are a different vocabulary with a different reason to exist, and folding
  * them together would make that map's name a lie.
  *

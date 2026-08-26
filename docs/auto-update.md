@@ -1,6 +1,6 @@
 # Auto-update
 
-How Arcane updates itself, why it is built this way, and the things that break
+How UnityIDE updates itself, why it is built this way, and the things that break
 it silently.
 
 Implemented by Tasks 3–7 of `docs/superpowers/plans/2026-08-23-auto-update.md`.
@@ -15,7 +15,7 @@ There is exactly **one keypair**, and it is the whole security story.
 
 | Half | Lives in | Used for |
 |---|---|---|
-| Private | `TAURI_SIGNING_PRIVATE_KEY` + `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (GitHub secrets), backed up in `~/.arcane-release-keys/` | CI signs each update bundle |
+| Private | `TAURI_SIGNING_PRIVATE_KEY` + `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (GitHub secrets), backed up in `~/.unityide-release-keys/` | CI signs each update bundle |
 | Public | `pubkey` in `tauri.conf.json` **and** `tauri.dev.conf.json` — compiled into the binary | The installed app verifies what it downloads |
 
 Current key id: `2E7CE0241A47EB25`.
@@ -27,7 +27,7 @@ consequences, all permanent:
   updates the moment you do, and there is no remote fix — each one has to be
   replaced by hand.
 - **Never lose the private key.** GitHub secrets are write-only; you cannot read
-  it back out. Losing `~/.arcane-release-keys/` means you can never publish an
+  it back out. Losing `~/.unityide-release-keys/` means you can never publish an
   update an installed build will accept.
 - **The two halves must match.** `bun run check:version` fails on a placeholder
   pubkey in *either* config for this reason. It is the only thing standing
@@ -74,7 +74,7 @@ is a lie the user notices when it sits there downloading.
 
 ### The notice
 
-Rust emits `arcane-update-ready` carrying `{ version, installed }`.
+Rust emits `unityide-update-ready` carrying `{ version, installed }`.
 `editor/src/features/updates/` listens and raises a **persistent** notification
 with a Restart action, which invokes `updates_apply_and_restart`.
 
@@ -172,7 +172,7 @@ hear about.
 ## What is not built
 
 - **Task 8 — dev-channel manifests.** `tauri.dev.conf.json` has a valid pubkey
-  and an endpoint, but `dev-build.yml` publishes no manifests. Arcane Dev polls
+  and an endpoint, but `dev-build.yml` publishes no manifests. UnityIDE Dev polls
   and gets a 404: inert, not broken. Reuse `write-update-manifest.mjs`.
 - **Task 9 — refresh the production site on release.**
 - **Task 10 — the plan's own end-to-end verification pass.**

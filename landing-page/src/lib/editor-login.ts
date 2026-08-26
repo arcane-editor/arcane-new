@@ -40,9 +40,9 @@ export interface EditorHandoff {
     code: string;       // one-time grant code (~60s TTL) for the manual-paste fallback
 }
 
-const REQUEST_KEY = 'arcane_editor_login_request';
-const HANDOFF_KEY = 'arcane_editor_login_handoff';
-const RETURN_KEY = 'arcane_post_auth_return';
+const REQUEST_KEY = 'unityide_editor_login_request';
+const HANDOFF_KEY = 'unityide_editor_login_handoff';
+const RETURN_KEY = 'unityide_post_auth_return';
 
 const CHALLENGE_RE = /^[A-Za-z0-9_-]{43,128}$/;
 // crypto.randomUUID() output, lowercase hex — the only shape the server mints.
@@ -141,7 +141,7 @@ export function parseEditorLoginParams(params: URLSearchParams): EditorLoginPars
     if (scheme !== null && redirectUri !== null) {
         return {
             ok: false,
-            error: 'The sign-in link from the editor is malformed (it names two different ways to return). Return to Arcane and click Sign in again.',
+            error: 'The sign-in link from the editor is malformed (it names two different ways to return). Return to UnityIDE and click Sign in again.',
         };
     }
 
@@ -155,7 +155,7 @@ export function parseEditorLoginParams(params: URLSearchParams): EditorLoginPars
         if (canonical === null) {
             return {
                 ok: false,
-                error: "This sign-in link asked to return to an address this site doesn't recognize, so we stopped for your safety. Update Arcane, then click Sign in again from the editor.",
+                error: "This sign-in link asked to return to an address this site doesn't recognize, so we stopped for your safety. Update UnityIDE, then click Sign in again from the editor.",
             };
         }
         target = { kind: 'loopback', redirectUri: canonical };
@@ -168,24 +168,24 @@ export function parseEditorLoginParams(params: URLSearchParams): EditorLoginPars
             const shown = raw.length > 20 ? `${raw.slice(0, 20)}…` : raw;
             return {
                 ok: false,
-                error: `This sign-in link asked to open an app link ("${shown || 'none'}://") this site doesn't recognize, so we stopped for your safety. Update Arcane, then click Sign in again from the editor.`,
+                error: `This sign-in link asked to open an app link ("${shown || 'none'}://") this site doesn't recognize, so we stopped for your safety. Update UnityIDE, then click Sign in again from the editor.`,
             };
         }
         target = { kind: 'scheme', scheme: scheme as EditorScheme };
     }
 
     if (!isValidChallenge(challenge)) {
-        return { ok: false, error: 'The sign-in link from the editor is malformed (bad challenge). Return to Arcane and click Sign in again.' };
+        return { ok: false, error: 'The sign-in link from the editor is malformed (bad challenge). Return to UnityIDE and click Sign in again.' };
     }
     if (!isValidState(state)) {
-        return { ok: false, error: 'The sign-in link from the editor is malformed (bad state). Return to Arcane and click Sign in again.' };
+        return { ok: false, error: 'The sign-in link from the editor is malformed (bad state). Return to UnityIDE and click Sign in again.' };
     }
     // Absent is fine (older app builds); present-but-malformed is not — this
     // value is POSTed straight back to the grant endpoint, so it must be
     // validated here rather than forwarded on trust.
     const attemptRaw = params.get('attempt');
     if (attemptRaw !== null && !isValidAttemptId(attemptRaw)) {
-        return { ok: false, error: 'The sign-in link from the editor is malformed (bad attempt id). Return to Arcane and click Sign in again.' };
+        return { ok: false, error: 'The sign-in link from the editor is malformed (bad attempt id). Return to UnityIDE and click Sign in again.' };
     }
     return { ok: true, request: { state, challenge, target, attemptId: attemptRaw } };
 }

@@ -61,7 +61,7 @@ namespace UnityIDE.Tests
         }
 
         [Test]
-        public void JournalPathsLiveUnderLibraryArcaneIde()
+        public void JournalPathsLiveUnderLibraryUnityIde()
         {
             string dir = Path.Combine(Path.Combine(_root, "Library"), "UnityIDE");
             Assert.AreEqual(Path.Combine(dir, "to-ide.jsonl"), Discovery.ToIdeJournalPath(_root));

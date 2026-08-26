@@ -8,11 +8,11 @@ import {
   STALE_PERMISSION_OPTION_ID,
 } from './session-persistence';
 import type { SaveSessionInput, SessionData } from './session-persistence';
-import type { AiMessage, ArcanePlanEntry } from '../../../stores/ai';
+import type { AiMessage, HostedPlanEntry } from '../../../stores/ai';
 
 const MESSAGES: AiMessage[] = [{ id: 'm1', role: 'user', text: 'hello', timestamp: 1000 }];
 
-const PLAN: ArcanePlanEntry[] = [
+const PLAN: HostedPlanEntry[] = [
   { text: 'Add CoinPickup component', status: 'done' },
   { text: 'Wire pickup to scene', status: 'in_progress' },
   { text: 'Write EditMode test', status: 'pending' },
@@ -23,33 +23,33 @@ const INPUT: SaveSessionInput = {
   mode: 'agent',
   effort: 'high',
   messages: MESSAGES,
-  agentKind: 'arcane',
+  agentKind: 'hosted',
   workspacePath: '/proj',
-  arcanePlan: PLAN,
+  hostedPlan: PLAN,
 };
 
-describe('buildSessionData / parseSessionData — arcanePlan round-trip (T9)', () => {
-  it('round-trips a full arcanePlan through save + load', () => {
+describe('buildSessionData / parseSessionData — hostedPlan round-trip (T9)', () => {
+  it('round-trips a full hostedPlan through save + load', () => {
     const data = buildSessionData(INPUT);
     const json = JSON.stringify(data, null, 2);
     const parsed = parseSessionData(json);
-    expect(parsed.arcanePlan).toEqual(PLAN);
+    expect(parsed.hostedPlan).toEqual(PLAN);
   });
 
-  it('round-trips an explicit null arcanePlan (no plan yet this session)', () => {
-    const data = buildSessionData({ ...INPUT, arcanePlan: null });
+  it('round-trips an explicit null hostedPlan (no plan yet this session)', () => {
+    const data = buildSessionData({ ...INPUT, hostedPlan: null });
     const json = JSON.stringify(data);
-    expect(parseSessionData(json).arcanePlan).toBeNull();
+    expect(parseSessionData(json).hostedPlan).toBeNull();
   });
 
-  it('defaults arcanePlan to null when the save input omits it entirely', () => {
-    const { arcanePlan: _omit, ...rest } = INPUT;
+  it('defaults hostedPlan to null when the save input omits it entirely', () => {
+    const { hostedPlan: _omit, ...rest } = INPUT;
     const data = buildSessionData(rest as SaveSessionInput);
-    expect(data.arcanePlan).toBeNull();
+    expect(data.hostedPlan).toBeNull();
   });
 
-  it('restores arcanePlan as undefined for a legacy file that never wrote the key', () => {
-    // Simulates a session JSON written before T9 — no "arcanePlan" key at all.
+  it('restores hostedPlan as undefined for a legacy file that never wrote the key', () => {
+    // Simulates a session JSON written before T9 — no "hostedPlan" key at all.
     const legacyJson = JSON.stringify({
       id: 'session-1',
       createdAt: 1000,
@@ -57,21 +57,21 @@ describe('buildSessionData / parseSessionData — arcanePlan round-trip (T9)', (
       mode: 'agent',
       effort: 'high',
       messages: MESSAGES,
-      agentKind: 'arcane',
+      agentKind: 'hosted',
       workspacePath: '/proj',
       title: 'legacy chat',
-    } satisfies Omit<SessionData, 'arcanePlan'>);
+    } satisfies Omit<SessionData, 'hostedPlan'>);
 
     const parsed = parseSessionData(legacyJson);
-    expect(parsed.arcanePlan).toBeUndefined();
+    expect(parsed.hostedPlan).toBeUndefined();
     // stores/ai.ts's loadSessionIntoStore coerces this the same way:
-    expect(parsed.arcanePlan ?? null).toBeNull();
+    expect(parsed.hostedPlan ?? null).toBeNull();
   });
 
-  it('produces valid, human-readable JSON containing the arcanePlan items', () => {
+  it('produces valid, human-readable JSON containing the hostedPlan items', () => {
     const json = JSON.stringify(buildSessionData(INPUT), null, 2);
     expect(() => JSON.parse(json)).not.toThrow();
-    expect(json).toContain('"arcanePlan"');
+    expect(json).toContain('"hostedPlan"');
     expect(json).toContain('Add CoinPickup component');
   });
 });
@@ -135,7 +135,7 @@ describe('plan-state persistence', () => {
     mode: 'plan',
     effort: 'low',
     messages: [{ id: 'm1', role: 'user', text: 'go', timestamp: 1 }],
-    agentKind: 'arcane',
+    agentKind: 'hosted',
     workspacePath: '/ws',
   } as never;
 
@@ -268,11 +268,51 @@ describe('settleDanglingRequests', () => {
   });
 
   it('is applied by parseSessionData, so sessions saved before the fix are repaired', () => {
-    const json = JSON.stringify({ id: 's', messages: [permission()], agentKind: 'arcane' });
+    const json = JSON.stringify({ id: 's', messages: [permission()], agentKind: 'hosted' });
     const data = parseSessionData(json);
     expect(
       (data.messages[0] as never as { permissionRequest: { resolvedOptionId: string } }).permissionRequest
         .resolvedOptionId,
     ).toBe(STALE_PERMISSION_OPTION_ID);
+  });
+});
+
+/**
+ * `hostedPlan` was `arcanePlan` before the rename. `agentKind` survives the
+ * same change for free because coerceAgentKind absorbs unknown values, but the
+ * plan has no such step — so without an explicit read of the old key, a session
+ * written before this release restores with its plan silently missing: the
+ * thread comes back, the plan card just isn't there.
+ */
+describe('parseSessionData — pre-rename plan field', () => {
+  it('reads a plan stored under the old arcanePlan key', () => {
+    const json = JSON.stringify({
+      agentKind: 'arcane',
+      arcanePlan: [{ text: 'ship it', status: 'pending' }],
+      messages: [],
+    });
+    const data = parseSessionData(json);
+    expect(data.hostedPlan).toEqual([{ text: 'ship it', status: 'pending' }]);
+    expect(data.agentKind).toBe('hosted');
+  });
+
+  it('drops the legacy key so it cannot linger as a second source of truth', () => {
+    const json = JSON.stringify({ arcanePlan: [{ text: 'a', status: 'done' }], messages: [] });
+    const data = parseSessionData(json) as unknown as Record<string, unknown>;
+    expect('arcanePlan' in data).toBe(false);
+  });
+
+  it('prefers the current key when a file somehow carries both', () => {
+    const json = JSON.stringify({
+      hostedPlan: [{ text: 'new', status: 'pending' }],
+      arcanePlan: [{ text: 'old', status: 'pending' }],
+      messages: [],
+    });
+    expect(parseSessionData(json).hostedPlan).toEqual([{ text: 'new', status: 'pending' }]);
+  });
+
+  it('leaves a session with no plan at all alone', () => {
+    const data = parseSessionData(JSON.stringify({ messages: [] }));
+    expect(data.hostedPlan ?? null).toBeNull();
   });
 });

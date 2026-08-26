@@ -3,7 +3,7 @@ import { EXTERNAL_STARTERS, STARTERS, groundingLabel, startersFor, type Groundin
 import { MODES, MODE_LADDER } from './modes';
 
 const base: GroundingInput = {
-  workspaceName: 'Arcane Demo',
+  workspaceName: 'UnityIDE Demo',
   isUnityProject: true,
   unityVersion: '6000.3.5f2',
   indexStatus: 'ready',
@@ -16,7 +16,7 @@ describe('groundingLabel', () => {
   });
 
   it('names the folder for a project that is not a Unity project', () => {
-    expect(groundingLabel({ ...base, isUnityProject: false })).toBe('Arcane Demo');
+    expect(groundingLabel({ ...base, isUnityProject: false })).toBe('UnityIDE Demo');
   });
 
   it('reports the asset count and Unity version once the index is ready', () => {
@@ -24,7 +24,7 @@ describe('groundingLabel', () => {
   });
 
   it('says it is still indexing rather than showing a stale count', () => {
-    expect(groundingLabel({ ...base, indexStatus: 'building' })).toBe('Indexing Arcane Demo…');
+    expect(groundingLabel({ ...base, indexStatus: 'building' })).toBe('Indexing UnityIDE Demo…');
   });
 
   /**
@@ -46,7 +46,7 @@ describe('groundingLabel', () => {
 
   it('falls back to a plain Unity label when the version is unknown', () => {
     expect(groundingLabel({ ...base, unityVersion: null, indexStatus: 'idle' })).toBe(
-      'Arcane Demo · Unity project',
+      'UnityIDE Demo · Unity project',
     );
   });
 });
@@ -90,16 +90,16 @@ describe('MODE_LADDER', () => {
 });
 
 describe('startersFor', () => {
-  it('gives the Arcane agent the starters written for its current mode', () => {
+  it('gives the UnityIDE agent the starters written for its current mode', () => {
     for (const mode of ['ask', 'plan', 'agent'] as const) {
-      expect(startersFor('arcane', mode)).toEqual(STARTERS[mode]);
+      expect(startersFor('hosted', mode)).toEqual(STARTERS[mode]);
     }
   });
 
   /**
    * The reported bug: with Claude Code selected the empty state still offered
-   * Arcane's PLAN starters under an "On send / Plan" ladder Claude does not
-   * read. An external agent has one set of starters, because Arcane's mode is
+   * UnityIDE's PLAN starters under an "On send / Plan" ladder Claude does not
+   * read. An external agent has one set of starters, because UnityIDE's mode is
    * not part of the request it receives.
    */
   it('gives an external agent one mode-independent set', () => {
@@ -108,15 +108,15 @@ describe('startersFor', () => {
     expect(EXTERNAL_STARTERS.length).toBeGreaterThan(0);
   });
 
-  it('does not hand an external agent starters phrased for an Arcane mode', () => {
+  it('does not hand an external agent starters phrased for a UnityIDE mode', () => {
     const hostedOnly = new Set(Object.values(STARTERS).flat());
     for (const text of EXTERNAL_STARTERS) expect(hostedOnly.has(text)).toBe(false);
   });
 });
 
 describe('externalAgentBrief', () => {
-  it('is null for Arcane — its own loop answers with the mode ladder', () => {
-    expect(externalAgentBrief('arcane')).toBeNull();
+  it('is null for UnityIDE — its own loop answers with the mode ladder', () => {
+    expect(externalAgentBrief('hosted')).toBeNull();
   });
 
   it('names the agent, so the block cannot go stale against the picker', () => {
@@ -147,7 +147,7 @@ describe('externalAgentBrief', () => {
     }
   });
 
-  it('never claims a control Arcane owns — no Ask/Plan/Agent ladder here', () => {
+  it('never claims a control UnityIDE owns — no Ask/Plan/Agent ladder here', () => {
     const all = (externalAgentBrief('claude')?.facts ?? []).join(' ');
     expect(all).not.toMatch(/\b(Ask|Plan mode|Agent mode)\b/);
   });

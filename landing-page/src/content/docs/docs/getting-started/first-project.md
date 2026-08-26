@@ -1,20 +1,20 @@
 ---
 title: Opening Your First Project
-description: Open a Unity project in ArcaneIDE and understand what happens next.
+description: Open a Unity project in UnityIDE and understand what happens next.
 ---
 
 ## Opening a Unity Project
 
-1. Launch **ArcaneIDE**
+1. Launch **UnityIDE**
 2. Go to **File → Open...** (or press `Cmd+O`)
 3. Select your Unity project's **root folder** — the one that contains the `Assets/` directory
 4. Click **Open**
 
-ArcaneIDE detects the Unity project automatically by looking for the `Assets/` folder. Non-project folders like `Library/`, `Temp/`, `obj/`, and `Logs/` are hidden from the file explorer automatically.
+UnityIDE detects the Unity project automatically by looking for the `Assets/` folder. Non-project folders like `Library/`, `Temp/`, `obj/`, and `Logs/` are hidden from the file explorer automatically.
 
 ## What Happens Next
 
-As soon as the project opens, Arcane starts **background indexing** in the node process:
+As soon as the project opens, UnityIDE starts **background indexing** in the node process:
 
 - C# scripts are parsed for classes, methods, fields, and inheritance hierarchies
 - Unity scene and prefab files are parsed for GameObjects and their components
@@ -33,11 +33,11 @@ The left sidebar shows your project's `Assets/` directory. You can:
 
 ## Configuring AI
 
-Before using the chat, you need an API key. Open the **Settings panel** via the Command Palette (`Cmd+Shift+P` → "Arcane: Settings") and enter your **OpenAI** or **Anthropic** API key.
+Before using the chat, you need an API key. Open the **Settings panel** via the Command Palette (`Cmd+Shift+P` → "UnityIDE: Settings") and enter your **OpenAI** or **Anthropic** API key.
 
 Once configured, click the chat icon in the left sidebar to start talking to the AI.
 
 ## Next Steps
 
-- [Unity Integration](/docs/unity-integration/scene-inspector/) — connect Arcane to the live Unity Editor
+- [Unity Integration](/docs/unity-integration/scene-inspector/) — connect UnityIDE to the live Unity Editor
 - [AI Chat Modes](/docs/ai-features/autocompletion/) — understand Agent, Ask, and Plan modes

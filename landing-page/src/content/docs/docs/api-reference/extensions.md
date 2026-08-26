@@ -3,11 +3,11 @@ title: Troubleshooting
 description: Common issues and how to fix them.
 ---
 
-## macOS won't open ArcaneIDE
+## macOS won't open UnityIDE
 
-**Symptom:** "ArcaneIDE cannot be opened because it is from an unidentified developer."
+**Symptom:** "UnityIDE cannot be opened because it is from an unidentified developer."
 
-**Fix:** ArcaneIDE is not yet code-signed. See the [Installation guide](/docs/getting-started/installation/#macos-gatekeeper--unsigned-app-warning) for how to bypass Gatekeeper using right-click → Open, or via `xattr -cr /Applications/ArcaneIDE.app` in the terminal.
+**Fix:** UnityIDE is not yet code-signed. See the [Installation guide](/docs/getting-started/installation/#macos-gatekeeper--unsigned-app-warning) for how to bypass Gatekeeper using right-click → Open, or via `xattr -cr /Applications/UnityIDE.app` in the terminal.
 
 ---
 
@@ -17,7 +17,7 @@ description: Common issues and how to fix them.
 
 **Fixes:**
 1. Check the status bar for indexing state — wait for it to show "Complete"
-2. If it's stuck on "Indexing..." for more than a few minutes, open the Command Palette and run **"Arcane: Reindex Project"**
+2. If it's stuck on "Indexing..." for more than a few minutes, open the Command Palette and run **"UnityIDE: Reindex Project"**
 3. Make sure you opened the Unity project's root folder (the one containing `Assets/`), not a subfolder
 
 ---
@@ -27,10 +27,10 @@ description: Common issues and how to fix them.
 **Symptom:** The Play/Pause toolbar buttons are greyed out or show "Not connected".
 
 **Fixes:**
-1. Make sure the **Arcane Unity Plugin** is installed in your Unity project
-2. Check that both ArcaneIDE and the Unity Editor are running on the same machine
-3. Restart both ArcaneIDE and the Unity Editor
-4. Check the Output panel in ArcaneIDE for IPC connection errors
+1. Make sure the **UnityIDE Unity Plugin** is installed in your Unity project
+2. Check that both UnityIDE and the Unity Editor are running on the same machine
+3. Restart both UnityIDE and the Unity Editor
+4. Check the Output panel in UnityIDE for IPC connection errors
 
 ---
 
@@ -39,7 +39,7 @@ description: Common issues and how to fix them.
 **Symptom:** Sending a message does nothing, or the chat spins indefinitely.
 
 **Fixes:**
-1. Open **Arcane: Settings** and confirm your API key is entered correctly
+1. Open **UnityIDE: Settings** and confirm your API key is entered correctly
 2. Check you have credits remaining with your provider (OpenAI / Anthropic)
 3. If using a custom server URL, make sure the server at that address is running
 4. Check the browser developer tools console (Help → Toggle Developer Tools) for network errors
@@ -50,7 +50,7 @@ description: Common issues and how to fix them.
 
 **Symptom:** `searchProject` returns unrelated results, or misses classes that exist.
 
-**Fix:** Run **"Arcane: Reindex Project"** from the Command Palette to do a full rebuild. This clears and regenerates the entire knowledge graph from scratch.
+**Fix:** Run **"UnityIDE: Reindex Project"** from the Command Palette to do a full rebuild. This clears and regenerates the entire knowledge graph from scratch.
 
 ---
 

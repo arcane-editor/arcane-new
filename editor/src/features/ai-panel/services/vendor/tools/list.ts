@@ -3,7 +3,7 @@
  * extension filtering. Used by the AI to discover what files exist in the
  * project (the read tool can only fetch a known path).
  *
- * LOCAL: not part of the upstream PI tool set; added for the Arcane editor
+ * LOCAL: not part of the upstream PI tool set; added for the UnityIDE editor
  * so ASK and PLAN-planning modes can answer questions like "how many .cs
  * files are there" without granting bash access.
  */

@@ -188,7 +188,7 @@ describe('light theme overrides', () => {
 
 // A plan is one of the most-opened files in the app; the generic document
 // icon made it indistinguishable from every other text file in the tree.
-describe('resolveFileIconId — Arcane file types', () => {
+describe('resolveFileIconId — UnityIDE file types', () => {
   it('gives a plan its own icon', () => {
     const id = resolveFileIconId('20260810-1432-add-enemy.aplan', false);
     expect(id).toBe('todo');

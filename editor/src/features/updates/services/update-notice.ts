@@ -18,8 +18,8 @@ export interface UpdateReadyPayload {
  */
 export function updateReadyMessage({ version, installed }: UpdateReadyPayload): string {
   return installed
-    ? `Arcane ${version} is installed — restart whenever you're ready.`
-    : `Arcane ${version} is available — restarting will download and install it.`;
+    ? `UnityIDE ${version} is installed — restart whenever you're ready.`
+    : `UnityIDE ${version} is available — restarting will download and install it.`;
 }
 
 /**

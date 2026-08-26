@@ -215,12 +215,12 @@ function ClaudeSetupGate() {
       <Card
         icon={<LogIn size={16} />}
         title="Sign in to Claude"
-        body="Claude Code uses your own Anthropic account. Arcane never sees those credentials."
+        body="Claude Code uses your own Anthropic account. UnityIDE never sees those credentials."
         error={error}
       >
         {authMethods.length === 0 ? (
           <Note>
-            This agent needs authentication but offered no sign-in method Arcane can
+            This agent needs authentication but offered no sign-in method UnityIDE can
             run. Sign in with the <code>claude</code> CLI in a terminal, then retry.
           </Note>
         ) : (
@@ -337,7 +337,7 @@ function ClaudeSetupGate() {
         <Card
           icon={<AlertTriangle size={16} />}
           title="npm is required"
-          body="Node.js is installed but npm is not on your PATH, so Arcane cannot install the Claude agent."
+          body="Node.js is installed but npm is not on your PATH, so UnityIDE cannot install the Claude agent."
           error={error}
         >
           <RetryButton onClick={() => void refresh()} label="Check again" />
@@ -363,8 +363,8 @@ function ClaudeSetupGate() {
           title="Set up Claude Code"
           body={
             probe?.claudePath
-              ? 'Arcane will install the Claude agent adapter and connect it to the Claude CLI you already have.'
-              : 'Arcane will install the Claude agent locally. This downloads a few hundred megabytes the first time.'
+              ? 'UnityIDE will install the Claude agent adapter and connect it to the Claude CLI you already have.'
+              : 'UnityIDE will install the Claude agent locally. This downloads a few hundred megabytes the first time.'
           }
           error={error}
         >

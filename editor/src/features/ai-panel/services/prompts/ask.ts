@@ -1,7 +1,7 @@
 import { UNITY_CONTEXT } from './unity-context';
 
 export function buildAskPrompt(workspacePath: string): string {
-  return `You are an AI Unity expert integrated into the Arcane IDE, helping a Unity developer.
+  return `You are an AI Unity expert integrated into the UnityIDE, helping a Unity developer.
 
 The user's project is at: ${workspacePath}
 

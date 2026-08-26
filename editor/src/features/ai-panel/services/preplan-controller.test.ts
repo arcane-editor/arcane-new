@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'bun:test';
 import { runAgentModeSend, type AgentModeDeps, type PreplanAgentService } from './preplan-controller';
 import type { Attachment, ChatMode, Effort } from './types';
-import type { ArcanePlanEntry } from '../../../stores/ai';
+import type { HostedPlanEntry } from '../../../stores/ai';
 import type { ServerConfig } from '../../../stores/server-config';
 
 // Minimal, valid /v1/config shapes — only `hasPreplanning` on the tier under
@@ -26,12 +26,12 @@ interface Call {
 
 interface HarnessOpts {
   preplanEnabled: boolean;
-  initialPlan: ArcanePlanEntry[] | null;
+  initialPlan: HostedPlanEntry[] | null;
   aborted?: boolean;
   /** Simulates side effects of a `sendMessage` call (todo_update, an error tail). */
   onSend?: (
     call: Call,
-    mutableState: { arcanePlan: ArcanePlanEntry[] | null; messages: Array<{ role: string }> },
+    mutableState: { hostedPlan: HostedPlanEntry[] | null; messages: Array<{ role: string }> },
   ) => void;
 }
 
@@ -39,7 +39,7 @@ function makeHarness(opts: HarnessOpts) {
   const calls: Call[] = [];
   const systemMessages: string[] = [];
   const mutableState = {
-    arcanePlan: opts.initialPlan,
+    hostedPlan: opts.initialPlan,
     messages: [] as Array<{ role: string }>,
   };
 
@@ -56,7 +56,7 @@ function makeHarness(opts: HarnessOpts) {
     getAiState: () => ({
       mode: 'agent',
       effort: 'high',
-      arcanePlan: mutableState.arcanePlan,
+      hostedPlan: mutableState.hostedPlan,
       messages: mutableState.messages,
       addSystemMessage: (text: string) => {
         systemMessages.push(text);
@@ -105,7 +105,7 @@ describe('runAgentModeSend — preplan path', () => {
       initialPlan: null,
       onSend: (call, state) => {
         if (call.opts.promptMode === 'preplanning') {
-          state.arcanePlan = [
+          state.hostedPlan = [
             { text: 'Add CoinPickup component', status: 'pending' },
             { text: 'Wire pickup to scene', status: 'pending' },
           ];
@@ -139,7 +139,7 @@ describe('runAgentModeSend — preplan path', () => {
       aborted: true,
       onSend: (call, state) => {
         if (call.opts.promptMode === 'preplanning') {
-          state.arcanePlan = [{ text: 'Add CoinPickup component', status: 'pending' }];
+          state.hostedPlan = [{ text: 'Add CoinPickup component', status: 'pending' }];
         }
       },
     });
@@ -160,7 +160,7 @@ describe('runAgentModeSend — preplan path', () => {
           // The T5 choke point's outcome inspection appended an error tail —
           // a live todo list may or may not exist; the error tail alone must
           // still suppress send 2.
-          state.arcanePlan = [{ text: 'Add CoinPickup component', status: 'pending' }];
+          state.hostedPlan = [{ text: 'Add CoinPickup component', status: 'pending' }];
           state.messages.push({ role: 'assistant' }, { role: 'error' });
         }
       },
@@ -178,7 +178,7 @@ describe('runAgentModeSend — preplan path', () => {
       initialPlan: null,
       onSend: () => {
         // The model never called todo_update (or checked everything off
-        // immediately) — arcanePlan stays null/empty.
+        // immediately) — hostedPlan stays null/empty.
       },
     });
 
@@ -199,7 +199,7 @@ describe('runAgentModeSend — preplan path', () => {
       initialPlan: null,
       onSend: (call, state) => {
         if (call.opts.promptMode === 'preplanning') {
-          state.arcanePlan = [{ text: 'Already done somehow', status: 'done' }];
+          state.hostedPlan = [{ text: 'Already done somehow', status: 'done' }];
         }
       },
     });

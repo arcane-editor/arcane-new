@@ -1,7 +1,7 @@
 /**
- * Arcane server streaming integration.
+ * UnityIDE server streaming integration.
  * Implements the StreamFn that replaces PI's direct provider calls
- * with calls to the Arcane Cloudflare Workers server.
+ * with calls to the UnityIDE Cloudflare Workers server.
  *
  * Hardening (P3.1): the initial connect (fetch + non-OK response) is
  * retried with linear backoff on network errors / 429 / 5xx, bounded by a
@@ -72,7 +72,7 @@ interface HostedStreamEvent {
   model?: string;
   message?: string;
   /**
-   * Structured error classification from the Arcane server (T1's gateway
+   * Structured error classification from the UnityIDE server (T1's gateway
    * work), present alongside `message` on `type: 'error'` events. When set,
    * folded into the error message as a leading `[code:<x>]` marker that
    * `turn-errors.ts`'s `classifyTurnError` strips and maps precisely (rather
@@ -144,7 +144,7 @@ function corruptionErrorEvent(
 }
 
 /**
- * Builds a StreamFn against the Arcane server with the given hardening
+ * Builds a StreamFn against the UnityIDE server with the given hardening
  * config. Exists mainly so tests can inject a fake `fetch` and tiny
  * timeouts/attempt counts; production uses the pre-built `hostedStream`
  * below (defaults only, real `fetch`) so the `agent-service.ts` call site
@@ -296,7 +296,7 @@ async function doStream(
       // todo carries no tag. `JSON.stringify` drops the key entirely when
       // undefined, same as `planPhase` above — the server sees no key at all
       // rather than a literal `"difficulty": null`.
-      difficulty: difficultyForRequest(options.reasoning, getSendPromptMode(), useAiStore.getState().arcanePlan),
+      difficulty: difficultyForRequest(options.reasoning, getSendPromptMode(), useAiStore.getState().hostedPlan),
       routing,
       telemetry: nextTurnTelemetry(),
     },
@@ -401,7 +401,7 @@ async function doStream(
       }
 
       if (attemptResponse.status === 401) {
-        // Expired/revoked token: clear local auth state so the Arcane
+        // Expired/revoked token: clear local auth state so the UnityIDE
         // sign-in gate appears and we avoid repeated unauthorized calls.
         // Never retried — a retry would just repeat the same 401.
         // Set BEFORE logout() so the notice is already in the store by the
@@ -462,7 +462,7 @@ async function doStream(
   // Unreachable in practice: the loop above always either returns, throws,
   // or sets `response` before falling out. Guards TypeScript's control-flow
   // analysis of `response`.
-  if (!response) throw new Error('Arcane stream: exhausted retries with no response');
+  if (!response) throw new Error('UnityIDE stream: exhausted retries with no response');
 
   if (!response.body) {
     throw new Error('No response body');

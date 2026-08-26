@@ -7,7 +7,7 @@
  *
  * The rule this module exists to hold: a placeholder is a claim about what
  * pressing Enter will do, so it may only mention settings the receiving agent
- * actually reads. Arcane's `mode` is one of those for the Arcane loop and none
+ * actually reads. UnityIDE's `mode` is one of those for the UnityIDE loop and none
  * of them for an external agent, which runs its own loop and exposes its own
  * equivalents as session config options in the toolbar beside this text.
  */
@@ -17,7 +17,7 @@ import { isExternalAgent } from '../services/types';
 
 export interface PlaceholderInput {
   agent: AgentKind;
-  /** Arcane's chat mode. Meaningless — and unread — for an external agent. */
+  /** UnityIDE's chat mode. Meaningless — and unread — for an external agent. */
   mode: ChatMode;
   /** Plan mode with a plan already written and awaiting (or mid-) execution. */
   planResumePending: boolean;
@@ -26,7 +26,7 @@ export interface PlaceholderInput {
 }
 
 /** Shown in place of the agent's name when we have nothing better. */
-const AGENT_LABEL: Record<Exclude<AgentKind, 'arcane'>, string> = {
+const AGENT_LABEL: Record<Exclude<AgentKind, 'hosted'>, string> = {
   claude: 'Claude Code',
 };
 

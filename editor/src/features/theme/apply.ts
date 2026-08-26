@@ -42,7 +42,7 @@ export function applyCssVariables(theme: ThemeDefinition): void {
  * hue appears in none of the six palettes, so whenever a theme omits one of
  * these the editor grows a red artefact nothing in the theme explains.
  *
- * This had already bitten once: `arcane-dark` and `arcane-light` state the
+ * This had already bitten once: `unityide-dark` and `unityide-light` state the
  * diagnostic trio precisely to kill that red. The other four themes never got
  * the same treatment, and *no* theme stated the minimap or unexpected-bracket
  * entries — so those stayed Monaco red in all six.

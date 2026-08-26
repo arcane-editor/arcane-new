@@ -1790,10 +1790,18 @@ mod tests {
             let path = PathBuf::from(p);
             return path.join("Assets").is_dir().then_some(path);
         }
-        ["/Users/inno/UnityIDE Demo", "/Users/inno/My project"]
-            .iter()
-            .map(PathBuf::from)
-            .find(|p| p.join("Assets").is_dir())
+        // Real directories on a developer's disk, not brand strings. The rename
+        // sweep rewrote "Arcane Demo" here and the smoke test silently went back
+        // to returning None — which is exactly the "skipped looks like passed"
+        // failure this suite already got burned by once. Both spellings stay.
+        [
+            "/Users/inno/UnityIDE Demo",
+            "/Users/inno/Arcane Demo",
+            "/Users/inno/My project",
+        ]
+        .iter()
+        .map(PathBuf::from)
+        .find(|p| p.join("Assets").is_dir())
     }
 
     #[test]

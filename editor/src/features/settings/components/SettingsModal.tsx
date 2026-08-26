@@ -177,7 +177,7 @@ export function SettingsModal() {
           ) : (
             <>
               {activeSection === 'Updates' && appVersion && (
-                <p className="settings-app-version">Arcane {appVersion}</p>
+                <p className="settings-app-version">UnityIDE {appVersion}</p>
               )}
               <SettingsSection
                 title={activeSection}

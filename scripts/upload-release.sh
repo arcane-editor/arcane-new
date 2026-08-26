@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Upload Arcane installers to the `arcane-releases` R2 bucket — the simple,
+# Upload UnityIDE installers to the `arcane-releases` R2 bucket — the simple,
 # manual counterpart to .github/workflows/release.yml. Useful for the macOS
 # Apple-Silicon build you can produce locally (`cd editor && bun run tauri build`).
 #
@@ -22,7 +22,7 @@
 #   CLOUDFLARE_ACCOUNT_ID
 #
 # Note: `wrangler r2 object put` does a single-part upload (~300 MiB ceiling).
-# Arcane installers are well under that. If a file ever exceeds it, switch that
+# UnityIDE installers are well under that. If a file ever exceeds it, switch that
 # upload to the R2 S3 API via `rclone` or `aws s3 cp` (both do multipart).
 set -euo pipefail
 

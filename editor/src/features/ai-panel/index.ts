@@ -69,7 +69,7 @@ export type {
   ChatMode,
   Effort,
 } from './services/types';
-export { coerceEffort } from './services/types';
+export { coerceEffort, coerceAgentKind } from './services/types';
 export type {
   AgentEvent,
   AssistantMessage,

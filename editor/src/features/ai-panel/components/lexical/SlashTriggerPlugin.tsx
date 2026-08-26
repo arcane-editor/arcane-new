@@ -1,7 +1,7 @@
 /**
  * SlashTriggerPlugin — detects a leading `/` command in the composer and shows
  * the SlashCommandPopover with the connected external agent's advertised
- * commands. Inert for the Arcane agent, which has no slash commands. The text
+ * commands. Inert for the UnityIDE agent, which has no slash commands. The text
  * sends as an ordinary prompt (the agent interprets it), so picking just
  * rewrites the editor to `/<name> `.
  *
@@ -36,7 +36,7 @@ function SlashTriggerPlugin() {
   const [trigger, setTrigger] = useState<TriggerState | null>(null);
 
   const detect = useCallback(() => {
-    if (selectedAgent === 'arcane' || commands.length === 0) {
+    if (selectedAgent === 'hosted' || commands.length === 0) {
       setTrigger((t) => (t ? null : t));
       return;
     }

@@ -19,7 +19,7 @@ import type {
   ToolCallContent,
   ToolCallUpdate,
 } from '../../acp';
-import type { ArcanePlanEntry, ToolCallStatus } from '../../../stores/ai';
+import type { HostedPlanEntry, ToolCallStatus } from '../../../stores/ai';
 import type { DiffContent, StopReason } from './vendor/types';
 
 /**
@@ -158,7 +158,7 @@ export function stopReasonFor(reason: AcpStopReason | string | undefined): StopR
 }
 
 /** ACP plan entries → the panel's todo list. */
-export function planEntriesFor(entries: AcpPlanEntry[] | undefined): ArcanePlanEntry[] {
+export function planEntriesFor(entries: AcpPlanEntry[] | undefined): HostedPlanEntry[] {
   if (!Array.isArray(entries)) return [];
   return entries
     .filter((e) => e && typeof e.content === 'string')
@@ -221,7 +221,7 @@ export function reconcileToolCall(
 }
 
 /**
- * What Arcane tells the agent it can do. Extracted and frozen because two of
+ * What UnityIDE tells the agent it can do. Extracted and frozen because two of
  * these are FEATURE SWITCHES, not descriptions: an agent that does not see
  * them removes the corresponding ability from the model rather than falling
  * back to something degraded, and it does so silently.

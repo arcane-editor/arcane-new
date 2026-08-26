@@ -7,7 +7,7 @@ import tailwind from '@astrojs/tailwind';
 export default defineConfig({
 	integrations: [
 		starlight({
-			title: 'ArcaneIDE Docs',
+			title: 'UnityIDE Docs',
 			customCss: ['./src/styles/starlight-overrides.css'],
 			sidebar: [
 				{

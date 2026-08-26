@@ -255,7 +255,7 @@ export default function AccountPanel() {
                 <div className="flex items-center justify-between">
                     <div>
                         <h2 className="font-display text-lg font-bold">Sign out</h2>
-                        <p className="text-muted-foreground text-xs mt-1">Signs this browser out of Arcane.</p>
+                        <p className="text-muted-foreground text-xs mt-1">Signs this browser out of UnityIDE.</p>
                     </div>
                     <button
                         className="h-9 rounded-md px-4 text-sm font-semibold bg-destructive/10 border border-destructive/20 text-destructive hover:bg-destructive/20 transition-all"

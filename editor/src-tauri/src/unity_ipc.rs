@@ -332,7 +332,7 @@ fn write_bridge_discovery(
         "ideVersion": env!("CARGO_PKG_VERSION"),
         "idePid": std::process::id(),
         "minPackageVersion": MIN_PACKAGE_VERSION,
-        "_note": "UnityIDE IDE bridge. If Unity is not connecting, update the com.unityide.editor package.",
+        "_note": "UnityIDE bridge. If Unity is not connecting, update the com.unityide.editor package.",
     });
     let serialized = serde_json::to_string_pretty(&content).map_err(|e| e.to_string())?;
 
