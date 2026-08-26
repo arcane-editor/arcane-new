@@ -1,5 +1,9 @@
 # UnityIDE cutover runbook
 
+> **Status: executed 2026-08-26.** Dev and prod are live on unityide.app and the
+> old domain is fully detached. What remains is the GitHub OAuth Apps and the
+> Search Console submission — see "Still outstanding" at the bottom.
+
 Everything needed to take the Arcane → UnityIDE rename from a merged branch to a
 live dev and prod environment. The code side is done and on
 `feat/unityide-rebrand`; this is the part that lives in dashboards.
@@ -155,3 +159,34 @@ is reversible.
 - Names that deliberately did not change are listed in `AGENTS.md` under
   "Naming After The UnityIDE Rename", and `node scripts/brand-audit.mjs`
   enforces them.
+
+
+---
+
+## Executed 2026-08-26 — what actually happened
+
+| Step | Result |
+|---|---|
+| Email Sending onboard `unityide.app` | Done. All six records auto-created (MX ×3, SPF, DKIM, DMARC), DNS status `ready`. **Verified by an actual send**: Cloudflare accepted and queued a message from `no-reply@unityide.app` with a `@unityide.app` message-id and no bounces |
+| Turnstile | No-op — never provisioned (see P2) |
+| R2 `releases.unityide.app` | Attached, SSL active |
+| Pages custom domains | `dev.unityide.app`, `unityide.app`, `www.unityide.app` all active |
+| DNS | Pages/R2 do **not** auto-create records via the API (only via the dashboard). The four CNAMEs were created by hand; the Workers custom domains created their own `AAAA 100::` |
+| Dev deploy | Worker, landing and installers all green. Dev gate passed, including the `isDevChannel` check — dev links to `dev/latest`, never prod |
+| Release | `v0.3.2` force-retagged onto the rebrand. Artifacts + signed manifests live on `releases.unityide.app`; UPM tarball published as `com.unityide.editor.tgz` |
+| Prod deploy | Worker and landing live. `api.unityide.app/health` ok, CORS echoes `https://unityide.app`, site serves the new title/canonical/JSON-LD and H1 "The IDE for Unity" |
+| Dodo | Webhook repointed **in place** (same secret, no rotation). Five products renamed |
+| Hard cut | `arcaneai.org`, `www`, `dev`, `api`, `api-dev`, `releases` all detached and dead (522/530) |
+
+### Still outstanding — both need a human
+
+1. **GitHub OAuth Apps.** The workers already send the new `redirect_uri`, so
+   GitHub sign-in returns `redirect_uri_mismatch` until the callback URLs are
+   updated. Nothing else is affected.
+   - prod, client `Ov23li3jiDTY48SpR675` → `https://api.unityide.app/v1/auth/github/callback`
+   - dev, client `Ov23liq17bFjfybquP4r` → `https://api-dev.unityide.app/v1/auth/github/callback`
+2. **Google Search Console.** Add and verify `unityide.app`, then submit
+   `https://unityide.app/sitemap-index.xml`. Do not use Change of Address.
+
+The `arcaneai.org` zone is intentionally still present: it carries the Email
+Sending records for the old domain, and nothing routes to it any more.

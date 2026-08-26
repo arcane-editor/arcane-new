@@ -46,8 +46,8 @@ const ALLOWLIST = {
   // 18 -> 17 when AGENTS.md was excluded (see EXCLUDE).
   // Adjust this deliberately and say why; never edit it to silence a surprise.
   'arcane-extension': 17,
-  'arcane-releases': 22,    // R2 bucket name, deliberately kept
-  'arcane-landing': 6,      // Cloudflare Pages project names
+  'arcane-releases': 25,   // +3: named in the cutover runbook    // R2 bucket name, deliberately kept
+  'arcane-landing': 8,     // +2: named in the cutover runbook      // Cloudflare Pages project names
   'arcane-server': 80,      // worker name + JWT_ISSUER + OAUTH_COOKIE_ISSUER + user agent
   'arcane_user_id': 9,      // Dodo checkout metadata key (round-trips through Dodo)
   'arcane_kind': 6,         // Dodo checkout metadata key
