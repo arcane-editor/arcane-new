@@ -38,7 +38,7 @@
       "identifier": "shell:allow-spawn",
       "allow": [
         {
-          "name": "binaries/arcane-graph",
+          "name": "binaries/unityide-graph",
           "sidecar": true,
           "args": true
         }

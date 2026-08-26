@@ -49,7 +49,7 @@ gen/schemas/
 # ── Cloudflare Workers (arcane-server, arcane-release-worker) ────────────────
 .wrangler/
 
-# ── Python (editor/tooling/arcane-graph-sidecar) ─────────────────────────────
+# ── Python (editor/tooling/unityide-graph-sidecar) ─────────────────────────────
 __pycache__/
 *.py[cod]
 .venv/

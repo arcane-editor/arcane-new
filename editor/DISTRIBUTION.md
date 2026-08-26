@@ -46,7 +46,7 @@ A few things worth knowing:
 - The `.dmg` from `bun run tauri build` is fine as-is. You don't need to do anything special before sharing.
 - Every transport adds quarantine — AirDrop, Mail, Slack, browser download. There's no quarantine-free channel.
 - The `.dmg` wrapper itself doesn't need to be signed for the recipient flow above to work.
-- The bundled `arcane-graph` sidecar is signed by Tauri automatically as part of the main bundle, so recipients don't need to do anything for it.
+- The bundled `unityide-graph` sidecar is signed by Tauri automatically as part of the main bundle, so recipients don't need to do anything for it.
 - **typescript-language-server is bundled** as a sidecar — TypeScript / JavaScript IntelliSense works out of the box without Node.js installed. The bundle ships with TypeScript 6 embedded.
 - **csharp-ls is not bundled**. If the recipient wants C# language features they need the .NET SDK + `dotnet tool install -g csharp-ls`. For Unity projects the editor surfaces a modal when dotnet is missing; non-Unity workspaces get a quieter toast hint.
 - **pyright is not bundled (yet)**. Python LSP still requires `npm install -g pyright` on the recipient's machine. Bundling is a known follow-up — see [LSP sidecar bundling](#lsp-sidecar-bundling) below.
@@ -63,7 +63,7 @@ This is the "unknown publisher" warning, not a malware detection. To proceed:
 2. Click **Run anyway**.
 3. Continue through the installer normally.
 
-It goes away once the installer is signed — see [Upgrade path](#upgrade-path). The bundled `arcane-graph` and `typescript-language-server` sidecars are installed alongside the app automatically; recipients don't need to do anything for them.
+It goes away once the installer is signed — see [Upgrade path](#upgrade-path). The bundled `unityide-graph` and `typescript-language-server` sidecars are installed alongside the app automatically; recipients don't need to do anything for them.
 
 ## LSP sidecar bundling
 
@@ -149,7 +149,7 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-(Or run it manually from the **Actions** tab via **Run workflow**.) The workflow runs one job per target — `macos-14` (Apple Silicon), `macos-13` (Intel), `windows-latest` — building the native `arcane-graph` + `typescript-language-server` sidecars on each runner, then `tauri build`, then uploading each installer to the `arcane-releases` R2 bucket under both the version path `` `<tag>/` `` (archived) and `` `latest/` `` (the stable links the landing page points at):
+(Or run it manually from the **Actions** tab via **Run workflow**.) The workflow runs one job per target — `macos-14` (Apple Silicon), `macos-13` (Intel), `windows-latest` — building the native `unityide-graph` + `typescript-language-server` sidecars on each runner, then `tauri build`, then uploading each installer to the `arcane-releases` R2 bucket under both the version path `` `<tag>/` `` (archived) and `` `latest/` `` (the stable links the landing page points at):
 
 - `Arcane-arm64.dmg` — macOS Apple Silicon
 - `Arcane-x64.dmg` — macOS Intel

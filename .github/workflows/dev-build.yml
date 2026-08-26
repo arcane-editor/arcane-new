@@ -56,9 +56,9 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Build arcane-graph sidecar
+      - name: Build unityide-graph sidecar
         run: |
-          cd editor/tooling/arcane-graph-sidecar
+          cd editor/tooling/unityide-graph-sidecar
           python -m venv .venv
           if [[ "$RUNNER_OS" == "Windows" ]]; then
             PY=".venv/Scripts/python.exe"
@@ -70,9 +70,9 @@ jobs:
           "$PY" -m PyInstaller pyinstaller.spec
           mkdir -p ../../src-tauri/binaries
           if [[ "$RUNNER_OS" == "Windows" ]]; then
-            cp dist/arcane-graph.exe "../../src-tauri/binaries/arcane-graph-${{ matrix.triple }}.exe"
+            cp dist/unityide-graph.exe "../../src-tauri/binaries/unityide-graph-${{ matrix.triple }}.exe"
           else
-            cp dist/arcane-graph "../../src-tauri/binaries/arcane-graph-${{ matrix.triple }}"
+            cp dist/unityide-graph "../../src-tauri/binaries/unityide-graph-${{ matrix.triple }}"
           fi
 
       - name: Install JS deps

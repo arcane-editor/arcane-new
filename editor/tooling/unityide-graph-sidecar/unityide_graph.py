@@ -1,14 +1,14 @@
-"""arcane-graph: a thin Python wrapper around graphify's structural extraction.
+"""unityide-graph: a thin Python wrapper around graphify's structural extraction.
 
 This is the sidecar binary bundled with the Arcane IDE. It exposes a tight
 CLI surface that the Tauri Rust backend invokes:
 
-    arcane-graph build <workspace> --out <graph.json>
-    arcane-graph query <graph.json> <question> [--budget N] [--dfs]
-    arcane-graph explain <graph.json> <node>
-    arcane-graph path <graph.json> <node-a> <node-b>
-    arcane-graph summary <graph.json>
-    arcane-graph version
+    unityide-graph build <workspace> --out <graph.json>
+    unityide-graph query <graph.json> <question> [--budget N] [--dfs]
+    unityide-graph explain <graph.json> <node>
+    unityide-graph path <graph.json> <node-a> <node-b>
+    unityide-graph summary <graph.json>
+    unityide-graph version
 
 The build subcommand runs AST extraction only. It deliberately skips
 graphify's semantic LLM step because the bundled binary has no subagent
@@ -29,7 +29,7 @@ VERSION = "0.1.0"
 
 def _emit_progress(msg: str) -> None:
     """Single-line progress event to stdout. The Rust side streams these."""
-    print(f"[arcane-graph] {msg}", flush=True)
+    print(f"[unityide-graph] {msg}", flush=True)
 
 
 def cmd_build(args: argparse.Namespace) -> None:
@@ -350,7 +350,7 @@ def cmd_version(_args: argparse.Namespace) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(prog="arcane-graph")
+    parser = argparse.ArgumentParser(prog="unityide-graph")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     p_build = sub.add_parser("build", help="Build the AST-only code graph for a workspace.")

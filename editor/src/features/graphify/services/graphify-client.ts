@@ -1,5 +1,5 @@
 /**
- * Tauri wrappers around the bundled arcane-graph sidecar.
+ * Tauri wrappers around the bundled unityide-graph sidecar.
  *
  * The sidecar is a PyInstaller binary that runs graphify's structural
  * extraction (AST only, no LLM). Graph artifacts live at

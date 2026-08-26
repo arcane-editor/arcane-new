@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 #
-# Build the arcane-graph sidecar binary for the current platform.
-# Drops the result at src-tauri/binaries/arcane-graph-<target-triple>
+# Build the unityide-graph sidecar binary for the current platform.
+# Drops the result at src-tauri/binaries/unityide-graph-<target-triple>
 # so Tauri picks it up as a sidecar at bundle time.
 #
-# Run from anywhere:  bash tooling/arcane-graph-sidecar/build.sh
+# Run from anywhere:  bash tooling/unityide-graph-sidecar/build.sh
 # Requires: uv (https://github.com/astral-sh/uv), rustc (for target-triple resolution)
 
 set -euo pipefail
@@ -27,7 +27,7 @@ rm -rf build dist
 # uv handles Python version pinning + venv + fast installs in one tool.
 # 3.12 is the sweet spot for graphifyy's dep cone right now (3.14 host is too
 # new for several transitive deps; 3.11 also works as a fallback).
-PYTHON_VERSION="${ARCANE_GRAPH_PYTHON:-3.12}"
+PYTHON_VERSION="${UNITYIDE_GRAPH_PYTHON:-3.12}"
 uv venv --python "$PYTHON_VERSION" --seed .venv
 # shellcheck disable=SC1091
 source .venv/bin/activate
@@ -42,8 +42,8 @@ case "$OSTYPE" in
     msys*|cygwin*|win32) EXT=".exe" ;;
     *) EXT="" ;;
 esac
-OUT_FILE="$OUT_DIR/arcane-graph-${TARGET_TRIPLE}${EXT}"
-cp "dist/arcane-graph${EXT}" "$OUT_FILE"
+OUT_FILE="$OUT_DIR/unityide-graph-${TARGET_TRIPLE}${EXT}"
+cp "dist/unityide-graph${EXT}" "$OUT_FILE"
 chmod +x "$OUT_FILE"
 
 echo

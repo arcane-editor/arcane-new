@@ -1,9 +1,9 @@
 # -*- mode: python ; coding: utf-8 -*-
 
-# PyInstaller spec for the arcane-graph sidecar binary.
+# PyInstaller spec for the unityide-graph sidecar binary.
 #
 # Build with:  pyinstaller pyinstaller.spec
-# Produces:    dist/arcane-graph (or arcane-graph.exe on Windows)
+# Produces:    dist/unityide-graph (or unityide-graph.exe on Windows)
 #
 # We exclude graphify's heavy optional deps (whisper, torch, yt_dlp) and keep
 # only the languages tree-sitter parsers most likely to show up in real IDE
@@ -60,7 +60,7 @@ for lang in TREE_SITTER_LANGUAGES:
     datas.extend(collect_data_files(lang))
 
 a = Analysis(
-    ['arcane_graph.py'],
+    ['unityide_graph.py'],
     pathex=[],
     binaries=binaries,
     datas=datas,
@@ -99,7 +99,7 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name='arcane-graph',
+    name='unityide-graph',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
