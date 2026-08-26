@@ -1781,12 +1781,12 @@ mod tests {
 
     /// Locate a real Unity project to smoke-test against.
     ///
-    /// `ARCANE_SMOKE_UNITY_PROJECT` overrides; otherwise we try a couple of
+    /// `UNITYIDE_SMOKE_UNITY_PROJECT` overrides; otherwise we try a couple of
     /// known local projects. These tests are opt-in by nature — but a hardcoded
     /// path that has since been deleted makes them *silently* vacuous, which is
     /// how a total IntelliSense outage stayed green through a full suite.
     fn smoke_workspace() -> Option<PathBuf> {
-        if let Ok(p) = env::var("ARCANE_SMOKE_UNITY_PROJECT") {
+        if let Ok(p) = env::var("UNITYIDE_SMOKE_UNITY_PROJECT") {
             let path = PathBuf::from(p);
             return path.join("Assets").is_dir().then_some(path);
         }

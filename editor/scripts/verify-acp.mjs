@@ -18,8 +18,8 @@
  *   node scripts/verify-acp.mjs
  *
  * Env:
- *   ARCANE_ACP_ADAPTER   explicit path to the adapter's dist/index.js
- *   ARCANE_ACP_E2E       "required" → missing prerequisites fail (exit 1)
+ *   UNITYIDE_ACP_ADAPTER   explicit path to the adapter's dist/index.js
+ *   UNITYIDE_ACP_E2E       "required" → missing prerequisites fail (exit 1)
  *                        rather than skip. Use in pre-merge gates.
  */
 import { spawn, spawnSync } from 'node:child_process';
@@ -29,7 +29,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const EDITOR_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const REQUIRED = process.env.ARCANE_ACP_E2E === 'required';
+const REQUIRED = process.env.UNITYIDE_ACP_E2E === 'required';
 
 /** Must track `CLAUDE_AGENT_VERSION` / `REQUIRED_NODE_MAJOR` in src-tauri/src/acp.rs. */
 const RUST_ACP = path.join(EDITOR_DIR, 'src-tauri', 'src', 'acp.rs');
@@ -46,7 +46,7 @@ const HANDSHAKE_TIMEOUT_MS = 60_000;
 function skip(reason) {
   if (REQUIRED) {
     console.error(`\n  FAIL  ACP check could not run: ${reason}`);
-    console.error('        ARCANE_ACP_E2E=required forbids skipping.\n');
+    console.error('        UNITYIDE_ACP_E2E=required forbids skipping.\n');
     process.exit(1);
   }
   // Loud on purpose. A quiet skip reads exactly like a pass, which is how the
@@ -81,7 +81,7 @@ if (nodeMajor < MIN_NODE_MAJOR) {
 // turn a real verification into a skip on every such machine — and a skip here
 // reads exactly like a pass while proving nothing.
 const candidates = [
-  process.env.ARCANE_ACP_ADAPTER,
+  process.env.UNITYIDE_ACP_ADAPTER,
   path.join(os.homedir(), '.unityide', 'agents', 'claude', ADAPTER_REL),
   path.join(os.homedir(), '.unityide-dev', 'agents', 'claude', ADAPTER_REL),
   path.join(os.homedir(), '.arcane', 'agents', 'claude', ADAPTER_REL),
@@ -92,7 +92,7 @@ const adapter = candidates.find((p) => fs.existsSync(p));
 if (!adapter) {
   skip(
     'the managed adapter is not installed — open the AI panel, pick Claude Code and let it install, ' +
-      `or set ARCANE_ACP_ADAPTER (looked in: ${candidates.join(', ')})`,
+      `or set UNITYIDE_ACP_ADAPTER (looked in: ${candidates.join(', ')})`,
   );
 }
 

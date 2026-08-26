@@ -117,7 +117,7 @@ Restart Unity after installing the package. If it still doesn't appear, check th
 Verify the connection is active in **Arcane > Settings**. Logs are only streamed while connected.
 
 **Want detailed logs for debugging?**
-Add `ARCANE_VERBOSE` to **Player Settings > Scripting Define Symbols** to enable verbose logging. By default, only errors are logged to keep the console clean.
+Add `UNITYIDE_VERBOSE` to **Player Settings > Scripting Define Symbols** to enable verbose logging. By default, only errors are logged to keep the console clean.
 
 **Test runner not available?**
 Install `com.unity.test-framework` via Package Manager. The extension detects it automatically and enables test runner commands.

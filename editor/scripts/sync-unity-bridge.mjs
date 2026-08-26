@@ -8,7 +8,7 @@
 //
 // Runs automatically before `tauri dev` / `tauri build` (wired via tauri.conf.json
 // `beforeDevCommand` / `beforeBuildCommand`). The repos are expected side-by-side;
-// override the source location with the ARCANE_EXTENSION_DIR env var otherwise.
+// override the source location with the UNITYIDE_EXTENSION_DIR env var otherwise.
 
 import { existsSync, rmSync, cpSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -18,11 +18,11 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, '..'); // editor/
 const dest = resolve(repoRoot, 'unity-bridge'); // editor/unity-bridge (gitignored staging)
 
-// Source resolution. ARCANE_EXTENSION_DIR overrides everything; otherwise try
+// Source resolution. UNITYIDE_EXTENSION_DIR overrides everything; otherwise try
 // the sibling `arcane` repo layout first, then the monorepo layout where the
 // extension sits at the repo root next to editor/ (…/arcane-editor/arcane-extension).
-const srcCandidates = process.env.ARCANE_EXTENSION_DIR
-  ? [resolve(process.env.ARCANE_EXTENSION_DIR)]
+const srcCandidates = process.env.UNITYIDE_EXTENSION_DIR
+  ? [resolve(process.env.UNITYIDE_EXTENSION_DIR)]
   : [
       resolve(repoRoot, '../arcane/arcane-extension'), // sibling `arcane` repo
       resolve(repoRoot, '../arcane-extension'),        // monorepo (extension at repo root)
@@ -58,7 +58,7 @@ function keep(sourcePath) {
 if (!existsSync(src) || !statSync(src).isDirectory()) {
   console.error(
     `[sync-unity-bridge] Unity extension source not found at:\n  ${src}\n` +
-      `Check out the 'arcane' repo next to this one, or set ARCANE_EXTENSION_DIR.`,
+      `Check out the 'arcane' repo next to this one, or set UNITYIDE_EXTENSION_DIR.`,
   );
   process.exit(1);
 }

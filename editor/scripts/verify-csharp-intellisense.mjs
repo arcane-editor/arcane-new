@@ -16,8 +16,8 @@
  *   node scripts/verify-csharp-intellisense.mjs
  *
  * Env:
- *   ARCANE_SMOKE_UNITY_PROJECT   Unity project to probe (else known defaults)
- *   ARCANE_INTELLISENSE_E2E      "required" → missing prerequisites fail (exit 1)
+ *   UNITYIDE_SMOKE_UNITY_PROJECT   Unity project to probe (else known defaults)
+ *   UNITYIDE_INTELLISENSE_E2E      "required" → missing prerequisites fail (exit 1)
  *                                rather than skip. Use in pre-merge gates.
  */
 import { spawn, spawnSync } from 'node:child_process';
@@ -26,11 +26,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const EDITOR_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const REQUIRED = process.env.ARCANE_INTELLISENSE_E2E === 'required';
+const REQUIRED = process.env.UNITYIDE_INTELLISENSE_E2E === 'required';
 const MIN_COMPLETIONS = 20; // `transform.` alone yields ~98; 20 is "clearly working"
 
 const CANDIDATE_PROJECTS = [
-  process.env.ARCANE_SMOKE_UNITY_PROJECT,
+  process.env.UNITYIDE_SMOKE_UNITY_PROJECT,
   '/Users/inno/Arcane Demo',
   '/Users/inno/My project',
 ].filter(Boolean);
@@ -38,7 +38,7 @@ const CANDIDATE_PROJECTS = [
 function skip(reason) {
   if (REQUIRED) {
     console.error(`\n  FAIL  C# IntelliSense check could not run: ${reason}`);
-    console.error('        ARCANE_INTELLISENSE_E2E=required forbids skipping.\n');
+    console.error('        UNITYIDE_INTELLISENSE_E2E=required forbids skipping.\n');
     process.exit(1);
   }
   // Loud on purpose. A quiet skip is what let this break go unnoticed: the
@@ -58,7 +58,7 @@ function fail(msg, extra) {
 // ── prerequisites ──────────────────────────────────────────────────────────
 
 const project = CANDIDATE_PROJECTS.find((p) => fs.existsSync(path.join(p, 'Assets')));
-if (!project) skip('no Unity project found (set ARCANE_SMOKE_UNITY_PROJECT)');
+if (!project) skip('no Unity project found (set UNITYIDE_SMOKE_UNITY_PROJECT)');
 
 const csharpLs = [
   path.join(process.env.HOME ?? '', '.dotnet/tools/csharp-ls'),
@@ -89,7 +89,7 @@ const gen = spawnSync(
   ['test', '--lib', 'unity::tests::smoke_generate_full_setup', '--', '--exact'],
   {
     cwd: path.join(EDITOR_DIR, 'src-tauri'),
-    env: { ...process.env, ARCANE_SMOKE_UNITY_PROJECT: project },
+    env: { ...process.env, UNITYIDE_SMOKE_UNITY_PROJECT: project },
     encoding: 'utf8',
   },
 );

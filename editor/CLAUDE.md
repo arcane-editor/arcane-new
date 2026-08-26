@@ -93,8 +93,8 @@ both still hold:
 So: when the check reports `SKIPPED`, that is **not** a pass — it means the
 check did not run, and the claim "IntelliSense works" is unsupported. Say so
 plainly rather than treating it as green. Set
-`ARCANE_INTELLISENSE_E2E=required` to turn a skip into a failure, and
-`ARCANE_SMOKE_UNITY_PROJECT=<path>` to point it at a Unity project.
+`UNITYIDE_INTELLISENSE_E2E=required` to turn a skip into a failure, and
+`UNITYIDE_SMOKE_UNITY_PROJECT=<path>` to point it at a Unity project.
 
 The generator must never depend on Unity's `Assembly-CSharp*.csproj` again; it
 derives its reference set from the Unity install (`unity.rs`,
@@ -180,8 +180,8 @@ asserts the capabilities the editor depends on. It is the same class of check as
 integration has in the field is environmental (Node too old, half-finished
 install, renamed package, expired login, protocol bump), and none of those appear
 in a diff or break a mocked test. As with IntelliSense, **a `SKIPPED` is not a
-pass** — set `ARCANE_ACP_E2E=required` to turn a skip into a failure, and
-`ARCANE_ACP_ADAPTER=<path to dist/index.js>` to point it at an adapter outside
+pass** — set `UNITYIDE_ACP_E2E=required` to turn a skip into a failure, and
+`UNITYIDE_ACP_ADAPTER=<path to dist/index.js>` to point it at an adapter outside
 the managed install.
 
 ## Drag and drop: HTML5 DnD does not work here
