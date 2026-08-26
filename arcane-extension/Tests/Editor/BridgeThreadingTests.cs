@@ -1,10 +1,10 @@
 using System;
 using System.IO;
 using System.Threading;
-using Arcane.Bridge;
+using UnityIDE.Bridge;
 using NUnit.Framework;
 
-namespace Arcane.Tests
+namespace UnityIDE.Tests
 {
     /// <summary>
     /// Thread-affinity guarantees of the bridge worker.
@@ -23,7 +23,7 @@ namespace Arcane.Tests
         [SetUp]
         public void SetUp()
         {
-            _root = Path.Combine(Path.GetTempPath(), "arcane-thread-" + Path.GetRandomFileName());
+            _root = Path.Combine(Path.GetTempPath(), "unityide-thread-" + Path.GetRandomFileName());
             _bridgeDir = Discovery.BridgeDir(_root);
             Directory.CreateDirectory(_bridgeDir);
             MainThreadDispatcher.Clear();

@@ -3,7 +3,7 @@
 //
 // The Unity Test Framework (com.unity.test-framework) is a default package, but
 // to keep the bridge compiling even if a project removed it, all TestRunnerApi
-// usage is behind `#if ARCANE_HAS_TEST_FRAMEWORK` (set by the asmdef
+// usage is behind `#if UNITYIDE_HAS_TEST_FRAMEWORK` (set by the asmdef
 // versionDefine). The `#else` stub keeps Register/Tick present so
 // BridgeBootstrap can call them unconditionally; runTests then returns a clear
 // "not installed" result.
@@ -11,11 +11,11 @@
 // test_event payload phases (mirrored by the Rust headless path so the frontend
 // has ONE code path): runStarted / testStarted / testFinished / runFinished.
 
-#if ARCANE_HAS_TEST_FRAMEWORK
+#if UNITYIDE_HAS_TEST_FRAMEWORK
 using System;
 using UnityEditor.TestTools.TestRunner.Api;
 
-namespace Arcane.Bridge
+namespace UnityIDE.Bridge
 {
     internal static class TestRunnerHandlers
     {
@@ -43,7 +43,7 @@ namespace Arcane.Bridge
         /// which unregisters the callbacks and nulls them. Creating them only
         /// inside RunTests meant that after the reload nothing re-registered
         /// them — so a PlayMode run's testStarted / testFinished / runFinished
-        /// never reached the IDE. The tests really ran in Unity while Arcane's
+        /// never reached the IDE. The tests really ran in Unity while UnityIDE's
         /// Tests panel sat at "Running 0/12" forever, with no way to clear it,
         /// because run.active is only ever set false by the runFinished branch.
         ///
@@ -185,7 +185,7 @@ namespace Arcane.Bridge
     }
 }
 #else
-namespace Arcane.Bridge
+namespace UnityIDE.Bridge
 {
     // Test Framework package absent — keep the shape so BridgeBootstrap compiles.
     internal static class TestRunnerHandlers

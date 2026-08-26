@@ -1,8 +1,8 @@
 {
-    "name": "Arcane.Editor.Tests",
-    "rootNamespace": "Arcane.Tests",
+    "name": "UnityIDE.Editor.Tests",
+    "rootNamespace": "UnityIDE.Tests",
     "references": [
-        "Arcane.Editor",
+        "UnityIDE.Editor",
         "UnityEditor.TestRunner",
         "UnityEngine.TestRunner"
     ],

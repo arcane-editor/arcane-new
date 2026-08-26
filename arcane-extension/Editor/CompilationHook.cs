@@ -18,7 +18,7 @@ using UnityEditor;
 using UnityEditor.Compilation;
 using UnityEngine;
 
-namespace Arcane.Bridge
+namespace UnityIDE.Bridge
 {
     internal static class CompilationHook
     {
@@ -31,7 +31,7 @@ namespace Arcane.Bridge
         /// IDE's compile gate still resolves. Failed compiles don't reload, so
         /// their message flows normally and is never persisted here.
         /// </summary>
-        internal const string PendingResultKey = "Arcane.Bridge.PendingCompileResult";
+        internal const string PendingResultKey = "UnityIDE.Bridge.PendingCompileResult";
 
         private static BridgeClient _client;
         private static bool _installed;

@@ -9,7 +9,7 @@
 
 using System;
 
-namespace Arcane.Bridge
+namespace UnityIDE.Bridge
 {
     /// <summary>Outbound (C# → IDE) and inbound (IDE → C#) message type strings.</summary>
     internal static class MsgType

@@ -7,7 +7,7 @@
 //!
 //! Building this is expensive, so the result is:
 //!   • cached in-process (keyed by workspace path), and
-//!   • persisted to `<workspace>/Library/ArcaneIDE/index/guid-index.json`,
+//!   • persisted to `<workspace>/Library/UnityIDE/index/guid-index.json`,
 //!     reloaded on the next build when fresh (matching projectPath +
 //!     unityVersion + schemaVersion).
 //!
@@ -152,7 +152,7 @@ fn guid_regex() -> &'static Regex {
 // ── Path helpers ────────────────────────────────────────────────────────────
 
 fn index_dir(workspace: &Path) -> PathBuf {
-    workspace.join("Library").join("ArcaneIDE").join("index")
+    workspace.join("Library").join("UnityIDE").join("index")
 }
 
 fn index_file(workspace: &Path) -> PathBuf {

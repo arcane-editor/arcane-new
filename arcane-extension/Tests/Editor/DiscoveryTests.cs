@@ -1,8 +1,8 @@
 using System.IO;
-using Arcane.Bridge;
+using UnityIDE.Bridge;
 using NUnit.Framework;
 
-namespace Arcane.Tests
+namespace UnityIDE.Tests
 {
     public class DiscoveryTests
     {
@@ -11,8 +11,8 @@ namespace Arcane.Tests
         [SetUp]
         public void SetUp()
         {
-            _root = Path.Combine(Path.GetTempPath(), "arcane-disc-" + Path.GetRandomFileName());
-            Directory.CreateDirectory(Path.Combine(Path.Combine(_root, "Library"), "ArcaneIDE"));
+            _root = Path.Combine(Path.GetTempPath(), "unityide-disc-" + Path.GetRandomFileName());
+            Directory.CreateDirectory(Path.Combine(Path.Combine(_root, "Library"), "UnityIDE"));
         }
 
         [TearDown]
@@ -63,7 +63,7 @@ namespace Arcane.Tests
         [Test]
         public void JournalPathsLiveUnderLibraryArcaneIde()
         {
-            string dir = Path.Combine(Path.Combine(_root, "Library"), "ArcaneIDE");
+            string dir = Path.Combine(Path.Combine(_root, "Library"), "UnityIDE");
             Assert.AreEqual(Path.Combine(dir, "to-ide.jsonl"), Discovery.ToIdeJournalPath(_root));
             Assert.AreEqual(Path.Combine(dir, "to-ide.ack"), Discovery.ToIdeAckPath(_root));
             Assert.AreEqual(Path.Combine(dir, "to-unity.jsonl"), Discovery.ToUnityJournalPath(_root));
@@ -73,7 +73,7 @@ namespace Arcane.Tests
         [Test]
         public void EpochSidecarsSitBesideTheirJournals()
         {
-            string dir = Path.Combine(Path.Combine(_root, "Library"), "ArcaneIDE");
+            string dir = Path.Combine(Path.Combine(_root, "Library"), "UnityIDE");
             Assert.AreEqual(Path.Combine(dir, "to-ide.epoch"),
                 JournalLimits.EpochPathFor(Discovery.ToIdeJournalPath(_root)));
             Assert.AreEqual(Path.Combine(dir, "to-unity.epoch"),

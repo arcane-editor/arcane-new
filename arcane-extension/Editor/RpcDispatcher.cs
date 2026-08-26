@@ -16,7 +16,7 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace Arcane.Bridge
+namespace UnityIDE.Bridge
 {
     /// <summary>A single RPC handler: maps request params to a result value.</summary>
     internal delegate JsonValue RpcHandler(JsonValue @params);
@@ -55,7 +55,7 @@ namespace Arcane.Bridge
             if (string.IsNullOrEmpty(id))
             {
                 // No id → we cannot correlate a response; drop with a log.
-                Debug.LogWarning("[ArcaneBridge] rpc_request missing id; method=" + method);
+                Debug.LogWarning("[UnityIDEBridge] rpc_request missing id; method=" + method);
                 return;
             }
 
@@ -80,7 +80,7 @@ namespace Arcane.Bridge
                 // handler's own exception captured by EnqueueAndWait).
                 string msg = e.Message;
                 reply = Protocol.RpcErrorResult(id, RpcError.InternalError, msg);
-                Debug.LogError("[ArcaneBridge] RPC '" + method + "' failed: " + e);
+                Debug.LogError("[UnityIDEBridge] RPC '" + method + "' failed: " + e);
             }
 
             send(reply);

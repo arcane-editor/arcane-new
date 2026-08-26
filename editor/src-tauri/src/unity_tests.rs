@@ -379,12 +379,12 @@ pub fn unity_tests_run_headless(
     let exe = editor_executable(&install.path);
 
     let results_path = Path::new(&workspace_path)
-        .join("Library/ArcaneIDE")
+        .join("Library/UnityIDE")
         .join("test-results.xml");
     if let Some(parent) = results_path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    let log_path = Path::new(&workspace_path).join("Library/ArcaneIDE/test-run.log");
+    let log_path = Path::new(&workspace_path).join("Library/UnityIDE/test-run.log");
 
     let test_platform = if mode.eq_ignore_ascii_case("PlayMode") {
         "PlayMode"

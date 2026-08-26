@@ -200,7 +200,7 @@ jobs:
       - uses: oven-sh/setup-bun@v2
 
       # deploy-prod.sh validates package structure + .meta files, then `npm pack`s
-      # the tarball (com.arcane.editor-<version>.tgz).
+      # the tarball (com.unityide.editor-<version>.tgz).
       - name: Build UPM tarball
         run: cd arcane-extension && bash deploy-prod.sh
 
@@ -210,7 +210,13 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           cd arcane-extension
+          # Both the package id and the version come from package.json, which is
+          # also what `npm pack` names the tarball after. Hardcoding the id here
+          # meant the rename could rename the package and still upload under the
+          # old key — or, worse, upload nothing and fail on a missing file.
           V=$(node -p "require('./package.json').version")
-          TGZ="com.arcane.editor-${V}.tgz"
-          bunx wrangler r2 object put "arcane-releases/unity-extension-releases/${TGZ}"                       --file "$TGZ" --remote
-          bunx wrangler r2 object put "arcane-releases/unity-extension-releases/latest/com.arcane.editor.tgz" --file "$TGZ" --remote
+          NAME=$(node -p "require('./package.json').name")
+          TGZ="${NAME}-${V}.tgz"
+          test -f "$TGZ" || { echo "::error::expected $TGZ from deploy-prod.sh, not found"; exit 1; }
+          bunx wrangler r2 object put "arcane-releases/unity-extension-releases/${TGZ}"                --file "$TGZ" --remote
+          bunx wrangler r2 object put "arcane-releases/unity-extension-releases/latest/${NAME}.tgz"    --file "$TGZ" --remote

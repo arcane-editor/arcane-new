@@ -10,7 +10,7 @@
 
 using System.Diagnostics;
 
-namespace Arcane.Bridge
+namespace UnityIDE.Bridge
 {
     internal static class DebuggerHandlers
     {

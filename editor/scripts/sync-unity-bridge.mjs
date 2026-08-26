@@ -1,10 +1,10 @@
 // scripts/sync-unity-bridge.mjs
 //
 // Syncs the canonical Unity extension package — the single source of truth — from
-// the sibling `arcane` repo (`arcane/arcane-extension`, package `com.arcane.editor`)
+// the sibling `arcane` repo (`arcane/arcane-extension`, package `com.unityide.editor`)
 // into a local, gitignored `unity-bridge/` staging folder. Tauri bundles that folder
 // as an app resource (see tauri.conf.json `resources`), and the Rust backend
-// (`unity_install_bridge`) copies it into a user's `Packages/com.arcane.editor/`.
+// (`unity_install_bridge`) copies it into a user's `Packages/com.unityide.editor/`.
 //
 // Runs automatically before `tauri dev` / `tauri build` (wired via tauri.conf.json
 // `beforeDevCommand` / `beforeBuildCommand`). The repos are expected side-by-side;

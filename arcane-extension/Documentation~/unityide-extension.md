@@ -1,16 +1,16 @@
-# Arcane IDE Integration
+# UnityIDE Integration
 
-Unity Editor extension that connects your Unity project to the Arcane AI IDE. Provides real-time bidirectional communication, allowing you to control Unity directly from the IDE and see Unity state reflected instantly.
+Unity Editor extension that connects your Unity project to UnityIDE. Provides real-time bidirectional communication, allowing you to control Unity directly from the IDE and see Unity state reflected instantly.
 
 ## Requirements
 
 - Unity 2021.3 or later (LTS recommended)
-- Arcane IDE installed ([download](https://arcaneai.org))
+- UnityIDE installed ([download](https://arcaneai.org))
 
 ## Installation
 
 ### Via Download & Import (Recommended)
-1. Download the package: [com.arcane.editor-0.0.1.tgz](https://releases.arcaneai.org/unity-extension-releases/com.arcane.editor-0.0.1.tgz)
+1. Download the package: [com.unityide.editor-0.0.1.tgz](https://releases.arcaneai.org/unity-extension-releases/com.unityide.editor-0.0.1.tgz)
 2. In Unity, go to **Window > Package Manager**
 3. Click **+** > **Add package from tarball...**
 4. Browse to the downloaded `.tgz` file and click **Open**
@@ -19,7 +19,7 @@ Unity Editor extension that connects your Unity project to the Arcane AI IDE. Pr
 Open your Unity project's `Packages/manifest.json` and add this to the `"dependencies"` block:
 
 ```json
-"com.arcane.editor": "https://releases.arcaneai.org/unity-extension-releases/com.arcane.editor-0.0.1.tgz"
+"com.unityide.editor": "https://releases.arcaneai.org/unity-extension-releases/com.unityide.editor-0.0.1.tgz"
 ```
 
 Save the file — Unity will download and install the package automatically.
@@ -28,27 +28,27 @@ Save the file — Unity will download and install the package automatically.
 1. Open Unity Editor
 2. Go to **Window > Package Manager**
 3. Click **+** > **Add package by name...**
-4. Paste: `https://releases.arcaneai.org/unity-extension-releases/com.arcane.editor-0.0.1.tgz`
+4. Paste: `https://releases.arcaneai.org/unity-extension-releases/com.unityide.editor-0.0.1.tgz`
 5. Click **Add**
 
 ## Setup
 
 1. After installation, go to **Edit > Preferences > External Tools**
-2. Select **Arcane** from the External Script Editor dropdown
-3. If Arcane IDE is not auto-detected, set the path manually via **Arcane > Settings** in the menu bar
+2. Select **UnityIDE** from the External Script Editor dropdown
+3. If UnityIDE is not auto-detected, set the path manually via **UnityIDE > Settings** in the menu bar
 
-The extension auto-detects Arcane from these default install locations:
+The extension auto-detects UnityIDE from these default install locations:
 
 | Platform | Default Paths |
 |----------|--------------|
-| macOS | `/Applications/Arcane.app`, `~/Applications/Arcane.app` |
-| Windows | `C:\Program Files\Arcane\Arcane.exe`, `%LOCALAPPDATA%\Programs\Arcane\Arcane.exe` |
+| macOS | `/Applications/UnityIDE.app`, `~/Applications/UnityIDE.app` |
+| Windows | `C:\Program Files\UnityIDE\UnityIDE.exe`, `%LOCALAPPDATA%\Programs\UnityIDE\UnityIDE.exe` |
 | Linux | `/usr/bin/arcane`, `/usr/local/bin/arcane`, `~/.local/bin/arcane` |
 
 ## Features
 
 ### Script Editing
-Double-click any `.cs` file in Unity to open it in Arcane IDE. If the IDE is already running and connected, the file opens instantly via IPC. Otherwise, Arcane launches with the file and line number.
+Double-click any `.cs` file in Unity to open it in UnityIDE. If the IDE is already running and connected, the file opens instantly via IPC. Otherwise, UnityIDE launches with the file and line number.
 
 ### IPC Communication
 Real-time bidirectional messaging between Unity and the IDE over Unix domain sockets (macOS/Linux) or named pipes (Windows). Connection is automatic — the extension connects on startup and reconnects with exponential backoff if the connection drops.
@@ -97,11 +97,11 @@ Generate `.sln` and `.csproj` files for C# IntelliSense support. The extension a
 
 ## Settings
 
-Access settings via **Arcane > Settings** in the menu bar.
+Access settings via **UnityIDE > Settings** in the menu bar.
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| Install Path | (auto-detected) | Custom path to the Arcane IDE executable |
+| Install Path | (auto-detected) | Custom path to the UnityIDE executable |
 | Auto Connect | `true` | Automatically connect to the IDE on Unity startup |
 | Log Batch Interval | `100ms` | How often console logs are flushed to the IDE |
 | Max Log Batch Size | `100` | Maximum log entries per batch |
@@ -124,16 +124,16 @@ Access settings via **Arcane > Settings** in the menu bar.
 
 ## Troubleshooting
 
-**Arcane not appearing in External Tools dropdown:**
+**UnityIDE not appearing in External Tools dropdown:**
 Ensure the package is installed (check Window > Package Manager). If installed, try restarting Unity.
 
 **Connection not established:**
-- Make sure Arcane IDE is running and has the same project open
-- Check **Arcane > Settings** for connection status
+- Make sure UnityIDE is running and has the same project open
+- Check **UnityIDE > Settings** for connection status
 - Both Unity and the IDE must have the same project path to connect
 
 **Console logs not appearing in IDE:**
-Verify the connection is active in **Arcane > Settings**. Logs are only streamed while connected.
+Verify the connection is active in **UnityIDE > Settings**. Logs are only streamed while connected.
 
 **Test runner not available:**
 Install `com.unity.test-framework` via Package Manager. The extension will automatically detect it and enable test runner commands.

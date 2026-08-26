@@ -4,7 +4,7 @@ using System.Reflection;
 using UnityEditor;
 using UnityEngine;
 
-namespace Arcane.Editor
+namespace UnityIDE.Editor
 {
     /// <summary>
     /// Generates .sln and .csproj files by invoking ProjectGeneration.Sync()
@@ -12,7 +12,7 @@ namespace Arcane.Editor
     /// com.unity.ide.visualstudio), using reflection to avoid compile-time dependencies.
     /// If neither package is found, auto-installs com.unity.ide.vscode.
     /// </summary>
-    public static class ArcaneProjectGeneration
+    public static class UnityIDEProjectGeneration
     {
         private static bool _initialized;
         private static MethodInfo _syncMethod;
@@ -98,7 +98,7 @@ namespace Arcane.Editor
             try
             {
                 _syncMethod.Invoke(_generatorInstance, null);
-                ArcaneLog.Info("Project files (.sln/.csproj) regenerated successfully.");
+                UnityIDELog.Info("Project files (.sln/.csproj) regenerated successfully.");
                 _consecutiveFailures = 0;
                 return true;
             }
@@ -129,14 +129,14 @@ namespace Arcane.Editor
         private static void ReportFailure(string message)
         {
             _consecutiveFailures++;
-            ArcaneLog.Info($"Project file generation deferred: {message}");
+            UnityIDELog.Info($"Project file generation deferred: {message}");
 
             if (_consecutiveFailures == FailureReportThreshold)
             {
-                ArcaneLog.Error(
+                UnityIDELog.Error(
                     $"Could not generate .sln/.csproj files after {_consecutiveFailures} attempts: {message}. " +
                     "Unity-side IntelliSense project generation is not working. " +
-                    "Arcane falls back to generating its own project files from the Unity install, " +
+                    "UnityIDE falls back to generating its own project files from the Unity install, " +
                     "so C# IntelliSense should still work in the editor.");
             }
         }
@@ -158,7 +158,7 @@ namespace Arcane.Editor
 
             _packageInstallRequested = true;
 
-            ArcaneLog.Info("No IDE package found. Auto-installing com.unity.ide.vscode for project file generation...");
+            UnityIDELog.Info("No IDE package found. Auto-installing com.unity.ide.vscode for project file generation...");
 
             var request = UnityEditor.PackageManager.Client.Add("com.unity.ide.vscode");
 
@@ -171,11 +171,11 @@ namespace Arcane.Editor
 
                 if (request.Status == UnityEditor.PackageManager.StatusCode.Success)
                 {
-                    ArcaneLog.Info("com.unity.ide.vscode installed successfully. Unity will reload scripts.");
+                    UnityIDELog.Info("com.unity.ide.vscode installed successfully. Unity will reload scripts.");
                 }
                 else
                 {
-                    ArcaneLog.Error($"Failed to install com.unity.ide.vscode: {request.Error?.message}");
+                    UnityIDELog.Error($"Failed to install com.unity.ide.vscode: {request.Error?.message}");
                     _packageInstallRequested = false;
                 }
             };
@@ -227,7 +227,7 @@ namespace Arcane.Editor
                     _generatorInstance = instance;
                     _syncMethod = syncMethod;
 
-                    ArcaneLog.Info($"Found ProjectGeneration in {assemblyName}");
+                    UnityIDELog.Info($"Found ProjectGeneration in {assemblyName}");
                     return true;
                 }
                 catch (FileNotFoundException)
@@ -236,7 +236,7 @@ namespace Arcane.Editor
                 }
                 catch (Exception ex)
                 {
-                    ArcaneLog.Warn($"Could not load {assemblyName}: {ex.Message}");
+                    UnityIDELog.Warn($"Could not load {assemblyName}: {ex.Message}");
                 }
             }
 

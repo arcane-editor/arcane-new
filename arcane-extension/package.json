@@ -1,8 +1,8 @@
 {
-    "name": "com.arcane.editor",
+    "name": "com.unityide.editor",
     "version": "0.1.0",
-    "displayName": "Arcane IDE Integration",
-    "description": "Connects Unity Editor to the Arcane IDE for AI-powered game development. Provides real-time IPC communication, console log streaming, play mode controls, build management, Inspector field sync, and test runner integration.",
+    "displayName": "UnityIDE Integration",
+    "description": "Connects Unity Editor to the UnityIDE for AI-powered game development. Provides real-time IPC communication, console log streaming, play mode controls, build management, Inspector field sync, and test runner integration.",
     "unity": "2021.3",
     "unityRelease": "0f1",
     "documentationUrl": "https://docs.arcaneai.org/unity-extension",
@@ -10,7 +10,7 @@
     "licensesUrl": "https://github.com/arcane-ide/arcane-extension/blob/main/LICENSE.md",
     "dependencies": {},
     "author": {
-        "name": "Arcane",
+        "name": "UnityIDE",
         "email": "support@arcaneai.org",
         "url": "https://arcaneai.org"
     },

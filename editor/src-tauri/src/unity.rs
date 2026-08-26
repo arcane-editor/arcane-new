@@ -495,18 +495,49 @@ fn bridge_source_dir(app: &AppHandle) -> Option<PathBuf> {
 }
 
 /// Install the Arcane Unity bridge package into the project's `Packages/` folder
-/// as an embedded package (`Packages/com.arcane.editor/`). Unity auto-discovers
+/// as an embedded package (`Packages/com.unityide.editor/`). Unity auto-discovers
 /// embedded packages — no manifest.json edit needed. Returns the install path.
 #[tauri::command]
 pub fn unity_install_bridge(app: AppHandle, workspace_path: String) -> Result<String, String> {
     let src = bridge_source_dir(&app)
         .ok_or_else(|| "Bridge package source not found (resource dir + dev fallback both missing)".to_string())?;
-    let dest = Path::new(&workspace_path)
-        .join("Packages")
-        .join("com.arcane.editor");
+    let packages = Path::new(&workspace_path).join("Packages");
+    let dest = packages.join("com.unityide.editor");
     copy_dir_recursive(&src, &dest)
         .map_err(|e| format!("Failed to copy bridge package to {}: {}", dest.display(), e))?;
+
+    remove_legacy_bridge_package(&packages);
+
     Ok(dest.to_string_lossy().to_string())
+}
+
+/// The embedded package id this bridge shipped under before the rename.
+const LEGACY_BRIDGE_PACKAGE: &str = "com.arcane.editor";
+
+/// Remove the pre-rename embedded package once the new one is in place.
+///
+/// This is not tidiness. The C# files keep their original `.meta` GUIDs across
+/// the rename — deliberately, so asmdef references by GUID survive — which
+/// means leaving the old directory in place gives Unity two embedded packages
+/// declaring the SAME asset GUIDs. Unity reports that as a GUID conflict and
+/// picks a winner arbitrarily. On top of that both packages register an
+/// `IExternalCodeEditor` and both start a `BridgeClient` against one journal.
+///
+/// Best-effort: install has already succeeded by this point, and failing the
+/// whole command over a leftover directory would be worse than the leftover.
+fn remove_legacy_bridge_package(packages_dir: &Path) {
+    let legacy = packages_dir.join(LEGACY_BRIDGE_PACKAGE);
+    if !legacy.is_dir() {
+        return;
+    }
+    match fs::remove_dir_all(&legacy) {
+        Ok(()) => eprintln!("[UnityIDE] removed legacy bridge package {}", legacy.display()),
+        Err(e) => eprintln!(
+            "[UnityIDE] could not remove legacy bridge package {} — Unity may report \
+             duplicate asset GUIDs until it is deleted by hand: {e}",
+            legacy.display()
+        ),
+    }
 }
 
 /// Scan all .meta files in a Unity project and extract GUID -> asset path mappings.
@@ -1519,6 +1550,43 @@ mod tests {
         );
 
         fs::remove_dir_all(&dir).ok();
+    }
+
+    /// After the package id change, installing the bridge into a project that
+    /// already had the old one would leave BOTH embedded packages in place.
+    /// The C# files keep their original .meta GUIDs across the rename (on
+    /// purpose — asmdef references by GUID depend on it), so two embedded
+    /// packages would declare the same asset GUIDs and Unity picks a winner
+    /// arbitrarily. Both would also register an IExternalCodeEditor and run a
+    /// BridgeClient against the same journal.
+    #[test]
+    fn installing_the_bridge_removes_the_pre_rename_package() {
+        let dir = make_temp_dir("_legacy_bridge_pkg");
+        let packages = dir.join("Packages");
+        let legacy = packages.join("com.arcane.editor").join("Editor");
+        fs::create_dir_all(&legacy).unwrap();
+        fs::write(legacy.join("ArcaneEditor.cs"), "// stale").unwrap();
+        assert!(packages.join("com.arcane.editor").is_dir());
+
+        remove_legacy_bridge_package(&packages);
+
+        assert!(
+            !packages.join("com.arcane.editor").exists(),
+            "legacy embedded package must be removed, or Unity sees duplicate asset GUIDs"
+        );
+    }
+
+    /// Must be a no-op — and specifically must not fail — on the overwhelmingly
+    /// common case of a project that never had the old package.
+    #[test]
+    fn removing_the_legacy_bridge_package_is_a_noop_when_absent() {
+        let dir = make_temp_dir("_no_legacy_bridge_pkg");
+        let packages = dir.join("Packages");
+        fs::create_dir_all(packages.join("com.unityide.editor")).unwrap();
+
+        remove_legacy_bridge_package(&packages);
+
+        assert!(packages.join("com.unityide.editor").is_dir(), "must not touch the current package");
     }
 
     /// The rename left `.arcane.csproj` / `.arcane.sln` sitting at the root of

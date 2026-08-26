@@ -581,8 +581,8 @@ mod tests {
     #[test]
     fn epoch_sidecar_sits_beside_its_journal() {
         assert_eq!(
-            epoch_path_for(Path::new("/x/Library/ArcaneIDE/to-ide.jsonl")),
-            PathBuf::from("/x/Library/ArcaneIDE/to-ide.epoch")
+            epoch_path_for(Path::new("/x/Library/UnityIDE/to-ide.jsonl")),
+            PathBuf::from("/x/Library/UnityIDE/to-ide.epoch")
         );
     }
 

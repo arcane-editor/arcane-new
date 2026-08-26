@@ -20,7 +20,7 @@ using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
-namespace Arcane.Bridge
+namespace UnityIDE.Bridge
 {
     internal static class HierarchySerializer
     {

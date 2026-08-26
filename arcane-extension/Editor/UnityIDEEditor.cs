@@ -6,31 +6,50 @@ using UnityEditor;
 using UnityEngine;
 using Debug = UnityEngine.Debug;
 
-namespace Arcane.Editor
+namespace UnityIDE.Editor
 {
     /// <summary>
-    /// Registers Arcane as an external code editor in Unity.
+    /// Registers UnityIDE as an external code editor in Unity.
     /// Implements IExternalCodeEditor to appear in Edit > Preferences > External Tools,
-    /// open scripts in Arcane on double-click, and keep .sln/.csproj files generated.
+    /// open scripts in UnityIDE on double-click, and keep .sln/.csproj files generated.
     ///
     /// Live IPC with the running IDE (console/play/hierarchy/telemetry) is owned by the
-    /// Arcane.Bridge package (see BridgeBootstrap); this class only handles the
-    /// Unity-initiated external-editor responsibilities and launches Arcane on demand.
+    /// UnityIDE.Bridge package (see BridgeBootstrap); this class only handles the
+    /// Unity-initiated external-editor responsibilities and launches UnityIDE on demand.
     /// </summary>
     [InitializeOnLoad]
-    public class ArcaneEditor : IExternalCodeEditor
+    public class UnityIDEEditor : IExternalCodeEditor
     {
+        /// <summary>
+        /// The app's name before the rename. Kept only so an already-installed
+        /// build is still found; nothing new is ever written under it.
+        /// </summary>
+        private const string LegacyAppName = "Arcane";
+
+        // Each table lists the new-name locations first, then the pre-rename
+        // ones. The extension and the IDE ship separately — a user can update
+        // the Unity package before reinstalling the app — so probing only the
+        // new paths would report "no installation found" on a machine where
+        // the IDE is sitting right there under its old name. The legacy
+        // entries cost one File.Exists each and can go once the old app has.
         private static readonly string[] MacPaths = {
-            "/Applications/Arcane.app",
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Personal), "Applications/Arcane.app")
+            "/Applications/UnityIDE.app",
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Personal), "Applications/UnityIDE.app"),
+            "/Applications/" + LegacyAppName + ".app",
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Personal), "Applications/" + LegacyAppName + ".app")
         };
 
         private static readonly string[] WindowsPaths = {
-            @"C:\Program Files\Arcane\Arcane.exe",
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Programs\Arcane\Arcane.exe")
+            @"C:\Program Files\UnityIDE\UnityIDE.exe",
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Programs\UnityIDE\UnityIDE.exe"),
+            @"C:\Program Files\" + LegacyAppName + @"\" + LegacyAppName + ".exe",
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Programs\" + LegacyAppName + @"\" + LegacyAppName + ".exe")
         };
 
         private static readonly string[] LinuxPaths = {
+            "/usr/bin/unityide",
+            "/usr/local/bin/unityide",
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Personal), ".local/bin/unityide"),
             "/usr/bin/arcane",
             "/usr/local/bin/arcane",
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Personal), ".local/bin/arcane")
@@ -38,9 +57,9 @@ namespace Arcane.Editor
 
         private string _installPath;
 
-        static ArcaneEditor()
+        static UnityIDEEditor()
         {
-            CodeEditor.Register(new ArcaneEditor());
+            CodeEditor.Register(new UnityIDEEditor());
         }
 
         public CodeEditor.Installation[] Installations
@@ -49,10 +68,10 @@ namespace Arcane.Editor
             {
                 var installations = new System.Collections.Generic.List<CodeEditor.Installation>();
 
-                // 1. Check for dev launcher (.arcane-dev-path file in project root)
+                // 1. Check for dev launcher (.unityide-dev-path file in project root)
                 string devConfigPath = Path.Combine(
                     Path.GetDirectoryName(Application.dataPath),
-                    ".arcane-dev-path"
+                    ".unityide-dev-path"
                 );
                 if (File.Exists(devConfigPath))
                 {
@@ -61,19 +80,19 @@ namespace Arcane.Editor
                     {
                         installations.Add(new CodeEditor.Installation
                         {
-                            Name = "Arcane (Dev)",
+                            Name = "UnityIDE (Dev)",
                             Path = devLauncher
                         });
                     }
                 }
 
                 // 2. Check custom path from EditorPrefs
-                string customPath = ArcaneSettings.InstallPath;
+                string customPath = UnityIDESettings.InstallPath;
                 if (!string.IsNullOrEmpty(customPath) && (File.Exists(customPath) || Directory.Exists(customPath)))
                 {
                     installations.Add(new CodeEditor.Installation
                     {
-                        Name = "Arcane",
+                        Name = "UnityIDE",
                         Path = customPath
                     });
                 }
@@ -102,7 +121,7 @@ namespace Arcane.Editor
                     {
                         installations.Add(new CodeEditor.Installation
                         {
-                            Name = "Arcane",
+                            Name = "UnityIDE",
                             Path = path
                         });
                     }
@@ -113,7 +132,7 @@ namespace Arcane.Editor
                 {
                     installations.Add(new CodeEditor.Installation
                     {
-                        Name = "Arcane (configure path in preferences)",
+                        Name = "UnityIDE (configure path in preferences)",
                         Path = ""
                     });
                 }
@@ -124,7 +143,7 @@ namespace Arcane.Editor
 
         public bool TryGetInstallationForPath(string editorPath, out CodeEditor.Installation installation)
         {
-            // Check if the given path matches any known Arcane installation
+            // Check if the given path matches any known UnityIDE installation
             foreach (var inst in Installations)
             {
                 if (inst.Path == editorPath)
@@ -134,13 +153,17 @@ namespace Arcane.Editor
                 }
             }
 
-            // Accept any path that looks like an Arcane executable
+            // Accept any path that looks like a UnityIDE executable, under either
+            // the current or the pre-rename name — a user whose External Script
+            // Editor still points at the old app should keep working until they
+            // reinstall, not silently lose their editor association.
             if (!string.IsNullOrEmpty(editorPath) &&
-                (editorPath.Contains("Arcane") || editorPath.Contains("arcane")))
+                (editorPath.IndexOf("UnityIDE", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                 editorPath.IndexOf(LegacyAppName, StringComparison.OrdinalIgnoreCase) >= 0))
             {
                 installation = new CodeEditor.Installation
                 {
-                    Name = "Arcane",
+                    Name = "UnityIDE",
                     Path = editorPath
                 };
                 return true;
@@ -154,11 +177,11 @@ namespace Arcane.Editor
         {
             _installPath = editorInstallation;
 
-            // Generate project files when Arcane is selected as the external editor.
+            // Generate project files when UnityIDE is selected as the external editor.
             // Deferred, not immediate: Unity calls this from CodeEditor.Register in
             // our InitializeOnLoad static constructor, which is too early for the
-            // IDE package's generator to run. See ArcaneProjectGeneration.ScheduleSync.
-            ArcaneProjectGeneration.ScheduleSync();
+            // IDE package's generator to run. See UnityIDEProjectGeneration.ScheduleSync.
+            UnityIDEProjectGeneration.ScheduleSync();
         }
 
         private static bool HasScriptChanges(string[] assets)
@@ -174,7 +197,7 @@ namespace Arcane.Editor
 
         public bool OpenProject(string filePath, int line, int column)
         {
-            // Launch (or focus) Arcane and navigate to the requested location. If Arcane
+            // Launch (or focus) UnityIDE and navigate to the requested location. If UnityIDE
             // is already running, its single-instance lock relays the --goto argument to
             // the existing window; otherwise a new instance opens the project.
             return LaunchArcane(filePath, line, column);
@@ -183,7 +206,7 @@ namespace Arcane.Editor
         public void SyncAll()
         {
             // Generate .sln/.csproj files via the installed IDE package (reflection).
-            ArcaneProjectGeneration.ScheduleSync();
+            UnityIDEProjectGeneration.ScheduleSync();
         }
 
         public void SyncIfNeeded(string[] addedAssets, string[] deletedAssets, string[] movedAssets,
@@ -195,41 +218,41 @@ namespace Arcane.Editor
             {
                 // Deferred + coalesced: a single import can call this many times,
                 // and each Sync regenerates every .csproj in the project.
-                ArcaneProjectGeneration.ScheduleSync();
+                UnityIDEProjectGeneration.ScheduleSync();
             }
         }
 
         public void OnGUI()
         {
-            EditorGUILayout.LabelField("Arcane IDE Settings", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("UnityIDE Settings", EditorStyles.boldLabel);
 
             // Install Path
             EditorGUILayout.BeginHorizontal();
-            string installPath = EditorGUILayout.TextField("Install Path", ArcaneSettings.InstallPath);
-            if (installPath != ArcaneSettings.InstallPath)
-                ArcaneSettings.InstallPath = installPath;
+            string installPath = EditorGUILayout.TextField("Install Path", UnityIDESettings.InstallPath);
+            if (installPath != UnityIDESettings.InstallPath)
+                UnityIDESettings.InstallPath = installPath;
             if (GUILayout.Button("Browse", GUILayout.Width(60)))
             {
-                string selected = EditorUtility.OpenFilePanel("Select Arcane Executable", "", "");
+                string selected = EditorUtility.OpenFilePanel("Select UnityIDE Executable", "", "");
                 if (!string.IsNullOrEmpty(selected))
-                    ArcaneSettings.InstallPath = selected;
+                    UnityIDESettings.InstallPath = selected;
             }
             EditorGUILayout.EndHorizontal();
 
             EditorGUILayout.Space();
             EditorGUILayout.HelpBox(
-                "Live connection to the Arcane IDE (console, play mode, hierarchy) is " +
-                "managed automatically by the Arcane bridge while the IDE is running.",
+                "Live connection to the UnityIDE (console, play mode, hierarchy) is " +
+                "managed automatically by the UnityIDE bridge while the IDE is running.",
                 MessageType.Info);
         }
 
         private bool LaunchArcane(string filePath, int line, int column)
         {
-            string execPath = !string.IsNullOrEmpty(_installPath) ? _installPath : ArcaneSettings.InstallPath;
+            string execPath = !string.IsNullOrEmpty(_installPath) ? _installPath : UnityIDESettings.InstallPath;
 
             if (string.IsNullOrEmpty(execPath))
             {
-                ArcaneLog.Warn("No Arcane installation path configured. Please set the path in Preferences > External Tools.");
+                UnityIDELog.Warn("No UnityIDE installation path configured. Please set the path in Preferences > External Tools.");
                 return false;
             }
 
@@ -255,7 +278,7 @@ namespace Arcane.Editor
                 // Electron's single-instance lock works (open -a won't relay args to existing instance)
                 else if (Application.platform == RuntimePlatform.OSXEditor && execPath.EndsWith(".app"))
                 {
-                    string macBinary = Path.Combine(execPath, "Contents", "MacOS", "Arcane");
+                    string macBinary = Path.Combine(execPath, "Contents", "MacOS", "UnityIDE");
                     if (File.Exists(macBinary))
                     {
                         Process.Start(macBinary, args);
@@ -274,7 +297,7 @@ namespace Arcane.Editor
             }
             catch (Exception ex)
             {
-                ArcaneLog.Error($"Failed to launch: {ex.Message}");
+                UnityIDELog.Error($"Failed to launch: {ex.Message}");
                 return false;
             }
         }

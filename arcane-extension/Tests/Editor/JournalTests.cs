@@ -1,10 +1,10 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
-using Arcane.Bridge;
+using UnityIDE.Bridge;
 using NUnit.Framework;
 
-namespace Arcane.Tests
+namespace UnityIDE.Tests
 {
     public class JournalTests
     {
@@ -15,7 +15,7 @@ namespace Arcane.Tests
         [SetUp]
         public void SetUp()
         {
-            _dir = Path.Combine(Path.GetTempPath(), "arcane-journal-" + Path.GetRandomFileName());
+            _dir = Path.Combine(Path.GetTempPath(), "unityide-journal-" + Path.GetRandomFileName());
             Directory.CreateDirectory(_dir);
             _journal = Path.Combine(_dir, "to-ide.jsonl");
             _ack = Path.Combine(_dir, "to-ide.ack");

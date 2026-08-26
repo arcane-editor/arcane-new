@@ -211,7 +211,7 @@ fn dir_exists(path: String) -> bool {
 /// Canonicalize a project path before `openProjectInNewWindow`
 /// (`src/features/project/services/multi-window.ts`) hashes it into a
 /// per-window label. The Unity bridge's journal files sit at a fixed location
-/// relative to the project (`<project>/Library/ArcaneIDE/`), so if the window
+/// relative to the project (`<project>/Library/UnityIDE/`), so if the window
 /// label were hashed from the RAW path instead, the same project opened via
 /// two different spellings (a symlink, a trailing slash, `..` segments) would
 /// get two different window labels while both windows' bridges wrote the SAME

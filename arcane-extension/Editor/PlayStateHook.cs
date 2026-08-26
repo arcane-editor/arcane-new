@@ -15,7 +15,7 @@
 using UnityEditor;
 using UnityEngine;
 
-namespace Arcane.Bridge
+namespace UnityIDE.Bridge
 {
     internal static class PlayStateHook
     {
