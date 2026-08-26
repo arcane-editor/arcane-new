@@ -127,17 +127,24 @@ SPARK_BASE_URL = "https://api.meta.ai/v1"
 WEB_BASE_URL = "https://dev.arcaneai.org"
 API_BASE_URL = "https://api-dev.arcaneai.org"
 EMAIL_FROM = "no-reply@arcaneai.org"
-# Dodo product ids: empty for now. The old dev test-mode ids (created against
-# test.dodopayments.com pre-relaunch) pointed at the retired $20/$50/$200
-# tier ladder and MUST NOT be reused under the new starter/pro/max names —
-# reusing them would checkout customers into the wrong price. Empty means
-# checkout 503s cleanly (product_unconfigured) until an owner re-provisions
-# test-mode products for the new ladder.
-DODO_PRODUCT_STARTER = ""
-DODO_PRODUCT_PRO = ""
-DODO_PRODUCT_MAX = ""
-DODO_PRODUCT_TOPUP_16 = ""
-DODO_PRODUCT_TOPUP_75 = ""
+# Dodo product ids are deliberately ABSENT from this block: on dev they are
+# SECRETS on the worker (`wrangler secret put DODO_PRODUCT_<SLOT> --env dev`).
+# A plaintext var of the same name SHADOWS the secret at deploy time, so
+# re-adding these five names here — even as "" — silently breaks checkout
+# again. productId() (src/routes/billing.ts) reads them off `env` by name,
+# which resolves a secret and a var identically, so no code change is needed.
+#
+# Dev talks to test.dodopayments.com (dodoApiBase() keys off ENVIRONMENT, which
+# is "development" here). Rather than provision a second test-mode ladder, each
+# new slot REUSES an existing test-mode product left over from the retired
+# ladder, matched cheapest-to-most-expensive so the dev ladder stays monotonic:
+#   STARTER / PRO / MAX  ← the three retired recurring products ($20/$50/$200)
+#   TOPUP_16 / TOPUP_75  ← the two retired one-time packs (amounts already match)
+# The two top-up amounts line up exactly; the three subscription amounts do NOT
+# — a dev Starter checkout is billed the retired product's $20 while the app
+# grants Starter's 387 credits. That is test-mode play money, fine for
+# exercising the flow, but it means DEV CHECKOUT AMOUNTS ARE NOT A PREVIEW OF
+# PROD AMOUNTS. Prod's live ids stay in [vars] above and are untouched by this.
 
 [env.dev.observability]
 enabled = true
