@@ -97,17 +97,21 @@ manifests. Do not "fix" it during the cutover.
    build time, so releasing first is what stops the version cards falling back.
 8. Detach `arcaneai.org`, `www.arcaneai.org` and `dev.arcaneai.org` from the two
    Pages projects.
-9. Dodo: create the LIVE endpoint at `https://api.unityide.app/v1/billing/webhook`
-   (`scripts/create-live-dodo-webhook.ts` is idempotent), `wrangler secret put
-   DODO_WEBHOOK_SECRET` for both environments, confirm a delivery, then delete
-   the old endpoint. Rename the five live products (`Arcane Starter` →
-   `UnityIDE Starter`, …) — those names appear on checkout pages and invoices.
-   Product **ids** do not change.
+9. Dodo: **update the existing endpoint's URL in place** to
+   `https://api.unityide.app/v1/billing/webhook` rather than creating a new one.
+   Same endpoint id means the same signing secret, so `DODO_WEBHOOK_SECRET` does
+   not rotate and there is no window at all — strictly better than the
+   create → swap secret → verify → delete sequence, which was the original plan
+   here and is only needed if the endpoint cannot be edited.
 
-   This swap is zero-loss: both endpoints receive every event, and the one whose
-   signature does not match the currently-set secret returns 400 from
-   `verifyDodoWebhook` *before* `recordBillingEvent` runs. No double grants, no
-   dropped events.
+   Then rename the five live products (`Arcane Starter` → `UnityIDE Starter`, …);
+   those names appear on checkout pages and invoices. Product **ids** do not
+   change, so no `DODO_PRODUCT_*` var or secret moves.
+
+   If you ever do have to create-and-swap: it is still zero-loss, because both
+   endpoints receive every event and the one whose signature does not match the
+   currently-set secret returns 400 from `verifyDodoWebhook` *before*
+   `recordBillingEvent` runs. No double grants, no dropped events.
 10. Google Search Console: add `unityide.app`, verify, submit
     `https://unityide.app/sitemap-index.xml`. Do **not** use Change of Address —
     it requires 301s from the old domain, which the hard cut forbids.
