@@ -11,7 +11,7 @@ import {
   planGrantsClient,
   type Session,
 } from '../features/auth';
-import { ARCANE_WEB_URL } from '../config/api';
+import { WEB_URL } from '../config/api';
 
 export type LoginStatus = 'idle' | 'waiting-browser' | 'exchanging' | 'error';
 
@@ -300,6 +300,6 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   openBilling: async () => {
-    await openUrl(`${ARCANE_WEB_URL}/account`).catch(() => {});
+    await openUrl(`${WEB_URL}/account`).catch(() => {});
   },
 }));

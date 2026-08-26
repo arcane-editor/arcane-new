@@ -3,11 +3,11 @@
 // overridable via .env.development.local or shell env at build time).
 // Fallbacks are the PRODUCTION endpoints so a build with missing env vars
 // fails safe.
-export const ARCANE_API_URL: string =
-  import.meta.env.VITE_ARCANE_API_URL ?? 'https://api.arcaneai.org';
+export const API_URL: string =
+  import.meta.env.VITE_API_URL ?? 'https://api.arcaneai.org';
 
-export const ARCANE_WEB_URL: string =
-  import.meta.env.VITE_ARCANE_WEB_URL ?? 'https://arcaneai.org';
+export const WEB_URL: string =
+  import.meta.env.VITE_WEB_URL ?? 'https://arcaneai.org';
 
 /**
  * Assert that the endpoints this build targets match the channel the Rust side
@@ -26,7 +26,7 @@ export async function checkReleaseChannel(
   invoke: (cmd: string, args: Record<string, unknown>) => Promise<unknown>,
 ): Promise<string | null> {
   try {
-    await invoke('auth_check_channel', { apiUrl: ARCANE_API_URL });
+    await invoke('auth_check_channel', { apiUrl: API_URL });
     return null;
   } catch (err) {
     return String(err);

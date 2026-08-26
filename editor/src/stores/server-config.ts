@@ -27,7 +27,7 @@
  */
 
 import { create } from 'zustand';
-import { ARCANE_API_URL } from '../config/api';
+import { API_URL } from '../config/api';
 import { useAuthStore } from './auth';
 import type { Effort } from '../features/ai-panel';
 
@@ -83,7 +83,7 @@ function isValidServerConfig(body: unknown): body is ServerConfig {
 export function createServerConfigStore(cfg: ServerConfigStoreConfig = {}) {
   const fetchImpl = cfg.fetchImpl ?? fetch;
   const getToken = cfg.getToken ?? (() => useAuthStore.getState().token);
-  const baseUrl = cfg.baseUrl ?? ARCANE_API_URL;
+  const baseUrl = cfg.baseUrl ?? API_URL;
 
   return create<ServerConfigState>((set) => ({
     config: null,

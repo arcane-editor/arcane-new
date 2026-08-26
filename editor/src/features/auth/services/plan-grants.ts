@@ -12,7 +12,7 @@
  * failure clears the in-flight promise so the next call retries instead of
  * staying poisoned for the rest of the session.
  */
-import { ARCANE_API_URL } from '../../../config/api';
+import { API_URL } from '../../../config/api';
 
 interface PlanGrantsClientConfig {
   fetchImpl?: typeof fetch;
@@ -21,7 +21,7 @@ interface PlanGrantsClientConfig {
 
 export function createPlanGrantsClient(cfg: PlanGrantsClientConfig = {}) {
   const fetchImpl = cfg.fetchImpl ?? fetch;
-  const baseUrl = cfg.baseUrl ?? ARCANE_API_URL;
+  const baseUrl = cfg.baseUrl ?? API_URL;
 
   let grants: Record<string, number> | null = null;
   let inflight: Promise<Record<string, number>> | null = null;

@@ -32,9 +32,9 @@ import { getStreamExtras } from './stream-extras';
 import { getSendPlanPhase, getSendPromptMode } from './send-context';
 import { difficultyForRequest } from './difficulty';
 import { combineSignals, computeBackoffMs, isTransient, raceWithTimeout, sleep, TimeoutRaceError } from './stream-retry';
-import { ARCANE_API_URL } from '../../../config/api';
+import { API_URL } from '../../../config/api';
 
-const HOSTED_SERVER_URL = ARCANE_API_URL;
+const HOSTED_SERVER_URL = API_URL;
 
 /**
  * First-token watchdog default: abort if no SSE chunk arrives at all within

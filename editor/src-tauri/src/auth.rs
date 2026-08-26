@@ -222,8 +222,8 @@ mod tests {
         let env_file = std::fs::read_to_string(root.join("../.env.development")).unwrap();
         let api_url = env_file
             .lines()
-            .find_map(|l| l.trim().strip_prefix("VITE_ARCANE_API_URL="))
-            .expect("VITE_ARCANE_API_URL must be set in .env.development");
+            .find_map(|l| l.trim().strip_prefix("VITE_API_URL="))
+            .expect("VITE_API_URL must be set in .env.development");
         assert_eq!(
             channel_for_api_url(api_url),
             "dev",

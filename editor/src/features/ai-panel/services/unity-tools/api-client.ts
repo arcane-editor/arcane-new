@@ -15,10 +15,10 @@ import { useAuthStore } from '../../../../stores/auth';
 import { postJsonWithTimeout } from './post-json';
 import { unityMajorMinor } from '../../../../data/unity-docs-index';
 import { getUnityGroundingContext } from '../prompts/unity-facts';
-import { ARCANE_API_URL } from '../../../../config/api';
+import { API_URL } from '../../../../config/api';
 
 // Same host as the AI chat path (see hosted-stream.ts / graphify-enrich.ts).
-const HOSTED_SERVER_URL = ARCANE_API_URL;
+const HOSTED_SERVER_URL = API_URL;
 
 /**
  * Discriminated result for the two version-accurate grounding calls
