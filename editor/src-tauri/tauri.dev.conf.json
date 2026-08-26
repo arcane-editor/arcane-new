@@ -1,14 +1,14 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Arcane Dev",
-  "identifier": "com.inno.editor.dev",
+  "productName": "UnityIDE Dev",
+  "identifier": "app.unityide.desktop.dev",
   "build": {
     "beforeBuildCommand": "bun run sync:bridge && bun run build:dev-env"
   },
   "plugins": {
     "deep-link": {
       "desktop": {
-        "schemes": ["arcane-dev"]
+        "schemes": ["unityide-dev"]
       }
     },
     "updater": {

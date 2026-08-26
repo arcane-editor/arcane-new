@@ -29,24 +29,24 @@ jobs:
             # "the bundler was configured to create updater artifacts but no
             # updater-enabled targets were built" and no .app.tar.gz at all.
             bundles: app,dmg
-            asset: Arcane-arm64.dmg
+            asset: UnityIDE-arm64.dmg
             glob: editor/src-tauri/target/release/bundle/dmg/*.dmg
             platform_key: darwin-aarch64
-            updater_asset: Arcane.app.tar.gz
+            updater_asset: UnityIDE.app.tar.gz
             updater_glob: editor/src-tauri/target/release/bundle/macos/*.app.tar.gz
-          # macOS Intel (macos-13 / x86_64-apple-darwin / Arcane-x64.dmg)
+          # macOS Intel (macos-13 / x86_64-apple-darwin / UnityIDE-x64.dmg)
           # dropped from distribution as of v0.2.0 — the download option is
           # gone from the landing page too. Restore a matrix entry here if
           # Intel support returns.
           - os: windows-latest    # Windows x64
             triple: x86_64-pc-windows-msvc
             bundles: nsis
-            asset: ArcaneSetup.exe
+            asset: UnityIDESetup.exe
             glob: editor/src-tauri/target/release/bundle/nsis/*-setup.exe
             # On Windows the updater artifact IS the installer — the same file,
             # with a .sig written beside it.
             platform_key: windows-x86_64
-            updater_asset: ArcaneSetup.exe
+            updater_asset: UnityIDESetup.exe
             updater_glob: editor/src-tauri/target/release/bundle/nsis/*-setup.exe
     runs-on: ${{ matrix.os }}
     defaults:

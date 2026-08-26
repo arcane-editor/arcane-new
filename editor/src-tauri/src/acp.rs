@@ -24,7 +24,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::{Mutex, OnceCell};
 
-/// The adapter Arcane installs for the `claude` agent.
+/// The adapter UnityIDE installs for the `claude` agent.
 ///
 /// Pinned deliberately. `@latest` drifts under users mid-session, and the
 /// protocol surface an agent advertises changes between releases; a pin means a

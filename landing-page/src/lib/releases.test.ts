@@ -4,14 +4,14 @@ import { downloadUrls, manifestUrls, versionFromManifest } from './releases';
 describe('downloadUrls', () => {
     it('serves the dev channel when the site is built against the dev API', () => {
         const urls = downloadUrls('https://api-dev.arcaneai.org');
-        expect(urls.macArm).toBe('https://releases.arcaneai.org/dev/latest/Arcane-Dev-arm64.dmg');
-        expect(urls.windows).toBe('https://releases.arcaneai.org/dev/latest/ArcaneDevSetup.exe');
+        expect(urls.macArm).toBe('https://releases.arcaneai.org/dev/latest/UnityIDE-Dev-arm64.dmg');
+        expect(urls.windows).toBe('https://releases.arcaneai.org/dev/latest/UnityIDEDevSetup.exe');
     });
 
     it('serves the production channel for the production API', () => {
         const urls = downloadUrls('https://api.arcaneai.org');
-        expect(urls.macArm).toBe('https://releases.arcaneai.org/latest/Arcane-arm64.dmg');
-        expect(urls.windows).toBe('https://releases.arcaneai.org/latest/ArcaneSetup.exe');
+        expect(urls.macArm).toBe('https://releases.arcaneai.org/latest/UnityIDE-arm64.dmg');
+        expect(urls.windows).toBe('https://releases.arcaneai.org/latest/UnityIDESetup.exe');
     });
 
     it('never hands the dev site a production installer', () => {
@@ -26,7 +26,7 @@ describe('downloadUrls', () => {
     it('falls back to production for an unrecognised API host', () => {
         // Fail safe: an unknown host must not advertise dev builds publicly.
         expect(downloadUrls('https://example.test').macArm)
-            .toBe('https://releases.arcaneai.org/latest/Arcane-arm64.dmg');
+            .toBe('https://releases.arcaneai.org/latest/UnityIDE-arm64.dmg');
     });
 
     it('treats a localhost API as dev', () => {

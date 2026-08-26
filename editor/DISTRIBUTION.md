@@ -53,7 +53,7 @@ A few things worth knowing:
 
 ## Windows
 
-Windows builds are **unsigned** for now (no code-signing certificate). Recipients running `ArcaneSetup.exe` (the NSIS installer) will hit Microsoft **SmartScreen**:
+Windows builds are **unsigned** for now (no code-signing certificate). Recipients running `UnityIDESetup.exe` (the NSIS installer) will hit Microsoft **SmartScreen**:
 
 > **Windows protected your PC** — Microsoft Defender SmartScreen prevented an unrecognized app from starting.
 
@@ -151,9 +151,9 @@ git push origin v0.1.0
 
 (Or run it manually from the **Actions** tab via **Run workflow**.) The workflow runs one job per target — `macos-14` (Apple Silicon), `macos-13` (Intel), `windows-latest` — building the native `unityide-graph` + `typescript-language-server` sidecars on each runner, then `tauri build`, then uploading each installer to the `arcane-releases` R2 bucket under both the version path `` `<tag>/` `` (archived) and `` `latest/` `` (the stable links the landing page points at):
 
-- `Arcane-arm64.dmg` — macOS Apple Silicon
-- `Arcane-x64.dmg` — macOS Intel
-- `ArcaneSetup.exe` — Windows x64
+- `UnityIDE-arm64.dmg` — macOS Apple Silicon
+- `UnityIDE-x64.dmg` — macOS Intel
+- `UnityIDESetup.exe` — Windows x64
 
 **Required GitHub secrets** (Settings → Secrets and variables → Actions): `CLOUDFLARE_API_TOKEN` (a token with **R2 edit** permission) and `CLOUDFLARE_ACCOUNT_ID`. No signing secrets are needed while we're ad-hoc / unsigned.
 
@@ -195,4 +195,4 @@ After that, recipients can mount and open the app with no warnings and no Termin
 
 ### Windows signing (later)
 
-To remove the SmartScreen warning, sign `ArcaneSetup.exe` with a code-signing certificate or **Azure Trusted Signing**. Tauri wires this through `bundle.windows` config + a CI signing step — no restructuring of `release.yml` needed, just an added secret and config.
+To remove the SmartScreen warning, sign `UnityIDESetup.exe` with a code-signing certificate or **Azure Trusted Signing**. Tauri wires this through `bundle.windows` config + a CI signing step — no restructuring of `release.yml` needed, just an added secret and config.

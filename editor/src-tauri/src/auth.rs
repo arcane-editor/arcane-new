@@ -11,7 +11,7 @@ pub struct AuthToken {
 }
 
 /// Directory NAME for per-app config under $HOME, keyed off the bundle
-/// identifier so the side-by-side dev build (com.inno.editor.dev) never
+/// identifier so the side-by-side dev build (app.unityide.desktop.dev) never
 /// shares tokens/sessions/graphs with the prod app.
 pub fn config_dir_name(identifier: &str) -> &'static str {
     if identifier.ends_with(".dev") {
@@ -93,19 +93,19 @@ pub fn get_config_home_dir(app: tauri::AppHandle) -> Result<String, String> {
 /// First deep-link scheme from the MERGED tauri config
 /// (`plugins.deep-link.desktop.schemes[0]`). Reading the runtime config —
 /// rather than hardcoding — makes the dev overlay (`tauri.dev.conf.json`,
-/// schemes ["arcane-dev"]) the single source of truth: a dev build
-/// automatically reports "arcane-dev" with zero extra plumbing.
+/// schemes ["unityide-dev"]) the single source of truth: a dev build
+/// automatically reports "unityide-dev" with zero extra plumbing.
 fn scheme_from_plugin_config(deep_link: Option<&serde_json::Value>) -> String {
     deep_link
         .and_then(|v| v.get("desktop"))
         .and_then(|d| d.get("schemes"))
         .and_then(|s| s.get(0))
         .and_then(|s| s.as_str())
-        .unwrap_or("arcane")
+        .unwrap_or("unityide")
         .to_string()
 }
 
-/// Deep-link scheme of the running app: "arcane" (prod) or "arcane-dev"
+/// Deep-link scheme of the running app: "unityide" (prod) or "unityide-dev"
 /// (dev overlay build). Also used by the single-instance callback in lib.rs
 /// to tell "re-launch with a deep link" from "plain re-launch".
 pub fn deep_link_scheme(app: &tauri::AppHandle) -> String {
@@ -167,7 +167,7 @@ pub fn auth_check_channel(app: tauri::AppHandle, api_url: String) -> Result<(), 
         api_url,
         by_url,
     );
-    eprintln!("[Arcane] {}", message);
+    eprintln!("[UnityIDE] {}", message);
     Err(message)
 }
 
@@ -188,8 +188,8 @@ mod tests {
 
     #[test]
     fn channel_is_derived_consistently_from_both_halves() {
-        assert_eq!(channel_for_identifier("com.inno.editor"), "prod");
-        assert_eq!(channel_for_identifier("com.inno.editor.dev"), "dev");
+        assert_eq!(channel_for_identifier("app.unityide.desktop"), "prod");
+        assert_eq!(channel_for_identifier("app.unityide.desktop.dev"), "dev");
 
         assert_eq!(channel_for_api_url(PROD_API_URL), "prod");
         assert_eq!(channel_for_api_url("https://api.arcaneai.org/"), "prod");
@@ -233,29 +233,29 @@ mod tests {
         // And the deep-link scheme has to follow the identifier, or the browser
         // sign-in callback lands in the other build.
         let scheme = scheme_from_plugin_config(conf["plugins"].get("deep-link"));
-        assert_eq!(scheme, "arcane-dev");
+        assert_eq!(scheme, "unityide-dev");
     }
 
     #[test]
-    fn prod_identifier_uses_arcane() {
-        assert_eq!(config_dir_name("com.inno.editor"), ".unityide");
+    fn prod_identifier_uses_the_base_config_dir() {
+        assert_eq!(config_dir_name("app.unityide.desktop"), ".unityide");
     }
 
     #[test]
-    fn dev_identifier_uses_arcane_dev() {
-        assert_eq!(config_dir_name("com.inno.editor.dev"), ".unityide-dev");
+    fn dev_identifier_uses_the_dev_config_dir() {
+        assert_eq!(config_dir_name("app.unityide.desktop.dev"), ".unityide-dev");
     }
 
     #[test]
     fn scheme_read_from_merged_plugin_config() {
-        let v = json!({ "desktop": { "schemes": ["arcane-dev"] } });
-        assert_eq!(scheme_from_plugin_config(Some(&v)), "arcane-dev");
+        let v = json!({ "desktop": { "schemes": ["unityide-dev"] } });
+        assert_eq!(scheme_from_plugin_config(Some(&v)), "unityide-dev");
     }
 
     #[test]
-    fn scheme_falls_back_to_arcane() {
-        assert_eq!(scheme_from_plugin_config(None), "arcane");
+    fn scheme_falls_back_to_the_prod_scheme() {
+        assert_eq!(scheme_from_plugin_config(None), "unityide");
         let empty = json!({ "desktop": { "schemes": [] } });
-        assert_eq!(scheme_from_plugin_config(Some(&empty)), "arcane");
+        assert_eq!(scheme_from_plugin_config(Some(&empty)), "unityide");
     }
 }

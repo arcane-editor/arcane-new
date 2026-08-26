@@ -419,7 +419,7 @@ fn build_child_env(base: impl Iterator<Item = (String, String)>) -> Vec<(String,
     // readline/zle line editing — including backspace — is broken.
     out.push(("TERM".to_string(), "xterm-256color".to_string()));
     out.push(("COLORTERM".to_string(), "truecolor".to_string()));
-    out.push(("TERM_PROGRAM".to_string(), "Arcane".to_string()));
+    out.push(("TERM_PROGRAM".to_string(), "UnityIDE".to_string()));
     out.push((
         "TERM_PROGRAM_VERSION".to_string(),
         env!("CARGO_PKG_VERSION").to_string(),
@@ -1227,7 +1227,7 @@ mod env_tests {
             ("TERM_PROGRAM", "iTerm.app"),
             ("TERM_PROGRAM_VERSION", "3.5.0"),
         ]);
-        assert_eq!(get(&env, "TERM_PROGRAM"), Some("Arcane"));
+        assert_eq!(get(&env, "TERM_PROGRAM"), Some("UnityIDE"));
         assert_eq!(count(&env, "TERM_PROGRAM"), 1);
         assert_ne!(get(&env, "TERM_PROGRAM_VERSION"), Some("3.5.0"));
     }

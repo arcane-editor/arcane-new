@@ -1,7 +1,21 @@
 // Editor login flow: pure validators + sessionStorage plumbing.
 // Framework-free on purpose — covered by src/lib/editor-login.test.ts (vitest).
 
-export const SCHEME_ALLOWLIST = ['arcane', 'arcane-dev'] as const;
+/**
+ * Deep-link schemes the website will hand a grant code back to.
+ *
+ * ADDITIVE across the rename, deliberately. The website deploys on its own and
+ * takes effect for everyone the moment it does, while the app it talks to is
+ * whatever each user happens to have installed — so for the whole window where
+ * arcaneai.org still serves this build, an un-updated app is still sending
+ * `scheme=arcane`. Swapping rather than appending would break sign-in for every
+ * one of those users on deploy day, and the failure would look like the site's
+ * fault rather than a version skew.
+ *
+ * The two legacy entries can go once the old domain stops resolving and no
+ * pre-rename install can reach this page at all.
+ */
+export const SCHEME_ALLOWLIST = ['unityide', 'unityide-dev', 'arcane', 'arcane-dev'] as const;
 export type EditorScheme = (typeof SCHEME_ALLOWLIST)[number];
 
 /** Where the website sends the browser once it holds the grant code.

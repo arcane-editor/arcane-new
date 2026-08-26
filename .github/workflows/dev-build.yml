@@ -27,12 +27,12 @@ jobs:
           - os: macos-14          # Apple Silicon
             triple: aarch64-apple-darwin
             bundles: dmg
-            asset: Arcane-Dev-arm64.dmg
+            asset: UnityIDE-Dev-arm64.dmg
             glob: editor/src-tauri/target/release/bundle/dmg/*.dmg
           - os: windows-latest    # Windows x64
             triple: x86_64-pc-windows-msvc
             bundles: nsis
-            asset: ArcaneDevSetup.exe
+            asset: UnityIDEDevSetup.exe
             glob: editor/src-tauri/target/release/bundle/nsis/*-setup.exe
     runs-on: ${{ matrix.os }}
     defaults:

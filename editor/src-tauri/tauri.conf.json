@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Arcane",
+  "productName": "UnityIDE",
   "version": "../package.json",
-  "identifier": "com.inno.editor",
+  "identifier": "app.unityide.desktop",
   "build": {
     "beforeDevCommand": "bun run sync:bridge && bun run dev",
     "devUrl": "http://localhost:1420",
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "welcome",
-        "title": "Arcane",
+        "title": "UnityIDE",
         "url": "index.html?view=welcome",
         "width": 720,
         "height": 480,
@@ -32,7 +32,7 @@
   "plugins": {
     "deep-link": {
       "desktop": {
-        "schemes": ["arcane"]
+        "schemes": ["unityide"]
       }
     },
     "updater": {

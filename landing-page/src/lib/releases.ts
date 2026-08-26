@@ -21,12 +21,12 @@ export function downloadUrls(apiUrl: string): DownloadUrls {
     // never advertise dev installers to the public.
     return isDevChannel(apiUrl)
         ? {
-            macArm: `${RELEASES_ORIGIN}/dev/latest/Arcane-Dev-arm64.dmg`,
-            windows: `${RELEASES_ORIGIN}/dev/latest/ArcaneDevSetup.exe`,
+            macArm: `${RELEASES_ORIGIN}/dev/latest/UnityIDE-Dev-arm64.dmg`,
+            windows: `${RELEASES_ORIGIN}/dev/latest/UnityIDEDevSetup.exe`,
         }
         : {
-            macArm: `${RELEASES_ORIGIN}/latest/Arcane-arm64.dmg`,
-            windows: `${RELEASES_ORIGIN}/latest/ArcaneSetup.exe`,
+            macArm: `${RELEASES_ORIGIN}/latest/UnityIDE-arm64.dmg`,
+            windows: `${RELEASES_ORIGIN}/latest/UnityIDESetup.exe`,
         };
 }
 

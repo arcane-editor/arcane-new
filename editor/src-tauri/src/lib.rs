@@ -490,7 +490,7 @@ async fn read_capped<R: tokio::io::AsyncRead + Unpin>(mut reader: R, cap: usize)
     (out, truncated)
 }
 
-const CAPTURE_TRUNCATED_NOTE: &str = "\n[output truncated by Arcane: exceeded 2 MiB]";
+const CAPTURE_TRUNCATED_NOTE: &str = "\n[output truncated by UnityIDE: exceeded 2 MiB]";
 
 #[tauri::command]
 async fn execute_command(
@@ -731,13 +731,13 @@ async fn debug_panic_async() {
 /// so a plain app re-launch opens a window in the running process instead of
 /// spawning a second process. (`tauri::Manager` is imported at module level.)
 /// Window title for this build, taken from the configured `productName` so the
-/// dev overlay shows "Arcane Dev" wherever a title is surfaced — the Window
+/// dev overlay shows "UnityIDE Dev" wherever a title is surfaced — the Window
 /// menu and Mission Control on macOS (where `hiddenTitle` keeps it out of the
 /// title bar itself), and the title bar proper on Windows and Linux.
 pub(crate) fn window_title(product_name: Option<&str>) -> String {
     product_name
         .filter(|s| !s.is_empty())
-        .unwrap_or("Arcane")
+        .unwrap_or("UnityIDE")
         .to_string()
 }
 
@@ -790,7 +790,7 @@ pub fn run() {
     // mean N processes; now one process — a plain re-launch (no deep-link
     // URL in argv) opens/focuses the welcome window instead, preserving the
     // visible "launch again = another window" UX (VS Code/Cursor pattern).
-    // The `deep-link` cargo feature forwards any `arcane://`/`arcane-dev://`
+    // The `deep-link` cargo feature forwards any `unityide://`/`unityide-dev://`
     // URL in the second instance's argv to the deep-link plugin — this is
     // how Windows/Linux deliver deep links to a running app.
     #[cfg(desktop)]
@@ -801,7 +801,7 @@ pub fn run() {
             return;
         }
         // Unity launches the external script editor as
-        // `Arcane.exe --goto <file>:<line>:<col> <project>`. argv was never
+        // `UnityIDE.exe --goto <file>:<line>:<col> <project>`. argv was never
         // read, so double-clicking a script in Unity's Project window showed
         // the Welcome window instead of the file.
         if let Some(target) = cli::parse_goto(argv.as_slice()) {
@@ -1154,14 +1154,14 @@ mod window_title_tests {
 
     #[test]
     fn uses_the_configured_product_name() {
-        assert_eq!(window_title(Some("Arcane Dev")), "Arcane Dev");
-        assert_eq!(window_title(Some("Arcane")), "Arcane");
+        assert_eq!(window_title(Some("UnityIDE Dev")), "UnityIDE Dev");
+        assert_eq!(window_title(Some("UnityIDE")), "UnityIDE");
     }
 
     #[test]
     fn falls_back_when_product_name_is_missing_or_blank() {
-        assert_eq!(window_title(None), "Arcane");
-        assert_eq!(window_title(Some("")), "Arcane");
+        assert_eq!(window_title(None), "UnityIDE");
+        assert_eq!(window_title(Some("")), "UnityIDE");
     }
 }
 
@@ -1453,6 +1453,6 @@ mod execute_command_tests {
             out.stdout.len(),
             MAX_CAPTURE_BYTES
         );
-        assert!(out.stdout.contains("output truncated by Arcane"));
+        assert!(out.stdout.contains("output truncated by UnityIDE"));
     }
 }

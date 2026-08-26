@@ -11,7 +11,7 @@
 #   [dir]       directory holding the installers (default: ./dist-release).
 #
 # Expected filenames in <dir> (whichever exist get uploaded):
-#   Arcane-arm64.dmg   Arcane-x64.dmg   ArcaneSetup.exe
+#   UnityIDE-arm64.dmg   UnityIDE-x64.dmg   UnityIDESetup.exe
 #
 # Each file is uploaded to BOTH:
 #   arcane-releases/<version>/<file>   (archived, immutable)
@@ -29,7 +29,7 @@ set -euo pipefail
 VERSION="${1:?usage: scripts/upload-release.sh <version> [dir]}"
 DIR="${2:-dist-release}"
 BUCKET="arcane-releases"
-ASSETS=(Arcane-arm64.dmg Arcane-x64.dmg ArcaneSetup.exe)
+ASSETS=(UnityIDE-arm64.dmg UnityIDE-x64.dmg UnityIDESetup.exe)
 
 uploaded=0
 for asset in "${ASSETS[@]}"; do
