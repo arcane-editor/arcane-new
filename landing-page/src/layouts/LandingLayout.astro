@@ -7,9 +7,49 @@ interface Props {
   // Mixpanel's autocapture + session recording would otherwise exfiltrate
   // them to a third party before React ever gets a chance to scrub the URL.
   analytics?: boolean;
+  /** Page title. Falls back to the site default. */
+  title?: string;
+  /** Meta description + og:description. Falls back to the site default. */
+  description?: string;
+  /** Keep this page out of the index (auth flows, account, admin). */
+  noindex?: boolean;
 }
 
-const { analytics = true } = Astro.props;
+const SITE_NAME = 'UnityIDE';
+const DEFAULT_TITLE = 'UnityIDE — The AI-Powered IDE for Unity Developers';
+const DEFAULT_DESCRIPTION =
+  'UnityIDE is the IDE built for Unity. AI that reads your scenes, prefabs and C#, live Editor integration, and GUID-safe refactors. Free during beta on macOS and Windows.';
+
+const {
+  analytics = true,
+  title = DEFAULT_TITLE,
+  description = DEFAULT_DESCRIPTION,
+  noindex = false,
+} = Astro.props;
+
+// Astro.site comes from `site` in astro.config.mjs. Guarded so a
+// misconfiguration degrades to omitting canonical/og:url rather than emitting
+// a relative or "undefined/..." URL, which is worse than emitting neither.
+const canonical = Astro.site ? new URL(Astro.url.pathname, Astro.site).href : undefined;
+const ogImage = Astro.site ? new URL('/og-image.png', Astro.site).href : undefined;
+
+/**
+ * SoftwareApplication is the schema Google uses for downloadable dev tools, and
+ * it is the highest-leverage structured data available to this site — there was
+ * none at all before. `offers` at price 0 is what marks it free during beta;
+ * omitting it entirely reads as "price unknown" rather than "free".
+ */
+const structuredData = {
+  '@context': 'https://schema.org',
+  '@type': 'SoftwareApplication',
+  name: SITE_NAME,
+  applicationCategory: 'DeveloperApplication',
+  applicationSubCategory: 'Integrated Development Environment',
+  operatingSystem: 'macOS, Windows',
+  url: Astro.site?.href,
+  description: DEFAULT_DESCRIPTION,
+  offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
+};
 ---
 
 <!doctype html>
@@ -17,9 +57,40 @@ const { analytics = true } = Astro.props;
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>UnityIDE — AI-Powered Unity Code Editor</title>
-    <meta name="description" content="The intelligent code editor built exclusively for Unity developers. Smart autocompletion, AI-assisted debugging, and deep engine integration." />
+    {/* Fonts as a <link>, not a CSS @import. An @import inside global.css is
+        render-blocking AND serialized behind that stylesheet — the browser
+        cannot even discover the font request until the CSS has parsed. Moving
+        it here lets the preconnects open both connections during HTML parse. */}
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700;800&display=swap"
+    />
+
+    <title>{title}</title>
+    <meta name="description" content={description} />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    {canonical && <link rel="canonical" href={canonical} />}
+    {noindex && <meta name="robots" content="noindex, nofollow" />}
+
+    {/* Open Graph — the site emitted none of this before, so every shared link
+        rendered as a bare URL with no title, description or image. */}
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content={SITE_NAME} />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    {canonical && <meta property="og:url" content={canonical} />}
+    {ogImage && <meta property="og:image" content={ogImage} />}
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    {ogImage && <meta name="twitter:image" content={ogImage} />}
+
+    <script type="application/ld+json" set:html={JSON.stringify(structuredData)} />
 
     {/* Mixpanel Analytics (marketing pages only — see `analytics` prop) */}
     {analytics && (

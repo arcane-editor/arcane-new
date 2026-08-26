@@ -5,7 +5,7 @@ import Footer from '../components/Footer.astro';
 import AccountTabs from '../components/auth/AccountTabs.tsx';
 ---
 
-<LandingLayout analytics={false}>
+<LandingLayout analytics={false} noindex>
   <Navbar client:load />
   <AccountTabs client:load />
   <Footer />

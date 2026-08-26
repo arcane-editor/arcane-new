@@ -5,7 +5,10 @@ import Footer from '../components/Footer.astro';
 import PricingTable from '../components/billing/PricingTable.tsx';
 ---
 
-<LandingLayout>
+<LandingLayout
+  title="Pricing — UnityIDE"
+  description="Simple usage-based pricing for UnityIDE, the AI-powered IDE for Unity. Free during beta, with paid tiers for heavier AI use."
+>
   <Navbar client:load />
   <PricingTable client:load />
   <Footer />
