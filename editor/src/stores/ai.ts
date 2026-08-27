@@ -31,6 +31,7 @@ import {
   type TurnError,
   type VerifiedCardData,
   coerceEffort,
+  findPendingQuestion,
   normalizePlanRestore,
   resetWriteApprovalSession,
   resolvePendingQuestion,
@@ -1129,24 +1130,14 @@ export const useAiStore = create<AiState>((set, get) => ({
 
 /**
  * Selector (Zustand-hook style, e.g. `useAiStore(selectPendingQuestion)`):
- * the newest unresolved `questionRequest` — no `resolvedAnswer`, not
- * `cancelled` — while the agent is actually running. `null` once the turn
- * ends (aborted/finished) or once the question is answered/cancelled, so
- * `ChatInput`'s answer-mode routing never targets a question nobody can
- * still resolve into a live gate promise.
+ * the newest `questionRequest` the user can still answer — unresolved, not
+ * cancelled, and still awaited by a live `question-gate.ts` promise. `null`
+ * otherwise, so `ChatInput`'s answer-mode routing never targets a question
+ * nobody can still resolve.
+ *
+ * The rule itself lives in `findPendingQuestion` (see that module's header for
+ * why it no longer keys off `isAgentRunning`, and what broke while it did).
  */
 export function selectPendingQuestion(state: AiState): QuestionRequestData | null {
-  if (!state.isAgentRunning) return null;
-  for (let i = state.messages.length - 1; i >= 0; i--) {
-    const m = state.messages[i];
-    if (
-      m.role === 'questionRequest' &&
-      m.questionRequest &&
-      m.questionRequest.resolvedAnswer === undefined &&
-      !m.questionRequest.cancelled
-    ) {
-      return m.questionRequest;
-    }
-  }
-  return null;
+  return findPendingQuestion(state.messages);
 }

@@ -5620,11 +5620,77 @@ html, body, #root {
   cursor: not-allowed;
 }
 
-.ai-question-block-hint {
+/* The card's own answer row: free text, always available while the question is
+   open. Recessed against the card's accent tint so it reads as somewhere to
+   type rather than as one more option, and echoes the composer's focus ring so
+   the two answer surfaces feel like the same control in two places. */
+.ai-question-block-answer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   margin-top: 8px;
-  font-size: 11px;
-  font-style: italic;
+  padding: 3px 3px 3px 10px;
+  background: var(--bg-input);
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  border-radius: 8px;
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.ai-question-block-answer:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.ai-question-block-answer-input {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  background: none;
+  border: none;
+  outline: none;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 22px;
+}
+
+.ai-question-block-answer-input::placeholder {
   color: var(--text-secondary);
+}
+
+/* Same circular accent affordance as the composer's send, one size down so it
+   sits inside the card without competing with it. */
+.ai-question-block-answer-send {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background: var(--accent);
+  border: none;
+  border-radius: 50%;
+  color: var(--button-primary-text);
+  cursor: pointer;
+  transition:
+    background 160ms ease,
+    opacity 160ms ease,
+    transform 160ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+.ai-question-block-answer-send:not(:disabled):hover {
+  background: var(--button-primary-hover);
+}
+
+.ai-question-block-answer-send:not(:disabled):active {
+  transform: scale(0.92);
+}
+
+.ai-question-block-answer-send:disabled {
+  opacity: 0.35;
+  cursor: default;
 }
 
 .ai-question-block-footer {
