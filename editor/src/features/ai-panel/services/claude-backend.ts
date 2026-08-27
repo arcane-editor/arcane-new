@@ -115,7 +115,7 @@ const AGENT_ID = 'claude';
  * synchronous. It drifted two minors behind before anyone noticed, so
  * `check:version` now asserts this equals package.json — keep them together.
  */
-const APP_VERSION = '0.3.2';
+const APP_VERSION = '0.3.3';
 
 // `ClaudeSetupRequiredError` is declared in `claude-connect.ts` alongside the
 // state it maps to, and re-exported here because this is where callers expect
