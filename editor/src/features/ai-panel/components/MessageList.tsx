@@ -18,6 +18,13 @@
  *    a `ResizeObserver` on the inner content wrapper, since content can now
  *    grow without a MessageList render at all (e.g. a `ToolCallBlock`
  *    expanding when its diffs arrive).
+ *
+ * This list also owns WHERE the "agent is working" dots go. They belong at the
+ * tail of the transcript: a streaming assistant bubble carries them inline
+ * while it is the last block (`isLast`, threaded through `MessageRow`), and
+ * every other running state gets the standalone `.ai-panel-working` row after
+ * the last message. `services/working-indicator.ts` holds the rule and the
+ * reason it is not simply `isStreaming`.
  */
 
 import { useRef, useEffect, useCallback, useState, memo } from 'react';
@@ -32,6 +39,8 @@ import VerifiedCard from './VerifiedCard';
 import CheckpointRow from './CheckpointRow';
 import ErrorBlock from './ErrorBlock';
 import EmptyState from './EmptyState';
+import StreamingIndicator from './StreamingIndicator';
+import { showsTailIndicator } from '../services/working-indicator';
 
 // Matches UnityConsolePanel's "close enough to the bottom" threshold shape
 // (that one uses 30px); a slightly wider 40px band here since chat bubbles
@@ -49,6 +58,8 @@ interface MessageRowProps {
    * (computed by the parent; see `MessageList`'s `lastAssistantIdx`).
    */
   withPlanActions: boolean;
+  /** Passed through to `AssistantMessage` to gate its streaming dots. */
+  isLast: boolean;
 }
 
 /**
@@ -64,6 +75,7 @@ const MessageRow = memo(function MessageRow({
   message,
   turnUserMessageId,
   withPlanActions,
+  isLast,
 }: MessageRowProps) {
   let node: React.ReactNode;
 
@@ -77,7 +89,13 @@ const MessageRow = memo(function MessageRow({
       );
       break;
     case 'assistant':
-      node = <AssistantMessage message={message} turnUserMessageId={turnUserMessageId} />;
+      node = (
+        <AssistantMessage
+          message={message}
+          turnUserMessageId={turnUserMessageId}
+          isLast={isLast}
+        />
+      );
       break;
     case 'permissionRequest':
       node = <PermissionRequestBlock message={message} />;
@@ -114,6 +132,7 @@ function MessageList() {
   const messages = useAiStore((s) => s.messages);
   const planPhase = useAiStore((s) => s.planPhase);
   const selectedAgent = useAiStore((s) => s.selectedAgent);
+  const isAgentRunning = useAiStore((s) => s.isAgentRunning);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -153,7 +172,7 @@ function MessageList() {
   // the bottom if the user was already there.
   useEffect(() => {
     scheduleStick();
-  }, [messages, planPhase, scheduleStick]);
+  }, [messages, planPhase, isAgentRunning, scheduleStick]);
 
   // Content can grow WITHOUT a MessageList render at all — e.g. a
   // ToolCallBlock expanding when its diffs arrive, or a CheckpointRow's
@@ -206,6 +225,13 @@ function MessageList() {
   // function's header for why toolCallId isn't available instead).
   let currentUserMessageId: string | null = null;
 
+  // The "agent is working" dots live at the TAIL of the transcript. A
+  // streaming assistant bubble carries them inline while it is last; every
+  // other running state gets the standalone row below. See
+  // `services/working-indicator.ts` for why this is not just `isStreaming`.
+  const lastMessage = messages.length > 0 ? messages[messages.length - 1] : null;
+  const showWorking = showsTailIndicator({ isAgentRunning, last: lastMessage });
+
   return (
     <div className="ai-panel-messages-wrap">
       <div
@@ -228,9 +254,15 @@ function MessageList() {
                 message={msg}
                 turnUserMessageId={currentUserMessageId}
                 withPlanActions={idx === lastAssistantIdx && showPlanActions}
+                isLast={idx === messages.length - 1}
               />
             );
           })}
+          {showWorking && (
+            <div className="ai-panel-working">
+              <StreamingIndicator />
+            </div>
+          )}
         </div>
       </div>
 
