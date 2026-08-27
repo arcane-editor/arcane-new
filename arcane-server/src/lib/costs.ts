@@ -89,6 +89,23 @@ export const MODEL_CATALOG: Record<string, ModelInfo> = {
             inputCostPer1M: 0.40, outputCostPer1M: 1.80, cachedInputCostPer1M: 0.04,
         },
     },
+    // Standard/Deep-Think/Max EXECUTOR, and the low tier's planner (2026-08-27).
+    // Replaced spark/muse-spark-1.2-contributor in DEFAULT_MODEL_ROUTING — see
+    // config/plans.ts. Rates from the model page, verified 2026-08-27.
+    //
+    // Context window: the model page publishes 1,048,576 while the live
+    // /accounts/*/models catalog reports 1,310,720. Seeded at the SMALLER of
+    // the two on purpose — this number is a send budget (routes/config.ts
+    // feeds it to the editor's compaction), so over-stating it builds requests
+    // the provider rejects, while under-stating it only compacts sooner.
+    //
+    // maxOutput is published nowhere for this model; 32_000 matches glm-5.2,
+    // the closest sibling in the family, and is the conservative assumption.
+    '@cf/zai-org/glm-5.3-flash': {
+        route: 'workers-ai',
+        inputCostPer1M: 0.15, outputCostPer1M: 0.50, cachedInputCostPer1M: 0.03,
+        contextWindow: 1_048_576, maxOutput: 32_000,
+    },
     // Deep Think — extended reasoning. Terminal-Bench 2.1 leader (81.0%).
     // Flat pricing: the only tier with no long-context cliff, which makes it
     // the correct choice for genuinely large-context work.
@@ -138,6 +155,10 @@ export const MODEL_CATALOG: Record<string, ModelInfo> = {
         contextWindow: 400_000, maxOutput: 128_000,
     },
     // Direct OpenAI-compatible provider (owner's Spark key; no CF gateway).
+    // NO LONGER ROUTED TO as of 2026-08-27 — glm-5.3-flash took every slot it
+    // held (config/plans.ts). Kept for two reasons that both still bite if it
+    // is deleted: usage rows are keyed by model id, so historical debits stop
+    // costing out, and it is the one-line rollback if glm-5.3-flash regresses.
     // Output rate confirmed by owner; input/cached SEEDED = output rate as a
     // conservative over-charge until the owner enters real prices via the
     // admin Pricing panel. Context window conservative for the same reason.

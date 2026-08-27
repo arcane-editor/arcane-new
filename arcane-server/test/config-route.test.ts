@@ -3,6 +3,7 @@ import { env, SELF } from 'cloudflare:test';
 import { seedPasswordUser, tokenFor } from './helpers.ts';
 import { putConfigDoc, clearConfigCache } from '../src/lib/app-config.ts';
 import { MODEL_CATALOG } from '../src/lib/costs.ts';
+import { EXECUTOR_MODEL } from '../src/config/plans.ts';
 import type { ModelPricingDoc } from '../src/lib/app-config.ts';
 import type { UserRow } from '../src/lib/db.ts';
 
@@ -91,7 +92,7 @@ describe('GET /v1/config', () => {
         expect(tierById(body, 'high').allowed).toBe(false);
     });
 
-    it('hasPreplanning follows DEFAULT_MODEL_ROUTING: low false (spark/spark), mid+high true', async () => {
+    it('hasPreplanning follows DEFAULT_MODEL_ROUTING: low false (same model both roles), mid+high true', async () => {
         const user = await seedPasswordUser('config-preplan@test.dev', 'password123');
         const token = await tokenFor(user);
         const res = await getConfig(token);
@@ -102,42 +103,48 @@ describe('GET /v1/config', () => {
         expect(tierById(body, 'high').hasPreplanning).toBe(true);
     });
 
-    it('contextWindow: high tier = min(sol 400_000, spark 131_072, grok 500_000) = 131_072 with seed catalog', async () => {
+    // Until 2026-08-27 the executor (spark, 131_072) was the smallest window on
+    // every tier, so all three came back identical. glm-5.3-flash's 1,048,576
+    // lifted that floor, and each tier now reports its own planner's window.
+    it('contextWindow: high tier = min(sol 400_000, glm 1_048_576, grok 500_000) = 400_000 with seed catalog', async () => {
         const user = await seedPasswordUser('config-ctxwin@test.dev', 'password123');
         const token = await tokenFor(user);
         const res = await getConfig(token);
         const body = await res.json<ConfigResponse>();
 
-        expect(tierById(body, 'high').contextWindow).toBe(131_072);
+        expect(tierById(body, 'high').contextWindow).toBe(400_000);
+        expect(tierById(body, 'low').contextWindow).toBe(1_048_576);
+        expect(tierById(body, 'mid').contextWindow).toBe(500_000);
     });
 
-    it('contextWindow: a model_pricing override raising spark\'s window changes the derived high-tier value', async () => {
+    it('contextWindow: a model_pricing override lowering the executor\'s window changes the derived high-tier value', async () => {
         clearConfigCache();
         const user = await seedPasswordUser('config-ctxwin-override@test.dev', 'password123');
         const token = await tokenFor(user);
 
-        const sparkOverride: ModelPricingDoc = {
+        const executorOverride: ModelPricingDoc = {
             models: {
-                'spark/muse-spark-1.2-contributor': {
-                    ...MODEL_CATALOG['spark/muse-spark-1.2-contributor']!,
-                    contextWindow: 999_999,
+                [EXECUTOR_MODEL]: {
+                    ...MODEL_CATALOG[EXECUTOR_MODEL]!,
+                    contextWindow: 100_000,
                 },
             },
             gatewayFee: 1.05,
             margin: 1.0,
         };
-        await putConfigDoc(env.arcane_db, 'model_pricing', sparkOverride);
+        await putConfigDoc(env.arcane_db, 'model_pricing', executorOverride);
         clearConfigCache();
 
         const res = await getConfig(token);
         const body = await res.json<ConfigResponse>();
-        // Now the smallest of (sol 400_000, spark 999_999, grok 500_000) is sol.
-        expect(tierById(body, 'high').contextWindow).toBe(400_000);
+        // Now the smallest of (sol 400_000, executor 100_000, grok 500_000) is
+        // the executor — the derived value follows the override, not the seed.
+        expect(tierById(body, 'high').contextWindow).toBe(100_000);
 
         clearConfigCache(); // leave a clean cache for any test file sharing this isolate
     });
 
-    it('pricingCliffTokens: high tier = 200_000 (grok\'s cliff) with seed data; low tier (spark/spark, no cliffs) = null', async () => {
+    it('pricingCliffTokens: high tier = 200_000 (grok\'s cliff) with seed data; low tier (flat-priced, no cliffs) = null', async () => {
         const user = await seedPasswordUser('config-cliff@test.dev', 'password123');
         const token = await tokenFor(user);
         const res = await getConfig(token);

@@ -106,8 +106,9 @@ graphRouter.post('/v1/graph/enrich', async (c) => {
     // Generative enrichment, like chat, is sampled (temperature 0.2) — skip the
     // gateway cache so a repeat call doesn't replay a stale sampled response.
     // resolveModel (not workersAiProvider directly) so a 'direct'-route model
-    // (spark/…) — the shipped default mid.executor — is servable here too,
-    // not just @cf/ Workers AI catalog ids.
+    // (spark/…) is servable here too, not just @cf/ Workers AI catalog ids.
+    // The shipped default mid.executor is a @cf/ id again as of 2026-08-27,
+    // but an admin can still route this tier at a direct-route model.
     const model = resolveModel(enrichModel, c.env, { skipCache: true });
 
     const system = [

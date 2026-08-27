@@ -54,21 +54,26 @@ describe('resolveModel: spark direct provider', () => {
         expect(model.provider.split('.')[0]).toBe('spark');
     });
 
-    // Regression guard for Finding 1 (2026-08-22 final-review fix wave):
-    // graph.ts's /v1/graph/enrich route serves `routing.tiers.mid.executor`
-    // — under the code-default routing table (empty app_config) that's
-    // SPARK_MODEL, a 'direct'-route id `workersAiProvider` alone cannot serve
-    // (it only knows the Workers AI binding's own catalog). The route must
-    // go through `resolveModel`, which routes a `spark/…` id to the direct
-    // OpenAI-compatible provider instead. This pins the exact id graph.ts's
-    // default mid.executor resolves to, so a future DEFAULT_MODEL_ROUTING
-    // edit that points mid.executor somewhere `resolveModel` can't serve
-    // fails here first, not in production.
-    it('DEFAULT_MODEL_ROUTING.tiers.mid.executor (graph enrich\'s default model) resolves through the spark direct provider', () => {
-        expect(DEFAULT_MODEL_ROUTING.tiers.mid.executor).toBe(SPARK_MODEL);
-        const model = resolveModel(DEFAULT_MODEL_ROUTING.tiers.mid.executor, SPARK_ENV);
-        expect(model.modelId).toBe('muse-spark-1.2-contributor');
-        expect(model.provider.split('.')[0]).toBe('spark');
+});
+
+// Regression guard for Finding 1 (2026-08-22 final-review fix wave):
+// graph.ts's /v1/graph/enrich route serves `routing.tiers.mid.executor`, and
+// used to hand it straight to `workersAiProvider` — which only knows the
+// Workers AI binding's own catalog, so the then-default SPARK_MODEL (a
+// 'direct'-route id) 500'd every call. The route goes through `resolveModel`
+// now, which serves both routes. What has to keep holding is that whatever
+// mid.executor points at, `resolveModel` can actually serve it — so this
+// asserts the resolution rather than any one model id, and a future
+// DEFAULT_MODEL_ROUTING edit that breaks it fails here, not in production.
+//
+// mid.executor went back to a `@cf/` id on 2026-08-27 (glm-5.3-flash), so the
+// live assertion is the Workers AI branch; the spark branch above still covers
+// the direct route, which is the documented rollback.
+describe('resolveModel: graph enrich\'s default model', () => {
+    it('serves DEFAULT_MODEL_ROUTING.tiers.mid.executor through the Workers AI binding', () => {
+        const id = DEFAULT_MODEL_ROUTING.tiers.mid.executor;
+        expect(id.startsWith('@cf/')).toBe(true);
+        expect(resolveModel(id, SPARK_ENV).modelId).toBe(id);
     });
 });
 

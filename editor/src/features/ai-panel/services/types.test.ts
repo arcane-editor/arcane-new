@@ -3,12 +3,20 @@ import { TIER_CONTEXT_WINDOWS, coerceAgentKind, coerceEffort, isExternalAgent } 
 
 describe('TIER_CONTEXT_WINDOWS', () => {
   // Offline fallback only — mirrors /v1/config's per-tier contextWindow
-  // (min across planner/executor/executorHard). All three sit at spark's
-  // conservative 131k seed window today.
+  // (min across planner/executor/executorHard). Each tier is bounded by its
+  // own PLANNER now: glm-5.3-flash's 1,048,576 replaced spark's conservative
+  // 131k executor seed on 2026-08-27, which had been the floor everywhere.
   it('encodes each tier usable window', () => {
-    expect(TIER_CONTEXT_WINDOWS.low).toBe(131_072);
-    expect(TIER_CONTEXT_WINDOWS.mid).toBe(131_072);
-    expect(TIER_CONTEXT_WINDOWS.high).toBe(131_072);
+    expect(TIER_CONTEXT_WINDOWS.low).toBe(1_048_576);
+    expect(TIER_CONTEXT_WINDOWS.mid).toBe(500_000);
+    expect(TIER_CONTEXT_WINDOWS.high).toBe(400_000);
+  });
+
+  // They were all identical while spark bottlenecked every tier; a future
+  // routing change that silently re-flattens them is worth failing on.
+  it('is bounded tightest at the top, where the planners are smallest', () => {
+    expect(TIER_CONTEXT_WINDOWS.low).toBeGreaterThan(TIER_CONTEXT_WINDOWS.mid);
+    expect(TIER_CONTEXT_WINDOWS.mid).toBeGreaterThan(TIER_CONTEXT_WINDOWS.high);
   });
 
   it('has no super tier', () => {
