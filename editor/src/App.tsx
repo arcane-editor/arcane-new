@@ -83,6 +83,7 @@ import { useRegisterCommands } from './hooks/useRegisterCommands';
 import { useAutoSave } from './hooks/useAutoSave';
 import { useCloseGuard } from './hooks/useCloseGuard';
 import { notify, useNotificationsStore } from './stores/notifications';
+import { runWorkspaceDiagnostics, resetWorkspaceDiagnostics } from './features/lsp';
 import { checkReleaseChannel } from './config/api';
 import { useCommandsStore } from './stores/commands';
 import { listenScoped } from './utils/tauri-listener';
@@ -227,7 +228,7 @@ function App() {
   const setDotnetMissingModalOpen = useUiStore((s) => s.setDotnetMissingModalOpen);
   const restoredRef = useRef(false);
   const [showThemePicker, setShowThemePicker] = useState(false);
-  const [paletteMode, setPaletteMode] = useState<'commands' | 'files' | null>(null);
+  const [paletteMode, setPaletteMode] = useState<'commands' | 'files' | 'symbols' | null>(null);
   const [branchPickerMode, setBranchPickerMode] = useState<'switch' | 'create' | null>(null);
   const [unityPicker, setUnityPicker] = useState<UnityPickerMode | null>(null);
   const [newScriptDir, setNewScriptDir] = useState<string | null>(null);
@@ -952,6 +953,33 @@ function App() {
       category: 'View',
       handler: () => {
         useWorkspaceStore.getState().restartLsp();
+        // Result ids belong to the process that issued them; a restarted
+        // server would answer 'unchanged' for files it has never analysed.
+        resetWorkspaceDiagnostics();
+      },
+      when: () => !!useWorkspaceStore.getState().workspacePath,
+    },
+    {
+      id: 'lsp.analyzeSolution',
+      label: 'Analyze Whole Solution',
+      category: 'View',
+      handler: async () => {
+        const res = await runWorkspaceDiagnostics().catch((err) => {
+          notify.error(`Solution analysis failed: ${String(err)}`);
+          return null;
+        });
+        if (!res) return;
+        if (!res.ran) {
+          notify.warning(`Solution analysis did not run — ${res.reason}`);
+          return;
+        }
+        const problems = res.errors + res.warnings;
+        notify.info(
+          problems === 0
+            ? `No problems found across ${res.filesReported} files.`
+            : `${res.errors} error(s), ${res.warnings} warning(s) in ${res.filesReported} files` +
+              (res.truncated ? ' (list truncated)' : ''),
+        );
       },
       when: () => !!useWorkspaceStore.getState().workspacePath,
     },
@@ -1008,6 +1036,17 @@ function App() {
       category: 'View',
       keybinding: 'mod+p',
       handler: () => setPaletteMode('files'),
+    },
+    {
+      // `mod+t` matches Rider's and VS Code's Go-to-Symbol-in-project. Verified
+      // free in both the command registry and src-tauri/src/menu.rs, which owns
+      // CmdOrCtrl+Shift+T but not CmdOrCtrl+T.
+      id: 'palette.gotoSymbolInProject',
+      label: 'Go to Symbol in Project...',
+      category: 'View',
+      keybinding: 'mod+t',
+      handler: () => setPaletteMode('symbols'),
+      when: () => !!useWorkspaceStore.getState().workspacePath,
     },
     {
       id: 'search.openTab',
@@ -1468,6 +1507,28 @@ function App() {
       category: 'Editor',
       keybinding: 'mod+g',
       handler: () => window.dispatchEvent(new CustomEvent('goto-line')),
+      when: () => !!useWorkspaceStore.getState().activeFilePath,
+    },
+    {
+      id: 'editor.gotoSymbol',
+      label: 'Go to Symbol in File...',
+      category: 'Editor',
+      keybinding: 'mod+shift+o',
+      handler: () => window.dispatchEvent(new CustomEvent('goto-symbol')),
+      when: () => !!useWorkspaceStore.getState().activeFilePath,
+    },
+    {
+      // NOT on mod+shift+r, which Monaco itself uses for this action: that
+      // chord is already `view.revealInExplorer`, and because app commands are
+      // bridged into Monaco via addCommand they shadow the built-in whenever
+      // the editor has focus. The refactorings are real (csharp-ls serves
+      // Extract Method, Introduce constant/parameter — see verify:intellisense)
+      // so they need a chord that is actually free.
+      id: 'editor.refactor',
+      label: 'Refactor This...',
+      category: 'Editor',
+      keybinding: 'mod+alt+r',
+      handler: () => window.dispatchEvent(new CustomEvent('refactor-this')),
       when: () => !!useWorkspaceStore.getState().activeFilePath,
     },
     {

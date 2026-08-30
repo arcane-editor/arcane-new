@@ -20,9 +20,12 @@ import {
 } from './services/analyzer-engine';
 import { registerAllRules } from './services/register-rules';
 import { registerFsaRename, unregisterFsaRename } from './services/fsa-rename';
+import { loadProjectSettings } from './services/project-settings-cache';
+import { useWorkspaceStore } from '../../stores/workspace';
 
 let initialized = false;
 let stopEngineFn: (() => void) | null = null;
+let unsubWorkspace: (() => void) | null = null;
 
 /**
  * Initialise the Unity analyzers: register all rules, start the debounced
@@ -35,6 +38,18 @@ export function initUnityAnalyzers(monaco: Monaco): void {
   registerAllRules();
   stopEngineFn = startEngine(monaco);
   registerFsaRename();
+
+  // The ProjectSettings snapshot backs the tag/layer/scene/input checks. It is
+  // loaded per workspace and re-run afterwards, because the rules read it
+  // synchronously and would otherwise stay silent for the first analysis pass
+  // of every session.
+  const syncSettings = (path: string | null) => {
+    void loadProjectSettings(path).then(() => refreshAll(monaco));
+  };
+  syncSettings(useWorkspaceStore.getState().workspacePath);
+  unsubWorkspace = useWorkspaceStore.subscribe((state, prev) => {
+    if (state.workspacePath !== prev.workspacePath) syncSettings(state.workspacePath);
+  });
 }
 
 /** Tear down all analyzer wiring (engine, code actions, rename hook). */
@@ -46,6 +61,8 @@ export function stopUnityAnalyzers(): void {
     stopEngine();
   }
   unregisterFsaRename();
+  unsubWorkspace?.();
+  unsubWorkspace = null;
   initialized = false;
 }
 

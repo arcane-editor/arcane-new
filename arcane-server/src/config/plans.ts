@@ -60,6 +60,17 @@ export const SPARK_MODEL = 'spark/muse-spark-1.2-contributor';
  *  direct route opted out of. See costs.ts's MODEL_CATALOG entry. */
 export const EXECUTOR_MODEL = '@cf/zai-org/glm-5.3-flash';
 
+/** Deep-Think planner, and the Max tier's hard-task executor.
+ *  Took over both slots from `xai/grok-4.6` on 2026-08-30: cheaper on every
+ *  axis ($1.40/$4.40 vs $2.00/$6.00), a real cached-input rate ($0.26, where
+ *  grok published none and cache hits were billed at the full input rate),
+ *  2x the context (1,048,576 vs 500,000), and no long-context cliff — grok
+ *  doubled the price of the ENTIRE request above 200k input, at exactly the
+ *  sizes Deep Think exists for. It also moves both slots onto Workers AI,
+ *  leaving `openai/gpt-5.6-sol` as the only third-party model still routed.
+ *  See costs.ts's MODEL_CATALOG entry. */
+export const PLANNER_MODEL = '@cf/zai-org/glm-5.3';
+
 /** Code-default model routing — served whenever the app_config table has no
  *  valid 'model_routing' doc. The admin panel overrides at runtime.
  *
@@ -70,8 +81,8 @@ export const EXECUTOR_MODEL = '@cf/zai-org/glm-5.3-flash';
 export const DEFAULT_MODEL_ROUTING: ModelRoutingDoc = {
     tiers: {
         low:  { planner: EXECUTOR_MODEL, executor: EXECUTOR_MODEL },
-        mid:  { planner: 'xai/grok-4.6', executor: EXECUTOR_MODEL },
-        high: { planner: 'openai/gpt-5.6-sol', executor: EXECUTOR_MODEL, executorHard: 'xai/grok-4.6' },
+        mid:  { planner: PLANNER_MODEL, executor: EXECUTOR_MODEL },
+        high: { planner: 'openai/gpt-5.6-sol', executor: EXECUTOR_MODEL, executorHard: PLANNER_MODEL },
     },
     inline: '@cf/qwen/qwen3-30b-a3b-fp8',
 };

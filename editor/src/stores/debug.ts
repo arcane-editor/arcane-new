@@ -1,4 +1,8 @@
 import { create } from 'zustand';
+import { applySetVariable, type VariableNode } from './debug-variables';
+// Re-exported so existing importers of `stores/debug` keep working.
+export { applySetVariable };
+export type { VariableNode };
 import { invoke } from '@tauri-apps/api/core';
 import { dapClient } from '../features/debugger';
 import { useWorkspaceStore } from './workspace';
@@ -23,19 +27,27 @@ export interface StackFrame {
   column: number;
 }
 
-export interface VariableNode {
-  name: string;
-  value: string;
-  type?: string;
-  variablesReference: number; // >0 means expandable
-}
 
 export interface Scope {
   name: string;
   variablesReference: number;
 }
 
+/**
+ * The adapter's `initialize` response body. It was discarded, so nothing could
+ * feature-detect: `supportsSetVariable`, `exceptionBreakpointFilters` and
+ * `supportsLogPoints` all live here and every optional debugger feature has to
+ * gate on them or risk sending a request the adapter rejects mid-session.
+ */
+export interface DapCapabilities {
+  supportsSetVariable?: boolean;
+  supportsSetExpression?: boolean;
+  supportsLogPoints?: boolean;
+  exceptionBreakpointFilters?: Array<{ filter: string; label: string; default?: boolean }>;
+}
+
 interface DebugState {
+  capabilities: DapCapabilities;
   status: DebugStatus;
   monoAvailable: boolean | null;
   /** Why the debugger isn't available (for a precise, layered message). */
@@ -66,6 +78,8 @@ interface DebugState {
   stop: () => Promise<void>;
   selectFrame: (frameId: number) => Promise<void>;
   loadChildren: (variablesReference: number) => Promise<void>;
+  /** Write a new value into a variable and refresh the rows that showed it. */
+  setVariable: (containerRef: number, name: string, value: string) => Promise<void>;
   addWatch: (expr: string) => void;
   removeWatch: (expr: string) => void;
 }
@@ -95,6 +109,7 @@ function persistBreakpoints(workspace: string, bps: Map<string, Breakpoint[]>): 
 let handlersBound = false;
 
 export const useDebugStore = create<DebugState>((set, get) => ({
+  capabilities: {},
   status: 'inactive',
   monoAvailable: null,
   unavailableReason: null,
@@ -194,7 +209,10 @@ export const useDebugStore = create<DebugState>((set, get) => ({
 
       bindDapHandlers(set, get);
       await dapClient.start();
-      await dapClient.request('initialize', {
+      // The response body is the adapter's capability set. It used to be
+      // dropped on the floor, so nothing could tell whether setVariable,
+      // logpoints or exception filters were available.
+      const caps = await dapClient.request<DapCapabilities | undefined>('initialize', {
         clientID: 'hosted',
         adapterID: 'mono',
         linesStartAt1: true,
@@ -202,6 +220,7 @@ export const useDebugStore = create<DebugState>((set, get) => ({
         pathFormat: 'path',
         supportsVariableType: true,
       });
+      set({ capabilities: caps ?? {} });
       // attach kicks the session; the 'initialized' event handler then sends
       // breakpoints + configurationDone.
       await dapClient.request('attach', { address: host, port });
@@ -268,6 +287,25 @@ export const useDebugStore = create<DebugState>((set, get) => ({
       set({ variables: map });
     } catch {
       /* ignore */
+    }
+  },
+
+  setVariable: async (containerRef, name, value) => {
+    if (containerRef <= 0) return;
+    try {
+      const res = await dapClient.request<{
+        value: string;
+        type?: string;
+        variablesReference?: number;
+      }>('setVariable', { variablesReference: containerRef, name, value });
+
+      set({ variables: applySetVariable(get().variables, containerRef, name, res) });
+
+      // A watch expression may read the field just changed, so re-evaluate.
+      const fid = get().currentFrameId;
+      if (fid != null) void refreshWatches(fid, set, get);
+    } catch (err) {
+      notify.error(`Could not set ${name}: ${String(err)}`);
     }
   },
 

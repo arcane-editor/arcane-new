@@ -68,6 +68,10 @@ function UnityConsolePanel() {
   const [showError, setShowError] = useState(true);
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
   const [autoScroll, setAutoScroll] = useState(true);
+  // Play/edit mode filter. `UnityLogEntry.mode` has always carried this; the
+  // panel just never used it. Chasing a runtime bug means ignoring the
+  // hundreds of import and compile messages Unity logs in edit mode.
+  const [modeFilter, setModeFilter] = useState<'all' | 'PlayMode' | 'EditMode'>('all');
 
   const scrollRef = useRef<HTMLDivElement>(null);
   // The auto-scroll effect runs before `virtualizer`/`collapsed` are in scope
@@ -105,11 +109,12 @@ function UnityConsolePanel() {
       if (!showLog && entry.logType === 'Log') return false;
       if (!showWarning && entry.logType === 'Warning') return false;
       if (!showError && (entry.logType === 'Error' || entry.logType === 'Assert' || entry.logType === 'Exception')) return false;
+      if (modeFilter !== 'all' && entry.mode !== modeFilter) return false;
       if (needle && !entry.message.toLowerCase().includes(needle)) return false;
       return true;
     });
     return collapseEntries(filteredLogs);
-  }, [logs, showLog, showWarning, showError, needle]);
+  }, [logs, showLog, showWarning, showError, needle, modeFilter]);
 
   // Virtualized: Unity emits thousands of lines in a play session and the
   // store caps at 10,000. Rendering every row built ~10k DOM subtrees, each
@@ -238,6 +243,28 @@ function UnityConsolePanel() {
           }}
         >
           Error ({errCount})
+        </button>
+
+        {/* Play/edit mode. A three-state cycle rather than two toggles: the
+            useful states are "everything", "only this play session" and "only
+            edit-time", and two independent toggles allow a fourth state that
+            shows nothing at all. */}
+        <button
+          title="Filter by play mode"
+          onClick={() =>
+            setModeFilter((m) => (m === 'all' ? 'PlayMode' : m === 'PlayMode' ? 'EditMode' : 'all'))
+          }
+          style={{
+            background: modeFilter === 'all' ? 'transparent' : 'var(--hover)',
+            border: '1px solid var(--border)',
+            borderRadius: 3,
+            color: 'var(--text-secondary)',
+            fontSize: 11,
+            padding: '2px 6px',
+            cursor: 'pointer',
+          }}
+        >
+          {modeFilter === 'all' ? 'All modes' : modeFilter === 'PlayMode' ? 'Play only' : 'Edit only'}
         </button>
 
         {!autoScroll && (

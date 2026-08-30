@@ -17,6 +17,8 @@ import { destroyThisRule } from '../rules/destroy-this';
 import { deltaTimeInFixedUpdateRule } from '../rules/deltatime-in-fixedupdate';
 import { transformPositionPerAxisRule } from '../rules/transform-position-per-axis';
 import { editorApiInRuntimeRule } from '../rules/editor-api-in-runtime';
+// Part F — validated against the project's own ProjectSettings assets
+import { projectSettingsLiteralsRule } from '../rules/project-settings-literals';
 
 let registered = false;
 
@@ -43,4 +45,6 @@ export function registerAllRules(): void {
   registerRule(deltaTimeInFixedUpdateRule);
   registerRule(transformPositionPerAxisRule);
   registerRule(editorApiInRuntimeRule);
+
+  registerRule(projectSettingsLiteralsRule);
 }

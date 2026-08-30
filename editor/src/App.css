@@ -8011,3 +8011,23 @@ html, body, #root {
 .tab[data-drag-over] {
   box-shadow: inset 2px 0 0 var(--accent);
 }
+
+/* Inline variable editing (debugger). The affordance only appears when the
+   adapter advertises supportsSetVariable, so a read-only adapter shows no
+   hover cue for something that cannot work. */
+.dbg-var-value--editable:hover {
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+  cursor: text;
+}
+.dbg-var-edit {
+  flex: 1 1 auto;
+  min-width: 0;
+  font: inherit;
+  color: var(--text-primary);
+  background: var(--bg-input);
+  border: 1px solid var(--accent, var(--border));
+  border-radius: 3px;
+  padding: 0 4px;
+  outline: none;
+}

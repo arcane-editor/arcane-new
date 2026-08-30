@@ -3,19 +3,22 @@ import { TIER_CONTEXT_WINDOWS, coerceAgentKind, coerceEffort, isExternalAgent } 
 
 describe('TIER_CONTEXT_WINDOWS', () => {
   // Offline fallback only — mirrors /v1/config's per-tier contextWindow
-  // (min across planner/executor/executorHard). Each tier is bounded by its
-  // own PLANNER now: glm-5.3-flash's 1,048,576 replaced spark's conservative
-  // 131k executor seed on 2026-08-27, which had been the floor everywhere.
+  // (min across planner/executor/executorHard). glm-5.3-flash's 1,048,576
+  // replaced spark's conservative 131k executor seed on 2026-08-27, and
+  // glm-5.3 replaced grok's 500,000 mid planner on 2026-08-30 — leaving
+  // gpt-5.6-sol on the high tier as the only model still binding a window.
   it('encodes each tier usable window', () => {
     expect(TIER_CONTEXT_WINDOWS.low).toBe(1_048_576);
-    expect(TIER_CONTEXT_WINDOWS.mid).toBe(500_000);
+    expect(TIER_CONTEXT_WINDOWS.mid).toBe(1_048_576);
     expect(TIER_CONTEXT_WINDOWS.high).toBe(400_000);
   });
 
-  // They were all identical while spark bottlenecked every tier; a future
-  // routing change that silently re-flattens them is worth failing on.
-  it('is bounded tightest at the top, where the planners are smallest', () => {
-    expect(TIER_CONTEXT_WINDOWS.low).toBeGreaterThan(TIER_CONTEXT_WINDOWS.mid);
+  // Low and mid share the whole GLM-5.3 family window; only the high tier's
+  // gpt-5.6-sol planner narrows it. A routing change that silently drops a
+  // tier's usable context is worth failing on — under-compacting builds
+  // requests the provider rejects outright.
+  it('is bounded tightest at the top, where the planner is smallest', () => {
+    expect(TIER_CONTEXT_WINDOWS.low).toBe(TIER_CONTEXT_WINDOWS.mid);
     expect(TIER_CONTEXT_WINDOWS.mid).toBeGreaterThan(TIER_CONTEXT_WINDOWS.high);
   });
 

@@ -125,7 +125,7 @@ const EFFORT_RANK: Record<Effort, number> = { low: 0, mid: 1, high: 2 };
  *  together. */
 const FALLBACK_CONTEXT_WINDOW: Record<Effort, number> = {
   low: 1_048_576,
-  mid: 500_000,
+  mid: 1_048_576,
   high: 400_000,
 };
 

@@ -22,6 +22,7 @@ mod graphify;
 mod fs_copy;
 mod cli;
 mod path_util;
+mod project_settings;
 mod process_util;
 mod sync_util;
 mod walk_policy;
@@ -926,6 +927,7 @@ pub fn run() {
             file_index::build_file_index,
             unity::detect_unity_project,
             unity::scan_meta_files,
+            project_settings::unity_project_settings,
             unity::unity_setup_lsp,
             unity::resolve_unity_editor,
             unity::unity_fetch_registry_index,
@@ -940,6 +942,7 @@ pub fn run() {
             unity_index::unity_index_build,
             unity_index::unity_index_guid_map,
             unity_index::unity_index_find_references,
+            unity_index::unity_method_usages,
             unity_index::unity_index_hygiene,
             unity_index::unity_index_apply_delta,
             unity_tests::unity_tests_discover,

@@ -129,14 +129,17 @@ export type Attachment =
  * the server hands it. These constants below are what the editor falls back
  * to before the first successful `/v1/config` round-trip, and after one
  * fails, and mirror that same per-tier-minimum rule for today's lineup:
- *   low  → min(glm-5.3-flash 1,048,576)                       = 1,048,576
- *   mid  → min(grok 500,000, glm 1,048,576)                    =   500,000
- *   high → min(sol 400,000, glm 1,048,576, grok 500,000)       =   400,000
+ *   low  → min(glm-5.3-flash 1,048,576)                        = 1,048,576
+ *   mid  → min(glm-5.3 1,048,576, glm-5.3-flash 1,048,576)      = 1,048,576
+ *   high → min(sol 400,000, glm-5.3-flash 1,048,576, glm-5.3 …) =   400,000
  *
  * These stopped being identical on 2026-08-27, when glm-5.3-flash replaced
  * spark as the executor on every tier. Spark's conservative 131k seed had been
  * the binding constraint everywhere, so each tier now falls back to its own
- * planner's real window instead. Update alongside `stores/server-config.ts`'s
+ * planner's real window instead. On 2026-08-30 glm-5.3 replaced grok as the
+ * mid planner, lifting mid off grok's 500,000 — low and mid are equal again,
+ * and `openai/gpt-5.6-sol` on the high tier is now the ONLY model in the
+ * routed lineup that constrains a window at all. Update alongside `stores/server-config.ts`'s
  * `FALLBACK_CONTEXT_WINDOW`, which duplicates these same three numbers (see
  * that file's header for why it's a duplicate rather than an import of this
  * constant), and alongside the server's `DEFAULT_MODEL_ROUTING`, which is what
@@ -144,6 +147,6 @@ export type Attachment =
  */
 export const TIER_CONTEXT_WINDOWS: Record<Effort, number> = {
   low: 1_048_576,
-  mid: 500_000,
+  mid: 1_048_576,
   high: 400_000,
 };

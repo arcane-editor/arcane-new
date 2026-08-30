@@ -116,13 +116,28 @@ function EditorPanel() {
     const gotoHandler = () => {
       editorRef.current?.getAction('editor.action.gotoLine')?.run();
     };
+    // Both of these are Monaco built-ins that stay inert until a provider
+    // exists: quickOutline needs a DocumentSymbolProvider, refactor needs a
+    // CodeActionProvider advertising `refactor.*` kinds. Both are registered
+    // now (see lsp/services/symbol-providers.ts and code-actions.ts), so the
+    // only thing missing was a reachable command.
+    const symbolHandler = () => {
+      editorRef.current?.getAction('editor.action.quickOutline')?.run();
+    };
+    const refactorHandler = () => {
+      editorRef.current?.getAction('editor.action.refactor')?.run();
+    };
     window.addEventListener('navigate-to-line', navHandler);
     window.addEventListener('format-document', formatHandler);
     window.addEventListener('goto-line', gotoHandler);
+    window.addEventListener('goto-symbol', symbolHandler);
+    window.addEventListener('refactor-this', refactorHandler);
     return () => {
       window.removeEventListener('navigate-to-line', navHandler);
       window.removeEventListener('format-document', formatHandler);
       window.removeEventListener('goto-line', gotoHandler);
+      window.removeEventListener('goto-symbol', symbolHandler);
+      window.removeEventListener('refactor-this', refactorHandler);
     };
   }, []);
 

@@ -34,6 +34,8 @@ const DEFAULT_SETTINGS: SettingsSchema = {
   'unity.nearMissDiagnostics.enabled': true,
   'unity.rename.formerlySerializedAs': true,
   'unity.serializationDiagnostics.enabled': true,
+  'unity.projectSettingsDiagnostics.enabled': true,
+  'lsp.solutionWideAnalysis': true,
   'unity.asmdef.diagnostics': true,
   'unity.bridge.enabled': true,
   'unity.bridge.refreshOnSave': true,

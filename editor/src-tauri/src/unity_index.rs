@@ -569,6 +569,93 @@ pub fn unity_index_guid_map(
     Ok(get_or_build(&workspace_path).guid_to_path)
 }
 
+/// One Inspector-wired call into a script, resolved down to the method.
+///
+/// This is what `unity_index_find_references` cannot tell you. That answers
+/// "which files mention this GUID" — a file-level count. Unity's actual
+/// coupling is per-method: a button wired to `MenuController.OnStartPressed`
+/// breaks silently when that method is renamed, and a file-level answer never
+/// surfaces which method or which GameObject was affected.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MethodUsage {
+    pub method_name: String,
+    /// Project-relative asset that holds the wiring.
+    pub path: String,
+    /// Name of the GameObject the calling component sits on, when resolvable.
+    pub game_object: Option<String>,
+    /// `Type, Assembly` Unity recorded for the target.
+    pub target_type: Option<String>,
+}
+
+/// Find every UnityEvent call wired to the script identified by `guid`.
+///
+/// Only files the reverse index already says mention the guid are opened, so
+/// this costs one parse per referencing asset rather than a project-wide scan.
+#[tauri::command]
+pub fn unity_method_usages(workspace_path: String, guid: String) -> Vec<MethodUsage> {
+    let state = get_or_build(&workspace_path);
+    let Some(hits) = state.reverse.get(&guid) else {
+        return Vec::new();
+    };
+
+    let mut out = Vec::new();
+    for hit in hits {
+        let Ok(text) = std::fs::read_to_string(&hit.path) else {
+            continue;
+        };
+        let docs = crate::unity_yaml::parse_asset_with_bodies(&text);
+
+        // fileID -> (script guid, owning GameObject fileID) for every component
+        // in this asset, so a call target can be resolved back to its script.
+        let mut script_of: HashMap<i64, String> = HashMap::new();
+        let mut owner_of: HashMap<i64, i64> = HashMap::new();
+        let mut go_name: HashMap<i64, String> = HashMap::new();
+        for (doc, _) in &docs {
+            let Ok(fid) = doc.file_id.parse::<i64>() else { continue };
+            if let Some(g) = &doc.script_guid {
+                script_of.insert(fid, g.clone());
+            }
+            if let Some(go) = &doc.game_object_file_id {
+                if let Ok(go_id) = go.parse::<i64>() {
+                    owner_of.insert(fid, go_id);
+                }
+            }
+            if let Some((_, name)) = doc.properties.iter().find(|(k, _)| k == "m_Name") {
+                go_name.insert(fid, name.clone());
+            }
+        }
+
+        for (_, body) in &docs {
+            for call in crate::unity_yaml::extract_persistent_calls(body) {
+                // The target is this script when the call points straight at
+                // its guid (cross-asset), or at a component in this file whose
+                // m_Script is that guid (same-asset).
+                let targets_script = call.target_guid.as_deref() == Some(guid.as_str())
+                    || script_of
+                        .get(&call.target_file_id)
+                        .map(|g| g == &guid)
+                        .unwrap_or(false);
+                if !targets_script {
+                    continue;
+                }
+                let game_object = owner_of
+                    .get(&call.target_file_id)
+                    .and_then(|go| go_name.get(go))
+                    .cloned();
+                out.push(MethodUsage {
+                    method_name: call.method_name,
+                    path: hit.path.clone(),
+                    game_object,
+                    target_type: call.target_type,
+                });
+            }
+        }
+    }
+    out.sort_by(|a, b| (&a.path, &a.method_name).cmp(&(&b.path, &b.method_name)));
+    out
+}
+
 #[tauri::command]
 pub fn unity_index_find_references(
     workspace_path: String,

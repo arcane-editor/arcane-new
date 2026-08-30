@@ -123,10 +123,11 @@ describe('effectiveContextWindow', () => {
 
   // Mirrors TIER_CONTEXT_WINDOWS in features/ai-panel/services/types.ts —
   // the duplicate these two files deliberately keep in step (see that file's
-  // header). Both moved off spark's flat 131k on 2026-08-27.
+  // header). Both moved off spark's flat 131k on 2026-08-27, and off grok's
+  // 500k mid planner on 2026-08-30.
   it('falls back to the hardcoded offline window when config is null', () => {
     expect(effectiveContextWindow(null, 'low')).toBe(1_048_576);
-    expect(effectiveContextWindow(null, 'mid')).toBe(500_000);
+    expect(effectiveContextWindow(null, 'mid')).toBe(1_048_576);
     expect(effectiveContextWindow(null, 'high')).toBe(400_000);
   });
 });

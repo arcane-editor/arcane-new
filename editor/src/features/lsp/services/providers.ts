@@ -10,11 +10,17 @@ import {
 import { registerApplyEditHandler } from './workspace-edit';
 import { registerLspCodeActionProviders } from './code-actions';
 import { registerLspRenameProviders } from './rename-provider';
+import {
+  registerLspSymbolProviders,
+  registerSemanticTokensForClient,
+  disposeSemanticTokenProviders,
+} from './symbol-providers';
 import { useWorkspaceStore } from '../../../stores/workspace';
 import { useUiStore } from '../../../stores/ui';
 import { useProjectContextStore } from '../../../stores/project-context';
 import { useSettingsStore } from '../../../stores/settings';
 import { UNITY_LIFECYCLE_METHODS } from '../data/unity-lifecycle-snippets';
+import { UNITY_LIVE_TEMPLATES } from '../data/unity-live-templates';
 import { CSHARP_KEYWORDS } from '../data/csharp-keywords';
 import { UNITY_API_NAMES } from '../data/unity-api-names';
 import { getOpenDocumentUris, pathFromFileUri, syncDocumentOpen } from './document-sync';
@@ -22,6 +28,8 @@ import { lspManager } from './manager';
 import { isCsharpProjectLoaded, onCsharpProjectLoaded } from './project-readiness';
 import { LSP_BACKED_MONACO_LANGUAGES } from '../../../utils/language-detect';
 import { setPendingNavigation } from '../../../utils/editor-navigation';
+import { getMonacoInstance } from '../../../utils/monaco-instance';
+import { runWorkspaceDiagnostics } from './workspace-diagnostics';
 
 // ── LSP type aliases (structural, not imported) ─────────────────
 // LspPosition/LspRange come from ./model-context (canonical home).
@@ -396,6 +404,45 @@ export function registerLspProviders(monaco: Monaco): () => void {
     });
     return /\.\s*$/.test(lineUntil);
   }
+
+  // ── a4) Unity live templates (sfield / sprop / …) ─────────────
+  // Rider ships these as its Unity live templates; they are the abbreviations
+  // a Unity developer types dozens of times a day.
+  registerForLanguages(
+    UNITY_ONLY_LANGUAGES,
+    (lang, p) => monaco.languages.registerCompletionItemProvider(lang, p),
+    {
+      provideCompletionItems(model: editor.ITextModel, position: Position) {
+        // A template expands to a declaration, so it is never valid directly
+        // after a `.` — offering it there would push real members down.
+        if (isAfterDot(model, position)) return { suggestions: [] };
+
+        const word = model.getWordUntilPosition(position);
+        const range = {
+          startLineNumber: position.lineNumber,
+          startColumn: word.startColumn,
+          endLineNumber: position.lineNumber,
+          endColumn: word.endColumn,
+        };
+
+        return {
+          suggestions: UNITY_LIVE_TEMPLATES.map((tpl) => ({
+            label: tpl.name,
+            kind: monaco.languages.CompletionItemKind.Snippet,
+            insertText: tpl.body,
+            insertTextRules:
+              monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+            detail: tpl.detail,
+            documentation: { value: tpl.documentation },
+            // Sorted above the Unity API name list (8_) so typing `sf` offers
+            // the template before any member that happens to share a prefix.
+            sortText: '2_' + tpl.name,
+            range,
+          })),
+        };
+      },
+    },
+  );
 
   registerForLanguages(
     UNITY_ONLY_LANGUAGES,
@@ -873,6 +920,14 @@ export function registerLspProviders(monaco: Monaco): () => void {
   // which is exactly how a wrong report used to become permanent. Forcing a
   // full report costs one round trip per open file, once per server lifetime.
   const readyUnsub = onCsharpProjectLoaded(() => {
+    // Solution-wide analysis: one pass once the project graph exists, so the
+    // Problems panel reflects the whole solution rather than only the files
+    // that happen to be open. Failures are swallowed — this is an enrichment
+    // of the panel, and a server that cannot answer must not break the
+    // per-document path below.
+    if (useSettingsStore.getState().getSetting('lsp.solutionWideAnalysis') !== false) {
+      void runWorkspaceDiagnostics().catch(() => {});
+    }
     lastResultIds.clear();
     for (const m of monaco.editor.getModels()) {
       if (m.getLanguageId() === 'csharp') schedulePull(m.uri.toString(), 300);
@@ -927,6 +982,15 @@ export function registerLspProviders(monaco: Monaco): () => void {
 
   // ── h) CodeActionProvider (LSP + local quick-fix sources) ─────
   disposables.push({ dispose: registerLspCodeActionProviders(monaco) });
+
+  // ── h3) Symbol / navigation / formatting providers ────────────
+  // documentSymbol (outline + Go to Symbol), implementation, typeDefinition,
+  // and document/range formatting. See symbol-providers.ts.
+  disposables.push({ dispose: registerLspSymbolProviders(monaco) });
+  // Semantic-token providers are registered per client (see
+  // attachClientToProviders), so they are torn down here rather than added
+  // to `disposables` one by one.
+  disposables.push({ dispose: disposeSemanticTokenProviders });
 
   // ── h2) workspace/applyEdit (server→client) handler ───────────
   // Routes server-initiated applyEdit requests through the same
@@ -1002,6 +1066,19 @@ let pushDiagnosticsApplier:
   | null = null;
 
 export function attachClientToProviders(client: LspClient): () => void {
+  // A started server is the first moment its semantic-token legend exists, so
+  // this is where that provider gets registered — see the comment on
+  // `registerSemanticTokensForClient` for why it cannot happen at startup.
+  const monaco = getMonacoInstance();
+  if (monaco) {
+    registerSemanticTokensForClient(
+      monaco,
+      client.languageId,
+      client.getServerCapabilities(),
+      (method, params) => client.request(method, params),
+    );
+  }
+
   return client.onNotification(
     'textDocument/publishDiagnostics',
     (params: unknown) => {

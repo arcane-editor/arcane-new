@@ -450,6 +450,102 @@ pub fn parse_asset(content: &str) -> UnityAssetModel {
 /// `collect_simple_properties` intentionally skips. Reuses the same
 /// `split_documents`/`parse_document` internals as `parse_asset` — same
 /// document set, same leniency, never panics.
+/// One entry of a `UnityEvent`'s persistent (Inspector-wired) call list.
+///
+/// This is the wiring the C# compiler cannot see: a button's OnClick pointing
+/// at `MenuController.OnStartPressed` is a string in a prefab, so renaming or
+/// deleting that method breaks the button silently, with no error anywhere.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PersistentCall {
+    /// The method invoked, e.g. `OnStartPressed`.
+    pub method_name: String,
+    /// `fileID` of the target component. 0 when the target is another asset.
+    pub target_file_id: i64,
+    /// Set when the target lives in a different asset.
+    pub target_guid: Option<String>,
+    /// `Type, Assembly` as Unity stored it, when present.
+    pub target_type: Option<String>,
+}
+
+/// Extract every persistent call from one document body.
+///
+/// Hand-rolled rather than routed through `collect_simple_properties`, which
+/// drops any value containing `fileID` and caps at 64 properties — it would
+/// discard exactly these fields. The parser is positional: `m_MethodName`,
+/// `m_Target` and `m_TargetAssemblyTypeName` all belong to the same list item,
+/// so a new `- m_Target:` starts a new call.
+pub fn extract_persistent_calls(body: &str) -> Vec<PersistentCall> {
+    let mut out: Vec<PersistentCall> = Vec::new();
+    let mut cur: Option<PersistentCall> = None;
+
+    let flush = |cur: &mut Option<PersistentCall>, out: &mut Vec<PersistentCall>| {
+        if let Some(call) = cur.take() {
+            // A call with no method name is an empty Inspector slot, not a
+            // usage — reporting it would show phantom references.
+            if !call.method_name.is_empty() {
+                out.push(call);
+            }
+        }
+    };
+
+    for line in body.lines() {
+        let trimmed = line.trim_start();
+        let is_item = trimmed.starts_with("- ");
+        let field = trimmed.strip_prefix("- ").unwrap_or(trimmed);
+
+        if is_item && field.starts_with("m_Target:") {
+            flush(&mut cur, &mut out);
+            cur = Some(PersistentCall {
+                method_name: String::new(),
+                target_file_id: 0,
+                target_guid: None,
+                target_type: None,
+            });
+        }
+
+        let Some(call) = cur.as_mut() else { continue };
+
+        if let Some(rest) = field.strip_prefix("m_Target:") {
+            if let Some(id) = capture_i64(rest, "fileID:") {
+                call.target_file_id = id;
+            }
+            call.target_guid = capture_guid(rest);
+        } else if let Some(rest) = field.strip_prefix("m_MethodName:") {
+            call.method_name = rest.trim().to_string();
+        } else if let Some(rest) = field.strip_prefix("m_TargetAssemblyTypeName:") {
+            let v = rest.trim();
+            if !v.is_empty() {
+                call.target_type = Some(v.to_string());
+            }
+        }
+    }
+    flush(&mut cur, &mut out);
+    out
+}
+
+/// Read `key: <int>` out of an inline `{...}` map.
+fn capture_i64(text: &str, key: &str) -> Option<i64> {
+    let idx = text.find(key)? + key.len();
+    let rest = text[idx..].trim_start();
+    let end = rest
+        .find(|c: char| !(c.is_ascii_digit() || c == '-'))
+        .unwrap_or(rest.len());
+    rest[..end].parse().ok()
+}
+
+/// Read a 32-char hex `guid:` out of an inline `{...}` map.
+fn capture_guid(text: &str) -> Option<String> {
+    let idx = text.find("guid:")? + "guid:".len();
+    let rest = text[idx..].trim_start();
+    let g: String = rest.chars().take(32).collect();
+    if g.len() == 32 && g.chars().all(|c| c.is_ascii_hexdigit()) {
+        Some(g)
+    } else {
+        None
+    }
+}
+
 pub fn parse_asset_with_bodies(content: &str) -> Vec<(UnityYamlDocument, String)> {
     split_documents(content)
         .iter()
@@ -614,6 +710,63 @@ Material:
         assert!(guids.contains(&"11111111111111111111111111111111".to_string()));
         assert!(guids.contains(&"22222222222222222222222222222222".to_string()));
         assert!(guids.contains(&"33333333333333333333333333333333".to_string()));
+    }
+
+    #[test]
+    fn extracts_persistent_calls_from_a_real_prefab_fixture() {
+        let base = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/unity-yaml");
+        let prefab = std::fs::read_to_string(base.join("EventWiring.prefab"))
+            .expect("read EventWiring.prefab fixture");
+
+        let calls: Vec<PersistentCall> = parse_asset_with_bodies(&prefab)
+            .iter()
+            .flat_map(|(_, body)| extract_persistent_calls(body))
+            .collect();
+
+        assert_eq!(calls.len(), 2, "expected two wired calls, got {calls:?}");
+
+        // Same-asset target: addressed by fileID, no guid.
+        assert_eq!(calls[0].method_name, "OnStartPressed");
+        assert_eq!(calls[0].target_file_id, 103);
+        assert_eq!(calls[0].target_guid, None);
+        assert_eq!(
+            calls[0].target_type.as_deref(),
+            Some("MenuController, Assembly-CSharp")
+        );
+
+        // Cross-asset target: fileID 0 plus a guid pointing at another asset.
+        assert_eq!(calls[1].method_name, "PlayClick");
+        assert_eq!(calls[1].target_file_id, 0);
+        assert_eq!(calls[1].target_guid.as_deref(), Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
+    }
+
+    #[test]
+    fn empty_call_lists_and_unwired_slots_produce_no_usages() {
+        // `m_Calls: []` is an event with nothing wired. Reporting it would put
+        // a phantom reference on a method that is not actually used.
+        assert!(extract_persistent_calls("  m_OnValueChanged:\n    m_PersistentCalls:\n      m_Calls: []\n").is_empty());
+
+        // A target with no method selected is an empty Inspector slot.
+        let unwired = "      - m_Target: {fileID: 55}\n        m_MethodName: \n        m_Mode: 0\n";
+        assert!(extract_persistent_calls(unwired).is_empty());
+    }
+
+    #[test]
+    fn each_list_item_starts_a_new_call() {
+        let body = "      - m_Target: {fileID: 1}\n        m_MethodName: A\n      - m_Target: {fileID: 2}\n        m_MethodName: B\n";
+        let calls = extract_persistent_calls(body);
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].method_name, "A");
+        assert_eq!(calls[0].target_file_id, 1);
+        assert_eq!(calls[1].method_name, "B");
+        assert_eq!(calls[1].target_file_id, 2);
+    }
+
+    #[test]
+    fn persistent_call_extraction_never_panics_on_malformed_input() {
+        for junk in ["", "- m_Target:", "m_MethodName:", "- m_Target: {fileID: }", "\u{0}\u{1}"] {
+            let _ = extract_persistent_calls(junk);
+        }
     }
 
     #[test]

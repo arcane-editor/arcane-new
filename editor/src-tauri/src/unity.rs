@@ -858,6 +858,78 @@ fn generate_ide_csproj(workspace: &Path) -> Result<bool, String> {
 /// The split exists so the "Unity generated no csprojs" case — the one that
 /// silently cost every Unity project its C# IntelliSense — can be reproduced
 /// hermetically against a fixture install, with no Unity on the box.
+/// Unity's cumulative `UNITY_X_Y_OR_NEWER` ladder for a `m_EditorVersion`
+/// string like `6000.3.5f2` or `2022.3.10f1`.
+///
+/// Unity defines one symbol per release *at or below* the installed version,
+/// which is why this returns a list rather than a single symbol: code guarded
+/// by `UNITY_2021_1_OR_NEWER` must still compile on Unity 6.
+/// The C# language version Unity's own compiler uses, by editor version.
+///
+/// Was hardcoded to `9.0`, which is right for modern Unity and wrong for
+/// anything before 2021.2 — those projects would accept language features
+/// in the IDE that fail to compile in Unity, which is the worst direction
+/// for this to be wrong in.
+fn unity_lang_version(editor_version: Option<&str>) -> &'static str {
+    let parsed = editor_version.and_then(|v| {
+        let mut parts = v.split('.');
+        let major: u32 = parts.next()?.parse().ok()?;
+        let minor: u32 = parts.next()?.parse().ok()?;
+        Some((major, minor))
+    });
+    match parsed {
+        Some((major, minor)) if (major, minor) >= (2021, 2) => "9.0",
+        Some((major, _)) if major >= 2020 => "8.0",
+        Some(_) => "7.3",
+        None => "9.0",
+    }
+}
+
+fn unity_version_defines(editor_version: Option<&str>) -> Vec<String> {
+    // (major, minor) pairs Unity emits a define for, newest first.
+    const LADDER: &[(u32, u32)] = &[
+        (6000, 3), (6000, 2), (6000, 1), (6000, 0),
+        (2023, 3), (2023, 2), (2023, 1),
+        (2022, 3), (2022, 2), (2022, 1),
+        (2021, 3), (2021, 2), (2021, 1),
+        (2020, 3), (2020, 2), (2020, 1),
+        (2019, 4), (2019, 3), (2019, 2), (2019, 1),
+        (2018, 4), (2018, 3), (2018, 2), (2018, 1),
+        (2017, 4), (2017, 3), (2017, 2), (2017, 1),
+    ];
+
+    // Parse leading `major.minor`. Anything unparseable falls back to the
+    // previous hardcoded behaviour rather than emitting nothing, because a
+    // define-less project loses IntelliSense inside every conditional block.
+    let parsed = editor_version.and_then(|v| {
+        let mut parts = v.split('.');
+        let major: u32 = parts.next()?.parse().ok()?;
+        let minor: u32 = parts.next()?.parse().ok()?;
+        Some((major, minor))
+    });
+    let (major, minor) = parsed.unwrap_or((2022, 3));
+
+    let mut out: Vec<String> = LADDER
+        .iter()
+        .filter(|(ma, mi)| (*ma, *mi) <= (major, minor))
+        .map(|(ma, mi)| format!("UNITY_{ma}_{mi}_OR_NEWER"))
+        .collect();
+    out.push("UNITY_5_3_OR_NEWER".to_string());
+    out
+}
+
+/// Whether the project depends on `com.unity.inputsystem`.
+///
+/// Read from `Packages/manifest.json` textually: a full JSON parse would fail
+/// on a manifest with comments or trailing commas, and getting this wrong is
+/// worse than a false negative — it flips which branch of every
+/// `#if ENABLE_INPUT_SYSTEM` the language server sees.
+fn uses_input_system_package(workspace: &Path) -> bool {
+    std::fs::read_to_string(workspace.join("Packages").join("manifest.json"))
+        .map(|m| m.contains("com.unity.inputsystem"))
+        .unwrap_or(false)
+}
+
 fn generate_ide_csproj_from(
     workspace: &Path,
     scripting_root: Option<&Path>,
@@ -983,7 +1055,6 @@ fn generate_ide_csproj_from(
     <RootNamespace></RootNamespace>
     <AssemblyName>unityide</AssemblyName>
     <TargetFrameworkVersion>v4.7.1</TargetFrameworkVersion>
-    <LangVersion>9.0</LangVersion>
     <FileAlignment>512</FileAlignment>
     <NoStdLib>true</NoStdLib>
     <OutputPath>Library/IntellisenseBin</OutputPath>
@@ -993,9 +1064,54 @@ fn generate_ide_csproj_from(
         xml.push_str(&xml_escape(fp));
         xml.push_str("</FrameworkPathOverride>\n");
     }
+    // Version defines are derived from the project's real Unity version, not
+    // pinned. They were frozen at UNITY_2022_3_OR_NEWER, so on a Unity 6
+    // project every `#if UNITY_6000_0_OR_NEWER` block was analyzed as dead.
+    let version_defines = unity_version_defines(
+        read_unity_version(&workspace.join("ProjectSettings")).as_deref(),
+    );
+
+    // The project's OWN scripting defines. Without these, every `#if MY_FLAG`
+    // block in user code is greyed out and its contents get no IntelliSense —
+    // silently, because a define that is merely absent is not an error.
+    let project_defines = crate::project_settings::read_project_settings(workspace)
+        .standalone_defines();
+
+    let mut defines: Vec<String> = vec!["UNITY_EDITOR".to_string(), editor_define.to_string()];
+    defines.extend(version_defines);
+    defines.extend([
+        "UNITY_64".to_string(),
+        standalone_define.to_string(),
+        "UNITY_STANDALONE".to_string(),
+        "ENABLE_MONO".to_string(),
+        "NETSTANDARD2_1".to_string(),
+        "NET_STANDARD".to_string(),
+        "NET_STANDARD_2_1".to_string(),
+        "CSHARP_7_3_OR_NEWER".to_string(),
+    ]);
+    // ENABLE_INPUT_SYSTEM used to be asserted unconditionally, which is wrong
+    // for a project on the legacy input manager: it activated the wrong branch
+    // of every `#if ENABLE_INPUT_SYSTEM` in the project AND in packages.
+    // Detect it from the package manifest instead.
+    if uses_input_system_package(workspace) {
+        defines.push("ENABLE_INPUT_SYSTEM".to_string());
+    } else {
+        defines.push("ENABLE_LEGACY_INPUT_MANAGER".to_string());
+    }
+    for d in project_defines {
+        if !defines.contains(&d) {
+            defines.push(d);
+        }
+    }
+
     xml.push_str(&format!(
-        "    <DefineConstants>UNITY_EDITOR;{};UNITY_2022_3_OR_NEWER;UNITY_2021_1_OR_NEWER;UNITY_2020_1_OR_NEWER;UNITY_2019_1_OR_NEWER;UNITY_2018_1_OR_NEWER;UNITY_2017_1_OR_NEWER;UNITY_5_3_OR_NEWER;UNITY_64;{};UNITY_STANDALONE;ENABLE_MONO;ENABLE_INPUT_SYSTEM;NETSTANDARD2_1;NET_STANDARD;NET_STANDARD_2_1;CSHARP_7_3_OR_NEWER</DefineConstants>\n",
-        editor_define, standalone_define
+        "    <LangVersion>{}</LangVersion>\n",
+        unity_lang_version(read_unity_version(&workspace.join("ProjectSettings")).as_deref())
+    ));
+
+    xml.push_str(&format!(
+        "    <DefineConstants>{}</DefineConstants>\n",
+        xml_escape(&defines.join(";"))
     ));
     xml.push_str(
         r#"    <NoWarn>0169;0436;CS0436;CS0162;CS0168</NoWarn>
@@ -1630,6 +1746,72 @@ mod tests {
     /// launched with no solution, and every completion/hover returned null.
     ///
     /// Hermetic: fixture Unity install, no Unity on the machine required.
+    #[test]
+    fn lang_version_tracks_the_unity_release() {
+        assert_eq!(unity_lang_version(Some("6000.3.5f2")), "9.0");
+        assert_eq!(unity_lang_version(Some("2021.2.0f1")), "9.0");
+        assert_eq!(unity_lang_version(Some("2021.1.0f1")), "8.0");
+        assert_eq!(unity_lang_version(Some("2020.3.0f1")), "8.0");
+        assert_eq!(unity_lang_version(Some("2019.4.0f1")), "7.3");
+        assert_eq!(unity_lang_version(None), "9.0");
+    }
+
+    #[test]
+    fn version_defines_are_cumulative_for_the_installed_unity() {
+        let d = unity_version_defines(Some("6000.3.5f2"));
+        // Unity 6 gets its own symbol AND every older one, because code
+        // guarded by an older `_OR_NEWER` must still compile.
+        assert!(d.contains(&"UNITY_6000_3_OR_NEWER".to_string()));
+        assert!(d.contains(&"UNITY_6000_0_OR_NEWER".to_string()));
+        assert!(d.contains(&"UNITY_2022_3_OR_NEWER".to_string()));
+        assert!(d.contains(&"UNITY_5_3_OR_NEWER".to_string()));
+    }
+
+    #[test]
+    fn version_defines_never_claim_a_newer_unity_than_is_installed() {
+        let d = unity_version_defines(Some("2022.3.10f1"));
+        assert!(d.contains(&"UNITY_2022_3_OR_NEWER".to_string()));
+        // The old hardcoded list asserted 2022.3 for EVERY project. A 2022.3
+        // project must not advertise Unity 6 symbols.
+        assert!(!d.contains(&"UNITY_6000_0_OR_NEWER".to_string()));
+        assert!(!d.contains(&"UNITY_2023_1_OR_NEWER".to_string()));
+    }
+
+    #[test]
+    fn unparseable_version_falls_back_rather_than_emitting_nothing() {
+        // A define-less project loses IntelliSense inside every conditional
+        // block, so garbage input degrades to the previous pinned behaviour.
+        for bad in [None, Some(""), Some("not-a-version"), Some("6000")] {
+            let d = unity_version_defines(bad);
+            assert!(
+                d.contains(&"UNITY_2022_3_OR_NEWER".to_string()),
+                "fallback missing for {bad:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn input_system_define_follows_the_package_manifest() {
+        let dir = make_temp_dir("input_defines");
+        let pkgs = dir.join("Packages");
+        fs::create_dir_all(&pkgs).unwrap();
+
+        // No manifest at all → legacy input, not the new system.
+        assert!(!uses_input_system_package(&dir));
+
+        fs::write(pkgs.join("manifest.json"), r#"{"dependencies":{"com.unity.ugui":"1.0.0"}}"#).unwrap();
+        assert!(!uses_input_system_package(&dir));
+
+        fs::write(
+            pkgs.join("manifest.json"),
+            r#"{"dependencies":{"com.unity.inputsystem":"1.7.0"}}"#,
+        )
+        .unwrap();
+        assert!(uses_input_system_package(&dir));
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
     #[test]
     fn csproj_is_complete_without_any_unity_generated_csproj() {
         let dir = make_temp_dir("_no_unity_csproj");

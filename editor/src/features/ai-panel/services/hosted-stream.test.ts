@@ -396,6 +396,49 @@ describe('createHostedStreamFn', () => {
     expect(events.some((e) => e.type === 'done')).toBe(false);
   });
 
+  it('treats server keepalive comments as liveness, so a slow model never trips the first-token watchdog', async () => {
+    // The "Stream stalled before the first token" fix. The server now writes
+    // a `: keepalive` comment immediately and every 10s while the model is
+    // still thinking (arcane-server/src/lib/sse-heartbeat.ts). This locks the
+    // client half of that contract: a comment frame must count as a live
+    // stream, must hand every later read to the idle-gap watchdog, and must
+    // never be mistaken for a malformed event.
+    const fetchImpl = (async () => {
+      let pulls = 0;
+      const body = new ReadableStream<Uint8Array>({
+        async pull(controller) {
+          pulls++;
+          const enc = new TextEncoder();
+          if (pulls <= 4) {
+            // The model is still thinking — keepalives only, for well past
+            // the first-token window this test sets.
+            await sleep(10);
+            controller.enqueue(enc.encode(': keepalive\n\n'));
+            return;
+          }
+          if (pulls === 5) {
+            controller.enqueue(enc.encode('data: {"type":"text","content":"finally"}\n\n'));
+            return;
+          }
+          controller.enqueue(enc.encode('data: [DONE]\n\n'));
+          controller.close();
+        },
+      });
+      return new Response(body, { status: 200 });
+    }) as unknown as typeof fetch;
+
+    // 25ms first-token window vs ~40ms of keepalive-only traffic: without the
+    // keepalives counting as liveness this errors out before the text lands.
+    const streamFn = createHostedStreamFn({ fetchImpl, firstTokenTimeoutMs: 25, idleTimeoutMs: 5_000 });
+    const events = await drain(streamFn(ctx, opts()));
+
+    expect(events.some((e) => e.type === 'error')).toBe(false);
+    const done = events.find((e) => e.type === 'done') as Extract<AssistantMessageEvent, { type: 'done' }>;
+    expect(done).toBeDefined();
+    // Not "Response corrupted": comments must not count as malformed events.
+    expect(done.message.content).toEqual([{ type: 'text', text: 'finally' }]);
+  });
+
   it('does not retry a failure that happens after the first chunk has already been consumed', async () => {
     let calls = 0;
     let pullCount = 0;

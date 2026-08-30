@@ -182,6 +182,8 @@ export interface SettingsSchema {
   'unity.nearMissDiagnostics.enabled': boolean;
   'unity.rename.formerlySerializedAs': boolean;
   'unity.serializationDiagnostics.enabled': boolean;
+  'unity.projectSettingsDiagnostics.enabled': boolean;
+  'lsp.solutionWideAnalysis': boolean;
   'unity.asmdef.diagnostics': boolean;
   'unity.bridge.enabled': boolean;
   'unity.bridge.refreshOnSave': boolean;

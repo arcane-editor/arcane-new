@@ -106,7 +106,10 @@ describe('GET /v1/config', () => {
     // Until 2026-08-27 the executor (spark, 131_072) was the smallest window on
     // every tier, so all three came back identical. glm-5.3-flash's 1,048,576
     // lifted that floor, and each tier now reports its own planner's window.
-    it('contextWindow: high tier = min(sol 400_000, glm 1_048_576, grok 500_000) = 400_000 with seed catalog', async () => {
+    // 2026-08-30: glm-5.3 replaced grok as the mid planner, so mid is no
+    // longer pinned to grok's 500_000 — low and mid are both 1,048,576 now
+    // and gpt-5.6-sol is the only remaining constraint anywhere.
+    it('contextWindow: high tier = min(sol 400_000, glm-flash 1_048_576, glm 1_048_576) = 400_000 with seed catalog', async () => {
         const user = await seedPasswordUser('config-ctxwin@test.dev', 'password123');
         const token = await tokenFor(user);
         const res = await getConfig(token);
@@ -114,7 +117,7 @@ describe('GET /v1/config', () => {
 
         expect(tierById(body, 'high').contextWindow).toBe(400_000);
         expect(tierById(body, 'low').contextWindow).toBe(1_048_576);
-        expect(tierById(body, 'mid').contextWindow).toBe(500_000);
+        expect(tierById(body, 'mid').contextWindow).toBe(1_048_576);
     });
 
     it('contextWindow: a model_pricing override lowering the executor\'s window changes the derived high-tier value', async () => {
@@ -137,20 +140,26 @@ describe('GET /v1/config', () => {
 
         const res = await getConfig(token);
         const body = await res.json<ConfigResponse>();
-        // Now the smallest of (sol 400_000, executor 100_000, grok 500_000) is
-        // the executor — the derived value follows the override, not the seed.
+        // Now the smallest of (sol 400_000, executor 100_000, glm 1_048_576)
+        // is the executor — the derived value follows the override, not the seed.
         expect(tierById(body, 'high').contextWindow).toBe(100_000);
 
         clearConfigCache(); // leave a clean cache for any test file sharing this isolate
     });
 
-    it('pricingCliffTokens: high tier = 200_000 (grok\'s cliff) with seed data; low tier (flat-priced, no cliffs) = null', async () => {
+    // Grok's 200k cliff was the ONLY repricing cliff in the routed lineup, and
+    // it sat on the high tier. Retiring grok on 2026-08-30 removed it: every
+    // routed model is now flat-priced, so no tier reports a cliff at all. The
+    // editor uses this to warn before a request gets suddenly more expensive —
+    // a null here means there is genuinely nothing to warn about.
+    it('pricingCliffTokens: null on every tier once grok (the only cliff model) is unrouted', async () => {
         const user = await seedPasswordUser('config-cliff@test.dev', 'password123');
         const token = await tokenFor(user);
         const res = await getConfig(token);
         const body = await res.json<ConfigResponse>();
 
-        expect(tierById(body, 'high').pricingCliffTokens).toBe(200_000);
+        expect(tierById(body, 'high').pricingCliffTokens).toBeNull();
+        expect(tierById(body, 'mid').pricingCliffTokens).toBeNull();
         expect(tierById(body, 'low').pricingCliffTokens).toBeNull();
     });
 

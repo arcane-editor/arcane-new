@@ -40,11 +40,27 @@ const HOSTED_SERVER_URL = API_URL;
  * First-token watchdog default: abort if no SSE chunk arrives at all within
  * this window of the very first `reader.read()` call (before any content has
  * streamed). A hung-but-open connect otherwise looks identical to "nothing
- * happening" for the full 90s idle-gap window below — this bounds it much
- * tighter since a healthy stream should produce SOMETHING quickly. Every
- * read after the first keeps falling under the (longer) idle-gap watchdog.
+ * happening" for the full 90s idle-gap window below — this bounds it tighter
+ * since a healthy stream should produce SOMETHING quickly. Every read after
+ * the first keeps falling under the (longer) idle-gap watchdog.
+ *
+ * RAISED FROM 25s: at 25s this watchdog was not measuring what its name
+ * says. The server writes nothing between handing over response headers and
+ * the model's first token, so the window covered gateway connect + prefill +
+ * (on a reasoning model) the entire think-before-answering phase. Slow turns
+ * died as "Stream stalled before the first token" — reported mostly from
+ * Windows, where slower machines and TLS-inspecting security software add
+ * just enough latency to lose the race.
+ *
+ * The actual fix is server-side (`lib/sse-heartbeat.ts` writes a keepalive
+ * comment immediately and every 10s thereafter, which resolves this read and
+ * hands every later read to the idle-gap watchdog) — deliberately there,
+ * because it reaches already-installed editors without an app update. This
+ * value is the client's half: margin for the case where the keepalive itself
+ * is delayed by a buffering intermediary, and a real bound on a genuinely
+ * dead connect for anyone talking to a server that predates the keepalive.
  */
-const FIRST_TOKEN_TIMEOUT_MS = 25_000;
+const FIRST_TOKEN_TIMEOUT_MS = 60_000;
 
 interface HostedStreamEvent {
   type: 'text' | 'tool_call' | 'thinking' | 'usage' | 'error';
@@ -96,9 +112,10 @@ export interface HostedStreamHardeningConfig {
    * First-token watchdog: governs ONLY the very first `reader.read()` call
    * (before any chunk has arrived at all). Injectable/overridable the same
    * way `idleTimeoutMs` is, for tests. Default `FIRST_TOKEN_TIMEOUT_MS`
-   * (25s) — much tighter than the 90s idle-gap window, since a hung connect
-   * with zero bytes ever sent should be surfaced far sooner than a stall
-   * mid-stream.
+   * (60s) — tighter than the 90s idle-gap window, since a hung connect with
+   * zero bytes ever sent should be surfaced sooner than a stall mid-stream,
+   * but no longer tight enough to mistake model latency for a dead socket
+   * (see that constant for the full history).
    */
   firstTokenTimeoutMs?: number;
 }

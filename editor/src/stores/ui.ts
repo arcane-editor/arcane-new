@@ -162,6 +162,18 @@ interface UiState {
    * sources for a URI become empty the inner map is removed.
    */
   setFileDiagnostics: (fileUri: string, source: DiagnosticSource, items: DiagnosticItem[]) => void;
+  /**
+   * Publish many files at once.
+   *
+   * `setFileDiagnostics` recomputes counts by flattening AND sorting the whole
+   * map, so calling it in a loop is quadratic: solution-wide analysis publishes
+   * thousands of files and would flatten a growing map once per file, on the
+   * main thread, with a Zustand set() (and a Problems-panel re-render) each
+   * time. This does one pass and one set().
+   */
+  setManyFileDiagnostics: (
+    entries: Array<{ fileUri: string; source: DiagnosticSource; items: DiagnosticItem[] }>,
+  ) => void;
   /** Remove all sources for a URI. */
   clearFileDiagnostics: (fileUri: string) => void;
   /** All diagnostics across all URIs and sources, deduped and sorted. */
@@ -292,6 +304,26 @@ export const useUiStore = create<UiState>((set, get) => ({
         next.delete(fileUri);
       } else {
         next.set(fileUri, sourceMap);
+      }
+      return { diagnostics: next, diagnosticCounts: recomputeCounts(next) };
+    });
+  },
+  setManyFileDiagnostics: (entries) => {
+    if (entries.length === 0) return;
+    set((state) => {
+      const next: DiagnosticsMap = new Map(state.diagnostics);
+      for (const { fileUri, source, items } of entries) {
+        const sourceMap = new Map(next.get(fileUri) ?? []);
+        if (items.length === 0) {
+          sourceMap.delete(source);
+        } else {
+          sourceMap.set(source, items);
+        }
+        if (sourceMap.size === 0) {
+          next.delete(fileUri);
+        } else {
+          next.set(fileUri, sourceMap);
+        }
       }
       return { diagnostics: next, diagnosticCounts: recomputeCounts(next) };
     });
