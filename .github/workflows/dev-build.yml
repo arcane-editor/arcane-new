@@ -112,3 +112,47 @@ jobs:
           SHA7="${GITHUB_SHA:0:7}"
           bunx wrangler r2 object put "arcane-releases/dev/$SHA7/${{ matrix.asset }}"  --file "dist-release/${{ matrix.asset }}" --remote
           bunx wrangler r2 object put "arcane-releases/dev/latest/${{ matrix.asset }}" --file "dist-release/${{ matrix.asset }}" --remote
+
+  # The dev-channel Unity package. Published alongside the dev app because the
+  # two are one unit: the package generated for this channel targets the
+  # "UnityIDE Dev" application, its unityide-dev:// scheme and its
+  # ~/.unityide-dev config home, and pairing it with a release app (or the
+  # release package with this app) is exactly the mix-up the split exists to
+  # prevent.
+  #
+  # Cheap (no native build), so it runs alongside the app matrix rather than
+  # after it.
+  unity-extension-dev:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: oven-sh/setup-bun@v2
+
+      # Stages a copy, rewrites it into the dev channel
+      # (scripts/unity-extension-channel.mjs), validates and packs it. The
+      # checked-in source is never modified.
+      - name: Build dev UPM tarball
+        run: cd arcane-extension && bash deploy.sh dev
+
+      - name: Upload Unity extension to R2 (dev channel)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          cd arcane-extension
+          # Both the id and the version come from the GENERATED package.json,
+          # which is also what npm pack names the tarball after — so the dev id
+          # can never be uploaded under the release key.
+          TGZ=$(ls com.unityide.editor.dev-*.tgz | head -n1)
+          test -f "$TGZ" || { echo "::error::expected a dev tarball from deploy.sh, not found"; exit 1; }
+          SHA7="${GITHUB_SHA:0:7}"
+          bunx wrangler r2 object put "arcane-releases/unity-extension-releases/dev/$SHA7/${TGZ}"                    --file "$TGZ" --remote
+          bunx wrangler r2 object put "arcane-releases/unity-extension-releases/dev/latest/com.unityide.editor.dev.tgz" --file "$TGZ" --remote

@@ -7,7 +7,70 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **The package now ships once per release channel.** The release build targets
+  the UnityIDE application, `unityide://` and `~/.unityide`; the dev build
+  (`com.unityide.editor.dev`) targets UnityIDE Dev, `unityide-dev://` and
+  `~/.unityide-dev`. Both are generated from this source by
+  `scripts/unity-extension-channel.mjs`, which also gives the dev package its
+  own assembly names and asset GUIDs so the two can never be confused for one
+  another. Installing either one removes the other.
+
+  This replaces working the channel out at runtime, which got it wrong in the
+  one case that mattered: it always resolved to release, so anyone testing the
+  dev build had their double-clicks answered by the release app, silently.
+- **Window > UnityIDE > Open Project in UnityIDE** opens the current project in
+  UnityIDE, launching it if it is not running and bringing it to the front if it
+  is. Unity's own **Assets > Open C# Project** now works too — it hands us an
+  empty file path, which produced a bare `UnityIDE "<project>"` that the app's
+  argument parser ignored entirely.
+- A one-time offer to make UnityIDE the external script editor, shown the first
+  time the package loads on a machine where UnityIDE is installed and something
+  else is configured. Opt-in, with "Not now" and "Never ask again"; the setting
+  is never changed without an answer.
+- **Window > UnityIDE > Use UnityIDE for C# Scripts**, for taking that offer
+  later.
+- Preferences > External Tools now reports where UnityIDE was found and whether
+  it currently has this project open, with a button to open it.
+- Opening now goes through the `unityide://open` deep link before it goes
+  looking for an executable. The OS already knows where UnityIDE is installed
+  and how to bring it forward, so a copy in a non-default location — or one the
+  probe list has never heard of — is opened correctly, and on macOS nothing
+  spawns a throwaway process to relay the request.
+
+  Falling back to launching an executable is still needed and still happens: on
+  macOS `tauri dev` can never register a scheme, and on Windows registration
+  happens on the app's first run, so an install nobody has opened yet has no
+  handler. The package only fires a deep link at Windows once
+  `~/.unityide/install.json` proves the app has run.
+
 ### Fixed
+- Double-clicking a script no longer relaunches the app when UnityIDE already
+  has the project open. The file is sent over the bridge journal instead, with
+  its line and column, and the IDE raises itself — no throwaway process, no dock
+  bounce, and no dependence on knowing where the app is installed.
+- UnityIDE is found on Windows again. The probe list carried Electron's
+  `%LOCALAPPDATA%\Programs\<app>` convention while the installer puts a
+  per-user install in `%LOCALAPPDATA%\<app>`, so a default install was never
+  detected. The app now also records its own location in
+  `~/.unityide/install.json` on every launch, which makes discovery work for a
+  copy installed anywhere.
+- A pre-rename install is found again. The bulk rename that turned Arcane into
+  UnityIDE also rewrote the constant naming the *pre*-rename app, so every
+  "legacy" probe path was a duplicate of the current one.
+- Paths ending in a separator no longer mangle the launch. A trailing backslash
+  escaped its own closing quote, so `"C:\Proj\"` swallowed every argument
+  after it.
+- The Unity test assembly compiles. It exercises internal types
+  (`Discovery`, `Journal`, `BridgeClient`) and the package never granted it
+  access, so none of its tests had ever run.
+- Double-clicking a script when the package is installed but the application is
+  not now opens the download page, once per Unity session. It used to write a
+  console error and nothing else — from inside Unity, indistinguishable from
+  the integration being broken.
+- The dev application is discoverable at all. The probe list only ever named
+  `UnityIDE`, so a machine with only UnityIDE Dev installed, and no install
+  record yet, found nothing.
 - A domain reload no longer looks like a disconnect. The bridge announces a new
   `reloading` message before tearing down its AppDomain, so the IDE widens its
   liveness deadline instead of dropping the session, and a script recompile no

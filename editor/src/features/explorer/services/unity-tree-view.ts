@@ -8,6 +8,19 @@ export interface UnityTreeViewOptions {
   assetsFirst: boolean;
 }
 
+export interface ExplorerRoot {
+  treeRoot: string;
+  workspaceName: string;
+}
+
+/** Keep Unity's tree scoped to Assets while labeling it with the project name. */
+export function explorerRootFor(workspacePath: string, assetsRootPath: string | null): ExplorerRoot {
+  return {
+    treeRoot: assetsRootPath ?? workspacePath,
+    workspaceName: workspacePath.split('/').filter(Boolean).pop() ?? workspacePath,
+  };
+}
+
 // Root folders pinned (in this order) when "Assets First" is on.
 const PINNED_ROOTS = ['Assets', 'Packages', 'ProjectSettings'];
 

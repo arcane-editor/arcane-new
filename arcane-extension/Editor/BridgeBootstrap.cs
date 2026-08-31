@@ -55,6 +55,58 @@ namespace UnityIDE.Bridge
         private static BridgeClient _client;
         private static bool _started;
 
+        /// <summary>
+        /// True when an IDE has this project open and the handshake has
+        /// completed.
+        ///
+        /// This is deliberately the client's live state, not "does
+        /// Library/UnityIDE/bridge.json exist". A crashed IDE leaves that file
+        /// behind, and trusting it would send an open_file into a journal
+        /// nobody is reading — the double-click would silently do nothing
+        /// instead of falling back to launching the app.
+        /// </summary>
+        internal static bool IsConnected
+        {
+            get { return _client != null && _client.IsConnected; }
+        }
+
+        /// <summary>
+        /// The pid of the IDE holding this project open, or 0 when unknown.
+        /// Windows needs it to hand foreground rights to a background process
+        /// (see UnityIDELauncher.AllowForeground).
+        /// </summary>
+        internal static int IdePid
+        {
+            get
+            {
+                BridgeDiscovery disc;
+                if (!Discovery.TryResolve(Discovery.ProjectRoot(Application.dataPath), out disc))
+                    return 0;
+                return disc.IdePid;
+            }
+        }
+
+        /// <summary>
+        /// Send an envelope to the connected IDE. False when there is no live
+        /// connection, which is the caller's signal to fall back to launching.
+        /// Never throws.
+        /// </summary>
+        internal static bool TrySend(JsonValue envelope)
+        {
+            var client = _client;
+            if (client == null || !client.IsConnected) return false;
+            try
+            {
+                client.Send(envelope);
+                return true;
+            }
+            catch (Exception e)
+            {
+                global::UnityIDE.Editor.UnityIDELog.Warn("could not reach the running IDE: " + e.Message);
+                return false;
+            }
+        }
+
         static BridgeBootstrap()
         {
             // Defer the actual startup by one tick. Touching some Unity APIs (and

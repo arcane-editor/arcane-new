@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useRecentsStore } from './stores/recents';
-import { openProjectInNewWindow, routePendingGotoToProjectWindow } from './features/project';
+import { openDroppedProject, openProjectInNewWindow, routePendingOpenToProjectWindow } from './features/project';
 import { listenScoped, safeUnlisten } from './utils/tauri-listener';
 import { formatRelativeDate } from './utils/date';
 import { Folder, FolderOpen } from 'lucide-react';
@@ -44,18 +44,55 @@ function WelcomeApp() {
 
   useEffect(() => { void reload(); }, [reload]);
 
-  // Unity launches us as `UnityIDE.exe --goto <file>:<line>:<col> <project>`.
-  // When no window has that project open, this one routes it: open the project
-  // window, which then claims the target itself on boot. Also re-checked on
-  // `unityide-goto-pending`, which the single-instance handler emits when an
-  // already-running app is launched again by Unity.
+  // Unity launches us as `UnityIDE --goto <file>:<line>:<col> <project>` or
+  // `UnityIDE --project <project>`. When no window has that project open, this
+  // one routes it: open the project window, which then claims the request
+  // itself on boot. Also re-checked on `unityide-open-pending`, which the
+  // single-instance handler emits when an already-running app is launched again
+  // by Unity.
+  //
+  // This window is declared `"visible": false` so a launch from Unity does not
+  // flash a 720x480 panel on its way to the project window. Rust shows it for
+  // every launch that carried no project. When it IS hidden it is only here to
+  // route, so it closes itself once it has — and shows itself instead if it
+  // could not, because then it is the only surface the user has left.
   useEffect(() => {
     let unlisten: (() => void) | null = null;
     let cancelled = false;
-    void routePendingGotoToProjectWindow();
+    const route = async () => {
+      // Were we brought into being purely to route? A hidden welcome window is
+      // one nobody asked to see. Checked BEFORE routing, because routing is
+      // what makes it redundant.
+      let wasHidden = false;
+      try {
+        wasHidden = !(await getCurrentWindow().isVisible());
+      } catch { /* treat as visible: never close a window we are unsure about */ }
+
+      if (await routePendingOpenToProjectWindow()) {
+        // Routed. Close rather than linger hidden: an invisible window still
+        // counts as a window, so on Windows and Linux it would keep the process
+        // alive after the user closes the project window, with nothing on
+        // screen and no way back to it.
+        if (wasHidden) {
+          try {
+            await getCurrentWindow().close();
+          } catch { /* ignore */ }
+        }
+        return;
+      }
+
+      // Nothing to route, or routing failed (a moved project, a window that
+      // failed to spawn). Either way this window is the only surface left.
+      if (wasHidden) {
+        try {
+          await getCurrentWindow().show();
+        } catch { /* ignore */ }
+      }
+    };
+    void route();
     (async () => {
-      const fn = await listenScoped('unityide-goto-pending', () => {
-        void routePendingGotoToProjectWindow();
+      const fn = await listenScoped('unityide-open-pending', () => {
+        void route();
       });
       if (cancelled) safeUnlisten(fn);
       else unlisten = fn;
@@ -90,6 +127,7 @@ function WelcomeApp() {
   // `menu-action` listener below (registered once, on mount) always invokes
   // the current one — not a stale closure from the render it subscribed in.
   const pickFolderRef = useRef<() => void>(() => {});
+  const openDroppedProjectRef = useRef<(paths: string[]) => void>(() => {});
 
   // Native menu (macOS): `menu-action` is routed to the FOCUSED window. Now
   // that the welcome window stays open after spawning a project window,
@@ -135,6 +173,43 @@ function WelcomeApp() {
     }
   }
   pickFolderRef.current = pickFolder;
+
+  async function handleProjectDrop(paths: string[]) {
+    if (busy) return;
+    clearError();
+    setBusy(true);
+    try {
+      const opened = await openDroppedProject(paths);
+      if (!opened) showError('Drop exactly one folder to open it.');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      showError(`Couldn't open the dropped folder - it may have been moved or deleted. (${msg})`);
+    } finally {
+      setBusy(false);
+    }
+  }
+  openDroppedProjectRef.current = handleProjectDrop;
+
+  // Tauri intercepts Finder/Explorer drops natively, so this window cannot
+  // observe HTML5 drop events. Keep this listener in the manager only; project
+  // windows retain their existing file, terminal, AI, and Explorer drop routes.
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    let cancelled = false;
+    (async () => {
+      const fn = await getCurrentWindow().onDragDropEvent((event) => {
+        if (event.payload.type === 'drop') {
+          void openDroppedProjectRef.current(event.payload.paths);
+        }
+      });
+      if (cancelled) safeUnlisten(fn);
+      else unlisten = fn;
+    })();
+    return () => {
+      cancelled = true;
+      safeUnlisten(unlisten);
+    };
+  }, []);
 
   async function pickRecent(path: string) {
     if (busy) return;

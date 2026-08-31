@@ -4,14 +4,16 @@ export { initialBootSurface } from './services/boot-gate';
 export type { BootSurface } from './services/boot-gate';
 export {
   openProjectInNewWindow,
+  openDroppedProject,
   openFolderInNewWindow,
   openWelcomeWindow,
   setProjectWindowTitle,
 } from './services/multi-window';
 export {
-  consumePendingGotoForWorkspace,
-  routePendingGotoToProjectWindow,
-} from './services/startup-goto';
+  consumePendingOpenForWorkspace,
+  routePendingOpenToProjectWindow,
+} from './services/startup-open';
+export type { OpenRequest, StartupOpenDeps } from './services/startup-open';
 export { rootBannerFor } from './services/root-banner';
 export type { RootBanner, RootBannerInput } from './services/root-banner';
 export { signpostShortcuts } from './services/signpost';

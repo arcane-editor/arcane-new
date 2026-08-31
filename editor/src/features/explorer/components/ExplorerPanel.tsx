@@ -23,7 +23,7 @@ import InlineInput from './InlineInput';
 import TypedConfirmDialog from './TypedConfirmDialog';
 import ImpactDeleteDialog from './ImpactDeleteDialog';
 import MetaChoiceDialog from './MetaChoiceDialog';
-import { applyUnityTreeView } from '../services/unity-tree-view';
+import { applyUnityTreeView, explorerRootFor } from '../services/unity-tree-view';
 import { ancestorDirs, consumePendingReveal } from '../services/reveal';
 import { copyIntoDir, existingMetaSiblings } from '../services/drop-target';
 import { startPointerDrag } from '../../../utils/pointer-drag';
@@ -399,8 +399,7 @@ function ExplorerPanel() {
 
   // The directory the tree is rooted at. For Unity projects this is <root>/Assets
   // (so the explorer shows only Assets contents); otherwise the project root.
-  const treeRoot = assetsRootPath ?? workspacePath;
-  const workspaceName = treeRoot.split('/').pop() || treeRoot;
+  const { treeRoot, workspaceName } = explorerRootFor(workspacePath, assetsRootPath);
 
   function handleRefresh() {
     // NOT setWorkspace(). That is the full workspace-switch action: it closes

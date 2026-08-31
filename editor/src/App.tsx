@@ -33,7 +33,7 @@ import {
   openFolderInNewWindow,
   setProjectWindowTitle,
   initialBootSurface,
-  consumePendingGotoForWorkspace,
+  consumePendingOpenForWorkspace,
 } from './features/project';
 import { startUpdateNotices } from './features/updates';
 import {
@@ -487,12 +487,23 @@ function App() {
             store.setActiveFile(activeToSet);
           }
         }
-        // Unity's `--goto` lands last, so it wins over the restored active
-        // tab: the user double-clicked a specific script and that is what
-        // they are waiting to see. The claim is conditional on the Rust side,
-        // so a target belonging to another project stays pending for the
-        // window that owns it.
-        await consumePendingGotoForWorkspace(workspacePath);
+        // Announce which project this window owns, so the single-instance
+        // handler can route a later launch straight here and raise THIS
+        // window instead of putting the welcome panel in front of it. After
+        // setWorkspace, never before: a window that is still booting cannot
+        // serve a request, and registering early would route one to a window
+        // that then fails to open the project.
+        try {
+          await invoke('register_window_workspace', { workspacePath });
+        } catch {
+          // Only costs us the direct route; the welcome window still relays.
+        }
+        // Unity's request lands last, so it wins over the restored active tab:
+        // the user double-clicked a specific script and that is what they are
+        // waiting to see. The claim is conditional on the Rust side, so a
+        // request belonging to another project stays pending for the window
+        // that owns it.
+        await consumePendingOpenForWorkspace(workspacePath);
       }).catch((err) => {
         // setWorkspace's own catch already surfaces a user-facing toast
         // (path + "moved or deleted" hint) before rethrowing — this handler
@@ -597,15 +608,16 @@ function App() {
   }, []);
 
   // Unity re-launching an already-running app: the single-instance handler
-  // stores the --goto and emits this. Every project window tries to claim it;
-  // the Rust side only hands it to the one whose workspace matches, so exactly
-  // one window opens the file and the rest are no-ops.
+  // stores the request and emits this. It targets this window directly when the
+  // registry knows we own the project, and goes to every window otherwise; the
+  // Rust side only hands the request to the one whose workspace matches, so
+  // exactly one window acts on it and the rest are no-ops.
   useEffect(() => {
     let unlisten: (() => void) | null = null;
     let cancelled = false;
     (async () => {
-      const fn = await listenScoped('unityide-goto-pending', () => {
-        void consumePendingGotoForWorkspace(useWorkspaceStore.getState().workspacePath);
+      const fn = await listenScoped('unityide-open-pending', () => {
+        void consumePendingOpenForWorkspace(useWorkspaceStore.getState().workspacePath);
       });
       if (cancelled) safeUnlisten(fn);
       else unlisten = fn;
