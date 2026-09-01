@@ -3,9 +3,9 @@
 How UnityIDE updates itself, why it is built this way, and the things that break
 it silently.
 
-Implemented by Tasks 3–7 of `docs/superpowers/plans/2026-08-23-auto-update.md`.
-Tasks 8–10 (dev-channel manifests, site refresh on release, the plan's own
-verification pass) are **not** done — see [What is not built](#what-is-not-built).
+Implemented by Tasks 3–8 of `docs/superpowers/plans/2026-08-23-auto-update.md`.
+Tasks 9–10 (site refresh on release, the plan's own verification pass) are
+**not** done — see [What is not built](#what-is-not-built).
 
 ---
 
@@ -146,6 +146,64 @@ symptom:
 
 ---
 
+## The dev channel
+
+`dev-build.yml` mirrors the release job for the **UnityIDE Dev** app
+(`app.unityide.desktop.dev`), and publishes the same three things:
+
+```
+push to `dev`
+  └─ upload to `arcane-releases`:
+        dev/<sha7>/UnityIDE-Dev-arm64.dmg      what people download
+        dev/latest/UnityIDE-Dev-arm64.dmg      (a stable copy of the same)
+        dev/<sha7>/UnityIDE-Dev.app.tar.gz     what the updater fetches
+        dev/latest/darwin-aarch64.json         the manifest  (max-age=300)
+        dev/latest/windows-x86_64.json
+```
+
+Three differences from production, each deliberate:
+
+| | Production | Dev |
+|---|---|---|
+| Version comes from | the pushed `v*` tag | `editor/package.json` — there is no tag |
+| Immutable path | `v0.3.3/` | `dev/<sha7>/` |
+| macOS updater name | `UnityIDE.app.tar.gz` | `UnityIDE-Dev.app.tar.gz` |
+
+The macOS bundle is literally `UnityIDE Dev.app.tar.gz`, with a space. It is
+renamed on the way out because the name lands in a manifest url; the signature
+covers bytes, not filenames, so renaming is safe.
+
+### Dev updates track version bumps, not merges
+
+Every dev build between two version bumps reports the **same** version, because
+`tauri.dev.conf.json` inherits `"version": "../package.json"` from the base
+config. The updater compares versions, so it will not offer 0.3.3 to a machine
+already running 0.3.3 — a second merge to `dev` at an unchanged version
+publishes a new manifest that no client acts on.
+
+This is the intended trade. Encoding a per-build version instead would leak a
+build number into the UI, into the ACP `clientInfo` handshake and into every
+crash report, in order to make `dev` update more often than it is versioned.
+**Bump `editor/package.json` when you want dev installs to move.**
+
+### What made this fail silently for a whole release
+
+`tauri.dev.conf.json` named an updater endpoint from the day it was written, and
+`dev-build.yml` never wrote anything to it. UnityIDE Dev polled
+`dev/latest/darwin-aarch64.json`, got a 404, logged one line to stderr and went
+quiet for six hours — so UnityIDE Dev 0.3.2 sat there while 0.3.3 shipped to the
+same bucket. Two separate causes, both invisible:
+
+- no manifest was ever written or uploaded, and
+- the macOS job built `--bundles dmg` alone. `dmg` is not updater-enabled, so no
+  `.app.tar.gz` existed to point a manifest at — and the job still passed.
+
+`checkVersionSync` now fails `bun run verify` on both, for **either** workflow:
+a channel that runs no `write-update-manifest.mjs`, one that uploads no `.json`,
+and any matrix entry building `dmg` without `app`.
+
+---
+
 ## Verifying a release actually worked
 
 Signed manifests fail *quietly*, so check rather than assume:
@@ -159,7 +217,10 @@ curl -sSI https://releases.unityide.app/latest/windows-x86_64.json | head -1
 curl -sS https://releases.unityide.app/latest/darwin-aarch64.json | grep url
 curl -sSI "<that url>" | head -1
 
-# 3. The app agrees: Settings → Updates shows the running version
+# 3. The same two on the dev channel
+curl -sS https://releases.unityide.app/dev/latest/darwin-aarch64.json | grep -E 'version|url'
+
+# 4. The app agrees: Settings → Updates shows the running version
 ```
 
 The Rust side logs to stderr with an `[updates]` prefix. Every failure path is
@@ -171,9 +232,6 @@ hear about.
 
 ## What is not built
 
-- **Task 8 — dev-channel manifests.** `tauri.dev.conf.json` has a valid pubkey
-  and an endpoint, but `dev-build.yml` publishes no manifests. UnityIDE Dev polls
-  and gets a 404: inert, not broken. Reuse `write-update-manifest.mjs`.
 - **Task 9 — refresh the production site on release.**
 - **Task 10 — the plan's own end-to-end verification pass.**
 

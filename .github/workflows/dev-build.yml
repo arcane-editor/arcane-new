@@ -2,7 +2,8 @@ name: Dev Build
 
 # Builds the side-by-side "UnityIDE Dev" app (identifier com.inno.editor.dev,
 # scheme unityide-dev://, config dir ~/.unityide-dev) with the DEV API/web URLs
-# baked in, and uploads installers to arcane-releases under dev/.
+# baked in, and uploads installers AND signed update manifests to
+# arcane-releases under dev/.
 #
 # Mirrors release.yml step-for-step — keep the two in sync. Same two repo
 # secrets (CLOUDFLARE_API_TOKEN with R2 edit, CLOUDFLARE_ACCOUNT_ID).
@@ -26,14 +27,28 @@ jobs:
         include:
           - os: macos-14          # Apple Silicon
             triple: aarch64-apple-darwin
-            bundles: dmg
+            # `app` as well as `dmg`: dmg is NOT an updater-enabled target, and
+            # building it alone logs "no updater-enabled targets were built"
+            # and produces no .app.tar.gz — while the job still succeeds.
+            bundles: app,dmg
             asset: UnityIDE-Dev-arm64.dmg
             glob: editor/src-tauri/target/release/bundle/dmg/*.dmg
+            platform_key: darwin-aarch64
+            # No space in the published name: it ends up in the manifest url.
+            # The bundle itself is "UnityIDE Dev.app.tar.gz" — the signature
+            # covers bytes, not the filename, so renaming is safe.
+            updater_asset: UnityIDE-Dev.app.tar.gz
+            updater_glob: editor/src-tauri/target/release/bundle/macos/*.app.tar.gz
           - os: windows-latest    # Windows x64
             triple: x86_64-pc-windows-msvc
             bundles: nsis
             asset: UnityIDEDevSetup.exe
             glob: editor/src-tauri/target/release/bundle/nsis/*-setup.exe
+            # On Windows the updater artifact IS the installer — the same file,
+            # with a .sig written beside it.
+            platform_key: windows-x86_64
+            updater_asset: UnityIDEDevSetup.exe
+            updater_glob: editor/src-tauri/target/release/bundle/nsis/*-setup.exe
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -93,10 +108,38 @@ jobs:
           VITE_WEB_URL: https://dev.unityide.app
         run: cd editor && bunx tauri build --bundles ${{ matrix.bundles }} --config src-tauri/tauri.dev.conf.json
 
-      - name: Stage installer under its public name
+      - name: Stage installer and updater artifact
         run: |
           mkdir -p dist-release
           cp "$(ls ${{ matrix.glob }} | head -n1)" "dist-release/${{ matrix.asset }}"
+          UP="$(ls ${{ matrix.updater_glob }} | head -n1)"
+          cp "$UP"      "dist-release/${{ matrix.updater_asset }}"
+          cp "$UP.sig"  "dist-release/${{ matrix.updater_asset }}.sig"
+
+      # The dev channel has no tag to take a version from, so it reads the one
+      # the binary actually reports — package.json, which tauri.dev.conf.json
+      # inherits via the base config's "version": "../package.json".
+      #
+      # CONSEQUENCE, deliberate: every dev build between two version bumps
+      # reports the SAME version, and the updater does not offer 0.3.3 to a
+      # machine already on 0.3.3. Dev auto-update therefore carries version
+      # bumps, not every merge to `dev`. Encoding a per-build version instead
+      # would leak a build number into the UI, the ACP clientInfo handshake and
+      # every crash report, to make `dev` update more often than it is versioned.
+      - name: Write the update manifest
+        run: |
+          SHA7="${GITHUB_SHA:0:7}"
+          V="$(node -p "require('./editor/package.json').version")"
+          # The url must be the immutable dev/$SHA7 copy, never dev/latest —
+          # write-update-manifest.mjs refuses /latest/ outright, because a
+          # download in flight would otherwise be swapped by the next build and
+          # the client would verify this signature against different bytes.
+          node editor/scripts/write-update-manifest.mjs \
+            --platform "${{ matrix.platform_key }}" \
+            --version  "$V" \
+            --url      "https://releases.unityide.app/dev/$SHA7/${{ matrix.updater_asset }}" \
+            --sig      "dist-release/${{ matrix.updater_asset }}.sig" \
+            --out      "dist-release/${{ matrix.platform_key }}.json"
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
@@ -112,6 +155,14 @@ jobs:
           SHA7="${GITHUB_SHA:0:7}"
           bunx wrangler r2 object put "arcane-releases/dev/$SHA7/${{ matrix.asset }}"  --file "dist-release/${{ matrix.asset }}" --remote
           bunx wrangler r2 object put "arcane-releases/dev/latest/${{ matrix.asset }}" --file "dist-release/${{ matrix.asset }}" --remote
+          # Only under $SHA7 — this is the object the manifest names, and it has
+          # to stay exactly the bytes that signature was made over.
+          bunx wrangler r2 object put "arcane-releases/dev/$SHA7/${{ matrix.updater_asset }}" --file "dist-release/${{ matrix.updater_asset }}" --remote
+          # The manifest is the one object that must never be served stale — it
+          # is how a rollback reaches clients. Short TTL, JSON content type.
+          bunx wrangler r2 object put "arcane-releases/dev/latest/${{ matrix.platform_key }}.json" \
+            --file "dist-release/${{ matrix.platform_key }}.json" --remote \
+            --content-type application/json --cache-control "max-age=300"
 
   # The dev-channel Unity package. Published alongside the dev app because the
   # two are one unit: the package generated for this channel targets the
