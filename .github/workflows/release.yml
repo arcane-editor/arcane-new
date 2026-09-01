@@ -199,10 +199,12 @@ jobs:
 
       - uses: oven-sh/setup-bun@v2
 
-      # deploy-prod.sh validates package structure + .meta files, then `npm pack`s
-      # the tarball (com.unityide.editor-<version>.tgz).
+      # deploy.sh validates package structure + .meta files, then `npm pack`s
+      # the tarball (com.unityide.editor-<version>.tgz). The release channel is
+      # the default and is what the checked-in source already is; the dev
+      # variant is built by dev-build.yml.
       - name: Build UPM tarball
-        run: cd arcane-extension && bash deploy-prod.sh
+        run: cd arcane-extension && bash deploy.sh release
 
       - name: Upload Unity extension to R2
         env:
@@ -217,6 +219,6 @@ jobs:
           V=$(node -p "require('./package.json').version")
           NAME=$(node -p "require('./package.json').name")
           TGZ="${NAME}-${V}.tgz"
-          test -f "$TGZ" || { echo "::error::expected $TGZ from deploy-prod.sh, not found"; exit 1; }
+          test -f "$TGZ" || { echo "::error::expected $TGZ from deploy.sh, not found"; exit 1; }
           bunx wrangler r2 object put "arcane-releases/unity-extension-releases/${TGZ}"                --file "$TGZ" --remote
           bunx wrangler r2 object put "arcane-releases/unity-extension-releases/latest/${NAME}.tgz"    --file "$TGZ" --remote

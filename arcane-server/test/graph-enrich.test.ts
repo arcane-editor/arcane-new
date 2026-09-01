@@ -2,24 +2,25 @@ import { describe, it, expect } from 'vitest';
 import { env, SELF } from 'cloudflare:test';
 import { seedPasswordUser, tokenFor } from './helpers.ts';
 import { MODEL_CATALOG } from '../src/lib/costs.ts';
-import { SPARK_MODEL, DEFAULT_MODEL_ROUTING } from '../src/config/plans.ts';
+import { EXECUTOR_MODEL, DEFAULT_MODEL_ROUTING } from '../src/config/plans.ts';
 import { clearConfigCache } from '../src/lib/app-config.ts';
 
 // Finding 1 (2026-08-22 final-review fix wave): /v1/graph/enrich used to hand
 // `routing.tiers.mid.executor` straight to `workersAiProvider`, which only
-// knows the Workers AI binding's own catalog — under the shipped default
-// routing that executor is SPARK_MODEL (a 'direct'-route id), so every call
-// 500'd. The fix serves via `resolveModel` (services/llm-router.ts) instead,
-// and adds the same effective-catalog serve guard chat.ts already has.
+// knows the Workers AI binding's own catalog — the shipped default executor
+// was SPARK_MODEL then (a 'direct'-route id), so every call 500'd. The fix
+// serves via `resolveModel` (services/llm-router.ts) instead, and adds the
+// same effective-catalog serve guard chat.ts already has. The default is a
+// @cf/ id again since 2026-08-27, but an admin can still route this tier at a
+// direct-route model, so both halves of the fix still earn their keep.
 //
 // This suite exercises the NEW guard end-to-end (no real network — the guard
 // returns before ever resolving a model). The "resolveModel can actually
 // serve the default mid.executor" half of the regression is covered at the
-// unit level in llm-router.test.ts (DEFAULT_MODEL_ROUTING ties to the spark
-// direct provider there) rather than here, matching this codebase's existing
-// convention (see chat-metering.test.ts / tier-gate.test.ts): a route-level
-// e2e request that actually reaches generateText for a spark/… id makes a
-// REAL fetch to the RFC-2606 spark.invalid host, which still errors
+// unit level in llm-router.test.ts ("graph enrich's default model") rather
+// than here, matching this codebase's existing convention (see
+// chat-metering.test.ts / tier-gate.test.ts): a route-level e2e request that
+// actually reaches generateText hits a real provider call, which still errors
 // correctly but logs a spurious Miniflare "uncaught exception" line.
 
 async function post(path: string, token: string, body: unknown): Promise<Response> {
@@ -41,13 +42,13 @@ describe('graph enrich serve guard: model_unconfigured', () => {
         const token = await tokenFor(user);
 
         // No model_routing row seeded → DEFAULT_MODEL_ROUTING applies, whose
-        // mid.executor is SPARK_MODEL (see plans.ts). Pull that entry out of
+        // mid.executor is EXECUTOR_MODEL (see plans.ts). Pull that entry out of
         // the live catalog so getEffectivePricing's merge no longer contains
         // it — simulating a routing doc/catalog drift, same technique as
         // chat-metering.test.ts's model_unconfigured test.
-        expect(DEFAULT_MODEL_ROUTING.tiers.mid.executor).toBe(SPARK_MODEL);
-        const saved = MODEL_CATALOG[SPARK_MODEL];
-        delete MODEL_CATALOG[SPARK_MODEL];
+        expect(DEFAULT_MODEL_ROUTING.tiers.mid.executor).toBe(EXECUTOR_MODEL);
+        const saved = MODEL_CATALOG[EXECUTOR_MODEL];
+        delete MODEL_CATALOG[EXECUTOR_MODEL];
         clearConfigCache(); // force a fresh getEffectivePricing read against the mutated catalog
         try {
             const res = await post('/v1/graph/enrich', token, ENRICH_BODY);
@@ -64,7 +65,7 @@ describe('graph enrich serve guard: model_unconfigured', () => {
             ).bind(user.id).first<{ n: number }>();
             expect(row!.n).toBe(0);
         } finally {
-            MODEL_CATALOG[SPARK_MODEL] = saved!;
+            MODEL_CATALOG[EXECUTOR_MODEL] = saved!;
             clearConfigCache();
         }
     });

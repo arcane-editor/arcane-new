@@ -7,3 +7,6 @@ Thumbs.db
 
 # Dev config (generated per-project, not part of source)
 .unityide-dev-path
+
+# Staging copy used to build the dev-channel package (deploy.sh dev).
+.pack-dev/

@@ -47,6 +47,16 @@ interface UnityIndexState {
   progress: IndexProgress | null;
   summary: IndexSummary | null;
   error: string | null;
+  /**
+   * Bumped every time the index content changes — full build AND incremental
+   * delta. Consumers that cache index-derived results key on this.
+   *
+   * `status` is not sufficient: a delta leaves status untouched, so anything
+   * watching status alone serves stale results until a full rebuild or an app
+   * restart. On a large project deltas are the normal path, so that staleness
+   * is permanent in practice.
+   */
+  indexRevision: number;
 
   /** Full build (persists + caches in Rust). Background, non-blocking. */
   build: (workspacePath: string, unityVersion: string, force?: boolean) => Promise<void>;
@@ -103,6 +113,7 @@ export const useUnityIndexStore = create<UnityIndexState>((set) => ({
   status: 'idle',
   progress: null,
   summary: null,
+  indexRevision: 0,
   error: null,
 
   build: async (workspacePath, unityVersion, force = false) => {
@@ -242,7 +253,10 @@ function initDeltaListener(): void {
         changed,
         removed: removedList,
       })
-        .then(() => invalidateGuidMap())
+        .then(() => {
+          invalidateGuidMap();
+          useUnityIndexStore.setState((s) => ({ indexRevision: s.indexRevision + 1 }));
+        })
         .catch((err) => {
           console.warn('[UnityIndex] apply_delta failed:', err);
         });

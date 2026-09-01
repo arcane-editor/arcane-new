@@ -67,6 +67,16 @@ export async function openProjectInNewWindow(rawPath: string): Promise<void> {
   });
 }
 
+/** Open the single folder dropped on the project-management window. */
+export async function openDroppedProject(
+  paths: string[],
+  openProject: (path: string) => Promise<void> = openProjectInNewWindow,
+): Promise<boolean> {
+  if (paths.length !== 1 || !paths[0]) return false;
+  await openProject(paths[0]);
+  return true;
+}
+
 export async function openFolderInNewWindow(): Promise<void> {
   const sel = await open({ directory: true, multiple: false, title: 'Open Folder' });
   if (typeof sel === 'string') await openProjectInNewWindow(sel);

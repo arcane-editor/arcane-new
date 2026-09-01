@@ -16,6 +16,7 @@ import FilePathChip from './FilePathChip';
 import ThinkingBlock from './ThinkingBlock';
 import ToolCallBlock from './ToolCallBlock';
 import StreamingIndicator from './StreamingIndicator';
+import { showsInlineIndicator } from '../services/working-indicator';
 
 // R2-T4: module-level constant so the plugins array is referentially stable
 // across renders — react-markdown otherwise sees a "new" remarkPlugins array
@@ -73,9 +74,17 @@ interface AssistantMessageProps {
    * normally happen, but session-restore edge cases are defensive here).
    */
   turnUserMessageId: string | null;
+  /**
+   * Whether this bubble is the last block in the transcript. Gates the
+   * streaming dots: they mean "more is coming", so they belong at the tail and
+   * nowhere else. When something has been appended after this message (a
+   * question card, a permission request), `MessageList` renders the dots as
+   * their own row down there instead — see `services/working-indicator.ts`.
+   */
+  isLast: boolean;
 }
 
-function AssistantMessage({ message, turnUserMessageId }: AssistantMessageProps) {
+function AssistantMessage({ message, turnUserMessageId, isLast }: AssistantMessageProps) {
   // T5/R2-T3: a turn with no renderable content (no text/thinking/tool call —
   // just the bare stopReason/errorMessage T4 preserves) would otherwise
   // render as an empty bubble. This covers both an error tail (the
@@ -126,7 +135,7 @@ function AssistantMessage({ message, turnUserMessageId }: AssistantMessageProps)
               return null;
           }
         })}
-        {message.isStreaming && <StreamingIndicator />}
+        {showsInlineIndicator(message, isLast) && <StreamingIndicator />}
         {/* Turn-final only: streaming not yet finished, or a stopReason other
             than 'stop' (e.g. 'toolUse'), means there's another assistant
             message still coming in this turn — showing the served model on an

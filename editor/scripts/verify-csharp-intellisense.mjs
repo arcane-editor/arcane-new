@@ -29,6 +29,27 @@ const EDITOR_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '.
 const REQUIRED = process.env.UNITYIDE_INTELLISENSE_E2E === 'required';
 const MIN_COMPLETIONS = 20; // `transform.` alone yields ~98; 20 is "clearly working"
 
+// Server capabilities the editor's providers are built on. csharp-ls advertises
+// every one of these today, so a missing entry means the server was downgraded
+// or swapped — which removes an editor feature silently, with no error on
+// either side, exactly like the ACP capability switches in CLAUDE.md.
+//
+// `foldingRangeProvider` and `selectionRangeProvider` are deliberately absent:
+// csharp-ls 0.22 does not implement them, and Monaco falls back to
+// indentation-based folding. Do not add them here without re-probing.
+const REQUIRED_CAPABILITIES = [
+  'definitionProvider',
+  'documentFormattingProvider',
+  'documentSymbolProvider',
+  'hoverProvider',
+  'implementationProvider',
+  'referencesProvider',
+  'renameProvider',
+  'semanticTokensProvider',
+  'typeDefinitionProvider',
+  'workspaceSymbolProvider',
+];
+
 // Developer-machine fallbacks, tried in order. These are real directories on
 // someone's disk, NOT brand strings — the rename sweep rewrote "Arcane Demo" to
 // "UnityIDE Demo" here and the check immediately stopped finding a project.
@@ -122,6 +143,11 @@ const pending = new Map();
 let nextId = 1;
 let solutionLoaded = false;
 const logs = [];
+// Capabilities can arrive AFTER initialize, via client/registerCapability.
+// Answering that request with `null` and dropping the payload — which this
+// script did — makes a dynamically-registered provider invisible to the
+// capability report below, so a feature could look absent while working fine.
+const dynamicRegistrations = [];
 
 server.stdout.on('data', (chunk) => {
   buf = Buffer.concat([buf, chunk]);
@@ -144,6 +170,9 @@ server.stdout.on('data', (chunk) => {
       if (/Finished loading/i.test(msg.params.message)) solutionLoaded = true;
     } else if (msg.id !== undefined && msg.method) {
       // Server-to-client request: answer so it doesn't block.
+      if (msg.method === 'client/registerCapability') {
+        for (const reg of msg.params?.registrations ?? []) dynamicRegistrations.push(reg.method);
+      }
       send({ jsonrpc: '2.0', id: msg.id, result: msg.method === 'workspace/configuration' ? [{}] : null });
     }
   }
@@ -167,7 +196,13 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const uriOf = (p) => 'file://' + encodeURI(p);
 
 try {
-  await request('initialize', {
+  // These capabilities mirror `src/features/lsp/services/client.ts`. They are
+  // duplicated rather than imported on purpose: this script is dependency-free
+  // plain node, with no bundler and no TS. The duplication is load-bearing, not
+  // laziness — a server may gate its own capability on the client declaring the
+  // matching one, so a probe that asks for less than the editor does would
+  // report a feature missing that actually works (and vice versa).
+  const init = await request('initialize', {
     processId: null,
     rootUri: uriOf(project),
     workspaceFolders: [{ uri: uriOf(project), name: path.basename(project) }],
@@ -176,11 +211,43 @@ try {
         completion: { contextSupport: true, completionItem: { snippetSupport: true } },
         hover: { contentFormat: ['markdown', 'plaintext'] },
         diagnostic: { dynamicRegistration: false, relatedDocumentSupport: false },
+        definition: { linkSupport: true },
+        typeDefinition: { linkSupport: true },
+        implementation: { linkSupport: true },
+        references: {},
+        documentHighlight: {},
+        documentSymbol: { hierarchicalDocumentSymbolSupport: true },
+        rename: { prepareSupport: true },
+        formatting: {},
+        rangeFormatting: {},
+        onTypeFormatting: {},
+        callHierarchy: {},
+        typeHierarchy: {},
+        inlayHint: {},
+        foldingRange: {},
+        selectionRange: {},
+        semanticTokens: {
+          requests: { full: true, range: true },
+          formats: ['relative'],
+          tokenTypes: [],
+          tokenModifiers: [],
+        },
+        codeAction: {
+          codeActionLiteralSupport: {
+            codeActionKind: { valueSet: ['', 'quickfix', 'refactor'] },
+          },
+        },
       },
-      workspace: { configuration: true, workspaceFolders: true },
+      workspace: {
+        configuration: true,
+        workspaceFolders: true,
+        symbol: {},
+        applyEdit: true,
+      },
     },
   });
   notify('initialized', {});
+  const serverCaps = init.result?.capabilities ?? {};
 
   // Synthetic content for a path the generated csproj already globs in. Keeps
   // the assertions independent of whatever the user happens to have written.
@@ -302,6 +369,82 @@ try {
     );
   }
 
+  // ── server capabilities ──────────────────────────────────────────────────
+  //
+  // Completion and hover prove Roslyn resolved the reference set. They say
+  // nothing about the other providers the editor registers. A csharp-ls that
+  // stopped advertising `documentSymbolProvider` would take Go-to-Symbol and
+  // the outline with it, silently, while everything above still printed PASS.
+  const advertised = new Set([...Object.keys(serverCaps), ...dynamicRegistrations]);
+  const missing = REQUIRED_CAPABILITIES.filter((c) => !advertised.has(c));
+  if (missing.length) {
+    fail(
+      `csharp-ls no longer advertises ${missing.length} capability the editor depends on`,
+      `    missing: ${missing.join(', ')}\n` +
+        `    advertised: ${[...advertised].sort().join(', ')}\n` +
+        '  Each missing capability removes an editor feature with no error on\n' +
+        '  either side. Check the installed csharp-ls version (dotnet tool list -g).',
+    );
+  }
+
+  // ── refactoring surface ──────────────────────────────────────────────────
+  //
+  // `codeActionProvider` is advertised as a bare `true` with no
+  // `codeActionKinds`, so the only way to learn which Roslyn refactorings are
+  // reachable is to ask for them on real, syntactically valid code. The probe
+  // text above ends in a deliberate `transform.` syntax error, which suppresses
+  // refactorings across the whole file — so swap in a clean body first.
+  const REFACTOR_PROBE = [
+    'using UnityEngine;',
+    '',
+    'public class UnityIDEIntelliSenseProbe : MonoBehaviour',
+    '{',
+    '    private void Update()',
+    '    {',
+    '        int total = 1 + 2;',
+    '        Debug.Log(total);',
+    '    }',
+    '}',
+    '',
+  ].join('\n');
+  const rLines = REFACTOR_PROBE.split('\n');
+  const exprLine = rLines.findIndex((l) => l.includes('1 + 2'));
+  const lastStmt = rLines.findIndex((l) => l.includes('Debug.Log(total)'));
+  const exprCol = rLines[exprLine].indexOf('1 + 2');
+
+  notify('textDocument/didChange', {
+    textDocument: { uri: uriOf(probeFile), version: 2 },
+    contentChanges: [{ text: REFACTOR_PROBE }],
+  });
+  await sleep(1500);
+
+  const askRefactor = async (label, range) => {
+    const res = await request('textDocument/codeAction', {
+      textDocument: { uri: uriOf(probeFile) },
+      range,
+      context: { diagnostics: [], only: ['refactor'], triggerKind: 1 },
+    });
+    const actions = Array.isArray(res.result) ? res.result : [];
+    console.log(`  refactor    ${label}: ${actions.length} offered`);
+    for (const a of actions) console.log(`                • ${a.title}${a.kind ? `  [${a.kind}]` : ''}`);
+    return actions;
+  };
+
+  const onExpression = await askRefactor('over `1 + 2`', {
+    start: { line: exprLine, character: exprCol },
+    end: { line: exprLine, character: exprCol + '1 + 2'.length },
+  });
+  const onBody = await askRefactor('over the method body', {
+    start: { line: exprLine, character: 8 },
+    end: { line: lastStmt, character: rLines[lastStmt].length },
+  });
+  if (onExpression.length + onBody.length === 0) {
+    console.log('  refactor    none offered — §4 needs its own engine, not just a UI');
+  }
+
+  console.log('');
+  console.log(`  capabilities ${REQUIRED_CAPABILITIES.length} required present` +
+    (dynamicRegistrations.length ? ` (+${dynamicRegistrations.length} dynamic)` : ''));
   console.log(`  completions ${labels.length} on \`transform.\` (position, rotation, localScale present)`);
   console.log('  hover       MonoBehaviour resolves');
   console.log('  corelib     no CS0518/CS0433 — exactly one corelib in the project\n');

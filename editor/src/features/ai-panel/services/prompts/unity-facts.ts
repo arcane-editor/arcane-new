@@ -15,14 +15,20 @@ import { invoke } from '@tauri-apps/api/core';
 import { useProjectContextStore } from '../../../../stores/project-context';
 import { useWorkspaceStore } from '../../../../stores/workspace';
 import { useAsmdefStore } from '../../../../stores/asmdef';
-import { contrastFactLines, type ContrastInputSystem } from './unity-contrast';
+import { contrastFactLines } from './unity-contrast';
+import {
+  detectInputSystem,
+  inputSystemLabel,
+  type InputSystemMode,
+} from '../../../../utils/input-system';
 
 type RenderPipeline = 'URP' | 'HDRP' | 'Built-in';
 
 interface UnityFacts {
   workspacePath: string;
   renderPipeline: RenderPipeline;
-  inputSystem: string; // "New", "Legacy", "Both", or "Unknown"
+  /** Tri-state, not prose — `inputSystemLabel()` renders it for the prompt. */
+  inputSystem: InputSystemMode;
   keyPackages: Array<{ name: string; version: string }>;
   unityRules: string | null; // contents of .ai/unity-rules.md
 }
@@ -49,27 +55,6 @@ function detectRenderPipeline(deps: Record<string, string>): RenderPipeline {
   if (deps['com.unity.render-pipelines.universal']) return 'URP';
   if (deps['com.unity.render-pipelines.high-definition']) return 'HDRP';
   return 'Built-in';
-}
-
-/** Read `activeInputHandler` from ProjectSettings.asset (0=legacy,1=new,2=both). */
-function detectInputSystem(projectSettings: string | null, hasInputSystemPkg: boolean): string {
-  if (projectSettings) {
-    const m = projectSettings.match(/activeInputHandler:\s*(\d)/);
-    if (m) {
-      return m[1] === '0' ? 'Legacy' : m[1] === '1' ? 'New (Input System)' : 'Both';
-    }
-  }
-  return hasInputSystemPkg ? 'New (Input System) available' : 'Legacy';
-}
-
-/**
- * Collapse the wordy `inputSystem` label above (`"New (Input System)"`,
- * `"New (Input System) available"`, `"Both"`, `"Legacy"`) to the tri-state
- * `ContrastInputSystem` the contrast table and `getUnityGroundingContext()`
- * key their detection off of — same substring-matching rule both already used.
- */
-function deriveContrastInputSystem(inputSystemLabel: string): ContrastInputSystem {
-  return inputSystemLabel.includes('New') ? 'New' : inputSystemLabel.includes('Both') ? 'Both' : 'Legacy';
 }
 
 /** Populate the facts cache for a workspace (idempotent, best-effort). */
@@ -142,7 +127,7 @@ export function getUnityFactsBlock(): string | null {
 
   if (facts) {
     lines.push(`- Render pipeline: ${facts.renderPipeline}`);
-    lines.push(`- Input system: ${facts.inputSystem}`);
+    lines.push(`- Input system: ${inputSystemLabel(facts.inputSystem)}`);
     if (facts.keyPackages.length > 0) {
       lines.push(
         `- Key packages: ${facts.keyPackages.map((p) => `${p.name}@${p.version}`).join(', ')}`,
@@ -172,7 +157,7 @@ export function getUnityFactsBlock(): string | null {
     lines.push(
       ...contrastFactLines({
         renderPipeline: facts.renderPipeline,
-        inputSystem: deriveContrastInputSystem(facts.inputSystem),
+        inputSystem: facts.inputSystem,
       }),
     );
   }
@@ -208,7 +193,7 @@ export function getUnityGroundingContext(): {
   const facts = cache?.workspacePath === workspacePath ? cache : null;
   if (!facts && workspacePath) void primeUnityFacts(workspacePath);
 
-  const inputSystem = facts ? deriveContrastInputSystem(facts.inputSystem) : undefined;
+  const inputSystem = facts?.inputSystem;
   return { unityVersion: ctx.unityVersion ?? null, renderPipeline: facts?.renderPipeline, inputSystem };
 }
 

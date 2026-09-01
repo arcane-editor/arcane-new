@@ -59,8 +59,13 @@ export interface CompilationPayload {
 
 export interface OpenFilePayload {
   path: string;
-  line: number;
-  column: number;
+  /**
+   * 1-based position to land on. Optional on the wire: a Unity package older
+   * than the one that started sending them omits both, and "open the file" is
+   * still the right thing to do without a position.
+   */
+  line?: number;
+  column?: number;
 }
 
 /** One play-mode telemetry sample (F-4.5), emitted ≤4Hz while playing. */

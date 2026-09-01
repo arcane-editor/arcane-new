@@ -5,6 +5,8 @@ import type {
   IDisposable,
   Uri as MonacoUri,
 } from 'monaco-editor';
+import { invoke } from '@tauri-apps/api/core';
+import { formatMethodTitle, type MethodUsage } from './method-usage-title';
 import { useProjectContextStore } from '../../../stores/project-context';
 import { useWorkspaceStore } from '../../../stores/workspace';
 import { useSettingsStore } from '../../../stores/settings';
@@ -100,6 +102,43 @@ async function getCounts(guid: string): Promise<UsageCounts> {
   }
 }
 
+/** Method-usage cache, keyed like `getCounts` and invalidated by the same generation. */
+const methodCache = new Map<string, { gen: number; usages: MethodUsage[] }>();
+const methodInflight = new Map<string, Promise<MethodUsage[]>>();
+
+/**
+ * Resolve method-level usages for a guid.
+ *
+ * MUST be cached and de-duplicated the same way `getCounts` is: Monaco re-runs
+ * `provideCodeLenses` on every model change, and this command reads and parses
+ * EVERY scene and prefab that references the script. Uncached, a common
+ * MonoBehaviour meant re-parsing hundreds of assets on each keystroke.
+ */
+async function getMethodUsages(guid: string, workspacePath: string): Promise<MethodUsage[]> {
+  const cached = methodCache.get(guid);
+  if (cached && cached.gen === indexGeneration) return cached.usages;
+
+  const existing = methodInflight.get(guid);
+  if (existing) return existing;
+
+  const gen = indexGeneration;
+  const promise = (async () => {
+    const usages = await invoke<MethodUsage[]>('unity_method_usages', {
+      workspacePath,
+      guid,
+    });
+    methodCache.set(guid, { gen, usages });
+    return usages;
+  })();
+
+  methodInflight.set(guid, promise);
+  try {
+    return await promise;
+  } finally {
+    methodInflight.delete(guid);
+  }
+}
+
 /** "Used in 3 prefabs, 2 scenes" — pluralized, zero-kinds omitted, '' when total 0. */
 function formatTitle(counts: UsageCounts): string {
   const parts: string[] = [];
@@ -132,13 +171,24 @@ class UsageCodeLensProvider implements languages.CodeLensProvider {
     // Recompute lenses when the index finishes (re)building: bump the cache
     // generation so getCounts() refetches, then ask Monaco to re-request.
     let lastStatus = useUnityIndexStore.getState().status;
+    let lastRevision = useUnityIndexStore.getState().indexRevision;
     const unsubIndex = useUnityIndexStore.subscribe((state) => {
-      if (state.status === lastStatus) return;
+      // Two triggers, not one. `status` covers a full (re)build; `indexRevision`
+      // covers incremental deltas, which leave status untouched — without it,
+      // rewiring a UnityEvent in Unity left this lens showing the previous
+      // method names until the app restarted.
+      const rebuilt = state.status !== lastStatus && state.status === 'ready';
+      const delta = state.indexRevision !== lastRevision;
       lastStatus = state.status;
-      if (state.status === 'ready') {
-        indexGeneration += 1;
-        emitter.fire(this);
-      }
+      lastRevision = state.indexRevision;
+      if (!rebuilt && !delta) return;
+      indexGeneration += 1;
+      // Drop the entries outright rather than relying on the generation check
+      // alone, so a long session cannot accumulate one dead entry per script
+      // per index change.
+      cache.clear();
+      methodCache.clear();
+      emitter.fire(this);
     });
     this.disposers.push(unsubIndex);
 
@@ -183,7 +233,20 @@ class UsageCodeLensProvider implements languages.CodeLensProvider {
     if (!guid) return empty;
 
     const counts = await getCounts(guid);
-    const title = formatTitle(counts);
+    let title = formatTitle(counts);
+    // Append the method-level detail when any UnityEvent points at this
+    // script. Failures are swallowed: the file-level lens is still useful on
+    // its own, and a broken index must not remove it.
+    try {
+      const workspacePath = useWorkspaceStore.getState().workspacePath;
+      if (workspacePath && title) {
+        const methods = await getMethodUsages(guid, workspacePath);
+        const detail = formatMethodTitle(methods);
+        if (detail) title = `${title} — ${detail}`;
+      }
+    } catch {
+      /* keep the file-level lens */
+    }
     // Default: show nothing when the script isn't referenced anywhere, to keep
     // the gutter quiet.
     if (!title) return empty;

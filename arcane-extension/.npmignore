@@ -1,6 +1,7 @@
 # Dev-only files — excluded from npm pack / UPM tarball
 install-dev.sh
-deploy-prod.sh
+deploy.sh
+.pack-dev/
 .gitignore
 .npmignore
 .DS_Store

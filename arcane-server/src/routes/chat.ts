@@ -10,6 +10,7 @@ import { getUserBillingRow } from '../lib/db.ts';
 import { getModelRouting, getEffectivePricing } from '../lib/app-config.ts';
 import { recordUsage } from '../lib/usage.ts';
 import { logChatError } from '../lib/log.ts';
+import { startHeartbeat, SSE_HEARTBEAT_FRAME } from '../lib/sse-heartbeat.ts';
 import type { AuthPayload } from '../middleware/auth.ts';
 
 export const chatRouter = new Hono<AppEnv>();
@@ -173,7 +174,7 @@ chatRouter.post('/v1/chat/completions', async (c) => {
     }
 
     // Streaming: SSE with StreamEvent format
-    return streamSSE(c, async (stream) => {
+    const sseResponse = streamSSE(c, async (stream) => {
         let inputTokens = 0;
         let outputTokens = 0;
         let cachedInputTokens = 0;
@@ -186,8 +187,35 @@ chatRouter.post('/v1/chat/completions', async (c) => {
         // is the only reliable disconnect notification.
         const clientSignal = c.req.raw.signal;
 
+        // Keepalive (see lib/sse-heartbeat.ts for the full why). `streamSSE`
+        // already handed the client its response headers, and the editor
+        // starts a first-token watchdog off them — but nothing is written
+        // here until the model emits its first event, so that watchdog was
+        // timing model latency and killing slow turns with "Stream stalled
+        // before the first token". This first frame proves the connection
+        // immediately; the timer keeps proving it while the model thinks.
+        await stream.write(SSE_HEARTBEAT_FRAME);
+
+        // Because heartbeats make the client watchdogs unable to distinguish
+        // "still thinking" from "provider dead", the real liveness check
+        // moves here: no upstream event for UPSTREAM_STALL_TIMEOUT_MS aborts
+        // the provider call, which unwinds into the catch below as a visible
+        // error rather than an open connection nobody is ever going to close.
+        const upstreamStall = new AbortController();
+        const heartbeat = startHeartbeat({
+            write: (frame) => {
+                if (stream.closed || stream.aborted || clientSignal.aborted) return;
+                void stream.write(frame);
+            },
+            onStall: (idleMs) => upstreamStall.abort(
+                new Error(`upstream produced no events for ${idleMs}ms`),
+            ),
+        });
+
         try {
-            for await (const event of streamCompletion(body, env, undefined, clientSignal, pricing.catalog)) {
+            const upstreamSignal = AbortSignal.any([clientSignal, upstreamStall.signal]);
+            for await (const event of streamCompletion(body, env, undefined, upstreamSignal, pricing.catalog)) {
+                heartbeat.sawEvent();
                 if (event.type === 'text') streamedChars += event.content.length;
                 if (event.type === 'tool_call') streamedChars += event.arguments.length;
                 if (event.type === 'usage') {
@@ -204,9 +232,18 @@ chatRouter.post('/v1/chat/completions', async (c) => {
             }
             await stream.writeSSE({ data: '[DONE]' });
         } catch (err) {
-            // An abort surfaces as a throw from the AI SDK — that's the
-            // expected Stop path, not a server error worth logging/forwarding.
-            if (!clientSignal.aborted) {
+            // An abort surfaces as a throw from the AI SDK. Which abort it
+            // was decides everything: the client's Stop is the expected happy
+            // path (silent), ours is a dead provider the user must be told
+            // about — and telling them is the whole point of the stall cap,
+            // since heartbeats have taken that job away from the client.
+            if (upstreamStall.signal.aborted) {
+                const message = 'The model stopped responding before producing any output. Please try again.';
+                logChatError(errCtx, 'chat.stream.upstream_stall', message);
+                await stream.writeSSE({
+                    data: JSON.stringify({ type: 'error', code: 'server_error', message }),
+                });
+            } else if (!clientSignal.aborted) {
                 const message = err instanceof Error ? err.message : String(err);
                 logChatError(errCtx, 'chat.stream.catch', message);
                 await stream.writeSSE({
@@ -214,6 +251,7 @@ chatRouter.post('/v1/chat/completions', async (c) => {
                 });
             }
         } finally {
+            heartbeat.stop();
             // Aborted/errored streams end with no 'finish' part, so usage was
             // metered as 0x0 — the delivered tokens were free and invisible
             // to the $1/hr cap. Estimate from what actually streamed.
@@ -241,4 +279,21 @@ chatRouter.post('/v1/chat/completions', async (c) => {
             }));
         }
     });
+
+    // Keep the keepalive frames actually reaching the client. `streamSSE`
+    // sets Content-Type/Cache-Control itself, so these have to be applied to
+    // the finished Response rather than through `c.header()` (which it
+    // overwrites). Both headers exist to stop an intermediary from holding
+    // small writes back:
+    //  - `no-transform` tells Cloudflare not to compress the stream. A gzip
+    //    encoder buffers until it has a block worth emitting, which is
+    //    exactly how a 13-byte heartbeat becomes invisible.
+    //  - `X-Accel-Buffering: no` is the de-facto opt-out honoured by nginx
+    //    and other reverse proxies users sit behind (corporate egress and
+    //    TLS-inspecting security software, disproportionately on Windows).
+    // Neither is load-bearing for correctness on a clean network; both are
+    // what makes the heartbeat dependable on a dirty one.
+    sseResponse.headers.set('Cache-Control', 'no-cache, no-transform');
+    sseResponse.headers.set('X-Accel-Buffering', 'no');
+    return sseResponse;
 });

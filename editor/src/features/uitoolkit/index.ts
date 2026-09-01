@@ -25,9 +25,93 @@ function isExt(model: editor.ITextModel, ext: string): boolean {
   return model.uri.path.toLowerCase().endsWith(ext);
 }
 
+/**
+ * Teach Monaco's CSS worker about USS before it validates a `.uss` file.
+ *
+ * **The bug this fixes, which predates the feature it was written for.**
+ * `.uss` is mapped to the `css` language (`utils/language-detect.ts`) and
+ * `monaco-workers.ts` routes the real `css.worker` for that label — but nothing
+ * ever configured it. Monaco's default `lint.unknownProperties` is `warning`,
+ * so every `-unity-font`, `-unity-text-align` and `-unity-slice-left` in every
+ * `.uss` file has been showing "Unknown property" under marker owner `css`,
+ * while `box-shadow` — which USS genuinely does not support — passed clean.
+ * Exactly backwards.
+ *
+ * **The trade-off, stated because it is real.** `cssDefaults` is global to the
+ * `css` language, so a real `.css` file also stops flagging `-unity-*`
+ * properties. That is harmless (nobody writes `-unity-font` in CSS) and it is
+ * the only lever Monaco offers — the alternative is `validate: false`, which
+ * would disable CSS validation outright.
+ */
+/** The slice of Monaco's CSS defaults we use, in either build's shape. */
+interface CssDefaultsLike {
+  options?: Record<string, unknown>;
+  setOptions(options: Record<string, unknown>): void;
+}
+
+/**
+ * Find `cssDefaults` in whichever Monaco build is actually running.
+ *
+ * There are two, and they disagree. The ESM build moved CSS defaults to a
+ * TOP-LEVEL `css` namespace and left `monaco.languages.css` as a deprecation
+ * stub typed `{ deprecated: true }`. The AMD bundle — which is what actually
+ * loads here, since `@monaco-editor/loader` defaults to
+ * `cdn.jsdelivr.net/npm/monaco-editor@0.55.1/min/vs` and nothing calls
+ * `loader.config` — still exposes the classic `monaco.languages.css` path.
+ * Picking one would silently no-op on the other, which is precisely the class
+ * of bug being fixed here.
+ */
+function findCssDefaults(monaco: Monaco): CssDefaultsLike | null {
+  const probe = monaco as unknown as {
+    css?: { cssDefaults?: CssDefaultsLike };
+    languages?: { css?: { cssDefaults?: CssDefaultsLike } };
+  };
+  const candidate = probe.css?.cssDefaults ?? probe.languages?.css?.cssDefaults;
+  return typeof candidate?.setOptions === 'function' ? candidate : null;
+}
+
+function configureUssValidation(monaco: Monaco): void {
+  const cssDefaults = findCssDefaults(monaco);
+  if (!cssDefaults) {
+    // Observable rather than silent: if this ever fires, `.uss` files are back
+    // to being told `-unity-font` is an unknown property, and nothing else in
+    // the app would reveal it.
+    console.warn(
+      '[uitoolkit] Monaco CSS defaults not found — .uss files will show spurious ' +
+      '"Unknown property" warnings for -unity-* properties.',
+    );
+    return;
+  }
+  try {
+    cssDefaults.setOptions({
+      ...cssDefaults.options,
+      data: {
+        useDefaultDataProvider: true,
+        dataProviders: {
+          uss: {
+            version: 1.1,
+            properties: USS_PROPERTIES.map((name) => ({
+              name,
+              description: name.startsWith('-unity-')
+                ? 'Unity Style Sheets (USS) property.'
+                : undefined,
+            })),
+          },
+        },
+      },
+    });
+  } catch (err) {
+    // A Monaco version without CSS custom data must not take the editor down;
+    // the worst case is the pre-existing wrong warnings, which is where we were.
+    console.warn('[uitoolkit] could not configure USS validation:', err);
+  }
+}
+
 export function registerUiToolkit(monaco: Monaco): void {
   if (registered) return;
   registered = true;
+
+  configureUssValidation(monaco);
 
   // USS → contributes onto the `css` language, scoped to .uss files.
   const ussProvider: languages.CompletionItemProvider = {

@@ -33,7 +33,7 @@ import {
   openFolderInNewWindow,
   setProjectWindowTitle,
   initialBootSurface,
-  consumePendingGotoForWorkspace,
+  consumePendingOpenForWorkspace,
 } from './features/project';
 import { startUpdateNotices } from './features/updates';
 import {
@@ -83,6 +83,7 @@ import { useRegisterCommands } from './hooks/useRegisterCommands';
 import { useAutoSave } from './hooks/useAutoSave';
 import { useCloseGuard } from './hooks/useCloseGuard';
 import { notify, useNotificationsStore } from './stores/notifications';
+import { runWorkspaceDiagnostics, resetWorkspaceDiagnostics } from './features/lsp';
 import { checkReleaseChannel } from './config/api';
 import { useCommandsStore } from './stores/commands';
 import { listenScoped } from './utils/tauri-listener';
@@ -227,7 +228,7 @@ function App() {
   const setDotnetMissingModalOpen = useUiStore((s) => s.setDotnetMissingModalOpen);
   const restoredRef = useRef(false);
   const [showThemePicker, setShowThemePicker] = useState(false);
-  const [paletteMode, setPaletteMode] = useState<'commands' | 'files' | null>(null);
+  const [paletteMode, setPaletteMode] = useState<'commands' | 'files' | 'symbols' | null>(null);
   const [branchPickerMode, setBranchPickerMode] = useState<'switch' | 'create' | null>(null);
   const [unityPicker, setUnityPicker] = useState<UnityPickerMode | null>(null);
   const [newScriptDir, setNewScriptDir] = useState<string | null>(null);
@@ -486,12 +487,23 @@ function App() {
             store.setActiveFile(activeToSet);
           }
         }
-        // Unity's `--goto` lands last, so it wins over the restored active
-        // tab: the user double-clicked a specific script and that is what
-        // they are waiting to see. The claim is conditional on the Rust side,
-        // so a target belonging to another project stays pending for the
-        // window that owns it.
-        await consumePendingGotoForWorkspace(workspacePath);
+        // Announce which project this window owns, so the single-instance
+        // handler can route a later launch straight here and raise THIS
+        // window instead of putting the welcome panel in front of it. After
+        // setWorkspace, never before: a window that is still booting cannot
+        // serve a request, and registering early would route one to a window
+        // that then fails to open the project.
+        try {
+          await invoke('register_window_workspace', { workspacePath });
+        } catch {
+          // Only costs us the direct route; the welcome window still relays.
+        }
+        // Unity's request lands last, so it wins over the restored active tab:
+        // the user double-clicked a specific script and that is what they are
+        // waiting to see. The claim is conditional on the Rust side, so a
+        // request belonging to another project stays pending for the window
+        // that owns it.
+        await consumePendingOpenForWorkspace(workspacePath);
       }).catch((err) => {
         // setWorkspace's own catch already surfaces a user-facing toast
         // (path + "moved or deleted" hint) before rethrowing — this handler
@@ -596,15 +608,16 @@ function App() {
   }, []);
 
   // Unity re-launching an already-running app: the single-instance handler
-  // stores the --goto and emits this. Every project window tries to claim it;
-  // the Rust side only hands it to the one whose workspace matches, so exactly
-  // one window opens the file and the rest are no-ops.
+  // stores the request and emits this. It targets this window directly when the
+  // registry knows we own the project, and goes to every window otherwise; the
+  // Rust side only hands the request to the one whose workspace matches, so
+  // exactly one window acts on it and the rest are no-ops.
   useEffect(() => {
     let unlisten: (() => void) | null = null;
     let cancelled = false;
     (async () => {
-      const fn = await listenScoped('unityide-goto-pending', () => {
-        void consumePendingGotoForWorkspace(useWorkspaceStore.getState().workspacePath);
+      const fn = await listenScoped('unityide-open-pending', () => {
+        void consumePendingOpenForWorkspace(useWorkspaceStore.getState().workspacePath);
       });
       if (cancelled) safeUnlisten(fn);
       else unlisten = fn;
@@ -952,6 +965,33 @@ function App() {
       category: 'View',
       handler: () => {
         useWorkspaceStore.getState().restartLsp();
+        // Result ids belong to the process that issued them; a restarted
+        // server would answer 'unchanged' for files it has never analysed.
+        resetWorkspaceDiagnostics();
+      },
+      when: () => !!useWorkspaceStore.getState().workspacePath,
+    },
+    {
+      id: 'lsp.analyzeSolution',
+      label: 'Analyze Whole Solution',
+      category: 'View',
+      handler: async () => {
+        const res = await runWorkspaceDiagnostics().catch((err) => {
+          notify.error(`Solution analysis failed: ${String(err)}`);
+          return null;
+        });
+        if (!res) return;
+        if (!res.ran) {
+          notify.warning(`Solution analysis did not run — ${res.reason}`);
+          return;
+        }
+        const problems = res.errors + res.warnings;
+        notify.info(
+          problems === 0
+            ? `No problems found across ${res.filesReported} files.`
+            : `${res.errors} error(s), ${res.warnings} warning(s) in ${res.filesReported} files` +
+              (res.truncated ? ' (list truncated)' : ''),
+        );
       },
       when: () => !!useWorkspaceStore.getState().workspacePath,
     },
@@ -1008,6 +1048,17 @@ function App() {
       category: 'View',
       keybinding: 'mod+p',
       handler: () => setPaletteMode('files'),
+    },
+    {
+      // `mod+t` matches Rider's and VS Code's Go-to-Symbol-in-project. Verified
+      // free in both the command registry and src-tauri/src/menu.rs, which owns
+      // CmdOrCtrl+Shift+T but not CmdOrCtrl+T.
+      id: 'palette.gotoSymbolInProject',
+      label: 'Go to Symbol in Project...',
+      category: 'View',
+      keybinding: 'mod+t',
+      handler: () => setPaletteMode('symbols'),
+      when: () => !!useWorkspaceStore.getState().workspacePath,
     },
     {
       id: 'search.openTab',
@@ -1269,6 +1320,15 @@ function App() {
       },
     },
     {
+      id: 'view.inputHub',
+      label: 'Input Actions',
+      category: 'View',
+      handler: () => {
+        useUiStore.getState().setActiveSidebarView('input');
+        useUiStore.getState().setSidebarVisible(true);
+      },
+    },
+    {
       id: 'view.debug',
       label: 'Run and Debug',
       category: 'View',
@@ -1468,6 +1528,28 @@ function App() {
       category: 'Editor',
       keybinding: 'mod+g',
       handler: () => window.dispatchEvent(new CustomEvent('goto-line')),
+      when: () => !!useWorkspaceStore.getState().activeFilePath,
+    },
+    {
+      id: 'editor.gotoSymbol',
+      label: 'Go to Symbol in File...',
+      category: 'Editor',
+      keybinding: 'mod+shift+o',
+      handler: () => window.dispatchEvent(new CustomEvent('goto-symbol')),
+      when: () => !!useWorkspaceStore.getState().activeFilePath,
+    },
+    {
+      // NOT on mod+shift+r, which Monaco itself uses for this action: that
+      // chord is already `view.revealInExplorer`, and because app commands are
+      // bridged into Monaco via addCommand they shadow the built-in whenever
+      // the editor has focus. The refactorings are real (csharp-ls serves
+      // Extract Method, Introduce constant/parameter — see verify:intellisense)
+      // so they need a chord that is actually free.
+      id: 'editor.refactor',
+      label: 'Refactor This...',
+      category: 'Editor',
+      keybinding: 'mod+alt+r',
+      handler: () => window.dispatchEvent(new CustomEvent('refactor-this')),
       when: () => !!useWorkspaceStore.getState().activeFilePath,
     },
     {

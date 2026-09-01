@@ -24,13 +24,9 @@ import { PackageCacheBanner, isPackageCachePath } from '../../unity-packages';
 import { initUsageCodeLens } from '../../unity-context';
 import { initUnityAnalyzers } from '../../unity-analyzers';
 import { initUnityCompilerDiagnostics } from '../../unity-compiler';
-import {
-  AssetViewer,
-  isUnityAssetFile,
-  InputActionsViewer,
-  isInputActionsFile,
-  SceneDiffViewer,
-} from '../../unity-asset-viewer';
+import { AssetViewer, isUnityAssetFile, SceneDiffViewer } from '../../unity-asset-viewer';
+import { InputActionsEditor, isInputActionsFile } from '../../unity-input';
+import { ScriptableObjectEditor, initSoInstanceCodeLens } from '../../unity-scriptable-objects';
 import { attachUnityDecorations } from '../../csharp';
 import { initTestCodeLens } from '../../unity-test-runner';
 import { attachBreakpointGutter } from '../../debugger';
@@ -116,13 +112,28 @@ function EditorPanel() {
     const gotoHandler = () => {
       editorRef.current?.getAction('editor.action.gotoLine')?.run();
     };
+    // Both of these are Monaco built-ins that stay inert until a provider
+    // exists: quickOutline needs a DocumentSymbolProvider, refactor needs a
+    // CodeActionProvider advertising `refactor.*` kinds. Both are registered
+    // now (see lsp/services/symbol-providers.ts and code-actions.ts), so the
+    // only thing missing was a reachable command.
+    const symbolHandler = () => {
+      editorRef.current?.getAction('editor.action.quickOutline')?.run();
+    };
+    const refactorHandler = () => {
+      editorRef.current?.getAction('editor.action.refactor')?.run();
+    };
     window.addEventListener('navigate-to-line', navHandler);
     window.addEventListener('format-document', formatHandler);
     window.addEventListener('goto-line', gotoHandler);
+    window.addEventListener('goto-symbol', symbolHandler);
+    window.addEventListener('refactor-this', refactorHandler);
     return () => {
       window.removeEventListener('navigate-to-line', navHandler);
       window.removeEventListener('format-document', formatHandler);
       window.removeEventListener('goto-line', gotoHandler);
+      window.removeEventListener('goto-symbol', symbolHandler);
+      window.removeEventListener('refactor-this', refactorHandler);
     };
   }, []);
 
@@ -168,8 +179,16 @@ function EditorPanel() {
     if (ok) useUiStore.getState().setAssetViewerMode(activeFile.path, 'raw-edit');
   };
 
+  // A ScriptableObject `.asset` gets the typed form; everything else Unity
+  // serialises (scenes, prefabs, materials) keeps the structural tree.
+  //
+  // Whether this file really IS a typed instance is an async question — read
+  // the asset, resolve its m_Script guid, scan the class — and this router is a
+  // synchronous ladder, so the component owns that state machine and falls back
+  // itself. `AssetViewer` is handed in as the fallback ELEMENT rather than
+  // imported by the new feature, which keeps ownership of its props here.
   if (isUnityAsset && assetMode === 'structured') {
-    return (
+    const assetViewer = (
       <AssetViewer
         path={activeFile.path}
         name={activeFile.name}
@@ -177,10 +196,22 @@ function EditorPanel() {
         onEditRaw={setRawEdit}
       />
     );
+    if (activeFile.name.toLowerCase().endsWith('.asset')) {
+      return (
+        <ScriptableObjectEditor
+          path={activeFile.path}
+          name={activeFile.name}
+          onViewRaw={setRawView}
+          onEditRaw={setRawEdit}
+          fallback={assetViewer}
+        />
+      );
+    }
+    return assetViewer;
   }
   if (isInputActions && assetMode === 'structured') {
     return (
-      <InputActionsViewer
+      <InputActionsEditor
         name={activeFile.name}
         content={activeFile.content}
         onViewRaw={setRawView}
@@ -390,6 +421,7 @@ function EditorPanel() {
           registerUiToolkit(monaco);
           registerBlameHoverProvider(monaco);
           initUsageCodeLens(monaco);
+          initSoInstanceCodeLens(monaco);
           registerUsageHoverProvider(monaco);
           registerUnityDocsHover(monaco);
           initUnityAnalyzers(monaco);

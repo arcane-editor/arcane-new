@@ -494,49 +494,200 @@ fn bridge_source_dir(app: &AppHandle) -> Option<PathBuf> {
     None
 }
 
+/// The UPM id of the package this build bundles.
+///
+/// Read from the bundled package rather than hardcoded, because there are two:
+/// the release app ships `com.unityide.editor` and the dev app ships
+/// `com.unityide.editor.dev`, generated from the same source by
+/// `scripts/unity-extension-channel.mjs`. Hardcoding one here would have the
+/// dev app install the release package, which then goes looking for the release
+/// application — the exact confusion the split exists to end.
+#[tauri::command]
+pub fn unity_bridge_package_id(app: AppHandle) -> Result<String, String> {
+    let src = bridge_source_dir(&app).ok_or_else(|| BRIDGE_SOURCE_MISSING.to_string())?;
+    bridge_package_id(&src)
+}
+
+fn bridge_package_id(src: &Path) -> Result<String, String> {
+    let manifest = src.join("package.json");
+    let text = fs::read_to_string(&manifest)
+        .map_err(|e| format!("Failed to read {}: {}", manifest.display(), e))?;
+    let json: serde_json::Value = serde_json::from_str(&text)
+        .map_err(|e| format!("Failed to parse {}: {}", manifest.display(), e))?;
+    json.get("name")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .ok_or_else(|| format!("{} has no package name", manifest.display()))
+}
+
+const BRIDGE_SOURCE_MISSING: &str =
+    "Bridge package source not found (resource dir + dev fallback both missing)";
+
 /// Install the UnityIDE Unity bridge package into the project's `Packages/` folder
-/// as an embedded package (`Packages/com.unityide.editor/`). Unity auto-discovers
-/// embedded packages — no manifest.json edit needed. Returns the install path.
+/// as an embedded package. Unity auto-discovers embedded packages — no
+/// manifest.json edit needed. Returns the install path.
 #[tauri::command]
 pub fn unity_install_bridge(app: AppHandle, workspace_path: String) -> Result<String, String> {
-    let src = bridge_source_dir(&app)
-        .ok_or_else(|| "Bridge package source not found (resource dir + dev fallback both missing)".to_string())?;
+    let src = bridge_source_dir(&app).ok_or_else(|| BRIDGE_SOURCE_MISSING.to_string())?;
+    let package_id = bridge_package_id(&src)?;
     let packages = Path::new(&workspace_path).join("Packages");
-    let dest = packages.join("com.unityide.editor");
+    let dest = packages.join(&package_id);
     copy_dir_recursive(&src, &dest)
         .map_err(|e| format!("Failed to copy bridge package to {}: {}", dest.display(), e))?;
 
-    remove_legacy_bridge_package(&packages);
+    remove_other_bridge_packages(&packages, &package_id);
 
     Ok(dest.to_string_lossy().to_string())
 }
 
-/// The embedded package id this bridge shipped under before the rename.
-const LEGACY_BRIDGE_PACKAGE: &str = "com.arcane.editor";
+/// Filename of the install record inside the per-user config home.
+const INSTALL_RECORD: &str = "install.json";
 
-/// Remove the pre-rename embedded package once the new one is in place.
+/// Record where this build of UnityIDE lives, for the Unity package to read.
 ///
-/// This is not tidiness. The C# files keep their original `.meta` GUIDs across
-/// the rename — deliberately, so asmdef references by GUID survive — which
-/// means leaving the old directory in place gives Unity two embedded packages
+/// The Unity extension has to launch us, and until now it did that by probing a
+/// hardcoded list of install paths per platform — a list that was wrong on
+/// Windows (it carried Electron's `%LOCALAPPDATA%\Programs\<app>` convention;
+/// Tauri's NSIS installs to `%LOCALAPPDATA%\<productName>`) and that can never
+/// be right for a portable copy, a non-default install directory, or a build
+/// under a name we have not thought of.
+///
+/// So the app states its own location — and the deep-link scheme it answers —
+/// instead of being guessed at. `~/.unityide`
+/// is already this app's per-user config home (`auth::config_home_dir`), keyed
+/// off the bundle identifier so the dev build writes `~/.unityide-dev` and the
+/// two never shadow each other. C# can compute that path from `$HOME` alone —
+/// no registry read (Unity's .NET Standard profile has no `Microsoft.Win32`)
+/// and no `SpecialFolder` mapping, which differs between Mono and .NET on macOS.
+///
+/// Best-effort by design: every failure here costs the extension nothing but a
+/// fallback to its static probe list.
+pub fn write_install_record(app: &AppHandle) {
+    // A debug build's `current_exe` is `target/debug/editor`. Writing that would
+    // point every Unity project on a developer's machine at a binary that only
+    // exists while `tauri dev` is running, shadowing their real install. The
+    // dev launcher has its own hook (`.unityide-dev-path` in the project root).
+    if cfg!(debug_assertions) {
+        return;
+    }
+
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
+    let Ok(dir) = crate::auth::config_home_dir(app) else {
+        return;
+    };
+    if fs::create_dir_all(&dir).is_err() {
+        return;
+    }
+
+    let record = serde_json::json!({
+        "exePath": exe.to_string_lossy(),
+        // The launchable artifact. On macOS that is the .app bundle, not the
+        // binary: launching through `open` is what gets LaunchServices' normal
+        // activation and Gatekeeper handling instead of a bare fork of Unity's
+        // own process, carrying Unity's environment with it.
+        "launchPath": launch_path(&exe).to_string_lossy(),
+        "version": app.package_info().version.to_string(),
+        "identifier": app.config().identifier,
+        // The deep-link scheme this build answers — `unityide` or, for the
+        // side-by-side dev build, `unityide-dev`. Read from the plugin config
+        // rather than derived from the identifier, so the two can never drift.
+        //
+        // It is also the Unity package's proof that the scheme is REGISTERED on
+        // Windows and Linux, where registration happens at runtime
+        // (`deep_link().register_all()` in setup) rather than at install: this
+        // file existing means the app has run at least once, which means the
+        // registry key is there. Without that proof the package must not fire a
+        // deep link at Windows, which answers an unregistered scheme with a
+        // "you need a new app to open this" dialog.
+        "scheme": crate::auth::deep_link_scheme(app),
+        "updatedAt": std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0),
+    });
+
+    let Ok(serialized) = serde_json::to_string_pretty(&record) else {
+        return;
+    };
+    // Same write-then-rename as bridge.json: the reader is another process and
+    // must never see a half-written file.
+    let file = dir.join(INSTALL_RECORD);
+    let tmp = dir.join("install.json.tmp");
+    if fs::write(&tmp, serialized).is_ok() {
+        let _ = fs::rename(&tmp, &file);
+    }
+}
+
+/// The artifact a launcher should start: the enclosing `.app` bundle on macOS,
+/// the executable itself everywhere else.
+///
+/// A macOS executable lives at `<Bundle>.app/Contents/MacOS/<name>`, so the
+/// bundle is three levels up — and only if those levels actually spell
+/// `Contents/MacOS`, which they do not for an unbundled `cargo run`.
+fn launch_path(exe: &Path) -> PathBuf {
+    if !cfg!(target_os = "macos") {
+        return exe.to_path_buf();
+    }
+    let macos = exe.parent();
+    let contents = macos.and_then(|p| p.parent());
+    let bundle = contents.and_then(|p| p.parent());
+    match (macos, contents, bundle) {
+        (Some(m), Some(c), Some(b))
+            if m.file_name().is_some_and(|n| n == "MacOS")
+                && c.file_name().is_some_and(|n| n == "Contents")
+                && b.extension().is_some_and(|e| e == "app") =>
+        {
+            b.to_path_buf()
+        }
+        _ => exe.to_path_buf(),
+    }
+}
+
+/// Embedded package ids that must never sit alongside the one we just
+/// installed: the pre-rename package, and the other release channel's.
+const RIVAL_BRIDGE_PACKAGES: &[&str] = &[
+    "com.arcane.editor",
+    "com.unityide.editor",
+    "com.unityide.editor.dev",
+];
+
+/// Remove every rival embedded package once ours is in place.
+///
+/// This is not tidiness. The C# files keep their `.meta` GUIDs across the
+/// rename — deliberately, so asmdef references by GUID survive — which means
+/// leaving the old directory in place gives Unity two embedded packages
 /// declaring the SAME asset GUIDs. Unity reports that as a GUID conflict and
 /// picks a winner arbitrarily. On top of that both packages register an
 /// `IExternalCodeEditor` and both start a `BridgeClient` against one journal.
 ///
+/// The dev-channel package has its own GUIDs (they are remapped when it is
+/// generated), so it does not conflict that way — but the other two problems
+/// stand, and worse: the two packages point at two different applications, so
+/// whichever `IExternalCodeEditor` Unity happened to pick would decide which
+/// app your double-clicks opened.
+///
 /// Best-effort: install has already succeeded by this point, and failing the
 /// whole command over a leftover directory would be worse than the leftover.
-fn remove_legacy_bridge_package(packages_dir: &Path) {
-    let legacy = packages_dir.join(LEGACY_BRIDGE_PACKAGE);
-    if !legacy.is_dir() {
-        return;
-    }
-    match fs::remove_dir_all(&legacy) {
-        Ok(()) => eprintln!("[UnityIDE] removed legacy bridge package {}", legacy.display()),
-        Err(e) => eprintln!(
-            "[UnityIDE] could not remove legacy bridge package {} — Unity may report \
-             duplicate asset GUIDs until it is deleted by hand: {e}",
-            legacy.display()
-        ),
+fn remove_other_bridge_packages(packages_dir: &Path, keep: &str) {
+    for id in RIVAL_BRIDGE_PACKAGES {
+        if *id == keep {
+            continue;
+        }
+        let rival = packages_dir.join(id);
+        if !rival.is_dir() {
+            continue;
+        }
+        match fs::remove_dir_all(&rival) {
+            Ok(()) => eprintln!("[UnityIDE] removed rival bridge package {}", rival.display()),
+            Err(e) => eprintln!(
+                "[UnityIDE] could not remove {} — Unity may report duplicate asset GUIDs, or open \
+                 the wrong application, until it is deleted by hand: {e}",
+                rival.display()
+            ),
+        }
     }
 }
 
@@ -858,6 +1009,78 @@ fn generate_ide_csproj(workspace: &Path) -> Result<bool, String> {
 /// The split exists so the "Unity generated no csprojs" case — the one that
 /// silently cost every Unity project its C# IntelliSense — can be reproduced
 /// hermetically against a fixture install, with no Unity on the box.
+/// Unity's cumulative `UNITY_X_Y_OR_NEWER` ladder for a `m_EditorVersion`
+/// string like `6000.3.5f2` or `2022.3.10f1`.
+///
+/// Unity defines one symbol per release *at or below* the installed version,
+/// which is why this returns a list rather than a single symbol: code guarded
+/// by `UNITY_2021_1_OR_NEWER` must still compile on Unity 6.
+/// The C# language version Unity's own compiler uses, by editor version.
+///
+/// Was hardcoded to `9.0`, which is right for modern Unity and wrong for
+/// anything before 2021.2 — those projects would accept language features
+/// in the IDE that fail to compile in Unity, which is the worst direction
+/// for this to be wrong in.
+fn unity_lang_version(editor_version: Option<&str>) -> &'static str {
+    let parsed = editor_version.and_then(|v| {
+        let mut parts = v.split('.');
+        let major: u32 = parts.next()?.parse().ok()?;
+        let minor: u32 = parts.next()?.parse().ok()?;
+        Some((major, minor))
+    });
+    match parsed {
+        Some((major, minor)) if (major, minor) >= (2021, 2) => "9.0",
+        Some((major, _)) if major >= 2020 => "8.0",
+        Some(_) => "7.3",
+        None => "9.0",
+    }
+}
+
+fn unity_version_defines(editor_version: Option<&str>) -> Vec<String> {
+    // (major, minor) pairs Unity emits a define for, newest first.
+    const LADDER: &[(u32, u32)] = &[
+        (6000, 3), (6000, 2), (6000, 1), (6000, 0),
+        (2023, 3), (2023, 2), (2023, 1),
+        (2022, 3), (2022, 2), (2022, 1),
+        (2021, 3), (2021, 2), (2021, 1),
+        (2020, 3), (2020, 2), (2020, 1),
+        (2019, 4), (2019, 3), (2019, 2), (2019, 1),
+        (2018, 4), (2018, 3), (2018, 2), (2018, 1),
+        (2017, 4), (2017, 3), (2017, 2), (2017, 1),
+    ];
+
+    // Parse leading `major.minor`. Anything unparseable falls back to the
+    // previous hardcoded behaviour rather than emitting nothing, because a
+    // define-less project loses IntelliSense inside every conditional block.
+    let parsed = editor_version.and_then(|v| {
+        let mut parts = v.split('.');
+        let major: u32 = parts.next()?.parse().ok()?;
+        let minor: u32 = parts.next()?.parse().ok()?;
+        Some((major, minor))
+    });
+    let (major, minor) = parsed.unwrap_or((2022, 3));
+
+    let mut out: Vec<String> = LADDER
+        .iter()
+        .filter(|(ma, mi)| (*ma, *mi) <= (major, minor))
+        .map(|(ma, mi)| format!("UNITY_{ma}_{mi}_OR_NEWER"))
+        .collect();
+    out.push("UNITY_5_3_OR_NEWER".to_string());
+    out
+}
+
+/// Whether the project depends on `com.unity.inputsystem`.
+///
+/// Read from `Packages/manifest.json` textually: a full JSON parse would fail
+/// on a manifest with comments or trailing commas, and getting this wrong is
+/// worse than a false negative — it flips which branch of every
+/// `#if ENABLE_INPUT_SYSTEM` the language server sees.
+fn uses_input_system_package(workspace: &Path) -> bool {
+    std::fs::read_to_string(workspace.join("Packages").join("manifest.json"))
+        .map(|m| m.contains("com.unity.inputsystem"))
+        .unwrap_or(false)
+}
+
 fn generate_ide_csproj_from(
     workspace: &Path,
     scripting_root: Option<&Path>,
@@ -983,7 +1206,6 @@ fn generate_ide_csproj_from(
     <RootNamespace></RootNamespace>
     <AssemblyName>unityide</AssemblyName>
     <TargetFrameworkVersion>v4.7.1</TargetFrameworkVersion>
-    <LangVersion>9.0</LangVersion>
     <FileAlignment>512</FileAlignment>
     <NoStdLib>true</NoStdLib>
     <OutputPath>Library/IntellisenseBin</OutputPath>
@@ -993,9 +1215,54 @@ fn generate_ide_csproj_from(
         xml.push_str(&xml_escape(fp));
         xml.push_str("</FrameworkPathOverride>\n");
     }
+    // Version defines are derived from the project's real Unity version, not
+    // pinned. They were frozen at UNITY_2022_3_OR_NEWER, so on a Unity 6
+    // project every `#if UNITY_6000_0_OR_NEWER` block was analyzed as dead.
+    let version_defines = unity_version_defines(
+        read_unity_version(&workspace.join("ProjectSettings")).as_deref(),
+    );
+
+    // The project's OWN scripting defines. Without these, every `#if MY_FLAG`
+    // block in user code is greyed out and its contents get no IntelliSense —
+    // silently, because a define that is merely absent is not an error.
+    let project_defines = crate::project_settings::read_project_settings(workspace)
+        .standalone_defines();
+
+    let mut defines: Vec<String> = vec!["UNITY_EDITOR".to_string(), editor_define.to_string()];
+    defines.extend(version_defines);
+    defines.extend([
+        "UNITY_64".to_string(),
+        standalone_define.to_string(),
+        "UNITY_STANDALONE".to_string(),
+        "ENABLE_MONO".to_string(),
+        "NETSTANDARD2_1".to_string(),
+        "NET_STANDARD".to_string(),
+        "NET_STANDARD_2_1".to_string(),
+        "CSHARP_7_3_OR_NEWER".to_string(),
+    ]);
+    // ENABLE_INPUT_SYSTEM used to be asserted unconditionally, which is wrong
+    // for a project on the legacy input manager: it activated the wrong branch
+    // of every `#if ENABLE_INPUT_SYSTEM` in the project AND in packages.
+    // Detect it from the package manifest instead.
+    if uses_input_system_package(workspace) {
+        defines.push("ENABLE_INPUT_SYSTEM".to_string());
+    } else {
+        defines.push("ENABLE_LEGACY_INPUT_MANAGER".to_string());
+    }
+    for d in project_defines {
+        if !defines.contains(&d) {
+            defines.push(d);
+        }
+    }
+
     xml.push_str(&format!(
-        "    <DefineConstants>UNITY_EDITOR;{};UNITY_2022_3_OR_NEWER;UNITY_2021_1_OR_NEWER;UNITY_2020_1_OR_NEWER;UNITY_2019_1_OR_NEWER;UNITY_2018_1_OR_NEWER;UNITY_2017_1_OR_NEWER;UNITY_5_3_OR_NEWER;UNITY_64;{};UNITY_STANDALONE;ENABLE_MONO;ENABLE_INPUT_SYSTEM;NETSTANDARD2_1;NET_STANDARD;NET_STANDARD_2_1;CSHARP_7_3_OR_NEWER</DefineConstants>\n",
-        editor_define, standalone_define
+        "    <LangVersion>{}</LangVersion>\n",
+        unity_lang_version(read_unity_version(&workspace.join("ProjectSettings")).as_deref())
+    ));
+
+    xml.push_str(&format!(
+        "    <DefineConstants>{}</DefineConstants>\n",
+        xml_escape(&defines.join(";"))
     ));
     xml.push_str(
         r#"    <NoWarn>0169;0436;CS0436;CS0162;CS0168</NoWarn>
@@ -1568,7 +1835,7 @@ mod tests {
         fs::write(legacy.join("UnityIDEEditor.cs"), "// stale").unwrap();
         assert!(packages.join("com.arcane.editor").is_dir());
 
-        remove_legacy_bridge_package(&packages);
+        remove_other_bridge_packages(&packages, "com.unityide.editor");
 
         assert!(
             !packages.join("com.arcane.editor").exists(),
@@ -1576,17 +1843,67 @@ mod tests {
         );
     }
 
-    /// Must be a no-op — and specifically must not fail — on the overwhelmingly
-    /// common case of a project that never had the old package.
+    /// The two release channels ship two packages, and only one of them may be
+    /// embedded in a project at a time. They have distinct asset GUIDs, so this
+    /// is not the GUID conflict above — it is worse: each registers an
+    /// IExternalCodeEditor pointing at a DIFFERENT application, so whichever
+    /// Unity happened to pick would decide which app a double-click opened.
     #[test]
-    fn removing_the_legacy_bridge_package_is_a_noop_when_absent() {
+    fn installing_one_channel_removes_the_other() {
+        let dir = make_temp_dir("_rival_channel_pkg");
+        let packages = dir.join("Packages");
+        fs::create_dir_all(packages.join("com.unityide.editor").join("Editor")).unwrap();
+        fs::create_dir_all(packages.join("com.unityide.editor.dev").join("Editor")).unwrap();
+
+        remove_other_bridge_packages(&packages, "com.unityide.editor.dev");
+
+        assert!(
+            packages.join("com.unityide.editor.dev").is_dir(),
+            "the channel being installed must survive"
+        );
+        assert!(
+            !packages.join("com.unityide.editor").exists(),
+            "the other channel's package must be removed"
+        );
+    }
+
+    /// Must be a no-op — and specifically must not fail — on the overwhelmingly
+    /// common case of a project that has only the package being installed.
+    #[test]
+    fn removing_rival_bridge_packages_is_a_noop_when_absent() {
         let dir = make_temp_dir("_no_legacy_bridge_pkg");
         let packages = dir.join("Packages");
         fs::create_dir_all(packages.join("com.unityide.editor")).unwrap();
 
-        remove_legacy_bridge_package(&packages);
+        remove_other_bridge_packages(&packages, "com.unityide.editor");
 
         assert!(packages.join("com.unityide.editor").is_dir(), "must not touch the current package");
+    }
+
+    /// The id comes from the bundled package itself, so the dev app installs
+    /// the dev package. Hardcoding it is how the dev app would end up shipping
+    /// a package that goes looking for the release application.
+    #[test]
+    fn the_bridge_package_id_is_read_from_the_bundled_package() {
+        let dir = make_temp_dir("_bridge_pkg_id");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("package.json"),
+            br#"{"name":"com.unityide.editor.dev","version":"0.1.0"}"#,
+        )
+        .unwrap();
+
+        assert_eq!(bridge_package_id(&dir).unwrap(), "com.unityide.editor.dev");
+    }
+
+    #[test]
+    fn a_bundled_package_with_no_name_is_an_error() {
+        let dir = make_temp_dir("_bridge_pkg_id_bad");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("package.json"), br#"{"version":"0.1.0"}"#).unwrap();
+
+        assert!(bridge_package_id(&dir).is_err());
+        assert!(bridge_package_id(&dir.join("nope")).is_err());
     }
 
     /// The rename left `.arcane.csproj` / `.arcane.sln` sitting at the root of
@@ -1630,6 +1947,72 @@ mod tests {
     /// launched with no solution, and every completion/hover returned null.
     ///
     /// Hermetic: fixture Unity install, no Unity on the machine required.
+    #[test]
+    fn lang_version_tracks_the_unity_release() {
+        assert_eq!(unity_lang_version(Some("6000.3.5f2")), "9.0");
+        assert_eq!(unity_lang_version(Some("2021.2.0f1")), "9.0");
+        assert_eq!(unity_lang_version(Some("2021.1.0f1")), "8.0");
+        assert_eq!(unity_lang_version(Some("2020.3.0f1")), "8.0");
+        assert_eq!(unity_lang_version(Some("2019.4.0f1")), "7.3");
+        assert_eq!(unity_lang_version(None), "9.0");
+    }
+
+    #[test]
+    fn version_defines_are_cumulative_for_the_installed_unity() {
+        let d = unity_version_defines(Some("6000.3.5f2"));
+        // Unity 6 gets its own symbol AND every older one, because code
+        // guarded by an older `_OR_NEWER` must still compile.
+        assert!(d.contains(&"UNITY_6000_3_OR_NEWER".to_string()));
+        assert!(d.contains(&"UNITY_6000_0_OR_NEWER".to_string()));
+        assert!(d.contains(&"UNITY_2022_3_OR_NEWER".to_string()));
+        assert!(d.contains(&"UNITY_5_3_OR_NEWER".to_string()));
+    }
+
+    #[test]
+    fn version_defines_never_claim_a_newer_unity_than_is_installed() {
+        let d = unity_version_defines(Some("2022.3.10f1"));
+        assert!(d.contains(&"UNITY_2022_3_OR_NEWER".to_string()));
+        // The old hardcoded list asserted 2022.3 for EVERY project. A 2022.3
+        // project must not advertise Unity 6 symbols.
+        assert!(!d.contains(&"UNITY_6000_0_OR_NEWER".to_string()));
+        assert!(!d.contains(&"UNITY_2023_1_OR_NEWER".to_string()));
+    }
+
+    #[test]
+    fn unparseable_version_falls_back_rather_than_emitting_nothing() {
+        // A define-less project loses IntelliSense inside every conditional
+        // block, so garbage input degrades to the previous pinned behaviour.
+        for bad in [None, Some(""), Some("not-a-version"), Some("6000")] {
+            let d = unity_version_defines(bad);
+            assert!(
+                d.contains(&"UNITY_2022_3_OR_NEWER".to_string()),
+                "fallback missing for {bad:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn input_system_define_follows_the_package_manifest() {
+        let dir = make_temp_dir("input_defines");
+        let pkgs = dir.join("Packages");
+        fs::create_dir_all(&pkgs).unwrap();
+
+        // No manifest at all → legacy input, not the new system.
+        assert!(!uses_input_system_package(&dir));
+
+        fs::write(pkgs.join("manifest.json"), r#"{"dependencies":{"com.unity.ugui":"1.0.0"}}"#).unwrap();
+        assert!(!uses_input_system_package(&dir));
+
+        fs::write(
+            pkgs.join("manifest.json"),
+            r#"{"dependencies":{"com.unity.inputsystem":"1.7.0"}}"#,
+        )
+        .unwrap();
+        assert!(uses_input_system_package(&dir));
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
     #[test]
     fn csproj_is_complete_without_any_unity_generated_csproj() {
         let dir = make_temp_dir("_no_unity_csproj");
@@ -1868,5 +2251,44 @@ mod tests {
         assert_eq!(sln.as_deref(), Some(".unityide.sln"));
         assert!(workspace.join(".unityide.sln").exists());
         assert!(workspace.join(".unityide.csproj").exists());
+    }
+
+    // ── install record ───────────────────────────────────────────────────
+    //
+    // The Unity package launches whatever `launchPath` names. On macOS that
+    // has to be the .app bundle: `open` a bundle and LaunchServices starts it
+    // properly; exec the inner binary and it inherits Unity's environment and
+    // process group instead.
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn launch_path_walks_up_to_the_app_bundle() {
+        let exe = PathBuf::from("/Applications/UnityIDE.app/Contents/MacOS/UnityIDE");
+        assert_eq!(launch_path(&exe), PathBuf::from("/Applications/UnityIDE.app"));
+    }
+
+    /// An unbundled `cargo run` binary is not inside `Contents/MacOS`, so there
+    /// is no bundle to find and the executable itself is the launchable thing.
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn launch_path_keeps_an_unbundled_binary_as_is() {
+        let exe = PathBuf::from("/repo/target/release/editor");
+        assert_eq!(launch_path(&exe), exe);
+    }
+
+    /// A directory that merely *looks* like the tail of a bundle path but has
+    /// no `.app` extension must not be reported as one.
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn launch_path_requires_the_app_extension() {
+        let exe = PathBuf::from("/tmp/Staging/Contents/MacOS/UnityIDE");
+        assert_eq!(launch_path(&exe), exe);
+    }
+
+    #[test]
+    #[cfg(not(target_os = "macos"))]
+    fn launch_path_is_the_executable_off_macos() {
+        let exe = PathBuf::from(r"C:\Users\me\AppData\Local\UnityIDE\UnityIDE.exe");
+        assert_eq!(launch_path(&exe), exe);
     }
 }

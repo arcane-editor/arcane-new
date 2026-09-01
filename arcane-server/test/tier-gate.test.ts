@@ -111,7 +111,7 @@ describe('max-plan difficulty routing (through the chat route)', () => {
         });
     }
 
-    it('difficulty "hard" routes to executorHard (xai/grok-4.6)', async () => {
+    it('difficulty "hard" routes to executorHard (@cf/zai-org/glm-5.3)', async () => {
         const user = await seedMaxUser('tier-hard@test.dev');
         const token = await tokenFor(user);
 
@@ -121,7 +121,7 @@ describe('max-plan difficulty routing (through the chat route)', () => {
         const row = await env.arcane_db.prepare(
             'SELECT model FROM request_logs WHERE user_id = ? ORDER BY created_at DESC LIMIT 1'
         ).bind(user.id).first<{ model: string }>();
-        expect(row?.model).toBe('xai/grok-4.6');
+        expect(row?.model).toBe('@cf/zai-org/glm-5.3');
     });
 
     it('"easy" and absent difficulty both stay on the tier executor (not executorHard)', async () => {

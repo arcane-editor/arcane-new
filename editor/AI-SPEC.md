@@ -71,7 +71,7 @@ The internal Unity eval lives at `tooling/unity-eval/` (12 seed tasks across cod
 Superseded the 2026-07 "deliberately off" record. Design + rollout:
 `../docs/superpowers/specs/2026-08-15-ai-cost-and-context-optimization-design.md`.
 
-- **All three tier models now cache server-side, automatically:** `openai/gpt-5.6-luna` (90% off cached input, implicit breakpoint + `prompt_cache_key`), `@cf/zai-org/glm-5.2` (Workers AI shipped real prefix caching 2026-03; 81% off), `xai/grok-4.6` (75% off, opportunistic — its Chat Completions routing hint is a header the gateway path doesn't expose).
+- **Every routed model caches server-side, automatically:** `@cf/zai-org/glm-5.3-flash` (executor on all three tiers, and the Standard planner — $0.03/M cached vs $0.15 fresh, 80% off), `@cf/zai-org/glm-5.3` (Deep Think planner + Max hard-task executor — $0.26/M vs $1.40, 81% off), `openai/gpt-5.6-sol` (Max planner — $0.50/M vs $5.00, 90% off, implicit breakpoint + `prompt_cache_key`). Workers AI shipped real prefix caching in 2026-03 and takes `x-session-affinity` for cache-shard routing; the OpenAI family wants `prompt_cache_key` in the body. Retired from the lineup: `xai/grok-4.6` (2026-08-30) and `spark/muse-spark-1.2-contributor` (2026-08-27) — both stay in `MODEL_CATALOG` so historical usage rows still cost out.
 - **The client's job is prefix STABILITY, not breakpoints.** The volatile decoration (facts, context pack, graph snapshot) is frozen per conversation (`prompts/frozen-context.ts`); the plan body left the plan-execution system prompt; tool sets no longer flap (graphify/memory tools always registered; governor sends `tool_choice: 'none'` instead of stripping `tools`); mid-send model escalation was replaced by send-boundary latched escalation (`send-escalation.ts`). Drift surfaces as tail notes on the newest user message.
 - **`skipCache: true` on the gateway stays** — that disables AI Gateway's unrelated exact-match response-replay cache (a replayed sampled completion is semantically wrong). Provider prefix caching is a different mechanism and is unaffected.
 - **Measurement:** `request_logs.cached_input_tokens` (was always 0; now fed by providers), `estimateCost` already bills cached tokens at catalog cached rates, and the eval report carries a "Cached in %" column + run-level cache share.
@@ -79,6 +79,10 @@ Superseded the 2026-07 "deliberately off" record. Design + rollout:
 - The server-side search cache for `/v1/unity/api/search` (the old "same normalized query re-embeds" skip) now exists: D1 `unity_search_cache`, 7-day TTL (migration 0021).
 
 ## Model routing status (2026-08)
+
+**Current lineup (2026-08-30).** Standard = glm-5.3-flash planner + executor. Deep Think = glm-5.3 planner + glm-5.3-flash executor. Max = gpt-5.6-sol planner + glm-5.3-flash executor, escalating to glm-5.3 on hard tasks. Inline (tab) = qwen3-30b-a3b-fp8. Everything except the Max planner is Workers AI, and no routed model has a long-context repricing cliff any more — grok's 200k cliff went with it.
+
+**These are CODE DEFAULTS ONLY.** A deployed environment whose D1 `app_config` table holds a `model_routing` doc ignores `DEFAULT_MODEL_ROUTING` entirely (`lib/app-config.ts`'s `getModelRouting`). Changing `config/plans.ts` does nothing there — the doc has to be rewritten through `PUT /admin/config/models`.
 
 `config/routing.ts` (flag `ROUTING_V2`, on in dev / off in prod): effort tier is a ceiling, not a model pin — short attachment-free non-code asks route down to the low model; `taskType: 'memory'` (the memory distiller/consolidator side-task lane) always routes to `INLINE_MODEL`. Routing is sticky per conversation (provider caches are per-model). The served model rides the usage SSE event.
 

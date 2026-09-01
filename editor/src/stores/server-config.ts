@@ -124,9 +124,9 @@ const EFFORT_RANK: Record<Effort, number> = { low: 0, mid: 1, high: 2 };
  *  (see header for why this is a duplicate, not an import). Update both
  *  together. */
 const FALLBACK_CONTEXT_WINDOW: Record<Effort, number> = {
-  low: 131_072,
-  mid: 131_072,
-  high: 131_072,
+  low: 1_048_576,
+  mid: 1_048_576,
+  high: 400_000,
 };
 
 /** Mirrors `maxEntitledEffort` in `features/ai-panel/services/entitlement.ts`

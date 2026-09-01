@@ -2,11 +2,11 @@ import { describe, it, expect } from 'vitest';
 import { env, SELF } from 'cloudflare:test';
 import { seedPasswordUser, tokenFor } from './helpers.ts';
 import { MODEL_CATALOG } from '../src/lib/costs.ts';
-import { SPARK_MODEL } from '../src/config/plans.ts';
+import { EXECUTOR_MODEL } from '../src/config/plans.ts';
 import { clearConfigCache, putConfigDoc } from '../src/lib/app-config.ts';
 import type { ModelRoutingDoc } from '../src/lib/app-config.ts';
 
-// DEFAULT_MODEL_ROUTING's low tier resolves to SPARK_MODEL (Task 4), whose
+// DEFAULT_MODEL_ROUTING's low tier resolves to EXECUTOR_MODEL, whose
 // 'direct' route calls a real OpenAI-compatible endpoint — the test env now
 // has valid-shaped SPARK_BASE_URL/SPARK_API_KEY (wrangler.test.toml), so an
 // unmocked streamText for that model would attempt REAL network egress
@@ -86,9 +86,9 @@ describe('chat serve guard: model_unconfigured', () => {
         const token = await tokenFor(user);
 
         // Default (unset) plan is free, and free's low tier resolves to
-        // SPARK_MODEL under DEFAULT_MODEL_ROUTING — pull that entry.
-        const saved = MODEL_CATALOG[SPARK_MODEL];
-        delete MODEL_CATALOG[SPARK_MODEL];
+        // EXECUTOR_MODEL under DEFAULT_MODEL_ROUTING — pull that entry.
+        const saved = MODEL_CATALOG[EXECUTOR_MODEL];
+        delete MODEL_CATALOG[EXECUTOR_MODEL];
         clearConfigCache(); // force a fresh getEffectivePricing read against the mutated catalog
         try {
             const res = await SELF.fetch('https://example.com/v1/chat/completions', {
@@ -110,7 +110,7 @@ describe('chat serve guard: model_unconfigured', () => {
             ).bind(user.id).first<{ n: number }>();
             expect(row!.n).toBe(0);
         } finally {
-            MODEL_CATALOG[SPARK_MODEL] = saved!;
+            MODEL_CATALOG[EXECUTOR_MODEL] = saved!;
             clearConfigCache();
         }
     });

@@ -8,6 +8,7 @@ mod file_scanner;
 mod file_index;
 mod unity;
 mod asmdef;
+mod unity_asset_edit;
 mod unity_yaml;
 mod unity_index;
 mod unity_diff;
@@ -19,9 +20,12 @@ mod acp;
 mod auth;
 mod auth_loopback;
 mod graphify;
+mod fs_atomic;
 mod fs_copy;
 mod cli;
+mod window_registry;
 mod path_util;
+mod project_settings;
 mod process_util;
 mod sync_util;
 mod walk_policy;
@@ -741,26 +745,111 @@ pub(crate) fn window_title(product_name: Option<&str>) -> String {
         .to_string()
 }
 
-pub(crate) fn open_or_focus_welcome(app: &tauri::AppHandle) {
-    if let Some(w) = app.webview_windows().get("welcome") {
-        let _ = w.show();
-        let _ = w.set_focus();
-    } else {
-        let app = app.clone();
-        tauri::async_runtime::spawn(async move {
-            let title = window_title(app.config().product_name.as_deref());
-            let _ = tauri::WebviewWindowBuilder::new(
-                &app,
-                "welcome",
-                tauri::WebviewUrl::App("index.html?view=welcome".into()),
-            )
-            .title(&title)
-            .inner_size(720.0, 480.0)
-            .min_inner_size(600.0, 360.0)
-            .resizable(true)
-            .build();
-        });
+/// How long to give the frontend to put *something* on screen before we do.
+const WELCOME_WATCHDOG: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// Never leave the app running with nothing visible.
+///
+/// The welcome window starts hidden (`"visible": false`) and normally shows
+/// itself as soon as WelcomeApp mounts and finds nothing to route — which is
+/// what keeps a launch from Unity from flashing a 720x480 panel on its way to
+/// the project window. That leaves exactly one bad outcome: a webview that
+/// never boots, and a process alive with an invisible window and no way to
+/// reach it.
+///
+/// So this is a net, not a mechanism. It fires once, late, and only when
+/// nothing at all made it to the screen.
+fn arm_welcome_watchdog(app: &tauri::AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(WELCOME_WATCHDOG).await;
+
+        let nothing_visible = app
+            .webview_windows()
+            .values()
+            .all(|w| !w.is_visible().unwrap_or(false));
+        if nothing_visible {
+            eprintln!("[UnityIDE] no window became visible; showing the welcome window");
+            open_or_focus_welcome(&app);
+        }
+    });
+}
+
+/// Act on an open request, wherever it came from.
+///
+/// Three callers, one behaviour: the single-instance callback (argv from a
+/// second launch), the deep-link handler (`unityide://open?…`), and the
+/// cold-start read in `setup`. They differ only in how the request was spelled.
+fn dispatch_open_request(app: &tauri::AppHandle, request: cli::OpenRequest) {
+    use tauri::{Emitter, Manager};
+
+    let project = request.project.clone();
+    cli::set_pending(&app.state::<cli::PendingOpen>(), request);
+
+    // Route to the window that already owns this project, if there is one, and
+    // raise THAT window. Falling through to the welcome window here is what
+    // used to drop a 720x480 panel on top of the project window that was busy
+    // opening the file.
+    if let Some(target) = project
+        .as_deref()
+        .and_then(|p| window_registry::find_window_for_project(app, p))
+    {
+        let _ = app.emit_to(target.label(), "unityide-open-pending", ());
+        window_registry::raise(&target);
+        return;
     }
+
+    // Nobody owns it. Nudge every window — a request with no project belongs to
+    // whoever asks first — and make sure the welcome window exists, because it
+    // is what turns a project path into a window.
+    //
+    // Hidden when a project was named: it is acting as a router, and showing it
+    // would put it right back on top of the project window it is about to open.
+    // Visible otherwise, since a request we cannot route needs a surface the
+    // user can act on.
+    ensure_welcome_window(app, project.is_none());
+    let _ = app.emit("unityide-open-pending", ());
+}
+
+pub(crate) fn open_or_focus_welcome(app: &tauri::AppHandle) {
+    ensure_welcome_window(app, true);
+}
+
+/// Make sure the welcome window exists, and optionally bring it forward.
+///
+/// `visible: false` is the router case. The welcome window is the only surface
+/// that knows how to turn "open this project" into a project window, but when
+/// Unity is the one asking, the user wants the project — not a 720x480 panel
+/// landing in front of it. So it is brought into existence to do the routing
+/// and left hidden.
+///
+/// An already-open welcome window is never hidden by this: the user may have
+/// put it there themselves.
+fn ensure_welcome_window(app: &tauri::AppHandle, visible: bool) {
+    if let Some(w) = app.webview_windows().get("welcome") {
+        if visible {
+            // unminimize -> show -> focus, in that order: tao's macOS set_focus
+            // returns early on a miniaturized window, so focusing alone left a
+            // minimized welcome window exactly where it was.
+            window_registry::raise(w);
+        }
+        return;
+    }
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let title = window_title(app.config().product_name.as_deref());
+        let _ = tauri::WebviewWindowBuilder::new(
+            &app,
+            "welcome",
+            tauri::WebviewUrl::App("index.html?view=welcome".into()),
+        )
+        .title(&title)
+        .inner_size(720.0, 480.0)
+        .min_inner_size(600.0, 360.0)
+        .resizable(true)
+        .visible(visible)
+        .build();
+    });
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -800,17 +889,19 @@ pub fn run() {
         if has_deep_link {
             return;
         }
-        // Unity launches the external script editor as
-        // `UnityIDE.exe --goto <file>:<line>:<col> <project>`. argv was never
-        // read, so double-clicking a script in Unity's Project window showed
-        // the Welcome window instead of the file.
-        if let Some(target) = cli::parse_goto(argv.as_slice()) {
-            use tauri::{Emitter, Manager};
-            cli::set_pending(&app.state::<cli::PendingGoto>(), target);
-            // Nudge every live window: one of them may already have this
-            // project open and can act immediately. The welcome window is the
-            // fallback surface when none can.
-            let _ = app.emit("unityide-goto-pending", ());
+        // Unity launches us as `UnityIDE --goto <file>:<line>:<col> <project>`
+        // (double-clicking a script) or `UnityIDE --project <project>` /
+        // `UnityIDE <project>` (its Open C# Project menu item, and ours).
+        // argv was never read, so both showed the Welcome window instead.
+        //
+        // This is the fallback route now — Unity prefers the `unityide://open`
+        // deep link, which never reaches argv on macOS and is intercepted above
+        // on Windows. It still has to work: a Windows install that has never
+        // been launched has no scheme registered yet, and `tauri dev` on macOS
+        // can never have one.
+        if let Some(request) = cli::parse_open(argv.as_slice()) {
+            dispatch_open_request(app, request);
+            return;
         }
         open_or_focus_welcome(app);
     }));
@@ -818,7 +909,24 @@ pub fn run() {
     let builder = builder.plugin(tauri_plugin_deep_link::init());
 
     builder
-        .plugin(tauri_plugin_window_state::Builder::default().build())
+        // Everything EXCEPT visibility. The plugin defaults to StateFlags::all(),
+        // and its VISIBLE flag makes it `show()` + `set_focus()` a window on
+        // creation whenever the last session left it visible — which for the
+        // welcome window is always. That runs during `build()`, before `setup()`
+        // gets a say, so it would put the 720x480 panel on screen (and in front)
+        // on a launch from Unity no matter what `"visible": false` says.
+        //
+        // Nothing in this app is deliberately left hidden across a restart, so
+        // giving up visibility restore costs nothing: who is on screen is a
+        // decision this process makes at launch, from argv.
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(
+                    tauri_plugin_window_state::StateFlags::all()
+                        - tauri_plugin_window_state::StateFlags::VISIBLE,
+                )
+                .build(),
+        )
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
@@ -826,7 +934,8 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .manage(cli::PendingGoto::default())
+        .manage(cli::PendingOpen::default())
+        .manage(window_registry::WindowWorkspaces::default())
         .manage(lsp::LspState::new())
         .manage(terminal::TerminalState::new())
         .manage(file_scanner::FileWatcherState::new())
@@ -926,20 +1035,25 @@ pub fn run() {
             file_index::build_file_index,
             unity::detect_unity_project,
             unity::scan_meta_files,
+            project_settings::unity_project_settings,
             unity::unity_setup_lsp,
             unity::resolve_unity_editor,
             unity::unity_fetch_registry_index,
             unity::unity_install_bridge,
+            unity::unity_bridge_package_id,
             asmdef::asmdef_build_graph,
             asmdef::asmdef_graph_get,
             asmdef::asmdef_owning_assembly,
             asmdef::unity_classify_scripts,
             unity_yaml::unity_parse_asset,
+            unity_asset_edit::unity_asset_read_fields,
+            unity_asset_edit::unity_asset_apply_edits,
             unity_diff::unity_scene_diff,
             unity_diff::unity_scene_diff_revs,
             unity_index::unity_index_build,
             unity_index::unity_index_guid_map,
             unity_index::unity_index_find_references,
+            unity_index::unity_method_usages,
             unity_index::unity_index_hygiene,
             unity_index::unity_index_apply_delta,
             unity_tests::unity_tests_discover,
@@ -979,8 +1093,10 @@ pub fn run() {
             graphify::graphify_symbols,
             create_directory_recursive,
             execute_command,
-            cli::peek_pending_goto,
-            cli::claim_pending_goto,
+            cli::peek_pending_open,
+            cli::claim_pending_open,
+            window_registry::register_window_workspace,
+            window_registry::raise_current_window,
         ])
         .setup(|_app| {
             // FIRST, before anything reads the config dir — the update watcher
@@ -1000,17 +1116,70 @@ pub fn run() {
             // from the frontend would check (and download) once per window.
             updates::spawn_watcher(_app.handle());
 
-            // Cold start: the same `--goto` Unity passes on a second launch
-            // also arrives on the first one, and is likewise ignored unless
-            // read here. Stored rather than emitted — no window is listening
-            // yet at this point in boot.
+            // Deep links: `unityide://open?project=…&file=…&line=…&column=…`.
+            //
+            // This is the route Unity takes first, because it needs no idea
+            // where the app is installed — the OS already knows. One handler
+            // covers every warm case on every platform: the plugin emits
+            // `deep-link://new-url` both from macOS's RunEvent::Opened and from
+            // the argv it is handed by the single-instance plugin on
+            // Windows/Linux, and `on_open_url` listens to that event.
+            //
+            // Auth callbacks (`unityide://auth/callback?…`) fall straight
+            // through — `parse_deep_link` discriminates on the host — and are
+            // still handled by the frontend's own `onOpenUrl`.
             {
-                use tauri::Manager;
-                let argv: Vec<String> = std::env::args().collect();
-                if let Some(target) = cli::parse_goto(&argv) {
-                    cli::set_pending(&_app.state::<cli::PendingGoto>(), target);
-                }
+                use tauri_plugin_deep_link::DeepLinkExt;
+                let handle = _app.handle().clone();
+                _app.deep_link().on_open_url(move |event| {
+                    for url in event.urls() {
+                        if let Some(request) = cli::parse_deep_link(&url) {
+                            dispatch_open_request(&handle, request);
+                        }
+                    }
+                });
             }
+
+            // Cold start. Three shapes reach us here and all end in the same
+            // pending slot:
+            //
+            //  * argv — `--goto` / `--project` / a bare path. Unity's fallback
+            //    route, and what an already-installed older package still uses.
+            //  * a deep link on Windows/Linux, which arrives as the process's
+            //    single argument and is parsed by the deep-link plugin's own
+            //    setup — BEFORE the handler above exists, so its event is
+            //    missed and `get_current()` is the only way to see it.
+            //  * a deep link on macOS, which arrives later as RunEvent::Opened
+            //    and IS caught by the handler above. Nothing to do here.
+            //
+            // Stored rather than emitted — no window is listening yet.
+            let launched_with_a_project = {
+                use tauri::Manager;
+                use tauri_plugin_deep_link::DeepLinkExt;
+
+                let from_deep_link = _app
+                    .deep_link()
+                    .get_current()
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default()
+                    .iter()
+                    .find_map(cli::parse_deep_link);
+
+                let argv: Vec<String> = std::env::args().collect();
+                match from_deep_link.or_else(|| cli::parse_open(&argv)) {
+                    Some(request) => {
+                        let has_project = request.project.is_some();
+                        cli::set_pending(&_app.state::<cli::PendingOpen>(), request);
+                        has_project
+                    }
+                    None => false,
+                }
+            };
+
+            // Record where this build is installed so the Unity package can
+            // find it without guessing at platform install paths.
+            unity::write_install_record(_app.handle());
 
             // The welcome window is declared in tauri.conf.json, so it is built
             // before any of this runs and carries that file's literal title.
@@ -1028,8 +1197,32 @@ pub fn run() {
                     // macOS to make up for turning them off here.
                     #[cfg(not(target_os = "macos"))]
                     let _ = w.set_decorations(false);
+
+                    // It is declared `"visible": false` so that a launch from
+                    // Unity does not flash a 720x480 panel on its way to the
+                    // project window. Show it here for every other launch —
+                    // from Rust rather than from the frontend, so a webview
+                    // that fails to boot still leaves the user with a window.
+                    // WelcomeApp shows itself in the remaining case: it was
+                    // handed a project and could not route it anywhere.
+                    // Deliberately not shown here, even when argv named no
+                    // project. On macOS a deep link arrives as
+                    // RunEvent::Opened — AFTER this runs — so showing eagerly
+                    // would put the panel on screen milliseconds before the
+                    // deep link asked for a project window, and leave it
+                    // sitting in front of one. WelcomeApp shows itself the
+                    // moment it knows there is nothing to route, which is the
+                    // same instant either way. `arm_welcome_watchdog` below is
+                    // the net for the case where it never gets that far.
+                    if launched_with_a_project {
+                        // Belt and braces: a no-op unless something showed it
+                        // behind our back.
+                        let _ = w.hide();
+                    }
                 }
             }
+
+            arm_welcome_watchdog(_app.handle());
 
             // Runtime deep-link registration for unbundled runs (`tauri dev`,
             // portable exe) — writes the registry/desktop-file entries the

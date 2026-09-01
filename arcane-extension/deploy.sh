@@ -1,12 +1,42 @@
 #!/bin/bash
-# Prepares the UnityIDE Unity extension for production / Asset Store deployment.
-# Validates package structure, checks .meta files, cleans artifacts, and builds a UPM tarball.
-# Usage: ./deploy-prod.sh
+# Builds a UPM tarball of the UnityIDE Unity extension.
+# Validates package structure, checks .meta files, cleans artifacts, and packs.
+#
+# Usage: ./deploy.sh [release|dev]        (default: release)
+#
+# The package ships twice, once per release channel, because the two channels
+# are separate applications: a different product name, deep-link scheme, config
+# directory and updater feed. The checked-in source IS the release package;
+# `dev` stages a copy and rewrites it (scripts/unity-extension-channel.mjs)
+# before packing, so the source tree is never modified.
 
 set -euo pipefail
 
+CHANNEL="${1:-release}"
+if [ "$CHANNEL" != "release" ] && [ "$CHANNEL" != "dev" ]; then
+    echo "usage: $0 [release|dev]" >&2
+    exit 2
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 cd "$SCRIPT_DIR"
+
+# The dev variant is built from a staging copy so `arcane-extension/` keeps its
+# release identity. The tarball is moved back here afterwards, so callers do not
+# have to care which channel they asked for.
+STAGING=""
+if [ "$CHANNEL" = "dev" ]; then
+    STAGING="$SCRIPT_DIR/.pack-dev"
+    rm -rf "$STAGING"
+    mkdir -p "$STAGING"
+    # -a would carry .wrangler and any stale tarball; the deny list below and
+    # .npmignore agree on what is not package content.
+    tar -cf - --exclude='.pack-dev' --exclude='.wrangler' --exclude='*.tgz' \
+              --exclude='.git' --exclude='.DS_Store' . | tar -xf - -C "$STAGING"
+    node "$REPO_ROOT/scripts/unity-extension-channel.mjs" "$STAGING" dev
+    cd "$STAGING"
+fi
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -15,7 +45,7 @@ NC='\033[0m'
 
 ERRORS=0
 
-echo "=== UnityIDE Extension — Production Deploy ==="
+echo "=== UnityIDE Extension — $CHANNEL package ==="
 echo ""
 
 # --- 1. Validate required files ---
@@ -24,7 +54,7 @@ REQUIRED_FILES=(
     "package.json"
     "LICENSE.md"
     "CHANGELOG.md"
-    "Editor/UnityIDE.Editor.asmdef"
+    "Editor/UnityIDEChannel.cs"
     "Documentation~/unityide-extension.md"
 )
 
@@ -145,7 +175,8 @@ else
         --exclude='.gitignore' \
         --exclude='*.tgz' \
         --exclude='install-dev.sh' \
-        --exclude='deploy-prod.sh' \
+        --exclude='deploy.sh' \
+        --exclude='.pack-dev' \
         --exclude='.unityide-dev-path' \
         package.json \
         LICENSE.md LICENSE.md.meta \
@@ -161,9 +192,23 @@ else
     fi
 fi
 
+# The dev tarball was built in the staging copy; move it back so callers find
+# it in the package directory either way.
+if [ -n "$STAGING" ]; then
+    mv "$TARBALL" "$SCRIPT_DIR/$TARBALL"
+    cd "$SCRIPT_DIR"
+    rm -rf "$STAGING"
+fi
+
 echo ""
-echo "=== Deploy checklist ==="
-echo "1. Import $TARBALL into a Unity 2021.3+ project"
-echo "2. Install Asset Store Tools (com.unity.asset-store-tools)"
-echo "3. Use Asset Store Tools > Package Upload to validate"
-echo "4. Submit via publisher.unity.com"
+if [ "$CHANNEL" = "dev" ]; then
+    echo "=== Built the DEV-channel package ==="
+    echo "It targets the \"UnityIDE Dev\" application and the unityide-dev:// scheme."
+    echo "It must not be published to the release feed."
+else
+    echo "=== Deploy checklist ==="
+    echo "1. Import $TARBALL into a Unity 2021.3+ project"
+    echo "2. Install Asset Store Tools (com.unity.asset-store-tools)"
+    echo "3. Use Asset Store Tools > Package Upload to validate"
+    echo "4. Submit via publisher.unity.com"
+fi

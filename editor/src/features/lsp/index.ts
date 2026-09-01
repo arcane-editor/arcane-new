@@ -50,3 +50,21 @@ export {
   type LocalCodeAction,
   type LocalCodeActionContext,
 } from './services/code-actions';
+// Project-wide symbol search. Not a Monaco provider — the standalone API has
+// no workspace-symbol hook — so the command palette calls this directly.
+// `LspTextEdit` is deliberately NOT re-exported here: workspace-edit already
+// owns that name in this barrel.
+export {
+  queryWorkspaceSymbols,
+  MIN_SYMBOL_QUERY_LENGTH,
+  type WorkspaceSymbolHit,
+} from './services/symbol-providers';
+
+// Solution-wide analysis. csharp-ls advertises
+// `diagnosticProvider.workspaceDiagnostics`, so this needs no Roslyn host —
+// see services/workspace-diagnostics.ts.
+export {
+  runWorkspaceDiagnostics,
+  resetWorkspaceDiagnostics,
+  type WorkspaceAnalysisResult,
+} from './services/workspace-diagnostics';

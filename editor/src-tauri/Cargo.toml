@@ -1,6 +1,6 @@
 [package]
 name = "editor"
-version = "0.3.2"
+version = "0.3.3"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -27,6 +27,10 @@ tauri-plugin-store = "2"
 tauri-plugin-shell = "2"
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 tauri-plugin-deep-link = "2"
+# Deep-link URL parsing. `on_open_url` already hands us `url::Url`, so this is
+# the type we have to speak anyway; it was already resolved at this version
+# transitively (via the deep-link plugin), so naming it adds no resolution.
+url = "2"
 tauri-plugin-updater = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

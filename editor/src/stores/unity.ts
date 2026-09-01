@@ -16,6 +16,8 @@ import { parseStackTrace } from '../types/unity';
 import { useWorkspaceStore } from './workspace';
 import { useNotificationsStore, notify } from './notifications';
 import { isBridgeInstalled, installBridge } from '../features/unity-bridge';
+import { setPendingNavigation } from '../utils/editor-navigation';
+import { raiseCurrentWindow } from '../utils/window-focus';
 
 const MAX_LOG_ENTRIES = 10_000;
 /** How long after a disconnect we assume Unity is mid-domain-reload (not gone). */
@@ -286,10 +288,20 @@ export const useUnityStore = create<UnityState>((set, get) => ({
       });
     });
 
+    // Unity asking this window to open a script — the warm path behind
+    // double-clicking a file in its Project window. It goes over the bridge
+    // rather than relaunching the app, so nothing else brings us forward:
+    // raising is part of honouring the request, not a nicety.
     const u6 = await listenScoped<OpenFilePayload>('unity-open-file', (event) => {
-      const { path } = event.payload;
+      const { path, line, column } = event.payload;
       const fileName = path.split('/').pop() ?? path;
-      useWorkspaceStore.getState().openFile(path, fileName);
+      // Before openFile, not after: EditorPanel consumes the pending
+      // navigation on the activeFilePath effect that openFile triggers.
+      if (line !== undefined) {
+        setPendingNavigation({ line, column: column ?? 1 });
+      }
+      void raiseCurrentWindow();
+      void useWorkspaceStore.getState().openFile(path, fileName);
     });
 
     const u7 = await listenScoped<{ ideProtocol: number; bridgeProtocol: number }>(

@@ -2,7 +2,6 @@
 // as a navigable tree via the Rust `unity_parse_asset` parser, with a raw/edit
 // fallback handled by the editor host.
 export { AssetViewer } from './components/AssetViewer';
-export { InputActionsViewer, isInputActionsFile } from './components/InputActionsViewer';
 export { isUnityAssetFile } from './services/asset-model';
 
 // Semantic scene/prefab git-diff viewer (P6.2), driven by the Rust
@@ -26,3 +25,7 @@ export type {
   PrefabOverrideStatus,
   DiffSummary,
 } from './services/scene-diff-model';
+
+// Resolves a guid to an asset and opens it on click. Reused by the
+// ScriptableObject inspector for object-reference field values.
+export { GuidRef } from './components/AssetViewer';

@@ -244,6 +244,50 @@ export class LspClient {
           documentHighlight: {
             dynamicRegistration: false,
           },
+          // Declared because a server may gate its own capability on the
+          // client asking for it — csharp-ls advertises all of these, and
+          // `verify:intellisense` fails if any of them stops coming back.
+          documentSymbol: {
+            dynamicRegistration: false,
+            hierarchicalDocumentSymbolSupport: true,
+            symbolKind: {
+              valueSet: [
+                1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
+                19, 20, 21, 22, 23, 24, 25, 26,
+              ],
+            },
+            labelSupport: true,
+          },
+          semanticTokens: {
+            dynamicRegistration: false,
+            requests: { range: true, full: { delta: false } },
+            formats: ['relative'],
+            tokenTypes: [
+              'namespace', 'type', 'class', 'enum', 'interface', 'struct',
+              'typeParameter', 'parameter', 'variable', 'property',
+              'enumMember', 'event', 'function', 'method', 'macro', 'keyword',
+              'modifier', 'comment', 'string', 'number', 'regexp', 'operator',
+              'decorator',
+            ],
+            tokenModifiers: [
+              'declaration', 'definition', 'readonly', 'static', 'deprecated',
+              'abstract', 'async', 'modification', 'documentation',
+              'defaultLibrary',
+            ],
+            overlappingTokenSupport: false,
+            multilineTokenSupport: false,
+            serverCancelSupport: false,
+            augmentsSyntaxTokens: true,
+          },
+          formatting: { dynamicRegistration: false },
+          rangeFormatting: { dynamicRegistration: false },
+          onTypeFormatting: { dynamicRegistration: false },
+          callHierarchy: { dynamicRegistration: false },
+          typeHierarchy: { dynamicRegistration: false },
+          inlayHint: {
+            dynamicRegistration: false,
+            resolveSupport: { properties: ['tooltip', 'label.tooltip'] },
+          },
           rename: { prepareSupport: true, dynamicRegistration: false },
           publishDiagnostics: { relatedInformation: true, versionSupport: true },
           diagnostic: { dynamicRegistration: false, relatedDocumentSupport: false },

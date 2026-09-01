@@ -182,12 +182,18 @@ export interface SettingsSchema {
   'unity.nearMissDiagnostics.enabled': boolean;
   'unity.rename.formerlySerializedAs': boolean;
   'unity.serializationDiagnostics.enabled': boolean;
+  'unity.projectSettingsDiagnostics.enabled': boolean;
+  'unity.inputDiagnostics.enabled': boolean;
+  'unity.uiDiagnostics.enabled': boolean;
+  'lsp.solutionWideAnalysis': boolean;
   'unity.asmdef.diagnostics': boolean;
   'unity.bridge.enabled': boolean;
   'unity.bridge.refreshOnSave': boolean;
   'unity.telemetry.enabled': boolean;
   'unity.hierarchyPanel.enabled': boolean;
   'unity.assetViewer.structuredDefault': boolean;
+  'unity.scriptableObjects.inspector': boolean;
+  'unity.codeLens.scriptableObjectInstances': boolean;
   'unity.sceneDiff.enabled': boolean;
   'unity.codeLens.assetUsages': boolean;
   'unity.templates.enabled': boolean;
@@ -201,6 +207,7 @@ export interface SettingsSchema {
   'unity.git.metaPairingChecks': boolean;
   'unity.git.yamlMergeIntegration': boolean;
   'unity.testRunner.enabled': boolean;
+  'unity.inputHub.enabled': boolean;
   'unity.debugger.enabled': boolean;
   'unity.shader.completions': boolean;
   'unity.packages.manifestIntelligence': boolean;
@@ -228,6 +235,7 @@ export interface SettingsSchema {
  *   'unity-compiler'   – compilation errors forwarded from the Unity Editor bridge
  *   'asmdef'           – assembly-definition graph diagnostics
  *   'unity-packages'   – package manifest / UPM hint diagnostics
+ *   'unity-uitoolkit'  – UXML/USS reference + property diagnostics
  */
 export type DiagnosticSource =
   | 'lsp'
@@ -235,6 +243,7 @@ export type DiagnosticSource =
   | 'unity-compiler'
   | 'asmdef'
   | 'unity-packages'
+  | 'unity-uitoolkit'
   | (string & Record<never, never>); // allow arbitrary strings while keeping the named literals
 
 export interface DiagnosticItem {

@@ -40,7 +40,8 @@ export { EFFORT_ORDER, cycleEffort, nextEffort, clampEffort, restoreEffort } fro
 export { planController } from './services/plan-controller';
 export { resetWriteApprovalSession } from './services/write-approval-gate';
 export type { AskUserOption, AskUserParams } from './services/ask-user-tool';
-export { resolvePendingQuestion } from './services/question-gate';
+export { hasPendingQuestion, resolvePendingQuestion } from './services/question-gate';
+export { findPendingQuestion } from './services/pending-question';
 export type { VerifiedCardData } from './services/verified-pass';
 export type { TurnError, TurnErrorKind } from './services/turn-errors';
 export { summarizeSceneDiff } from './services/summarize-scene-diff';

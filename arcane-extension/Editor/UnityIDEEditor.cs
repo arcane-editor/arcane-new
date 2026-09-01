@@ -1,10 +1,8 @@
 using System;
-using System.Diagnostics;
-using System.IO;
+using System.Collections.Generic;
 using Unity.CodeEditor;
 using UnityEditor;
 using UnityEngine;
-using Debug = UnityEngine.Debug;
 
 namespace UnityIDE.Editor
 {
@@ -13,49 +11,29 @@ namespace UnityIDE.Editor
     /// Implements IExternalCodeEditor to appear in Edit > Preferences > External Tools,
     /// open scripts in UnityIDE on double-click, and keep .sln/.csproj files generated.
     ///
+    /// Finding and launching the app lives in <see cref="UnityIDELauncher"/>, not
+    /// here: the same job is needed by the Window > UnityIDE menu items, which
+    /// have to work whether or not UnityIDE is the configured script editor.
+    ///
     /// Live IPC with the running IDE (console/play/hierarchy/telemetry) is owned by the
-    /// UnityIDE.Bridge package (see BridgeBootstrap); this class only handles the
-    /// Unity-initiated external-editor responsibilities and launches UnityIDE on demand.
+    /// UnityIDE.Bridge package (see BridgeBootstrap).
     /// </summary>
     [InitializeOnLoad]
     public class UnityIDEEditor : IExternalCodeEditor
     {
         /// <summary>
-        /// The app's name before the rename. Kept only so an already-installed
-        /// build is still found; nothing new is ever written under it.
+        /// The app's name before the rename, or empty for a channel that never
+        /// had one. Kept only so an already-installed build is still
+        /// recognised; nothing new is ever written under it.
         /// </summary>
-        private const string LegacyAppName = "UnityIDE";
+        private const string LegacyAppName = UnityIDEChannel.LegacyAppName;
 
-        // Each table lists the new-name locations first, then the pre-rename
-        // ones. The extension and the IDE ship separately — a user can update
-        // the Unity package before reinstalling the app — so probing only the
-        // new paths would report "no installation found" on a machine where
-        // the IDE is sitting right there under its old name. The legacy
-        // entries cost one File.Exists each and can go once the old app has.
-        private static readonly string[] MacPaths = {
-            "/Applications/UnityIDE.app",
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Personal), "Applications/UnityIDE.app"),
-            "/Applications/" + LegacyAppName + ".app",
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Personal), "Applications/" + LegacyAppName + ".app")
-        };
-
-        private static readonly string[] WindowsPaths = {
-            @"C:\Program Files\UnityIDE\UnityIDE.exe",
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Programs\UnityIDE\UnityIDE.exe"),
-            @"C:\Program Files\" + LegacyAppName + @"\" + LegacyAppName + ".exe",
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Programs\" + LegacyAppName + @"\" + LegacyAppName + ".exe")
-        };
-
-        private static readonly string[] LinuxPaths = {
-            "/usr/bin/unityide",
-            "/usr/local/bin/unityide",
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Personal), ".local/bin/unityide"),
-            "/usr/bin/arcane",
-            "/usr/local/bin/arcane",
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Personal), ".local/bin/arcane")
-        };
-
-        private string _installPath;
+        /// <summary>
+        /// The application this build of the package talks to. Everything user
+        /// visible is named after it, so the dev-channel package says "UnityIDE
+        /// Dev" everywhere the release one says "UnityIDE".
+        /// </summary>
+        private const string AppName = UnityIDEChannel.DisplayName;
 
         static UnityIDEEditor()
         {
@@ -66,74 +44,24 @@ namespace UnityIDE.Editor
         {
             get
             {
-                var installations = new System.Collections.Generic.List<CodeEditor.Installation>();
-
-                // 1. Check for dev launcher (.unityide-dev-path file in project root)
-                string devConfigPath = Path.Combine(
-                    Path.GetDirectoryName(Application.dataPath),
-                    ".unityide-dev-path"
-                );
-                if (File.Exists(devConfigPath))
-                {
-                    string devLauncher = File.ReadAllText(devConfigPath).Trim();
-                    if (File.Exists(devLauncher))
-                    {
-                        installations.Add(new CodeEditor.Installation
-                        {
-                            Name = "UnityIDE (Dev)",
-                            Path = devLauncher
-                        });
-                    }
-                }
-
-                // 2. Check custom path from EditorPrefs
-                string customPath = UnityIDESettings.InstallPath;
-                if (!string.IsNullOrEmpty(customPath) && (File.Exists(customPath) || Directory.Exists(customPath)))
+                var installations = new List<CodeEditor.Installation>();
+                foreach (var found in UnityIDELauncher.Installations())
                 {
                     installations.Add(new CodeEditor.Installation
                     {
-                        Name = "UnityIDE",
-                        Path = customPath
+                        Name = found.Name,
+                        Path = found.Path,
                     });
                 }
 
-                // 3. Search platform-specific paths for packaged app
-                string[] paths;
-                switch (Application.platform)
-                {
-                    case RuntimePlatform.OSXEditor:
-                        paths = MacPaths;
-                        break;
-                    case RuntimePlatform.WindowsEditor:
-                        paths = WindowsPaths;
-                        break;
-                    case RuntimePlatform.LinuxEditor:
-                        paths = LinuxPaths;
-                        break;
-                    default:
-                        paths = Array.Empty<string>();
-                        break;
-                }
-
-                foreach (string path in paths)
-                {
-                    if (File.Exists(path) || Directory.Exists(path))
-                    {
-                        installations.Add(new CodeEditor.Installation
-                        {
-                            Name = "UnityIDE",
-                            Path = path
-                        });
-                    }
-                }
-
-                // Always provide at least one entry
+                // Always provide at least one entry, so the dropdown says what
+                // to do rather than simply omitting us.
                 if (installations.Count == 0)
                 {
                     installations.Add(new CodeEditor.Installation
                     {
-                        Name = "UnityIDE (configure path in preferences)",
-                        Path = ""
+                        Name = AppName + " (configure path in preferences)",
+                        Path = "",
                     });
                 }
 
@@ -158,24 +86,25 @@ namespace UnityIDE.Editor
             // Editor still points at the old app should keep working until they
             // reinstall, not silently lose their editor association.
             if (!string.IsNullOrEmpty(editorPath) &&
-                (editorPath.IndexOf("UnityIDE", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                 editorPath.IndexOf(LegacyAppName, StringComparison.OrdinalIgnoreCase) >= 0))
+                (editorPath.IndexOf(AppName, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                 (!string.IsNullOrEmpty(LegacyAppName) &&
+                  editorPath.IndexOf(LegacyAppName, StringComparison.OrdinalIgnoreCase) >= 0)))
             {
                 installation = new CodeEditor.Installation
                 {
-                    Name = "UnityIDE",
+                    Name = AppName,
                     Path = editorPath
                 };
                 return true;
             }
 
-            installation = default;
+            installation = default(CodeEditor.Installation);
             return false;
         }
 
         public void Initialize(string editorInstallation)
         {
-            _installPath = editorInstallation;
+            UnityIDELauncher.SelectedInstallation = editorInstallation;
 
             // Generate project files when UnityIDE is selected as the external editor.
             // Deferred, not immediate: Unity calls this from CodeEditor.Register in
@@ -195,12 +124,21 @@ namespace UnityIDE.Editor
             return false;
         }
 
+        /// <summary>
+        /// Unity asking us to open something. Two callers, and the difference
+        /// between them is the whole reason this used to half-work:
+        ///
+        ///  * Double-clicking a script passes a file, a line and a column.
+        ///  * `Assets > Open C# Project` passes an empty path — "just open the
+        ///    project". That produced a bare `UnityIDE "&lt;project&gt;"`, which
+        ///    the app's argv parser ignored entirely, so the menu item did
+        ///    nothing but raise a Welcome window.
+        ///
+        /// Both are now one call.
+        /// </summary>
         public bool OpenProject(string filePath, int line, int column)
         {
-            // Launch (or focus) UnityIDE and navigate to the requested location. If UnityIDE
-            // is already running, its single-instance lock relays the --goto argument to
-            // the existing window; otherwise a new instance opens the project.
-            return LaunchIde(filePath, line, column);
+            return UnityIDELauncher.Open(filePath, line, column);
         }
 
         public void SyncAll()
@@ -222,84 +160,60 @@ namespace UnityIDE.Editor
             }
         }
 
+        /// <summary>
+        /// Drawn by Unity inside Preferences > External Tools.
+        ///
+        /// This doubles as the diagnostic surface. Everything that can go wrong
+        /// with "open my project in UnityIDE" is invisible otherwise — the app
+        /// not installed, installed but never launched so it has left no record
+        /// of itself, or running but not connected to this project.
+        /// </summary>
         public void OnGUI()
         {
-            EditorGUILayout.LabelField("UnityIDE Settings", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField(AppName, EditorStyles.boldLabel);
 
-            // Install Path
+            string resolved = UnityIDELauncher.ResolveInstallation();
+            EditorGUILayout.LabelField(
+                "Installation",
+                string.IsNullOrEmpty(resolved) ? "not found" : resolved);
+            EditorGUILayout.LabelField(
+                "Unity bridge",
+                Bridge.BridgeBootstrap.IsConnected
+                    ? "connected — this project is open in " + AppName
+                    : "not connected");
+
+            EditorGUILayout.Space();
+
+            // Install Path override
             EditorGUILayout.BeginHorizontal();
             string installPath = EditorGUILayout.TextField("Install Path", UnityIDESettings.InstallPath);
             if (installPath != UnityIDESettings.InstallPath)
                 UnityIDESettings.InstallPath = installPath;
             if (GUILayout.Button("Browse", GUILayout.Width(60)))
             {
-                string selected = EditorUtility.OpenFilePanel("Select UnityIDE Executable", "", "");
+                string selected = EditorUtility.OpenFilePanel("Select " + AppName, "", "");
                 if (!string.IsNullOrEmpty(selected))
                     UnityIDESettings.InstallPath = selected;
             }
             EditorGUILayout.EndHorizontal();
 
             EditorGUILayout.Space();
+
+            EditorGUILayout.BeginHorizontal();
+            using (new EditorGUI.DisabledScope(string.IsNullOrEmpty(resolved)))
+            {
+                if (GUILayout.Button("Open Project in " + AppName))
+                    UnityIDEMenu.OpenProject();
+            }
+            if (string.IsNullOrEmpty(resolved) && GUILayout.Button("Download " + AppName))
+                Application.OpenURL(UnityIDELauncher.DownloadUrl);
+            EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.Space();
             EditorGUILayout.HelpBox(
-                "Live connection to the UnityIDE (console, play mode, hierarchy) is " +
-                "managed automatically by the UnityIDE bridge while the IDE is running.",
+                "Live connection to " + AppName + " (console, play mode, hierarchy) " +
+                "is managed automatically by the bridge while the IDE is running.",
                 MessageType.Info);
-        }
-
-        private bool LaunchIde(string filePath, int line, int column)
-        {
-            string execPath = !string.IsNullOrEmpty(_installPath) ? _installPath : UnityIDESettings.InstallPath;
-
-            if (string.IsNullOrEmpty(execPath))
-            {
-                UnityIDELog.Warn("No UnityIDE installation path configured. Please set the path in Preferences > External Tools.");
-                return false;
-            }
-
-            try
-            {
-                string projectPath = Path.GetDirectoryName(Application.dataPath);
-                string args = string.IsNullOrEmpty(filePath)
-                    ? $"\"{projectPath}\""
-                    : $"--goto \"{filePath}:{line}:{column}\" \"{projectPath}\"";
-
-                // Shell scripts (dev launcher)
-                if (execPath.EndsWith(".sh"))
-                {
-                    var psi = new ProcessStartInfo
-                    {
-                        FileName = "/bin/bash",
-                        Arguments = $"\"{execPath}\" {args}",
-                        UseShellExecute = false
-                    };
-                    Process.Start(psi);
-                }
-                // On macOS, launch the binary inside .app bundle directly so
-                // Electron's single-instance lock works (open -a won't relay args to existing instance)
-                else if (Application.platform == RuntimePlatform.OSXEditor && execPath.EndsWith(".app"))
-                {
-                    string macBinary = Path.Combine(execPath, "Contents", "MacOS", "UnityIDE");
-                    if (File.Exists(macBinary))
-                    {
-                        Process.Start(macBinary, args);
-                    }
-                    else
-                    {
-                        Process.Start("open", $"-a \"{execPath}\" --args {args}");
-                    }
-                }
-                else
-                {
-                    Process.Start(execPath, args);
-                }
-
-                return true;
-            }
-            catch (Exception ex)
-            {
-                UnityIDELog.Error($"Failed to launch: {ex.Message}");
-                return false;
-            }
         }
     }
 }

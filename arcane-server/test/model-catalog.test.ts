@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { INTENSITY_CONFIG, getIntensityConfig, DEFAULT_MODEL_ROUTING, SPARK_MODEL } from '../src/config/plans.ts';
+import { INTENSITY_CONFIG, getIntensityConfig, DEFAULT_MODEL_ROUTING, EXECUTOR_MODEL, PLANNER_MODEL, SPARK_MODEL } from '../src/config/plans.ts';
 import { MODEL_CATALOG, wireFormatForNativeId } from '../src/lib/costs.ts';
 
 describe('INTENSITY_CONFIG', () => {
@@ -67,22 +67,60 @@ describe('catalog guard', () => {
 // Role pins — catches an accidental swap of which model serves which
 // planner/executor/executorHard slot in the code-default routing doc.
 describe('DEFAULT_MODEL_ROUTING role pins', () => {
-    it('low: spark planner, spark executor', () => {
-        expect(DEFAULT_MODEL_ROUTING.tiers.low.planner).toBe(SPARK_MODEL);
-        expect(DEFAULT_MODEL_ROUTING.tiers.low.executor).toBe(SPARK_MODEL);
+    it('low: glm-5.3-flash planner, glm-5.3-flash executor', () => {
+        expect(DEFAULT_MODEL_ROUTING.tiers.low.planner).toBe(EXECUTOR_MODEL);
+        expect(DEFAULT_MODEL_ROUTING.tiers.low.executor).toBe(EXECUTOR_MODEL);
         expect(DEFAULT_MODEL_ROUTING.tiers.low.executorHard).toBeUndefined();
     });
 
-    it('mid: grok planner, spark executor', () => {
-        expect(DEFAULT_MODEL_ROUTING.tiers.mid.planner).toBe('xai/grok-4.6');
-        expect(DEFAULT_MODEL_ROUTING.tiers.mid.executor).toBe(SPARK_MODEL);
+    it('mid: glm-5.3 planner, glm-5.3-flash executor', () => {
+        expect(DEFAULT_MODEL_ROUTING.tiers.mid.planner).toBe(PLANNER_MODEL);
+        expect(DEFAULT_MODEL_ROUTING.tiers.mid.executor).toBe(EXECUTOR_MODEL);
         expect(DEFAULT_MODEL_ROUTING.tiers.mid.executorHard).toBeUndefined();
     });
 
-    it('high: sol planner, spark executor, grok executorHard', () => {
+    it('high: sol planner, glm-5.3-flash executor, glm-5.3 executorHard', () => {
         expect(DEFAULT_MODEL_ROUTING.tiers.high.planner).toBe('openai/gpt-5.6-sol');
-        expect(DEFAULT_MODEL_ROUTING.tiers.high.executor).toBe(SPARK_MODEL);
-        expect(DEFAULT_MODEL_ROUTING.tiers.high.executorHard).toBe('xai/grok-4.6');
+        expect(DEFAULT_MODEL_ROUTING.tiers.high.executor).toBe(EXECUTOR_MODEL);
+        expect(DEFAULT_MODEL_ROUTING.tiers.high.executorHard).toBe(PLANNER_MODEL);
+    });
+
+    // Spark served every executor slot until 2026-08-27. Its catalog entry has
+    // to survive the swap — usage rows are keyed by model id, so deleting it
+    // would silently zero the cost of every historical debit against it.
+    it('keeps the retired spark entry in the catalog, unrouted', () => {
+        expect(MODEL_CATALOG[SPARK_MODEL]).toBeDefined();
+        const routed = Object.values(DEFAULT_MODEL_ROUTING.tiers).flatMap((t) =>
+            [t.planner, t.executor, t.executorHard].filter(Boolean),
+        );
+        expect(routed).not.toContain(SPARK_MODEL);
+    });
+
+    // Grok held the mid planner and the high executorHard until 2026-08-30,
+    // when glm-5.3 took both. Same contract as spark above: the entry stays so
+    // historical usage rows keyed to it still cost out, but nothing routes to
+    // it. With grok gone, gpt-5.6-sol is the last third-party model routed.
+    it('keeps the retired grok entry in the catalog, unrouted', () => {
+        expect(MODEL_CATALOG['xai/grok-4.6']).toBeDefined();
+        const routed = Object.values(DEFAULT_MODEL_ROUTING.tiers).flatMap((t) =>
+            [t.planner, t.executor, t.executorHard].filter(Boolean),
+        );
+        expect(routed).not.toContain('xai/grok-4.6');
+        expect(routed.filter((m) => !m!.startsWith('@cf/'))).toEqual(['openai/gpt-5.6-sol']);
+    });
+
+    it('glm-5.3 prices strictly below the grok it replaced, with no long-context cliff', () => {
+        const glm = MODEL_CATALOG[PLANNER_MODEL]!;
+        const grok = MODEL_CATALOG['xai/grok-4.6']!;
+
+        expect(glm.inputCostPer1M).toBeLessThan(grok.inputCostPer1M);
+        expect(glm.outputCostPer1M).toBeLessThan(grok.outputCostPer1M);
+        expect(glm.cachedInputCostPer1M).toBeLessThan(grok.cachedInputCostPer1M);
+        expect(glm.contextWindow).toBeGreaterThan(grok.contextWindow);
+        // Grok doubled the price of the whole request above 200k input, at
+        // exactly the sizes the Deep Think tier exists to serve.
+        expect(grok.longContext).toBeDefined();
+        expect(glm.longContext).toBeUndefined();
     });
 
     it('inline: qwen3-30b', () => {

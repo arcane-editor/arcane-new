@@ -4,8 +4,8 @@
  * (icon header + body + action row, same CSS discipline), but shaped for
  * free-form/multi-select answers instead of fixed permission options:
  *
- *  - No `options`: chip-less card — the question is answered only via
- *    ChatInput's answer mode (typing in the composer).
+ *  - No `options`: the question is answered by typing into the card's own
+ *    answer row (below), or into ChatInput's answer mode.
  *  - `options`, single-select: clicking a chip resolves immediately.
  *  - `options` carrying descriptions or previews (external agents' structured
  *    questions): the same options rendered as stacked cards instead, since the
@@ -13,6 +13,17 @@
  *  - `options`, `allowMultiple`: chips toggle a local selected-set; an
  *    "Answer" button (disabled while nothing is selected) submits the
  *    comma-joined labels.
+ *
+ * THE ANSWER ROW IS PART OF THE CARD, not just the composer. Every question
+ * takes free text — the agents' own schemas carry an "Other" slot for it
+ * (`acp-elicitation.ts`'s `encodeAnswer`) — and this used to be reachable only
+ * through the composer at the bottom of the panel, advertised by a one-line
+ * hint. That indirection failed outright whenever the composer's answer mode
+ * did not arm (see `pending-question.ts`), leaving a question that invited a
+ * typed answer and accepted none. The row here resolves through the same store
+ * action the chips do, reading the card's own message, so it cannot be
+ * defeated by anything happening in the composer. Composer answer mode stays
+ * as the second path for someone already typing down there.
  *
  * Resolution ALWAYS goes through `useAiStore.getState().resolveQuestionRequest`
  * — this component never touches `question-gate.ts` directly, mirroring how
@@ -27,7 +38,7 @@
  */
 
 import { useState } from 'react';
-import { CheckSquare, MessageCircleQuestion, Square } from 'lucide-react';
+import { ArrowUp, CheckSquare, MessageCircleQuestion, Square } from 'lucide-react';
 import { useAiStore, type AiMessage } from '../../../stores/ai';
 
 interface Props {
@@ -46,9 +57,10 @@ function splitAnswerLabels(answer: string): Set<string> {
 
 function QuestionBlock({ message }: Props) {
   const req = message.questionRequest;
-  // Hook called unconditionally, ahead of the `!req` early return below, so
-  // this never becomes a conditional hook call across renders.
+  // Hooks called unconditionally, ahead of the `!req` early return below, so
+  // these never become conditional hook calls across renders.
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  const [draft, setDraft] = useState('');
 
   if (!req) return null;
 
@@ -62,6 +74,7 @@ function QuestionBlock({ message }: Props) {
   // explanation or a preview get a stacked card each, because a choice whose
   // reasoning is hidden in a tooltip is a choice made blind.
   const detailed = !!req.options?.some((o) => o.description || o.preview);
+  const hasOptions = !!req.options && req.options.length > 0;
 
   function resolveWith(answer: string) {
     if (locked) return;
@@ -88,6 +101,13 @@ function QuestionBlock({ message }: Props) {
     else resolveWith(label);
   }
 
+  function submitDraft() {
+    const answer = draft.trim();
+    if (!answer) return;
+    setDraft('');
+    resolveWith(answer);
+  }
+
   return (
     <div className={`ai-question-block ${cancelled ? 'is-cancelled' : ''}`}>
       <div className="ai-question-block-header">
@@ -95,9 +115,9 @@ function QuestionBlock({ message }: Props) {
         <span className="ai-question-block-text">{req.question}</span>
       </div>
 
-      {req.options && req.options.length > 0 && (
+      {hasOptions && (
         <div className={detailed ? 'ai-question-block-cards' : 'ai-question-block-options'}>
-          {req.options.map((opt) => {
+          {req.options!.map((opt) => {
             const isChosen = chosenLabels.has(opt.label);
             const className = `${detailed ? 'ai-question-block-card' : 'ai-question-block-chip'} ${
               isChosen ? 'is-selected' : ''
@@ -151,7 +171,40 @@ function QuestionBlock({ message }: Props) {
         </div>
       )}
 
-      {!locked && <div className="ai-question-block-hint">…or type your answer below</div>}
+      {!locked && (
+        <div className="ai-question-block-answer">
+          <input
+            type="text"
+            className="ai-question-block-answer-input"
+            // With options above, this is the escape hatch from them; without
+            // any, it is the whole question. The placeholder says which.
+            placeholder={hasOptions ? 'Or type your own answer…' : 'Type your answer…'}
+            aria-label="Type your answer"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key !== 'Enter') return;
+              // preventDefault only, deliberately no stopPropagation: React
+              // listens on #root, BELOW the document listener the app's
+              // hotkeys use, so stopping propagation here would swallow every
+              // app chord for as long as this input holds focus (see the
+              // editor's CLAUDE.md). Nothing binds a bare Enter globally.
+              e.preventDefault();
+              submitDraft();
+            }}
+          />
+          <button
+            type="button"
+            className="ai-question-block-answer-send"
+            disabled={draft.trim().length === 0}
+            onClick={submitDraft}
+            title="Send answer"
+            aria-label="Send answer"
+          >
+            <ArrowUp size={13} strokeWidth={2.5} />
+          </button>
+        </div>
+      )}
 
       {resolved && <div className="ai-question-block-footer">Answered: {req.resolvedAnswer}</div>}
       {cancelled && <div className="ai-question-block-footer">Cancelled</div>}

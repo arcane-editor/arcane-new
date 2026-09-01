@@ -861,7 +861,11 @@ async fn route_message(app: &AppHandle, state: &Arc<UnityIpcInner>, label: &str,
             let _ = app.emit_to(label, "unity-hierarchy-changed", &msg.payload);
         }
         "focus_window" => {
-            // Could focus the IDE window
+            // Unity asking to be brought forward — sent alongside `open_file`
+            // when the user double-clicks a script and this window already has
+            // the project open, so no process is launched and nothing else
+            // would raise us.
+            crate::window_registry::raise_by_label(app, label);
         }
         _ => {
             // Unknown message type — ignore

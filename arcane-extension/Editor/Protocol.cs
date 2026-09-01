@@ -36,7 +36,25 @@ namespace UnityIDE.Bridge
         public const string PlaystateChanged = "playstate_changed";
         public const string CompilationStarted = "compilation_started";
         public const string CompilationFinished = "compilation_finished";
+        /// <summary>
+        /// Open a script in the IDE that has this project open. Payload:
+        /// { path: string, line?: number, column?: number } — 1-based, and both
+        /// positions optional so an IDE older than the package that started
+        /// sending them still opens the file.
+        ///
+        /// This is the warm half of double-clicking a script in Unity's Project
+        /// window: when the IDE is already up on this project, sending it here
+        /// beats relaunching the executable — no throwaway process, no dock
+        /// bounce, and no need to know where the app is installed.
+        /// </summary>
         public const string OpenFile = "open_file";
+        /// <summary>
+        /// Ask the IDE to bring itself to the front. Sent alongside OpenFile,
+        /// because nothing else will: on the warm path no process is launched,
+        /// so without this the file opens in a window that stays behind Unity.
+        /// Payload is empty.
+        /// </summary>
+        public const string FocusWindow = "focus_window";
         public const string RpcResponse = "rpc_response";
         public const string SelectionChanged = "selection_changed";
         public const string HierarchyChanged = "hierarchy_changed";
