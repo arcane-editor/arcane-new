@@ -128,3 +128,41 @@ export function bareTypeName(type: string): string {
   const parts = t.split('.');
   return parts[parts.length - 1] ?? t;
 }
+
+/**
+ * Which inspector control renders a serialized field of a given C# type.
+ *
+ * Keyed by `bareTypeName`. Every member of `UNITY_SERIALIZABLE_STRUCTS` MUST
+ * appear here — including the ones we cannot edit yet, which map to `'unknown'`
+ * deliberately rather than being absent. A declared `'unknown'` is a read-only
+ * row; a MISSING key is a type nobody thought about. `so-schema.test.ts` asserts
+ * the two sets stay in step, so adding a struct there fails the build until a
+ * widget decision is made for it.
+ *
+ * The values are the `SoWidgetKind` union in `services/so-schema.ts`; this file
+ * stays data-only and does not import it, so the coupling is checked by that
+ * test rather than by the type system.
+ */
+export const WIDGET_BY_TYPE: Record<string, string> = {
+  // Numbers. Unity writes every integral type as a plain YAML integer.
+  int: 'int', uint: 'int', long: 'int', ulong: 'int',
+  short: 'int', ushort: 'int', byte: 'int', sbyte: 'int', char: 'int',
+  float: 'float', double: 'float', decimal: 'float',
+
+  bool: 'bool',
+  string: 'string',
+
+  Vector2: 'vector2', Vector3: 'vector3', Vector4: 'vector4',
+  Vector2Int: 'vector2Int', Vector3Int: 'vector3Int',
+  Quaternion: 'vector4',
+  Color: 'color', Color32: 'color',
+  Rect: 'rect', RectInt: 'rect',
+  Bounds: 'bounds', BoundsInt: 'bounds',
+  LayerMask: 'layerMask',
+
+  // Serialized as a structured block we do not model yet. Read-only, on
+  // purpose: a curve or gradient rendered as a scalar would be a wrong edit.
+  Matrix4x4: 'unknown',
+  AnimationCurve: 'unknown',
+  Gradient: 'unknown',
+};

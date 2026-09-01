@@ -5,6 +5,7 @@ import { useNotificationsStore } from './notifications';
 import { useSettingsStore } from './settings';
 import { useUnityIndexStore } from './unity-index';
 import { openProjectInNewWindow } from '../features/project';
+import { readInputSystem, type InputSystemMode } from '../utils/input-system';
 
 interface UnityProjectInfo {
   is_unity: boolean;
@@ -45,6 +46,13 @@ interface ProjectContextState {
   unityYamlMergePath: string | null;
   nestedProjectPath: string | null;
   ancestorProjectPath: string | null;
+  /**
+   * Which input system the project runs, or null when undetected / not a Unity
+   * project. Resolved asynchronously after detection, so it stays null for the
+   * first frames — every consumer gates on `isNewInputSystemActive`, which
+   * treats null as "don't show it yet" rather than flickering a surface in.
+   */
+  inputSystem: InputSystemMode | null;
 
   detectProjectType: (workspacePath: string) => Promise<UnityProjectInfo | null>;
   applyDetection: (workspacePath: string, info: UnityProjectInfo) => void;
@@ -63,6 +71,7 @@ export const useProjectContextStore = create<ProjectContextState>((set) => ({
   unityYamlMergePath: null,
   nestedProjectPath: null,
   ancestorProjectPath: null,
+  inputSystem: null,
 
   detectProjectType: async (workspacePath: string) => {
     try {
@@ -83,6 +92,9 @@ export const useProjectContextStore = create<ProjectContextState>((set) => ({
       unityVersion: info.unity_version,
       nestedProjectPath: info.nested_project_path,
       ancestorProjectPath: info.ancestor_project_path,
+      // Cleared here, not left stale: switching from a Unity project to a
+      // non-Unity one must take the Input Hub away with it.
+      inputSystem: null,
     });
 
     if (info.is_unity) {
@@ -102,6 +114,13 @@ export const useProjectContextStore = create<ProjectContextState>((set) => ({
           .getState()
           .build(workspacePath, info.unity_version ?? '');
       }
+
+      // Fire-and-forget: which input system this project actually runs. Gates
+      // every Input Hub surface, so a failed read leaves it null and the
+      // feature simply stays hidden.
+      void readInputSystem(workspacePath)
+        .then((mode) => set({ inputSystem: mode }))
+        .catch(() => {});
 
       // Fire-and-forget: resolve the Unity editor install path.
       if (info.unity_version) {
@@ -151,6 +170,7 @@ export const useProjectContextStore = create<ProjectContextState>((set) => ({
       unityYamlMergePath: null,
       nestedProjectPath: null,
       ancestorProjectPath: null,
+      inputSystem: null,
     });
     useWorkspaceStore.getState().setExcludePatterns([]);
   },

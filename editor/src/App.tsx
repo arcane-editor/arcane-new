@@ -1320,6 +1320,15 @@ function App() {
       },
     },
     {
+      id: 'view.inputHub',
+      label: 'Input Actions',
+      category: 'View',
+      handler: () => {
+        useUiStore.getState().setActiveSidebarView('input');
+        useUiStore.getState().setSidebarVisible(true);
+      },
+    },
+    {
       id: 'view.debug',
       label: 'Run and Debug',
       category: 'View',

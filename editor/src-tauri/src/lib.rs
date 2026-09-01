@@ -8,6 +8,7 @@ mod file_scanner;
 mod file_index;
 mod unity;
 mod asmdef;
+mod unity_asset_edit;
 mod unity_yaml;
 mod unity_index;
 mod unity_diff;
@@ -19,6 +20,7 @@ mod acp;
 mod auth;
 mod auth_loopback;
 mod graphify;
+mod fs_atomic;
 mod fs_copy;
 mod cli;
 mod window_registry;
@@ -1044,6 +1046,8 @@ pub fn run() {
             asmdef::asmdef_owning_assembly,
             asmdef::unity_classify_scripts,
             unity_yaml::unity_parse_asset,
+            unity_asset_edit::unity_asset_read_fields,
+            unity_asset_edit::unity_asset_apply_edits,
             unity_diff::unity_scene_diff,
             unity_diff::unity_scene_diff_revs,
             unity_index::unity_index_build,

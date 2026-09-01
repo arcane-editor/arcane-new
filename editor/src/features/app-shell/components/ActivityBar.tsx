@@ -1,10 +1,11 @@
-import { Files, GitBranch, Search, Settings, Bug, Network, FlaskConical, SquareTerminal } from 'lucide-react';
+import { Files, GitBranch, Search, Settings, Bug, Network, FlaskConical, SquareTerminal, Gamepad2 } from 'lucide-react';
 import Tooltip from '../../../components/Tooltip';
 import { useUiStore, type SidebarView } from '../../../stores/ui';
 import { useCommandsStore } from '../../../stores/commands';
 import { useProjectContextStore } from '../../../stores/project-context';
 import { useSettingsStore } from '../../../stores/settings';
 import { useGitStore } from '../../../stores/git';
+import { isNewInputSystemActive } from '../../../utils/input-system';
 
 // `commandId` is what supplies the chord in the tooltip. Never spell a chord
 // into `label`: it goes stale the moment the binding moves, and five tooltips
@@ -31,6 +32,12 @@ function ActivityBar() {
   const debuggerEnabled = useSettingsStore((s) => s.getSetting('unity.debugger.enabled') !== false);
   const hierarchyEnabled = useSettingsStore((s) => s.getSetting('unity.hierarchyPanel.enabled') !== false);
   const testRunnerEnabled = useSettingsStore((s) => s.getSetting('unity.testRunner.enabled') !== false);
+  const inputHubEnabled = useSettingsStore((s) => s.getSetting('unity.inputHub.enabled') !== false);
+  // The Input Hub is meaningless under the legacy Input Manager -- there are
+  // no .inputactions assets to edit and no action names to resolve -- so the
+  // icon is absent rather than present-and-empty. `inputSystem` is null until
+  // detection lands, which keeps the icon from flashing in on project open.
+  const inputSystemActive = useProjectContextStore((s) => isNewInputSystemActive(s.inputSystem));
 
   // Narrow selector: only re-render when the changed-file count changes.
   //
@@ -55,6 +62,9 @@ function ActivityBar() {
       : []),
     ...(isUnityProject && testRunnerEnabled
       ? [{ id: 'test' as SidebarView, icon: FlaskConical, label: 'Unity Tests', commandId: 'view.testRunner' }]
+      : []),
+    ...(isUnityProject && inputSystemActive && inputHubEnabled
+      ? [{ id: 'input' as SidebarView, icon: Gamepad2, label: 'Input Actions', commandId: 'view.inputHub' }]
       : []),
     ...(isUnityProject && debuggerEnabled
       ? [{ id: 'debug' as SidebarView, icon: Bug, label: 'Run and Debug', commandId: 'view.debug' }]

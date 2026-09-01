@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import type { DiagnosticItem, DiagnosticSource } from '../types';
 
-export type SidebarView = 'explorer' | 'source-control' | 'search' | 'scene-context' | 'hierarchy' | 'test' | 'debug';
+export type SidebarView = 'explorer' | 'source-control' | 'search' | 'scene-context' | 'hierarchy' | 'test' | 'debug' | 'input';
 /** Per-file view mode for Unity YAML assets: structured tree vs raw Monaco. */
 export type AssetViewerMode = 'structured' | 'raw-view' | 'raw-edit';
 /** Per-tab view mode for a Unity-asset git diff tab: semantic tree vs raw Monaco text diff. */

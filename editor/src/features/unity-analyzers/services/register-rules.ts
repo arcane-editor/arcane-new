@@ -19,6 +19,12 @@ import { transformPositionPerAxisRule } from '../rules/transform-position-per-ax
 import { editorApiInRuntimeRule } from '../rules/editor-api-in-runtime';
 // Part F — validated against the project's own ProjectSettings assets
 import { projectSettingsLiteralsRule } from '../rules/project-settings-literals';
+// Part G -- validated against the project's .inputactions assets
+import { inputActionsRule } from '../rules/input-actions';
+import { inputCallbackLeakRule } from '../rules/input-callback-leak';
+import { inputLegacyApiRule } from '../rules/input-legacy-api';
+import { uitoolkitQueryRule } from '../rules/uitoolkit-query';
+import { unityEventListenersRule } from '../rules/unity-event-listeners';
 
 let registered = false;
 
@@ -47,4 +53,12 @@ export function registerAllRules(): void {
   registerRule(editorApiInRuntimeRule);
 
   registerRule(projectSettingsLiteralsRule);
+
+  registerRule(inputActionsRule);
+  registerRule(inputCallbackLeakRule);
+  registerRule(inputLegacyApiRule);
+
+  // Validated against the project's .uxml/.uss rather than against C# alone.
+  registerRule(uitoolkitQueryRule);
+  registerRule(unityEventListenersRule);
 }

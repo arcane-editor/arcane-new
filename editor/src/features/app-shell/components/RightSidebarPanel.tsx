@@ -1,7 +1,7 @@
 import { useUiStore } from '../../../stores/ui';
 import { useProjectContextStore } from '../../../stores/project-context';
 import { AiChatPanel } from '../../ai-panel';
-import { SceneUsagePanel } from '../../unity-context';
+import { UnityInspectorPanel } from '../../unity-scriptable-objects';
 import { ErrorBoundary } from '../../../components/ErrorBoundary';
 
 function RightSidebarPanel() {
@@ -32,8 +32,8 @@ function RightSidebarPanel() {
       return aiPanel;
     case 'unity-inspector':
       return isUnityProject ? (
-        <ErrorBoundary fallback={<div className="sidebar-empty">Scene panel unavailable.</div>}>
-          <SceneUsagePanel />
+        <ErrorBoundary fallback={<div className="sidebar-empty">Inspector unavailable.</div>}>
+          <UnityInspectorPanel />
         </ErrorBoundary>
       ) : (
         aiPanel

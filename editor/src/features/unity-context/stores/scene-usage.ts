@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { listenScoped } from '../../../utils/tauri-listener';
+import { shouldInvalidate } from '../services/usage-invalidation';
 import {
   findAssetUsages,
   findInstanceUsages,
@@ -11,6 +12,8 @@ interface SceneUsageState {
   cache: Map<string, AssetUsageEntry[]>;
   entriesForActiveScript: AssetUsageEntry[] | null;
   activeScriptPath: string | null;
+  /** Workspace the active script was loaded against, so a refresh can re-issue. */
+  activeWorkspacePath: string | null;
   isLoading: boolean;
 
   // Level-2: usages of a specific SO instance, keyed by the instance asset's
@@ -25,6 +28,8 @@ interface SceneUsageState {
   ) => Promise<AssetUsageEntry[]>;
   loadForScript: (scriptAbsPath: string, workspacePath: string) => Promise<void>;
   loadInstanceUsages: (instanceAssetGuid: string, workspacePath: string) => Promise<void>;
+  /** Drop the active script's cached entries and load them again. */
+  refreshActiveScript: () => Promise<void>;
   invalidate: () => void;
 }
 
@@ -36,6 +41,7 @@ export const useSceneUsageStore = create<SceneUsageState>((set, get) => ({
   cache: new Map(),
   entriesForActiveScript: null,
   activeScriptPath: null,
+  activeWorkspacePath: null,
   isLoading: false,
   instanceUsageCache: new Map(),
   instanceUsageLoading: new Set(),
@@ -75,7 +81,11 @@ export const useSceneUsageStore = create<SceneUsageState>((set, get) => ({
 
   loadForScript: async (scriptAbsPath, workspacePath) => {
     const gen = ++loadGeneration;
-    set({ activeScriptPath: scriptAbsPath, isLoading: true });
+    set({
+      activeScriptPath: scriptAbsPath,
+      activeWorkspacePath: workspacePath,
+      isLoading: true,
+    });
 
     const guid = await readScriptGuid(scriptAbsPath);
     if (gen !== loadGeneration) return;
@@ -130,20 +140,45 @@ export const useSceneUsageStore = create<SceneUsageState>((set, get) => ({
     }
   },
 
+  refreshActiveScript: async () => {
+    const { activeScriptPath, activeWorkspacePath } = get();
+    if (!activeScriptPath || !activeWorkspacePath) return;
+    const guid = await readScriptGuid(activeScriptPath);
+    if (guid) {
+      const next = new Map(get().cache);
+      next.delete(guid);
+      inflightByGuid.delete(guid);
+      set({ cache: next });
+    }
+    await get().loadForScript(activeScriptPath, activeWorkspacePath);
+  },
+
   invalidate: () => {
     loadGeneration++;
     inflightByGuid.clear();
     inflightInstanceByGuid.clear();
+    // KEEP activeScriptPath. Clearing it used to leave the panel permanently
+    // blank: its effect is keyed on [gate, workspacePath, loadForScript], none
+    // of which change when the store invalidates, so nothing ever re-issued the
+    // load and the user had to switch files to get the panel back.
+    const { activeScriptPath, activeWorkspacePath } = get();
     set({
       cache: new Map(),
       entriesForActiveScript: null,
-      activeScriptPath: null,
-      isLoading: false,
+      isLoading: activeScriptPath !== null,
       instanceUsageCache: new Map(),
       instanceUsageLoading: new Set(),
     });
+    if (activeScriptPath && activeWorkspacePath) {
+      void get().loadForScript(activeScriptPath, activeWorkspacePath);
+    }
   },
 }));
+
+/** Unity reimports arrive as a burst; coalesce them into one invalidation. */
+const INVALIDATION_DEBOUNCE_MS = 400;
+const pendingChangedPaths = new Set<string>();
+let invalidationTimer: ReturnType<typeof setTimeout> | null = null;
 
 let invalidationListenerInitialized = false;
 function initInvalidationListener() {
@@ -151,13 +186,19 @@ function initInvalidationListener() {
   invalidationListenerInitialized = true;
   listenScoped<{ added: string[]; removed: string[] }>('file-index-changed', (event) => {
     const all = [...(event.payload.added ?? []), ...(event.payload.removed ?? [])];
-    const relevant = all.some((p) => {
-      const lower = p.toLowerCase();
-      return lower.endsWith('.unity') || lower.endsWith('.prefab') || lower.endsWith('.asset');
-    });
-    if (relevant) {
-      useSceneUsageStore.getState().invalidate();
-    }
+    // Accumulate and fire on a trailing timer: Unity rewrites whole folders on
+    // import, so one reimport arrives as many events. `shouldInvalidate` also
+    // drops paths this app just wrote itself.
+    for (const p of all) pendingChangedPaths.add(p);
+    if (invalidationTimer !== null) clearTimeout(invalidationTimer);
+    invalidationTimer = setTimeout(() => {
+      invalidationTimer = null;
+      const batch = [...pendingChangedPaths];
+      pendingChangedPaths.clear();
+      if (shouldInvalidate(batch)) {
+        useSceneUsageStore.getState().invalidate();
+      }
+    }, INVALIDATION_DEBOUNCE_MS);
   }).catch(() => {
     invalidationListenerInitialized = false;
   });

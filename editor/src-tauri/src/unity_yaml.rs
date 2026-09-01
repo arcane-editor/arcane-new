@@ -127,6 +127,8 @@ struct Regexes {
     any_guid: Regex,
     /// A top-level `key: value` scalar pair (two-space indent or none).
     simple_field: Regex,
+    /// Like `separator`, but with byte-exact end offsets. See `separator_spans`.
+    separator_spans: Regex,
 }
 
 fn regexes() -> &'static Regexes {
@@ -148,6 +150,19 @@ fn regexes() -> &'static Regexes {
         // that is NOT an inline map/list (skip `{...}` and `- ...` blocks).
         simple_field: Regex::new(r"^ {0,2}([A-Za-z_][A-Za-z0-9_]*):\s*(.+)$")
             .expect("simple_field regex"),
+        // The offset-preserving twin of `separator`.
+        //
+        // `separator` ends with `\s*$`, and `\s` matches `\n`: the match end
+        // therefore walks PAST blank lines after the header and swallows the
+        // newline at EOF, so its end offsets cannot be used to reassemble the
+        // file. `[^\S\r\n]*` is horizontal whitespace only, so a match can
+        // never cross a line, and the optional `\r` pulls a CRLF's carriage
+        // return into the header so every body starts at its own `\n`.
+        //
+        // The ` stripped` marker is CAPTURED here (group 3) rather than merely
+        // tolerated, because a writer has to be able to reproduce the header.
+        separator_spans: Regex::new(r"(?m)^--- !u!(\d+) &(\d+)( stripped)?[^\S\r\n]*\r?$")
+            .expect("separator_spans regex"),
     })
 }
 
@@ -159,40 +174,89 @@ struct RawDoc<'a> {
     content: &'a str,
 }
 
-/// Split a Unity asset into its constituent documents. Content for a document
-/// runs from just after its header line to the start of the next header (or
-/// EOF). Mirrors the TS `splitDocuments` algorithm.
-fn split_documents(content: &str) -> Vec<RawDoc<'_>> {
-    let re = &regexes().separator;
-    let mut headers: Vec<(String, String, usize, usize)> = Vec::new();
+/// Byte spans of one Unity YAML document inside its source text.
+///
+/// `header` and `body` are contiguous and, together with the file preamble,
+/// tile the input EXACTLY: concatenating them reproduces it byte for byte. That
+/// property is what the whole byte-exact editing path rests on, and
+/// `document_spans_tile_every_fixture` asserts it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DocumentSpan {
+    pub class_id: String,
+    pub file_id: String,
+    /// True when the header carried the ` stripped` marker (prefab variants).
+    pub stripped: bool,
+    /// The header line WITHOUT its terminating `\n`. Includes any trailing
+    /// horizontal whitespace and the `\r` of a CRLF line ending.
+    pub header: std::ops::Range<usize>,
+    /// From the header's line terminator (inclusive) to the next header's
+    /// start, or EOF. A body therefore normally begins with its own newline.
+    pub body: std::ops::Range<usize>,
+}
+
+/// Split `content` into `(preamble, documents)` without losing a byte.
+///
+/// `preamble` is `0 .. first header start` — the `%YAML 1.1` / `%TAG !u!` lines
+/// plus any byte-order mark. When there is no header at all the preamble is the
+/// whole input and the document list is empty. This is exactly the text that
+/// `split_documents` throws away, and that a writer must preserve.
+pub fn split_document_spans(
+    content: &str,
+) -> (std::ops::Range<usize>, Vec<DocumentSpan>) {
+    let re = &regexes().separator_spans;
+    let mut headers: Vec<(String, String, bool, usize, usize)> = Vec::new();
     for caps in re.captures_iter(content) {
-        // capture 0 spans the whole header line.
         let whole = match caps.get(0) {
             Some(m) => m,
             None => continue,
         };
-        let class_id = caps.get(1).map(|m| m.as_str().to_string()).unwrap_or_default();
-        let file_id = caps.get(2).map(|m| m.as_str().to_string()).unwrap_or_default();
-        headers.push((class_id, file_id, whole.start(), whole.end()));
+        headers.push((
+            caps.get(1).map(|m| m.as_str().to_string()).unwrap_or_default(),
+            caps.get(2).map(|m| m.as_str().to_string()).unwrap_or_default(),
+            caps.get(3).is_some(),
+            whole.start(),
+            whole.end(),
+        ));
     }
+
+    let preamble = 0..headers.first().map(|h| h.3).unwrap_or(content.len());
 
     let mut docs = Vec::with_capacity(headers.len());
     for i in 0..headers.len() {
-        let (class_id, file_id, _start, body_start) = &headers[i];
+        let (class_id, file_id, stripped, start, header_end) = &headers[i];
         let body_end = headers
             .get(i + 1)
-            .map(|(_, _, next_start, _)| *next_start)
+            .map(|(_, _, _, next_start, _)| *next_start)
             .unwrap_or(content.len());
-        // body_start points at the header-line end (the `\n` is just after the
-        // regex match because `$` matched end-of-line). slice from there.
-        let body = content.get(*body_start..body_end).unwrap_or("");
-        docs.push(RawDoc {
+        docs.push(DocumentSpan {
             class_id: class_id.clone(),
             file_id: file_id.clone(),
-            content: body,
+            stripped: *stripped,
+            header: *start..*header_end,
+            body: *header_end..body_end,
         });
     }
-    docs
+    (preamble, docs)
+}
+
+/// Split a Unity asset into its constituent documents. Content for a document
+/// runs from just after its header line to the start of the next header (or
+/// EOF). Mirrors the TS `splitDocuments` algorithm.
+fn split_documents(content: &str) -> Vec<RawDoc<'_>> {
+    // Built on the span splitter so there is one notion of where a document
+    // starts. The only observable difference from the old implementation is
+    // that a body now KEEPS any blank lines directly after its header instead
+    // of eating one — every consumer of a body is line-oriented and
+    // blank-line-tolerant, and the diff engine never compares bodies verbatim.
+    split_document_spans(content)
+        .1
+        .into_iter()
+        .map(|span| RawDoc {
+            class_id: span.class_id,
+            file_id: span.file_id,
+            content: content.get(span.body).unwrap_or(""),
+        })
+        .collect()
 }
 
 /// Pull the first capture-group-1 match for `re` out of `content`.
@@ -582,6 +646,172 @@ pub fn unity_parse_asset(path: String) -> Result<UnityAssetModel, String> {
 
 #[cfg(test)]
 mod tests {
+    // ── Byte-exactness of the span splitter ────────────────────────────────
+    //
+    // P1 (tiling): preamble ++ Σ(header ++ body) reproduces the input exactly.
+    // Every editing guarantee downstream is a corollary of this, so it is
+    // asserted over every fixture in all three line-ending flavours.
+    //
+    // CRLF and no-trailing-newline variants are SYNTHESIZED rather than
+    // committed: the repo root's `.gitattributes` says `* text=auto eol=lf`, so
+    // a committed CRLF fixture is normalised in the index and checked out as
+    // LF — the test would pass forever without ever seeing a `\r`.
+
+    use super::*;
+
+    fn crlf(s: &str) -> String {
+        s.replace("\r\n", "\n").replace('\n', "\r\n")
+    }
+
+    fn no_final_newline(s: &str) -> String {
+        s.trim_end_matches(['\n', '\r']).to_string()
+    }
+
+    fn fixture(dir: &str, name: &str) -> String {
+        let base = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures").join(dir);
+        std::fs::read_to_string(base.join(name)).unwrap_or_else(|e| panic!("read {name}: {e}"))
+    }
+
+    fn all_fixtures() -> Vec<(String, String)> {
+        vec![
+            ("Weapon.asset".into(), fixture("unity-yaml", "Weapon.asset")),
+            ("WeaponSubAssets.asset".into(), fixture("unity-yaml", "WeaponSubAssets.asset")),
+            ("TwoObjects.unity".into(), fixture("unity-yaml", "TwoObjects.unity")),
+            ("ScriptedPrefab.prefab".into(), fixture("unity-yaml", "ScriptedPrefab.prefab")),
+            ("EventWiring.prefab".into(), fixture("unity-yaml", "EventWiring.prefab")),
+            ("SampleScene.before.unity".into(), fixture("unity-diff", "SampleScene.before.unity")),
+            ("SampleScene.after.unity".into(), fixture("unity-diff", "SampleScene.after.unity")),
+        ]
+    }
+
+    /// P1 — the spans tile the input with no gaps, overlaps or lost bytes.
+    fn assert_tiles(label: &str, content: &str) {
+        let (preamble, docs) = split_document_spans(content);
+        assert_eq!(preamble.start, 0, "{label}: preamble must start at 0");
+
+        let mut rebuilt = String::with_capacity(content.len());
+        rebuilt.push_str(&content[preamble.clone()]);
+        let mut cursor = preamble.end;
+        for (i, d) in docs.iter().enumerate() {
+            assert_eq!(d.header.start, cursor, "{label}: gap before header {i}");
+            assert_eq!(d.body.start, d.header.end, "{label}: header/body not contiguous at {i}");
+            rebuilt.push_str(&content[d.header.clone()]);
+            rebuilt.push_str(&content[d.body.clone()]);
+            cursor = d.body.end;
+        }
+        assert_eq!(cursor, content.len(), "{label}: trailing bytes lost");
+        assert_eq!(
+            rebuilt.as_bytes(),
+            content.as_bytes(),
+            "{label}: spans do not reassemble the input"
+        );
+    }
+
+    #[test]
+    fn document_spans_tile_every_fixture() {
+        for (name, content) in all_fixtures() {
+            assert_tiles(&format!("{name} (lf)"), &content);
+            assert_tiles(&format!("{name} (crlf)"), &crlf(&content));
+            assert_tiles(&format!("{name} (no final nl)"), &no_final_newline(&content));
+            assert_tiles(
+                &format!("{name} (crlf, no final nl)"),
+                &no_final_newline(&crlf(&content)),
+            );
+        }
+    }
+
+    #[test]
+    fn blank_lines_after_a_header_belong_to_the_body() {
+        // The old `\s*$` separator was greedy across newlines and ate one.
+        let src = "--- !u!1 &100\n\n\nGameObject:\n";
+        let (_, docs) = split_document_spans(src);
+        assert_eq!(docs.len(), 1);
+        assert_eq!(&src[docs[0].header.clone()], "--- !u!1 &100");
+        assert_eq!(&src[docs[0].body.clone()], "\n\n\nGameObject:\n");
+    }
+
+    #[test]
+    fn eof_newline_after_a_header_is_not_swallowed() {
+        let src = "--- !u!1 &100\n";
+        let (_, docs) = split_document_spans(src);
+        assert_eq!(&src[docs[0].header.clone()], "--- !u!1 &100");
+        assert_eq!(&src[docs[0].body.clone()], "\n");
+    }
+
+    #[test]
+    fn crlf_header_keeps_its_cr_and_the_body_starts_at_the_lf() {
+        let src = "--- !u!1 &100\r\nGameObject:\r\n";
+        let (_, docs) = split_document_spans(src);
+        assert_eq!(&src[docs[0].header.clone()], "--- !u!1 &100\r");
+        assert_eq!(&src[docs[0].body.clone()], "\nGameObject:\r\n");
+    }
+
+    #[test]
+    fn stripped_marker_is_captured_not_just_tolerated() {
+        let src = "--- !u!4 &400 stripped\nTransform:\n";
+        let (_, docs) = split_document_spans(src);
+        assert!(docs[0].stripped, "a writer must be able to reproduce the header");
+        assert_eq!(docs[0].class_id, "4");
+        assert_eq!(docs[0].file_id, "400");
+    }
+
+    #[test]
+    fn preamble_is_captured_verbatim() {
+        let content = fixture("unity-yaml", "Weapon.asset");
+        let (preamble, _) = split_document_spans(&content);
+        assert_eq!(
+            &content[preamble],
+            "%YAML 1.1\n%TAG !u! tag:unity3d.com,2011:\n"
+        );
+    }
+
+    #[test]
+    fn a_file_with_no_documents_is_all_preamble() {
+        let src = "just some text\nwith no headers\n";
+        let (preamble, docs) = split_document_spans(src);
+        assert!(docs.is_empty());
+        assert_eq!(&src[preamble], src);
+    }
+
+    #[test]
+    fn span_and_legacy_splitters_agree_on_document_identity() {
+        // The refactor must not change WHICH documents are found, only how
+        // precisely their bounds are described.
+        for (name, content) in all_fixtures() {
+            let legacy = split_documents(&content);
+            let (_, spans) = split_document_spans(&content);
+            assert_eq!(legacy.len(), spans.len(), "{name}: document count changed");
+            for (a, b) in legacy.iter().zip(spans.iter()) {
+                assert_eq!(a.class_id, b.class_id, "{name}: class_id changed");
+                assert_eq!(a.file_id, b.file_id, "{name}: file_id changed");
+            }
+        }
+    }
+
+    #[test]
+    fn span_splitter_never_panics_on_garbage() {
+        for junk in [
+            "",
+            "---",
+            "--- !u!",
+            "--- !u!1",
+            "--- !u!1 &",
+            "--- !u!1 &100 x",
+            "\n\n\n",
+            "--- !u!1 &100\n--- !u!1 &100\n",
+            "%YAML 1.1\n",
+        ] {
+            let (preamble, docs) = split_document_spans(junk);
+            // Whatever it decides, it must still tile.
+            let mut cursor = preamble.end;
+            for d in &docs {
+                assert_eq!(d.header.start, cursor);
+                cursor = d.body.end;
+            }
+            assert_eq!(cursor, junk.len(), "garbage input {junk:?} lost bytes");
+        }
+    }
+
     use super::*;
 
     // A 2-GameObject scene: "Parent" with a child "Child" via Transform m_Father.

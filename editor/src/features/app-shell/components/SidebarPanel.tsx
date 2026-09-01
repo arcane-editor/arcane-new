@@ -7,6 +7,7 @@ import { SceneContextPanel } from '../../unity-context';
 import { HierarchyPanel } from '../../unity-hierarchy';
 import { TestPanel } from '../../unity-test-runner';
 import { DebugPanel } from '../../debugger';
+import { InputHubPanel } from '../../unity-input';
 import { ErrorBoundary } from '../../../components/ErrorBoundary';
 
 function SidebarPanel() {
@@ -34,6 +35,14 @@ function SidebarPanel() {
       return isUnityProject ? (
         <ErrorBoundary fallback={<div className="sidebar-empty">Test runner unavailable.</div>}>
           <TestPanel />
+        </ErrorBoundary>
+      ) : (
+        <ExplorerPanel />
+      );
+    case 'input':
+      return isUnityProject ? (
+        <ErrorBoundary fallback={<div className="sidebar-empty">Input Hub unavailable.</div>}>
+          <InputHubPanel />
         </ErrorBoundary>
       ) : (
         <ExplorerPanel />
