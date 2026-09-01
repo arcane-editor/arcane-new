@@ -117,3 +117,64 @@ describe('checkVersionSync — ACP clientInfo version', () => {
     expect(checkVersionSync(OK)).toEqual([]);
   });
 });
+
+/**
+ * A release channel that builds installers but publishes no update manifest is
+ * inert, not broken: the app polls, gets a 404, logs one line to stderr and
+ * goes quiet for six hours. Nothing surfaces it.
+ *
+ * That is precisely what the dev channel did — `tauri.dev.conf.json` named an
+ * endpoint, `dev-build.yml` never wrote anything to it, and UnityIDE Dev 0.3.2
+ * sat there while 0.3.3 shipped. The pubkey half of that failure was already
+ * guarded here; this is the other half.
+ */
+describe('checkVersionSync — channel workflows publish updates', () => {
+  const WORKFLOW_OK = [
+    '          - os: macos-14',
+    '            bundles: app,dmg',
+    '            platform_key: darwin-aarch64',
+    '      - name: Write the update manifest',
+    '        run: |',
+    '          node editor/scripts/write-update-manifest.mjs --platform "${{ matrix.platform_key }}"',
+    '      - name: Upload to R2',
+    '        run: |',
+    '          bunx wrangler r2 object put "arcane-releases/dev/latest/${{ matrix.platform_key }}.json" --file m.json --remote --content-type application/json',
+  ].join('\n');
+
+  const wf = (source) => ({ ...OK, channelWorkflows: [{ name: 'dev-build.yml', source }] });
+
+  it('accepts a workflow that builds, writes and uploads an update', () => {
+    expect(checkVersionSync(wf(WORKFLOW_OK))).toEqual([]);
+  });
+
+  it('rejects a channel that ships installers but writes no manifest', () => {
+    const source = WORKFLOW_OK.replace('node editor/scripts/write-update-manifest.mjs', 'echo skip');
+    expect(checkVersionSync(wf(source)).join(' ')).toContain('dev-build.yml');
+  });
+
+  it('rejects a manifest that is written but never uploaded', () => {
+    // Written to the runner and left there: the client still gets a 404.
+    const source = WORKFLOW_OK.replace(/bunx wrangler.*$/m, 'bunx wrangler r2 object put "x/UnityIDE.dmg" --file d');
+    expect(checkVersionSync(wf(source)).join(' ')).toContain('upload');
+  });
+
+  it('rejects a macOS bundle list of dmg alone', () => {
+    // `dmg` is not an updater-enabled target. Building it alone logs "no
+    // updater-enabled targets were built" and produces no .app.tar.gz — so
+    // there is nothing for the manifest to point at, and the build still
+    // passes.
+    const source = WORKFLOW_OK.replace('bundles: app,dmg', 'bundles: dmg');
+    expect(checkVersionSync(wf(source)).join(' ')).toContain('app');
+  });
+
+  it('leaves an nsis-only matrix entry alone', () => {
+    // On Windows the updater artifact IS the installer; there is no second
+    // bundle to add.
+    const source = WORKFLOW_OK.replace('bundles: app,dmg', 'bundles: nsis');
+    expect(checkVersionSync(wf(source))).toEqual([]);
+  });
+
+  it('stays valid for callers that pass no workflows at all', () => {
+    expect(checkVersionSync(OK)).toEqual([]);
+  });
+});

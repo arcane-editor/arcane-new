@@ -15,6 +15,13 @@ const problems = checkVersionSync({
     new URL('../src/features/ai-panel/services/claude-backend.ts', import.meta.url),
     'utf8',
   ),
+  // Both channels. A workflow that builds installers but publishes no update
+  // manifest leaves its endpoint serving a 404, and the app swallows that
+  // after one stderr line — so nothing but this check reports it.
+  channelWorkflows: ['release.yml', 'dev-build.yml'].map((name) => ({
+    name,
+    source: readFileSync(new URL(`../../.github/workflows/${name}`, import.meta.url), 'utf8'),
+  })),
 });
 
 if (problems.length > 0) {
