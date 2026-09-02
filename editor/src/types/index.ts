@@ -52,6 +52,17 @@ export interface OpenFile {
   content: string;
   isDirty: boolean;
   diff?: DiffInfo;
+  /**
+   * The file's bytes are not UTF-8, so `content` is empty and stands for
+   * nothing. Unity ships binary `.asset` files in every project (TerrainData,
+   * XRSettings, lightmaps) and writes them as binary even under Force Text.
+   *
+   * Every write path MUST refuse this tab: saving the empty buffer would
+   * truncate the asset.
+   */
+  isBinary?: boolean;
+  /** Byte length on disk, shown in place of content for a binary file. */
+  byteSize?: number;
 }
 
 export interface GitLogEntry {

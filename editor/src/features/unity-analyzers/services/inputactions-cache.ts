@@ -12,84 +12,22 @@
  */
 
 import { invoke } from '@tauri-apps/api/core';
+import { readInputSystem } from '../../../utils/input-system';
 import {
-  parseInputActions,
-  listActions,
-  findBindingConflicts,
-  type BindingConflict,
-} from '../../../utils/inputactions-model';
-import { detectInputSystem, type InputSystemMode } from '../../../utils/input-system';
+  buildInputActionsIndex,
+  type InputActionsIndex,
+  type RawAsset,
+} from '../../../utils/inputactions-index';
 
-export interface KnownAction {
-  qualifiedName: string;
-  name: string;
-  mapName: string;
-  /** `Button`, `Vector2`, `Axis`, ... — what `ReadValue<T>()` must agree with. */
-  expectedControlType: string | null;
-  /** True when another action in the same map claims one of its controls. */
-  starved: boolean;
-}
-
-export interface InputActionsIndex {
-  /** Unqualified action name -> its definitions (a name can repeat across maps). */
-  byName: Map<string, KnownAction[]>;
-  /** `Map/Action` -> definition. */
-  byQualifiedName: Map<string, KnownAction>;
-  /** Every map name in the project. */
-  mapNames: Set<string>;
-  conflicts: BindingConflict[];
-  assetCount: number;
-  /** Which input system the project runs, so rules can gate on it. */
-  inputSystem: InputSystemMode;
-}
-
-export interface RawAsset {
-  path: string;
-  content: string;
-}
-
-/**
- * Build the index from already-read assets. Pure, so the rules can be tested
- * without a Tauri mock.
- */
-export function buildInputActionsIndex(
-  assets: readonly RawAsset[],
-  inputSystem: InputSystemMode,
-): InputActionsIndex {
-  const byName = new Map<string, KnownAction[]>();
-  const byQualifiedName = new Map<string, KnownAction>();
-  const mapNames = new Set<string>();
-  const conflicts: BindingConflict[] = [];
-  let assetCount = 0;
-
-  for (const asset of assets) {
-    const parsed = parseInputActions(asset.content);
-    if (!parsed.doc) continue;
-    assetCount++;
-
-    const assetConflicts = findBindingConflicts(parsed.doc);
-    conflicts.push(...assetConflicts);
-    const starvedNames = new Set(assetConflicts.flatMap((c) => c.starved));
-
-    for (const map of parsed.doc.maps) mapNames.add(map.name);
-
-    for (const action of listActions(parsed.doc)) {
-      const known: KnownAction = {
-        qualifiedName: action.qualifiedName,
-        name: action.name,
-        mapName: action.mapName,
-        expectedControlType: action.expectedControlType ?? null,
-        starved: starvedNames.has(action.qualifiedName),
-      };
-      byQualifiedName.set(known.qualifiedName, known);
-      const list = byName.get(known.name);
-      if (list) list.push(known);
-      else byName.set(known.name, [known]);
-    }
-  }
-
-  return { byName, byQualifiedName, mapNames, conflicts, assetCount, inputSystem };
-}
+// The pure half lives in `utils/` so the AI tool and its Bun tests can reach it
+// without importing this feature's barrel (which pulls Monaco). Re-exported so
+// the rules and the analyzers barrel keep their existing import.
+export {
+  buildInputActionsIndex,
+  type InputActionsIndex,
+  type KnownAction,
+  type RawAsset,
+} from '../../../utils/inputactions-index';
 
 let cached: InputActionsIndex | null = null;
 let cachedWorkspace: string | null = null;
@@ -129,11 +67,12 @@ export async function loadInputActions(workspacePath: string | null): Promise<vo
           ? []
           : await invoke<RawAsset[]>('read_files_bulk', { paths: assetPaths });
 
-      const settings = await invoke<string>('read_file', {
-        path: `${workspacePath}/ProjectSettings/ProjectSettings.asset`,
-      }).catch(() => null);
-
-      cached = buildInputActionsIndex(assets, detectInputSystem(settings, assetPaths.length > 0));
+      // `readInputSystem`, not a local `detectInputSystem` call: this used to
+      // pass `assetPaths.length > 0` as the package signal while
+      // `stores/project-context.ts` passed the `com.unity.inputsystem` manifest
+      // dependency, so the analyzer and the Input Hub could disagree about the
+      // same project. One reader, one answer.
+      cached = buildInputActionsIndex(assets, await readInputSystem(workspacePath));
     } catch {
       // A failed read must not wedge the analyzer: leave the previous snapshot
       // (or null) in place and let the rules stay quiet.

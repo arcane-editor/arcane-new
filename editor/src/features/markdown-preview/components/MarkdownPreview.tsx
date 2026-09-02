@@ -207,6 +207,10 @@ function MarkdownPreview({
         }}
         aria-label="Edit block markdown"
         data-editing-start={editingBlock.start}
+        spellCheck={false}
+        autoComplete="off"
+        autoCorrect="off"
+        autoCapitalize="off"
       />
     );
   }
@@ -269,6 +273,10 @@ function MarkdownPreview({
             onChange={() => {
               if (typeof start === 'number') onToggleTask(start + offsetBase);
             }}
+        spellCheck={false}
+        autoComplete="off"
+        autoCorrect="off"
+        autoCapitalize="off"
           />
         );
       },
@@ -302,6 +310,10 @@ function MarkdownPreview({
                 addNote();
               }
             }}
+            spellCheck={false}
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="off"
           />
           <div className="md-suggest-actions">
             <button type="button" className="md-suggest-btn" onClick={() => { setPending(null); setDraft(''); }}>

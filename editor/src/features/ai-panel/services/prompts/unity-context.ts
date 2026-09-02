@@ -52,7 +52,6 @@ where the code cannot speak for itself.
 ### Common API crib
 - Movement: \`transform.Translate(direction * speed * Time.deltaTime)\` for non-physics, \`rigidbody.AddForce(...)\` or \`rigidbody.MovePosition(...)\` inside \`FixedUpdate\` for physics.
 - Vector math: \`Vector3.Lerp(a, b, t)\`, \`Vector3.MoveTowards(a, b, maxDelta)\`, \`Vector3.Distance(a, b)\`, \`Quaternion.Slerp(...)\`, \`Quaternion.LookRotation(forward, up)\`.
-- Input (legacy): \`Input.GetAxis("Horizontal")\`, \`Input.GetKey(KeyCode.Space)\`, \`Input.GetMouseButtonDown(0)\`. Prefer the new Input System if the project already references it.
 - Spawning: \`Instantiate(prefab, position, rotation)\` or \`Instantiate(prefab, parent)\`. Always destroy with \`Destroy(go)\` (end-of-frame) or \`Destroy(go, delay)\`.
 - Lookup: \`GetComponent<T>()\` on the same GameObject; \`GetComponentInChildren<T>()\` / \`GetComponentInParent<T>()\` for traversal. Avoid \`FindObjectOfType<T>()\` in hot paths.
 - Coroutines: \`StartCoroutine(MyCoroutine())\` returns an \`IEnumerator\`; yield \`new WaitForSeconds(t)\`, \`null\` (next frame), or \`new WaitForFixedUpdate()\`.

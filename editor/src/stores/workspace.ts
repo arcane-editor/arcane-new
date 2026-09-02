@@ -1240,7 +1240,29 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     // The account view is a section of the settings modal now, so nothing
     // creates one — the remaining `auth://` guards elsewhere in the codebase
     // are kept only to tolerate state persisted by an older version.
-    const content = await invoke<string>('read_file', { path });
+    // `read_file_checked` rather than `read_file`: a binary asset is an
+    // ordinary thing to click in a Unity project, and `read_to_string` reports
+    // it with the same io::Error as a missing file. That surfaced to the user
+    // as the raw OS string "stream did not contain valid UTF-8".
+    const read = await invoke<{ text: string | null; isBinary: boolean; size: number }>(
+      'read_file_checked',
+      { path },
+    );
+
+    if (read.isBinary) {
+      // Content stays empty and the tab is flagged, so the editor renders an
+      // explanation and every write path refuses it.
+      set((state) => ({
+        openFiles: [
+          ...state.openFiles,
+          { path, name, content: '', isDirty: false, isBinary: true, byteSize: read.size },
+        ],
+        activeFilePath: path,
+      }));
+      return;
+    }
+
+    const content = read.text ?? '';
     const file: OpenFile = { path, name, content, isDirty: false };
     set((state) => ({
       openFiles: [...state.openFiles, file],
@@ -1371,7 +1393,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   updateFileContent: (path: string, content: string) => {
     set((state) => ({
       openFiles: state.openFiles.map((f) =>
-        f.path === path ? { ...f, content, isDirty: true } : f,
+        // A binary tab never takes content: marking it dirty would arm a save
+        // that truncates the file.
+        f.path === path && !f.isBinary ? { ...f, content, isDirty: true } : f,
       ),
     }));
 
@@ -1387,6 +1411,14 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     const { openFiles } = get();
     const file = openFiles.find((f) => f.path === path);
     if (!file) return;
+    // A binary tab's `content` is an empty placeholder, never the file. Writing
+    // it would truncate the asset, so saving is refused outright rather than
+    // silently no-oped -- the user pressed Cmd+S and deserves to know why
+    // nothing happened.
+    if (file.isBinary) {
+      notify.error(`${file.name} is a binary file and cannot be saved from the editor.`);
+      return;
+    }
     // Snapshot what actually goes to disk. The user can keep typing during the
     // write — easily hundreds of ms on a large file — and those keystrokes are
     // NOT in this payload.
@@ -1428,6 +1460,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     const file = openFiles.find((f) => f.path === path);
     if (!file) return;
     if (isVirtualPath(path)) return;
+    // A binary tab holds no text to refresh, and `read_file` would fail on it.
+    if (file.isBinary) return;
     let content: string;
     try {
       content = await invoke<string>('read_file', { path });

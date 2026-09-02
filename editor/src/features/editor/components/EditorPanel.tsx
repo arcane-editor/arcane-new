@@ -22,6 +22,8 @@ import { registerUnityDocsHover } from '../services/unity-docs-hover';
 import { registerBlameHoverProvider, attachGitGutter } from '../../git';
 import { PackageCacheBanner, isPackageCachePath } from '../../unity-packages';
 import { initUsageCodeLens } from '../../unity-context';
+import { BinaryFileNotice } from './BinaryFileNotice';
+import { applyPendingNavigation } from '../services/nav-landing';
 import { initUnityAnalyzers } from '../../unity-analyzers';
 import { initUnityCompilerDiagnostics } from '../../unity-compiler';
 import { AssetViewer, isUnityAssetFile, SceneDiffViewer } from '../../unity-asset-viewer';
@@ -80,11 +82,7 @@ function EditorPanel() {
     // Defer one frame so the model swap initiated by the path-prop
     // change has actually completed before we move the cursor / focus.
     requestAnimationFrame(() => {
-      if (nav) {
-        const position = { lineNumber: nav.line, column: nav.column };
-        editor.setPosition(position);
-        editor.revealPositionInCenter(position);
-      }
+      if (nav) applyPendingNavigation(editor, nav);
       editor.focus();
     });
   }, [activeFilePath]);
@@ -162,6 +160,13 @@ function EditorPanel() {
   // Unity YAML assets (+ Input System .inputactions) render in a structured
   // viewer by default (per setting), with per-file "View raw" / "Edit raw"
   // overrides tracked in the ui store.
+  // First in the ladder on purpose: `unity_parse_asset` reads the file as a
+  // string too, so routing a binary `.asset` to the structured viewer would
+  // just move the same UTF-8 failure one step later.
+  if (activeFile.isBinary) {
+    return <BinaryFileNotice name={activeFile.name} byteSize={activeFile.byteSize} />;
+  }
+
   const isUnityAsset = isUnityProject && isUnityAssetFile(activeFile.name);
   const isInputActions = isUnityProject && isInputActionsFile(activeFile.name);
   const structuredCandidate = isUnityAsset || isInputActions;
@@ -215,7 +220,6 @@ function EditorPanel() {
         name={activeFile.name}
         content={activeFile.content}
         onViewRaw={setRawView}
-        onEditRaw={setRawEdit}
       />
     );
   }
@@ -473,13 +477,14 @@ function EditorPanel() {
           const disposeGitGutter = attachGitGutter(editor, monaco);
           editor.onDidDispose(disposeGitGutter);
 
-          // Handle pending Go to Definition navigation
+          // Handle a pending navigation. This is the path taken whenever the
+          // jump STARTS in a structured asset viewer (the Input Hub, the asset
+          // viewer, a scene diff), because those unmount Monaco entirely --
+          // the effect above finds a null editorRef and defers to here.
           const nav = getPendingNavigation();
           if (nav) {
             clearPendingNavigation();
-            const position = { lineNumber: nav.line, column: nav.column };
-            editor.setPosition(position);
-            editor.revealPositionInCenter(position);
+            applyPendingNavigation(editor, nav);
           }
 
           // Focus the editor on mount so the very first file opened in a

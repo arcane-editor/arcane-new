@@ -143,11 +143,101 @@ export interface ResolvedAction {
   expectedControlType?: string;
   interactions?: string;
   processors?: string;
-  /** Real controls only; composite parents are excluded. */
-  bindings: InputBinding[];
+  /**
+   * Bindings as a TREE, not a flat list: a composite is one node holding its
+   * parts. Unity stores `WASD` as a parent plus eight part rows, and rendering
+   * those parts as eight peers of `<Gamepad>/leftStick` is both wrong and
+   * unreadable -- it is one binding the user configured, not eight.
+   */
+  bindings: BindingNode[];
 }
 
-/** Every action across every map, flattened, each carrying its bindings. */
+/** One binding as the user thinks of it: a control, or a composite of controls. */
+export interface BindingNode {
+  /** The composite parent, or the standalone binding itself. */
+  binding: InputBinding;
+  /** Composite parts, in declaration order. Empty for a standalone binding. */
+  parts: InputBinding[];
+  isComposite: boolean;
+  /** What to show: the composite's name (`WASD`) or the control path. */
+  label: string;
+  /** Control schemes this node belongs to; empty means "every scheme". */
+  schemes: string[];
+  /** Device families touched, e.g. `['Keyboard']` or `['Gamepad']`. */
+  devices: string[];
+}
+
+/**
+ * `groups` is a semicolon-separated scheme list, and Unity frequently writes a
+ * leading separator (`";Gamepad"`), so the empty segments have to go.
+ */
+export function parseSchemes(groups: string | undefined): string[] {
+  if (!groups) return [];
+  return groups.split(';').map((g) => g.trim()).filter(Boolean);
+}
+
+/**
+ * The device family a control path targets: `<Gamepad>/leftStick` -> `Gamepad`.
+ * Composite parents (`Dpad`, `2DVector`) name no device. A path beginning with
+ * a wildcard is a usage that any device may satisfy, so it reports `Any`.
+ */
+export function deviceOfPath(path: string | undefined): string | null {
+  if (!path) return null;
+  const angle = /^<([^>]+)>/.exec(path);
+  if (angle) return angle[1];
+  if (path.startsWith('*')) return 'Any';
+  return null;
+}
+
+function uniq(values: readonly (string | null)[]): string[] {
+  return [...new Set(values.filter((v): v is string => Boolean(v)))];
+}
+
+/** Group one action's bindings into composites-with-parts plus standalone controls. */
+export function bindingNodes(map: InputActionMap, actionName: string): BindingNode[] {
+  const rows = (map.bindings ?? []).filter((b) => b.action === actionName);
+  const nodes: BindingNode[] = [];
+
+  for (const row of rows) {
+    if (row.isComposite) {
+      nodes.push({
+        binding: row,
+        parts: [],
+        isComposite: true,
+        label: row.name || row.path || 'Composite',
+        schemes: parseSchemes(row.groups),
+        devices: [],
+      });
+      continue;
+    }
+    // A part belongs to the most recent composite. Unity always writes parts
+    // immediately after their parent, so the last composite seen is the owner.
+    const owner = row.isPartOfComposite ? nodes.filter((n) => n.isComposite).at(-1) : undefined;
+    if (owner) {
+      owner.parts.push(row);
+      continue;
+    }
+    nodes.push({
+      binding: row,
+      parts: [],
+      isComposite: false,
+      label: row.path || row.name || '(binding)',
+      schemes: parseSchemes(row.groups),
+      devices: uniq([deviceOfPath(row.path)]),
+    });
+  }
+
+  // A composite carries no groups of its own; its reach is its parts' reach.
+  for (const node of nodes) {
+    if (!node.isComposite) continue;
+    node.schemes = uniq(node.parts.flatMap((p) => parseSchemes(p.groups)));
+    node.devices = uniq(node.parts.map((p) => deviceOfPath(p.path)));
+  }
+
+  return nodes;
+}
+
+/** Every action across every map, flattened, each carrying its binding tree. */
 export function listActions(doc: InputActionsDocument): ResolvedAction[] {
   const out: ResolvedAction[] = [];
   for (const map of doc.maps ?? []) {
@@ -161,13 +251,16 @@ export function listActions(doc: InputActionsDocument): ResolvedAction[] {
         expectedControlType: action.expectedControlType,
         interactions: action.interactions,
         processors: action.processors,
-        bindings: (map.bindings ?? []).filter(
-          (b) => b.action === action.name && !b.isComposite,
-        ),
+        bindings: bindingNodes(map, action.name),
       });
     }
   }
   return out;
+}
+
+/** Every control scheme name declared by the asset, in declaration order. */
+export function listControlSchemes(doc: InputActionsDocument): string[] {
+  return (doc.controlSchemes ?? []).map((c) => c.name).filter(Boolean);
 }
 
 export interface BindingConflict {

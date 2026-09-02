@@ -57,6 +57,15 @@ interface UnityIndexState {
    * is permanent in practice.
    */
   indexRevision: number;
+  /**
+   * Bumped only when a delta touched an `.inputactions` asset.
+   *
+   * Separate from `indexRevision` on purpose. Reloading the analyzers' input
+   * snapshot costs a project scan, so hanging it off the general revision
+   * would run that scan on every prefab and scene save. This fires only when
+   * the input assets themselves changed.
+   */
+  inputActionsRevision: number;
 
   /** Full build (persists + caches in Rust). Background, non-blocking. */
   build: (workspacePath: string, unityVersion: string, force?: boolean) => Promise<void>;
@@ -114,6 +123,7 @@ export const useUnityIndexStore = create<UnityIndexState>((set) => ({
   progress: null,
   summary: null,
   indexRevision: 0,
+  inputActionsRevision: 0,
   error: null,
 
   build: async (workspacePath, unityVersion, force = false) => {
@@ -206,6 +216,12 @@ export const INDEX_RELEVANT = [
   '.mat',
   '.controller',
   '.anim',
+  // `.inputactions` carries no outgoing `guid:` refs, so the Rust reingest is
+  // a no-op for it and its GUID already arrives via the `.meta` sidecar. It is
+  // listed here for the two things this list actually gates: the `@asset`
+  // mention category, and the `indexRevision` bump that tells consumers (the
+  // analyzers' input snapshot) that the asset changed on disk.
+  '.inputactions',
 ];
 
 function isIndexRelevant(p: string): boolean {
@@ -248,6 +264,12 @@ function initDeltaListener(): void {
       if (!workspacePath || !indexEnabled()) return;
       if (changed.length === 0 && removedList.length === 0) return;
 
+      // Bumped separately below so a prefab save does not trigger the
+      // analyzers' `.inputactions` rescan (see `inputActionsRevision`).
+      const inputTouched = [...changed, ...removedList].some((p) =>
+        p.toLowerCase().endsWith('.inputactions'),
+      );
+
       void invoke('unity_index_apply_delta', {
         workspacePath,
         changed,
@@ -255,7 +277,10 @@ function initDeltaListener(): void {
       })
         .then(() => {
           invalidateGuidMap();
-          useUnityIndexStore.setState((s) => ({ indexRevision: s.indexRevision + 1 }));
+          useUnityIndexStore.setState((s) => ({
+            indexRevision: s.indexRevision + 1,
+            inputActionsRevision: s.inputActionsRevision + (inputTouched ? 1 : 0),
+          }));
         })
         .catch((err) => {
           console.warn('[UnityIndex] apply_delta failed:', err);

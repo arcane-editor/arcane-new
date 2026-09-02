@@ -93,3 +93,86 @@ describe('findActionReferencesInText', () => {
     expect([...lines].sort((a, b) => a - b)).toEqual(lines);
   });
 });
+
+// -- "What runs when this fires?" --------------------------------------------
+// The answer is two hops from the action: a local is bound to the action, the
+// local's event is bound to a handler, and the handler's body is the behaviour.
+// Following only the first hop lands you on a lookup, which is not what anyone
+// clicking "go to usage" is actually after.
+
+const WIRED = `using UnityEngine.InputSystem;
+
+public class PlayerMotor : MonoBehaviour
+{
+    private InputAction jump, sprint;
+
+    private void Awake()
+    {
+        jump = controls.FindAction("Jump");
+        sprint = controls.FindAction("Sprint");
+    }
+
+    private void OnEnable()
+    {
+        jump.performed += OnJumpPressed;
+        sprint.started += HandleSprint;
+    }
+
+    private void OnJumpPressed(InputAction.CallbackContext ctx)
+    {
+        velocity.y = jumpForce;
+    }
+
+    private void HandleSprint(InputAction.CallbackContext ctx) { }
+}
+`;
+
+describe('resolving the behaviour behind an action', () => {
+  const refs = findActionReferencesInText('/p/PlayerMotor.cs', WIRED, KNOWN);
+  const of = (kind: string, name: string) =>
+    refs.filter((r) => r.kind === kind && r.actionName === name);
+
+  it('records the subscription and which phase it fires on', () => {
+    const [sub] = of('subscription', 'Jump');
+    expect(sub).toBeDefined();
+    expect(sub.handler).toBe('OnJumpPressed');
+    expect(sub.phase).toBe('performed');
+    expect(sub.line).toBe(15);
+  });
+
+  it('follows the handler to its declaration, whatever it is named', () => {
+    // `HandleSprint` breaks the OnX convention entirely, so only the
+    // subscription can connect it to Sprint.
+    const [handler] = of('handler', 'Sprint');
+    expect(handler).toBeDefined();
+    expect(handler.handler).toBe('HandleSprint');
+    expect(handler.line).toBe(24);
+  });
+
+  it('lands on the method name, so the caret sits on the declaration', () => {
+    const [handler] = of('handler', 'Jump');
+    const line = WIRED.split('\n')[handler.line - 1];
+    expect(line.slice(handler.column - 1)).toStartWith('OnJumpPressed(');
+  });
+
+  it('does not mistake the subscription line for a second declaration', () => {
+    // `jump.performed += OnJumpPressed;` has no return type, so it is a
+    // subscription; only line 20 declares the method.
+    expect(of('handler', 'Jump')).toHaveLength(1);
+    expect(of('handler', 'Jump')[0].line).toBe(19);
+  });
+
+  it('still recognises the Send Messages convention with no subscription', () => {
+    const sendMessages = `public class P : MonoBehaviour {
+      private void OnCrouch(InputValue v) { }
+    }`;
+    const found = findActionReferencesInText('/p/P.cs', sendMessages, ['Crouch']);
+    expect(found.map((r) => r.kind)).toEqual(['handler']);
+    expect(found[0].handler).toBe('OnCrouch');
+  });
+
+  it('ignores a subscription on a local that is not an action', () => {
+    const unrelated = `void OnEnable() { health.performed += OnHealth; }`;
+    expect(findActionReferencesInText('/p/P.cs', unrelated, KNOWN)).toEqual([]);
+  });
+});

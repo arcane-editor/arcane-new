@@ -2,3 +2,4 @@
 // feature expose one, and that other features import only through it.
 export { startUpdateNotices, updateReadyMessage } from './services/update-notice';
 export type { UpdateReadyPayload } from './services/update-notice';
+export { default as UpdateButton } from './components/UpdateButton';

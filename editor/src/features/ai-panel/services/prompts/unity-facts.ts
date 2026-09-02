@@ -16,6 +16,7 @@ import { useProjectContextStore } from '../../../../stores/project-context';
 import { useWorkspaceStore } from '../../../../stores/workspace';
 import { useAsmdefStore } from '../../../../stores/asmdef';
 import { contrastFactLines } from './unity-contrast';
+import { inputFactLines, type InputActionsFacts } from './input-facts';
 import {
   detectInputSystem,
   inputSystemLabel,
@@ -31,6 +32,8 @@ interface UnityFacts {
   inputSystem: InputSystemMode;
   keyPackages: Array<{ name: string; version: string }>;
   unityRules: string | null; // contents of .ai/unity-rules.md
+  /** Null when the project has no `.inputactions` assets (or is on Legacy). */
+  inputActions: InputActionsFacts | null;
 }
 
 let cache: UnityFacts | null = null;
@@ -96,15 +99,57 @@ export async function primeUnityFacts(workspacePath: string): Promise<void> {
       version: deps[name],
     }));
 
+    const inputSystem = detectInputSystem(projectSettings, !!deps['com.unity.inputsystem']);
+
     cache = {
       workspacePath,
       renderPipeline: detectRenderPipeline(deps),
-      inputSystem: detectInputSystem(projectSettings, !!deps['com.unity.inputsystem']),
+      inputSystem,
       keyPackages,
       unityRules,
+      inputActions: await readInputActionsFacts(workspacePath, inputSystem),
     };
   } finally {
     priming = null;
+  }
+}
+
+/**
+ * The project's declared action maps, or null when there are none to name.
+ *
+ * Reached through a dynamic import for the reason `graphify-tools.ts`
+ * documents: the `unity-analyzers` barrel pulls Monaco, and a static import
+ * here would drag `stores/theme.ts` into Bun's DOM-less runtime, where its
+ * module-scope `document` access kills the suite on import alone.
+ *
+ * Shares the analyzers' snapshot rather than scanning again, so the names in
+ * the prompt are the same ones UNITY0401 validates written code against.
+ */
+async function readInputActionsFacts(
+  workspacePath: string,
+  inputSystem: InputSystemMode,
+): Promise<InputActionsFacts | null> {
+  if (inputSystem === 'Legacy') return null;
+  try {
+    const { loadInputActions, getInputActionsIndex } = await import('../../../unity-analyzers');
+    await loadInputActions(workspacePath);
+    const index = getInputActionsIndex();
+    if (!index || index.assetCount === 0) return null;
+
+    const maps = new Map<string, string[]>();
+    for (const action of index.byQualifiedName.values()) {
+      const list = maps.get(action.mapName);
+      if (list) list.push(action.name);
+      else maps.set(action.mapName, [action.name]);
+    }
+    return {
+      assetPaths: index.assetPaths.map((p) =>
+        p.startsWith(`${workspacePath}/`) ? p.slice(workspacePath.length + 1) : p,
+      ),
+      maps: [...maps].map(([name, actions]) => ({ name, actions })),
+    };
+  } catch {
+    return null;
   }
 }
 
@@ -128,6 +173,7 @@ export function getUnityFactsBlock(): string | null {
   if (facts) {
     lines.push(`- Render pipeline: ${facts.renderPipeline}`);
     lines.push(`- Input system: ${inputSystemLabel(facts.inputSystem)}`);
+    lines.push(...inputFactLines(facts.inputSystem, facts.inputActions));
     if (facts.keyPackages.length > 0) {
       lines.push(
         `- Key packages: ${facts.keyPackages.map((p) => `${p.name}@${p.version}`).join(', ')}`,

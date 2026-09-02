@@ -192,6 +192,10 @@ function QuestionBlock({ message }: Props) {
               e.preventDefault();
               submitDraft();
             }}
+            spellCheck={false}
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="off"
           />
           <button
             type="button"

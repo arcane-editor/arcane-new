@@ -212,7 +212,7 @@ function createToolsForPromptMode(mode: PromptMode, workspacePath: string, effor
   // LSP diagnostics gate: csharp-ls error-severity diagnostics fed back to the
   // agent. Default-on; the gate itself no-ops when csharp-ls isn't running.
   const lspGateOn = isUnity && settings.getSetting('unity.lspGate.enabled') !== false;
-  const unityRead: AgentTool[] = isUnity ? createUnityReadTools() : [];
+  const unityRead: AgentTool[] = isUnity ? createUnityReadTools(workspacePath) : [];
 
   if (mode === 'ask') {
     return [...readOnly, ...graphTools, ...memoryTools, ...unityRead].map((t) => withRepeatCallGuard(t, workspacePath));

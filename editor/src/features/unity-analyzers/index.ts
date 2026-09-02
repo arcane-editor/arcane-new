@@ -86,6 +86,16 @@ export function initUnityAnalyzers(monaco: Monaco): void {
       dropAllListenerSnapshots();
       refreshAll(monaco);
     }
+    // Its own counter, not `indexRevision`: reloading the input snapshot costs
+    // a project scan, and it is only stale when the assets themselves changed.
+    // Without this the rules keep validating literals against the actions the
+    // asset had at workspace open, so renaming an action in Unity makes
+    // UNITY0401 report a live action as missing until the project is reopened.
+    if (state.inputActionsRevision !== prev.inputActionsRevision) {
+      void loadInputActions(useWorkspaceStore.getState().workspacePath).then(() =>
+        refreshAll(monaco),
+      );
+    }
   });
 }
 
@@ -174,3 +184,19 @@ export type {
   SoWidgetKind,
   SoBaseKind,
 } from './services/so-schema';
+
+// ── Input System snapshot ────────────────────────────────────────────────────
+//
+// Exported for the AI harness's `unity_input_actions` tool, which needs the
+// same parsed view of the project's `.inputactions` assets the rules validate
+// against. Sharing the cache rather than re-scanning means the agent and the
+// Problems panel can never disagree about which actions exist.
+export {
+  getInputActionsIndex,
+  loadInputActions,
+  buildInputActionsIndex,
+} from './services/inputactions-cache';
+export type {
+  InputActionsIndex,
+  KnownAction,
+} from './services/inputactions-cache';

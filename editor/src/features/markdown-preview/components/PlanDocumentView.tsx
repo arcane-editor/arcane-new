@@ -376,6 +376,10 @@ function PlanStepCard({
                 }
               }}
               aria-label="Edit step title"
+              spellCheck={false}
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
             />
           ) : (
             <h3

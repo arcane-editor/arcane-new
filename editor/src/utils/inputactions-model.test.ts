@@ -6,6 +6,10 @@ import {
   findBindingConflicts,
   setBindingPath,
   qualifiedActionName,
+  bindingNodes,
+  parseSchemes,
+  deviceOfPath,
+  listControlSchemes,
 } from './inputactions-model';
 
 /**
@@ -160,7 +164,7 @@ describe('listActions', () => {
       'Player/Interact',
       'Player/Reload',
     ]);
-    expect(actions[2].bindings.map((b) => b.path)).toEqual([
+    expect(actions[2].bindings.map((b) => b.label)).toEqual([
       '<Gamepad>/buttonWest',
       '<Keyboard>/r',
     ]);
@@ -230,5 +234,101 @@ describe('setBindingPath', () => {
 describe('qualifiedActionName', () => {
   it('joins map and action the way C# addresses them', () => {
     expect(qualifiedActionName('Player', 'Jump')).toBe('Player/Jump');
+  });
+});
+
+// -- Composites and control schemes -----------------------------------------
+// Modelled on Unity's own default asset, where `Move` is a WASD composite: one
+// parent row plus eight part rows. Rendering those parts as eight peers of
+// `<Gamepad>/leftStick` was the bug that turned one action into a wall of
+// chips.
+
+const COMPOSITE_MAP = {
+  name: 'Player',
+  id: 'm',
+  actions: [{ name: 'Move', id: 'a', type: 'Value', expectedControlType: 'Vector2' }],
+  bindings: [
+    { id: '1', path: '<Gamepad>/leftStick', action: 'Move', groups: 'Gamepad' },
+    { id: '2', path: 'Dpad', action: 'Move', name: 'WASD', isComposite: true, groups: '' },
+    { id: '3', path: '<Keyboard>/w', action: 'Move', name: 'up', isPartOfComposite: true, groups: ';Keyboard&Mouse' },
+    { id: '4', path: '<Keyboard>/s', action: 'Move', name: 'down', isPartOfComposite: true, groups: ';Keyboard&Mouse' },
+    { id: '5', path: '<Keyboard>/a', action: 'Move', name: 'left', isPartOfComposite: true, groups: ';Keyboard&Mouse' },
+    { id: '6', path: '<Keyboard>/d', action: 'Move', name: 'right', isPartOfComposite: true, groups: ';Keyboard&Mouse' },
+    { id: '7', path: '<Joystick>/stick', action: 'Move', groups: 'Joystick' },
+  ],
+};
+
+describe('bindingNodes', () => {
+  const nodes = bindingNodes(COMPOSITE_MAP, 'Move');
+
+  it('collapses a composite and its parts into ONE node', () => {
+    // Three nodes, not seven: leftStick, the WASD composite, the joystick.
+    expect(nodes).toHaveLength(3);
+    expect(nodes.map((n) => n.label)).toEqual(['<Gamepad>/leftStick', 'WASD', '<Joystick>/stick']);
+  });
+
+  it('keeps the composite parts, in order, on their parent', () => {
+    const wasd = nodes[1];
+    expect(wasd.isComposite).toBe(true);
+    expect(wasd.parts.map((p) => p.path)).toEqual([
+      '<Keyboard>/w',
+      '<Keyboard>/s',
+      '<Keyboard>/a',
+      '<Keyboard>/d',
+    ]);
+    expect(wasd.parts.map((p) => p.name)).toEqual(['up', 'down', 'left', 'right']);
+  });
+
+  it('gives a composite the schemes and devices of its parts', () => {
+    // The parent row itself carries no groups; its reach is its parts' reach.
+    expect(nodes[1].schemes).toEqual(['Keyboard&Mouse']);
+    expect(nodes[1].devices).toEqual(['Keyboard']);
+  });
+
+  it('reads schemes and device off a standalone binding', () => {
+    expect(nodes[0].schemes).toEqual(['Gamepad']);
+    expect(nodes[0].devices).toEqual(['Gamepad']);
+  });
+});
+
+describe('parseSchemes', () => {
+  it('drops the empty segment Unity writes as a leading separator', () => {
+    expect(parseSchemes(';Gamepad')).toEqual(['Gamepad']);
+  });
+
+  it('splits a multi-scheme binding', () => {
+    expect(parseSchemes('Keyboard&Mouse;Gamepad;Touch')).toEqual([
+      'Keyboard&Mouse',
+      'Gamepad',
+      'Touch',
+    ]);
+  });
+
+  it('treats blank and missing as "every scheme"', () => {
+    expect(parseSchemes('')).toEqual([]);
+    expect(parseSchemes(undefined)).toEqual([]);
+  });
+});
+
+describe('deviceOfPath', () => {
+  it('reads the device family out of a control path', () => {
+    expect(deviceOfPath('<Gamepad>/leftStick')).toBe('Gamepad');
+    expect(deviceOfPath('<XRController>/{Primary2DAxis}')).toBe('XRController');
+  });
+
+  it('treats a bare usage as satisfiable by any device', () => {
+    expect(deviceOfPath('*/{Submit}')).toBe('Any');
+  });
+
+  it('has no device for a composite parent path', () => {
+    expect(deviceOfPath('2DVector')).toBeNull();
+    expect(deviceOfPath(undefined)).toBeNull();
+  });
+});
+
+describe('listControlSchemes', () => {
+  it('returns scheme names in declaration order', () => {
+    const { doc } = parseInputActions(FIXTURE);
+    expect(listControlSchemes(doc!)).toEqual(['Gamepad']);
   });
 });

@@ -1,12 +1,10 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { useNotificationsStore } from '../../../stores/notifications';
+import { useUpdatesStore, type PendingUpdate } from '../../../stores/updates';
 
-export interface UpdateReadyPayload {
-  version: string;
-  /** True when the new version is in place and only a relaunch is outstanding. */
-  installed: boolean;
-}
+/** The Tauri event payload. Identical to what the store holds, by design. */
+export type UpdateReadyPayload = PendingUpdate;
 
 /**
  * Copy for the update toast.
@@ -31,6 +29,11 @@ export function updateReadyMessage({ version, installed }: UpdateReadyPayload): 
  */
 export async function startUpdateNotices(): Promise<UnlistenFn> {
   return listen<UpdateReadyPayload>('unityide-update-ready', (event) => {
+    // The store first: the title-bar control is the surface that persists, and
+    // it must be correct even if the user dismisses the toast — or never sees
+    // it, having been in another window when it arrived.
+    useUpdatesStore.getState().setPending(event.payload);
+
     useNotificationsStore.getState().addNotification({
       type: 'info',
       message: updateReadyMessage(event.payload),

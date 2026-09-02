@@ -240,6 +240,8 @@ function SearchQueryBar({ sessionId }: SearchQueryBarProps) {
               onChange={(e) => update(sessionId, { includePattern: e.target.value })}
               spellCheck={false}
               autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
             />
           </label>
           <label className="search-filter-field">
@@ -252,6 +254,8 @@ function SearchQueryBar({ sessionId }: SearchQueryBarProps) {
               onChange={(e) => update(sessionId, { excludePattern: e.target.value })}
               spellCheck={false}
               autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
             />
           </label>
         </div>

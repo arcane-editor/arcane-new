@@ -184,6 +184,77 @@ fn read_file(path: String) -> Result<String, String> {
     fs::read_to_string(&path).map_err(|e| e.to_string())
 }
 
+/// What a read found, distinguishing "binary" from "failed".
+///
+/// `read_file` cannot express that difference: `read_to_string` returns the
+/// same `io::Error` for a missing file and for one whose bytes are not UTF-8,
+/// so a binary asset surfaced to the user as the raw OS string "stream did not
+/// contain valid UTF-8". Unity ships several such files in every project
+/// (TerrainData, XRSettings, lightmaps) and writes them as binary even when
+/// the project is set to Force Text, so opening one is ordinary, not an error.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileRead {
+    /// `None` exactly when the bytes are not valid UTF-8.
+    text: Option<String>,
+    is_binary: bool,
+    size: u64,
+}
+
+/// Read a file, reporting binary content instead of failing on it.
+///
+/// Deliberately NOT `from_utf8_lossy`: a lossy decode produces a string that
+/// looks editable and silently destroys the file the moment it is saved.
+/// Callers get `text: None` and must refuse to write.
+#[tauri::command]
+fn read_file_checked(path: String) -> Result<FileRead, String> {
+    let bytes = fs::read(&path).map_err(|e| e.to_string())?;
+    let size = bytes.len() as u64;
+    match String::from_utf8(bytes) {
+        Ok(text) => Ok(FileRead { text: Some(text), is_binary: false, size }),
+        Err(_) => Ok(FileRead { text: None, is_binary: true, size }),
+    }
+}
+
+
+#[cfg(test)]
+mod read_file_checked_tests {
+    use super::read_file_checked;
+
+    #[test]
+    fn utf8_file_reads_as_text() {
+        let dir = std::env::temp_dir().join("uid_rfc_text");
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("a.txt");
+        std::fs::write(&f, "hello").unwrap();
+        let got = read_file_checked(f.to_string_lossy().into()).unwrap();
+        assert_eq!(got.text.as_deref(), Some("hello"));
+        assert!(!got.is_binary);
+        assert_eq!(got.size, 5);
+    }
+
+    #[test]
+    fn non_utf8_file_reads_as_binary_rather_than_erroring() {
+        // Unity's TerrainData and XRSettings assets look exactly like this:
+        // a `.asset` extension over bytes that are not text. Before this
+        // command they surfaced as "stream did not contain valid UTF-8".
+        let dir = std::env::temp_dir().join("uid_rfc_bin");
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("TerrainData.asset");
+        std::fs::write(&f, [0x00u8, 0xFF, 0xFE, 0x80, 0x01]).unwrap();
+        let got = read_file_checked(f.to_string_lossy().into()).unwrap();
+        assert!(got.is_binary);
+        // No lossy text: a caller that saved it would corrupt the asset.
+        assert!(got.text.is_none());
+        assert_eq!(got.size, 5);
+    }
+
+    #[test]
+    fn a_missing_file_is_still_an_error() {
+        assert!(read_file_checked("/no/such/file/at/all".into()).is_err());
+    }
+}
+
 #[tauri::command]
 fn write_file(path: String, contents: String) -> Result<(), String> {
     fs::write(&path, &contents).map_err(|e| e.to_string())
@@ -960,6 +1031,7 @@ pub fn run() {
             delete_path,
             fs_copy::copy_path,
             read_files_bulk,
+            read_file_checked,
             scan_node_modules_types,
             #[cfg(debug_assertions)]
             debug_panic_sync,

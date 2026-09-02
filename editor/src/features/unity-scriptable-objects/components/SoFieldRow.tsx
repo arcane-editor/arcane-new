@@ -214,6 +214,10 @@ function TextControl({
           e.currentTarget.blur();
         }
       }}
+      spellCheck={false}
+      autoComplete="off"
+      autoCorrect="off"
+      autoCapitalize="off"
     />
   );
 }
