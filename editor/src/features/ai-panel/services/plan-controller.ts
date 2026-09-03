@@ -23,6 +23,8 @@ import { getAgentService } from './agent-service';
 import { routePlanSend } from './plan-route';
 import { buildRegeneratePrompt, type PriorPlan } from './plan-regen';
 import { buildReviseNotesPrompt } from './plan-revise';
+import { validatePlanDocument, buildPlanRepairPrompt } from './plan-quality';
+import { unityRecipesFor } from './prompts/unity-recipes';
 import { parsePlanTodos, planTodosToHostedPlan } from './plan-todos';
 import {
   reservePlanPath,
@@ -77,8 +79,16 @@ async function startPlanning(
   store.setPendingPrompt(prompt);
   store.setLastAttachments(attachments);
 
+  // Recipes ride on the USER message, not the system prompt — they are chosen
+  // from what was asked, and `plan-execution.ts` documents why request-shaped
+  // content must stay out of the system prompt: it changes the cached prefix on
+  // every send and re-bills the whole conversation on prefix-caching providers.
+  // Here it also keeps the prompt identical across the repair turn below.
+  const recipes = unityRecipesFor(prompt);
+  const sendText = opts.sendText ?? prompt;
+
   try {
-    await getAgentService().sendMessage(opts.sendText ?? prompt, {
+    await getAgentService().sendMessage(recipes ? `${sendText}\n${recipes}` : sendText, {
       mode: 'plan',
       effort: store.effort,
       promptMode: 'plan-planning',
@@ -94,20 +104,37 @@ async function startPlanning(
 
   // Pull the freshest state after the agent loop completes.
   const after = useAiStore.getState();
-  // Find the most recent assistant message that has text content.
-  let planMarkdown = '';
-  for (let i = after.messages.length - 1; i >= 0; i--) {
-    const m = after.messages[i];
-    if (m.role === 'assistant') {
-      planMarkdown = extractPlanMarkdown(m.content);
-      if (planMarkdown) break;
-    }
-  }
+  let planMarkdown = latestPlanMarkdown();
 
   if (!planMarkdown) {
     after.setPlanPhase('idle');
     after.setError('Planning did not produce any output.');
     return;
+  }
+
+  // Hold the draft to the template before it becomes a document with an
+  // Execute button under it. Nothing did this before, which is how a turn that
+  // produced only "First, let me study the scene file structure…" ended up
+  // saved as the plan. One repair turn, the same single forced retry
+  // `grounding-lint.ts` uses for ask mode — if the model cannot produce a plan
+  // twice, that is worth surfacing rather than looping at the user's expense.
+  let report = validatePlanDocument(planMarkdown);
+  if (!report.ok) {
+    try {
+      await getAgentService().sendMessage(buildPlanRepairPrompt(report.problems), {
+        mode: 'plan',
+        effort: store.effort,
+        promptMode: 'plan-planning',
+      });
+      const repaired = latestPlanMarkdown();
+      if (repaired) {
+        planMarkdown = repaired;
+        report = validatePlanDocument(repaired);
+      }
+    } catch {
+      // Keep the first draft and its problems: a failed repair turn is not a
+      // reason to throw away work the user can still edit by hand.
+    }
   }
 
   const planPath = await reservePlanPath(workspacePath, prompt);
@@ -130,6 +157,31 @@ async function startPlanning(
     status: 'draft',
   });
   after.setPlanPhase('awaiting-execute');
+
+  // The file is written and open either way — a plan the user can read and fix
+  // beats one thrown away — but it must never LOOK approved when it isn't.
+  if (!report.ok) {
+    useAiStore.getState().setError(
+      `This plan does not follow the plan format, so executing it may not do what ` +
+        `you expect:\n${report.problems.map((p) => `• ${p}`).join('\n')}\n` +
+        `Edit it directly, or send a message to have it revised.`,
+    );
+  }
+}
+
+/**
+ * The most recent assistant message carrying text. Planning and revision both
+ * read the model's reply out of the transcript this way — plan-planning's
+ * toolset is read-only, so the reply IS the document.
+ */
+function latestPlanMarkdown(): string {
+  const { messages } = useAiStore.getState();
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role !== 'assistant') continue;
+    const text = extractPlanMarkdown(messages[i].content);
+    if (text) return text;
+  }
+  return '';
 }
 
 /** Set the session `PlanRef.status` for `planPath`, keeping the existing ref's identity fields. */
@@ -239,13 +291,20 @@ async function resumeExecution(text: string): Promise<void> {
 }
 
 /**
- * Route a composer message sent while the panel is in plan mode. With a plan
- * pending (or a phase stuck at 'executing'), typed text RESUMES execution —
- * it does not re-plan; Regenerate and Revise are the explicit re-plan paths.
+ * Route a composer message sent while the panel is in plan mode — see
+ * `plan-route.ts` for which phase means what. With a plan written but not yet
+ * started, typed text REVISES it; execution stays behind the Execute button.
  */
 async function sendPlanModeMessage(text: string, attachments: Attachment[]): Promise<void> {
   const store = useAiStore.getState();
-  if (routePlanSend(store.planPhase, store.activePlanPath) === 'resume') {
+  const route = routePlanSend(store.planPhase, store.activePlanPath);
+  if (route === 'revise') {
+    const planPath = store.activePlanPath!;
+    // Anything already pinned to a passage rides along, so a user who left a
+    // couple of suggestions and then typed a sentence gets one revision that
+    // answers all of it rather than two competing rewrites.
+    await reviseWithNotes(planPath, store.planNotes[planPath] ?? [], text);
+  } else if (route === 'resume') {
     await resumeExecution(text);
   } else {
     await startPlanning(text, attachments);
@@ -283,9 +342,13 @@ async function regenerate(): Promise<void> {
  * discarded every note. WE persist the reply here, exactly as startPlanning
  * persists the initial draft.
  */
-async function reviseWithNotes(planPath: string, notes: PlanNote[]): Promise<void> {
+async function reviseWithNotes(
+  planPath: string,
+  notes: PlanNote[],
+  freeText?: string,
+): Promise<void> {
   const store = useAiStore.getState();
-  if (notes.length === 0) return;
+  if (notes.length === 0 && !freeText?.trim()) return;
   if (store.isAgentRunning) return;
 
   let planContent: string;
@@ -300,27 +363,26 @@ async function reviseWithNotes(planPath: string, notes: PlanNote[]): Promise<voi
   // Pin the plan being revised — same reason runExecution pins it.
   store.setActivePlanPath(planPath);
   try {
-    await getAgentService().sendMessage(buildReviseNotesPrompt(planPath, planContent, notes), {
+    await getAgentService().sendMessage(buildReviseNotesPrompt(planPath, planContent, notes, freeText), {
       mode: 'plan',
       effort: store.effort,
       promptMode: 'plan-planning',
     });
 
     const after = useAiStore.getState();
-    let revised = '';
-    for (let i = after.messages.length - 1; i >= 0; i--) {
-      const m = after.messages[i];
-      if (m.role === 'assistant') {
-        revised = extractPlanMarkdown(m.content);
-        if (revised) break;
-      }
-    }
+    const revised = latestPlanMarkdown();
     if (!revised) {
       after.setError('Revision did not produce a plan — the file was left unchanged.');
       return;
     }
     try {
       await writePlan(planPath, revised);
+      // These notes have now been answered: the model rewrote the document
+      // around them. Leaving them in place was the old behaviour, and because
+      // a rewrite moves their quoted text they came back as a list of
+      // "text changed" cards to be dismissed one at a time. Clearing only
+      // after the write succeeds means a failed revision keeps them.
+      after.setPlanNotes(planPath, []);
       openPlanInEditor(planPath);
     } catch (err) {
       after.setError(`Failed to write revised plan: ${formatErr(err)}`);

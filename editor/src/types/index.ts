@@ -294,3 +294,31 @@ export interface FileSearchResult {
    */
   truncated?: boolean;
 }
+
+/**
+ * A suggestion pinned to a plan document. The behaviour is documented where
+ * the anchoring lives (`markdown-preview/services/note-anchor.ts`, which
+ * re-exports this); the SHAPE lives here because `stores/ai.ts` holds these
+ * notes and `markdown-preview`'s barrel exports components that read that
+ * store. Importing the type across that barrel would close a runtime cycle —
+ * store → barrel → PlanDocumentView → store — which is the failure mode
+ * CLAUDE.md records for `acp`/`ai-panel`. `types/` imports nothing, so it
+ * cannot participate in one.
+ */
+export interface PlanNote {
+  id: string;
+  /** The exact text the user selected. */
+  quotedText: string;
+  /** What they want changed. */
+  body: string;
+  /** Nearest preceding heading, or the document title. */
+  headingPath: string;
+  /** False once the quoted text no longer appears in the document. */
+  anchored: boolean;
+}
+
+/** A checkbox line in a plan's `## Todos` section. */
+export interface PlanStep {
+  title: string;
+  done: boolean;
+}

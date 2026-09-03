@@ -23,6 +23,7 @@ import { useWorkspaceStore } from '../../../stores/workspace';
 import { getChatBackend, sendChatMessage } from '../services/chat-backend';
 import { getAgentService } from '../services/agent-service';
 import { planController } from '../services/plan-controller';
+import { routePlanSend } from '../services/plan-route';
 import { agentModeController } from '../services/preplan-controller';
 import { shouldRouteToQuestion } from '../services/question-routing';
 import { composerPlaceholder } from '../data/composer-copy';
@@ -89,10 +90,12 @@ function ChatInput() {
     }
 
     if (mode === 'plan') {
-      // Phase-aware: with a plan awaiting execution (or stuck 'executing'),
-      // typed text RESUMES the remaining steps instead of re-planning — the
-      // old unconditional startPlanning() here re-created the plan on any
-      // message, with the write tools stripped so the model couldn't resume.
+      // Phase-aware — `plan-route.ts` owns the decision. With a plan written
+      // but not started, typed text REVISES it; only a run already under way
+      // takes it as guidance. (Two bugs live in this one branch's history: an
+      // unconditional startPlanning() that re-created the plan on any message,
+      // then a resume that handed the model the write tools when all the user
+      // had done was comment on a plan they were still reading.)
       // Last-resort net (T5): agent-service/plan-controller already surface
       // their own errors via the store, but a bug that throws before that
       // point would otherwise become an unhandled rejection.
@@ -122,15 +125,14 @@ function ChatInput() {
   // is blocked mid-run, but answering the question is exactly what unblocks it.
   const canSend = !!workspacePath && hasText && (!isAgentRunning || !!pendingQuestion);
 
-  const planResumePending =
-    mode === 'plan' && !!activePlanPath && (planPhase === 'awaiting-execute' || planPhase === 'executing');
   // The placeholder is a promise about what Enter does, so it has to know who
   // is receiving the message — `mode` is UnityIDE's and an external agent never
-  // reads it. See `data/composer-copy.ts`.
+  // reads it. See `data/composer-copy.ts`. The plan-mode branch asks the same
+  // function the send path uses, so the two cannot disagree.
   const placeholder = composerPlaceholder({
     agent: selectedAgent,
     mode,
-    planResumePending,
+    planRoute: routePlanSend(planPhase, activePlanPath),
     pendingQuestion: !!pendingQuestion,
   });
 

@@ -13,6 +13,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { join } from '@tauri-apps/api/path';
 import type { AiMessage, HostedPlanEntry, PlanPhase } from '../../../stores/ai';
+import type { PlanNote } from '../../../types';
 import { deleteCheckpointsFile } from './checkpoints/checkpoint-store-io';
 import { deleteReviewsFile } from './edit-review/review-store-io';
 import { coerceAgentKind, type AgentKind, type ChatMode, type Effort } from './types';
@@ -67,6 +68,13 @@ export interface SessionData {
   planPhase?: PlanPhase;
   activePlanPath?: string | null;
   /**
+   * Pending suggestions per plan path. Unlike `planPhase`, this is not process
+   * state — it is what the user typed about a document — so it restores
+   * verbatim rather than through a normalizer. Absent on legacy files and on
+   * sessions with nothing pending.
+   */
+  planNotes?: Record<string, PlanNote[]>;
+  /**
    * The EXTERNAL agent's own session id (`agentKind !== 'hosted'`), so a
    * reopened transcript can be resumed with its full context via ACP
    * `session/load` rather than restarting cold.
@@ -106,6 +114,8 @@ export interface SaveSessionInput {
   /** See `SessionData.planPhase` / `activePlanPath`. */
   planPhase?: PlanPhase;
   activePlanPath?: string | null;
+  /** See `SessionData.planNotes`. */
+  planNotes?: Record<string, PlanNote[]>;
   /** See `SessionData.acpSessionId`. */
   acpSessionId?: string | null;
 }
@@ -184,6 +194,12 @@ export function buildSessionData(input: SaveSessionInput): SessionData {
     // Same omission rule: only sessions actually carrying plan state write it.
     ...(input.activePlanPath && input.planPhase && input.planPhase !== 'idle'
       ? { planPhase: input.planPhase, activePlanPath: input.activePlanPath }
+      : {}),
+    // Same omission rule, but keyed on the notes themselves rather than on
+    // plan phase: a note belongs to a plan FILE, and outlives any particular
+    // phase the session happened to be in when it was saved.
+    ...(input.planNotes && Object.keys(input.planNotes).length > 0
+      ? { planNotes: input.planNotes }
       : {}),
     // Same omission rule again: a UnityIDE session never carries an agent id.
     ...(input.acpSessionId ? { acpSessionId: input.acpSessionId } : {}),

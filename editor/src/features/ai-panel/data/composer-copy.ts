@@ -19,8 +19,13 @@ export interface PlaceholderInput {
   agent: AgentKind;
   /** UnityIDE's chat mode. Meaningless — and unread — for an external agent. */
   mode: ChatMode;
-  /** Plan mode with a plan already written and awaiting (or mid-) execution. */
-  planResumePending: boolean;
+  /**
+   * What Enter will actually do in plan mode — taken straight from
+   * `routePlanSend` rather than re-derived from the phase, so the promise the
+   * placeholder makes cannot drift from the routing that keeps it. Ignored
+   * outside plan mode.
+   */
+  planRoute: 'revise' | 'resume' | 'plan';
   /** The agent is blocked on an `ask_user` question, so typing answers it. */
   pendingQuestion: boolean;
 }
@@ -46,9 +51,13 @@ export function composerPlaceholder(input: PlaceholderInput): string {
   }
 
   if (input.mode === 'plan') {
-    return input.planResumePending
-      ? 'Message continues the current plan — Regenerate to re-plan. ⏎ to send.'
-      : 'Describe what you want to build. @ for context, ⏎ to plan.';
+    if (input.planRoute === 'revise') {
+      return 'Message revises the plan — Execute when it looks right. ⏎ to send.';
+    }
+    if (input.planRoute === 'resume') {
+      return 'Message guides the run in progress. ⏎ to send.';
+    }
+    return 'Describe what you want to build. @ for context, ⏎ to plan.';
   }
 
   return 'Plan, build, edit. @ for context, ⏎ to send.';

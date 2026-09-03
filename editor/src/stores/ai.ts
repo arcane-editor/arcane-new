@@ -41,6 +41,10 @@ import {
 // and the barrel is mid-evaluation when this module runs (barrel → AiChatPanel
 // → here), so a barrel import resolved to a module whose own `const`s had not
 // been initialized yet — a TDZ ReferenceError before the app could even render.
+// From types/, NOT the markdown-preview barrel: that barrel exports
+// PlanDocumentView, which imports this store. Going through it would close a
+// runtime cycle — see the note on PlanNote in types/index.ts.
+import type { PlanNote } from '../types';
 import { createUpdateCoalescer } from '../utils/update-coalescer';
 import { useWorkspaceStore } from './workspace';
 import { useCheckpointsStore } from './checkpoints';
@@ -309,6 +313,18 @@ interface AiState {
   planPhase: PlanPhase;
   /** Workspace-absolute path to the most recent plan markdown file. */
   activePlanPath: string | null;
+  /**
+   * Pending suggestions per plan, keyed by the plan's workspace-absolute path.
+   *
+   * Keyed, and held here rather than in the editor pane, for two reasons the
+   * previous `useState<PlanNote[]>` in `EditorPanel` got wrong: that array was
+   * shared by every open tab, so opening a second plan re-anchored the first
+   * plan's notes against it; and it lived only in a component, so a reload
+   * discarded comments the user had written while `planPhase`/`activePlanPath`
+   * beside it survived. Notes are a user's own words about a specific
+   * document — losing them silently is the worst available outcome.
+   */
+  planNotes: Record<string, PlanNote[]>;
   /** Last user prompt sent in plan-mode, used by Regenerate. */
   pendingPrompt: string | null;
   /** Snapshot of the attachments the last plan was created with. */
@@ -386,6 +402,9 @@ interface AiState {
   clearAttachments: () => void;
   setPlanPhase: (phase: PlanPhase) => void;
   setActivePlanPath: (path: string | null) => void;
+  /** Replace the suggestions held against one plan. An empty array drops the
+   *  key entirely, so a plan with nothing pending costs nothing to persist. */
+  setPlanNotes: (path: string, notes: PlanNote[]) => void;
   /**
    * Plans produced by the current session, persisted with it so they are
    * reachable from chat history. Re-adding the same path replaces its entry
@@ -488,6 +507,7 @@ function buildSaveInput(): SaveSessionInput | null {
     plans: state.sessionPlans,
     planPhase: state.planPhase,
     activePlanPath: state.activePlanPath,
+    planNotes: state.planNotes,
   };
 }
 
@@ -599,6 +619,7 @@ export const useAiStore = create<AiState>((set, get) => ({
   pendingServedModel: null,
   attachments: [],
   planPhase: 'idle',
+  planNotes: {},
   activePlanPath: null,
   pendingPrompt: null,
   lastAttachments: [],
@@ -863,6 +884,7 @@ export const useAiStore = create<AiState>((set, get) => ({
       sessionPlans: [],
       attachments: [],
       planPhase: 'idle',
+      planNotes: {},
       activePlanPath: null,
       pendingPrompt: null,
       lastAttachments: [],
@@ -912,6 +934,10 @@ export const useAiStore = create<AiState>((set, get) => ({
       // no longer exists in this process; 'awaiting-execute' + the plan file's
       // [x] ticks are what can honestly be resumed.
       ...normalizePlanRestore(session.planPhase, session.activePlanPath),
+      // Suggestions are the user's own words about a specific document, so
+      // they come back exactly as saved — unlike planPhase, none of this is
+      // process state that a reload could invalidate.
+      planNotes: session.planNotes ?? {},
       pendingPrompt: null,
       lastAttachments: [],
       sessionUsage: { input: 0, output: 0, requests: 0 },
@@ -1107,6 +1133,13 @@ export const useAiStore = create<AiState>((set, get) => ({
 
   setPlanPhase: (phase: PlanPhase) => set({ planPhase: phase }),
   setActivePlanPath: (path: string | null) => set({ activePlanPath: path }),
+  setPlanNotes: (path: string, notes: PlanNote[]) =>
+    set((s) => {
+      const next = { ...s.planNotes };
+      if (notes.length === 0) delete next[path];
+      else next[path] = notes;
+      return { planNotes: next };
+    }),
   sessionPlans: [],
   addSessionPlan: (plan) =>
     set((s) => ({

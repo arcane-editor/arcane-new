@@ -10,7 +10,6 @@ import remarkGfm from 'remark-gfm';
 import type { AiMessage } from '../../../stores/ai';
 import type { TextContent, ThinkingContent, ToolCall } from '../services/vendor/types';
 import { hasRenderableContent } from '../services/turn-errors';
-import { modelShortName } from '../data/served-model';
 import { parseFileRef } from '../data/file-ref';
 import FilePathChip from './FilePathChip';
 import ThinkingBlock from './ThinkingBlock';
@@ -136,16 +135,11 @@ function AssistantMessage({ message, turnUserMessageId, isLast }: AssistantMessa
           }
         })}
         {showsInlineIndicator(message, isLast) && <StreamingIndicator />}
-        {/* Turn-final only: streaming not yet finished, or a stopReason other
-            than 'stop' (e.g. 'toolUse'), means there's another assistant
-            message still coming in this turn — showing the served model on an
-            intermediate tool-call step would misattribute whichever model
-            happens to be stamped mid-turn (`pendingServedModel` is only
-            captured once, at `message_end`) to a bubble that isn't the turn's
-            actual answer. */}
-        {!message.isStreaming && message.stopReason === 'stop' && message.servedModel && (
-          <div className="ai-message-served-model">{modelShortName(message.servedModel)}</div>
-        )}
+        {/* No served-model footer. `message.servedModel` is still recorded —
+            it is the only record of which model answered a turn, and it is
+            worth having in a bug report — but the underlying model id is not
+            something to put in front of a user. `AssistantMessage.test.ts`
+            pins that it stays unrendered. */}
       </div>
     </div>
   );

@@ -6,12 +6,20 @@ import { routePlanSend } from './plan-route';
 // stopped execution re-created the plan (with the write tools stripped, the
 // model couldn't resume even if it wanted to). Routing must consult the phase.
 describe('routePlanSend', () => {
-  it('resumes when a plan is awaiting execution', () => {
-    expect(routePlanSend('awaiting-execute', '/ws/.unityide/plans/p.md')).toBe('resume');
+  // The second bug, and the reason 'revise' exists: a plan awaiting execution
+  // used to RESUME on typed text. So the obvious way to comment on a plan you
+  // were still reading — type a sentence — handed the model the write tools
+  // and started building. Execution belongs to the Execute button.
+  it('revises when a plan is written but not yet started', () => {
+    expect(routePlanSend('awaiting-execute', '/ws/.unityide/plans/p.md')).toBe('revise');
   });
 
   it('resumes when the phase is stuck at executing (recovery after a crashed send)', () => {
     expect(routePlanSend('executing', '/ws/.unityide/plans/p.md')).toBe('resume');
+  });
+
+  it('never revises without a plan file to revise', () => {
+    expect(routePlanSend('awaiting-execute', null)).toBe('plan');
   });
 
   it('plans fresh when there is no active plan file, whatever the phase says', () => {

@@ -305,9 +305,17 @@ function MarkdownPreview({
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
               // Enter submits; Shift+Enter is a newline. Matches the composer.
-              if (e.key === 'Enter' && !e.shiftKey) {
+              // ⌘/Ctrl+Enter submits too, so the habit carries over from the
+              // roomier per-step composer without having to think about which
+              // box you are in. Escape closes: without it the only way out of
+              // a popover you opened by accident was to aim at Cancel.
+              if (e.key === 'Enter' && (!e.shiftKey || e.metaKey || e.ctrlKey)) {
                 e.preventDefault();
                 addNote();
+              } else if (e.key === 'Escape') {
+                e.preventDefault();
+                setPending(null);
+                setDraft('');
               }
             }}
             spellCheck={false}

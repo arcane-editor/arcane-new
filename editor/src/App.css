@@ -4650,15 +4650,6 @@ html, body, #root {
   padding-top: 3px;
 }
 
-/* Served-model footer (T13): muted-metadata idiom — quiet enough to ignore,
-   findable when looked for. (It used to cite the effort chord keycap, which
-   went away when effort became a cycling pill with the chord in its tooltip.) */
-.ai-message-served-model {
-  margin-top: 4px;
-  font-size: 10.5px;
-  color: color-mix(in srgb, var(--text-secondary) 65%, transparent);
-}
-
 /* ---- AI Panel: Input area ---- */
 .ai-panel-input-area {
   padding: 10px 12px 12px;
@@ -8074,7 +8065,9 @@ html, body, #root {
 }
 .md-suggest-input {
   width: 100%;
-  min-height: 54px;
+  /* Was 54px — about two lines, which made a suggestion feel like a form
+     field rather than a sentence you were writing. */
+  min-height: 76px;
   padding: var(--space-1) var(--space-2);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -8101,7 +8094,12 @@ html, body, #root {
   transition: background var(--motion-fast) var(--ease-out);
 }
 .md-suggest-btn:hover { background: var(--hover); }
-.md-suggest-btn--primary { background: var(--accent); border-color: var(--accent); color: var(--text-on-dark); }
+/* `--button-primary-*` is the pair authored to sit on each other. Reaching for
+   `--accent` + `--text-on-dark` here put cream on gold at 1.56:1. The hover
+   rule needs restating too: `.md-suggest-btn:hover` outranks this on
+   specificity, so without it the fill dropped to grey under the pointer. */
+.md-suggest-btn--primary { background: var(--button-primary-bg); border-color: var(--button-primary-bg); color: var(--button-primary-text); }
+.md-suggest-btn--primary:hover:not(:disabled) { background: var(--button-primary-hover); border-color: var(--button-primary-hover); }
 .md-suggest-btn:disabled { opacity: 0.5; cursor: default; }
 
 .md-notes {
@@ -8419,6 +8417,73 @@ html, body, #root {
 .plan-step-disclose:focus-visible { opacity: 1; }
 .plan-step-disclose:hover { color: var(--text-primary); }
 
+/* Step actions: comment, reorder, add, delete. Same disclosure idiom as the
+   chevron above — invisible until the step is hovered or something in the row
+   takes focus, so a plan being READ stays a document and only shows its
+   handles when you reach for one. Kept keyboard-reachable regardless:
+   `:focus-within` covers tabbing in, which hover never would. */
+.plan-step-actions {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  margin-left: auto;
+  opacity: 0;
+  transition: opacity var(--motion-fast) var(--ease-out);
+}
+.plan-step:hover .plan-step-actions,
+.plan-step-actions:focus-within { opacity: 1; }
+
+.plan-step-action {
+  display: flex;
+  padding: 3px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background var(--motion-fast) var(--ease-out), color var(--motion-fast) var(--ease-out);
+}
+.plan-step-action:hover:not(:disabled) { background: var(--hover); color: var(--text-primary); }
+.plan-step-action:disabled { opacity: 0.3; cursor: default; }
+.plan-step-action--danger:hover:not(:disabled) { color: var(--error-text); }
+
+/* The per-step comment composer. Deliberately roomier than the selection
+   popover's box was: a suggestion is a sentence or three, and a 54px well
+   made writing one feel like filling in a form field. */
+.plan-step-comment {
+  margin-top: var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+}
+.plan-step-comment-input {
+  width: 100%;
+  min-height: 72px;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: var(--text-sm);
+  resize: vertical;
+}
+.plan-step-comment-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
+}
+.plan-step-comment-hint {
+  margin-right: auto;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
 .plan-step-guide {
   margin-top: var(--space-2);
   font-size: var(--text-sm);
@@ -8464,7 +8529,13 @@ html, body, #root {
 }
 .plan-doc-btn:hover:not(:disabled) { background: var(--hover); }
 .plan-doc-btn:disabled { opacity: 0.5; cursor: default; }
-.plan-doc-btn--primary { background: var(--accent); border-color: var(--accent); color: var(--text-on-dark); }
+/* Execute. `--button-primary-*` is the pair authored to sit on each other;
+   `--accent` + `--text-on-dark` (the TITLE-BAR foreground) put cream on gold
+   at 1.56:1 and made the primary action of the whole plan view unreadable.
+   The hover needs restating because `.plan-doc-btn:hover` outranks a single
+   class — without it Execute went grey under the pointer. */
+.plan-doc-btn--primary { background: var(--button-primary-bg); border-color: var(--button-primary-bg); color: var(--button-primary-text); }
+.plan-doc-btn--primary:hover:not(:disabled) { background: var(--button-primary-hover); border-color: var(--button-primary-hover); }
 .plan-doc-btn--stop { border-color: var(--error-text); color: var(--error-text); }
 .plan-doc-effort {
   padding: 3px var(--space-1);

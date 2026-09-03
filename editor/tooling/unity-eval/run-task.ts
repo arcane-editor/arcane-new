@@ -17,6 +17,8 @@ import { createTodoTool, type TodoItem } from '../../src/features/ai-panel/servi
 import type { AgentTool, StreamFn } from '../../src/features/ai-panel/services/vendor/types';
 import { buildAskPrompt } from '../../src/features/ai-panel/services/prompts/ask';
 import { buildAgentPrompt } from '../../src/features/ai-panel/services/prompts/agent';
+import { buildPlanPlanningPrompt } from '../../src/features/ai-panel/services/prompts/plan-planning';
+import { unityRecipesFor } from '../../src/features/ai-panel/services/prompts/unity-recipes';
 import { createUnityApiSearchTool } from '../../src/features/ai-panel/services/unity-tools/api-search-tool';
 import type { UnityApiClient } from '../../src/features/ai-panel/services/unity-tools/api-search-tool';
 import { createGetUnityDocsTool } from '../../src/features/ai-panel/services/unity-tools/docs-tool';
@@ -57,11 +59,9 @@ export interface GroundingConfig {
 }
 
 // Mirrors production's per-task-type output ceiling (`hosted-stream.ts`'s
-// `maxTokensByTask`: chat 16384 / plan 24576 / edit 24576). The eval only has
-// two task modes (`ask` | `agent` — see `eval-types.ts`), so this collapses
-// prod's three-way split to two: `ask` maps to prod's chat/Q&A cap, `agent`
-// (which covers both plan-shaped and edit-shaped agentic work here) maps to
-// prod's higher agentic cap.
+// `maxTokensByTask`: chat 16384 / plan 24576 / edit 24576). `ask` maps to
+// prod's chat/Q&A cap; `agent` and `plan` both map to prod's higher cap, which
+// is the one prod actually sends for a planning turn.
 export const ASK_MAX_TOKENS = 16384;
 export const AGENT_MAX_TOKENS = 24576;
 
@@ -83,7 +83,13 @@ export function buildTools(
     createUnityApiSearchTool(groundingClient),
     createGetUnityDocsTool(() => unityVersion),
   ];
-  if (task.mode === 'ask') return [read, list, ...unityTools].map((t) => withRepeatCallGuard(t, workDir));
+  // Plan mode gets the same read-only set as ask, because that is exactly what
+  // prod's planning phase gets (`agent-service.ts`'s `createToolsForPromptMode`
+  // for 'plan-planning': read/list/unity reads, no write/edit/bash). A plan
+  // task that could write files would not be measuring planning.
+  if (task.mode === 'ask' || task.mode === 'plan') {
+    return [read, list, ...unityTools].map((t) => withRepeatCallGuard(t, workDir));
+  }
   // Analyzer gate (eval analog of prod's F-5.3 `withUnityAnalyzerGate` /
   // `wrapCs` in `agent-service.ts`) wraps write/edit only — same tools prod
   // wraps, in the same order (gate applied first, closest to the raw tool).
@@ -134,7 +140,15 @@ export async function runTask(
   const workDir = await mkdtemp(join(tmpdir(), `unity-eval-${task.id}-`));
   await cp(join(FIXTURES_DIR, task.fixture), workDir, { recursive: true });
 
-  const base = task.mode === 'ask' ? buildAskPrompt(workDir) : buildAgentPrompt(workDir);
+  // `difficultyTags: false` matches the low/mid tiers — the ones the README
+  // requires a prompt change to be validated against, and the ones where a
+  // weak plan actually shows up.
+  const base =
+    task.mode === 'plan'
+      ? buildPlanPlanningPrompt(workDir, { difficultyTags: false })
+      : task.mode === 'ask'
+        ? buildAskPrompt(workDir)
+        : buildAgentPrompt(workDir);
   const facts = await buildFixtureFacts(workDir);
   const systemPrompt = `${base}\n\n${facts}`;
 
@@ -205,7 +219,12 @@ export async function runTask(
   let finalAnswer = '';
   let groundingLintHits = 0;
   try {
-    const messages = await agent.prompt(task.prompt);
+    // Prod puts the task-class recipes on the USER message for planning sends
+    // (`plan-controller.ts`'s `startPlanning`, which keeps the cached system
+    // prefix stable). Reproduce that here or the eval would be grading a
+    // different prompt than the one that ships.
+    const recipes = task.mode === 'plan' ? unityRecipesFor(task.prompt) : '';
+    const messages = await agent.prompt(recipes ? `${task.prompt}\n${recipes}` : task.prompt);
     const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
     if (lastAssistant && lastAssistant.role === 'assistant') {
       finalAnswer = lastAssistant.content

@@ -299,4 +299,70 @@ export const TASKS: EvalTask[] = [
       { type: 'file_not_contains', path: 'Assets/Scripts/Mover.cs', pattern: 'void update\\(\\)' },
     ],
   },
+
+  // ── plan (plan mode: is the drafted document actually a plan?) ───────
+  //
+  // Added after a real report: asked for a character controller, the planner
+  // replied with a preamble — "First, let me study the exact scene file
+  // structure…" — and that was written to disk and presented as the plan with
+  // an Execute button under it. Nothing caught it. `plan-quality.ts` now
+  // rejects that shape client-side, but a document can pass every structural
+  // rule and still be useless, which is what these grade: does the plan carry
+  // the Unity specifics the request actually turns on?
+  //
+  // Scored on the final answer only. Planning is read-only in prod, so there
+  // are no files to check — `answer_matches` against the drafted document is
+  // the whole surface.
+  {
+    id: 'plan-character-controller', family: 'plan', fixture: 'urp-newinput', mode: 'plan',
+    prompt:
+      'Build a full character controller I can drive with WASD and jump with space. '
+      + 'The player is just a capsule. There are stairs in the level and the player must '
+      + 'go up and down them without getting stuck. Set up a basic scene so I can play right away.',
+    checks: [
+      // The reported failure, pinned directly: a plan, not a preamble.
+      { type: 'answer_matches', pattern: '^\\s*#\\s+\\S' },
+      // No `m` flag on purpose: `^` then anchors to the START OF THE ANSWER,
+      // which is the thing being tested. (JS has no `\A`.)
+      { type: 'answer_not_matches', pattern: '^\\s*(I\'m going to|I will|First, let me|Let me)' },
+      // Structure: the five sections and the closing sentinel.
+      { type: 'answer_matches', pattern: '^## Goal', flags: 'm' },
+      { type: 'answer_matches', pattern: '^## Context', flags: 'm' },
+      { type: 'answer_matches', pattern: '^## Todos', flags: 'm' },
+      { type: 'answer_matches', pattern: '^## Guide', flags: 'm' },
+      { type: 'answer_matches', pattern: '^## Risks', flags: 'm' },
+      { type: 'answer_matches', pattern: 'STOP — review and edit before execution\\.' },
+      // At least five todos, and a guide entry for the fifth — the cheap way
+      // to catch a checklist with no detail behind it.
+      { type: 'answer_matches', pattern: '(?:^\\s*[-*] \\[[ x]\\] T\\d+[\\s\\S]*?){5}', flags: 'm' },
+      { type: 'answer_matches', pattern: '^### T5\\b', flags: 'm' },
+      // Substance: the request turns on these and nothing in this repo taught
+      // them before `prompts/unity-recipes.ts`.
+      { type: 'answer_matches', pattern: 'CharacterController|Rigidbody' },
+      { type: 'answer_matches', pattern: 'stepOffset|step offset' },
+      { type: 'answer_matches', pattern: 'slopeLimit|slope limit' },
+      // This fixture is a NEW Input System project, so legacy input is wrong
+      // here — the same trap the grounding family exists for.
+      { type: 'answer_not_matches', pattern: 'Input\\.GetAxis|Input\\.GetKey' },
+      // The scene half: the agent cannot build a scene, so a good plan says
+      // what the user must do in the Inspector rather than pretending.
+      { type: 'answer_matches', pattern: 'Inspector' },
+    ],
+  },
+  {
+    id: 'plan-legacy-input-controller', family: 'plan', fixture: 'builtin-legacy', mode: 'plan',
+    // Same request, opposite project. Guards the recipe against teaching one
+    // input API: it must defer to the project facts, which say legacy here.
+    prompt:
+      'Add WASD movement and a space-bar jump to the player capsule, and make sure '
+      + 'it can walk up the stairs in the scene.',
+    checks: [
+      { type: 'answer_matches', pattern: '^\\s*#\\s+\\S' },
+      { type: 'answer_matches', pattern: '^## Todos', flags: 'm' },
+      { type: 'answer_matches', pattern: '^## Guide', flags: 'm' },
+      { type: 'answer_matches', pattern: 'STOP — review and edit before execution\\.' },
+      { type: 'answer_matches', pattern: 'stepOffset|step offset' },
+      { type: 'answer_not_matches', pattern: 'InputAction|PlayerInput|Keyboard\\.current' },
+    ],
+  },
 ];

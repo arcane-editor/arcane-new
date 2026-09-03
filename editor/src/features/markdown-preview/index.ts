@@ -7,3 +7,4 @@ export { createNote, reanchorNotes, planStepsOf } from './services/note-anchor';
 export type { PlanNote, PlanStep } from './services/note-anchor';
 export { isPlanPath, isMarkdownPath } from './services/plan-paths';
 export { replaceBlock, toggleTaskAt } from './services/block-edit';
+export { insertTodoAfter, removeTodoAt, moveTodo, todoCount } from './services/todo-edit';

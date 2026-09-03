@@ -11,7 +11,7 @@ too much into a single number.
 
 ## What it is
 
-24 tasks across three families:
+26 tasks across four families:
 
 - **codegen** (8) — agent mode, asked to create/extend a script. Scored by
   `file_exists` / `file_contains` / `file_not_contains` + `analyzer_clean`.
@@ -30,6 +30,25 @@ too much into a single number.
   shader-property strings, so `grounding-urp-texture` and
   `grounding-trap-shader` no longer need this check — see the per-task
   comments in `tasks.ts`.)
+- **plan** (2) — plan mode, asked for a change and graded on the DOCUMENT it
+  drafts. Read-only tools, exactly as production's planning phase runs
+  (`agent-service.ts`'s `plan-planning` tool map), with the same system prompt
+  (`buildPlanPlanningPrompt`) and the same task-class recipes prod puts on the
+  user message (`unity-recipes.ts`). Scored entirely by `answer_matches` /
+  `answer_not_matches`: the five required sections, at least five `- [ ] T<n>`
+  todos with a `### T5` entry behind them, the `STOP —` sentinel, and the Unity
+  specifics the request turns on (`stepOffset`, `slopeLimit`,
+  `CharacterController`) — plus the fixture's correct input API, the same trap
+  the grounding family exists for.
+
+  Added after a real report: asked for a character controller, the planner
+  answered with a preamble ("First, let me study the exact scene file
+  structure…") and that was written to disk and presented as the plan. Nothing
+  in the suite could have caught it, because nothing exercised plan mode.
+  `tasks.test.ts` runs these checks offline against a known-good plan and
+  against that exact preamble, so a check that has stopped discriminating fails
+  the JS suite rather than quietly passing every eval run.
+
 - **agentic** (4) — agent mode, multi-step tasks requiring investigation
   (find a bug, not just apply a patch) and Unity-safe editing (e.g. rename a
   serialized field without losing Inspector-set values). Scored by file

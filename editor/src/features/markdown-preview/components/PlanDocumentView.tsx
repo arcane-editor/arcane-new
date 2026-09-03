@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Check, ChevronDown, ChevronRight, MessageSquarePlus, Play, Square, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, Check, ChevronDown, ChevronRight, MessageSquarePlus, Play, Plus, Square, Trash2, X } from 'lucide-react';
 import { useAiStore } from '../../../stores/ai';
 import { useWorkspaceStore } from '../../../stores/workspace';
 import MarkdownPreview from './MarkdownPreview';
-import { reanchorNotes, type PlanNote } from '../services/note-anchor';
+import { createNote, reanchorNotes, type PlanNote } from '../services/note-anchor';
 import { replaceBlock, toggleTaskAt } from '../services/block-edit';
+import { insertTodoAfter, removeTodoAt, moveTodo } from '../services/todo-edit';
 import { parsePlanDocument, type PlanStepBlock } from '../services/plan-document';
 
 interface PlanDocumentViewProps {
@@ -118,6 +119,17 @@ function PlanDocumentView({
     [content, write],
   );
 
+  // A note pinned from a step's own Comment button, anchored on the step title.
+  // The selection popover still exists for finer targeting, but requiring a
+  // text selection to say anything meant there was no way at all to comment on
+  // a step AS a step — which is the level most feedback is actually about.
+  const addStepNote = useCallback(
+    (title: string, body: string) => {
+      onNotesChange([...notes, createNote(content, title, body)]);
+    },
+    [content, notes, onNotesChange],
+  );
+
   const sliceProps = (start: number, end: number) => ({
     content: content.slice(start, end),
     slice: { base: start, document: content },
@@ -203,7 +215,7 @@ function PlanDocumentView({
               <MarkdownPreview key={`md-${block.range.start}-${i}`} {...sliceProps(block.range.start, block.range.end)} />
             ) : (
               <ol className="plan-spine" key={`steps-${i}`}>
-                {block.steps.map((step) => (
+                {block.steps.map((step, si) => (
                   <PlanStepCard
                     key={step.ordinal}
                     step={step}
@@ -214,6 +226,12 @@ function PlanDocumentView({
                     onRename={(text) =>
                       commitBlockEdit(step.titleRange.start, step.titleRange.end, text)
                     }
+                    onComment={(body) => addStepNote(step.title, body)}
+                    onInsertAfter={() => write(insertTodoAfter(content, si, 'New step'))}
+                    onRemove={() => write(removeTodoAt(content, si))}
+                    onMove={(delta) => write(moveTodo(content, si, si + delta))}
+                    canMoveUp={si > 0}
+                    canMoveDown={si < block.steps.length - 1}
                     guideProps={step.guide ? sliceProps(step.guide.start, step.guide.end) : null}
                   />
                 ))}
@@ -275,6 +293,13 @@ interface PlanStepCardProps {
   document: string;
   onToggle: () => void;
   onRename: (text: string) => void;
+  /** Pin a suggestion to this step without having to select its text first. */
+  onComment: (body: string) => void;
+  onInsertAfter: () => void;
+  onRemove: () => void;
+  onMove: (delta: -1 | 1) => void;
+  canMoveUp: boolean;
+  canMoveDown: boolean;
   guideProps: React.ComponentProps<typeof MarkdownPreview> | null;
 }
 
@@ -292,6 +317,12 @@ function PlanStepCard({
   document: doc,
   onToggle,
   onRename,
+  onComment,
+  onInsertAfter,
+  onRemove,
+  onMove,
+  canMoveUp,
+  canMoveDown,
   guideProps,
 }: PlanStepCardProps) {
   const [override, setOverride] = useState<boolean | null>(null);
@@ -299,6 +330,8 @@ function PlanStepCard({
   const [renaming, setRenaming] = useState<{ original: string } | null>(null);
   const [draft, setDraft] = useState('');
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const [comment, setComment] = useState<string | null>(null);
+  const commentRef = useRef<HTMLTextAreaElement>(null);
 
   const open = override ?? (executing ? state === 'running' : true);
   const raw = doc.slice(step.titleRange.start, step.titleRange.end);
@@ -390,6 +423,64 @@ function PlanStepCard({
             </h3>
           )}
 
+          {/* Editing a plan means changing what the steps ARE, not only what
+              they say — adding one, dropping one, doing that first. Those had
+              no affordance at all, so the only way to ask for them was to
+              select some text and describe the change in prose. The row is
+              hidden until the step is hovered or focused (see App.css) so a
+              plan being read stays a document. */}
+          {!executing && (
+            <div className="plan-step-actions">
+              <button
+                type="button"
+                className="plan-step-action"
+                onClick={() => setComment(comment === null ? '' : null)}
+                aria-label={`Comment on step ${step.ordinal}`}
+                title="Comment on this step"
+              >
+                <MessageSquarePlus size={12} />
+              </button>
+              <button
+                type="button"
+                className="plan-step-action"
+                onClick={() => onMove(-1)}
+                disabled={!canMoveUp}
+                aria-label={`Move step ${step.ordinal} up`}
+                title="Move up"
+              >
+                <ArrowUp size={12} />
+              </button>
+              <button
+                type="button"
+                className="plan-step-action"
+                onClick={() => onMove(1)}
+                disabled={!canMoveDown}
+                aria-label={`Move step ${step.ordinal} down`}
+                title="Move down"
+              >
+                <ArrowDown size={12} />
+              </button>
+              <button
+                type="button"
+                className="plan-step-action"
+                onClick={onInsertAfter}
+                aria-label={`Add a step after step ${step.ordinal}`}
+                title="Add a step below"
+              >
+                <Plus size={12} />
+              </button>
+              <button
+                type="button"
+                className="plan-step-action plan-step-action--danger"
+                onClick={onRemove}
+                aria-label={`Delete step ${step.ordinal}`}
+                title="Delete this step"
+              >
+                <Trash2 size={12} />
+              </button>
+            </div>
+          )}
+
           {guideProps && (
             <button
               type="button"
@@ -402,6 +493,47 @@ function PlanStepCard({
             </button>
           )}
         </div>
+
+        {comment !== null && (
+          <div className="plan-step-comment">
+            <textarea
+              ref={commentRef}
+              className="plan-step-comment-input"
+              value={comment}
+              onChange={(e) => setComment(e.target.value)}
+              placeholder={`What should change about "${step.title}"?`}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                  e.preventDefault();
+                  if (comment.trim()) onComment(comment.trim());
+                  setComment(null);
+                } else if (e.key === 'Escape') {
+                  e.preventDefault();
+                  setComment(null);
+                }
+              }}
+              autoFocus
+              aria-label={`Comment on step ${step.ordinal}`}
+            />
+            <div className="plan-step-comment-actions">
+              <span className="plan-step-comment-hint">⌘⏎ to add</span>
+              <button type="button" className="md-suggest-btn" onClick={() => setComment(null)}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="md-suggest-btn md-suggest-btn--primary"
+                disabled={!comment.trim()}
+                onClick={() => {
+                  onComment(comment.trim());
+                  setComment(null);
+                }}
+              >
+                Add
+              </button>
+            </div>
+          </div>
+        )}
 
         {guideProps && open && (
           <div className="plan-step-guide">

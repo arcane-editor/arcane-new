@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import MonacoEditor, { DiffEditor } from '@monaco-editor/react';
 import type { editor as MonacoEditorNs } from 'monaco-editor';
 import { ask } from '@tauri-apps/plugin-dialog';
 import { useWorkspaceStore } from '../../../stores/workspace';
+import { useAiStore } from '../../../stores/ai';
 import { useUiStore, type AssetViewerMode, type DiffViewMode } from '../../../stores/ui';
 import { useThemeStore } from '../../../stores/theme';
 import { useSettingsStore } from '../../../stores/settings';
@@ -34,6 +35,10 @@ import { initTestCodeLens } from '../../unity-test-runner';
 import { attachBreakpointGutter } from '../../debugger';
 import { registerInlineSuggestProvider } from '../../inline-suggest';
 import { MarkdownPreview, PlanDocumentView, isMarkdownPath, isPlanPath, type PlanNote } from '../../markdown-preview';
+
+/** Module-level so a plan with no notes hands PlanDocumentView the SAME array
+ *  every render — a fresh `[]` would re-run its re-anchoring effect forever. */
+const EMPTY_NOTES: PlanNote[] = [];
 import { planController } from '../../ai-panel';
 import { SearchResultsTab } from '../../search';
 import { fileUri } from '../../lsp';
@@ -60,9 +65,14 @@ function EditorPanel() {
   const assetViewerModeMap = useUiStore((s) => s.assetViewerMode);
   const diffViewModeMap = useUiStore((s) => s.diffViewMode);
   const markdownViewModeMap = useUiStore((s) => s.markdownViewMode);
-  // Suggestions live with the open document, not in the .md — the file
-  // stays clean because execution re-reads it from disk.
-  const [planNotes, setPlanNotes] = useState<PlanNote[]>([]);
+  // Suggestions live with the open document, not in the .md — the file stays
+  // clean because execution re-reads it from disk. They are held in the ai
+  // store KEYED BY PLAN PATH, not in local state here: this component is the
+  // single editor pane for every tab, so one shared array meant a second plan
+  // re-anchored the first one's notes against itself, and a reload threw away
+  // comments the user had written.
+  const planNotesByPath = useAiStore((s) => s.planNotes);
+  const setPlanNotesFor = useAiStore((s) => s.setPlanNotes);
 
   const editorRef = useRef<MonacoEditorNs.IStandaloneCodeEditor | null>(null);
 
@@ -239,13 +249,14 @@ function EditorPanel() {
   const isPlainMarkdown =
     isMarkdownPath(activeFile.name) && !activeFile.diff && !isPlanPath(activeFile.path);
   if (isPlanPath(activeFile.path) && !activeFile.diff) {
+    const notes = planNotesByPath[activeFile.path] ?? EMPTY_NOTES;
     return (
       <PlanDocumentView
         path={activeFile.path}
         content={activeFile.content}
-        notes={planNotes}
-        onNotesChange={setPlanNotes}
-        onRevise={() => planController.reviseWithNotes(activeFile.path, planNotes)}
+        notes={notes}
+        onNotesChange={(next) => setPlanNotesFor(activeFile.path, next)}
+        onRevise={() => planController.reviseWithNotes(activeFile.path, notes)}
         onExecute={() => planController.executePlan(activeFile.path)}
         onStop={() => planController.abortExecution()}
       />
