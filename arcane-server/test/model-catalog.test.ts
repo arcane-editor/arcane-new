@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { INTENSITY_CONFIG, getIntensityConfig, DEFAULT_MODEL_ROUTING, EXECUTOR_MODEL, PLANNER_MODEL, SPARK_MODEL } from '../src/config/plans.ts';
+import {
+    INTENSITY_CONFIG, getIntensityConfig, DEFAULT_MODEL_ROUTING,
+    SPARK_MODEL, LEGACY_SPARK_MODEL, FLASH_MODEL, PLANNER_MODEL,
+} from '../src/config/plans.ts';
 import { MODEL_CATALOG, wireFormatForNativeId } from '../src/lib/costs.ts';
 
 describe('INTENSITY_CONFIG', () => {
@@ -67,46 +70,70 @@ describe('catalog guard', () => {
 // Role pins — catches an accidental swap of which model serves which
 // planner/executor/executorHard slot in the code-default routing doc.
 describe('DEFAULT_MODEL_ROUTING role pins', () => {
-    it('low: glm-5.3-flash planner, glm-5.3-flash executor', () => {
-        expect(DEFAULT_MODEL_ROUTING.tiers.low.planner).toBe(EXECUTOR_MODEL);
-        expect(DEFAULT_MODEL_ROUTING.tiers.low.executor).toBe(EXECUTOR_MODEL);
+    it('low: spark planner, spark executor', () => {
+        expect(DEFAULT_MODEL_ROUTING.tiers.low.planner).toBe(SPARK_MODEL);
+        expect(DEFAULT_MODEL_ROUTING.tiers.low.executor).toBe(SPARK_MODEL);
         expect(DEFAULT_MODEL_ROUTING.tiers.low.executorHard).toBeUndefined();
     });
 
-    it('mid: glm-5.3 planner, glm-5.3-flash executor', () => {
+    it('mid: glm-5.3 planner, spark executor', () => {
         expect(DEFAULT_MODEL_ROUTING.tiers.mid.planner).toBe(PLANNER_MODEL);
-        expect(DEFAULT_MODEL_ROUTING.tiers.mid.executor).toBe(EXECUTOR_MODEL);
+        expect(DEFAULT_MODEL_ROUTING.tiers.mid.executor).toBe(SPARK_MODEL);
         expect(DEFAULT_MODEL_ROUTING.tiers.mid.executorHard).toBeUndefined();
     });
 
-    it('high: sol planner, glm-5.3-flash executor, glm-5.3 executorHard', () => {
+    it('high: sol planner, spark executor, glm-5.3 executorHard', () => {
         expect(DEFAULT_MODEL_ROUTING.tiers.high.planner).toBe('openai/gpt-5.6-sol');
-        expect(DEFAULT_MODEL_ROUTING.tiers.high.executor).toBe(EXECUTOR_MODEL);
+        expect(DEFAULT_MODEL_ROUTING.tiers.high.executor).toBe(SPARK_MODEL);
         expect(DEFAULT_MODEL_ROUTING.tiers.high.executorHard).toBe(PLANNER_MODEL);
     });
 
-    // Spark served every executor slot until 2026-08-27. Its catalog entry has
-    // to survive the swap — usage rows are keyed by model id, so deleting it
-    // would silently zero the cost of every historical debit against it.
-    it('keeps the retired spark entry in the catalog, unrouted', () => {
-        expect(MODEL_CATALOG[SPARK_MODEL]).toBeDefined();
-        const routed = Object.values(DEFAULT_MODEL_ROUTING.tiers).flatMap((t) =>
-            [t.planner, t.executor, t.executorHard].filter(Boolean),
+    /** Every model id the code-default doc routes to, in slot order. */
+    function routedModels(): string[] {
+        return Object.values(DEFAULT_MODEL_ROUTING.tiers).flatMap((t) =>
+            [t.planner, t.executor, t.executorHard].filter((m): m is string => Boolean(m)),
         );
-        expect(routed).not.toContain(SPARK_MODEL);
+    }
+
+    // Retirement contract, applied three times over now: a model that stops
+    // being routed KEEPS its catalog entry, because usage rows are keyed by
+    // model id — deleting one silently zeroes the cost of every historical
+    // debit against it (and forfeits the one-line rollback).
+    it('keeps spark 1.2 in the catalog, unrouted — superseded by 1.3', () => {
+        expect(MODEL_CATALOG[LEGACY_SPARK_MODEL]).toBeDefined();
+        expect(routedModels()).not.toContain(LEGACY_SPARK_MODEL);
     });
 
-    // Grok held the mid planner and the high executorHard until 2026-08-30,
-    // when glm-5.3 took both. Same contract as spark above: the entry stays so
-    // historical usage rows keyed to it still cost out, but nothing routes to
-    // it. With grok gone, gpt-5.6-sol is the last third-party model routed.
+    // glm-5.3-flash held every slot spark 1.3 now holds, between 2026-08-27
+    // and 2026-09-03. It is the documented rollback.
+    it('keeps glm-5.3-flash in the catalog, unrouted', () => {
+        expect(MODEL_CATALOG[FLASH_MODEL]).toBeDefined();
+        expect(routedModels()).not.toContain(FLASH_MODEL);
+    });
+
     it('keeps the retired grok entry in the catalog, unrouted', () => {
         expect(MODEL_CATALOG['xai/grok-4.6']).toBeDefined();
-        const routed = Object.values(DEFAULT_MODEL_ROUTING.tiers).flatMap((t) =>
-            [t.planner, t.executor, t.executorHard].filter(Boolean),
-        );
-        expect(routed).not.toContain('xai/grok-4.6');
-        expect(routed.filter((m) => !m!.startsWith('@cf/'))).toEqual(['openai/gpt-5.6-sol']);
+        expect(routedModels()).not.toContain('xai/grok-4.6');
+    });
+
+    // Spark is a 'direct'-route model — no Cloudflare in the path at all — so
+    // routing it puts a slot on an entirely different failure domain from the
+    // rest of the lineup. Worth stating explicitly rather than inferring.
+    it('spark 1.3 is a direct-route catalog entry with the 1.2 seed carried over', () => {
+        const spark = MODEL_CATALOG[SPARK_MODEL]!;
+        const legacy = MODEL_CATALOG[LEGACY_SPARK_MODEL]!;
+        expect(spark.route).toBe('direct');
+        expect(spark.inputCostPer1M).toBe(legacy.inputCostPer1M);
+        expect(spark.outputCostPer1M).toBe(legacy.outputCostPer1M);
+        expect(spark.cachedInputCostPer1M).toBe(legacy.cachedInputCostPer1M);
+        expect(spark.contextWindow).toBe(131_072);
+        // A flat rate has no long-context cliff to fall off.
+        expect(spark.longContext).toBeUndefined();
+    });
+
+    it('the only non-Workers-AI models routed are spark and sol', () => {
+        const offCf = [...new Set(routedModels().filter((m) => !m.startsWith('@cf/')))];
+        expect(offCf.sort()).toEqual([SPARK_MODEL, 'openai/gpt-5.6-sol'].sort());
     });
 
     it('glm-5.3 prices strictly below the grok it replaced, with no long-context cliff', () => {

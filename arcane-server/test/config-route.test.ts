@@ -3,7 +3,7 @@ import { env, SELF } from 'cloudflare:test';
 import { seedPasswordUser, tokenFor } from './helpers.ts';
 import { putConfigDoc, clearConfigCache } from '../src/lib/app-config.ts';
 import { MODEL_CATALOG } from '../src/lib/costs.ts';
-import { EXECUTOR_MODEL } from '../src/config/plans.ts';
+import { SPARK_MODEL } from '../src/config/plans.ts';
 import type { ModelPricingDoc } from '../src/lib/app-config.ts';
 import type { UserRow } from '../src/lib/db.ts';
 
@@ -103,21 +103,27 @@ describe('GET /v1/config', () => {
         expect(tierById(body, 'high').hasPreplanning).toBe(true);
     });
 
-    // Until 2026-08-27 the executor (spark, 131_072) was the smallest window on
-    // every tier, so all three came back identical. glm-5.3-flash's 1,048,576
-    // lifted that floor, and each tier now reports its own planner's window.
-    // 2026-08-30: glm-5.3 replaced grok as the mid planner, so mid is no
-    // longer pinned to grok's 500_000 — low and mid are both 1,048,576 now
-    // and gpt-5.6-sol is the only remaining constraint anywhere.
-    it('contextWindow: high tier = min(sol 400_000, glm-flash 1_048_576, glm 1_048_576) = 400_000 with seed catalog', async () => {
+    // This number has now flipped twice. Spark's conservative 131_072 seed was
+    // the smallest window on every tier until 2026-08-27, when glm-5.3-flash
+    // took the executor slots and each tier rose to its own planner's window
+    // (1,048,576 / 1,048,576 / 400,000). Spark 1.3 took those slots back on
+    // 2026-09-03, so its seed is the binding constraint everywhere again and
+    // all three tiers report the same number — including high, whose
+    // gpt-5.6-sol planner (400_000) is no longer the smallest.
+    //
+    // This is a real product consequence, not bookkeeping: the editor derives
+    // its compaction threshold from this value, so every tier compacts ~8x
+    // sooner than it did the day before. Raising spark's catalog window (or
+    // rolling back to FLASH_MODEL) is what moves it.
+    it('contextWindow: every tier = spark\'s 131_072 seed, the smallest in each tier\'s lineup', async () => {
         const user = await seedPasswordUser('config-ctxwin@test.dev', 'password123');
         const token = await tokenFor(user);
         const res = await getConfig(token);
         const body = await res.json<ConfigResponse>();
 
-        expect(tierById(body, 'high').contextWindow).toBe(400_000);
-        expect(tierById(body, 'low').contextWindow).toBe(1_048_576);
-        expect(tierById(body, 'mid').contextWindow).toBe(1_048_576);
+        expect(tierById(body, 'low').contextWindow).toBe(131_072);
+        expect(tierById(body, 'mid').contextWindow).toBe(131_072);
+        expect(tierById(body, 'high').contextWindow).toBe(131_072);
     });
 
     it('contextWindow: a model_pricing override lowering the executor\'s window changes the derived high-tier value', async () => {
@@ -127,8 +133,8 @@ describe('GET /v1/config', () => {
 
         const executorOverride: ModelPricingDoc = {
             models: {
-                [EXECUTOR_MODEL]: {
-                    ...MODEL_CATALOG[EXECUTOR_MODEL]!,
+                [SPARK_MODEL]: {
+                    ...MODEL_CATALOG[SPARK_MODEL]!,
                     contextWindow: 100_000,
                 },
             },
@@ -141,7 +147,8 @@ describe('GET /v1/config', () => {
         const res = await getConfig(token);
         const body = await res.json<ConfigResponse>();
         // Now the smallest of (sol 400_000, executor 100_000, glm 1_048_576)
-        // is the executor — the derived value follows the override, not the seed.
+        // is the overridden executor, below even spark's own 131_072 seed —
+        // the derived value follows the override, not the catalog.
         expect(tierById(body, 'high').contextWindow).toBe(100_000);
 
         clearConfigCache(); // leave a clean cache for any test file sharing this isolate

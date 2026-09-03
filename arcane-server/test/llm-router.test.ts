@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
     resolveModel, classifyStreamError, convertMessages, describeStreamError, streamCompletion,
-    isToolChoiceRejection,
+    isToolChoiceRejection, isEffortRejection, effortProviderOptions,
     LlmConfigError, type LlmEnv,
 } from '../src/services/llm-router.ts';
 import { SPARK_MODEL, DEFAULT_MODEL_ROUTING } from '../src/config/plans.ts';
@@ -46,7 +46,7 @@ describe('resolveModel: spark direct provider', () => {
 
     it('resolves to the spark provider with the prefix stripped, given both bindings', () => {
         const model = resolveModel(SPARK_MODEL, SPARK_ENV);
-        expect(model.modelId).toBe('muse-spark-1.2-contributor');
+        expect(model.modelId).toBe('muse-spark-1.3-contributor');
         // @ai-sdk/openai-compatible's `.provider` getter returns
         // `${name}.${modelType}` (e.g. 'spark.chat') — verified against the
         // installed 2.0.30 source (openai-compatible-provider.ts
@@ -66,14 +66,14 @@ describe('resolveModel: spark direct provider', () => {
 // asserts the resolution rather than any one model id, and a future
 // DEFAULT_MODEL_ROUTING edit that breaks it fails here, not in production.
 //
-// mid.executor went back to a `@cf/` id on 2026-08-27 (glm-5.3-flash), so the
-// live assertion is the Workers AI branch; the spark branch above still covers
-// the direct route, which is the documented rollback.
+// mid.executor went back to a spark id on 2026-09-03, so the live assertion
+// is the direct-provider branch again — which is exactly the configuration
+// that broke in the first place, making this guard load-bearing rather than
+// vestigial.
 describe('resolveModel: graph enrich\'s default model', () => {
-    it('serves DEFAULT_MODEL_ROUTING.tiers.mid.executor through the Workers AI binding', () => {
+    it('serves DEFAULT_MODEL_ROUTING.tiers.mid.executor without throwing', () => {
         const id = DEFAULT_MODEL_ROUTING.tiers.mid.executor;
-        expect(id.startsWith('@cf/')).toBe(true);
-        expect(resolveModel(id, SPARK_ENV).modelId).toBe(id);
+        expect(() => resolveModel(id, SPARK_ENV)).not.toThrow();
     });
 });
 
@@ -487,5 +487,206 @@ describe('streamCompletion maxOutputTokens clamp uses the passed catalog', () =>
         for await (const _ of streamCompletion(req, SPARK_ENV, fn)) { /* drain */ }
 
         expect(seen[0].maxOutputTokens).toBe(16_384); // MODEL_CATALOG's real seed entry
+    });
+});
+
+// ─── Reasoning effort ─────────────────────────────────────────
+//
+// config/routing.ts decides 'max' | 'xhigh' per send; this module's only job
+// is putting that on the wire in the shape each provider actually reads.
+// Three different shapes, verified against the installed provider packages:
+//   spark/   → @ai-sdk/openai-compatible spreads providerOptions[<name>] into
+//              the request body, and reads `reasoningEffort` as
+//              `reasoning_effort` (index.mjs:510).
+//   openai/  → @ai-sdk/openai accepts reasoningEffort from a fixed enum that
+//              DOES include both 'xhigh' and 'max' (index.mjs:713), and maps
+//              it to `reasoning.effort` on the Responses wire.
+//   @cf/     → workers-ai-provider reads providerOptions['workers-ai']
+//              .reasoning_effort onto the run INPUTS (index.mjs:1186).
+describe('effortProviderOptions', () => {
+    it('sends the level verbatim to spark, which is the only wire that implements max', () => {
+        expect(effortProviderOptions('spark/muse-spark-1.3-contributor', 'max'))
+            .toEqual({ spark: { reasoningEffort: 'max' } });
+        expect(effortProviderOptions('spark/muse-spark-1.3-contributor', 'xhigh'))
+            .toEqual({ spark: { reasoningEffort: 'xhigh' } });
+    });
+
+    it('sends the level verbatim to OpenAI-wire unified models', () => {
+        expect(effortProviderOptions('openai/gpt-5.6-sol', 'xhigh'))
+            .toEqual({ openai: { reasoningEffort: 'xhigh' } });
+        expect(effortProviderOptions('xai/grok-4.6', 'xhigh'))
+            .toEqual({ openai: { reasoningEffort: 'xhigh' } });
+    });
+
+    // Workers AI publishes no level above 'high'. Sending 'xhigh' there would
+    // be inventing a value the provider never documented — the exact class of
+    // mistake that made every gpt-5.6-luna request 400 in 2026-08.
+    it('maps both levels onto high for Workers AI, the ceiling that wire publishes', () => {
+        expect(effortProviderOptions('@cf/zai-org/glm-5.3', 'xhigh'))
+            .toEqual({ 'workers-ai': { reasoning_effort: 'high' } });
+        expect(effortProviderOptions('@cf/zai-org/glm-5.3', 'max'))
+            .toEqual({ 'workers-ai': { reasoning_effort: 'high' } });
+    });
+
+    it('is undefined when no effort was resolved (the memory side-task lane)', () => {
+        expect(effortProviderOptions('@cf/zai-org/glm-5.3', undefined)).toBeUndefined();
+    });
+});
+
+describe('streamCompletion: reasoning effort on the wire', () => {
+    const REQ: ChatCompletionRequest = {
+        model: '@cf/zai-org/glm-5.2',
+        messages: [{ role: 'user', content: 'hi' }],
+    };
+
+    function recordingStreamText() {
+        const seen: Array<Record<string, unknown>> = [];
+        const fn = (args: Record<string, unknown>) => {
+            seen.push(args);
+            return { fullStream: (async function* () {})() };
+        };
+        return { impl: fn as unknown as typeof import('ai').streamText, seen };
+    }
+
+    it('passes the resolved effort through to streamText', async () => {
+        const { impl, seen } = recordingStreamText();
+        for await (const _ of streamCompletion(REQ, ENV, impl, undefined, undefined, 'xhigh')) { /* drain */ }
+        expect(seen[0].providerOptions).toEqual({ 'workers-ai': { reasoning_effort: 'high' } });
+    });
+
+    it('sends no providerOptions at all when there is no effort and no cache key', async () => {
+        const { impl, seen } = recordingStreamText();
+        for await (const _ of streamCompletion(REQ, ENV, impl)) { /* drain */ }
+        expect('providerOptions' in seen[0]).toBe(false);
+    });
+
+    // Both live under the same `openai` key. A naive spread drops one of them,
+    // and the one that would go silently missing is promptCacheKey — no error,
+    // just a quiet loss of every prompt-cache discount on the Max planner.
+    it('merges effort with the OpenAI prompt-cache key instead of replacing it', async () => {
+        const { impl, seen } = recordingStreamText();
+        const req = { ...REQ, model: 'openai/gpt-5.6-sol', metadata: { sessionId: 'sess-1' } };
+        for await (const _ of streamCompletion(req, ENV, impl, undefined, undefined, 'xhigh')) { /* drain */ }
+        expect(seen[0].providerOptions).toEqual({
+            openai: { promptCacheKey: 'sess-1', reasoningEffort: 'xhigh' },
+        });
+    });
+});
+
+// Same hazard as tool_choice: a provider that does not implement the field
+// rejects the WHOLE request rather than ignoring it, which would turn "think
+// harder" into "every send on that model fails".
+describe('isEffortRejection', () => {
+    it('recognises an upstream error naming the field', () => {
+        expect(isEffortRejection(Object.assign(new Error('Bad Request'), {
+            statusCode: 400,
+            responseBody: '{"error":{"message":"unsupported","param":"reasoning_effort"}}',
+        }))).toBe(true);
+    });
+
+    it('recognises the Responses-wire spelling of the same field', () => {
+        expect(isEffortRejection(new Error("Unknown parameter: 'reasoning.effort'"))).toBe(true);
+    });
+
+    it('does not claim unrelated failures', () => {
+        expect(isEffortRejection(new Error('rate limited'))).toBe(false);
+        expect(isEffortRejection(new Error('reasoning content was truncated'))).toBe(false);
+    });
+});
+
+describe('streamCompletion: effort rejection fallback', () => {
+    const REQ: ChatCompletionRequest = {
+        model: '@cf/zai-org/glm-5.2',
+        messages: [{ role: 'user', content: 'hi' }],
+    };
+
+    const EFFORT_400 = Object.assign(new Error('Bad Request'), {
+        statusCode: 400,
+        responseBody: '{"error":{"message":"unsupported value","param":"reasoning_effort"}}',
+    });
+
+    function scriptedStreamText(calls: Array<Array<Record<string, unknown>>>) {
+        const seen: Array<Record<string, unknown>> = [];
+        const fn = (args: Record<string, unknown>) => {
+            const parts = calls[seen.length] ?? [];
+            seen.push(args);
+            return { fullStream: (async function* () { for (const p of parts) yield p; })() };
+        };
+        return { impl: fn as unknown as typeof import('ai').streamText, seen };
+    }
+
+    it('retries without the effort field instead of killing the turn', async () => {
+        const { impl, seen } = scriptedStreamText([
+            [{ type: 'error', error: EFFORT_400 }],
+            [{ type: 'text-delta', text: 'answered anyway' }],
+        ]);
+
+        const events: StreamEvent[] = [];
+        for await (const e of streamCompletion(REQ, ENV, impl, undefined, undefined, 'xhigh')) events.push(e);
+
+        expect(events).toEqual([{ type: 'text', content: 'answered anyway' }]);
+        expect(seen).toHaveLength(2);
+        expect(seen[0].providerOptions).toBeDefined();
+        expect('providerOptions' in seen[1]).toBe(false);
+    });
+
+    it('does not retry when no effort was sent', async () => {
+        const { impl, seen } = scriptedStreamText([
+            [{ type: 'error', error: EFFORT_400 }],
+            [{ type: 'text-delta', text: 'must not run' }],
+        ]);
+
+        const events: StreamEvent[] = [];
+        for await (const e of streamCompletion(REQ, ENV, impl)) events.push(e);
+
+        expect(seen).toHaveLength(1);
+        expect(events[0].type).toBe('error');
+    });
+
+    // Once a turn has streamed text to the client, a retry would replay it.
+    it('does not retry after the first token has been emitted', async () => {
+        const { impl, seen } = scriptedStreamText([
+            [{ type: 'text-delta', text: 'partial' }, { type: 'error', error: EFFORT_400 }],
+            [{ type: 'text-delta', text: 'must not run' }],
+        ]);
+
+        const events: StreamEvent[] = [];
+        for await (const e of streamCompletion(REQ, ENV, impl, undefined, undefined, 'max')) events.push(e);
+
+        expect(seen).toHaveLength(1);
+        expect(events.map((e) => e.type)).toEqual(['text', 'error']);
+    });
+
+    // The two fallbacks are independent and must compose: a provider that
+    // implements neither field still gets a working turn.
+    it('drops tool_choice and effort across successive attempts', async () => {
+        const TOOL_CHOICE_400 = Object.assign(new Error('only "auto" is supported for tool_choice'), {
+            statusCode: 400,
+            responseBody: '{"error":{"param":"tool_choice"}}',
+        });
+        const { impl, seen } = scriptedStreamText([
+            [{ type: 'error', error: TOOL_CHOICE_400 }],
+            [{ type: 'error', error: EFFORT_400 }],
+            [{ type: 'text-delta', text: 'third time lucky' }],
+        ]);
+
+        const req: ChatCompletionRequest = {
+            ...REQ,
+            tool_choice: 'none',
+            tools: [{
+                type: 'function',
+                function: { name: 'read_file', description: 'read a file', parameters: { type: 'object', properties: {} } },
+            }],
+        };
+
+        const events: StreamEvent[] = [];
+        for await (const e of streamCompletion(req, ENV, impl, undefined, undefined, 'xhigh')) events.push(e);
+
+        expect(events).toEqual([{ type: 'text', content: 'third time lucky' }]);
+        expect(seen).toHaveLength(3);
+        expect(seen[0].toolChoice).toBe('none');
+        expect(seen[1].toolChoice).toBeUndefined();
+        expect(seen[1].providerOptions).toBeDefined();
+        expect('providerOptions' in seen[2]).toBe(false);
     });
 });
