@@ -338,6 +338,144 @@ function cloneDoc(doc: InputActionsDocument): InputActionsDocument {
  * rebinding overrides from losing their reference. An unknown id is a no-op,
  * not an error — the caller is often reacting to a stale UI row.
  */
+/**
+ * A fresh Unity-style GUID for an action or binding id.
+ *
+ * Unity matches actions and bindings by `id`, not by name — a rename keeps
+ * every reference alive precisely because the id does not change. So a NEW
+ * action or binding needs a genuinely new id: reusing one silently merges two
+ * things Unity believes are the same, and colliding with an existing one is
+ * worse than a malformed file because nothing rejects it.
+ *
+ * `crypto.randomUUID` where available (browser, Bun, Node 19+), falling back to
+ * `getRandomValues`. Unity writes the plain 8-4-4-4-12 form, so that is what we
+ * write; it never sees the braces the C# `Guid` type prints.
+ */
+export function newInputId(): string {
+  const c = globalThis.crypto;
+  if (c && typeof c.randomUUID === 'function') return c.randomUUID();
+  const bytes = new Uint8Array(16);
+  c.getRandomValues(bytes);
+  // RFC 4122 version 4, variant 10xx — the shape Unity's own serializer emits.
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+export interface AddActionInput {
+  mapName: string;
+  actionName: string;
+  /** `Button` (default), `Value` or `PassThrough`. */
+  type?: string;
+  /** Must agree with what `ReadValue<T>()` will ask for. */
+  expectedControlType?: string;
+  /** Control paths to bind, e.g. `['<Keyboard>/space', '<Gamepad>/buttonSouth']`. */
+  bindings?: readonly string[];
+  /** Control scheme names for those bindings; omitted means every scheme. */
+  groups?: readonly string[];
+}
+
+export interface MutationResult {
+  parsed: ParsedInputActions;
+  /** Null on success; a human-readable reason the document was left untouched. */
+  error: string | null;
+}
+
+/**
+ * Add an action to an existing map, with optional bindings.
+ *
+ * Refuses rather than guesses in the two ambiguous cases: an unknown map (the
+ * caller meant a map that exists, or meant to create one — we cannot tell) and
+ * a duplicate name (Unity permits it and then resolves `FindAction` to
+ * whichever came first, which is never what anyone wants).
+ */
+export function addAction(
+  parsed: ParsedInputActions,
+  input: AddActionInput,
+): MutationResult {
+  if (!parsed.doc) return { parsed, error: 'the asset does not parse' };
+
+  const doc = cloneDoc(parsed.doc);
+  const map = (doc.maps ?? []).find((m) => m.name === input.mapName);
+  if (!map) {
+    const known = (doc.maps ?? []).map((m) => m.name).join(', ') || '(none)';
+    return { parsed, error: `no action map named "${input.mapName}". Maps: ${known}` };
+  }
+  if ((map.actions ?? []).some((a) => a.name === input.actionName)) {
+    return {
+      parsed,
+      error: `"${input.mapName}/${input.actionName}" already exists — Unity allows the duplicate and then resolves lookups to the first one`,
+    };
+  }
+
+  const action: InputAction = {
+    name: input.actionName,
+    type: input.type ?? 'Button',
+    id: newInputId(),
+    expectedControlType: input.expectedControlType ?? '',
+    processors: '',
+    interactions: '',
+    initialStateCheck: false,
+  };
+  map.actions = [...(map.actions ?? []), action];
+
+  const groups = (input.groups ?? []).join(';');
+  for (const path of input.bindings ?? []) {
+    map.bindings = [...(map.bindings ?? []), makeBinding(path, input.actionName, groups)];
+  }
+  return { parsed: { ...parsed, doc }, error: null };
+}
+
+/** Bind one more control to an action that already exists. */
+export function addBinding(
+  parsed: ParsedInputActions,
+  input: { mapName: string; actionName: string; path: string; groups?: readonly string[] },
+): MutationResult {
+  if (!parsed.doc) return { parsed, error: 'the asset does not parse' };
+
+  const doc = cloneDoc(parsed.doc);
+  const map = (doc.maps ?? []).find((m) => m.name === input.mapName);
+  if (!map) {
+    const known = (doc.maps ?? []).map((m) => m.name).join(', ') || '(none)';
+    return { parsed, error: `no action map named "${input.mapName}". Maps: ${known}` };
+  }
+  if (!(map.actions ?? []).some((a) => a.name === input.actionName)) {
+    const known = (map.actions ?? []).map((a) => a.name).join(', ') || '(none)';
+    return {
+      parsed,
+      error: `no action named "${input.actionName}" in map "${input.mapName}". Actions: ${known}`,
+    };
+  }
+
+  map.bindings = [
+    ...(map.bindings ?? []),
+    makeBinding(input.path, input.actionName, (input.groups ?? []).join(';')),
+  ];
+  return { parsed: { ...parsed, doc }, error: null };
+}
+
+/**
+ * One standalone binding, with every field Unity writes.
+ *
+ * The empty strings are not noise: Unity's own serializer emits them, and a
+ * binding missing them reads as a smaller diff here and a larger one the next
+ * time Unity saves the asset.
+ */
+function makeBinding(path: string, action: string, groups: string): InputBinding {
+  return {
+    name: '',
+    id: newInputId(),
+    path,
+    interactions: '',
+    processors: '',
+    groups,
+    action,
+    isComposite: false,
+    isPartOfComposite: false,
+  };
+}
+
 export function setBindingPath(
   parsed: ParsedInputActions,
   bindingId: string,

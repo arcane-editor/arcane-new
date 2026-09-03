@@ -30,6 +30,7 @@ const DEFAULT_SETTINGS: SettingsSchema = {
   'unity.analyzers.enabled': true,
   'unity.compileGate.enabled': true,
   'unity.lspGate.enabled': true,
+  'unity.assetGate.enabled': true,
   'unity.verifiedPass.enabled': true,
   'unity.nearMissDiagnostics.enabled': true,
   'unity.rename.formerlySerializedAs': true,

@@ -64,10 +64,16 @@ export function nonSourceSymbolsGuidance(file: string): string | null {
   const lower = file.toLowerCase();
   const ext = NON_SOURCE_EXTENSIONS.find((e) => lower.endsWith(e));
   if (!ext) return null;
-  const alternative =
-    ext === '.inputactions'
-      ? 'Call unity_input_actions to list its maps, actions and bindings'
-      : 'Use read to open it directly';
+  // Each of these has a tool that answers in a fraction of the tokens `read`
+  // would spend, and — for `.asset` — answers questions the file alone cannot
+  // (its schema lives in the C# class, and the drift between them in neither).
+  const REDIRECTS: Record<string, string> = {
+    '.inputactions': 'Call unity_input_actions to list its maps, actions and bindings',
+    '.uxml': 'Call unity_ui_toolkit to get its element tree, names and stylesheets',
+    '.uss': 'Call unity_ui_toolkit to get the classes it declares and where they are used',
+    '.asset': 'Call unity_scriptable_objects to get its typed field values and its class schema',
+  };
+  const alternative = REDIRECTS[ext] ?? 'Use read to open it directly';
   return (
     `project_symbols only covers source code: the codebase graph indexes C# scripts, not ${ext} ` +
     `data assets, so ${file} will never appear in it and rebuilding the graph will not change that. ` +

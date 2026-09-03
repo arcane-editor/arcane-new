@@ -38,12 +38,15 @@ import {
 } from './tool-operations';
 import {
   createUnityReadTools,
+  createUnityAssetMutateTools,
   createUnityMutateTools,
   withUnityAnalyzerGate,
+  withUnityAssetGate,
   withUnityCompileGate,
   withLspDiagnosticsGate,
   resetCompileGate,
 } from './unity-tools';
+import { resolveToCwd } from './vendor/tools/path-utils';
 import { withCheckpoint } from './checkpoints/checkpoint-gate';
 import { withWriteApproval } from './write-approval-gate';
 import { withResultDiffs } from './diff-decorator';
@@ -212,6 +215,11 @@ function createToolsForPromptMode(mode: PromptMode, workspacePath: string, effor
   // LSP diagnostics gate: csharp-ls error-severity diagnostics fed back to the
   // agent. Default-on; the gate itself no-ops when csharp-ls isn't running.
   const lspGateOn = isUnity && settings.getSetting('unity.lspGate.enabled') !== false;
+  // Asset gate: the same write-feedback loop for the four Unity formats the
+  // analyzers never covered (.uxml/.uss/.inputactions/.asset). Default-on; the
+  // gate itself early-returns on every other extension, including .cs.
+  const assetGateOn =
+    isUnity && settings.getSetting('unity.assetGate.enabled') !== false;
   const unityRead: AgentTool[] = isUnity ? createUnityReadTools(workspacePath) : [];
 
   if (mode === 'ask') {
@@ -266,9 +274,14 @@ function createToolsForPromptMode(mode: PromptMode, workspacePath: string, effor
 
   // Wrap .cs write/edit with the analyzer gate (instant, offline, regex) innermost,
   // then the LSP gate (csharp-ls, live but no engine needed), then the compile gate
-  // (authoritative, needs a live Unity bridge) on the OUTSIDE so it runs last.
+  // (needs the Unity bridge) outermost, so the cheapest signal reaches the model first.
+  //
+  // `withUnityAssetGate` covers exactly the extensions the other three ignore
+  // (.uxml/.uss/.inputactions/.asset), so the order between it and the cs-gates
+  // is irrelevant — each early-returns on the other's files.
   const wrapCs = (t: AgentTool): AgentTool => {
-    let g = analyzersOn ? withUnityAnalyzerGate(t, workspacePath) : t;
+    let g = assetGateOn ? withUnityAssetGate(t, workspacePath) : t;
+    if (analyzersOn) g = withUnityAnalyzerGate(g, workspacePath);
     if (lspGateOn) g = withLspDiagnosticsGate(g, workspacePath);
     if (compileGateOn) g = withUnityCompileGate(g, workspacePath);
     return g;
@@ -318,6 +331,35 @@ function createToolsForPromptMode(mode: PromptMode, workspacePath: string, effor
     ...memoryTools,
     ...unityRead,
     ...(isUnity ? createUnityMutateTools() : []),
+    // Unity asset writes. They declare a top-level `path`, which is the only
+    // thing `withCheckpoint` and `withWriteApproval` key off — so "restore this
+    // turn" and the `ai.edits.alwaysApproveUnityAssets` policy cover them with
+    // no special case. The cs-gates are deliberately NOT applied: these tools
+    // never touch `.cs`, and the asset gate would re-check a write the tool
+    // already performed through a validating writer.
+    ...(isUnity
+      ? createUnityAssetMutateTools(workspacePath, {
+          // The same two consumers the vendor write tool notifies: the verified
+          // pass's touched-file registry, and the editor's open-buffer reload.
+          onWrite: (path) => {
+            const abs = resolveToCwd(path, workspacePath);
+            recordTouchedFile(abs);
+            onFileWritten(abs);
+          },
+        }).map((t) =>
+          guardRealPath(
+            withEditReview(
+              withResultDiffs(
+                withWriteApproval(withCheckpoint(t, workspacePath, { allowedRoot }), workspacePath, {
+                  allowedRoot,
+                }),
+                workspacePath,
+                { allowedRoot },
+              ),
+            ),
+          ),
+        )
+      : []),
     guardRealPath(
       withEditReview(
         withResultDiffs(

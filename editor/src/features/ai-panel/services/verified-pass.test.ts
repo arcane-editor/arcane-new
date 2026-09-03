@@ -29,6 +29,12 @@ function fakeDeps(overrides: Partial<VerifiedPassDeps> = {}): VerifiedPassDeps {
     bridgeConnected: () => false,
     triggerRecompile: async () => ({ status: 'unknown', reason: 'timeout' } as const),
     readGuid: async () => 'abc123',
+    // The three subsystem steps default to `'skipped'` here so the existing
+    // cases keep asserting exactly what they always did; the cases that care
+    // override them.
+    checkUiToolkit: async () => 'skipped',
+    checkScriptableObjects: async () => 'skipped',
+    checkInput: async () => 'skipped',
     ...overrides,
   };
 }
@@ -254,5 +260,70 @@ describe('runVerifiedPass', () => {
     expect(second.touchedFiles.sort()).toEqual(
       ['Assets/Scripts/Bar.cs', 'Assets/Scripts/Baz.cs'].sort(),
     );
+  });
+});
+
+
+// The three subsystems a compile can never speak for. The card's job is to say
+// what was actually checked, so the cases that matter are the ones where a step
+// must NOT claim a pass: nothing relevant was touched, or the step ran out of
+// budget.
+describe('verified-pass — the silent-failure subsystems', () => {
+  beforeEach(() => {
+    beginVerifiedPass();
+  });
+
+  it('reports each subsystem result on the card', async () => {
+    recordTouchedFile('/proj/Assets/UI/HUD.uxml');
+    const card = await runVerifiedPass(
+      WORKSPACE,
+      fakeDeps({
+        checkUiToolkit: async () => ({ queriesResolved: 11, queriesTotal: 12, problems: 2 }),
+        checkScriptableObjects: async () => ({ drift: 3 }),
+        checkInput: async () => 'clean',
+      }),
+    );
+    expect(card.uiToolkit).toEqual({ queriesResolved: 11, queriesTotal: 12, problems: 2 });
+    expect(card.scriptableObjects).toEqual({ drift: 3 });
+    expect(card.input).toBe('clean');
+  });
+
+  it('passes the touched files and the workspace to every step', async () => {
+    recordTouchedFile('/proj/Assets/UI/HUD.uxml');
+    let seen: { files: string[]; ws: string } | undefined;
+    await runVerifiedPass(
+      WORKSPACE,
+      fakeDeps({
+        checkUiToolkit: async (files, ws) => {
+          seen = { files, ws };
+          return 'clean';
+        },
+      }),
+    );
+    expect(seen).toEqual({ files: ['/proj/Assets/UI/HUD.uxml'], ws: WORKSPACE });
+  });
+
+  it('degrades a throwing step to skipped rather than failing the pass', async () => {
+    recordTouchedFile('/proj/Assets/UI/HUD.uxml');
+    const card = await runVerifiedPass(
+      WORKSPACE,
+      fakeDeps({
+        checkUiToolkit: async () => {
+          throw new Error('snapshot unavailable');
+        },
+        checkInput: async () => 'clean',
+      }),
+    );
+    expect(card.uiToolkit).toBe('skipped');
+    // The other steps still ran — one failure must not take the card down.
+    expect(card.input).toBe('clean');
+  });
+
+  it('never reports a subsystem as clean when the step said skipped', async () => {
+    recordTouchedFile('/proj/Assets/Scripts/Foo.cs');
+    const card = await runVerifiedPass(WORKSPACE, fakeDeps());
+    expect(card.uiToolkit).toBe('skipped');
+    expect(card.scriptableObjects).toBe('skipped');
+    expect(card.input).toBe('skipped');
   });
 });

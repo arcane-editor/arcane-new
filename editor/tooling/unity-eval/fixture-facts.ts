@@ -6,6 +6,11 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { contrastFactLines } from '../../src/features/ai-panel/services/prompts/unity-contrast';
+import {
+  subsystemInventoryLine,
+  type SubsystemInventory,
+} from '../../src/features/ai-panel/services/prompts/subsystem-facts';
+import { readdir } from 'node:fs/promises';
 
 type RenderPipeline = 'URP' | 'HDRP' | 'Built-in';
 
@@ -97,14 +102,65 @@ async function detectFixtureFacts(fixtureDir: string): Promise<RawFixtureFacts> 
   return { version, pipeline, inputSystem };
 }
 
+/** Every file under `dir`, recursively. Fixtures are small; no excludes needed. */
+async function walk(dir: string): Promise<string[]> {
+  const out: string[] = [];
+  let entries;
+  try {
+    entries = await readdir(dir, { withFileTypes: true });
+  } catch {
+    return out;
+  }
+  for (const entry of entries) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...(await walk(full)));
+    else out.push(full);
+  }
+  return out;
+}
+
+/**
+ * Headless equivalent of the subsystem inventory `unity-facts.ts` derives from
+ * the Rust asset index and the analyzers' UI Toolkit snapshot.
+ *
+ * Counts are approximated from the file tree, which is what a fixture gives us:
+ * an `.asset` count stands in for the instance count, and its type count is not
+ * knowable without the GUID index, so it is reported as the number of distinct
+ * `.asset` files' owning scripts — unavailable here, hence 0 types means the
+ * line is omitted rather than guessed at.
+ */
+async function detectFixtureInventory(fixtureDir: string): Promise<SubsystemInventory> {
+  const files = await walk(fixtureDir);
+  const count = (ext: string) => files.filter((f) => f.toLowerCase().endsWith(ext)).length;
+
+  const inputAssets = count('.inputactions');
+  const documents = count('.uxml');
+
+  return {
+    // Types need the GUID index (which script a `.asset` instances), and the
+    // eval has no Rust side. Reporting a count we cannot derive would make the
+    // eval prompt diverge from production in the one direction that matters:
+    // claiming knowledge we do not have.
+    scriptableObjects: null,
+    uiToolkit: documents > 0 ? { documents, stylesheets: count('.uss') } : null,
+    input: inputAssets > 0 ? { assets: inputAssets, maps: 0 } : null,
+  };
+}
+
 export async function buildFixtureFacts(fixtureDir: string): Promise<string> {
   const { version, pipeline, inputSystem } = await detectFixtureFacts(fixtureDir);
+  const inventory = subsystemInventoryLine(await detectFixtureInventory(fixtureDir));
 
   return [
     '## Unity project facts (authoritative — match these)',
     `- Unity version: ${version}`,
     `- Render pipeline: ${pipeline}`,
     `- Input system: ${INPUT_SYSTEM_WORDING[inputSystem]}`,
+    // The subsystem inventory line production always emits (subsystem-facts.ts).
+    // The per-subsystem DETAIL blocks are correctly absent: production selects
+    // them from the conversation's active file, and a headless eval run has no
+    // open file, so `selectSubsystems` would return none there too.
+    ...(inventory ? [inventory] : []),
     // Contrastive anti-default facts (P2.1, unity-contrast.ts) — ADDITIONS
     // only, derived from the SAME pipeline/inputSystem values just detected
     // above, so pre-existing fact strings above stay byte-identical.

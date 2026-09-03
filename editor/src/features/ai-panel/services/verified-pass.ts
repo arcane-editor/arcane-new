@@ -42,6 +42,17 @@ export interface VerifiedCardData {
   analyzers: { errors: number } | 'skipped';
   compile: { errors: number } | 'clean' | 'skipped';
   guids: 'intact' | { missing: string[] } | 'skipped';
+  /**
+   * The three subsystems whose failures a compile can never catch.
+   *
+   * Each is `'skipped'` unless the send actually touched a file that could
+   * affect it, so a pure C# change does not pay for three checks it cannot
+   * have broken — and, more importantly, so the card never claims to have
+   * verified something it did not look at.
+   */
+  uiToolkit: { queriesResolved: number; queriesTotal: number; problems: number } | 'clean' | 'skipped';
+  scriptableObjects: { drift: number } | 'clean' | 'skipped';
+  input: { problems: number } | 'clean' | 'skipped';
 }
 
 // ---- Injected boundaries ----
@@ -53,6 +64,21 @@ export interface VerifiedPassDeps {
   triggerRecompile: (opts: { signal?: AbortSignal }) => Promise<CompileWaitOutcome>;
   /** Resolves the GUID from a `.cs` file's paired `.meta`, or `null` if missing/unreadable. */
   readGuid: (absPath: string) => Promise<string | null>;
+  /**
+   * The three subsystem checks.
+   *
+   * Injected as whole steps rather than as their pieces because each one has
+   * to reach a feature barrel through a dynamic `import()` (see the DI note
+   * above), and because that keeps the pure analysis where it already lives —
+   * `asset-checks.ts` and `utils/uitoolkit-refs.ts` — rather than growing a
+   * second copy here.
+   */
+  checkUiToolkit: (files: string[], workspacePath: string) => Promise<VerifiedCardData['uiToolkit']>;
+  checkScriptableObjects: (
+    files: string[],
+    workspacePath: string,
+  ) => Promise<VerifiedCardData['scriptableObjects']>;
+  checkInput: (files: string[], workspacePath: string) => Promise<VerifiedCardData['input']>;
 }
 
 async function defaultReadFile(absPath: string): Promise<string> {
@@ -76,12 +102,160 @@ async function defaultTriggerRecompile(
   return triggerRecompileAndWait(opts);
 }
 
+function hasExt(files: readonly string[], ...exts: string[]): boolean {
+  return files.some((f) => exts.some((e) => f.toLowerCase().endsWith(e)));
+}
+
+/**
+ * UI Toolkit: do the documents still parse, and does every `Q<T>("name")` the
+ * send wrote resolve?
+ *
+ * Only touched files are re-read; the element-name pool comes from the
+ * analyzers' existing snapshot. A project-wide walk here would be the one
+ * expensive step in a pass that has to finish while the user is watching.
+ */
+async function defaultCheckUiToolkit(
+  files: string[],
+  workspacePath: string,
+): Promise<VerifiedCardData['uiToolkit']> {
+  if (!hasExt(files, '.uxml', '.uss', '.cs')) return 'skipped';
+  const mod = await import('../../unity-analyzers');
+  const uxml = mod.getUxmlIndex();
+  const uss = mod.getUssIndex();
+  if (!uxml || uxml.docCount === 0) return 'skipped';
+
+  const [{ checkUxml, checkUss }, { resolveQueryName, extractQuerySites }] = await Promise.all([
+    import('./unity-tools/asset-checks'),
+    import('../../../utils/uitoolkit-refs'),
+  ]);
+  const csRefs = mod.getCsUiRefIndex();
+  const ladder = {
+    associatedPath: null,
+    associatedNames: null,
+    projectNames: new Set(uxml.allNames),
+    csAssignedNames: csRefs.loaded ? csRefs.assignedNames : null,
+    allNames: uxml.allNames,
+  };
+
+  let problems = 0;
+  let queriesTotal = 0;
+  let queriesResolved = 0;
+
+  for (const file of files) {
+    const lower = file.toLowerCase();
+    const text = await defaultReadFile(file).catch(() => null);
+    if (text === null) continue;
+    if (lower.endsWith('.uxml')) {
+      problems += checkUxml(text, {
+        declaredClasses: new Set(uss?.allClasses ?? []),
+        csReferencedClasses: csRefs.loaded ? csRefs.referencedClasses : null,
+        // Workspace-RELATIVE, because that is the form `parseStyleRef` returns
+        // for a `project://` ref. Handing it absolute paths would report every
+        // stylesheet in every document as missing.
+        ussPaths: [...(uss?.docs.keys() ?? [])].map((p) => toRelative(p, workspacePath)),
+      }).length;
+    } else if (lower.endsWith('.uss')) {
+      problems += checkUss(text, file).length;
+    } else if (lower.endsWith('.cs')) {
+      for (const site of extractQuerySites(mod.blankStringsAndComments(text), text)) {
+        if (!site.name) continue;
+        queriesTotal++;
+        // `unresolved` is the only verdict that is a failure. Every other one,
+        // including `insufficient-data`, is a reason to stay quiet — the same
+        // discipline the analyzer rule applies.
+        if (resolveQueryName(site.name, ladder).kind !== 'unresolved') queriesResolved++;
+      }
+    }
+  }
+
+  if (queriesTotal === 0 && problems === 0) return 'clean';
+  return { queriesResolved, queriesTotal, problems };
+}
+
+/**
+ * ScriptableObjects: did a serialized-field change leave the assets behind?
+ *
+ * This is the check the whole subsystem exists for. A rename without
+ * `[FormerlySerializedAs]` compiles, passes every test, and destroys tuned data
+ * the next time Unity loads the asset — so "it compiles" is exactly the wrong
+ * moment to stop looking.
+ */
+async function defaultCheckScriptableObjects(
+  files: string[],
+  workspacePath: string,
+): Promise<VerifiedCardData['scriptableObjects']> {
+  const scripts = files.filter((f) => f.toLowerCase().endsWith('.cs'));
+  if (scripts.length === 0) return 'skipped';
+
+  const { invoke } = await import('@tauri-apps/api/core');
+  const analyzers = await import('../../unity-analyzers');
+  const so = await import('../../unity-scriptable-objects');
+
+  // Once, not once per touched script: this is a project-wide inventory and
+  // building it inside the loop turned a forty-file send into forty index
+  // queries.
+  const groups = await invoke<
+    Array<{ scriptPath: string | null; typeName: string; instances: Array<{ path: string }> }>
+  >('unity_scriptable_object_types', { workspacePath }).catch(() => null);
+  if (!groups) return 'skipped';
+
+  let drift = 0;
+  let looked = false;
+  for (const script of scripts) {
+    const source = await defaultReadFile(script).catch(() => null);
+    if (source === null) continue;
+    const schema = analyzers.buildSoSchema(analyzers.scanCSharp(source));
+    if (!schema || schema.baseKind !== 'scriptableObject') continue;
+
+    const group = groups.find((g) => g.scriptPath === script || g.typeName === schema.className);
+    const paths = group?.instances ?? [];
+    if (paths.length === 0) continue;
+
+    const read = await invoke<Array<{ path: string; snapshot: Parameters<typeof so.computeDrift>[0]['instances'][number]['snapshot'] }>>(
+      'unity_asset_read_many',
+      { paths: paths.map((p) => p.path) },
+    ).catch(() => []);
+    if (read.length === 0) continue;
+
+    looked = true;
+    drift += so.computeDrift({
+      schema,
+      instances: read.map((r) => ({
+        path: r.path,
+        name: r.path.split('/').pop() ?? r.path,
+        snapshot: r.snapshot,
+      })),
+    }).length;
+  }
+
+  if (!looked) return 'skipped';
+  return drift === 0 ? 'clean' : { drift };
+}
+
+/** Input: does a touched `.inputactions` still parse, and does anything starve? */
+async function defaultCheckInput(files: string[]): Promise<VerifiedCardData['input']> {
+  const assets = files.filter((f) => f.toLowerCase().endsWith('.inputactions'));
+  if (assets.length === 0) return 'skipped';
+
+  const { checkInputActions } = await import('./unity-tools/asset-checks');
+  let problems = 0;
+  for (const asset of assets) {
+    const text = await defaultReadFile(asset).catch(() => null);
+    if (text === null) continue;
+    problems += checkInputActions(text).length;
+  }
+  return problems === 0 ? 'clean' : { problems };
+}
+
 const DEFAULT_DEPS: VerifiedPassDeps = {
   readFile: defaultReadFile,
   runAnalyzers: defaultRunAnalyzers,
   bridgeConnected: defaultBridgeConnected,
   triggerRecompile: defaultTriggerRecompile,
   readGuid: readScriptGuidFromMeta,
+  checkUiToolkit: defaultCheckUiToolkit,
+  checkScriptableObjects: defaultCheckScriptableObjects,
+  checkInput: defaultCheckInput,
 };
 
 // ---- Per-send registry ----
@@ -246,6 +420,27 @@ export async function runVerifiedPass(
     remaining(),
     'skipped',
   );
+  // Before the compile step, not after: these are snapshot reads over the
+  // touched files alone and cost single-digit milliseconds, whereas the compile
+  // can legitimately consume the rest of the budget. Ordering them last would
+  // mean the checks that catch the SILENT failures are the ones that get
+  // dropped whenever the loud one takes a while.
+  const uiToolkit = await withBudget<VerifiedCardData['uiToolkit']>(
+    () => deps.checkUiToolkit(files, workspacePath),
+    remaining(),
+    'skipped',
+  );
+  const scriptableObjects = await withBudget<VerifiedCardData['scriptableObjects']>(
+    () => deps.checkScriptableObjects(files, workspacePath),
+    remaining(),
+    'skipped',
+  );
+  const input = await withBudget<VerifiedCardData['input']>(
+    () => deps.checkInput(files, workspacePath),
+    remaining(),
+    'skipped',
+  );
+
   const compile = await withBudget<VerifiedCardData['compile']>(
     () => computeCompile(deps, remaining()),
     remaining(),
@@ -268,5 +463,8 @@ export async function runVerifiedPass(
     analyzers,
     compile,
     guids,
+    uiToolkit,
+    scriptableObjects,
+    input,
   };
 }

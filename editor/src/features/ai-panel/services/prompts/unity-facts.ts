@@ -15,8 +15,19 @@ import { invoke } from '@tauri-apps/api/core';
 import { useProjectContextStore } from '../../../../stores/project-context';
 import { useWorkspaceStore } from '../../../../stores/workspace';
 import { useAsmdefStore } from '../../../../stores/asmdef';
+import { useUnityIndexStore } from '../../../../stores/unity-index';
 import { contrastFactLines } from './unity-contrast';
 import { inputFactLines, type InputActionsFacts } from './input-facts';
+import {
+  selectSubsystems,
+  presenceOf,
+  subsystemInventoryLine,
+  scriptableObjectFactLines,
+  uiToolkitFactLines,
+  type SubsystemInventory,
+  type ScriptableObjectFacts,
+  type UiToolkitFacts,
+} from './subsystem-facts';
 import {
   detectInputSystem,
   inputSystemLabel,
@@ -34,6 +45,12 @@ interface UnityFacts {
   unityRules: string | null; // contents of .ai/unity-rules.md
   /** Null when the project has no `.inputactions` assets (or is on Legacy). */
   inputActions: InputActionsFacts | null;
+  /** Counts for the always-on inventory line. */
+  inventory: SubsystemInventory;
+  /** Null when the project has no ScriptableObject types with assets. */
+  scriptableObjects: ScriptableObjectFacts | null;
+  /** Null when the project has no `.uxml` documents. */
+  uiToolkit: UiToolkitFacts | null;
 }
 
 let cache: UnityFacts | null = null;
@@ -101,13 +118,39 @@ export async function primeUnityFacts(workspacePath: string): Promise<void> {
 
     const inputSystem = detectInputSystem(projectSettings, !!deps['com.unity.inputsystem']);
 
+    // All three snapshots in parallel: each is a bounded read the app performs
+    // anyway, and priming is off the critical path (the first turn falls back
+    // to the version-only block if it is not warm yet).
+    const [inputActions, so, ui] = await Promise.all([
+      readInputActionsFacts(workspacePath, inputSystem),
+      readScriptableObjectFacts(workspacePath),
+      readUiToolkitFacts(workspacePath),
+    ]);
+    const scriptableObjects = so?.facts ?? null;
+    const soAssetCount = so?.assetCount ?? 0;
+    const uiToolkit = ui?.facts ?? null;
+    const ussCount = ui?.stylesheetCount ?? 0;
+
     cache = {
       workspacePath,
       renderPipeline: detectRenderPipeline(deps),
       inputSystem,
       keyPackages,
       unityRules,
-      inputActions: await readInputActionsFacts(workspacePath, inputSystem),
+      inputActions,
+      scriptableObjects,
+      uiToolkit,
+      inventory: {
+        scriptableObjects: scriptableObjects
+          ? { types: scriptableObjects.typeNames.length, assets: soAssetCount }
+          : null,
+        uiToolkit: uiToolkit
+          ? { documents: uiToolkit.documents.length, stylesheets: ussCount }
+          : null,
+        input: inputActions
+          ? { assets: inputActions.assetPaths.length, maps: inputActions.maps.length }
+          : null,
+      },
     };
   } finally {
     priming = null;
@@ -154,6 +197,76 @@ async function readInputActionsFacts(
 }
 
 /**
+ * The active file's content, from the buffer the editor already holds.
+ *
+ * Synchronous on purpose: `getUnityFactsBlock` runs inside the synchronous
+ * prompt builder, so there is no opportunity to read from disk. A file that is
+ * open but not yet loaded simply yields null, and the selection falls back to
+ * extension alone — which is the right degradation, since the alternative is
+ * making the whole prompt build async.
+ */
+function activeFileTextSync(): string | null {
+  const { openFiles, activeFilePath } = useWorkspaceStore.getState();
+  if (!activeFilePath) return null;
+  return openFiles.find((f) => f.path === activeFilePath)?.content ?? null;
+}
+
+/**
+ * ScriptableObject types that have at least one asset, most-instanced first.
+ *
+ * Shares the same Rust inventory command the ScriptableObjects panel uses,
+ * rather than scanning again — so the types named in the prompt are exactly the
+ * ones `unity_scriptable_objects` can then describe.
+ */
+async function readScriptableObjectFacts(
+  workspacePath: string,
+): Promise<{ facts: ScriptableObjectFacts; assetCount: number } | null> {
+  try {
+    const groups = await invoke<Array<{ typeName: string; instances: unknown[] }>>(
+      'unity_scriptable_object_types',
+      { workspacePath },
+    );
+    if (groups.length === 0) return null;
+    const sorted = [...groups].sort((a, b) => b.instances.length - a.instances.length);
+    return {
+      facts: { typeNames: sorted.map((g) => g.typeName) },
+      assetCount: groups.reduce((n, g) => n + g.instances.length, 0),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The project's UXML documents and every element name they declare.
+ *
+ * Reached through a dynamic import for the reason `readInputActionsFacts`
+ * documents above, and shares the analyzers' snapshot for the same reason: the
+ * names in the prompt are the ones UNITY0501 validates `Q<T>()` against.
+ */
+async function readUiToolkitFacts(
+  workspacePath: string,
+): Promise<{ facts: UiToolkitFacts; stylesheetCount: number } | null> {
+  try {
+    const mod = await import('../../../unity-analyzers');
+    await mod.loadUiToolkitIndex(workspacePath, mod.blankStringsAndComments);
+    const uxml = mod.getUxmlIndex();
+    if (!uxml || uxml.docCount === 0) return null;
+    const relative = (p: string) =>
+      p.startsWith(`${workspacePath}/`) ? p.slice(workspacePath.length + 1) : p;
+    return {
+      facts: {
+        documents: [...uxml.docs.keys()].map(relative),
+        elementNames: uxml.allNames,
+      },
+      stylesheetCount: mod.getUssIndex()?.docCount ?? 0,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Build the Unity facts markdown block synchronously. Returns null for
  * non-Unity projects. Triggers a background prime when the cache is cold.
  */
@@ -173,7 +286,31 @@ export function getUnityFactsBlock(): string | null {
   if (facts) {
     lines.push(`- Render pipeline: ${facts.renderPipeline}`);
     lines.push(`- Input system: ${inputSystemLabel(facts.inputSystem)}`);
-    lines.push(...inputFactLines(facts.inputSystem, facts.inputActions));
+
+    // Adaptive detail (subsystem-facts.ts): the inventory line is always sent,
+    // the per-subsystem detail only for what this conversation opens on. The
+    // choice is made HERE, once, because this whole block is then frozen for
+    // the conversation — nothing may vary the system prompt mid-conversation
+    // (frozen-context.ts), so "adaptive" has to mean "chosen at freeze time".
+    const selected = selectSubsystems({
+      activeFilePath: useWorkspaceStore.getState().activeFilePath,
+      activeFileText: activeFileTextSync(),
+      present: presenceOf(facts.inventory),
+    });
+    const inventory = subsystemInventoryLine(facts.inventory);
+    if (inventory) lines.push(inventory);
+
+    lines.push(
+      ...inputFactLines(facts.inputSystem, facts.inputActions, {
+        detail: selected.includes('input'),
+      }),
+    );
+    if (selected.includes('scriptableObjects') && facts.scriptableObjects) {
+      lines.push(...scriptableObjectFactLines(facts.scriptableObjects));
+    }
+    if (selected.includes('uiToolkit') && facts.uiToolkit) {
+      lines.push(...uiToolkitFactLines(facts.uiToolkit));
+    }
     if (facts.keyPackages.length > 0) {
       lines.push(
         `- Key packages: ${facts.keyPackages.map((p) => `${p.name}@${p.version}`).join(', ')}`,
@@ -254,6 +391,32 @@ queueMicrotask(() => {
       if (wp) void primeUnityFacts(wp);
     } else {
       cache = null;
+    }
+  });
+
+  // The facts cache is keyed on the workspace alone, so an action renamed or a
+  // .uxml edited mid-session left it serving the names the project had at
+  // workspace open — the same staleness `inputActionsRevision` was created to
+  // fix for the analyzers, leaking through a second cache nobody wired up.
+  //
+  // Dropping the cache is the whole fix, and it is deliberately all this does:
+  // the CURRENT conversation keeps the block it froze (frozen-context.ts —
+  // changing the prompt mid-conversation would invalidate the provider's prefix
+  // cache for the entire history), and the next one primes from the new truth.
+  useUnityIndexStore.subscribe((state, prev) => {
+    // The two asset-specific counters only, NOT `indexRevision` — for exactly
+    // the reason `unity-analyzers/index.ts` states at its own subscription:
+    // re-priming re-reads the `.inputactions` assets AND re-scans the project
+    // for `.uxml`/`.uss`, and `indexRevision` bumps on every prefab and scene
+    // save. Hanging this off it would run two project scans every time anyone
+    // saves a scene.
+    if (
+      state.inputActionsRevision !== prev.inputActionsRevision ||
+      state.uiToolkitRevision !== prev.uiToolkitRevision
+    ) {
+      cache = null;
+      const wp = useWorkspaceStore.getState().workspacePath;
+      if (wp && useProjectContextStore.getState().isUnityProject) void primeUnityFacts(wp);
     }
   });
 

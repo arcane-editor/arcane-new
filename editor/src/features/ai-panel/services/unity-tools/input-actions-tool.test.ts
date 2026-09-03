@@ -13,7 +13,11 @@
 import { describe, it, expect } from 'bun:test';
 import { buildInputActionsIndex } from '../../../../utils/inputactions-index';
 import type { ActionReference } from '../../../unity-input';
-import { createUnityInputActionsTool, type InputActionsToolDeps } from './input-actions-tool';
+import {
+  createUnityInputActionsTool,
+  type InputActionsToolDeps,
+  type ActionRefsResult,
+} from './input-actions-tool';
 
 const WS = '/proj';
 
@@ -70,10 +74,21 @@ const REFS: ActionReference[] = [
   },
 ];
 
+const NO_REFS: ActionRefsResult = {
+  byActionName: new Map(),
+  usesInputActionReference: false,
+};
+
+function refsResult(map: Map<string, ActionReference[]>, suppressed = false): ActionRefsResult {
+  return { byActionName: map, usesInputActionReference: suppressed };
+}
+
 function deps(over: Partial<InputActionsToolDeps> = {}): InputActionsToolDeps {
   return {
     loadIndex: async () => NEW_INDEX,
-    findRefs: async () => new Map([['Jump', REFS]]),
+    findRefs: async () => refsResult(new Map([['Jump', REFS]])),
+    loadAssetContext: async () => ({ wrapper: null, assetReferencedByScene: false }),
+    coverage: async () => null,
     ...over,
   };
 }
@@ -136,7 +151,7 @@ describe('unity_input_actions — one action', () => {
   });
 
   it('says so plainly when nothing in the project reads the action', async () => {
-    const out = await run({ action: 'Move', refs: true }, { findRefs: async () => new Map() });
+    const out = await run({ action: 'Move', refs: true }, { findRefs: async () => NO_REFS });
     expect(out).toContain('No C# references');
   });
 
@@ -147,7 +162,7 @@ describe('unity_input_actions — one action', () => {
       {
         findRefs: async () => {
           called = true;
-          return new Map();
+          return NO_REFS;
         },
       },
     );
@@ -186,5 +201,138 @@ describe('unity_input_actions — projects without the Input System', () => {
   it('answers rather than throwing when the cache stays cold', async () => {
     const out = await run({}, { loadIndex: async () => null });
     expect(out).toContain('No input snapshot');
+  });
+});
+
+
+// The blind spots this tool had until the graph work landed in the panel. Each
+// one made the tool answer confidently and wrongly, which is worse than not
+// answering: a wrong "nothing reads this" invites deleting a live action.
+describe('unity_input_actions — the wrapper', () => {
+  const withWrapper = {
+    loadAssetContext: async () => ({
+      wrapper: { className: 'PlayerControls', path: null },
+      assetReferencedByScene: false,
+    }),
+  };
+
+  it('names the generated class in the inventory, and the idiom it implies', async () => {
+    const out = await run({}, withWrapper);
+    expect(out).toContain('class PlayerControls');
+    expect(out).toContain('Prefer it over FindAction here');
+  });
+
+  it('gives the exact wrapper property for one action', async () => {
+    const out = await run({ action: 'Jump' }, withWrapper);
+    expect(out).toContain('PlayerControls.Player.Jump');
+  });
+
+  it('sanitises the property the way Unity does, so the name it prints exists', async () => {
+    const spaced = buildInputActionsIndex(
+      [
+        {
+          path: `${WS}/Assets/PlayerControls.inputactions`,
+          content: JSON.stringify({
+            name: 'PlayerControls',
+            maps: [
+              {
+                name: 'Player Two',
+                id: 'm1',
+                actions: [{ name: 'Move Camera', type: 'Value', id: 'a1' }],
+                bindings: [{ id: 'b1', path: '<Mouse>/delta', action: 'Move Camera' }],
+              },
+            ],
+          }),
+        },
+      ],
+      'New',
+    );
+    const out = await run(
+      { action: 'Move Camera' },
+      { ...withWrapper, loadIndex: async () => spaced },
+    );
+    expect(out).toContain('PlayerControls.PlayerTwo.MoveCamera');
+  });
+
+  it('says nothing about a wrapper when the asset does not generate one', async () => {
+    expect(await run({})).not.toContain('wrapper');
+  });
+});
+
+describe('unity_input_actions — "nothing reads this" is the claim that must not be wrong', () => {
+  it('reports unread only when nothing could be hiding a reader', async () => {
+    const out = await run({ action: 'Move', refs: true }, { findRefs: async () => NO_REFS });
+    expect(out).toContain('defined in the asset but unread');
+  });
+
+  it('downgrades to unknown when the project wires InputActionReference fields', async () => {
+    const out = await run(
+      { action: 'Move', refs: true },
+      { findRefs: async () => refsResult(new Map(), true) },
+    );
+    expect(out).toContain('unknown, not unused');
+    expect(out).not.toContain('but unread');
+  });
+
+  it('downgrades to unknown when a scene or prefab references the asset', async () => {
+    const out = await run(
+      { action: 'Move', refs: true },
+      {
+        findRefs: async () => NO_REFS,
+        loadAssetContext: async () => ({ wrapper: null, assetReferencedByScene: true }),
+      },
+    );
+    expect(out).toContain('unknown, not unused');
+  });
+
+  it('passes every action to the scan, so the wrapper catalog is complete', async () => {
+    let seen: Array<{ name: string; mapName: string }> = [];
+    await run(
+      { action: 'Jump', refs: true },
+      {
+        findRefs: async (_ws, actions) => {
+          seen = actions;
+          return NO_REFS;
+        },
+      },
+    );
+    expect(seen.map((a) => a.name).sort()).toEqual(['Jump', 'Move', 'Submit']);
+  });
+});
+
+describe('unity_input_actions — control-scheme coverage', () => {
+  it('lists the schemes an action cannot be triggered in', async () => {
+    const out = await run(
+      { coverage: true },
+      {
+        coverage: async () => ({
+          schemes: ['Keyboard&Mouse', 'Gamepad'],
+          rows: [
+            { qualifiedName: 'Player/Move', bound: ['Gamepad'], missing: ['Keyboard&Mouse'] },
+            { qualifiedName: 'Player/Jump', bound: ['Keyboard&Mouse', 'Gamepad'], missing: [] },
+          ],
+        }),
+      },
+    );
+    expect(out).toContain('Player/Move — missing: Keyboard&Mouse');
+    expect(out).not.toContain('Player/Jump —');
+  });
+
+  it('says so plainly when every action is covered', async () => {
+    const out = await run(
+      { coverage: true },
+      {
+        coverage: async () => ({
+          schemes: ['Keyboard&Mouse'],
+          rows: [{ qualifiedName: 'Player/Jump', bound: ['Keyboard&Mouse'], missing: [] }],
+        }),
+      },
+    );
+    expect(out).toContain('bound in every control scheme');
+  });
+
+  it('does not claim coverage for an asset that declares no schemes', async () => {
+    const out = await run({ coverage: true }, { coverage: async () => ({ schemes: [], rows: [] }) });
+    expect(out).toContain('declares no control schemes');
   });
 });

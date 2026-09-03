@@ -66,6 +66,17 @@ interface UnityIndexState {
    * the input assets themselves changed.
    */
   inputActionsRevision: number;
+  /**
+   * Bumped only when a delta touched a `.uxml` or `.uss`.
+   *
+   * Its own counter for exactly the reason `inputActionsRevision` has one:
+   * reloading the UI Toolkit snapshot re-reads every document and, in its
+   * second phase, walks the project's C#. Before this existed the snapshot was
+   * only ever loaded on workspace open, so editing a stylesheet in Unity left
+   * UNITY0501 — and the AI's `unity_ui_toolkit` — validating against the
+   * documents as they were when the project was opened.
+   */
+  uiToolkitRevision: number;
 
   /** Full build (persists + caches in Rust). Background, non-blocking. */
   build: (workspacePath: string, unityVersion: string, force?: boolean) => Promise<void>;
@@ -124,6 +135,7 @@ export const useUnityIndexStore = create<UnityIndexState>((set) => ({
   summary: null,
   indexRevision: 0,
   inputActionsRevision: 0,
+  uiToolkitRevision: 0,
   error: null,
 
   build: async (workspacePath, unityVersion, force = false) => {
@@ -222,6 +234,13 @@ export const INDEX_RELEVANT = [
   // mention category, and the `indexRevision` bump that tells consumers (the
   // analyzers' input snapshot) that the asset changed on disk.
   '.inputactions',
+  // Same bargain as `.inputactions` above: neither carries an outgoing `guid:`
+  // reference that `REF_EXTENSIONS` (`unity_index.rs`) ingests, so the Rust
+  // reingest is a no-op for both. They are listed for the `@asset` mention
+  // category and for the `uiToolkitRevision` bump that tells the analyzers'
+  // snapshot the documents changed on disk.
+  '.uxml',
+  '.uss',
 ];
 
 function isIndexRelevant(p: string): boolean {
@@ -269,6 +288,10 @@ function initDeltaListener(): void {
       const inputTouched = [...changed, ...removedList].some((p) =>
         p.toLowerCase().endsWith('.inputactions'),
       );
+      const uiTouched = [...changed, ...removedList].some((p) => {
+        const lower = p.toLowerCase();
+        return lower.endsWith('.uxml') || lower.endsWith('.uss');
+      });
 
       void invoke('unity_index_apply_delta', {
         workspacePath,
@@ -280,6 +303,7 @@ function initDeltaListener(): void {
           useUnityIndexStore.setState((s) => ({
             indexRevision: s.indexRevision + 1,
             inputActionsRevision: s.inputActionsRevision + (inputTouched ? 1 : 0),
+            uiToolkitRevision: s.uiToolkitRevision + (uiTouched ? 1 : 0),
           }));
         })
         .catch((err) => {

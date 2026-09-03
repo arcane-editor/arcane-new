@@ -79,6 +79,15 @@ export function buildTools(
   const list = createListTool(workDir, { operations: localListOperations });
   // Unity read tools join every mode, matching prod's mode→tool map
   // (`agent-service.ts` — unity read tools are available in 'ask' too).
+  //
+  // Deliberately ABSENT, and this is the list to check when a run diverges from
+  // prod: `unity_input_actions`, `unity_scriptable_objects`, `unity_ui_toolkit`,
+  // `get_unity_script_map`, the bridge read tools and the three asset-mutate
+  // tools. Every one of them answers from a snapshot the editor maintains (the
+  // analyzers' `.inputactions`/UI Toolkit caches, the Rust GUID index, a live
+  // Unity bridge) that a headless run does not have. A stub that answered
+  // "no snapshot" would be worse than the omission: the model would learn to
+  // stop calling tools that work in production.
   const unityTools: AgentTool[] = [
     createUnityApiSearchTool(groundingClient),
     createGetUnityDocsTool(() => unityVersion),

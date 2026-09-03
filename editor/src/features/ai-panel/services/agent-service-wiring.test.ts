@@ -103,3 +103,53 @@ describe('agent-service.ts — auto-plan.ts fully removed (Task 11)', () => {
     expect(SRC).not.toContain("ai.autoPlan.enabled");
   });
 });
+
+// The three Unity subsystems whose failures never reach a compiler. The read
+// tools have to be in EVERY mode (the model needs them to answer a question as
+// much as to write code), and the mutate tools only in the modes that write —
+// with the same checkpoint and approval treatment every other file write gets,
+// because "restore this turn" silently stops covering whatever is left out.
+describe('agent-service.ts — Unity subsystem tools', () => {
+  it('registers the read tools through the shared barrel, so every mode gets them', () => {
+    // `createUnityReadTools` is spread into ask / plan-planning / preplanning
+    // and the agent path alike; the barrel decides the contents.
+    expect(SRC).toContain('const unityRead: AgentTool[] = isUnity ? createUnityReadTools(workspacePath) : [];');
+    const barrel = readFileSync(
+      path.resolve(import.meta.dir, './unity-tools/index.ts'),
+      'utf8',
+    );
+    for (const factory of [
+      'createUnityInputActionsTool(workspacePath)',
+      'createUnityScriptableObjectsTool(workspacePath)',
+      'createUnityUiToolkitTool(workspacePath)',
+    ]) {
+      expect(barrel).toContain(factory);
+    }
+  });
+
+  it('keeps the asset-mutate tools out of the read-only modes', () => {
+    // They appear exactly once, in the final (agent / plan-execution) return.
+    const occurrences = SRC.split('createUnityAssetMutateTools(').length - 1;
+    expect(occurrences).toBe(1);
+    const ask = SRC.indexOf("if (mode === 'ask')");
+    expect(SRC.indexOf('createUnityAssetMutateTools(')).toBeGreaterThan(ask);
+  });
+
+  it('gives the asset-mutate tools a checkpoint and the write-approval policy', () => {
+    // Both gates key off a top-level `path`, which is why all three tools
+    // declare one — see the barrel's comment on `createUnityAssetMutateTools`.
+    expect(SRC).toMatch(
+      /createUnityAssetMutateTools\(workspacePath, \{[\s\S]*?\}\)\.map\(\(t\) =>[\s\S]*?withWriteApproval\(withCheckpoint\(t, workspacePath/,
+    );
+  });
+
+  it('registers their writes with the verified pass and the buffer reload', () => {
+    // bash already bypasses both and is documented as doing so; a second
+    // silent bypass is exactly what this wiring exists to prevent.
+    expect(SRC).toMatch(/onWrite: \(path\) => \{[\s\S]*?recordTouchedFile\(abs\);[\s\S]*?onFileWritten\(abs\);/);
+  });
+
+  it('gates them on the project being a Unity one, like every other Unity tool', () => {
+    expect(SRC).toContain('...(isUnity\n      ? createUnityAssetMutateTools(workspacePath, {');
+  });
+});

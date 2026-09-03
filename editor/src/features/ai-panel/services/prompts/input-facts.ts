@@ -33,10 +33,17 @@ const INPUT_ACTION_NAME_BUDGET = 700;
 export function inputFactLines(
   inputSystem: InputSystemMode,
   ia: InputActionsFacts | null,
+  opts: { detail?: boolean } = {},
 ): string[] {
   const lines: string[] = [];
 
-  if (ia) {
+  // The action-name listing is the budgeted half, so it follows the same
+  // adaptive rule as the other two subsystems (`subsystem-facts.ts`): spend it
+  // on the conversation that opened on input, and leave the rest to the tool.
+  // The API crib below is NOT adaptive — it is one line, it is what stops a
+  // New-Input-System project being handed `Input.GetAxis`, and being wrong
+  // about it costs a compile error at best and a silent no-op at worst.
+  if (ia && opts.detail !== false) {
     lines.push(`- Input actions (${ia.assetPaths.join(', ')}):`);
     // Budgeted: this block is frozen per conversation, so it is re-sent on
     // every turn. Names first — they are what stops a guessed literal.
@@ -54,6 +61,11 @@ export function inputFactLines(
     }
     lines.push(
       '  Use these exact names — a wrong action name compiles and then silently never fires. Call unity_input_actions for bindings, control types and C# call sites.',
+    );
+  } else if (ia) {
+    lines.push(
+      `- Input actions (${ia.assetPaths.join(', ')}): ${ia.maps.length} map(s). ` +
+        'Call unity_input_actions before naming any action — a wrong name compiles and then silently never fires.',
     );
   }
 

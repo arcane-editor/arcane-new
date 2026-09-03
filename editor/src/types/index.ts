@@ -189,6 +189,7 @@ export interface SettingsSchema {
   'unity.analyzers.enabled': boolean;
   'unity.compileGate.enabled': boolean;
   'unity.lspGate.enabled': boolean;
+  'unity.assetGate.enabled': boolean;
   'unity.verifiedPass.enabled': boolean;
   'unity.nearMissDiagnostics.enabled': boolean;
   'unity.rename.formerlySerializedAs': boolean;

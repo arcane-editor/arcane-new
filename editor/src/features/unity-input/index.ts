@@ -17,6 +17,9 @@ export {
   listActions,
   findBindingConflicts,
   setBindingPath,
+  addAction,
+  addBinding,
+  newInputId,
   qualifiedActionName,
   type InputActionsDocument,
   type InputActionMap,
@@ -26,6 +29,8 @@ export {
   type ParsedInputActions,
   type ResolvedAction,
   type BindingConflict,
+  type AddActionInput,
+  type MutationResult,
 } from '../../utils/inputactions-model';
 
 export {
@@ -46,3 +51,46 @@ export {
   readInputSystem,
   type InputSystemMode,
 } from '../../utils/input-system';
+
+// ── The input graph ──────────────────────────────────────────────────────────
+//
+// Exported for the AI harness's `unity_input_actions` tool. The tool used to
+// answer from `InputActionsIndex` alone, which is the asset's half of the
+// chain; the graph is the join with the C# that reads it. Without it the agent
+// cannot tell a `wired` action from an `unread` one, cannot see that a project
+// generates a wrapper class (so it writes `FindAction("Jump")` into a codebase
+// whose idiom is `controls.Player.Jump.performed +=`), and cannot see a control
+// scheme with no binding.
+export {
+  buildInputGraph,
+  deriveActionStatus,
+  explainStatus,
+  controlCountOf,
+  byControl,
+  coverageMatrix,
+  graphSummary,
+  NO_SUPPRESSORS,
+} from './services/input-graph';
+export type {
+  ActionStatus,
+  ActionNode,
+  MapNode,
+  InputGraph,
+  GraphInput,
+  Suppressors,
+  WrapperInfo,
+  ControlRow,
+  CoverageRow,
+  CoverageCell,
+} from './services/input-graph';
+
+export {
+  loadInputAssetContext,
+  parseInputMeta,
+  referencedByScene,
+  assetStem,
+} from './services/input-context';
+export type { InputAssetContext, InputAssetMeta } from './services/input-context';
+
+export { buildWrapperCatalog, makeIdentifier, BEHAVIOUR_KINDS } from './services/action-refs';
+export type { WrapperCatalog } from './services/action-refs';

@@ -105,6 +105,18 @@ export function initUnityAnalyzers(monaco: Monaco): void {
         refreshAll(monaco),
       );
     }
+    // Same treatment, same reason: without this, editing a `.uxml` or `.uss` in
+    // Unity leaves the query check — and the AI's `unity_ui_toolkit` — reading
+    // the documents as they were when the workspace was opened. `loadUiToolkitIndex`
+    // resolves after its cheap first phase and fires `onUiToolkitIndexChanged`
+    // when the project-wide C# walk lands, so the subscription above re-runs
+    // the rules a second time on its own.
+    if (state.uiToolkitRevision !== prev.uiToolkitRevision) {
+      void loadUiToolkitIndex(
+        useWorkspaceStore.getState().workspacePath,
+        blankStringsAndComments,
+      ).then(() => refreshAll(monaco));
+    }
   });
 }
 
@@ -210,3 +222,28 @@ export type {
   InputActionsIndex,
   KnownAction,
 } from './services/inputactions-cache';
+
+// ── UI Toolkit snapshot ──────────────────────────────────────────────────────
+//
+// Exported for the AI harness's `unity_ui_toolkit` tool and its write gate, for
+// the same reason the Input System block above is exported: the agent must read
+// the SAME parsed view of `.uxml`/`.uss` that UNITY0501 validates `Q<T>("name")`
+// against. A private scan here would let the agent and the Problems panel
+// disagree about which element names exist, which is the one thing that makes a
+// grounded tool worse than no tool.
+export {
+  getUxmlIndex,
+  getUssIndex,
+  getCsUiRefIndex,
+  loadUiToolkitIndex,
+  onUiToolkitIndexChanged,
+  buildUxmlIndex,
+  buildUssIndex,
+  buildCsUiRefIndex,
+} from './services/uitoolkit-cache';
+export type {
+  UxmlIndex,
+  UssIndex,
+  CsUiRefIndex,
+  ElementDecl,
+} from './services/uitoolkit-cache';

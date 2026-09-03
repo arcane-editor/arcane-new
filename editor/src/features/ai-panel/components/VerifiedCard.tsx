@@ -1,8 +1,16 @@
 /**
  * VerifiedCard — the "AI you can trust" closing proof (P3.4). Renders the
  * verified-pass result (`verified-pass.ts`) as a compact single-row summary:
- * compile / analyzers / GUID integrity, plus the touched-file count, each with
- * a ✓ / ✗ / – (skipped) marker. The touched-file list (and any missing-GUID
+ * compile / analyzers / GUID integrity, plus the three Unity subsystems whose
+ * breakage a compile can never report (UI Toolkit, ScriptableObjects, Input),
+ * plus the touched-file count, each with a ✓ / ✗ / – (skipped) marker.
+ *
+ * The three subsystem chips render only when their step actually ran. Unlike
+ * compile/analyzers/GUIDs, which apply to every send, a send that touched no
+ * .uxml has nothing to say about UI Toolkit — and a chip reading "UI Toolkit
+ * skipped" on every C#-only change is noise that trains the user to stop
+ * reading the card. Their markers still feed the verdict, so a real failure
+ * both appears and turns the shield red. The touched-file list (and any missing-GUID
  * detail) sits collapsed behind a chevron, same pattern as ToolCallBlock.
  */
 
@@ -46,7 +54,8 @@ function VerifiedCard({ message }: Props) {
   const data = message.verifiedPass;
   if (!data) return null;
 
-  const { files, touchedFiles, analyzers, compile, guids } = data;
+  const { files, touchedFiles, analyzers, compile, guids, uiToolkit, scriptableObjects, input } =
+    data;
 
   const compileMarker: Marker = compile === 'clean' ? 'ok' : compile === 'skipped' ? 'skip' : 'bad';
   const compileLabel =
@@ -69,9 +78,45 @@ function VerifiedCard({ message }: Props) {
         ? 'GUIDs ok'
         : plural(guids.missing.length, 'GUID missing');
 
+  // ── The three silent-failure subsystems ───────────────────────────────────
+  const uiMarker: Marker =
+    uiToolkit === 'skipped'
+      ? 'skip'
+      : uiToolkit === 'clean'
+        ? 'ok'
+        : uiToolkit.problems > 0 || uiToolkit.queriesResolved < uiToolkit.queriesTotal
+          ? 'bad'
+          : 'ok';
+  const uiLabel =
+    uiToolkit === 'skipped' || uiToolkit === 'clean'
+      ? 'UI Toolkit ok'
+      : uiToolkit.problems > 0
+        ? `UI Toolkit: ${plural(uiToolkit.problems, 'problem')}`
+        : `${uiToolkit.queriesResolved}/${uiToolkit.queriesTotal} Q<T>() resolve`;
+
+  const soMarker: Marker =
+    scriptableObjects === 'skipped' ? 'skip' : scriptableObjects === 'clean' ? 'ok' : 'bad';
+  const soLabel =
+    scriptableObjects === 'skipped' || scriptableObjects === 'clean'
+      ? 'no ScriptableObject drift'
+      : `${plural(scriptableObjects.drift, 'ScriptableObject drift')}`;
+
+  const inputMarker: Marker = input === 'skipped' ? 'skip' : input === 'clean' ? 'ok' : 'bad';
+  const inputLabel =
+    input === 'skipped' || input === 'clean'
+      ? 'input actions ok'
+      : `input: ${plural(input.problems, 'problem')}`;
+
   // A skipped check is NOT a passing one: when the bridge is down and the budget
   // runs out, all three skip — and this used to render a green "Verified".
-  const verdict = verifiedVerdict([compileMarker, analyzersMarker, guidsMarker]);
+  const verdict = verifiedVerdict([
+    compileMarker,
+    analyzersMarker,
+    guidsMarker,
+    uiMarker,
+    soMarker,
+    inputMarker,
+  ]);
   const missingGuids = guids !== 'skipped' && guids !== 'intact' ? guids.missing : [];
   const hasDetail = touchedFiles.length > 0 || missingGuids.length > 0;
 
@@ -115,6 +160,33 @@ function VerifiedCard({ message }: Props) {
             <MarkerIcon marker={guidsMarker} />
             {guidsLabel}
           </span>
+          {uiToolkit !== 'skipped' && (
+            <>
+              <span className="ai-verified-sep">·</span>
+              <span className="ai-verified-item">
+                <MarkerIcon marker={uiMarker} />
+                {uiLabel}
+              </span>
+            </>
+          )}
+          {scriptableObjects !== 'skipped' && (
+            <>
+              <span className="ai-verified-sep">·</span>
+              <span className="ai-verified-item">
+                <MarkerIcon marker={soMarker} />
+                {soLabel}
+              </span>
+            </>
+          )}
+          {input !== 'skipped' && (
+            <>
+              <span className="ai-verified-sep">·</span>
+              <span className="ai-verified-item">
+                <MarkerIcon marker={inputMarker} />
+                {inputLabel}
+              </span>
+            </>
+          )}
           <span className="ai-verified-sep">·</span>
           <span className="ai-verified-item ai-verified-files">{plural(files, 'file')}</span>
         </span>

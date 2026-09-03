@@ -12,6 +12,22 @@
  * the agent and the Problems panel can never disagree about which actions
  * exist — the agent writes `FindAction("Player/Jump")`, and UNITY0401 is
  * validating against the same map.
+ *
+ * Three things the panel learned and this tool did not, until now:
+ *
+ *   1. **The wrapper.** With `generateWrapperCode: 1` in the asset's `.meta`,
+ *      the project's idiom is `controls.Player.Jump.performed += OnJump`, not
+ *      `FindAction("Jump")`. Writing the string form into such a project is
+ *      not wrong so much as foreign, and it throws away the compile-time
+ *      safety the wrapper exists to provide.
+ *   2. **Wrapper references.** `buildActionReferenceIndex` only sees
+ *      `controls.Player.Jump` when it is handed a `WrapperCatalog`. Without
+ *      one, every action in a wrapper project reports zero references — so
+ *      `refs: true` used to tell the agent, confidently, that live actions
+ *      were unused.
+ *   3. **Device coverage.** "Cancel has no gamepad binding" is a console
+ *      certification failure that is trivially visible from the asset and
+ *      invisible from any single action.
  */
 
 import { Type, type Static } from '@sinclair/typebox';
@@ -36,6 +52,12 @@ const schema = Type.Object({
         'Also list the C# call sites: where the action is looked up, subscribed to, and the method that runs when it fires. Requires a project scan, so ask for it only when the answer depends on the code.',
     }),
   ),
+  coverage: Type.Optional(
+    Type.Boolean({
+      description:
+        'Show the actions × control-schemes matrix, so a scheme with no binding (e.g. an action reachable on keyboard but not on gamepad) is visible before it fails certification.',
+    }),
+  ),
 });
 type Params = Static<typeof schema>;
 
@@ -52,8 +74,28 @@ export interface InputActionsToolDeps {
   loadIndex: (workspacePath: string) => Promise<InputActionsIndex | null>;
   findRefs: (
     workspacePath: string,
-    actionNames: string[],
-  ) => Promise<Map<string, ActionReference[]>>;
+    actions: Array<{ name: string; mapName: string }>,
+  ) => Promise<ActionRefsResult>;
+  /** Wrapper settings + Inspector-wiring suppressor, read from the `.meta`. */
+  loadAssetContext: (assetPath: string, workspacePath: string) => Promise<AssetContext>;
+  /** Actions × control schemes for one asset, straight from its own bindings. */
+  coverage: (assetPath: string) => Promise<CoverageResult | null>;
+}
+
+export interface ActionRefsResult {
+  byActionName: Map<string, ActionReference[]>;
+  /** True when any scanned file mentions `InputActionReference`. */
+  usesInputActionReference: boolean;
+}
+
+export interface AssetContext {
+  wrapper: { className: string; path: string | null } | null;
+  assetReferencedByScene: boolean;
+}
+
+export interface CoverageResult {
+  schemes: string[];
+  rows: Array<{ qualifiedName: string; bound: string[]; missing: string[] }>;
 }
 
 const defaultDeps: InputActionsToolDeps = {
@@ -64,10 +106,55 @@ const defaultDeps: InputActionsToolDeps = {
     await loadInputActions(workspacePath);
     return getInputActionsIndex();
   },
-  async findRefs(workspacePath, actionNames) {
-    const { buildActionReferenceIndex } = await import('../../../unity-input');
-    const index = await buildActionReferenceIndex(workspacePath, actionNames);
-    return index.byActionName;
+  async findRefs(workspacePath, actions) {
+    const { buildActionReferenceIndex, buildWrapperCatalog } = await import('../../../unity-input');
+    // The catalog is what makes `controls.Player.Jump` visible. Omitting it is
+    // not a smaller answer, it is a wrong one: in a project with
+    // `generateWrapperCode: 1` every action reports zero references.
+    const index = await buildActionReferenceIndex(
+      workspacePath,
+      actions.map((a) => a.name),
+      buildWrapperCatalog(actions),
+    );
+    return {
+      byActionName: index.byActionName,
+      usesInputActionReference: index.usesInputActionReference,
+    };
+  },
+  async loadAssetContext(assetPath, workspacePath) {
+    const { loadInputAssetContext } = await import('../../../unity-input');
+    const ctx = await loadInputAssetContext(assetPath, workspacePath);
+    return { wrapper: ctx.wrapper, assetReferencedByScene: ctx.assetReferencedByScene };
+  },
+  async coverage(assetPath) {
+    const { invoke } = await import('@tauri-apps/api/core');
+    const [{ parseInputActions, listActions, listControlSchemes }, { buildInputGraph, coverageMatrix }] =
+      await Promise.all([
+        import('../../../../utils/inputactions-model'),
+        import('../../../unity-input'),
+      ]);
+    const text = await invoke<string>('read_file', { path: assetPath });
+    const parsed = parseInputActions(text);
+    if (!parsed.doc) return null;
+    // Reuse `coverageMatrix` rather than deriving coverage from the index's
+    // flattened `schemes`: a binding with NO scheme belongs to EVERY scheme,
+    // which is Unity's rule and the easy thing to get backwards.
+    const graph = buildInputGraph({
+      asset: assetPath,
+      actions: listActions(parsed.doc),
+      conflicts: [],
+      schemes: listControlSchemes(parsed.doc),
+      refs: new Map(),
+      scanned: false,
+    });
+    return {
+      schemes: graph.schemes,
+      rows: coverageMatrix(graph).map((r) => ({
+        qualifiedName: r.action.qualifiedName,
+        bound: r.cells.filter((c) => c.bound).map((c) => c.scheme),
+        missing: r.cells.filter((c) => !c.bound).map((c) => c.scheme),
+      })),
+    };
   },
 };
 
@@ -80,6 +167,15 @@ const NO_ASSETS_TEXT =
   'The New Input System is active, but this project has no .inputactions asset. ' +
   'Actions can still be declared in code (new InputAction(...)) or wired through a PlayerInput component. ' +
   'If the user wants a shared, rebindable set, create one in Unity (Assets → Create → Input Actions) rather than inventing action names here.';
+
+/**
+ * Unity's `CSharpCodeHelpers.MakeIdentifier`, via the same implementation the
+ * reference scanner uses. `"Move Camera"` becomes `MoveCamera`, so a naive
+ * concatenation would print a property that does not exist.
+ */
+function makeIdent(name: string): string {
+  return name.replace(/[^A-Za-z0-9_]/g, '').replace(/^[0-9]/, (d) => `_${d}`);
+}
 
 /** Workspace-relative path, for output a human can match to the file tree. */
 function rel(path: string, workspacePath: string): string {
@@ -106,8 +202,36 @@ function conflictLines(index: InputActionsIndex): string[] {
   return out;
 }
 
+/**
+ * How the project's code is expected to reach an action.
+ *
+ * Stated first because it decides what the agent should WRITE. In a wrapper
+ * project the string APIs still compile, so nothing would ever correct a model
+ * that reaches for `FindAction` out of habit.
+ */
+function wrapperLines(contexts: Map<string, AssetContext>, workspacePath: string): string[] {
+  const out: string[] = [];
+  for (const [assetPath, ctx] of contexts) {
+    if (!ctx.wrapper) continue;
+    out.push(
+      `Generated wrapper for ${rel(assetPath, workspacePath)}: class ${ctx.wrapper.className}` +
+        (ctx.wrapper.path ? ` (${ctx.wrapper.path})` : ''),
+    );
+    out.push(
+      `  This project's idiom is \`${ctx.wrapper.className} controls = new(); controls.<Map>.<Action>.performed += OnX;\`` +
+        ' — compile-checked property access, not string lookup. Prefer it over FindAction here.',
+    );
+  }
+  return out;
+}
+
 /** Every action, grouped by map. */
-function inventory(index: InputActionsIndex, workspacePath: string, map?: string): string {
+function inventory(
+  index: InputActionsIndex,
+  workspacePath: string,
+  contexts: Map<string, AssetContext>,
+  map?: string,
+): string {
   const actions = [...index.byQualifiedName.values()].filter(
     (a) => !map || a.mapName.toLowerCase() === map.toLowerCase(),
   );
@@ -123,6 +247,8 @@ function inventory(index: InputActionsIndex, workspacePath: string, map?: string
     `Assets: ${index.assetPaths.map((p) => rel(p, workspacePath)).join(', ')}`,
   ];
   if (schemes.length > 0) out.push(`Control schemes: ${schemes.join(', ')}`);
+  const wrappers = wrapperLines(contexts, workspacePath);
+  if (wrappers.length > 0) out.push('', ...wrappers);
 
   const byMap = new Map<string, KnownAction[]>();
   for (const a of actions) {
@@ -138,6 +264,33 @@ function inventory(index: InputActionsIndex, workspacePath: string, map?: string
   out.push(
     '',
     'Reference an action by its exact qualified name, e.g. FindAction("Player/Jump"). Names are case-sensitive.',
+    'Pass refs:true for the C# that reads each action, or coverage:true for the actions × control-schemes matrix.',
+  );
+  return out.join('\n');
+}
+
+/** The actions × control-schemes matrix, holes first. */
+function coverageReport(result: CoverageResult, assetPath: string, workspacePath: string): string {
+  if (result.schemes.length === 0) {
+    return `${rel(assetPath, workspacePath)} declares no control schemes, so every binding is reachable on every device. Nothing to cover.`;
+  }
+  const holes = result.rows.filter((r) => r.missing.length > 0);
+  const out = [
+    `Control-scheme coverage for ${rel(assetPath, workspacePath)}`,
+    `Schemes: ${result.schemes.join(', ')}`,
+  ];
+  if (holes.length === 0) {
+    out.push('', 'Every action is bound in every control scheme.');
+    return out.join('\n');
+  }
+  out.push('', `${holes.length} action(s) with no binding in at least one scheme:`);
+  for (const r of holes) {
+    out.push(`  ${r.qualifiedName} — missing: ${r.missing.join(', ')}${r.bound.length > 0 ? `  (has: ${r.bound.join(', ')})` : '  (no scheme at all)'}`);
+  }
+  out.push(
+    '',
+    'A player on a missing scheme simply cannot trigger that action. Nothing warns about it in Unity, ' +
+      'and on console it surfaces as a certification failure rather than a bug report.',
   );
   return out.join('\n');
 }
@@ -172,6 +325,7 @@ async function detail(
   action: string,
   wantRefs: boolean,
   workspacePath: string,
+  contexts: Map<string, AssetContext>,
   deps: InputActionsToolDeps,
 ): Promise<string> {
   const matches = resolve(index, action);
@@ -194,6 +348,13 @@ async function detail(
     if (a.bindings.length === 0) out.push('    (none — this action has no controls bound)');
     for (const b of a.bindings) out.push(`    ${b}`);
     if (a.schemes.length > 0) out.push(`  schemes: ${a.schemes.join(', ')}`);
+    const wrapper = contexts.get(a.assetPath)?.wrapper;
+    if (wrapper) {
+      out.push(
+        `  wrapper access: ${wrapper.className}.${makeIdent(a.mapName)}.${makeIdent(a.name)}` +
+          ' — prefer this over FindAction in this project; it is compile-checked.',
+      );
+    }
     if (a.starved) {
       const c = index.conflicts.find((x) => x.starved.includes(a.qualifiedName));
       out.push(
@@ -203,17 +364,33 @@ async function detail(
   }
 
   if (wantRefs) {
+    // Every action in the project, so the wrapper catalog is complete — the
+    // catalog maps sanitised C# identifiers back to asset names, and a partial
+    // one would miss exactly the sites this scan exists to find.
+    const all = [...index.byQualifiedName.values()].map((a) => ({ name: a.name, mapName: a.mapName }));
     const names = [...new Set(matches.map((a) => a.name))];
-    const refs = await deps.findRefs(workspacePath, names);
-    const hits = names.flatMap((n) => refs.get(n) ?? []);
+    const result = await deps.findRefs(workspacePath, all);
+    const hits = names.flatMap((n) => result.byActionName.get(n) ?? []);
     out.push('');
-    if (hits.length === 0) {
-      out.push(
-        'No C# references. Nothing in the project looks this action up — it is defined in the asset but unused.',
-      );
-    } else {
+    if (hits.length > 0) {
       out.push(`C# references (${hits.length}):`);
       for (const r of hits.slice(0, 40)) out.push(refLine(r, workspacePath));
+    } else {
+      // "Nothing reads this" is the one claim that can be confidently wrong,
+      // so it is only made when nothing could be hiding a reader. An
+      // InputActionReference wired in the Inspector leaves no trace in C# at
+      // all — see `input-graph.ts`'s `Suppressors`.
+      const suppressed =
+        result.usesInputActionReference ||
+        matches.some((a) => contexts.get(a.assetPath)?.assetReferencedByScene);
+      out.push(
+        suppressed
+          ? 'No C# reads this action by name. The project wires InputActionReference fields in the ' +
+              'Inspector (or a scene/prefab references this asset), so it may still be in use — treat ' +
+              'this as unknown, not unused, and do not delete it on this evidence.'
+          : 'No C# references. Nothing in the project looks this action up — it is defined in the ' +
+              'asset but unread.',
+      );
     }
   }
 
@@ -230,11 +407,13 @@ export function createUnityInputActionsTool(
     description:
       "Read the project's Unity Input System actions (.inputactions): every action map, action, its control type and bindings, the control schemes, and binding conflicts. " +
       'Call this BEFORE writing any input code or referencing an action by name — a wrong action name compiles and then silently never fires at runtime. ' +
-      'Pass refs:true to also get the C# call sites, including the method that runs when the action fires. ' +
+      'Pass refs:true to also get the C# call sites, including the method that runs when the action fires, ' +
+      'and coverage:true for the actions × control-schemes matrix (an action with no gamepad binding is invisible otherwise). ' +
+      'Reports the generated wrapper class when the asset has one, because that changes how the action should be reached from code. ' +
       'Far cheaper than reading the .inputactions JSON, and it says which input system the project actually uses.',
     parameters: schema,
     async execute(_id, params) {
-      const { action, map, refs = false } = params as Params;
+      const { action, map, refs = false, coverage = false } = params as Params;
 
       // Gated here, not at registration: `project-context.inputSystem` resolves
       // asynchronously, so conditioning the tool set on it would change the
@@ -256,9 +435,35 @@ export function createUnityInputActionsTool(
       if (index.inputSystem === 'Legacy') return txt(LEGACY_TEXT);
       if (index.assetCount === 0) return txt(NO_ASSETS_TEXT);
 
+      // Cheap (a `.meta` read plus a guid lookup per asset), and it changes
+      // what the agent should write, so it is loaded on every path rather than
+      // being hidden behind a flag.
+      const contexts = new Map<string, AssetContext>();
+      await Promise.all(
+        index.assetPaths.map(async (assetPath) => {
+          const ctx = await deps
+            .loadAssetContext(assetPath, workspacePath)
+            .catch(() => null);
+          if (ctx) contexts.set(assetPath, ctx);
+        }),
+      );
+
+      if (coverage) {
+        const reports: string[] = [];
+        for (const assetPath of index.assetPaths) {
+          const result = await deps.coverage(assetPath).catch(() => null);
+          reports.push(
+            result
+              ? coverageReport(result, assetPath, workspacePath)
+              : `Could not read control schemes from ${rel(assetPath, workspacePath)}.`,
+          );
+        }
+        return txt(cap(reports.join('\n\n')));
+      }
+
       const body = action
-        ? await detail(index, action, refs, workspacePath, deps)
-        : inventory(index, workspacePath, map);
+        ? await detail(index, action, refs, workspacePath, contexts, deps)
+        : inventory(index, workspacePath, contexts, map);
       return txt(cap(body));
     },
   };

@@ -5,6 +5,9 @@ import {
   listActions,
   findBindingConflicts,
   setBindingPath,
+  addAction,
+  addBinding,
+  newInputId,
   qualifiedActionName,
   bindingNodes,
   parseSchemes,
@@ -330,5 +333,148 @@ describe('listControlSchemes', () => {
   it('returns scheme names in declaration order', () => {
     const { doc } = parseInputActions(FIXTURE);
     expect(listControlSchemes(doc!)).toEqual(['Gamepad']);
+  });
+});
+
+// ── Mutation ─────────────────────────────────────────────────────────────────
+//
+// The round-trip contract is what makes these safe to hand an agent: the file
+// carries ids Unity matches actions and bindings by, and everything not
+// deliberately changed has to come back byte-identical. So each case asserts
+// both halves — the change happened, and nothing else did.
+
+describe('addAction / addBinding', () => {
+  const SOURCE = JSON.stringify(
+    {
+      name: 'Controls',
+      maps: [
+        {
+          name: 'Player',
+          id: 'map-1',
+          actions: [{ name: 'Jump', type: 'Button', id: 'act-1', expectedControlType: 'Button' }],
+          bindings: [
+            {
+              name: '',
+              id: 'bind-1',
+              path: '<Keyboard>/space',
+              interactions: '',
+              processors: '',
+              groups: 'Keyboard',
+              action: 'Jump',
+              isComposite: false,
+              isPartOfComposite: false,
+            },
+          ],
+        },
+      ],
+      controlSchemes: [{ name: 'Keyboard', bindingGroup: 'Keyboard', devices: [] }],
+    },
+    null,
+    4,
+  );
+
+  it('adds an action with a fresh id and leaves everything else untouched', () => {
+    const parsed = parseInputActions(SOURCE);
+    const { parsed: next, error } = addAction(parsed, {
+      mapName: 'Player',
+      actionName: 'Sprint',
+      type: 'Button',
+      expectedControlType: 'Button',
+      bindings: ['<Keyboard>/leftShift'],
+      groups: ['Keyboard'],
+    });
+    expect(error).toBeNull();
+
+    const doc = next.doc!;
+    const sprint = doc.maps[0].actions.find((a) => a.name === 'Sprint')!;
+    expect(sprint).toBeDefined();
+    expect(sprint.id).not.toBe('act-1');
+    expect(sprint.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+
+    // The original action and binding survive byte-identically.
+    expect(doc.maps[0].actions[0]).toEqual(parsed.doc!.maps[0].actions[0]);
+    expect(doc.maps[0].bindings[0]).toEqual(parsed.doc!.maps[0].bindings[0]);
+    expect(doc.controlSchemes).toEqual(parsed.doc!.controlSchemes);
+  });
+
+  it('does not mutate the document it was given', () => {
+    const parsed = parseInputActions(SOURCE);
+    addAction(parsed, { mapName: 'Player', actionName: 'Sprint' });
+    expect(parsed.doc!.maps[0].actions).toHaveLength(1);
+  });
+
+  it('replays the file’s own formatting, so the diff is only the addition', () => {
+    const parsed = parseInputActions(SOURCE);
+    const { parsed: next } = addAction(parsed, { mapName: 'Player', actionName: 'Sprint' });
+    const before = SOURCE.split('\n');
+    const after = serializeInputActions(next).split('\n');
+    // Same indentation convention, and the original lines still present in order.
+    expect(after[1]).toBe(before[1]);
+    expect(serializeInputActions(next).endsWith('\n')).toBe(SOURCE.endsWith('\n'));
+  });
+
+  it('refuses an unknown map rather than inventing one, and names the real maps', () => {
+    const parsed = parseInputActions(SOURCE);
+    const { parsed: next, error } = addAction(parsed, { mapName: 'UI', actionName: 'Submit' });
+    expect(error).toContain('no action map named "UI"');
+    expect(error).toContain('Player');
+    expect(next).toBe(parsed);
+  });
+
+  it('refuses a duplicate action name — Unity allows it and then resolves lookups to the first', () => {
+    const parsed = parseInputActions(SOURCE);
+    const { error } = addAction(parsed, { mapName: 'Player', actionName: 'Jump' });
+    expect(error).toContain('already exists');
+  });
+
+  it('binds one more control to an existing action', () => {
+    const parsed = parseInputActions(SOURCE);
+    const { parsed: next, error } = addBinding(parsed, {
+      mapName: 'Player',
+      actionName: 'Jump',
+      path: '<Gamepad>/buttonSouth',
+      groups: ['Gamepad'],
+    });
+    expect(error).toBeNull();
+    const bindings = next.doc!.maps[0].bindings;
+    expect(bindings).toHaveLength(2);
+    expect(bindings[1].path).toBe('<Gamepad>/buttonSouth');
+    expect(bindings[1].groups).toBe('Gamepad');
+    expect(bindings[1].id).not.toBe('bind-1');
+  });
+
+  it('refuses to bind to an action that does not exist, and names the real ones', () => {
+    const parsed = parseInputActions(SOURCE);
+    const { error } = addBinding(parsed, {
+      mapName: 'Player',
+      actionName: 'Crouch',
+      path: '<Keyboard>/c',
+    });
+    expect(error).toContain('no action named "Crouch"');
+    expect(error).toContain('Jump');
+  });
+
+  it('round-trips: an action added and then serialized re-parses to the same document', () => {
+    const parsed = parseInputActions(SOURCE);
+    const { parsed: next } = addAction(parsed, {
+      mapName: 'Player',
+      actionName: 'Sprint',
+      bindings: ['<Keyboard>/leftShift'],
+    });
+    const text = serializeInputActions(next);
+    expect(parseInputActions(text).doc).toEqual(next.doc);
+  });
+
+  it('refuses every operation on an asset that does not parse', () => {
+    const broken = parseInputActions('{ not json');
+    expect(addAction(broken, { mapName: 'Player', actionName: 'X' }).error).toContain('does not parse');
+    expect(
+      addBinding(broken, { mapName: 'Player', actionName: 'X', path: '<Keyboard>/x' }).error,
+    ).toContain('does not parse');
+  });
+
+  it('gives every generated id a distinct value', () => {
+    const ids = new Set(Array.from({ length: 200 }, () => newInputId()));
+    expect(ids.size).toBe(200);
   });
 });

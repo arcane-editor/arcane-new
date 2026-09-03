@@ -28,7 +28,17 @@ const KEEP_RECENT_TURNS = 3;
 const CLEARED_MARKER = '[Tool result cleared to save context]';
 const STALE_READ_PREFIX = '[Stale read superseded by a newer read of ';
 /** Tool-result content carrying these is an open repair task — never elide it. */
-const REPAIR_SENTINELS = ['[Unity compile]', '[Unity analyzers]'];
+const REPAIR_SENTINELS = [
+  '[Unity compile]',
+  '[Unity analyzers]',
+  // The asset gate's four labels (`asset-checks.ts`'s `gateLabelFor`). A
+  // repair instruction elided under compaction is a repair that never
+  // happens, and these formats fail silently in Unity rather than loudly.
+  '[Unity UXML]',
+  '[Unity USS]',
+  '[Unity input actions]',
+  '[Unity asset]',
+];
 
 /**
  * Flat char-equivalent for an image block. Counting the base64 payload as
