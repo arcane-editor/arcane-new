@@ -51,6 +51,29 @@ interface UnityState {
    * identical from here — both are simply "never connected".
    */
   packageStale: boolean;
+  /**
+   * Whether Unity's MAIN THREAD is currently servicing work.
+   *
+   * Deliberately separate from `connected`. Unity parks its main thread while
+   * its window is unfocused, but the bridge's worker thread keeps heartbeating
+   * from a background thread — so `connected` stayed true through the exact
+   * window in which every RPC was timing out against an editor that could not
+   * answer, and the UI showed a healthy green bridge the whole time.
+   */
+  editorAwake: boolean;
+  /** Whether the package can wake Unity's main thread without stealing focus. */
+  editorCanWake: boolean;
+  /**
+   * Bumped whenever Unity reports that a QUEUED asset import actually ran.
+   * Queued commands ack on acceptance, so this is the only honest "it happened".
+   */
+  refreshCompletedAt: number;
+  /**
+   * Whether Unity had a compile in flight when that import finished. Positive
+   * evidence: silence alone cannot tell "nothing to build" from "a compile
+   * Unity scheduled for a tick it has not run yet".
+   */
+  refreshCompiling: boolean;
 
   startIpc: (workspacePath: string) => Promise<void>;
   stopIpc: () => Promise<void>;
@@ -95,6 +118,12 @@ export const useUnityStore = create<UnityState>((set, get) => ({
   bridgeState: 'disconnected',
   lastCompilation: null,
   packageStale: false,
+  // Optimistic until Unity says otherwise, matching the Rust side's default:
+  // a bridge that has not heartbeated yet is not a sleeping editor.
+  editorAwake: true,
+  editorCanWake: false,
+  refreshCompletedAt: 0,
+  refreshCompiling: false,
 
   startIpc: async (workspacePath: string) => {
     try {
@@ -132,7 +161,13 @@ export const useUnityStore = create<UnityState>((set, get) => ({
       // Ignore
     }
     get().teardownListeners();
-    set({ connected: false, projectInfo: null, playState: 'Stopped', isCompiling: false });
+    set({
+      connected: false,
+      projectInfo: null,
+      playState: 'Stopped',
+      isCompiling: false,
+      editorAwake: true,
+    });
   },
 
   reconnect: async () => {
@@ -195,22 +230,53 @@ export const useUnityStore = create<UnityState>((set, get) => ({
       isCompiling: false,
       projectInfo: null,
       packageStale: false,
+      editorAwake: true,
+      editorCanWake: false,
+      refreshCompletedAt: 0,
+      refreshCompiling: false,
       // `connected` and the listeners are owned by the IPC lifecycle, which
       // setWorkspace restarts separately — clearing them here would race it.
     }),
 
   syncStatus: async () => {
-    let status: { connected: boolean; running: boolean };
+    type Status = {
+      connected: boolean;
+      running: boolean;
+      editorAwake: boolean;
+      editorCanWake: boolean;
+    };
+    let status: Status;
     try {
-      status = await invoke<{ connected: boolean; running: boolean }>('unity_ipc_status');
+      status = await invoke<Status>('unity_ipc_status');
     } catch {
       return; // no session for this window — leave the UI as it is
     }
+    // Liveness is reconciled UNCONDITIONALLY, even when `connected` is
+    // unchanged. `unity-editor-awake` fires only on a change, and startIpc
+    // awaits unity_ipc_start before attaching listeners — so the first
+    // awake→asleep transition can be emitted with nobody listening, leaving the
+    // store permanently convinced Unity is servicing work when it is parked.
+    const liveness = {
+      editorAwake: status.editorAwake,
+      editorCanWake: status.editorCanWake,
+    };
     set((state) => {
-      if (state.connected === status.connected) return {};
+      if (state.connected === status.connected) return liveness;
       return status.connected
-        ? { connected: true, bridgeInstalled: true, bridgeState: 'connected', packageStale: false }
-        : { connected: false, bridgeState: state.bridgeInstalled ? 'disconnected' : 'not-installed' };
+        ? {
+            ...liveness,
+            connected: true,
+            bridgeInstalled: true,
+            bridgeState: 'connected' as const,
+            packageStale: false,
+          }
+        : {
+            ...liveness,
+            connected: false,
+            bridgeState: state.bridgeInstalled
+              ? ('disconnected' as const)
+              : ('not-installed' as const),
+          };
     });
   },
 
@@ -242,6 +308,10 @@ export const useUnityStore = create<UnityState>((set, get) => ({
           playState: 'Stopped',
           isCompiling: false,
           bridgeState: 'connecting',
+          // Liveness belongs to the session that reported it. Carrying "asleep"
+          // into a reconnect would have the next handshake arrive already
+          // believing Unity is parked.
+          editorAwake: true,
         });
         reloadGraceTimer = setTimeout(() => {
           reloadGraceTimer = null;
@@ -368,7 +438,38 @@ export const useUnityStore = create<UnityState>((set, get) => ({
       });
     });
 
-    unlisteners = [u1, u2, u3, u4, u5, u6, u7, u8, u9];
+    // Unity's main thread going to sleep or waking up. This is what lets the
+    // agent gate say "your write landed, Unity is asleep" instead of stalling a
+    // turn for ninety seconds against an unfocused window.
+    const u10 = await listenScoped<{
+      awake: boolean;
+      editorIdleMs: number;
+      canWake: boolean;
+    }>('unity-editor-awake', (event) => {
+      const { awake, canWake } = event.payload;
+      set({ editorAwake: awake, editorCanWake: canWake });
+    });
+
+    // A queued import actually ran. The rpc_response for a queued command only
+    // ever meant "accepted", so this is the first moment anything may conclude
+    // that Unity had nothing to compile.
+    const u11 = await listenScoped<{ compileRequested?: boolean; compiling?: boolean }>(
+      'unity-refresh-completed',
+      (event) => {
+        // Deliberately does NOT touch `editorAwake`. Liveness is owned by the
+        // heartbeat, and Rust emits `unity-editor-awake` only when the value
+        // CHANGES — so synthesising an "awake" here left the store believing
+        // that forever, since Rust (still holding `false`) had no change to
+        // report. The next write then never saw a parked editor and waited out
+        // the full 90s cap, reinstating the stall this whole path removes.
+        set({
+          refreshCompletedAt: Date.now(),
+          refreshCompiling: event.payload?.compiling === true,
+        });
+      },
+    );
+
+    unlisteners = [u1, u2, u3, u4, u5, u6, u7, u8, u9, u10, u11];
     set({ listenersActive: true });
 
     // Reconcile against the backend now that we are listening. Events emitted

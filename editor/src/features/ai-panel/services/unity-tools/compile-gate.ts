@@ -167,6 +167,31 @@ export function withUnityCompileGate(
       }
       if (outcome.status === 'unknown') {
         if (outcome.reason === 'aborted') return res;
+        // A backgrounded Unity is the common case, not an incident: the user is
+        // looking at THIS window, so Unity's editor loop is parked and it has
+        // not imported anything yet. Calling that a timeout reads as a broken
+        // bridge and invites the model to rewrite the file to "force" a compile,
+        // which is the one response that cannot help.
+        if (outcome.reason === 'editor-asleep') {
+          // Whether waiting can possibly help is the difference between these
+          // two messages, so they must not be collapsed. With no focus-free
+          // wake available (Linux, or a P/Invoke that latched off), the compile
+          // genuinely will not happen until a human focuses Unity, and telling
+          // the model to sit tight would be telling it to wait forever.
+          const tail =
+            outcome.canWake === false
+              ? `This build of the bridge cannot wake Unity without focus, so the compile ` +
+                `will not run until someone focuses the Unity window.`
+              : `The import is queued and runs as soon as Unity ticks — compiler errors, ` +
+                `if any, arrive then.`;
+          return appendNote(
+            res,
+            `\n\n[Unity compile] Unity's window is in the background, so its editor loop is ` +
+              `parked and it has not reported a compile for this change. ${tail} ` +
+              `This is NOT a failure: the write succeeded — continue with the remaining file ` +
+              `work. Do not rewrite the file to try to force a compile.`,
+          );
+        }
         const why =
           outcome.reason === 'bridge-lost'
             ? 'Unity bridge was lost mid-compile; it reconnects automatically after the reload'

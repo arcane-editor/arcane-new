@@ -134,6 +134,11 @@ namespace UnityIDE.Bridge
             _started = true;
 
             MainThreadDispatcher.CaptureMainThread();
+            // Must follow CaptureMainThread and must run ON the main thread:
+            // Windows needs the OS-level id of this very thread to post it a
+            // wake-up message later, from the worker.
+            EditorWakeup.Reset();
+            EditorWakeup.CaptureMainThread();
 
             string projectRoot = Discovery.ProjectRoot(Application.dataPath);
 

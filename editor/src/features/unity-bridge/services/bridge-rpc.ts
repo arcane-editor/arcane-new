@@ -91,6 +91,19 @@ export interface ProjectAsset {
   type: string;
 }
 
+/**
+ * The reply to a queued command. `queued` is the marker that distinguishes it
+ * from a pre-queue package's synchronous reply, which only arrives once the
+ * work is genuinely done.
+ */
+export interface QueuedAck {
+  queued: true;
+  /** False when an identical command was already pending — success, not an error. */
+  accepted: boolean;
+  /** How long Unity's main thread had been idle when the ask landed. */
+  editorIdleMs: number;
+}
+
 export interface DebuggerEndpoint {
   host: string;
   port: number;
@@ -110,7 +123,27 @@ export const bridgeRpc = {
     ),
   getProjectAssets: (query: string, type?: string) =>
     rpc<{ assets: ProjectAsset[] }>('getProjectAssets', { query, type }),
-  refreshAssets: () => rpc<{ ok: boolean }>('refreshAssets'),
+  /**
+   * Ask Unity to import changed assets.
+   *
+   * Queued on the Unity side: this resolves when the ask is ACCEPTED, which is
+   * not the same as when the import ran. Unity parks its main thread while
+   * unfocused, and blocking on it there does not make the work happen sooner —
+   * it just fails after eight seconds. Watch for `unity-refresh-completed` if
+   * you need to know the import actually executed.
+   */
+  refreshAssets: () => rpc<QueuedAck | { ok: boolean }>('refreshAssets'),
+  /**
+   * Import changed assets and, with `force`, compel a script compile even when
+   * Unity's importer saw nothing worth rebuilding. Queued, exactly as
+   * `refreshAssets` is.
+   *
+   * `force` is off by default on purpose: RequestScriptCompilation() recompiles
+   * and reloads the domain unconditionally, and paying that on every agent
+   * write would cost more than the problem it solves.
+   */
+  requestCompile: (force = false) =>
+    rpc<QueuedAck | { ok: boolean }>('requestCompile', { force }),
   /** Every scene under `Assets/`, flagged with whether Unity has it open. */
   listScenes: () => rpc<{ scenes: ProjectScene[] }>('listScenes'),
   /**

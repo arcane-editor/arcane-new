@@ -88,9 +88,16 @@ namespace UnityIDE.Tests
         }
 
         [Test]
-        public void ProtocolVersionIsTwoForTheJournalTransport()
+        public void ProtocolVersionMatchesTheIdeSide()
         {
-            Assert.AreEqual(2, Discovery.ProtocolVersion);
+            // MUST equal PROTOCOL_VERSION in editor/src-tauri/src/unity_ipc.rs,
+            // which pins the same literal from its own side. A mismatch is not
+            // cosmetic: the IDE raises a permanent "update bridge" banner, and
+            // the package silently drops to the pre-queue blocking path.
+            //
+            // 3 = queued commands (refreshAssets/requestCompile ack on
+            // ACCEPTANCE, real completion arrives as refresh_completed).
+            Assert.AreEqual(3, Discovery.ProtocolVersion);
         }
     }
 }

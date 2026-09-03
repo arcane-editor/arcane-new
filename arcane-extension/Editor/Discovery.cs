@@ -30,8 +30,22 @@ namespace UnityIDE.Bridge
 
     internal static class Discovery
     {
-        /// <summary>Bridge wire-protocol major version. 2 = journal transport.</summary>
-        public const int ProtocolVersion = 2;
+        /// <summary>
+        /// Bridge wire-protocol major version.
+        ///   2 = journal transport.
+        ///   3 = queued commands: refreshAssets/requestCompile answer
+        ///       `{queued:true}` on ACCEPTANCE and report real completion with
+        ///       `refresh_completed`.
+        ///
+        /// The bump is what keeps an IDE that predates 3 safe. Such an IDE reads
+        /// an rpc_response to refreshAssets as "the import finished", so handing
+        /// it a queued ack would make it report a clean no-op compile for a file
+        /// Unity has not looked at — the exact bug queueing exists to fix,
+        /// re-created by updating only the Unity package. RpcDispatcher compares
+        /// the IDE's advertised version against this and keeps the old blocking
+        /// behaviour for anything older.
+        /// </summary>
+        public const int ProtocolVersion = 3;
 
         /// <summary>projectRoot = parent of Application.dataPath ("…/Assets").</summary>
         public static string ProjectRoot(string applicationDataPath)
