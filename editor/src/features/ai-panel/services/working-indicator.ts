@@ -67,3 +67,22 @@ export function showsTailIndicator({ isAgentRunning, last }: TailIndicatorInput)
   if (last && last.role === 'assistant' && last.isStreaming) return false;
   return !isAwaitingUser(last);
 }
+
+/** "1 model call" / "12 model calls" — singular only at exactly 1 (Task 3). */
+export function modelCallLabel(used: number): string {
+  return `${used} model call${used === 1 ? '' : 's'}`;
+}
+
+/**
+ * Whether the working row should show the live "N model calls" count next to
+ * the dots (Task 3): only while the agent is actually running, and only once
+ * the turn governor has reported at least one call for the current submit —
+ * `used === 0` (no progress yet) would just read as noise before anything
+ * has happened.
+ */
+export function showsModelCallCount(
+  isAgentRunning: boolean,
+  budget: { used: number } | null,
+): boolean {
+  return isAgentRunning && !!budget && budget.used >= 1;
+}

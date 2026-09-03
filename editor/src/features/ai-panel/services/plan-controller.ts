@@ -23,7 +23,8 @@ import { getAgentService } from './agent-service';
 import { routePlanSend } from './plan-route';
 import { buildRegeneratePrompt, type PriorPlan } from './plan-regen';
 import { buildReviseNotesPrompt } from './plan-revise';
-import { validatePlanDocument, buildPlanRepairPrompt } from './plan-quality';
+import { validatePlanDocument, buildPlanRepairPrompt, type PlanQualityReport } from './plan-quality';
+import { beginSubmitBudget, endSubmitBudget } from './turn-governor';
 import { unityRecipesFor } from './prompts/unity-recipes';
 import { parsePlanTodos, planTodosToHostedPlan } from './plan-todos';
 import {
@@ -87,56 +88,71 @@ async function startPlanning(
   const recipes = unityRecipesFor(prompt);
   const sendText = opts.sendText ?? prompt;
 
+  // The planning send and the (possible) repair send below are one composer
+  // submit and must share a single turn-governor budget rather than each
+  // getting its own fresh cap (turn-governor.ts's module header, SUBMIT
+  // SCOPE) — bracket the whole chain so `resetTurnGovernor()` between the two
+  // sends (agent-service's `runSend`, same call site as always) leaves the
+  // running count alone.
+  let planMarkdown = '';
+  let report: PlanQualityReport | null = null;
+  beginSubmitBudget();
   try {
-    await getAgentService().sendMessage(recipes ? `${sendText}\n${recipes}` : sendText, {
-      mode: 'plan',
-      effort: store.effort,
-      promptMode: 'plan-planning',
-      attachments,
-    });
-  } catch (err) {
-    // Without this, a throw stranded planPhase at 'planning' forever and the
-    // composer had no way back to a working plan mode.
-    useAiStore.getState().setPlanPhase('idle');
-    useAiStore.getState().setError(`Planning failed: ${formatErr(err)}`);
-    return;
-  }
-
-  // Pull the freshest state after the agent loop completes.
-  const after = useAiStore.getState();
-  let planMarkdown = latestPlanMarkdown();
-
-  if (!planMarkdown) {
-    after.setPlanPhase('idle');
-    after.setError('Planning did not produce any output.');
-    return;
-  }
-
-  // Hold the draft to the template before it becomes a document with an
-  // Execute button under it. Nothing did this before, which is how a turn that
-  // produced only "First, let me study the scene file structure…" ended up
-  // saved as the plan. One repair turn, the same single forced retry
-  // `grounding-lint.ts` uses for ask mode — if the model cannot produce a plan
-  // twice, that is worth surfacing rather than looping at the user's expense.
-  let report = validatePlanDocument(planMarkdown);
-  if (!report.ok) {
     try {
-      await getAgentService().sendMessage(buildPlanRepairPrompt(report.problems), {
+      await getAgentService().sendMessage(recipes ? `${sendText}\n${recipes}` : sendText, {
         mode: 'plan',
         effort: store.effort,
         promptMode: 'plan-planning',
+        attachments,
       });
-      const repaired = latestPlanMarkdown();
-      if (repaired) {
-        planMarkdown = repaired;
-        report = validatePlanDocument(repaired);
-      }
-    } catch {
-      // Keep the first draft and its problems: a failed repair turn is not a
-      // reason to throw away work the user can still edit by hand.
+    } catch (err) {
+      // Without this, a throw stranded planPhase at 'planning' forever and the
+      // composer had no way back to a working plan mode.
+      useAiStore.getState().setPlanPhase('idle');
+      useAiStore.getState().setError(`Planning failed: ${formatErr(err)}`);
+      return;
     }
+
+    // Pull the freshest state after the agent loop completes.
+    const afterSend1 = useAiStore.getState();
+    planMarkdown = latestPlanMarkdown();
+
+    if (!planMarkdown) {
+      afterSend1.setPlanPhase('idle');
+      afterSend1.setError('Planning did not produce any output.');
+      return;
+    }
+
+    // Hold the draft to the template before it becomes a document with an
+    // Execute button under it. Nothing did this before, which is how a turn
+    // that produced only "First, let me study the scene file structure…"
+    // ended up saved as the plan. One repair turn, the same single forced
+    // retry `grounding-lint.ts` uses for ask mode — if the model cannot
+    // produce a plan twice, that is worth surfacing rather than looping at
+    // the user's expense.
+    report = validatePlanDocument(planMarkdown);
+    if (!report.ok) {
+      try {
+        await getAgentService().sendMessage(buildPlanRepairPrompt(report.problems), {
+          mode: 'plan',
+          effort: store.effort,
+          promptMode: 'plan-planning',
+        });
+        const repaired = latestPlanMarkdown();
+        if (repaired) {
+          planMarkdown = repaired;
+          report = validatePlanDocument(repaired);
+        }
+      } catch {
+        // Keep the first draft and its problems: a failed repair turn is not a
+        // reason to throw away work the user can still edit by hand.
+      }
+    }
+  } finally {
+    endSubmitBudget();
   }
 
+  const after = useAiStore.getState();
   const planPath = await reservePlanPath(workspacePath, prompt);
   try {
     await writePlan(planPath, planMarkdown);
@@ -160,10 +176,12 @@ async function startPlanning(
 
   // The file is written and open either way — a plan the user can read and fix
   // beats one thrown away — but it must never LOOK approved when it isn't.
-  if (!report.ok) {
+  // `report` is always assigned by this point: every earlier return happens
+  // before `validatePlanDocument` runs, from inside the try/finally above.
+  if (!report!.ok) {
     useAiStore.getState().setError(
       `This plan does not follow the plan format, so executing it may not do what ` +
-        `you expect:\n${report.problems.map((p) => `• ${p}`).join('\n')}\n` +
+        `you expect:\n${report!.problems.map((p) => `• ${p}`).join('\n')}\n` +
         `Edit it directly, or send a message to have it revised.`,
     );
   }

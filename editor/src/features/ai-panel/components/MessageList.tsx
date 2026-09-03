@@ -40,7 +40,7 @@ import CheckpointRow from './CheckpointRow';
 import ErrorBlock from './ErrorBlock';
 import EmptyState from './EmptyState';
 import StreamingIndicator from './StreamingIndicator';
-import { showsTailIndicator } from '../services/working-indicator';
+import { showsTailIndicator, showsModelCallCount, modelCallLabel } from '../services/working-indicator';
 
 // Matches UnityConsolePanel's "close enough to the bottom" threshold shape
 // (that one uses 30px); a slightly wider 40px band here since chat bubbles
@@ -133,6 +133,7 @@ function MessageList() {
   const planPhase = useAiStore((s) => s.planPhase);
   const selectedAgent = useAiStore((s) => s.selectedAgent);
   const isAgentRunning = useAiStore((s) => s.isAgentRunning);
+  const modelCallBudget = useAiStore((s) => s.modelCallBudget);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -261,6 +262,9 @@ function MessageList() {
           {showWorking && (
             <div className="ai-panel-working">
               <StreamingIndicator />
+              {modelCallBudget && showsModelCallCount(isAgentRunning, modelCallBudget) && (
+                <span className="ai-panel-working-count">{modelCallLabel(modelCallBudget.used)}</span>
+              )}
             </div>
           )}
         </div>

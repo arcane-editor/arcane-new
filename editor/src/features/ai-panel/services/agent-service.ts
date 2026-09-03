@@ -51,7 +51,14 @@ import { withCheckpoint } from './checkpoints/checkpoint-gate';
 import { withWriteApproval } from './write-approval-gate';
 import { withResultDiffs } from './diff-decorator';
 import { withEditReview } from './edit-review/edit-review-decorator';
-import { withTurnGovernor, resetTurnGovernor, grantExtraCalls } from './turn-governor';
+import {
+  withTurnGovernor,
+  resetTurnGovernor,
+  grantExtraCalls,
+  wasCapReachedThisSend,
+  softLimitNotice,
+  capReachedNotice,
+} from './turn-governor';
 import { resolveSendEffort, resetSendEscalation } from './send-escalation';
 import { withStreamErrorGuard } from './stream-error-guard';
 import { withRepeatCallGuard, resetRepeatCallGuard } from './tool-guards';
@@ -80,7 +87,12 @@ import { sideTaskRequest } from './memory/memory-request';
 import { tauriMemoryFs } from './memory/tauri-memory-fs';
 import { useAiStore, type AiMessage } from '../../../stores/ai';
 import { useAuthStore } from '../../../stores/auth';
-import { useServerConfigStore, effectiveContextWindow, maxAllowedEffort } from '../../../stores/server-config';
+import {
+  useServerConfigStore,
+  effectiveContextWindow,
+  maxAllowedEffort,
+  turnCapsFromConfig,
+} from '../../../stores/server-config';
 import { useWorkspaceStore } from '../../../stores/workspace';
 import { useProjectContextStore } from '../../../stores/project-context';
 import { useSettingsStore } from '../../../stores/settings';
@@ -466,7 +478,19 @@ export class AgentService {
       // `hostedStream` itself. (Mid-send tier escalation was removed — model
       // switches inside a send reset the provider's prompt cache; escalation
       // now happens at send boundaries, see send-escalation.ts.)
-      streamFn: withStreamErrorGuard(withTurnGovernor(hostedStream)),
+      // The config closure runs on every stream call (not just once at
+      // construction), so a server-config cap change picked up mid-conversation
+      // applies starting the next call — `getState()` always reads the current
+      // snapshot. `onProgress` drives the working row's live count;
+      // `onSoftLimit`/`onCapReached` push the same in-loop notices the module's
+      // defaults would, wired explicitly so the store import lives here rather
+      // than in `turn-governor.ts` (kept Bun-safe for the eval harness).
+      streamFn: withStreamErrorGuard(withTurnGovernor(hostedStream, () => ({
+        caps: turnCapsFromConfig(useServerConfigStore.getState().config),
+        onProgress: (used, cap) => useAiStore.getState().setModelCallBudget({ used, cap }),
+        onSoftLimit: (_effort, used, cap) => useAiStore.getState().addSystemMessage(softLimitNotice(used, cap)),
+        onCapReached: (_effort, cap) => useAiStore.getState().addSystemMessage(capReachedNotice(cap)),
+      }))),
       convertToLlm,
       reasoning: 'mid',
       // Server picks the model per reasoningLevel; default to the smallest tier's
@@ -937,6 +961,20 @@ export class AgentService {
    */
   wasLastSendAborted(): boolean {
     return this.abortRequested;
+  }
+
+  /**
+   * True iff the turn governor's cap was reached on the most recently
+   * completed send — i.e. the model's tools were disabled and it was asked
+   * to wrap up rather than finishing on its own. Exposed on the
+   * `PreplanAgentService` seam (Task 3) for callers that need to tell a
+   * capped turn apart from a clean one, mirroring `wasLastSendAborted()`'s
+   * lifecycle: `wasCapReachedThisSend()` is per-send state cleared by
+   * `resetTurnGovernor()`, which every `sendMessage` call makes, so this
+   * reads the just-finished send's outcome.
+   */
+  wasLastSendCapped(): boolean {
+    return wasCapReachedThisSend();
   }
 
   /** Seed the agent with a saved session's history so the next prompt continues it. */

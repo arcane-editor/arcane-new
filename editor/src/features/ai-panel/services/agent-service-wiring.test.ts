@@ -95,6 +95,45 @@ describe('agent-service.ts — wasLastSendAborted (Task 11)', () => {
   });
 });
 
+describe('agent-service.ts — turn governor wiring (Task 3)', () => {
+  it('wires withTurnGovernor with a per-call config closure, not a one-shot config object', () => {
+    expect(SRC).toContain('withTurnGovernor(hostedStream, () => ({');
+  });
+
+  it('reads the per-tier cap table from server-config on every call', () => {
+    expect(SRC).toContain('caps: turnCapsFromConfig(useServerConfigStore.getState().config),');
+  });
+
+  it('reports live progress onto the ai store for the working-row count', () => {
+    expect(SRC).toContain(
+      'onProgress: (used, cap) => useAiStore.getState().setModelCallBudget({ used, cap }),',
+    );
+  });
+
+  it('pushes the soft-limit and cap-reached notices as system messages', () => {
+    expect(SRC).toContain(
+      "onSoftLimit: (_effort, used, cap) => useAiStore.getState().addSystemMessage(softLimitNotice(used, cap)),",
+    );
+    expect(SRC).toContain(
+      "onCapReached: (_effort, cap) => useAiStore.getState().addSystemMessage(capReachedNotice(cap)),",
+    );
+  });
+
+  it('exposes wasLastSendCapped() beside wasLastSendAborted()', () => {
+    expect(SRC).toMatch(/wasLastSendCapped\(\): boolean \{\s*return wasCapReachedThisSend\(\);\s*\}/);
+  });
+
+  it('imports turnCapsFromConfig alongside the existing server-config accessors', () => {
+    expect(SRC).toContain('turnCapsFromConfig,');
+  });
+
+  it('imports the notice helpers and wasCapReachedThisSend from turn-governor.ts', () => {
+    expect(SRC).toContain('wasCapReachedThisSend,');
+    expect(SRC).toContain('softLimitNotice,');
+    expect(SRC).toContain('capReachedNotice,');
+  });
+});
+
 describe('agent-service.ts — auto-plan.ts fully removed (Task 11)', () => {
   it('has no references to the deleted auto-plan module or its exports', () => {
     expect(SRC).not.toMatch(/from '\.\/auto-plan'/);

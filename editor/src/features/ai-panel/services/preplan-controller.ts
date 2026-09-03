@@ -27,6 +27,7 @@
  */
 import { shouldPreplanTier, type ServerConfig } from '../../../stores/server-config';
 import { routeAgentSend } from './preplan-route';
+import { beginSubmitBudget, endSubmitBudget } from './turn-governor';
 import type { Attachment, ChatMode, Effort } from './types';
 // Type-only — erased at compile time, so this doesn't pull `stores/ai.ts`'s
 // DOM-touching import graph into this module. Same discipline `todo-tool.ts`
@@ -53,6 +54,8 @@ export interface PreplanAgentService {
   ): Promise<void>;
   /** Persisted `abortRequested` flag — true iff the USER stopped the most recent send. */
   wasLastSendAborted(): boolean;
+  /** True iff the turn governor's cap was reached on the most recent send (Task 3). */
+  wasLastSendCapped(): boolean;
 }
 
 /** Minimal seam onto the ai store's live state this controller reads. */
@@ -109,51 +112,61 @@ export async function runAgentModeSend(
     return;
   }
 
-  // 'preplan' — Send 1: read-only exploration + exactly one todo_update call.
-  await agentService.sendMessage(text, {
-    mode: 'agent',
-    effort,
-    attachments,
-    promptMode: 'preplanning',
-  });
+  // 'preplan' — both sends below are one composer submit and must share a
+  // single turn-governor budget rather than each getting its own fresh cap
+  // (turn-governor.ts's module header, SUBMIT SCOPE) — bracket the whole
+  // chain so `resetTurnGovernor()` between send 1 and send 2 (agent-service's
+  // `runSend`, same call site as always) leaves the running count alone.
+  beginSubmitBudget();
+  try {
+    // Send 1: read-only exploration + exactly one todo_update call.
+    await agentService.sendMessage(text, {
+      mode: 'agent',
+      effort,
+      attachments,
+      promptMode: 'preplanning',
+    });
 
-  // Chain-guards: each one on its own must prevent (or redirect) send 2.
-  //
-  // (i) The user stopped the preplanning turn — nothing more to chain into.
-  if (agentService.wasLastSendAborted()) return;
+    // Chain-guards: each one on its own must prevent (or redirect) send 2.
+    //
+    // (i) The user stopped the preplanning turn — nothing more to chain into.
+    if (agentService.wasLastSendAborted()) return;
 
-  // (ii) The preplanning turn errored — the T5 choke point's outcome
-  // inspection appends a `role: 'error'` message for every error/crash tail
-  // (agent-service.ts's `runSend`); check the freshest state, not the
-  // snapshot from before send 1 ran.
-  const afterSend1 = deps.getAiState();
-  const lastMessage = afterSend1.messages[afterSend1.messages.length - 1];
-  if (lastMessage?.role === 'error') return;
+    // (ii) The preplanning turn errored — the T5 choke point's outcome
+    // inspection appends a `role: 'error'` message for every error/crash tail
+    // (agent-service.ts's `runSend`); check the freshest state, not the
+    // snapshot from before send 1 ran.
+    const afterSend1 = deps.getAiState();
+    const lastMessage = afterSend1.messages[afterSend1.messages.length - 1];
+    if (lastMessage?.role === 'error') return;
 
-  // (iii) FAIL OPEN: the preplanning turn produced no non-done todo (the
-  // model skipped its required todo_update, or checked everything off
-  // immediately) — still execute the user's request rather than stranding
-  // it on an empty preplan. Attachments are NOT repeated: send 1 already
-  // carried them into the conversation history.
-  if (!hasRemainingTodos(afterSend1.hostedPlan)) {
-    await agentService.sendMessage(text, { mode: 'agent', effort });
-    return;
+    // (iii) FAIL OPEN: the preplanning turn produced no non-done todo (the
+    // model skipped its required todo_update, or checked everything off
+    // immediately) — still execute the user's request rather than stranding
+    // it on an empty preplan. Attachments are NOT repeated: send 1 already
+    // carried them into the conversation history.
+    if (!hasRemainingTodos(afterSend1.hostedPlan)) {
+      await agentService.sendMessage(text, { mode: 'agent', effort });
+      return;
+    }
+
+    const taskCount = afterSend1.hostedPlan!.filter((item) => item.status !== 'done').length;
+    afterSend1.addSystemMessage(`Pre-planning complete — executing ${taskCount} tasks`);
+
+    // Send 2: a synthetic pointer, not the user's own words. Never added as a
+    // user bubble — this module never calls `addUserMessage` (only ChatInput's
+    // `handleSubmit` does, once, for the ORIGINAL text, before this controller
+    // ever runs), the same "sendMessage without a fresh addUserMessage" contract
+    // `plan-controller.ts`'s `executePlan` pointer text relies on (see
+    // `checkpoint-selection.ts`'s header, which documents that exact precedent).
+    await agentService.sendMessage(RESUME_AFTER_PREPLAN_TEXT, {
+      mode: 'agent',
+      effort,
+      promptMode: 'agent',
+    });
+  } finally {
+    endSubmitBudget();
   }
-
-  const taskCount = afterSend1.hostedPlan!.filter((item) => item.status !== 'done').length;
-  afterSend1.addSystemMessage(`Pre-planning complete — executing ${taskCount} tasks`);
-
-  // Send 2: a synthetic pointer, not the user's own words. Never added as a
-  // user bubble — this module never calls `addUserMessage` (only ChatInput's
-  // `handleSubmit` does, once, for the ORIGINAL text, before this controller
-  // ever runs), the same "sendMessage without a fresh addUserMessage" contract
-  // `plan-controller.ts`'s `executePlan` pointer text relies on (see
-  // `checkpoint-selection.ts`'s header, which documents that exact precedent).
-  await agentService.sendMessage(RESUME_AFTER_PREPLAN_TEXT, {
-    mode: 'agent',
-    effort,
-    promptMode: 'agent',
-  });
 }
 
 async function liveDeps(): Promise<AgentModeDeps> {

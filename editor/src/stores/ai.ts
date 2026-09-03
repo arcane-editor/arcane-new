@@ -333,6 +333,16 @@ interface AiState {
   /** Session-cumulative token usage (P4) — see `SessionUsage`. */
   sessionUsage: SessionUsage;
 
+  /**
+   * Live turn-governor progress for the working row's "N model calls" count
+   * (Task 3) — `used`/`cap` for the CURRENT submit, mirroring
+   * `turn-governor.ts`'s `onProgress` callback. `null` until the first
+   * governed call of a send/submit reports in. UI-only: never persisted
+   * (absent from `SaveSessionInput`/`buildSaveInput`) and reset to `null` on
+   * a new conversation and on session restore, same as `pendingServedModel`.
+   */
+  modelCallBudget: { used: number; cap: number } | null;
+
   // Actions
   handleAgentEvent: (event: AgentEvent) => void;
   addUserMessage: (text: string, attachments?: Attachment[]) => void;
@@ -419,6 +429,8 @@ interface AiState {
   recordSessionUsage: (inputTokens: number, outputTokens: number) => void;
   /** Stashes the in-flight request's served model id, read back at `message_end` (see `pendingServedModel`). */
   recordServedModel: (model: string) => void;
+  /** Sets the working row's live turn-governor progress (see `modelCallBudget`). */
+  setModelCallBudget: (budget: { used: number; cap: number } | null) => void;
 }
 
 let messageCounter = 0;
@@ -624,6 +636,7 @@ export const useAiStore = create<AiState>((set, get) => ({
   pendingPrompt: null,
   lastAttachments: [],
   sessionUsage: { input: 0, output: 0, requests: 0 },
+  modelCallBudget: null,
 
   handleAgentEvent: (event: AgentEvent) => {
     switch (event.type) {
@@ -889,6 +902,7 @@ export const useAiStore = create<AiState>((set, get) => ({
       pendingPrompt: null,
       lastAttachments: [],
       sessionUsage: { input: 0, output: 0, requests: 0 },
+      modelCallBudget: null,
       ...externalAgentReset(),
     });
     useCheckpointsStore.getState().reset();
@@ -941,6 +955,9 @@ export const useAiStore = create<AiState>((set, get) => ({
       pendingPrompt: null,
       lastAttachments: [],
       sessionUsage: { input: 0, output: 0, requests: 0 },
+      // A restored transcript has no in-flight submit either — see
+      // `modelCallBudget`'s doc.
+      modelCallBudget: null,
       // A restored transcript is not a live agent connection: the subprocess is
       // gone and its advertised config/commands went with it. Only
       // `acpSessionId` survives, and only so the backend can offer to resume.
@@ -1159,6 +1176,8 @@ export const useAiStore = create<AiState>((set, get) => ({
     })),
 
   recordServedModel: (model: string) => set({ pendingServedModel: model }),
+
+  setModelCallBudget: (budget) => set({ modelCallBudget: budget }),
 }));
 
 /**
