@@ -12,10 +12,11 @@ import {
 import { hashPassword, digestsMatch } from '../lib/crypto.ts';
 import {
     readConfigDoc, putConfigDoc, getModelRouting, getEffectivePricing,
-    validateModelRoutingDoc, validateModelPricingDoc,
+    validateModelRoutingDoc, validateModelPricingDoc, validateHarnessLimitsDoc,
 } from '../lib/app-config.ts';
 import type { ModelRoutingDoc, ModelPricingDoc } from '../lib/app-config.ts';
-import { DEFAULT_MODEL_ROUTING } from '../config/plans.ts';
+import { DEFAULT_MODEL_ROUTING, DEFAULT_HARNESS_LIMITS } from '../config/plans.ts';
+import type { HarnessLimitsDoc } from '../config/plans.ts';
 import { GATEWAY_FEE, MARGIN, isPaidPlan, tierGrantMicro, microToCredits } from '../config/tiers.ts';
 import { MODEL_CATALOG } from '../lib/costs.ts';
 
@@ -222,6 +223,44 @@ adminRouter.put('/v1/admin/config/pricing', async (c) => {
     }
 
     await putConfigDoc(c.env.arcane_db, 'model_pricing', body as object);
+    return c.json({ ok: true });
+});
+
+// ─── API: Config (harness limits) ────────────────────────────
+//
+// Mirrors the model_routing GET/PUT pair above: GET re-validates the raw
+// stored doc (readConfigDoc — uncached) so the admin panel can distinguish
+// "no row yet" from "a row exists but is invalid" (both report
+// isDefault:true, but only the latter has a non-null updatedAt while still
+// serving the code default).
+
+adminRouter.get('/v1/admin/config/harness', async (c) => {
+    const row = await readConfigDoc(c.env.arcane_db, 'harness_limits');
+
+    let value: HarnessLimitsDoc = DEFAULT_HARNESS_LIMITS;
+    let isDefault = true;
+    if (row) {
+        try {
+            const parsed: unknown = JSON.parse(row.raw);
+            if (validateHarnessLimitsDoc(parsed) === null) {
+                value = parsed as HarnessLimitsDoc;
+                isDefault = false;
+            }
+        } catch {
+            // malformed JSON -> falls back to the default, isDefault stays true
+        }
+    }
+
+    return c.json({ value, isDefault, updatedAt: row?.updatedAt ?? null });
+});
+
+adminRouter.put('/v1/admin/config/harness', async (c) => {
+    const body: unknown = await c.req.json();
+
+    const error = validateHarnessLimitsDoc(body);
+    if (error) return c.json({ error, code: 'invalid_config' }, 400);
+
+    await putConfigDoc(c.env.arcane_db, 'harness_limits', body as object);
     return c.json({ ok: true });
 });
 

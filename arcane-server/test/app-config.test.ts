@@ -1,14 +1,15 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { env } from 'cloudflare:test';
 import {
-    getModelRouting, getEffectivePricing, putConfigDoc, readConfigDoc, clearConfigCache,
-    validateModelRoutingDoc, validateModelPricingDoc,
+    getModelRouting, getEffectivePricing, getHarnessLimits, putConfigDoc, readConfigDoc, clearConfigCache,
+    validateModelRoutingDoc, validateModelPricingDoc, validateHarnessLimitsDoc,
 } from '../src/lib/app-config.ts';
 import type { ModelRoutingDoc, ModelPricingDoc, EffectivePricing } from '../src/lib/app-config.ts';
 import { MODEL_CATALOG, estimateCost, type ModelInfo } from '../src/lib/costs.ts';
 import { billedMicro } from '../src/lib/usage.ts';
 import { usdToMicro } from '../src/config/tiers.ts';
-import { DEFAULT_MODEL_ROUTING } from '../src/config/plans.ts';
+import { DEFAULT_MODEL_ROUTING, DEFAULT_HARNESS_LIMITS } from '../src/config/plans.ts';
+import type { HarnessLimitsDoc } from '../src/config/plans.ts';
 import { resolveModelForSend } from '../src/config/routing.ts';
 
 // A valid routing doc built entirely from real catalog entries — reused as
@@ -28,6 +29,10 @@ const VALID_PRICING_DOC: ModelPricingDoc = {
     },
     gatewayFee: 1.05,
     margin: 1.0,
+};
+
+const VALID_HARNESS_LIMITS_DOC: HarnessLimitsDoc = {
+    tiers: { low: { maxModelCalls: 500 }, mid: { maxModelCalls: 900 }, high: { maxModelCalls: 1200 } },
 };
 
 // Every test starts from a cold per-isolate cache so no test observes a
@@ -224,6 +229,186 @@ describe('getEffectivePricing', () => {
         expect(pricing.gatewayFee).toBe(1.05); // code default, not the invalid 0.5
         expect(spy).toHaveBeenCalledTimes(1);
         spy.mockRestore();
+    });
+});
+
+describe('getHarnessLimits', () => {
+    it('returns DEFAULT_HARNESS_LIMITS when the table has no harness_limits row, SILENTLY (no error log)', async () => {
+        const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        const limits = await getHarnessLimits(env.arcane_db);
+        expect(limits).toEqual(DEFAULT_HARNESS_LIMITS);
+        expect(limits.tiers).toEqual({ low: { maxModelCalls: 1000 }, mid: { maxModelCalls: 1600 }, high: { maxModelCalls: 2000 } });
+        // A missing row is the normal, defaults-active state of a fresh deploy —
+        // NOT an anomaly — so it must not log.
+        expect(spy).not.toHaveBeenCalled();
+        spy.mockRestore();
+    });
+
+    it('does not throw on an empty table', async () => {
+        await expect(getHarnessLimits(env.arcane_db)).resolves.toBeDefined();
+    });
+
+    it('serves a stored doc after putConfigDoc, distinguishable via readConfigDoc', async () => {
+        expect(await readConfigDoc(env.arcane_db, 'harness_limits')).toBeNull();
+
+        await putConfigDoc(env.arcane_db, 'harness_limits', VALID_HARNESS_LIMITS_DOC);
+
+        const limits = await getHarnessLimits(env.arcane_db);
+        expect(limits).toEqual(VALID_HARNESS_LIMITS_DOC);
+
+        const raw = await readConfigDoc(env.arcane_db, 'harness_limits');
+        expect(raw).not.toBeNull();
+        expect(JSON.parse(raw!.raw)).toEqual(VALID_HARNESS_LIMITS_DOC);
+        expect(typeof raw!.updatedAt).toBe('string');
+    });
+
+    it('serves the cached value after a direct SQL update bypassing putConfigDoc, until clearConfigCache', async () => {
+        await putConfigDoc(env.arcane_db, 'harness_limits', VALID_HARNESS_LIMITS_DOC);
+        const first = await getHarnessLimits(env.arcane_db); // populates cache
+        expect(first.tiers.low.maxModelCalls).toBe(500);
+
+        const bumped: HarnessLimitsDoc = { tiers: { ...VALID_HARNESS_LIMITS_DOC.tiers, low: { maxModelCalls: 750 } } };
+        await env.arcane_db.prepare("UPDATE app_config SET value = ?1 WHERE key = 'harness_limits'")
+            .bind(JSON.stringify(bumped)).run();
+
+        const stillCached = await getHarnessLimits(env.arcane_db);
+        expect(stillCached).toEqual(first); // cache not invalidated by the raw UPDATE
+
+        clearConfigCache();
+        const fresh = await getHarnessLimits(env.arcane_db);
+        expect(fresh).toEqual(bumped);
+    });
+
+    it('putConfigDoc invalidates this isolate\'s cache immediately', async () => {
+        await putConfigDoc(env.arcane_db, 'harness_limits', VALID_HARNESS_LIMITS_DOC);
+        const first = await getHarnessLimits(env.arcane_db);
+        expect(first).toEqual(VALID_HARNESS_LIMITS_DOC);
+
+        const second: HarnessLimitsDoc = { tiers: { ...VALID_HARNESS_LIMITS_DOC.tiers, high: { maxModelCalls: 1500 } } };
+        await putConfigDoc(env.arcane_db, 'harness_limits', second);
+
+        const after = await getHarnessLimits(env.arcane_db);
+        expect(after).toEqual(second); // no clearConfigCache() call needed
+    });
+
+    it('falls back to defaults and logs a structured error on malformed JSON', async () => {
+        const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        await env.arcane_db.prepare(
+            "INSERT INTO app_config (key, value, updated_at) VALUES ('harness_limits', 'not json at all', datetime('now')) " +
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+        ).run();
+
+        const limits = await getHarnessLimits(env.arcane_db);
+        expect(limits).toEqual(DEFAULT_HARNESS_LIMITS);
+
+        expect(spy).toHaveBeenCalledTimes(1);
+        const logged = JSON.parse(spy.mock.calls[0]![0] as string);
+        expect(logged.event).toBe('app_config_invalid');
+        expect(logged.key).toBe('harness_limits');
+        spy.mockRestore();
+    });
+
+    it('falls back to defaults and logs on an invalid doc (missing tier)', async () => {
+        const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+        const badDoc = {
+            tiers: {
+                low: { maxModelCalls: 500 },
+                mid: { maxModelCalls: 900 },
+                // high tier missing entirely
+            },
+        };
+        await putConfigDoc(env.arcane_db, 'harness_limits', badDoc);
+
+        const limits = await getHarnessLimits(env.arcane_db);
+        expect(limits).toEqual(DEFAULT_HARNESS_LIMITS);
+        expect(spy).toHaveBeenCalledTimes(1);
+        const logged = JSON.parse(spy.mock.calls[0]![0] as string);
+        expect(logged.event).toBe('app_config_invalid');
+        expect(logged.key).toBe('harness_limits');
+        spy.mockRestore();
+    });
+});
+
+describe('putConfigDoc invalidates the harness_limits cache too', () => {
+    it('a model_routing write also invalidates the cached harness_limits value', async () => {
+        await putConfigDoc(env.arcane_db, 'harness_limits', VALID_HARNESS_LIMITS_DOC);
+        const first = await getHarnessLimits(env.arcane_db); // populates the harness_limits cache
+        expect(first).toEqual(VALID_HARNESS_LIMITS_DOC);
+
+        // An unrelated routing write should still bust the harness_limits
+        // cache, per putConfigDoc's uniform (branch-free) invalidation.
+        await putConfigDoc(env.arcane_db, 'model_routing', VALID_ROUTING_DOC);
+
+        // Prove the cache was actually invalidated (not coincidentally still
+        // correct): mutate the harness_limits row directly via raw SQL,
+        // bypassing putConfigDoc entirely (which would invalidate it anyway).
+        const bumped: HarnessLimitsDoc = { tiers: { ...VALID_HARNESS_LIMITS_DOC.tiers, mid: { maxModelCalls: 111 } } };
+        await env.arcane_db.prepare("UPDATE app_config SET value = ?1 WHERE key = 'harness_limits'")
+            .bind(JSON.stringify(bumped)).run();
+
+        const afterRoutingWrite = await getHarnessLimits(env.arcane_db);
+        // If the routing write had NOT invalidated the harness_limits cache,
+        // this would still equal `first` (the stale cached VALID_HARNESS_LIMITS_DOC).
+        expect(afterRoutingWrite).toEqual(bumped);
+    });
+});
+
+describe('validateHarnessLimitsDoc', () => {
+    it('accepts a fully valid doc', () => {
+        expect(validateHarnessLimitsDoc(VALID_HARNESS_LIMITS_DOC)).toBeNull();
+    });
+
+    it('accepts DEFAULT_HARNESS_LIMITS', () => {
+        expect(validateHarnessLimitsDoc(DEFAULT_HARNESS_LIMITS)).toBeNull();
+    });
+
+    it.each([null, undefined, 'string', 42, []])('rejects a non-object doc: %p', (x) => {
+        expect(validateHarnessLimitsDoc(x)).not.toBeNull();
+    });
+
+    it('rejects a doc missing the tiers object', () => {
+        expect(validateHarnessLimitsDoc({})).not.toBeNull();
+    });
+
+    it.each(['low', 'mid', 'high'] as const)('rejects a doc missing the %s tier', (missing) => {
+        const tiers: Record<string, unknown> = {
+            low: { maxModelCalls: 500 },
+            mid: { maxModelCalls: 900 },
+            high: { maxModelCalls: 1200 },
+        };
+        delete tiers[missing];
+        expect(validateHarnessLimitsDoc({ tiers })).not.toBeNull();
+    });
+
+    it.each([1.5, '1000', null, undefined, NaN, Infinity])('rejects a non-integer maxModelCalls: %p', (v) => {
+        const doc = { tiers: { ...VALID_HARNESS_LIMITS_DOC.tiers, low: { maxModelCalls: v } } };
+        expect(validateHarnessLimitsDoc(doc)).not.toBeNull();
+    });
+
+    it('rejects maxModelCalls == 0', () => {
+        const doc = { tiers: { ...VALID_HARNESS_LIMITS_DOC.tiers, low: { maxModelCalls: 0 } } };
+        expect(validateHarnessLimitsDoc(doc)).not.toBeNull();
+    });
+
+    it('rejects maxModelCalls == 100_001', () => {
+        const doc = { tiers: { ...VALID_HARNESS_LIMITS_DOC.tiers, high: { maxModelCalls: 100_001 } } };
+        expect(validateHarnessLimitsDoc(doc)).not.toBeNull();
+    });
+
+    it('accepts maxModelCalls == 1 (lower bound)', () => {
+        const doc = { tiers: { ...VALID_HARNESS_LIMITS_DOC.tiers, low: { maxModelCalls: 1 } } };
+        expect(validateHarnessLimitsDoc(doc)).toBeNull();
+    });
+
+    it('accepts maxModelCalls == 100_000 (upper bound)', () => {
+        const doc = { tiers: { ...VALID_HARNESS_LIMITS_DOC.tiers, high: { maxModelCalls: 100_000 } } };
+        expect(validateHarnessLimitsDoc(doc)).toBeNull();
+    });
+
+    it('rejects a negative maxModelCalls', () => {
+        const doc = { tiers: { ...VALID_HARNESS_LIMITS_DOC.tiers, mid: { maxModelCalls: -1 } } };
+        expect(validateHarnessLimitsDoc(doc)).not.toBeNull();
     });
 });
 

@@ -5,6 +5,7 @@ import { putConfigDoc, clearConfigCache } from '../src/lib/app-config.ts';
 import { MODEL_CATALOG } from '../src/lib/costs.ts';
 import { SPARK_MODEL } from '../src/config/plans.ts';
 import type { ModelPricingDoc } from '../src/lib/app-config.ts';
+import type { HarnessLimitsDoc } from '../src/config/plans.ts';
 import type { UserRow } from '../src/lib/db.ts';
 
 interface ConfigTier {
@@ -15,6 +16,7 @@ interface ConfigTier {
     hasPreplanning: boolean;
     contextWindow: number;
     pricingCliffTokens: number | null;
+    maxModelCalls: number;
 }
 
 interface ConfigResponse {
@@ -168,6 +170,37 @@ describe('GET /v1/config', () => {
         expect(tierById(body, 'high').pricingCliffTokens).toBeNull();
         expect(tierById(body, 'mid').pricingCliffTokens).toBeNull();
         expect(tierById(body, 'low').pricingCliffTokens).toBeNull();
+    });
+
+    it('maxModelCalls: defaults to {1000,1600,2000} (DEFAULT_HARNESS_LIMITS)', async () => {
+        const user = await seedPasswordUser('config-harness-default@test.dev', 'password123');
+        const token = await tokenFor(user);
+        const res = await getConfig(token);
+        const body = await res.json<ConfigResponse>();
+
+        expect(tierById(body, 'low').maxModelCalls).toBe(1000);
+        expect(tierById(body, 'mid').maxModelCalls).toBe(1600);
+        expect(tierById(body, 'high').maxModelCalls).toBe(2000);
+    });
+
+    it('maxModelCalls: a harness_limits override is served after clearConfigCache', async () => {
+        clearConfigCache();
+        const user = await seedPasswordUser('config-harness-override@test.dev', 'password123');
+        const token = await tokenFor(user);
+
+        const override: HarnessLimitsDoc = {
+            tiers: { low: { maxModelCalls: 42 }, mid: { maxModelCalls: 84 }, high: { maxModelCalls: 168 } },
+        };
+        await putConfigDoc(env.arcane_db, 'harness_limits', override);
+        clearConfigCache();
+
+        const res = await getConfig(token);
+        const body = await res.json<ConfigResponse>();
+        expect(tierById(body, 'low').maxModelCalls).toBe(42);
+        expect(tierById(body, 'mid').maxModelCalls).toBe(84);
+        expect(tierById(body, 'high').maxModelCalls).toBe(168);
+
+        clearConfigCache(); // leave a clean cache for any test file sharing this isolate
     });
 
     it('unverified-email user still gets 200 (auth only, no verified-email gate)', async () => {

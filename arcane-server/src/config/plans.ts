@@ -104,3 +104,36 @@ export const DEFAULT_MODEL_ROUTING: ModelRoutingDoc = {
     },
     inline: '@cf/qwen/qwen3-30b-a3b-fp8',
 };
+
+// ─── Harness turn-governor limits ───────────────────────────────────
+//
+// Per-tier cap on model calls within one composer submit (the editor's
+// turn governor — see editor/AI-SPEC.md and
+// features/ai-panel/services/turn-governor.ts). Served to the editor over
+// GET /v1/config's `maxModelCalls` field (routes/config.ts) via the runtime
+// 'harness_limits' app_config document (lib/app-config.ts's
+// getHarnessLimits), with DEFAULT_HARNESS_LIMITS below as the code default
+// served whenever that table has no valid row. The admin panel's Harness tab
+// overrides at runtime.
+
+export interface HarnessTierLimits {
+    maxModelCalls: number;
+}
+
+export interface HarnessLimitsDoc {
+    tiers: Record<Intensity, HarnessTierLimits>;
+}
+
+/** Code-default harness limits — served whenever the app_config table has no
+ *  valid 'harness_limits' doc. Mirrors the editor's hardcoded fallbacks
+ *  (`FALLBACK_TURN_CAPS` in stores/server-config.ts, `DEFAULT_TURN_CAPS` in
+ *  features/ai-panel/services/turn-governor.ts) — keep all three in sync;
+ *  editing this file alone changes nothing for a deployed environment whose
+ *  D1 app_config table already holds a 'harness_limits' doc. */
+export const DEFAULT_HARNESS_LIMITS: HarnessLimitsDoc = {
+    tiers: {
+        low: { maxModelCalls: 1000 },
+        mid: { maxModelCalls: 1600 },
+        high: { maxModelCalls: 2000 },
+    },
+};
