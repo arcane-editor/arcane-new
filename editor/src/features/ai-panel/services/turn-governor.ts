@@ -3,7 +3,7 @@
  * `vendor/` changes. The loop's only natural exit is a tool-free assistant
  * response (`agent-loop.ts:101`: `if (toolCalls.length === 0) break;`). This
  * module is a `StreamFn` decorator: once the wrapped stream has been called
- * `cap` times for the current send (per-effort table below), every
+ * `cap` times for the current SUBMIT (per-effort table below), every
  * subsequent call receives a MODIFIED COPY of the outgoing request —
  * `tool_choice: 'none'` attached via stream-extras (so the model cannot emit
  * a tool call, while the `tools` block itself stays byte-identical for the
@@ -16,6 +16,21 @@
  * never mutated, so the injected wrap-up message never reaches the
  * agent's message history or the chat UI — only this one outgoing request
  * sees it.
+ *
+ * SUBMIT SCOPE, not send scope: the cap is measured against one composer
+ * submit, not one `agent.prompt()` send — some submits issue more than one
+ * send and those sends must share a single budget rather than each getting
+ * its own (preplanning issues two sends; planning + quality-repair issues
+ * two sends). A submit is bracketed with `beginSubmitBudget()` /
+ * `endSubmitBudget()`; while a submit is open, `resetTurnGovernor()` (called
+ * between the chained sends, same call site as always) leaves the running
+ * count and notice flags alone so the next send picks up where the last one
+ * left off. A caller that never brackets a submit — every call site until
+ * Task 3 wires the new controllers — gets exactly today's behavior:
+ * `submitOpen` defaults to false, so the one `resetTurnGovernor()` per send
+ * still zeroes the count every time, i.e. a fresh budget per send.
+ * `extraCallsGranted` and `capReachedThisSend` are always per-send —
+ * `resetTurnGovernor()` zeroes them unconditionally, submit or no submit.
  *
  * Per-send state (call count, notice-fired flag) is module-level, reset via
  * `resetTurnGovernor()` — the same pattern `resetCompileGate()` /
@@ -39,12 +54,20 @@ import { withStreamExtras } from './stream-extras';
 
 const KNOWN_EFFORTS: readonly Effort[] = ['low', 'mid', 'high'];
 
-/** Per-effort LLM-call cap (P3.2). */
+/**
+ * Per-effort LLM-call cap (P3.2). 100x the original 10/16/20 (2026-09-04
+ * harness-resilience run): now that chained sends within one submit share a
+ * single budget instead of each getting its own, the per-effort cap has to
+ * cover the whole submit, not just one send.
+ */
 export const DEFAULT_TURN_CAPS: Record<Effort, number> = {
-  low: 10,
-  mid: 16,
-  high: 20,
+  low: 1000,
+  mid: 1600,
+  high: 2000,
 };
+
+/** Fraction of the cap at which the one-time-per-submit soft notice fires. */
+export const SOFT_LIMIT_RATIO = 0.5;
 
 export interface TurnGovernorConfig {
   /** Overrides the default per-effort cap table — tests, and the eval harness's fixed `task.maxTurns`. */
@@ -55,17 +78,71 @@ export interface TurnGovernorConfig {
    * file Bun-safe for the eval harness's direct import).
    */
   onCapReached?: (effort: Effort, cap: number) => void;
+  /**
+   * Fires on EVERY governed call, before the cap decision. `used` is the
+   * submit-scoped count the cap is measured against — incremented before
+   * this fires, so the governed call itself is included. No-op by default.
+   */
+  onProgress?: (used: number, cap: number, effort: Effort) => void;
+  /**
+   * Fires once per submit: the first call where `used` reaches
+   * `Math.ceil(cap * SOFT_LIMIT_RATIO)` while still under the cap. Defaults
+   * to the same dynamic-import ai-store notice pattern as `onCapReached`.
+   */
+  onSoftLimit?: (effort: Effort, used: number, cap: number) => void;
 }
 
-let callCount = 0;
+let submitCallCount = 0;
 let noticeFired = false;
+let softNoticeFired = false;
 let extraCallsGranted = 0;
+let submitOpen = false;
+let capReachedThisSend = false;
 
-/** Reset the per-send call count + notice flag. Call once per user send (mirrors `resetCompileGate`). */
+/**
+ * Reset the per-send state: call once per send (mirrors `resetCompileGate`).
+ * `extraCallsGranted` and `capReachedThisSend` are always per-send and clear
+ * unconditionally. `submitCallCount` and the two notice flags only clear
+ * when no submit budget is open — see the module header's SUBMIT SCOPE note:
+ * inside an open submit (`beginSubmitBudget()` … `endSubmitBudget()`), the
+ * chained sends deliberately keep sharing one running count.
+ */
 export function resetTurnGovernor(): void {
-  callCount = 0;
-  noticeFired = false;
   extraCallsGranted = 0;
+  capReachedThisSend = false;
+  if (!submitOpen) {
+    submitCallCount = 0;
+    noticeFired = false;
+    softNoticeFired = false;
+  }
+}
+
+/**
+ * Open a submit-scoped budget shared by every send the current composer
+ * submit issues (preplanning's two sends; planning + quality-repair's two
+ * sends). Calling this while a submit is already open restarts it — as if
+ * the previous submit's calls never happened.
+ */
+export function beginSubmitBudget(): void {
+  submitCallCount = 0;
+  noticeFired = false;
+  softNoticeFired = false;
+  submitOpen = true;
+}
+
+/** Close the current submit-scoped budget. Idempotent. */
+export function endSubmitBudget(): void {
+  submitOpen = false;
+}
+
+/** The submit-scoped call count the cap is currently measured against. */
+export function getSubmitCallCount(): number {
+  return submitCallCount;
+}
+
+/** Whether the cap was reached on the current send (cleared by `resetTurnGovernor`). */
+export function wasCapReachedThisSend(): boolean {
+  return capReachedThisSend;
 }
 
 /**
@@ -105,25 +182,50 @@ function wrapUpMessage(): Message {
   return { role: 'user', content: WRAP_UP_TEXT, timestamp: Date.now() };
 }
 
+/** Soft-limit notice copy — fires once per submit at `SOFT_LIMIT_RATIO`, well before the model is cut off. */
+export function softLimitNotice(used: number, cap: number): string {
+  return `This task has used ${used} of its ${cap} model calls. It will wrap up on its own at the limit.`;
+}
+
+/** Cap-reached notice copy — fires once per send when the governed (tool-free wrap-up) path kicks in. */
+export function capReachedNotice(cap: number): string {
+  return `Reached the ${cap} model-call limit for this task and asked the agent to wrap up. Reply "continue" to pick up where it left off.`;
+}
+
 /**
- * Default notice: an ai-store system message, matching the wording the
+ * Default notices: an ai-store system message, matching the wording the
  * agent-service's other in-loop notices use (e.g. the grounding linter's
  * `addSystemMessage` call). `stores/ai.ts` transitively touches `document`
  * (via the ai-panel barrel / theme store — see `hosted-stream.test.ts`'s
- * header comment), which is fatal under Bun — so this reaches it via a
- * dynamic import, deferred until actually invoked. The eval harness (which
- * DOES load this module directly, for real, not just under test) always
- * supplies its own no-op `onCapReached`, so this default is never invoked
+ * header comment), which is fatal under Bun — so both reach it via a dynamic
+ * import, deferred until actually invoked. The eval harness (which DOES load
+ * this module directly, for real, not just under test) always supplies its
+ * own no-op `onCapReached`/`onSoftLimit`, so these defaults are never invoked
  * there and the import never fires.
  */
-function defaultOnCapReached(effort: Effort): void {
+function defaultOnCapReached(_effort: Effort, cap: number): void {
   import('../../../stores/ai')
     .then(({ useAiStore }) => {
-      useAiStore.getState().addSystemMessage(`Reached the ${effort} turn limit — asked the agent to wrap up`);
+      useAiStore.getState().addSystemMessage(capReachedNotice(cap));
     })
     .catch(() => {
       // Best-effort notice only — never let this break the actual send.
     });
+}
+
+function defaultOnSoftLimit(_effort: Effort, used: number, cap: number): void {
+  import('../../../stores/ai')
+    .then(({ useAiStore }) => {
+      useAiStore.getState().addSystemMessage(softLimitNotice(used, cap));
+    })
+    .catch(() => {
+      // Best-effort notice only — never let this break the actual send.
+    });
+}
+
+/** No-op default — most callers don't need progress; agent-service.ts wires a real one when Task 3 lands. */
+function defaultOnProgress(): void {
+  // Intentionally empty.
 }
 
 /**
@@ -137,14 +239,25 @@ export function withTurnGovernor(
   getConfig: () => TurnGovernorConfig = () => ({}),
 ): StreamFn {
   return (context: Context, options: StreamOptions) => {
-    callCount++;
+    submitCallCount++;
     const effort = normalizeEffort(options.reasoning);
     const config = getConfig();
     const cap = config.caps?.[effort] ?? DEFAULT_TURN_CAPS[effort];
 
+    // Every call reports progress, including the governed one below —
+    // `submitCallCount` is already incremented above.
+    (config.onProgress ?? defaultOnProgress)(submitCallCount, cap, effort);
+
+    // Soft notice: once per submit, the first call that crosses the ratio
+    // while still under the cap.
+    if (!softNoticeFired && submitCallCount >= Math.ceil(cap * SOFT_LIMIT_RATIO) && submitCallCount < cap) {
+      softNoticeFired = true;
+      (config.onSoftLimit ?? defaultOnSoftLimit)(effort, submitCallCount, cap);
+    }
+
     // Below the cap, pass through untouched. At or beyond the cap, allow only
     // if an extra call has been granted (e.g., for grounding-lint revise).
-    const exceedsNormalCap = callCount >= cap;
+    const exceedsNormalCap = submitCallCount >= cap;
     const canUseGrant = exceedsNormalCap && extraCallsGranted > 0;
 
     if (!exceedsNormalCap || canUseGrant) {
@@ -157,6 +270,7 @@ export function withTurnGovernor(
     // At the cap (and no extra grants), and defensively for any call beyond it
     // (shouldn't happen once stripping takes effect, but a model could
     // theoretically still try) — same treatment every time.
+    capReachedThisSend = true;
     if (!noticeFired) {
       noticeFired = true;
       (config.onCapReached ?? defaultOnCapReached)(effort, cap);

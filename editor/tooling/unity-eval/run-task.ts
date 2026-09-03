@@ -183,14 +183,16 @@ export async function runTask(
   // `setReasoning` (no `reasoning` option passed above), so `options.
   // reasoning` is always undefined and the governor normalizes that to
   // 'mid' — overriding all four keeps this robust even if that changes.
-  // `onCapReached` is a no-op: there's no ai-store to notify in the eval
-  // harness (mirrors the Bun-safe DI seam `lsp-gate.ts`/`compile-gate.ts` use
-  // for their own store-backed defaults).
+  // `onCapReached`/`onSoftLimit` are no-ops: there's no ai-store to notify in
+  // the eval harness (mirrors the Bun-safe DI seam `lsp-gate.ts`/
+  // `compile-gate.ts` use for their own store-backed defaults) — both
+  // defaults would otherwise dynamic-import `stores/ai`.
   resetTurnGovernor();
   resetRepeatCallGuard();
   const governedStreamFn = withTurnGovernor(streamFn, () => ({
     caps: { low: maxTurns, mid: maxTurns, high: maxTurns, super: maxTurns },
     onCapReached: () => {},
+    onSoftLimit: () => {},
   }));
 
   const agent = new Agent({

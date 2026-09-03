@@ -39,6 +39,10 @@ export interface ServerTierConfig {
   hasPreplanning: boolean;
   contextWindow: number;
   pricingCliffTokens: number | null;
+  /** Per-tier turn-governor cap (P3.2/A1). Optional: an older server that
+   *  doesn't publish this yet must not fail `isValidServerConfig` or blank
+   *  the rest of the config — see `effectiveTurnCap`'s fallback. */
+  maxModelCalls?: number;
 }
 
 export interface ServerConfig {
@@ -141,6 +145,32 @@ function fallbackMaxEntitledEffort(plan: string | null | undefined): Effort {
  *  across that tier's role models, or the offline fallback. */
 export function effectiveContextWindow(config: ServerConfig | null, effort: Effort): number {
   return config?.tiers.find((t) => t.id === effort)?.contextWindow ?? FALLBACK_CONTEXT_WINDOW[effort];
+}
+
+/** Mirrors `DEFAULT_TURN_CAPS` in `features/ai-panel/services/turn-governor.ts`
+ *  (see this file's header for why this is a duplicate, not an import).
+ *  Update both together. */
+const FALLBACK_TURN_CAPS: Record<Effort, number> = {
+  low: 1000,
+  mid: 1600,
+  high: 2000,
+};
+
+/** Per-tier turn-governor cap: the server's published value, or the offline
+ *  fallback. NOT subject to the stale-config entitlement guard below — like
+ *  `shouldPreplanTier`, this is a product/UX ceiling rather than an
+ *  entitlement, so a stale config can't leak extra access through it. */
+export function effectiveTurnCap(config: ServerConfig | null, effort: Effort): number {
+  return config?.tiers.find((t) => t.id === effort)?.maxModelCalls ?? FALLBACK_TURN_CAPS[effort];
+}
+
+/** Every effort's turn cap, config-first with the offline fallback per tier. */
+export function turnCapsFromConfig(config: ServerConfig | null): Record<Effort, number> {
+  return {
+    low: effectiveTurnCap(config, 'low'),
+    mid: effectiveTurnCap(config, 'mid'),
+    high: effectiveTurnCap(config, 'high'),
+  };
 }
 
 /**
