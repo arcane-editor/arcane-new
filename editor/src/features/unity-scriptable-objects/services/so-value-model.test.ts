@@ -2,7 +2,15 @@ import { describe, it, expect } from 'bun:test';
 import type { SoField, SoSchema, SoWidgetKind } from '../../unity-analyzers';
 import type { SoAssetSnapshot, SoFieldValue, SoValueKind } from './asset-fields-client';
 import { buildRows, toEdit, toMemberEdit } from './so-value-model';
-import { encodeValue, encodeYamlString, decodeYamlString, enumLabel, toDisplay } from './so-value-format';
+import {
+  encodeValue,
+  encodeYamlString,
+  decodeYamlString,
+  enumLabel,
+  nicifyFieldName,
+  summarizeRaw,
+  toDisplay,
+} from './so-value-format';
 
 // Type-only imports: a feature barrel pulls runtime modules that touch
 // `document` at load, and this runner has no DOM.
@@ -72,10 +80,36 @@ describe('buildRows — states', () => {
     expect(rows[0].yamlKey).toBe('damage');
   });
 
-  it('reports a field the asset does not have yet as missing, and not editable', () => {
+  it('reports a field the asset does not have yet as missing, but editable by insertion', () => {
     const rows = buildRows(schemaOf([damage]), snapshotOf([]));
     expect(rows[0].state).toBe('missing');
     expect(rows[0].value).toBeNull();
+    expect(rows[0].editable).toBe(true);
+  });
+
+  it('anchors an insertion after the last field actually present in the file', () => {
+    const a = field('a', 'int');
+    const gap = field('gap', 'int');
+    const c = field('c', 'int');
+    const rows = buildRows(
+      schemaOf([a, gap, c]),
+      snapshotOf([value('a', '1'), value('c', '3')]),
+    );
+    // `gap` is missing; it must land after `a`, not at the end of the document,
+    // so the file keeps the class's declaration order.
+    expect(rows[1].state).toBe('missing');
+    expect(rows[1].insertAfter).toBe('a');
+  });
+
+  it('appends when nothing precedes the missing field', () => {
+    const rows = buildRows(schemaOf([damage]), snapshotOf([]));
+    expect(rows[0].insertAfter).toBeNull();
+  });
+
+  it('does not make a non-editable field insertable', () => {
+    const arr = field('mods', 'unknown', { isArray: true, editable: false });
+    const rows = buildRows(schemaOf([arr]), snapshotOf([]));
+    expect(rows[0].state).toBe('missing');
     expect(rows[0].editable).toBe(false);
   });
 
@@ -166,10 +200,33 @@ describe('toEdit', () => {
   });
 
   it('returns null for a non-editable row', () => {
-    const missing = buildRows(schemaOf([damage]), snapshotOf([]))[0];
-    expect(toEdit(missing, '5', '11400000')).toBeNull();
     const unmapped = buildRows(schemaOf([]), snapshotOf([value('old', '1')]))[0];
     expect(toEdit(unmapped, '5', '11400000')).toBeNull();
+    const arr = field('mods', 'unknown', { isArray: true, editable: false });
+    const arrRow = buildRows(schemaOf([arr]), snapshotOf([]))[0];
+    expect(toEdit(arrRow, '5', '11400000')).toBeNull();
+  });
+
+  it('emits an insertion for a field the asset does not have yet', () => {
+    const a = field('a', 'int');
+    const missing = field('armorPierce', 'float');
+    const rows = buildRows(schemaOf([a, missing]), snapshotOf([value('a', '1')]));
+    expect(toEdit(rows[1], '0.15', '11400000')).toEqual({
+      fileId: '11400000',
+      path: 'armorPierce',
+      value: '0.15',
+      ifMissing: { mode: 'insertAfter', anchor: 'a' },
+    });
+  });
+
+  it('appends the insertion when there is no anchor', () => {
+    const row = buildRows(schemaOf([damage]), snapshotOf([]))[0];
+    expect(toEdit(row, '5', '11400000')?.ifMissing).toEqual({ mode: 'insertAtEnd' });
+  });
+
+  it('carries no `expected` on an insertion — there is no current value to guard', () => {
+    const row = buildRows(schemaOf([damage]), snapshotOf([]))[0];
+    expect(toEdit(row, '5', '11400000')?.expected).toBeUndefined();
   });
 
   it('writes through the migrated key, not the new one', () => {
@@ -290,5 +347,50 @@ describe('display helpers', () => {
     const e = field('f', 'enum', { enumMembers: [{ name: 'Epic', value: 2 }] });
     expect(enumLabel('2', e)).toBe('Epic');
     expect(enumLabel('9', e)).toBe('9');
+  });
+});
+
+describe('nicifyFieldName', () => {
+  it('spells a field the way Unity labels it', () => {
+    expect(nicifyFieldName('loadedLayout')).toBe('Loaded Layout');
+    expect(nicifyFieldName('displayName')).toBe('Display Name');
+    expect(nicifyFieldName('url')).toBe('Url');
+    expect(nicifyFieldName('damage')).toBe('Damage');
+  });
+
+  it('drops Unity prefixes', () => {
+    expect(nicifyFieldName('m_Name')).toBe('Name');
+    expect(nicifyFieldName('_privateThing')).toBe('Private Thing');
+    expect(nicifyFieldName('kMaxCount')).toBe('Max Count');
+  });
+
+  it('splits acronyms and digits sensibly', () => {
+    expect(nicifyFieldName('uiScale')).toBe('Ui Scale');
+    expect(nicifyFieldName('maxHP2')).toBe('Max HP 2');
+  });
+
+  it('never returns empty', () => {
+    expect(nicifyFieldName('m_')).toBe('m_');
+    expect(nicifyFieldName('')).toBe('');
+  });
+});
+
+describe('summarizeRaw', () => {
+  it('counts the items of a block sequence instead of quoting YAML', () => {
+    // A truncated line of YAML tells the reader nothing and reads as an error.
+    expect(summarizeRaw('  - fire\n  - ice', 'block')).toBe('2 items');
+    expect(summarizeRaw('  - only', 'block')).toBe('1 item');
+  });
+
+  it('counts the fields of a block mapping', () => {
+    expect(summarizeRaw('    label: inner\n    damage: 999', 'block')).toBe('2 fields');
+  });
+
+  it('describes an empty inline sequence', () => {
+    expect(summarizeRaw('[]', 'inlineSeq')).toBe('empty');
+  });
+
+  it('passes a scalar through', () => {
+    expect(summarizeRaw('12', 'scalar')).toBe('12');
   });
 });

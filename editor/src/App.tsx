@@ -1310,12 +1310,46 @@ function App() {
       },
     },
     {
+      // No keybinding on purpose: a chord here would also have to be mirrored
+      // in src-tauri/src/menu.rs, whose accelerators win on macOS, and
+      // keybinding-parity.test.ts enforces that. The command is still
+      // reachable from the command palette and supplies the tooltip.
+      id: 'view.scriptableObjects',
+      label: 'Scriptable Objects',
+      category: 'View',
+      handler: () => {
+        useUiStore.getState().setActiveSidebarView('scriptable-objects');
+        useUiStore.getState().setSidebarVisible(true);
+      },
+    },
+    {
       id: 'view.testRunner',
       label: 'Unity Tests',
       category: 'View',
       keybinding: 'mod+shift+u',
       handler: () => {
         useUiStore.getState().setActiveSidebarView('test');
+        useUiStore.getState().setSidebarVisible(true);
+      },
+    },
+    {
+      id: 'view.toggleAssetSource',
+      label: 'Toggle Source / Preview',
+      category: 'View',
+      handler: () => {
+        const path = useWorkspaceStore.getState().activeFilePath;
+        if (!path) return;
+        const ui = useUiStore.getState();
+        const mode = ui.assetViewerMode[path];
+        ui.setAssetViewerMode(path, mode === 'structured' || mode === undefined ? 'raw-edit' : 'structured');
+      },
+    },
+    {
+      id: 'view.unityUi',
+      label: 'Unity UI',
+      category: 'View',
+      handler: () => {
+        useUiStore.getState().setActiveSidebarView('unity-ui');
         useUiStore.getState().setSidebarVisible(true);
       },
     },

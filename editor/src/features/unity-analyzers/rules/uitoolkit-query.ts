@@ -19,6 +19,8 @@
 
 import type { AnalyzerRule, Finding } from '../services/analyzer-engine';
 import { extractQuerySites, resolveQueryName } from '../../../utils/uitoolkit-refs';
+import { queryContextAt } from '../../../utils/uitoolkit-query-context';
+import { typeChainFor, isBuiltinControl } from '../../../utils/uxml-controls';
 import { getUxmlIndex, getCsUiRefIndex } from '../services/uitoolkit-cache';
 
 const RULE_ID = 'unity/uitoolkit-query';
@@ -56,6 +58,15 @@ export const uitoolkitQueryRule: AnalyzerRule = {
         allNames: uxml.allNames,
       });
 
+      // The name resolves -- but does the TYPE? `Q<Button>("wordmark")` on a
+      // ui:Label compiles, returns null, and nothing anywhere says so. Same
+      // failure as the name typo, and the index already knows every element's
+      // tag, so this costs one lookup.
+      if (verdict.kind === 'resolved-associated' || verdict.kind === 'resolved-project') {
+        const mismatch = typeMismatch(scan.text, site.nameStart, site.name, uxml);
+        if (mismatch) findings.push(mismatch);
+        continue;
+      }
       if (verdict.kind !== 'unresolved') continue;
 
       const suggestion = verdict.suggestion
@@ -76,3 +87,41 @@ export const uitoolkitQueryRule: AnalyzerRule = {
     return findings;
   },
 };
+
+/**
+ * `Q<T>("name")` where the element is not a `T`.
+ *
+ * Only reported when EVERY declaration of that name disagrees with `T` -- a
+ * name declared in two documents, one of which matches, is a query we cannot
+ * call wrong. And only for built-in controls: a custom C# control's base class
+ * is invisible to us, so `Q<MyBase>("thing")` might be perfectly correct.
+ */
+function typeMismatch(
+  text: string,
+  literalStart: number,
+  name: string,
+  uxml: NonNullable<ReturnType<typeof getUxmlIndex>>,
+): Finding | null {
+  const ctx = queryContextAt(text, literalStart + 1);
+  const wanted = ctx?.typeArg;
+  if (!wanted || !isBuiltinControl(wanted)) return null;
+
+  const decls = uxml.elements.get(name) ?? [];
+  if (decls.length === 0) return null;
+
+  // Assignable when the requested type appears in the element's own chain.
+  const anyAssignable = decls.some((d) => typeChainFor(d.tag).includes(wanted));
+  if (anyAssignable) return null;
+
+  const tags = [...new Set(decls.map((d) => d.tag))].join(', ');
+  return {
+    ruleId: RULE_ID,
+    code: 'UNITY0504',
+    severity: 'warning',
+    message:
+      `'${name}' is a ${tags}, not a ${wanted}. Q<${wanted}>() filters by type, so this ` +
+      `returns null at runtime even though the element exists.`,
+    start: literalStart,
+    end: literalStart + name.length + 2,
+  };
+}

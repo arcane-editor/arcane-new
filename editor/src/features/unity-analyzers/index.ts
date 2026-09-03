@@ -30,6 +30,11 @@ import {
 } from './services/unity-events-cache';
 import { useUnityIndexStore } from '../../stores/unity-index';
 import { blankStringsAndComments } from './services/csharp-scan';
+export { blankStringsAndComments } from './services/csharp-scan';
+import {
+  registerUiToolkitCsProviders,
+  disposeUiToolkitCsProviders,
+} from './services/uitoolkit-providers';
 import { useWorkspaceStore } from '../../stores/workspace';
 
 let initialized = false;
@@ -50,6 +55,10 @@ export function initUnityAnalyzers(monaco: Monaco): void {
   registerAllRules();
   stopEngineFn = startEngine(monaco);
   registerFsaRename();
+  // Completion, hover and go-to-definition for the `Q<T>("name")` boundary.
+  // Registered next to csharp-ls, not instead of it: Monaco merges completions,
+  // stacks hovers, and csharp-ls has no definition for a string literal.
+  registerUiToolkitCsProviders(monaco, () => useWorkspaceStore.getState().workspacePath);
 
   // The ProjectSettings snapshot backs the tag/layer/scene/input checks. It is
   // loaded per workspace and re-run afterwards, because the rules read it
@@ -108,6 +117,7 @@ export function stopUnityAnalyzers(): void {
     stopEngine();
   }
   unregisterFsaRename();
+  disposeUiToolkitCsProviders();
   unsubWorkspace?.();
   unsubWorkspace = null;
   unsubUiToolkit?.();

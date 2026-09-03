@@ -55,6 +55,13 @@ export interface SoAssetSnapshot {
   sha1: string;
 }
 
+/** What to do when the key is not in the asset yet. */
+export type SoIfMissing =
+  | { mode: 'reject' }
+  /** Insert directly after this sibling key, keeping serialization order. */
+  | { mode: 'insertAfter'; anchor: string }
+  | { mode: 'insertAtEnd' };
+
 export interface SoFieldEdit {
   fileId: string;
   /** `damage`, or `tint.g` for one member of an inline map. */
@@ -63,6 +70,15 @@ export interface SoFieldEdit {
   value: string;
   /** Refuse unless the current on-disk value is byte-equal to this. */
   expected?: string;
+  /** Omitted means reject; the writer never invents a key by accident. */
+  ifMissing?: SoIfMissing;
+  /**
+   * Delete the key instead of writing a value.
+   *
+   * A rename is insert-new + remove-old in ONE batch, so a crash between them
+   * cannot lose the value. `value` is ignored when this is set.
+   */
+  remove?: boolean;
 }
 
 /** Mirrors Rust's `EditRejection`; `kind` is the discriminant. */

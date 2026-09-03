@@ -35,10 +35,62 @@ export type ActionRefKind =
   /** `void OnJump(...)` -- the behaviour itself. What runs when it fires. */
   | 'handler'
   /** `controls.FindActionMap("Player")` -- a map, not an action. */
-  | 'find-map';
+  | 'find-map'
+  /**
+   * `controls.Player.Jump` -- the generated C# wrapper class.
+   *
+   * The blind spot this closes. Wrapper access carries NO string literal, so
+   * none of the patterns above see it, and `SUBSCRIBE_RE` drops
+   * `controls.Player.Jump.performed += OnJump` because `Jump` was never bound
+   * by a `FindAction` assignment. In a project with `generateWrapperCode: 1` --
+   * i.e. every project past prototype -- that made polling reads like
+   * `controls.Player.Fire.IsPressed()` invisible and left actions reporting
+   * zero references while the UI stated outright that nothing reads them.
+   */
+  | 'wrapper';
 
 /** Kinds that answer "what happens when this fires?" rather than "where is it read?". */
 export const BEHAVIOUR_KINDS: readonly ActionRefKind[] = ['handler'];
+
+/**
+ * Unity's own identifier sanitisation, mirrored exactly.
+ *
+ * `CSharpCodeHelpers.MakeIdentifier` REMOVES every character that is not a
+ * letter, digit or underscore -- it does not replace them -- and prefixes `_`
+ * when the name starts with a digit. So the action `"Move Camera"` is reached
+ * as `controls.Player.MoveCamera`, and matching on the raw name would miss it.
+ */
+export function makeIdentifier(name: string): string {
+  if (name === '') return name;
+  const prefixed = /^[0-9]/.test(name) ? `_${name}` : name;
+  return prefixed.replace(/[^\p{L}\p{N}_]/gu, '');
+}
+
+/**
+ * Which `<Map>.<Action>` property paths the generated wrapper exposes.
+ *
+ * Keyed by the SANITISED spelling because that is what appears in C#, valued by
+ * the real asset name because that is what everything else keys on.
+ */
+export interface WrapperCatalog {
+  byMap: ReadonlyMap<string, ReadonlyMap<string, string>>;
+}
+
+/** Build the catalog from the asset's own map/action names. */
+export function buildWrapperCatalog(
+  actions: readonly { name: string; mapName: string }[],
+): WrapperCatalog {
+  const byMap = new Map<string, Map<string, string>>();
+  for (const action of actions) {
+    const map = makeIdentifier(action.mapName);
+    const ident = makeIdentifier(action.name);
+    if (map === '' || ident === '') continue;
+    let inner = byMap.get(map);
+    if (!inner) byMap.set(map, (inner = new Map()));
+    inner.set(ident, action.name);
+  }
+  return { byMap };
+}
 
 export interface ActionReference {
   filePath: string;
@@ -66,6 +118,13 @@ const FIND_MAP_RE = /\bFindActionMap\s*\(\s*"([^"\n]*)"/g;
 const ACTION_ASSIGN_RE = /\b(\w+)\s*=\s*[^;\n]*?\bFindAction\s*\(\s*"([^"\n]*)"/g;
 /** `jump.performed += OnJump` -- binds a local to the method that handles it. */
 const SUBSCRIBE_RE = /\b(\w+)\s*\.\s*(performed|started|canceled)\s*\+=\s*([\w.]+)/g;
+/**
+ * `controls.Player.Jump` -- two identifiers in a row. Deliberately loose: the
+ * receiver's TYPE is unknowable without symbol resolution, so the pair is
+ * filtered against the catalog instead. Same safety trick the literal patterns
+ * already use, and it is what keeps `transform.position.x` from matching.
+ */
+const WRAPPER_RE = /\.\s*([A-Za-z_]\w*)\s*\.\s*([A-Za-z_]\w*)\b/g;
 /**
  * A method declaration. Anchored on the return type so `jump.performed +=
  * OnJump` is read as a subscription, not as a second definition of `OnJump`.
@@ -107,6 +166,7 @@ export function findActionReferencesInText(
   filePath: string,
   text: string,
   actionNames: readonly string[],
+  catalog?: WrapperCatalog,
 ): ActionReference[] {
   if (actionNames.length === 0) return [];
   const known = new Set(actionNames);
@@ -161,6 +221,25 @@ export function findActionReferencesInText(
     if (known.has(action)) actionOfLocal.set(m[1], action);
   }
 
+  // Wrapper access. Runs before the subscribe pass on purpose: binding the
+  // wrapper's property name as a receiver is what lets
+  // `controls.Player.Jump.performed += OnJump` resolve at all -- SUBSCRIBE_RE
+  // captures `Jump` as the receiver and would otherwise drop it.
+  if (catalog) {
+    WRAPPER_RE.lastIndex = 0;
+    for (let m = WRAPPER_RE.exec(text); m !== null; m = WRAPPER_RE.exec(text)) {
+      const real = catalog.byMap.get(m[1])?.get(m[2]);
+      if (!real) continue;
+      actionOfLocal.set(m[2], real);
+      push(m.index + m[0].lastIndexOf(m[2]), 'wrapper', real, {
+        qualifiedName: `${m[1]}/${m[2]}`,
+      });
+      // Step back so `a.Player.Jump` and an immediately following pair are both
+      // seen -- the trailing `\b` does not consume, but overlapping pairs can.
+      WRAPPER_RE.lastIndex = m.index + m[0].lastIndexOf(m[2]);
+    }
+  }
+
   /** Handler name -> the action whose event it is attached to. */
   const actionOfHandler = new Map<string, string>();
 
@@ -192,10 +271,22 @@ export function findActionReferencesInText(
 
 // -- Project-wide index -------------------------------------------------------
 
+/**
+ * Does the project wire actions through the Inspector rather than by name?
+ *
+ * `[SerializeField] InputActionReference` is dragged in the Inspector and leaves
+ * NO trace in any C# pattern we scan for. Its presence anywhere is therefore a
+ * project-wide reason to say "unknown" rather than "nothing reads this" -- which
+ * is the one claim that would make the panel untrustworthy.
+ */
+const INPUT_ACTION_REFERENCE_RE = /\bInputActionReference\b/;
+
 export interface ActionReferenceIndex {
   /** Keyed by unqualified action name -- the form every site resolves to. */
   byActionName: Map<string, ActionReference[]>;
   scannedFiles: number;
+  /** True when any scanned file mentions `InputActionReference`. */
+  usesInputActionReference: boolean;
 }
 
 /** Unity noise that can never contain project scripts. */
@@ -218,9 +309,11 @@ interface FileContent {
 export async function buildActionReferenceIndex(
   workspacePath: string,
   actionNames: readonly string[],
+  catalog?: WrapperCatalog,
 ): Promise<ActionReferenceIndex> {
   const byActionName = new Map<string, ActionReference[]>();
-  if (actionNames.length === 0) return { byActionName, scannedFiles: 0 };
+  if (actionNames.length === 0)
+    return { byActionName, scannedFiles: 0, usesInputActionReference: false };
 
   let paths: string[];
   try {
@@ -229,11 +322,12 @@ export async function buildActionReferenceIndex(
       extraExcludes: SCAN_EXCLUDES,
     });
   } catch {
-    return { byActionName, scannedFiles: 0 };
+    return { byActionName, scannedFiles: 0, usesInputActionReference: false };
   }
 
   const csharp = paths.filter((p) => p.endsWith('.cs'));
   let scannedFiles = 0;
+  let usesInputActionReference = false;
 
   for (let i = 0; i < csharp.length; i += READ_CHUNK) {
     const chunk = csharp.slice(i, i + READ_CHUNK);
@@ -245,7 +339,10 @@ export async function buildActionReferenceIndex(
     }
     for (const file of files) {
       scannedFiles++;
-      for (const ref of findActionReferencesInText(file.path, file.content, actionNames)) {
+      if (!usesInputActionReference && INPUT_ACTION_REFERENCE_RE.test(file.content)) {
+        usesInputActionReference = true;
+      }
+      for (const ref of findActionReferencesInText(file.path, file.content, actionNames, catalog)) {
         const list = byActionName.get(ref.actionName);
         if (list) list.push(ref);
         else byActionName.set(ref.actionName, [ref]);
@@ -253,5 +350,5 @@ export async function buildActionReferenceIndex(
     }
   }
 
-  return { byActionName, scannedFiles };
+  return { byActionName, scannedFiles, usesInputActionReference };
 }

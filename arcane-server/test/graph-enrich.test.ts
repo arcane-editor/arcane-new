@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { env, SELF } from 'cloudflare:test';
 import { seedPasswordUser, tokenFor } from './helpers.ts';
 import { MODEL_CATALOG } from '../src/lib/costs.ts';
-import { EXECUTOR_MODEL, DEFAULT_MODEL_ROUTING } from '../src/config/plans.ts';
+import { SPARK_MODEL, DEFAULT_MODEL_ROUTING } from '../src/config/plans.ts';
 import { clearConfigCache } from '../src/lib/app-config.ts';
 
 // Finding 1 (2026-08-22 final-review fix wave): /v1/graph/enrich used to hand
@@ -42,13 +42,13 @@ describe('graph enrich serve guard: model_unconfigured', () => {
         const token = await tokenFor(user);
 
         // No model_routing row seeded → DEFAULT_MODEL_ROUTING applies, whose
-        // mid.executor is EXECUTOR_MODEL (see plans.ts). Pull that entry out of
+        // mid.executor is SPARK_MODEL (see plans.ts). Pull that entry out of
         // the live catalog so getEffectivePricing's merge no longer contains
         // it — simulating a routing doc/catalog drift, same technique as
         // chat-metering.test.ts's model_unconfigured test.
-        expect(DEFAULT_MODEL_ROUTING.tiers.mid.executor).toBe(EXECUTOR_MODEL);
-        const saved = MODEL_CATALOG[EXECUTOR_MODEL];
-        delete MODEL_CATALOG[EXECUTOR_MODEL];
+        expect(DEFAULT_MODEL_ROUTING.tiers.mid.executor).toBe(SPARK_MODEL);
+        const saved = MODEL_CATALOG[SPARK_MODEL];
+        delete MODEL_CATALOG[SPARK_MODEL];
         clearConfigCache(); // force a fresh getEffectivePricing read against the mutated catalog
         try {
             const res = await post('/v1/graph/enrich', token, ENRICH_BODY);
@@ -65,7 +65,7 @@ describe('graph enrich serve guard: model_unconfigured', () => {
             ).bind(user.id).first<{ n: number }>();
             expect(row!.n).toBe(0);
         } finally {
-            MODEL_CATALOG[EXECUTOR_MODEL] = saved!;
+            MODEL_CATALOG[SPARK_MODEL] = saved!;
             clearConfigCache();
         }
     });

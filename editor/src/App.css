@@ -8711,3 +8711,756 @@ html, body, #root {
     box-shadow: inset 3px 0 0 var(--accent);
   }
 }
+
+
+/* ── ScriptableObject drift + reference map ──────────────────────────────
+   Re-applied after restoring App.css. A working-tree edit had dropped 1,344
+   lines from this file -- 113 class definitions across the hierarchy, plan
+   docs, markdown, settings, modals, SCM, coach marks and the AI overlay --
+   while adding these. The deletion was incoherent (it kept `.hierarchy-row`
+   and removed `.hierarchy-row-label`), so it was restored wholesale and the
+   genuinely new rules below were replayed on top. */
+
+.so-type-icon {
+  color: var(--unity-inspector);
+  flex-shrink: 0;
+}
+
+.so-instance-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  font-size: 12.5px;
+  color: var(--text-primary);
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+.so-instance-row:hover {
+  background: var(--hover);
+}
+
+.so-instance-icon {
+  color: var(--text-secondary);
+  opacity: 0.75;
+  flex-shrink: 0;
+}
+
+.so-instance-script {
+  color: var(--text-secondary);
+  font-size: 11px;
+  margin-top: 2px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+}
+
+.so-instance-script:hover {
+  color: var(--accent);
+}
+
+.so-field-chip-quiet {
+  background: var(--surface-container-high);
+  color: var(--text-secondary);
+}
+
+.so-field-input-num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  width: 88px;
+}
+
+.so-check {
+  width: 15px;
+  height: 15px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  border: 1px solid var(--ghost-border);
+  background: var(--bg-input);
+  color: transparent;
+  cursor: pointer;
+  transition: background var(--motion-fast) var(--ease-out),
+    border-color var(--motion-fast) var(--ease-out);
+}
+
+.so-check:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.so-check-on {
+  background: var(--badge-bg);
+  border-color: var(--accent);
+  /* The tick carries the colour; the fill stays a tint. */
+  color: var(--accent);
+}
+
+.so-check:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.so-check:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.so-field-member .so-field-input-num {
+  width: 62px;
+}
+
+.so-field-swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  border: 1px solid var(--ghost-border);
+  flex-shrink: 0;
+}
+
+.so-field-muted {
+  color: var(--text-secondary);
+  font-style: italic;
+  opacity: 0.75;
+}
+
+.so-field-ref,
+.so-field-collection {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 340px;
+  padding: 1px 7px 1px 5px;
+  border-radius: 3px;
+  border: 1px solid var(--ghost-border);
+  background: var(--surface-container-high);
+  font-size: 11.5px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.so-field-ref {
+  color: var(--info);
+}
+
+.so-field-collection {
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.so-drift {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 8px;
+}
+
+.so-drift-card {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px;
+  margin-bottom: 8px;
+  background: var(--bg-primary);
+}
+
+.so-drift-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.so-drift-badge {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.so-drift-badge-renamed {
+  background: var(--warning-bg);
+  color: var(--warning);
+}
+
+.so-drift-badge-added {
+  background: var(--info-bg);
+  color: var(--info);
+}
+
+.so-drift-badge-orphan {
+  background: var(--error-bg);
+  color: var(--error-text);
+}
+
+.so-drift-sig {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-primary);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.so-drift-sig s {
+  color: var(--text-secondary);
+}
+
+.so-drift-count {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.so-drift-why {
+  margin: 0 0 6px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.so-drift-assets {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-secondary);
+  opacity: 0.85;
+  margin-bottom: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.so-drift-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.so-drift-done {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+  color: var(--git-added);
+}
+
+.so-drift-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.so-refmap {
+  border-top: 1px solid var(--border);
+  margin-top: 12px;
+  padding-bottom: 20px;
+  max-width: 760px;
+}
+
+.so-refmap-loading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 14px 8px;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+}
+
+.so-refmap-broken {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 14px 10px;
+  padding: 6px 9px;
+  border-radius: 4px;
+  background: var(--error-bg);
+  color: var(--error-text);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.so-refmap-cols {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 8px 24px;
+  padding: 0 14px;
+}
+
+.so-refmap-col h4 {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: 0 0 3px;
+  font-size: 10px;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.so-refmap-col h4 .so-refmap-count {
+  margin-left: 0;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--surface-container-high);
+}
+
+.so-refmap-count {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+  margin-left: auto;
+}
+
+.so-refmap-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 12px;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.so-refmap-row:hover {
+  background: var(--hover);
+}
+
+.so-refmap-row-broken {
+  color: var(--error-text);
+  cursor: default;
+}
+
+.so-refmap-via {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-secondary);
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.so-refmap-empty {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+  opacity: 0.8;
+  padding: 2px 6px;
+}
+
+
+/* ── UXML preview: element inspector ──────────────────────────────────────
+   The right-hand column of the .uxml preview. Answers two questions about the
+   selected element — what C# drives it, and what styles it — one per tab.
+   Nearly every row navigates, so these need real hover states; that is why
+   they live here rather than in module-scope style consts like the rest of
+   the uitoolkit feature. */
+
+.uxi {
+  width: 340px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-left: 1px solid var(--border);
+  background: var(--bg-sidebar);
+}
+
+.uxi-head {
+  flex-shrink: 0;
+  padding: 10px 14px 9px;
+}
+
+.uxi-identity {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  min-width: 0;
+}
+
+.uxi-name {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--accent);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.uxi-type {
+  font-size: 11px;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.uxi-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 7px;
+}
+
+.uxi-chip {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 15px;
+  padding: 0 5px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-container-high);
+  color: var(--text-secondary);
+}
+
+.uxi-chip--generated {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--border);
+  opacity: 0.6;
+}
+
+/* Same underline strip as .so-inspector-tab, keyed to the UI Toolkit accent. */
+.uxi-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 0 8px;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.uxi-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-family: inherit;
+  color: var(--text-secondary);
+  cursor: pointer;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+
+.uxi-tab:hover {
+  color: var(--text-primary);
+}
+
+.uxi-tab.active {
+  color: var(--text-primary);
+  border-bottom-color: var(--accent);
+}
+
+.uxi-tab-count {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
+.uxi-tab.active .uxi-tab-count {
+  color: var(--accent);
+}
+
+.uxi-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: 12px;
+}
+
+.uxi-section {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 13px 14px 5px;
+  font-size: 9.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.uxi-section::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.uxi-empty {
+  margin: 0;
+  padding: 14px;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+.uxi-empty--start {
+  padding-top: 18px;
+}
+
+.uxi-empty code {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+
+/* ── Styles: one row per property, carrying its own provenance ──
+   Written as the declaration it is — `font-size: 18px` — rather than as two
+   columns with a gap between them. A programmer reads a declaration faster
+   than a table row, and it removes the dead space that made the property and
+   its value look like two unrelated lists. */
+
+.uxi-props {
+  padding: 0 8px;
+}
+
+.uxi-prop-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: var(--radius-sm);
+}
+
+.uxi-prop-line:hover {
+  background: var(--hover);
+}
+
+.uxi-prop-decl {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 0 2px 6px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  text-align: left;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.75;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.uxi-prop-name {
+  color: var(--unity-engine-type);
+}
+
+.uxi-prop-colon {
+  color: var(--text-secondary);
+  opacity: 0.7;
+}
+
+.uxi-prop-value {
+  color: var(--text-primary);
+}
+
+/* Nothing survived to set this property — the value shown is what was written
+   and discarded, so it must not read as the value in effect. */
+.uxi-prop-value.struck {
+  color: var(--text-secondary);
+  text-decoration: line-through;
+  opacity: 0.75;
+}
+
+.uxi-prop-tag {
+  margin-left: 6px;
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  color: var(--warning);
+}
+
+.uxi-prop-row.unset .uxi-prop-name {
+  color: var(--text-secondary);
+}
+
+/* The rule that won, sitting where a comment would in the stylesheet. */
+.uxi-prop-origin {
+  flex-shrink: 0;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--accent);
+  opacity: 0.75;
+}
+
+.uxi-prop-line:hover .uxi-prop-origin {
+  opacity: 1;
+}
+
+.uxi-prop-more {
+  flex-shrink: 0;
+  margin-right: 6px;
+  padding: 0 4px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--surface-container-high);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  line-height: 15px;
+}
+
+.uxi-prop-more:hover,
+.uxi-prop-more.open {
+  background: var(--accent);
+  color: var(--bg-sidebar);
+}
+
+/* The rules this property beat. Collapsed by default: they are the working,
+   and the working is only wanted when the answer is surprising. */
+.uxi-prop-source {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  margin-left: 6px;
+  padding: 1px 6px 1px 0;
+  border: none;
+  border-left: 1px solid var(--border);
+  padding-left: 10px;
+  background: none;
+  cursor: pointer;
+  text-align: left;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 1.7;
+  color: var(--text-secondary);
+}
+
+.uxi-prop-source:hover {
+  border-left-color: var(--accent);
+  color: var(--text-primary);
+}
+
+.uxi-prop-source-mark {
+  width: 8px;
+  flex-shrink: 0;
+  font-size: 9px;
+  opacity: 0.8;
+}
+
+.uxi-prop-source-value {
+  flex-shrink: 0;
+}
+
+.uxi-prop-source.overridden .uxi-prop-source-value {
+  text-decoration: line-through;
+  opacity: 0.6;
+}
+
+.uxi-prop-source.dropped {
+  color: var(--warning);
+}
+
+.uxi-prop-source-sel {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.8;
+}
+
+/* ── C# references ── */
+
+.uxi-refs {
+  padding: 0 8px;
+}
+
+.uxi-ref {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  min-width: 0;
+  padding: 3px 6px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  cursor: pointer;
+  text-align: left;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-primary);
+}
+
+.uxi-ref:hover {
+  background: var(--hover);
+}
+
+.uxi-ref-mark {
+  flex-shrink: 0;
+  color: var(--success);
+}
+
+.uxi-ref-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.uxi-ref--quiet {
+  color: var(--text-secondary);
+}
+
+.uxi-ref--quiet .uxi-ref-mark {
+  color: var(--text-secondary);
+  opacity: 0.6;
+}
+
+/* A mutation is code changing the element, not an event it raises — same
+   section, different mark, so the two do not read as one kind of thing. */
+.uxi-ref--mutation .uxi-ref-mark {
+  color: var(--accent);
+}
+
+.uxi-where {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 9.5px;
+  color: var(--text-secondary);
+  opacity: 0.6;
+  white-space: nowrap;
+}
+
+/* ── UXML preview: header toolbar ──
+   A pressed-state toggle, sized to sit in the preview's 12px header strip. */
+.uxml-preview-toggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 11px;
+}
+
+.uxml-preview-toggle:hover {
+  color: var(--text-primary);
+  background: var(--hover);
+}
+
+.uxml-preview-toggle.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}

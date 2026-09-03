@@ -123,3 +123,49 @@ export function enumLabel(raw: string, field: SoField): string {
   if (!Number.isFinite(n)) return raw;
   return field.enumMembers?.find((m) => m.value === n)?.name ?? raw;
 }
+
+/**
+ * Unity's own label spelling for a serialized field.
+ *
+ * Unity shows `loadedLayout` as "Loaded Layout" in its Inspector, and people
+ * navigate by that label, not by the C# identifier. Mirrors
+ * `ObjectNames.NicifyVariableName`: drop a leading `m_`/`k`/underscore, split
+ * camelCase and digit runs, and capitalise.
+ */
+export function nicifyFieldName(name: string): string {
+  let s = name;
+  if (s.startsWith('m_')) s = s.slice(2);
+  else if (/^k[A-Z]/.test(s)) s = s.slice(1);
+  s = s.replace(/^_+/, '');
+  if (!s) return name;
+
+  const spaced = s
+    // camelCase / PascalCase boundary
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    // ACRONYMWord -> ACRONYM Word
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+    // letter -> digit boundary
+    .replace(/([A-Za-z])(\d)/g, '$1 $2');
+
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
+/**
+ * A short, human summary of a value we will not render as a control.
+ *
+ * A truncated line of YAML tells the reader nothing and reads as an error. The
+ * count does: "3 items" is the useful fact about a list.
+ */
+export function summarizeRaw(raw: string, kind: string): string {
+  const v = raw.trim();
+  if (kind === 'block') {
+    // Block sequences are `- item` lines; mappings are `key: value` lines.
+    const lines = v.split('\n').filter((l) => l.trim().length > 0);
+    const items = lines.filter((l) => l.trim().startsWith('-')).length;
+    if (items > 0) return `${items} ${items === 1 ? 'item' : 'items'}`;
+    return `${lines.length} ${lines.length === 1 ? 'field' : 'fields'}`;
+  }
+  if (kind === 'inlineSeq') return v === '[]' ? 'empty' : v;
+  if (kind === 'empty') return '';
+  return v;
+}

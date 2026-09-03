@@ -29,6 +29,7 @@ import { initUnityAnalyzers } from '../../unity-analyzers';
 import { initUnityCompilerDiagnostics } from '../../unity-compiler';
 import { AssetViewer, isUnityAssetFile, SceneDiffViewer } from '../../unity-asset-viewer';
 import { InputActionsEditor, isInputActionsFile } from '../../unity-input';
+import { UxmlPreviewEditor, isUxmlFile } from '../../uitoolkit';
 import { ScriptableObjectEditor, initSoInstanceCodeLens } from '../../unity-scriptable-objects';
 import { attachUnityDecorations } from '../../csharp';
 import { initTestCodeLens } from '../../unity-test-runner';
@@ -179,7 +180,8 @@ function EditorPanel() {
 
   const isUnityAsset = isUnityProject && isUnityAssetFile(activeFile.name);
   const isInputActions = isUnityProject && isInputActionsFile(activeFile.name);
-  const structuredCandidate = isUnityAsset || isInputActions;
+  const isUxml = isUnityProject && isUxmlFile(activeFile.name);
+  const structuredCandidate = isUnityAsset || isInputActions || isUxml;
   const assetMode: AssetViewerMode | null = structuredCandidate
     ? assetViewerModeMap[activeFile.path] ?? (structuredDefault ? 'structured' : 'raw-edit')
     : null;
@@ -187,6 +189,14 @@ function EditorPanel() {
 
   const setRawView = () => useUiStore.getState().setAssetViewerMode(activeFile.path, 'raw-view');
   const setRawEdit = async () => {
+    // UXML is markup people write by hand; scenes and prefabs are machine-
+    // serialised YAML where a stray edit silently breaks GUID references. Only
+    // the second deserves a warning, and showing one for the first teaches
+    // people to click through the one that matters.
+    if (isUxml) {
+      useUiStore.getState().setAssetViewerMode(activeFile.path, 'raw-edit');
+      return;
+    }
     const ok = await ask(
       'Editing this asset by hand can corrupt it and silently break references. Continue?',
       { title: 'Edit Raw', kind: 'warning' },
@@ -216,13 +226,20 @@ function EditorPanel() {
         <ScriptableObjectEditor
           path={activeFile.path}
           name={activeFile.name}
-          onViewRaw={setRawView}
-          onEditRaw={setRawEdit}
           fallback={assetViewer}
         />
       );
     }
     return assetViewer;
+  }
+  if (isUxml && assetMode === 'structured') {
+    return (
+      <UxmlPreviewEditor
+        path={activeFile.path}
+        name={activeFile.name}
+        content={activeFile.content}
+      />
+    );
   }
   if (isInputActions && assetMode === 'structured') {
     return (
@@ -403,16 +420,20 @@ function EditorPanel() {
           }}
         >
           <span>
-            {assetMode === 'raw-edit'
-              ? '⚠ Editing raw YAML — hand-edits can break this asset.'
-              : 'Raw YAML (read-only).'}
+            {isUxml
+              ? assetMode === 'raw-edit'
+                ? 'Editing UXML source.'
+                : 'UXML source (read-only).'
+              : assetMode === 'raw-edit'
+                ? '⚠ Editing raw YAML — hand-edits can break this asset.'
+                : 'Raw YAML (read-only).'}
           </span>
           <button
             className="asset-viewer-btn"
             style={{ marginLeft: 'auto' }}
             onClick={() => useUiStore.getState().setAssetViewerMode(activeFile.path, 'structured')}
           >
-            Structured View
+            {isUxml ? 'Preview' : 'Structured View'}
           </button>
         </div>
       )}

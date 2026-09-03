@@ -196,6 +196,7 @@ export interface SettingsSchema {
   'unity.projectSettingsDiagnostics.enabled': boolean;
   'unity.inputDiagnostics.enabled': boolean;
   'unity.uiDiagnostics.enabled': boolean;
+  'unity.uiToolkit.panel': boolean;
   'lsp.solutionWideAnalysis': boolean;
   'unity.asmdef.diagnostics': boolean;
   'unity.bridge.enabled': boolean;
@@ -204,6 +205,7 @@ export interface SettingsSchema {
   'unity.hierarchyPanel.enabled': boolean;
   'unity.assetViewer.structuredDefault': boolean;
   'unity.scriptableObjects.inspector': boolean;
+  'unity.scriptableObjects.browser': boolean;
   'unity.codeLens.scriptableObjectInstances': boolean;
   'unity.sceneDiff.enabled': boolean;
   'unity.codeLens.assetUsages': boolean;

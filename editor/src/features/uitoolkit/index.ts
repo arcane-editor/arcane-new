@@ -3,6 +3,11 @@ import type { languages, editor, IRange } from 'monaco-editor';
 import { USS_PROPERTIES, USS_PSEUDO } from './data/uss';
 import { UXML_ELEMENTS, UXML_ATTRIBUTES } from './data/uxml';
 
+export { UnityUiPanel } from './components/UnityUiPanel';
+export { UxmlPreviewEditor, isUxmlFile } from './components/UxmlPreviewEditor';
+export { loadUiToolkitSummary } from './services/uxml-assets';
+export type { UiToolkitSummary } from './services/uxml-assets';
+
 // UI Toolkit support (F-3.2 T7.3). Highlighting is delegated to Monaco's mature
 // built-in `css` (USS) and `xml` (UXML) languages — `.uss`/`.uxml` are mapped to
 // them in language-detect. Here we layer Unity-specific COMPLETIONS on top,

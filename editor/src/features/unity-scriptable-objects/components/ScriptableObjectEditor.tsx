@@ -14,12 +14,11 @@ import {
 } from '../services/asset-fields-client';
 import { buildRows, toEdit, toMemberEdit, type SoRow } from '../services/so-value-model';
 import SoFieldRow from './SoFieldRow';
+import SoReferenceMap from './SoReferenceMap';
 
 interface ScriptableObjectEditorProps {
   path: string;
   name: string;
-  onViewRaw: () => void;
-  onEditRaw: () => void;
   /** Rendered when this `.asset` is not a typed ScriptableObject instance. */
   fallback: React.ReactNode;
 }
@@ -41,13 +40,7 @@ interface Probe {
  * that normalises line endings — defeating the entire point of the writer, on a
  * file format where a moved byte is a diff for the whole team.
  */
-function ScriptableObjectEditor({
-  path,
-  name,
-  onViewRaw,
-  onEditRaw,
-  fallback,
-}: ScriptableObjectEditorProps) {
+function ScriptableObjectEditor({ path, name, fallback }: ScriptableObjectEditorProps) {
   const [phase, setPhase] = useState<Phase>('probing');
   const [probe, setProbe] = useState<Probe | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -141,7 +134,7 @@ function ScriptableObjectEditor({
 
   if (phase === 'probing') {
     return (
-      <Shell name={name} onViewRaw={onViewRaw} onEditRaw={onEditRaw} subtitle="Reading…">
+      <Shell name={name} subtitle="Reading…">
         <div className="so-editor-empty">
           <LoaderCircle size={18} className="so-spin" strokeWidth={1.5} />
         </div>
@@ -154,12 +147,7 @@ function ScriptableObjectEditor({
   const { schema, snapshot } = probe;
 
   return (
-    <Shell
-      name={name}
-      onViewRaw={onViewRaw}
-      onEditRaw={onEditRaw}
-      subtitle={schema.className}
-    >
+    <Shell name={name} subtitle={schema.className}>
       {staleOnDisk && (
         <div className="so-editor-banner">
           <span>This asset changed on disk — reload to continue editing.</span>
@@ -199,6 +187,10 @@ function ScriptableObjectEditor({
             ))}
           </div>
         ))}
+
+        {/* Inside the scroll container, not pinned below it: the map grows
+            with the reference count and would otherwise be clipped. */}
+        <SoReferenceMap path={path} rows={rows} />
       </div>
     </Shell>
   );
@@ -220,18 +212,14 @@ function groupRows(rows: SoRow[], schema: SoSchema) {
   return out;
 }
 
-/** Header chrome, identical to `AssetViewer`'s so switching does not flicker. */
+/** Header chrome for the typed form. */
 function Shell({
   name,
   subtitle,
-  onViewRaw,
-  onEditRaw,
   children,
 }: {
   name: string;
   subtitle: string;
-  onViewRaw: () => void;
-  onEditRaw: () => void;
   children: React.ReactNode;
 }) {
   return (
@@ -240,14 +228,6 @@ function Shell({
         <FileCode2 size={14} style={{ opacity: 0.7 }} />
         <span className="so-editor-name">{name}</span>
         <span className="so-editor-subtitle">{subtitle}</span>
-        <div className="so-editor-actions">
-          <button className="asset-viewer-btn" onClick={onViewRaw}>
-            View Raw
-          </button>
-          <button className="asset-viewer-btn" onClick={onEditRaw}>
-            Edit Raw
-          </button>
-        </div>
       </div>
       {children}
     </div>

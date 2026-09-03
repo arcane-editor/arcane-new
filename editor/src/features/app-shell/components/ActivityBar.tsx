@@ -1,4 +1,4 @@
-import { Files, GitBranch, Search, Settings, Bug, Network, FlaskConical, SquareTerminal, Gamepad2 } from 'lucide-react';
+import { Files, GitBranch, Search, Settings, Bug, Network, FlaskConical, SquareTerminal, Gamepad2, Boxes, PanelsTopLeft } from 'lucide-react';
 import Tooltip from '../../../components/Tooltip';
 import { useUiStore, type SidebarView } from '../../../stores/ui';
 import { useCommandsStore } from '../../../stores/commands';
@@ -33,6 +33,8 @@ function ActivityBar() {
   const hierarchyEnabled = useSettingsStore((s) => s.getSetting('unity.hierarchyPanel.enabled') !== false);
   const testRunnerEnabled = useSettingsStore((s) => s.getSetting('unity.testRunner.enabled') !== false);
   const inputHubEnabled = useSettingsStore((s) => s.getSetting('unity.inputHub.enabled') !== false);
+  const soBrowserEnabled = useSettingsStore((s) => s.getSetting('unity.scriptableObjects.browser') !== false);
+  const unityUiEnabled = useSettingsStore((s) => s.getSetting('unity.uiToolkit.panel') !== false);
   // The Input Hub is meaningless under the legacy Input Manager -- there are
   // no .inputactions assets to edit and no action names to resolve -- so the
   // icon is absent rather than present-and-empty. `inputSystem` is null until
@@ -60,11 +62,17 @@ function ActivityBar() {
     ...(isUnityProject && hierarchyEnabled
       ? [{ id: 'hierarchy' as SidebarView, icon: Network, label: 'Unity Hierarchy', commandId: 'view.hierarchy' }]
       : []),
+    ...(isUnityProject && soBrowserEnabled
+      ? [{ id: 'scriptable-objects' as SidebarView, icon: Boxes, label: 'Scriptable Objects', commandId: 'view.scriptableObjects' }]
+      : []),
     ...(isUnityProject && testRunnerEnabled
       ? [{ id: 'test' as SidebarView, icon: FlaskConical, label: 'Unity Tests', commandId: 'view.testRunner' }]
       : []),
     ...(isUnityProject && inputSystemActive && inputHubEnabled
       ? [{ id: 'input' as SidebarView, icon: Gamepad2, label: 'Input Actions', commandId: 'view.inputHub' }]
+      : []),
+    ...(isUnityProject && unityUiEnabled
+      ? [{ id: 'unity-ui' as SidebarView, icon: PanelsTopLeft, label: 'Unity UI', commandId: 'view.unityUi' }]
       : []),
     ...(isUnityProject && debuggerEnabled
       ? [{ id: 'debug' as SidebarView, icon: Bug, label: 'Run and Debug', commandId: 'view.debug' }]
