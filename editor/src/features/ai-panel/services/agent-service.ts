@@ -128,10 +128,12 @@ function restoreAgentMessages(messages: AiMessage[]): AgentMessage[] {
         timestamp: m.timestamp,
       });
     }
-    // system / permissionRequest / questionRequest / verifiedPass are not part
-    // of LLM history — skip. (`ask_user`'s answer is already the tool call's
-    // own `toolResult`, which the branch above restores; the questionRequest
-    // message is UI-only, same as permissionRequest.)
+    // system / permissionRequest / questionRequest / verifiedPass / error /
+    // stopped are not part of LLM history — skip. (`ask_user`'s answer is
+    // already the tool call's own `toolResult`, which the branch above
+    // restores; the questionRequest message is UI-only, same as
+    // permissionRequest. `stopped` (T4) is a UI-only marker for a user Stop —
+    // resuming re-sends fresh text, it never replays as if the model said it.)
   }
   return out;
 }
@@ -786,22 +788,24 @@ export class AgentService {
       return;
     }
 
-    // T5 fix wave: a deliberate Stop mid-stream can leave an 'error' tail
-    // (the aborted fetch rejects reader.read(), so hosted-stream pushes an
-    // error event rather than a clean 'aborted' done), and detectTurnOutcome
-    // checks stopReason 'error' (rule 2) BEFORE abortRequested (rule 3) —
-    // reordering those rules would break the toolUse-tail semantics other
-    // callers depend on, so suppress ALL outcome blocks for a user-aborted
-    // send here instead. abortRequested is per-send and only true when the
-    // user stopped THIS turn, so no error/crash block on abort is correct
-    // (the "none on abort" invariant).
-    if (!this.abortRequested) {
-      const outcome = detectTurnOutcome(this.agent.getMessages().slice(before), this.abortRequested);
-      if (outcome.type === 'error') {
-        useAiStore.getState().addTurnError(classifyTurnError(outcome.raw));
-      } else if (outcome.type === 'crash') {
-        useAiStore.getState().addTurnError(loopCrashError());
-      }
+    // T4: `detectTurnOutcome`'s own rule 0 checks `abortRequested` FIRST, ahead
+    // of everything else — so it always reports 'aborted' for a user-initiated
+    // Stop no matter what shape the tail is left in (a deliberate Stop
+    // mid-stream can leave an 'error' tail: the aborted fetch rejects
+    // `reader.read()`, so `hosted-stream.ts` pushes an error event rather than
+    // a clean 'aborted' done; a Stop mid-tool-execution can leave a 'toolUse'
+    // tail, or even no assistant message at all). That means this call no
+    // longer needs a caller-side `if (!this.abortRequested)` guard — the
+    // outcome detector itself is now the single source of truth for "was this
+    // aborted", so it always runs, and its result is always the right one to
+    // act on.
+    const outcome = detectTurnOutcome(this.agent.getMessages().slice(before), this.abortRequested);
+    if (outcome.type === 'error') {
+      useAiStore.getState().addTurnError(classifyTurnError(outcome.raw));
+    } else if (outcome.type === 'crash') {
+      useAiStore.getState().addTurnError(loopCrashError());
+    } else if (outcome.type === 'aborted') {
+      useAiStore.getState().addStoppedMarker({ promptMode });
     }
   }
 

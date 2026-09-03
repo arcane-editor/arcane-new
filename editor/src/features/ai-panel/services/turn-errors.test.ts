@@ -301,6 +301,26 @@ describe('detectTurnOutcome', () => {
     expect(result).toEqual({ type: 'aborted' });
   });
 
+  // ---- rule 0: abortRequested wins outright (T4) ----
+
+  it('reports aborted when abortRequested wins over an error tail', () => {
+    const result = detectTurnOutcome(
+      [assistantMsg({ stopReason: 'error', errorMessage: 'Server error (500): boom' })],
+      true,
+    );
+    expect(result).toEqual({ type: 'aborted' });
+  });
+
+  it('reports aborted when abortRequested wins even with no assistant message at all', () => {
+    const result = detectTurnOutcome([userMsg()], true);
+    expect(result).toEqual({ type: 'aborted' });
+  });
+
+  it('reports aborted when abortRequested wins over an empty message list', () => {
+    const result = detectTurnOutcome([], true);
+    expect(result).toEqual({ type: 'aborted' });
+  });
+
   it('uses the LAST assistant message when several are present', () => {
     const result = detectTurnOutcome(
       [assistantMsg({ stopReason: 'error', errorMessage: 'first' }), assistantMsg({ stopReason: 'stop' })],

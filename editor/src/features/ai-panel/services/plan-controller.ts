@@ -411,9 +411,13 @@ async function reviseWithNotes(
 }
 
 function abortExecution(): void {
+  // Agent loop will set isAgentRunning=false. Plan phase is deliberately NOT
+  // touched here (T4): forcing 'awaiting-execute' pre-decided the outcome
+  // before the aborted send's own outcome (agent-service.ts's
+  // detectTurnOutcome) had a chance to run, papering over a real crash/error
+  // tail with the same "ready to execute" phase a clean abort gets. A later
+  // task decides the phase from that outcome.
   getAgentService().abort();
-  // Agent loop will set isAgentRunning=false; we restore planPhase here too.
-  useAiStore.getState().setPlanPhase('awaiting-execute');
 }
 
 function openPlanTab(planPath: string): void {

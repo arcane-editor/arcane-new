@@ -44,6 +44,7 @@ export { hasPendingQuestion, resolvePendingQuestion } from './services/question-
 export { findPendingQuestion } from './services/pending-question';
 export type { VerifiedCardData } from './services/verified-pass';
 export type { TurnError, TurnErrorKind } from './services/turn-errors';
+export type { PromptMode } from './services/prompts';
 export { summarizeSceneDiff } from './services/summarize-scene-diff';
 export { computeRestorePlan, getSkippedTooLargePaths } from './services/checkpoints/restore-plan';
 export type {

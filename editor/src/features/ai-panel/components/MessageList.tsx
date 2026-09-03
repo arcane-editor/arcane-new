@@ -38,6 +38,7 @@ import QuestionBlock from './QuestionBlock';
 import VerifiedCard from './VerifiedCard';
 import CheckpointRow from './CheckpointRow';
 import ErrorBlock from './ErrorBlock';
+import StoppedBlock from './StoppedBlock';
 import EmptyState from './EmptyState';
 import StreamingIndicator from './StreamingIndicator';
 import { showsTailIndicator, showsModelCallCount, modelCallLabel } from '../services/working-indicator';
@@ -108,6 +109,9 @@ const MessageRow = memo(function MessageRow({
       break;
     case 'error':
       node = <ErrorBlock message={message} />;
+      break;
+    case 'stopped':
+      node = <StoppedBlock message={message} />;
       break;
     case 'system':
       node = <div className="ai-panel-system-message">{message.text}</div>;

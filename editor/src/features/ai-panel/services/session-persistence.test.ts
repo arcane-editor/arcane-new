@@ -76,6 +76,25 @@ describe('buildSessionData / parseSessionData — hostedPlan round-trip (T9)', (
   });
 });
 
+// A `role: 'stopped'` message (T4's abort marker) is not treated specially by
+// either build or parse — messages persist generically as JSON, same as
+// `verifiedPass` (see the doc comment on `AiMessage.verifiedPass`) — so this
+// pins that the round-trip is not silently broken by field stripping.
+describe('buildSessionData / parseSessionData — stopped message round-trip (T4)', () => {
+  it('round-trips a role: stopped message, including its promptMode, through save + load', () => {
+    const stoppedMessages: AiMessage[] = [
+      { id: 'm1', role: 'user', text: 'hello', timestamp: 1000 },
+      { id: 'm2', role: 'stopped', stopped: { promptMode: 'agent' }, timestamp: 1001 },
+    ];
+    const data = buildSessionData({ ...INPUT, messages: stoppedMessages });
+    const json = JSON.stringify(data);
+    const parsed = parseSessionData(json);
+    const restored = parsed.messages.find((m) => m.id === 'm2');
+    expect(restored?.role).toBe('stopped');
+    expect(restored?.stopped).toEqual({ promptMode: 'agent' });
+  });
+});
+
 // `stores/ai.ts` can't be imported here to assert on its live state: its
 // module graph (the ai-panel barrel's `AiChatPanel`/`MaximizedAiOverlay`
 // exports, plus `stores/workspace.ts`) transitively touches `document` at

@@ -192,3 +192,27 @@ describe('agent-service.ts — Unity subsystem tools', () => {
     expect(SRC).toContain('...(isUnity\n      ? createUnityAssetMutateTools(workspacePath, {');
   });
 });
+
+describe('agent-service.ts — abort wins in detectTurnOutcome (Task 4)', () => {
+  it('calls addStoppedMarker({ promptMode }) from the aborted outcome branch', () => {
+    expect(SRC).toContain(
+      "} else if (outcome.type === 'aborted') {\n      useAiStore.getState().addStoppedMarker({ promptMode });\n    }",
+    );
+  });
+
+  it('no longer wraps the outcome check in an `if (!this.abortRequested)` guard', () => {
+    // T4: detectTurnOutcome's own rule 0 is the single source of truth for
+    // an abort now, so runSend must call it unconditionally rather than
+    // skipping the whole outcome inspection for a user-aborted send.
+    expect(SRC).not.toContain('if (!this.abortRequested) {\n      const outcome = detectTurnOutcome(');
+    expect(SRC).toContain('const outcome = detectTurnOutcome(this.agent.getMessages().slice(before), this.abortRequested);');
+  });
+
+  it('restoreAgentMessages does not emit a stopped role — it stays a UI-only marker', () => {
+    const match = SRC.match(/function restoreAgentMessages[\s\S]*?\n}\n/);
+    expect(match).not.toBeNull();
+    const body = match![0];
+    expect(body).not.toContain("role: 'stopped'");
+    expect(body).toContain('stopped');
+  });
+});

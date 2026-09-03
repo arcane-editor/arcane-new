@@ -22,6 +22,7 @@ import {
   type ClaudeConnectState,
   type Effort,
   type PlanRef,
+  type PromptMode,
   type SaveSessionInput,
   type SessionData,
   type StopReason,
@@ -87,7 +88,8 @@ export interface AiMessage {
     | 'permissionRequest'
     | 'questionRequest'
     | 'verifiedPass'
-    | 'error';
+    | 'error'
+    | 'stopped';
   /** User message text */
   text?: string;
   /** Assistant message content blocks (text, thinking, tool calls) */
@@ -98,6 +100,14 @@ export interface AiMessage {
    * only plumbs the field through the store/persistence layer.
    */
   turnError?: TurnError;
+  /**
+   * Marks a deliberate user Stop (T4's `detectTurnOutcome` rule 0, `role:
+   * 'stopped'` only) — rendered as `StoppedBlock`'s latest-only Resume
+   * button. `promptMode` is the mode the aborted send was running under, so
+   * a future task deciding what "resume" means (e.g. plan phase) has it
+   * without re-deriving it from other store state.
+   */
+  stopped?: { promptMode: PromptMode };
   /**
    * Assistant provenance copied verbatim from the vendor `AssistantMessage`
    * at `message_end` (`role: 'assistant'` only) — how the turn ended and,
@@ -352,6 +362,8 @@ interface AiState {
   setVerificationRequired: (required: boolean) => void;
   /** Appends a `role: 'error'` message (T5's outcome-detection choke point) and flushes it to disk immediately — an error must survive an instant quit. Returns the new message id. */
   addTurnError: (error: TurnError) => string;
+  /** Appends a `role: 'stopped'` message (T4's `detectTurnOutcome` rule 0 — abort wins) and flushes it to disk immediately, same instant-quit rule as `addTurnError`. Returns the new message id. */
+  addStoppedMarker: (info: { promptMode: PromptMode }) => string;
   /** Drops all messages after `messageId` (keeping it), prunes now-orphaned `toolCalls` entries, and schedules a save. Used by Retry (T5) to roll history back before re-sending. */
   truncateAfterMessage: (messageId: string) => void;
   resetConversation: () => void;
@@ -856,6 +868,21 @@ export const useAiStore = create<AiState>((set, get) => ({
     set((s) => ({ messages: [...s.messages, msg] }));
     // Errors must survive an instant quit — flush immediately rather than
     // the debounced scheduleSave() other turn completions use.
+    void flushSave();
+    return id;
+  },
+
+  addStoppedMarker: (info: { promptMode: PromptMode }) => {
+    const id = nextId();
+    const msg: AiMessage = {
+      id,
+      role: 'stopped',
+      stopped: info,
+      timestamp: Date.now(),
+    };
+    set((s) => ({ messages: [...s.messages, msg] }));
+    // Same instant-quit rule as addTurnError — a Stop right before quitting
+    // must not lose the marker.
     void flushSave();
     return id;
   },

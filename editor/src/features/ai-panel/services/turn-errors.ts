@@ -315,12 +315,23 @@ function turnHasToolCall(newMessages: AgentMessage[]): boolean {
 /**
  * Determines how a send ended, given ONLY the messages appended during this
  * send (not the full conversation history). Rules (exact, in order):
+ *  0. `abortRequested` -> aborted, unconditionally, before anything else
+ *     inspects the tail. A user Stop can leave the vendor loop's tail in
+ *     almost any shape — an aborted `fetch` rejects `reader.read()`, so
+ *     `hosted-stream.ts` pushes an `'error'` event rather than a clean
+ *     `'aborted'` done, and an abort mid-tool-execution never gets a chance
+ *     to reach `'aborted'` at all (the tail stays `stopReason: 'toolUse'`,
+ *     or there's no assistant message yet). Rather than caller-side
+ *     suppression (T5's original approach — `agent-service.ts` skipped this
+ *     whole function when `abortRequested`), abort wins as the very first
+ *     check: a user-initiated Stop is authoritative over whatever the tail
+ *     happens to look like, no matter which rule below would otherwise fire.
  *  1. No assistant message at all -> crash.
  *  2. Last assistant message has `stopReason === 'error'` -> error, with its
  *     `errorMessage` (or a fallback) as `raw`.
- *  3. `stopReason === 'aborted'` OR `abortRequested` -> aborted (abortRequested
- *     wins over a toolUse tail: an abort mid-tool-execution still leaves
- *     `stopReason: 'toolUse'`).
+ *  3. `stopReason === 'aborted'` -> aborted (kept for the vendor loop's own
+ *     clean-abort tail; rule 0 above already covers the caller-reported case,
+ *     including when it wins over a toolUse tail).
  *  4. `stopReason === 'toolUse'` (and not aborted) -> crash (the loop's only
  *     legal exits are error/aborted/end-turn; a toolUse tail means it died
  *     mid-turn).
@@ -342,6 +353,8 @@ function turnHasToolCall(newMessages: AgentMessage[]): boolean {
  *  6. Otherwise -> clean.
  */
 export function detectTurnOutcome(newMessages: AgentMessage[], abortRequested: boolean): TurnOutcome {
+  if (abortRequested) return { type: 'aborted' };
+
   let lastAssistant: AssistantMessage | undefined;
   for (let i = newMessages.length - 1; i >= 0; i--) {
     const m = newMessages[i];
@@ -357,7 +370,7 @@ export function detectTurnOutcome(newMessages: AgentMessage[], abortRequested: b
     return { type: 'error', raw: lastAssistant.errorMessage ?? 'Unknown error' };
   }
 
-  if (lastAssistant.stopReason === 'aborted' || abortRequested) {
+  if (lastAssistant.stopReason === 'aborted') {
     return { type: 'aborted' };
   }
 
