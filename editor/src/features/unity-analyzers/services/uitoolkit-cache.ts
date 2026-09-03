@@ -15,16 +15,42 @@
 // names we have not finished checking.
 
 import { invoke } from '@tauri-apps/api/core';
-import { parseUxml, type UxmlDocument, type UxmlNode } from '../../../utils/uxml-model';
+import {
+  parseUxml,
+  offsetToPosition,
+  type UxmlDocument,
+  type UxmlNode,
+} from '../../../utils/uxml-model';
 import { parseUss, type UssStyleSheet } from '../../../utils/uss-model';
 import { extractCsUiRefs } from '../../../utils/uitoolkit-refs';
 import type { RawAsset } from './inputactions-cache';
+
+/**
+ * One declaration of a named element.
+ *
+ * Carries the tag and the source position because the three C# providers all
+ * need more than "this name exists": completion ranks by type, hover describes
+ * the element, and go-to-definition needs somewhere to go.
+ */
+export interface ElementDecl {
+  name: string;
+  /** Namespace-stripped tag: `Button`, `VisualElement`. */
+  tag: string;
+  classes: string[];
+  /** Project path of the declaring `.uxml`. */
+  path: string;
+  /** 1-based, pointing at the `name` attribute's value. */
+  line: number;
+  column: number;
+}
 
 export interface UxmlIndex {
   /** Project path -> parsed document. */
   docs: Map<string, UxmlDocument>;
   /** Element name -> the documents that declare it. */
   namesToDocs: Map<string, string[]>;
+  /** Element name -> every declaration of it, across the project. */
+  elements: Map<string, ElementDecl[]>;
   /** Class name -> the documents that use it. */
   classesToDocs: Map<string, string[]>;
   /** Every distinct declared name — the did-you-mean pool. */
@@ -68,12 +94,30 @@ export function buildUxmlIndex(assets: readonly RawAsset[]): UxmlIndex {
   const docs = new Map<string, UxmlDocument>();
   const namesToDocs = new Map<string, string[]>();
   const classesToDocs = new Map<string, string[]>();
+  const elements = new Map<string, ElementDecl[]>();
 
   for (const asset of assets) {
     const doc = parseUxml(asset.content);
     docs.set(asset.path, doc);
     walk(doc.root, (node) => {
-      if (node.name) push(namesToDocs, node.name, asset.path);
+      if (node.name) {
+        push(namesToDocs, node.name, asset.path);
+        // Point at the `name` attribute's VALUE rather than the tag, so F12
+        // lands on the string you asked about.
+        const attr = node.attrs.find((a) => a.name === 'name');
+        const where = offsetToPosition(asset.content, attr ? attr.valueSpan.start : node.openTagSpan.start);
+        const decl: ElementDecl = {
+          name: node.name,
+          tag: node.localName,
+          classes: node.classes,
+          path: asset.path,
+          line: where.line,
+          column: where.column,
+        };
+        const list = elements.get(node.name);
+        if (list) list.push(decl);
+        else elements.set(node.name, [decl]);
+      }
       for (const cls of node.classes) push(classesToDocs, cls, asset.path);
     });
   }
@@ -81,6 +125,7 @@ export function buildUxmlIndex(assets: readonly RawAsset[]): UxmlIndex {
   return {
     docs,
     namesToDocs,
+    elements,
     classesToDocs,
     allNames: [...namesToDocs.keys()],
     docCount: docs.size,

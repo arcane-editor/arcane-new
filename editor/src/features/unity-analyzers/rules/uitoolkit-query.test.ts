@@ -9,6 +9,7 @@ import {
 
 const MAIN_MENU = `<ui:UXML xmlns:ui="UnityEngine.UIElements">
   <ui:VisualElement name="root">
+    <ui:Label name="wordmark" text="EMBERFALL" />
     <ui:Button name="play-button" class="btn" />
     <ui:Button name="quit-btn" class="btn" />
   </ui:VisualElement>
@@ -127,5 +128,41 @@ describe('uitoolkit-query — when it reports', () => {
 
   it('reports each bad query once', () => {
     expect(run('root.Q<Button>("nope-a");\nroot.Q<Label>("nope-b");')).toHaveLength(2);
+  });
+});
+
+// ── Q<T>() type mismatch — UNITY0504 ────────────────────────────────────────
+//
+// `Q<Button>("wordmark")` on a ui:Label compiles, returns null, and nothing in
+// Unity says a word. Same failure class as the name typo, one lookup away.
+describe('uitoolkit-query — type mismatch', () => {
+  it('flags a query whose generic does not match the element tag', () => {
+    __setUiToolkitIndexesForTest({ uxml: INDEX, csRefs: loadedRefs() });
+    const found = run('root.Q<Button>("wordmark");');
+    expect(codes(found)).toEqual(['UNITY0504']);
+    expect(found[0].message).toContain('is a Label, not a Button');
+  });
+
+  it('says nothing when the generic matches', () => {
+    __setUiToolkitIndexesForTest({ uxml: INDEX, csRefs: loadedRefs() });
+    expect(run('root.Q<Button>("play-button");')).toEqual([]);
+  });
+
+  it('says nothing when the generic is a BASE of the element type', () => {
+    // Q<VisualElement>() matches everything; the chain is what makes this work.
+    __setUiToolkitIndexesForTest({ uxml: INDEX, csRefs: loadedRefs() });
+    expect(run('root.Q<VisualElement>("play-button");')).toEqual([]);
+  });
+
+  it('says nothing for a non-generic query, which filters by nothing', () => {
+    __setUiToolkitIndexesForTest({ uxml: INDEX, csRefs: loadedRefs() });
+    expect(run('root.Q("wordmark");')).toEqual([]);
+  });
+
+  it('says nothing for a custom control, whose base class we cannot see', () => {
+    // `Q<MyScreenBase>("wordmark")` may be perfectly correct — we have no way
+    // to know what MyScreenBase derives from, so we do not have an opinion.
+    __setUiToolkitIndexesForTest({ uxml: INDEX, csRefs: loadedRefs() });
+    expect(run('root.Q<MyScreenBase>("wordmark");')).toEqual([]);
   });
 });

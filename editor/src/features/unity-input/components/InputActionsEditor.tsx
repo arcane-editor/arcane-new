@@ -24,8 +24,18 @@ import {
   type BindingNode,
   type InputBinding,
 } from '../../../utils/inputactions-model';
-import { buildActionReferenceIndex, type ActionReference } from '../services/action-refs';
+import {
+  buildActionReferenceIndex,
+  buildWrapperCatalog,
+  type ActionReference,
+} from '../services/action-refs';
 import { gotoActionReference } from '../services/goto-usage';
+import { buildInputGraph, graphSummary } from '../services/input-graph';
+import { loadInputAssetContext, type InputAssetContext } from '../services/input-context';
+import { ControlsView, CoverageView } from './InputMapViews';
+
+/** Which question the panel is answering. One graph, three pivots. */
+type Pivot = 'actions' | 'controls' | 'coverage';
 
 interface Props {
   name: string;
@@ -99,6 +109,25 @@ export function InputActionsEditor({ name, content, onViewRaw }: Props) {
   const [scheme, setScheme] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [editing, setEditing] = useState<EditState | null>(null);
+  const [pivot, setPivot] = useState<Pivot>('actions');
+  const [usesActionRefs, setUsesActionRefs] = useState(false);
+  const [context, setContext] = useState<InputAssetContext>({
+    wrapper: null,
+    assetReferencedByScene: false,
+  });
+
+  // Wrapper settings and scene references both live outside the asset, and both
+  // change what the panel is allowed to CLAIM -- see `input-context.ts`.
+  useEffect(() => {
+    if (!filePath) return;
+    let cancelled = false;
+    void loadInputAssetContext(filePath, workspacePath).then((next) => {
+      if (!cancelled) setContext(next);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [filePath, workspacePath]);
 
   const parsed = useMemo(() => parseInputActions(content), [content]);
   const actions = useMemo(() => (parsed.doc ? listActions(parsed.doc) : []), [parsed.doc]);
@@ -156,23 +185,35 @@ export function InputActionsEditor({ name, content, onViewRaw }: Props) {
   );
 
   // Walking the project's C# is the expensive part, so this keys on the action
-  // NAMES: retyping a binding path must not re-scan thousands of files.
-  const actionNames = useMemo(
-    () => [...new Set(actions.map((a) => a.name))].sort().join(' '),
+  // identities: retyping a binding path must not re-scan thousands of files.
+  //
+  // Newline-separated, not space-separated. Action names may contain spaces
+  // ("Move Camera"), and the previous `join(' ')`/`split(' ')` round trip turned
+  // one such action into two bogus names -- so the scan looked for "Move" and
+  // "Camera" and found neither. Map name is carried too, because the generated
+  // wrapper is addressed as `controls.<Map>.<Action>`.
+  const catalogKey = useMemo(
+    () => [...new Set(actions.map((a) => `${a.mapName}\n${a.name}`))].sort().join('\u0000'),
     [actions],
   );
 
   useEffect(() => {
-    if (!workspacePath || actionNames === '') {
+    if (!workspacePath || catalogKey === '') {
       setRefsState('ready');
       return;
     }
+    const pairs = catalogKey.split('\u0000').map((entry) => {
+      const nl = entry.indexOf('\n');
+      return { mapName: entry.slice(0, nl), name: entry.slice(nl + 1) };
+    });
+    const names = [...new Set(pairs.map((p) => p.name))];
     let cancelled = false;
     setRefsState('loading');
-    buildActionReferenceIndex(workspacePath, actionNames.split(' '))
+    buildActionReferenceIndex(workspacePath, names, buildWrapperCatalog(pairs))
       .then((index) => {
         if (cancelled) return;
         setRefs(index.byActionName);
+        setUsesActionRefs(index.usesInputActionReference);
         setRefsState('ready');
       })
       .catch(() => {
@@ -181,7 +222,7 @@ export function InputActionsEditor({ name, content, onViewRaw }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [workspacePath, actionNames]);
+  }, [workspacePath, catalogKey]);
 
   const totalRefs = useMemo(() => {
     let n = 0;
@@ -258,15 +299,60 @@ export function InputActionsEditor({ name, content, onViewRaw }: Props) {
 
   const maps = parsed.doc?.maps ?? [];
 
+  // One model, three pivots. Assembled here because everything it needs -- the
+  // asset, the C# reference index and the out-of-asset context -- converges in
+  // this component and nowhere else.
+  const graph = useMemo(
+    () =>
+      buildInputGraph({
+        asset: filePath ?? name,
+        actions,
+        conflicts,
+        schemes,
+        refs,
+        suppressors: {
+          assetReferencedByScene: context.assetReferencedByScene,
+          usesInputActionReference: usesActionRefs,
+        },
+        // Until the walk finishes, "no reference" means "not looked yet".
+        scanned: refsState === 'ready',
+        wrapper: context.wrapper,
+      }),
+    [filePath, name, actions, conflicts, schemes, refs, context, usesActionRefs, refsState],
+  );
+  const summary = useMemo(() => graphSummary(graph), [graph]);
+
   return (
     <div className="editor-container" style={SHELL}>
       <Header
         name={name}
         subtitle={`${maps.length} ${maps.length === 1 ? 'map' : 'maps'}, ${actions.length} actions`}
+        unread={summary.unread}
+        wrapper={graph.wrapper?.className ?? null}
         conflicts={conflicts.length}
       />
 
       <div style={TOOLBAR}>
+        <div style={PILL_ROW} role="group" aria-label="View">
+          {(
+            [
+              ['actions', 'Actions'],
+              ['controls', 'Controls'],
+              ['coverage', 'Coverage'],
+            ] as const
+          ).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              aria-pressed={pivot === id}
+              onClick={() => setPivot(id)}
+              style={{ ...PILL, ...(pivot === id ? PILL_ON : null) }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
         <label style={SEARCH_WRAP}>
           <Search size={12} style={{ opacity: 0.6, flexShrink: 0 }} />
           <input
@@ -300,13 +386,19 @@ export function InputActionsEditor({ name, content, onViewRaw }: Props) {
 
       {refsState === 'ready' && totalRefs === 0 && actions.length > 0 && (
         <p style={NOTICE}>
-          No script looks these actions up by name. Only <code>FindAction("...")</code>,{' '}
-          <code>actions["..."]</code> and <code>OnX</code> handlers are tracked here. Actions built
-          in code with <code>new InputAction(...)</code>, or reached through a generated wrapper
-          class, are checked by the compiler and need no link.
+          No script reaches these actions. <code>FindAction("...")</code>,{' '}
+          <code>actions["..."]</code>, <code>OnX</code> handlers and generated-wrapper access like{' '}
+          <code>controls.Player.Jump</code> are all tracked. Actions built in code with{' '}
+          <code>new InputAction(...)</code>, or wired through an{' '}
+          <code>InputActionReference</code> in the Inspector, leave no trace here — those show as{' '}
+          <em>may be wired in the Inspector</em> rather than as unread.
         </p>
       )}
 
+      {pivot === 'controls' && <ControlsView graph={graph} />}
+      {pivot === 'coverage' && <CoverageView graph={graph} />}
+
+      {pivot === 'actions' && (
       <div style={{ overflow: 'auto', flex: 1 }}>
         {maps.map((map) => {
           const rows = visible.filter((a) => a.mapName === map.name);
@@ -433,6 +525,7 @@ export function InputActionsEditor({ name, content, onViewRaw }: Props) {
           </p>
         )}
       </div>
+      )}
     </div>
   );
 }
@@ -443,10 +536,14 @@ function Header({
   name,
   subtitle,
   conflicts = 0,
+  unread = 0,
+  wrapper = null,
 }: {
   name: string;
   subtitle: string;
   conflicts?: number;
+  unread?: number;
+  wrapper?: string | null;
 }) {
   return (
     <div style={HEADER}>
@@ -456,6 +553,19 @@ function Header({
       {conflicts > 0 && (
         <span style={CONFLICT_CHIP}>
           <AlertTriangle size={9} /> {conflicts} conflict{conflicts === 1 ? '' : 's'}
+        </span>
+      )}
+      {unread > 0 && (
+        <span style={CONFLICT_CHIP} title="No C# reads these actions, and nothing suggests they are wired elsewhere">
+          {unread} unread
+        </span>
+      )}
+      {wrapper && (
+        <span
+          style={{ fontSize: 10.5, color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}
+          title="This asset generates a C# wrapper class, so access through it is tracked"
+        >
+          wrapper: {wrapper}
         </span>
       )}
     </div>

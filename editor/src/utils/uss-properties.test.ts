@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'bun:test';
 import {
   USS_PROPERTY_REGISTRY,
+  USS_PROPERTY_GROUP_ORDER,
+  ussPropertyGroup,
   CSS_ONLY_PROPERTIES,
   USS_DEFAULTS,
   isUssProperty,
@@ -204,5 +206,57 @@ describe('USS_DEFAULTS', () => {
     // comment in the source. If it turns out wrong, this test fails loudly and
     // the fix is one line.
     expect(USS_DEFAULTS['flex-shrink']).toBe('1');
+  });
+});
+
+describe('ussPropertyGroup', () => {
+  it('files the flex family under Layout, together', () => {
+    for (const p of ['flex-direction', 'align-items', 'justify-content', 'flex-grow']) {
+      expect(ussPropertyGroup(p)).toBe('Layout');
+    }
+  });
+
+  it('counts spacing and size as Layout, because that is what they decide', () => {
+    for (const p of ['margin-bottom', 'padding', 'width', 'min-height', 'position', 'top']) {
+      expect(ussPropertyGroup(p)).toBe('Layout');
+    }
+  });
+
+  it('separates text from paint', () => {
+    expect(ussPropertyGroup('color')).toBe('Text');
+    expect(ussPropertyGroup('font-size')).toBe('Text');
+    expect(ussPropertyGroup('-unity-text-align')).toBe('Text');
+    expect(ussPropertyGroup('-unity-font-style')).toBe('Text');
+    expect(ussPropertyGroup('background-color')).toBe('Appearance');
+    expect(ussPropertyGroup('border-width')).toBe('Appearance');
+    expect(ussPropertyGroup('opacity')).toBe('Appearance');
+  });
+
+  it('does not let a prefix steal a longer exact match', () => {
+    // `overflow` is Layout and `text-overflow` is Text; a naive prefix scan
+    // files both under whichever rule it happens to reach first.
+    expect(ussPropertyGroup('overflow')).toBe('Layout');
+    expect(ussPropertyGroup('text-overflow')).toBe('Text');
+    expect(ussPropertyGroup('-unity-overflow-clip-box')).toBe('Appearance');
+  });
+
+  it('groups animation properties as Motion', () => {
+    for (const p of ['transition-duration', 'translate', 'rotate', 'scale', 'transform-origin']) {
+      expect(ussPropertyGroup(p)).toBe('Motion');
+    }
+  });
+
+  it('files an unknown property rather than dropping it', () => {
+    // A property the panel silently omitted would be worse than one filed
+    // imprecisely — the author would never learn it was there.
+    expect(ussPropertyGroup('box-shadow')).toBe('Appearance');
+    expect(ussPropertyGroup('-unity-name')).toBe('Appearance');
+    expect(ussPropertyGroup('MARGIN-TOP')).toBe('Layout');
+  });
+
+  it('assigns every registry property a group', () => {
+    for (const p of USS_PROPERTY_REGISTRY) {
+      expect(USS_PROPERTY_GROUP_ORDER).toContain(ussPropertyGroup(p));
+    }
   });
 });

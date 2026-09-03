@@ -1120,6 +1120,8 @@ pub fn run() {
             unity_yaml::unity_parse_asset,
             unity_asset_edit::unity_asset_read_fields,
             unity_asset_edit::unity_asset_apply_edits,
+            unity_asset_edit::unity_scriptable_object_types,
+            unity_asset_edit::unity_asset_read_many,
             unity_diff::unity_scene_diff,
             unity_diff::unity_scene_diff_revs,
             unity_index::unity_index_build,

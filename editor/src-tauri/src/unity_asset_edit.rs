@@ -936,8 +936,75 @@ pub fn apply_edits_to_text(
                 continue;
             }
         };
+
+        if edit.remove {
+            let key = match &path {
+                FieldPath::Whole(k) => k.clone(),
+                FieldPath::MapMember { .. } => {
+                    rejections.push(EditRejection::UnsupportedPath {
+                        path: edit.path.clone(),
+                        reason: "cannot remove one member of an inline map".into(),
+                    });
+                    continue;
+                }
+            };
+            let matches: Vec<&Entry> = entries.iter().filter(|e| e.key == key).collect();
+            if matches.is_empty() {
+                rejections.push(EditRejection::KeyNotFound { path: edit.path.clone() });
+                continue;
+            }
+            if matches.len() > 1 {
+                rejections.push(EditRejection::AmbiguousKey {
+                    path: edit.path.clone(),
+                    count: matches.len(),
+                });
+                continue;
+            }
+            if let Some(expected) = &edit.expected {
+                let current = match &matches[0].value {
+                    ValueSpan::Inline { span, .. } => content[span.clone()].to_string(),
+                    ValueSpan::Block { span, .. } => content[span.clone()].to_string(),
+                    ValueSpan::Opaque { span, .. } => content[span.clone()].to_string(),
+                };
+                if &current != expected {
+                    rejections.push(EditRejection::ValueMismatch {
+                        path: edit.path.clone(),
+                        expected: expected.clone(),
+                        actual: current,
+                    });
+                    continue;
+                }
+            }
+            planned.push((removal_span(content, matches[0]), String::new(), edit.path.clone()));
+            continue;
+        }
         let target = match resolve_target(content, entries, &path) {
             Ok(t) => t,
+            Err(EditRejection::KeyNotFound { path: p }) => {
+                // Not there yet — insert it, if the caller said where.
+                let key = match &path {
+                    FieldPath::Whole(k) => k.clone(),
+                    // A member path needs its parent map to exist first.
+                    FieldPath::MapMember { .. } => {
+                        rejections.push(EditRejection::KeyNotFound { path: p });
+                        continue;
+                    }
+                };
+                if let Err(r) = validate_raw_value(&edit.path, &edit.value) {
+                    rejections.push(r);
+                    continue;
+                }
+                match plan_insertion(entries, &key, &edit.value, &edit.if_missing) {
+                    Some((span, text)) => {
+                        planned.push((span, text, edit.path.clone()));
+                        continue;
+                    }
+                    None => {
+                        rejections.push(EditRejection::KeyNotFound { path: p });
+                        continue;
+                    }
+                }
+            }
             Err(r) => {
                 rejections.push(r);
                 continue;
@@ -970,13 +1037,70 @@ pub fn apply_edits_to_text(
         return Err(rejections);
     }
 
+    // A rename is "insert the new key, remove the old one", and the natural
+    // anchor for the insertion is the key being removed — so the insertion
+    // point lands INSIDE the removal span. That is not a conflict, it is
+    // "the new line takes the old line's place", so merge the pair into one
+    // replacement rather than making every caller dodge the overlap.
+    let mut merged: Vec<usize> = Vec::new();
+    for i in 0..planned.len() {
+        let (ins_span, ins_text, _) = &planned[i];
+        if ins_span.start != ins_span.end {
+            continue; // not an insertion
+        }
+        let point = ins_span.start;
+        let host = planned.iter().position(|(span, text, _)| {
+            text.is_empty() && span.start != span.end && point > span.start && point <= span.end
+        });
+        if let Some(h) = host {
+            // Rebuild the line to match the REMOVED span's own shape. A normal
+            // entry is `line + terminator`, but the last entry of a file with
+            // no trailing newline is `preceding-newline + line` — assuming the
+            // first form there moved the newline to the wrong end and joined
+            // two keys onto one line.
+            let removed = &content[planned[h].0.clone()];
+            let lead = if removed.starts_with("\r\n") {
+                "\r\n"
+            } else if removed.starts_with('\n') {
+                "\n"
+            } else {
+                ""
+            };
+            let tail = if removed.len() > lead.len() {
+                if removed.ends_with("\r\n") {
+                    "\r\n"
+                } else if removed.ends_with('\n') {
+                    "\n"
+                } else {
+                    ""
+                }
+            } else {
+                ""
+            };
+            // Strip whichever terminator `plan_insertion` prefixed; the shape
+            // above decides where it goes.
+            let text = ins_text.clone();
+            let body = text
+                .strip_prefix("\r\n")
+                .or_else(|| text.strip_prefix('\n'))
+                .unwrap_or(text.as_str());
+            planned[h].1 = format!("{lead}{body}{tail}");
+            merged.push(i);
+        }
+    }
+    // Drop the merged insertions, highest index first so the rest stay valid.
+    merged.sort_unstable_by(|a, b| b.cmp(a));
+    for i in merged {
+        planned.remove(i);
+    }
+
     // Overlapping spans mean two edits fight over the same bytes — which also
     // catches the same key being edited twice in one batch.
     let mut sorted: Vec<usize> = (0..planned.len()).collect();
     sorted.sort_by_key(|&i| planned[i].0.start);
     for w in sorted.windows(2) {
         let (a, b) = (&planned[w[0]], &planned[w[1]]);
-        if a.0.end > b.0.start {
+        if a.0.end > b.0.start && a.0.start != a.0.end {
             return Err(vec![EditRejection::OverlappingEdits {
                 path: a.2.clone(),
                 other: b.2.clone(),
@@ -996,6 +1120,25 @@ pub fn apply_edits_to_text(
     Ok(out)
 }
 
+/// What to do when the key is not in the asset yet.
+///
+/// A field added to the C# class after the asset was authored simply is not in
+/// the file; Unity supplies the default at load. Writing it means INSERTING a
+/// line, which needs an anchor — and Rust does not parse C#, so the frontend
+/// (which already has the schema) names the previously declared serialized
+/// field. That keeps the file in Unity's own serialization order.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(tag = "mode", rename_all = "camelCase")]
+pub enum IfMissing {
+    #[default]
+    Reject,
+    /// Insert directly after this sibling key; falls back to the end of the
+    /// document when the anchor itself is absent.
+    InsertAfter { anchor: String },
+    /// Append after the document's last top-level entry.
+    InsertAtEnd,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AssetEdit {
@@ -1008,6 +1151,196 @@ pub struct AssetEdit {
     /// Refuse unless the current on-disk value is byte-equal to this.
     #[serde(default)]
     pub expected: Option<String>,
+    #[serde(default)]
+    pub if_missing: IfMissing,
+    /// Delete the key outright instead of writing a value.
+    ///
+    /// Needed because a field rename is insert-new + delete-old, and both must
+    /// land in the same atomic write or a crash between them loses the value.
+    #[serde(default)]
+    pub remove: bool,
+}
+
+/// Byte range to cut when removing an entry: the whole entry plus its line
+/// terminator, so no blank line is left behind.
+///
+/// At EOF the entry has no terminator, so the PRECEDING newline is consumed
+/// instead — otherwise deleting the last key would leave a dangling blank line
+/// and change the file's trailing-newline shape.
+fn removal_span(content: &str, entry: &Entry) -> Range<usize> {
+    if !entry.terminator.is_empty() {
+        return entry.entry_span.start..entry.entry_span.end + entry.terminator.len();
+    }
+    let mut start = entry.entry_span.start;
+    let bytes = content.as_bytes();
+    if start > 0 && bytes[start - 1] == b'\n' {
+        start -= 1;
+        if start > 0 && bytes[start - 1] == b'\r' {
+            start -= 1;
+        }
+    }
+    start..entry.entry_span.end
+}
+
+/// Where and what to insert for a key that is not in the document yet.
+///
+/// Returned as a zero-length span plus text, so insertion joins the same
+/// descending-splice pass as every replacement and needs no separate path.
+fn plan_insertion(
+    entries: &[Entry],
+    key: &str,
+    value: &str,
+    if_missing: &IfMissing,
+) -> Option<(Range<usize>, String)> {
+    if entries.is_empty() {
+        return None;
+    }
+    let anchor = match if_missing {
+        IfMissing::Reject => return None,
+        IfMissing::InsertAfter { anchor } => entries
+            .iter()
+            .find(|e| &e.key == anchor)
+            .or_else(|| entries.last())?,
+        IfMissing::InsertAtEnd => entries.last()?,
+    };
+
+    // Copy the anchor's indent and terminator verbatim: that is what makes the
+    // inserted line correct in a CRLF file with no special-casing.
+    let indent = " ".repeat(anchor.indent);
+    // At EOF the anchor has no terminator. Using "\n" there puts the new line
+    // last and leaves the file still ending without a trailing newline.
+    let terminator = if anchor.terminator.is_empty() { "\n" } else { anchor.terminator };
+    let at = anchor.entry_span.end;
+    Some((at..at, format!("{terminator}{indent}{key}: {value}")))
+}
+
+// ── Project-wide ScriptableObject inventory ─────────────────────────────────
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SoInstanceRef {
+    pub path: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SoTypeGroup {
+    /// `.meta` guid of the C# script these assets instance.
+    pub script_guid: String,
+    /// Absolute path of the script, when the index can resolve it.
+    pub script_path: Option<String>,
+    /// Class name. Unity requires the file stem to match the class name for a
+    /// script to be assignable, so the stem is the class name in practice.
+    pub type_name: String,
+    pub instances: Vec<SoInstanceRef>,
+}
+
+/// True when a script path is the user's own code rather than a package's.
+///
+/// The index walks only `Assets/` and `Packages/`; a registry package lives in
+/// `Library/PackageCache`, which is not walked. So a guid that resolves is
+/// project-local by construction — this check is belt-and-braces, and documents
+/// the intent if the indexed roots ever change.
+fn is_project_script(workspace: &str, script_path: &str) -> bool {
+    let ws = workspace.trim_end_matches('/');
+    let rel = script_path.strip_prefix(ws).unwrap_or(script_path);
+    let rel = rel.trim_start_matches('/');
+    (rel.starts_with("Assets/") || rel.starts_with("Packages/"))
+        && !rel.contains("/PackageCache/")
+        && script_path.to_lowercase().ends_with(".cs")
+}
+
+/// Every ScriptableObject type in the project that has at least one asset.
+///
+/// Derived from the GUID index rather than a fresh walk: `path_to_guid` already
+/// knows every asset with a `.meta`, so this reads only the `.asset` files and
+/// resolves each one's `m_Script` guid back to its script.
+///
+/// Types with no instances are absent by construction. That is the right
+/// default for a browser — a `[CreateAssetMenu]` class nobody has instanced yet
+/// has nothing to browse — and it keeps the cost proportional to assets on disk
+/// rather than to scripts in the project.
+///
+/// Types whose script is NOT the user's own code are also absent. A Unity
+/// project is full of `.asset` files owned by packages — input actions, TMP
+/// settings, render-pipeline assets — whose `m_Script` points into
+/// `Library/PackageCache` and therefore never resolves. Listing those as
+/// `guid 2ec4…` is noise: they are not the user's data model, and they are not
+/// editable as one.
+#[tauri::command(async)]
+pub fn unity_scriptable_object_types(workspace_path: String) -> Result<Vec<SoTypeGroup>, String> {
+    let state = crate::unity_index::get_or_build(&workspace_path);
+
+    let mut by_script: std::collections::HashMap<String, Vec<SoInstanceRef>> =
+        std::collections::HashMap::new();
+
+    for asset_path in state.path_to_guid.keys() {
+        if !asset_path.to_lowercase().ends_with(".asset") {
+            continue;
+        }
+        let content = match std::fs::read_to_string(asset_path) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        // Only a MonoBehaviour document carries an m_Script guid; a settings
+        // asset (classId 1001 and friends) has none and is skipped.
+        let script_guid = match script_guid_of(&content) {
+            Some(g) => g,
+            None => continue,
+        };
+        let name = std::path::Path::new(asset_path)
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| asset_path.clone());
+        by_script
+            .entry(script_guid)
+            .or_default()
+            .push(SoInstanceRef { path: asset_path.clone(), name });
+    }
+
+    let mut groups: Vec<SoTypeGroup> = by_script
+        .into_iter()
+        .filter_map(|(script_guid, mut instances)| {
+            // Unresolvable => the script lives in a package, not this project.
+            let script_path = state.guid_to_path.get(&script_guid)?.clone();
+            if !is_project_script(&workspace_path, &script_path) {
+                return None;
+            }
+            instances.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+            let type_name = std::path::Path::new(&script_path)
+                .file_stem()
+                .map(|s| s.to_string_lossy().to_string())?;
+            Some(SoTypeGroup {
+                script_guid,
+                script_path: Some(script_path),
+                type_name,
+                instances,
+            })
+        })
+        .collect();
+
+    groups.sort_by(|a, b| a.type_name.to_lowercase().cmp(&b.type_name.to_lowercase()));
+    Ok(groups)
+}
+
+/// The `m_Script` guid of the first MonoBehaviour document, if any.
+fn script_guid_of(content: &str) -> Option<String> {
+    let (_, docs) = split_document_spans(content);
+    let doc = docs.iter().find(|d| d.class_id == "114")?;
+    let body = content.get(doc.body.clone())?;
+    let idx = body.find("m_Script:")?;
+    let rest = &body[idx..];
+    let end = rest.find('\n').unwrap_or(rest.len());
+    let line = &rest[..end];
+    let g = line.find("guid:")? + "guid:".len();
+    let tail = line[g..].trim_start();
+    let hex: String = tail.chars().take_while(|c| c.is_ascii_hexdigit()).collect();
+    if hex.len() == 32 {
+        Some(hex)
+    } else {
+        None
+    }
 }
 
 // ── Tauri commands ──────────────────────────────────────────────────────────
@@ -1032,6 +1365,31 @@ pub fn unity_asset_read_fields(
 ) -> Result<AssetSnapshot, String> {
     let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
     snapshot(&content, file_id.as_deref())
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssetSnapshotAt {
+    pub path: String,
+    pub snapshot: AssetSnapshot,
+}
+
+/// Read many assets in one call, for whole-type analysis (schema drift).
+///
+/// One command rather than N round trips: the drift report reads every instance
+/// of a type, and doing that as one invoke per asset makes a 40-weapon project
+/// forty IPC hops. Unreadable or non-ScriptableObject files are skipped rather
+/// than failing the batch — a broken asset should not hide the other 39.
+#[tauri::command(async)]
+pub fn unity_asset_read_many(paths: Vec<String>) -> Vec<AssetSnapshotAt> {
+    paths
+        .into_iter()
+        .filter_map(|path| {
+            let content = std::fs::read_to_string(&path).ok()?;
+            let snapshot = snapshot(&content, None).ok()?;
+            Some(AssetSnapshotAt { path, snapshot })
+        })
+        .collect()
 }
 
 /// Apply field edits atomically and byte-exactly.

@@ -8,6 +8,7 @@
 // Nothing may import this feature except `app-shell` and `editor`.
 
 export { default as UnityInspectorPanel } from './components/UnityInspectorPanel';
+export { default as ScriptableObjectsPanel } from './components/ScriptableObjectsPanel';
 export { default as ScriptableObjectEditor } from './components/ScriptableObjectEditor';
 
 export {
@@ -38,3 +39,6 @@ export {
 } from './services/so-instance-columns';
 
 export { initSoInstanceCodeLens } from './services/so-codelens';
+
+export { computeDrift, fixEditsFor, describeDrift, defaultRawFor } from './services/so-drift';
+export type { DriftFinding, DriftKind, DriftAsset } from './services/so-drift';

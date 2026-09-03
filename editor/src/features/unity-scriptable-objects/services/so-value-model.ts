@@ -36,6 +36,12 @@ export interface SoRow {
   editable: boolean;
   /** Set for `migrated`, naming the old key it is still stored under. */
   migratedFrom: string | null;
+  /**
+   * For a `missing` row: the key to insert after, so the new line lands in the
+   * class's declaration order rather than at the end of the document. Null when
+   * nothing precedes it in the file, in which case it appends.
+   */
+  insertAfter: string | null;
 }
 
 /** Which value shapes a widget can legitimately be backed by. */
@@ -58,11 +64,18 @@ const SHAPE_FOR_WIDGET: Record<string, string[]> = {
   objectRef: ['inlineMap'],
 };
 
-/** Does the value on disk match what the declared type implies? */
-function shapeAgrees(field: SoField, value: SoFieldValue): boolean {
+/**
+ * Does the value on disk contradict what the declared type implies?
+ *
+ * Only meaningful for a widget we actually render. A `List<T>` or an
+ * `AnimationCurve` has no entry here because we do not claim to know its shape
+ * — that is an unsupported TYPE, which is normal, not drift. Conflating the two
+ * put a warning triangle next to every list in the project.
+ */
+function shapeContradicts(field: SoField, value: SoFieldValue): boolean {
   const allowed = SHAPE_FOR_WIDGET[field.widget];
-  if (!allowed) return false;
-  return allowed.includes(value.kind);
+  if (!allowed) return false; // no opinion about this type
+  return !allowed.includes(value.kind);
 }
 
 /**
@@ -76,20 +89,24 @@ export function buildRows(schema: SoSchema, snapshot: SoAssetSnapshot): SoRow[] 
   const byKey = new Map(snapshot.fields.map((f) => [f.key, f]));
   const consumed = new Set<string>();
   const rows: SoRow[] = [];
+  /** Last schema field found in the file — the anchor for the next insertion. */
+  let lastPresentKey: string | null = null;
 
   for (const field of schema.fields) {
     const direct = byKey.get(field.name);
     if (direct) {
       consumed.add(field.name);
-      const agrees = shapeAgrees(field, direct);
+      const contradicts = shapeContradicts(field, direct);
       rows.push({
         field,
         yamlKey: field.name,
         value: direct,
-        state: agrees ? 'bound' : 'degraded',
-        editable: agrees && field.editable && direct.editable,
+        state: contradicts ? 'degraded' : 'bound',
+        editable: !contradicts && field.editable && direct.editable,
         migratedFrom: null,
+        insertAfter: null,
       });
+      lastPresentKey = field.name;
       continue;
     }
 
@@ -98,15 +115,17 @@ export function buildRows(schema: SoSchema, snapshot: SoAssetSnapshot): SoRow[] 
     if (former) {
       const value = byKey.get(former)!;
       consumed.add(former);
-      const agrees = shapeAgrees(field, value);
+      const contradicts = shapeContradicts(field, value);
       rows.push({
         field,
         yamlKey: former,
         value,
-        state: agrees ? 'migrated' : 'degraded',
-        editable: agrees && field.editable && value.editable,
+        state: contradicts ? 'degraded' : 'migrated',
+        editable: !contradicts && field.editable && value.editable,
         migratedFrom: former,
+        insertAfter: null,
       });
+      lastPresentKey = former;
       continue;
     }
 
@@ -115,10 +134,11 @@ export function buildRows(schema: SoSchema, snapshot: SoAssetSnapshot): SoRow[] 
       yamlKey: field.name,
       value: null,
       state: 'missing',
-      // Writing a key that is not in the file yet needs insertion, which this
-      // pass does not do — so a missing field is shown, not edited.
-      editable: false,
+      // Editable: writing it INSERTS the key, anchored after the last field
+      // that is actually in the file so the result keeps Unity's order.
+      editable: field.editable,
       migratedFrom: null,
+      insertAfter: lastPresentKey,
     });
   }
 
@@ -133,6 +153,7 @@ export function buildRows(schema: SoSchema, snapshot: SoAssetSnapshot): SoRow[] 
       state: 'unmapped',
       editable: false,
       migratedFrom: null,
+      insertAfter: null,
     });
   }
 
@@ -151,9 +172,22 @@ export function toEdit(
   draft: string,
   fileId: string,
 ): SoFieldEdit | null {
-  if (!row.editable || !row.field || !row.value) return null;
+  if (!row.editable || !row.field) return null;
   const encoded = encodeValue(draft, row.field);
   if (!encoded.ok) return null;
+
+  // Not in the file yet — this write inserts the key.
+  if (!row.value) {
+    return {
+      fileId,
+      path: row.yamlKey,
+      value: encoded.raw,
+      ifMissing: row.insertAfter
+        ? { mode: 'insertAfter', anchor: row.insertAfter }
+        : { mode: 'insertAtEnd' },
+    };
+  }
+
   if (encoded.raw === row.value.raw) return null;
   return {
     fileId,
