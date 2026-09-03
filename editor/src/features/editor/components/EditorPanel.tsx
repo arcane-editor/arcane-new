@@ -36,15 +36,15 @@ import { initTestCodeLens } from '../../unity-test-runner';
 import { attachBreakpointGutter } from '../../debugger';
 import { registerInlineSuggestProvider } from '../../inline-suggest';
 import { MarkdownPreview, PlanDocumentView, isMarkdownPath, isPlanPath, type PlanNote } from '../../markdown-preview';
-
-/** Module-level so a plan with no notes hands PlanDocumentView the SAME array
- *  every render — a fresh `[]` would re-run its re-anchoring effect forever. */
-const EMPTY_NOTES: PlanNote[] = [];
 import { planController } from '../../ai-panel';
 import { SearchResultsTab } from '../../search';
 import { fileUri } from '../../lsp';
 
 const detectLanguage = getMonacoLanguageId;
+
+/** Module-level so a plan with no notes hands PlanDocumentView the SAME array
+ *  every render — a fresh `[]` would re-run its re-anchoring effect forever. */
+const EMPTY_NOTES: PlanNote[] = [];
 
 function EditorPanel() {
   const openFiles = useWorkspaceStore((s) => s.openFiles);

@@ -9317,7 +9317,11 @@ html, body, #root {
 .uxi-prop-more:hover,
 .uxi-prop-more.open {
   background: var(--accent);
-  color: var(--bg-sidebar);
+  /* Not `--bg-sidebar`: a SURFACE token reads as "the light one" in a dark
+     theme, but it is not authored to be legible on the accent and came out at
+     4.06:1 in unityide-light on 9.5px text. `--button-primary-text` is the
+     foreground that goes with an accent fill. */
+  color: var(--button-primary-text);
 }
 
 /* The rules this property beat. Collapsed by default: they are the working,
