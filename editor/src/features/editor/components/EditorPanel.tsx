@@ -74,6 +74,11 @@ function EditorPanel() {
   // comments the user had written.
   const planNotesByPath = useAiStore((s) => s.planNotes);
   const setPlanNotesFor = useAiStore((s) => s.setPlanNotes);
+  // Read here (not inside PlanDocumentView's onExecute prop, which is just a
+  // callback) so the plan-tab toolbar's primary button can resume an
+  // interrupted run instead of re-executing from the top — mirrors
+  // PlanActions.tsx's `interrupted` branch (Task 5/6).
+  const planPhase = useAiStore((s) => s.planPhase);
 
   const editorRef = useRef<MonacoEditorNs.IStandaloneCodeEditor | null>(null);
 
@@ -274,7 +279,11 @@ function EditorPanel() {
         notes={notes}
         onNotesChange={(next) => setPlanNotesFor(activeFile.path, next)}
         onRevise={() => planController.reviseWithNotes(activeFile.path, notes)}
-        onExecute={() => planController.executePlan(activeFile.path)}
+        onExecute={() =>
+          planPhase === 'interrupted'
+            ? planController.resumeExecution('Continue executing the remaining steps.')
+            : planController.executePlan(activeFile.path)
+        }
         onStop={() => planController.abortExecution()}
       />
     );

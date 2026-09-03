@@ -12,9 +12,18 @@
  * Phase B (execution):
  *   - Re-read the plan file from disk (so user edits are honored).
  *   - Send with the plan-execution system prompt + full toolset.
- *   - On agent_end, planPhase returns to 'idle'.
+ *   - On agent_end, planPhase resolves via `plan-run.ts`'s
+ *     `resolvePostExecutionPhase` — `'awaiting-execute'` when the plan
+ *     finished (or a clean send left nothing to track), `'interrupted'`
+ *     otherwise, so the composer's next message resumes it (`plan-route.ts`).
  *
  * Regenerate just calls startPlanning again with the stashed prompt.
+ *
+ * `runExecution` is deps-injected (`plan-run.ts`'s `runPlanExecution`), for
+ * the same reason `preplan-controller.ts:11-27` documents — this file itself
+ * still imports `stores/ai` and `agent-service.ts` at module scope, so it has
+ * no test of its own. `startPlanning`/`reviseWithNotes`/`regenerate` are the
+ * next candidates for the same seam.
  */
 
 import { useAiStore } from '../../../stores/ai';
@@ -26,7 +35,7 @@ import { buildReviseNotesPrompt } from './plan-revise';
 import { validatePlanDocument, buildPlanRepairPrompt, type PlanQualityReport } from './plan-quality';
 import { beginSubmitBudget, endSubmitBudget } from './turn-governor';
 import { unityRecipesFor } from './prompts/unity-recipes';
-import { parsePlanTodos, planTodosToHostedPlan } from './plan-todos';
+import { runPlanExecution, liveDeps } from './plan-run';
 import {
   reservePlanPath,
   openPlanInEditor,
@@ -36,7 +45,6 @@ import {
 import type { TextContent, ThinkingContent, ToolCall } from './vendor/types';
 import type { Attachment } from './types';
 import type { PlanNote } from '../../markdown-preview';
-import { planStepsOf } from '../../markdown-preview';
 
 function getCurrentWorkspacePath(): string | null {
   return useWorkspaceStore.getState().workspacePath;
@@ -202,95 +210,15 @@ function latestPlanMarkdown(): string {
   return '';
 }
 
-/** Set the session `PlanRef.status` for `planPath`, keeping the existing ref's identity fields. */
-function setPlanRefStatus(planPath: string, status: 'draft' | 'executing' | 'done' | 'failed'): void {
-  const store = useAiStore.getState();
-  const existing = store.sessionPlans.find((p) => p.path === planPath);
-  store.addSessionPlan(
-    existing
-      ? { ...existing, status }
-      : { path: planPath, title: planPath.split('/').pop() ?? 'plan', createdAt: Date.now(), status },
-  );
-}
-
 /**
  * Shared execution runner — Execute sends the canonical pointer text,
  * resume sends the USER'S text (the plan pointer/body prefix is injected by
  * agent-service from `planExecution`, so the user's words ride along as
- * guidance for the remaining steps).
+ * guidance for the remaining steps). Delegates to `plan-run.ts`'s
+ * deps-injected core — see this file's header.
  */
 async function runExecution(planPath: string, sendText: string): Promise<void> {
-  const store = useAiStore.getState();
-
-  // Dirty-tab guard: if the plan tab has unsaved edits, ask user to save first.
-  const openFile = useWorkspaceStore
-    .getState()
-    .openFiles.find((f) => f.path === planPath);
-  if (openFile?.isDirty) {
-    store.setError('Save the plan file (Cmd+S) before executing.');
-    return;
-  }
-
-  let planContent: string;
-  try {
-    planContent = await readPlan(planPath);
-  } catch (err) {
-    // Clear the plan state, or every subsequent plan-mode message routes to
-    // 'resume' and dead-ends on this same unreadable file forever.
-    store.setActivePlanPath(null);
-    store.setPlanPhase('idle');
-    store.setError(
-      `Could not read plan file: ${formatErr(err)} — plan cleared; send a message to plan again.`,
-    );
-    return;
-  }
-  if (!planContent.trim()) {
-    store.setActivePlanPath(null);
-    store.setPlanPhase('idle');
-    store.setError('Plan file is empty — plan cleared; send a message to plan again.');
-    return;
-  }
-
-  store.setPlanPhase('executing');
-  // Pin the plan being run: a follow-up composer message resumes THIS plan,
-  // not whatever stale activePlanPath an earlier planning run left behind.
-  store.setActivePlanPath(planPath);
-  setPlanRefStatus(planPath, 'executing');
-
-  // Seed hostedPlan from the plan file's current Todos/checkbox state BEFORE
-  // the send below, so the FIRST plan-execution request already carries the
-  // current todo's difficulty — the metadata resolver (difficulty.ts's
-  // difficultyForRequest) reads hostedPlan off the store, and without this
-  // seed the first send would go out untagged until the model's own first
-  // todo_update call caught up. The todo-tool merge (mergeTodoDifficulty)
-  // keeps these tags authoritative for every send after this one.
-  store.setHostedPlan(planTodosToHostedPlan(parsePlanTodos(planContent)));
-
-  try {
-    await getAgentService().sendMessage(sendText, {
-      mode: 'plan',
-      effort: store.effort,
-      promptMode: 'plan-execution',
-      planExecution: { planPath, planContent },
-    });
-  } finally {
-    // Whatever happened — clean finish, abort, turn cap, or a REJECTED send —
-    // return to 'awaiting-execute' so the user can resume/re-execute. Without
-    // the finally, a rejection left the phase stuck at 'executing' and the
-    // composer routed every message into a fresh planning run.
-    useAiStore.getState().setPlanPhase('awaiting-execute');
-
-    // The file's own [x] ticks are the progress record: all ticked ⇒ done.
-    try {
-      const after = await readPlan(planPath);
-      const steps = planStepsOf(after);
-      if (steps.length > 0 && steps.every((s) => s.done)) {
-        setPlanRefStatus(planPath, 'done');
-      }
-    } catch {
-      /* status stays 'executing' (= started, not finished) */
-    }
-  }
+  await runPlanExecution(await liveDeps(), planPath, sendText);
 }
 
 async function executePlan(planPath: string): Promise<void> {

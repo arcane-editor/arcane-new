@@ -59,6 +59,11 @@ function PlanDocumentView({
 
   const executing = planPhase === 'executing';
   const editable = !executing;
+  // An interrupted run (capped/aborted/errored — Task 5/6) still shows this
+  // toolbar's primary button (`executing` is false), but it must read as
+  // "pick back up", not "start over" — mirrors PlanActions.tsx's `interrupted`
+  // branch, the message-list card for the same phase.
+  const interrupted = planPhase === 'interrupted';
 
   const doc = useMemo(() => parsePlanDocument(content), [content]);
 
@@ -182,9 +187,10 @@ function PlanDocumentView({
               className="plan-doc-btn plan-doc-btn--primary"
               onClick={onExecute}
               disabled={isAgentRunning}
+              title={interrupted ? 'Resume the plan from where it stopped' : undefined}
             >
               <Play size={11} />
-              Execute
+              {interrupted ? 'Resume' : 'Execute'}
             </button>
           )}
           {/* Effort is adjustable mid-plan; the model tier follows it. There is
