@@ -193,9 +193,16 @@ describe('normalizePlanRestore', () => {
     });
   });
 
-  it('normalizes a saved executing phase to awaiting-execute (no run is live after a reload)', () => {
+  it('normalizes a saved executing phase to interrupted (the run died with the old process, resumable from the file)', () => {
     expect(normalizePlanRestore('executing', '/p.md')).toEqual({
-      planPhase: 'awaiting-execute',
+      planPhase: 'interrupted',
+      activePlanPath: '/p.md',
+    });
+  });
+
+  it('restores an interrupted phase as-is', () => {
+    expect(normalizePlanRestore('interrupted', '/p.md')).toEqual({
+      planPhase: 'interrupted',
       activePlanPath: '/p.md',
     });
   });
@@ -210,6 +217,7 @@ describe('normalizePlanRestore', () => {
 
   it('a pending phase with no path degrades to idle (nothing to resume)', () => {
     expect(normalizePlanRestore('awaiting-execute', null)).toEqual({ planPhase: 'idle', activePlanPath: null });
+    expect(normalizePlanRestore('interrupted', null)).toEqual({ planPhase: 'idle', activePlanPath: null });
   });
 });
 

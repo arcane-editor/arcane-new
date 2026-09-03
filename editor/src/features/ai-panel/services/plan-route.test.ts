@@ -18,6 +18,15 @@ describe('routePlanSend', () => {
     expect(routePlanSend('executing', '/ws/.unityide/plans/p.md')).toBe('resume');
   });
 
+  // The wrap-up text after a capped/aborted/errored run tells the user to
+  // reply "continue" (StoppedBlock's Resume button sends that literal text —
+  // see composer-dispatch.ts). Routing 'interrupted' anywhere but 'resume'
+  // would make that promise false: the composer would silently start a fresh
+  // planning run instead, stripping the write tools mid-plan.
+  it("resumes an interrupted run so 'continue' does what the wrap-up text promised", () => {
+    expect(routePlanSend('interrupted', '/ws/.unityide/plans/p.md')).toBe('resume');
+  });
+
   it('never revises without a plan file to revise', () => {
     expect(routePlanSend('awaiting-execute', null)).toBe('plan');
   });
@@ -25,6 +34,7 @@ describe('routePlanSend', () => {
   it('plans fresh when there is no active plan file, whatever the phase says', () => {
     expect(routePlanSend('awaiting-execute', null)).toBe('plan');
     expect(routePlanSend('executing', null)).toBe('plan');
+    expect(routePlanSend('interrupted', null)).toBe('plan');
   });
 
   it('plans fresh from idle and while planning', () => {

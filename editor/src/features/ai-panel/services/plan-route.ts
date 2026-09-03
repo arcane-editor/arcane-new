@@ -20,6 +20,14 @@
 // 'executing' still resumes: with a live run the composer is disabled anyway,
 // so reaching this with 'executing' means the phase is STUCK from a send that
 // rejected before its finally — recovery, not conflict.
+//
+// 'interrupted' resumes too, and is the phase this actually matters for: a
+// run that hit the turn cap, was aborted, or errored out ends up here
+// (`mode-transition.ts`'s `normalizeLivePlanState`, `plan-run.ts`), and the
+// wrap-up text told the user to reply "continue" to pick it back up. Routing
+// it anywhere but 'resume' would make that promise false — the composer
+// would silently re-plan (stripping the write tools) instead of continuing
+// the plan the model just told the user it stopped mid-way through.
 
 import type { PlanPhase } from '../../../stores/ai';
 
@@ -29,5 +37,5 @@ export function routePlanSend(
 ): 'revise' | 'resume' | 'plan' {
   if (!activePlanPath) return 'plan';
   if (phase === 'awaiting-execute') return 'revise';
-  return phase === 'executing' ? 'resume' : 'plan';
+  return phase === 'executing' || phase === 'interrupted' ? 'resume' : 'plan';
 }

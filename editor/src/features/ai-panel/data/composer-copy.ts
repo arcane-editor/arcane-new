@@ -55,7 +55,7 @@ export function composerPlaceholder(input: PlaceholderInput): string {
       return 'Message revises the plan — Execute when it looks right. ⏎ to send.';
     }
     if (input.planRoute === 'resume') {
-      return 'Message guides the run in progress. ⏎ to send.';
+      return 'Message resumes the plan from where it stopped. ⏎ to send.';
     }
     return 'Describe what you want to build. @ for context, ⏎ to plan.';
   }

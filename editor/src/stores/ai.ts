@@ -34,6 +34,7 @@ import {
   coerceEffort,
   findPendingQuestion,
   normalizePlanRestore,
+  planModeTransition,
   resetWriteApprovalSession,
   resolvePendingQuestion,
   restoreEffort,
@@ -204,8 +205,17 @@ export interface HostedPlanEntry {
   difficulty?: 'easy' | 'hard';
 }
 
-/** Plan-mode lifecycle. */
-export type PlanPhase = 'idle' | 'planning' | 'awaiting-execute' | 'executing';
+/**
+ * Plan-mode lifecycle.
+ *
+ * `interrupted` is a plan whose execution run ended without finishing —
+ * capped, aborted, or errored (`plan-run.ts`) — or whose `executing` phase
+ * was found dead on restore/mode-switch (`normalizeLivePlanState`). It is
+ * resumable, unlike `awaiting-execute` which has never been started: the
+ * plan file's `[x]` ticks carry the progress, and `routePlanSend` maps it to
+ * `'resume'` the same way it maps `executing`.
+ */
+export type PlanPhase = 'idle' | 'planning' | 'awaiting-execute' | 'executing' | 'interrupted';
 
 /**
  * Session-cumulative token usage (P4) — accumulated from the UnityIDE server's
@@ -998,7 +1008,34 @@ export const useAiStore = create<AiState>((set, get) => ({
     resetWriteApprovalSession();
   },
 
-  setMode: (mode: ChatMode) => set({ mode }),
+  setMode: (mode: ChatMode) => {
+    const state = get();
+    const transition = planModeTransition({
+      from: state.mode,
+      to: mode,
+      planPhase: state.planPhase,
+      activePlanPath: state.activePlanPath,
+      isAgentRunning: state.isAgentRunning,
+    });
+    // `blocked` (an agent is running) and `noop` (already in that mode) both
+    // do nothing — the UI-level disables (ModeSelector, cycleAiMode) are the
+    // affordance; this is the enforcement. See `mode-transition.ts`.
+    if (transition.kind !== 'switch') return;
+    set((s) => ({
+      mode: transition.mode,
+      planPhase: transition.planPhase,
+      activePlanPath: transition.activePlanPath,
+      ...(transition.notice
+        ? {
+            messages: [
+              ...s.messages,
+              { id: nextId(), role: 'system', text: transition.notice, timestamp: Date.now() },
+            ],
+          }
+        : {}),
+    }));
+    scheduleSave();
+  },
 
   setEffort: (effort: Effort) => set({ effort }),
 
@@ -1175,7 +1212,14 @@ export const useAiStore = create<AiState>((set, get) => ({
 
   clearAttachments: () => set({ attachments: [] }),
 
-  setPlanPhase: (phase: PlanPhase) => set({ planPhase: phase }),
+  setPlanPhase: (phase: PlanPhase) => {
+    // Plan state belongs to UnityIDE's plan controller. An external agent runs
+    // its own loop and must never own it — the one phase it CAN reach is
+    // 'idle' (clearing state on session reset/reconnect); anything else here
+    // while an external agent is selected is silently ignored.
+    if (phase !== 'idle' && get().selectedAgent !== 'hosted') return;
+    set({ planPhase: phase });
+  },
   setActivePlanPath: (path: string | null) => set({ activePlanPath: path }),
   setPlanNotes: (path: string, notes: PlanNote[]) =>
     set((s) => {

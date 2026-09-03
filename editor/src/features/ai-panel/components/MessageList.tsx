@@ -136,6 +136,7 @@ function MessageList() {
   const messages = useAiStore((s) => s.messages);
   const planPhase = useAiStore((s) => s.planPhase);
   const selectedAgent = useAiStore((s) => s.selectedAgent);
+  const mode = useAiStore((s) => s.mode);
   const isAgentRunning = useAiStore((s) => s.isAgentRunning);
   const modelCallBudget = useAiStore((s) => s.modelCallBudget);
 
@@ -222,7 +223,17 @@ function MessageList() {
   // them. Without this check, switching agents mid-thread left UnityIDE's
   // Execute / Regenerate / Open card sitting under a "Claude Code" header,
   // offering to execute a plan the selected agent did not write and cannot run.
-  const showPlanActions = planPhase === 'awaiting-execute' && selectedAgent === 'hosted';
+  //
+  // Also gated on `mode === 'plan'`: `setMode` (mode-transition.ts) PARKS a
+  // live plan phase when the user switches away from plan mode rather than
+  // clearing it, so the card stays reachable on switching back — but that
+  // means the phase alone is no longer proof the user is looking at plan
+  // mode. Without this, a parked plan's card would render under the ask/agent
+  // composer it was just parked out of.
+  const showPlanActions =
+    (planPhase === 'awaiting-execute' || planPhase === 'interrupted') &&
+    selectedAgent === 'hosted' &&
+    mode === 'plan';
 
   // P5.1: track the most recent preceding user message id so ToolCallBlock's
   // per-file Revert can look up the right checkpoint turn

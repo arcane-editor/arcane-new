@@ -38,6 +38,8 @@ export { fixConsoleError } from './services/fix-console-error';
 export { isAiComposerFocused } from './services/composer-focus';
 export { EFFORT_ORDER, cycleEffort, nextEffort, clampEffort, restoreEffort } from './data/effort';
 export { planController } from './services/plan-controller';
+export { planModeTransition, normalizeLivePlanState, PLAN_PARKED_NOTICE } from './services/mode-transition';
+export type { ModeTransitionInput, ModeTransition } from './services/mode-transition';
 export { resetWriteApprovalSession } from './services/write-approval-gate';
 export type { AskUserOption, AskUserParams } from './services/ask-user-tool';
 export { hasPendingQuestion, resolvePendingQuestion } from './services/question-gate';

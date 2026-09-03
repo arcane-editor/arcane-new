@@ -208,10 +208,12 @@ export function buildSessionData(input: SaveSessionInput): SessionData {
 
 /**
  * Pure — maps saved plan state to what a fresh process can honestly claim.
- * 'executing' ⇒ 'awaiting-execute' (the run died with the old process; the
- * plan file's [x] ticks carry the progress), 'planning' ⇒ 'idle' (nothing to
- * resume — the plan was never written), and a pending phase without a plan
- * path degrades to 'idle'.
+ * 'executing' ⇒ 'interrupted' (the run died with the old process; the plan
+ * file's [x] ticks carry the progress, and 'interrupted' — unlike
+ * 'awaiting-execute' — is what tells `routePlanSend` this plan resumes
+ * rather than starts fresh), 'interrupted' ⇒ 'interrupted' (already honest),
+ * 'planning' ⇒ 'idle' (nothing to resume — the plan was never written), and
+ * a pending phase without a plan path degrades to 'idle'.
  */
 export function normalizePlanRestore(
   phase: PlanPhase | undefined,
@@ -219,8 +221,11 @@ export function normalizePlanRestore(
 ): { planPhase: PlanPhase; activePlanPath: string | null } {
   const path = activePlanPath ?? null;
   if (!path) return { planPhase: 'idle', activePlanPath: null };
-  if (phase === 'awaiting-execute' || phase === 'executing') {
+  if (phase === 'awaiting-execute') {
     return { planPhase: 'awaiting-execute', activePlanPath: path };
+  }
+  if (phase === 'executing' || phase === 'interrupted') {
+    return { planPhase: 'interrupted', activePlanPath: path };
   }
   return { planPhase: 'idle', activePlanPath: null };
 }

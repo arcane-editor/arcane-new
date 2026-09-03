@@ -26,8 +26,13 @@ describe('composerPlaceholder — UnityIDE', () => {
     expect(text).not.toContain('continues the current plan');
   });
 
-  it('promises guidance only once a run is actually under way', () => {
-    expect(p({ mode: 'plan', planRoute: 'resume' })).toContain('guides the run');
+  // The wrap-up text after a stopped run tells the user to reply "continue"
+  // to pick it back up (StoppedBlock's Resume button sends that literal
+  // text). The placeholder has to promise the same thing, not "guides the
+  // run in progress" — there is no run in progress once the phase is
+  // 'interrupted', only a plan file with [x] ticks to continue from.
+  it('promises resuming from where the plan stopped', () => {
+    expect(p({ mode: 'plan', planRoute: 'resume' })).toContain('resumes the plan from where it stopped');
   });
 });
 
