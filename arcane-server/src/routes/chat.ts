@@ -5,7 +5,7 @@ import { streamCompletion } from '../services/llm-router.ts';
 import { DEFAULT_INTENSITY, getIntensityConfig } from '../config/plans.ts';
 import { resolveModelForSend } from '../config/routing.ts';
 import { isTierAllowed, minPlanForTier, TIERS } from '../config/tiers.ts';
-import { checkAiBudget } from '../lib/credits.ts';
+import { checkAiBudget, budgetErrorBody } from '../lib/credits.ts';
 import { getUserBillingRow } from '../lib/db.ts';
 import { getModelRouting, getEffectivePricing } from '../lib/app-config.ts';
 import { recordUsage } from '../lib/usage.ts';
@@ -53,7 +53,10 @@ chatRouter.post('/v1/chat/completions', async (c) => {
     // Credit balance + anti-abuse hourly cap. 402 = out of credits (upgrade /
     // top up); 429 = short-window rate limit.
     const budget = await checkAiBudget(c.env.arcane_db, userId);
-    if (!budget.ok) return c.json({ error: budget.error, code: budget.code }, budget.status);
+    if (!budget.ok) {
+        if (budget.retryAfterSeconds !== undefined) c.header('Retry-After', String(budget.retryAfterSeconds));
+        return c.json(budgetErrorBody(budget), budget.status);
+    }
 
     // Resolve model — config-driven routing (config/routing.ts against the
     // runtime `model_routing` doc, lib/app-config.ts). Model choice is 100%

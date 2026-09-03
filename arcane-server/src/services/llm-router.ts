@@ -347,6 +347,38 @@ export function classifyStreamError(error: unknown): StreamErrorCode {
     return /rate limit|\b3036\b|\b3040\b|capacity/i.test(String(error)) ? 'rate_limit' : 'model_error';
 }
 
+/**
+ * Structured retry-after for a provider error, read off the AI SDK's
+ * `APICallError.responseHeaders` (`Record<string, string> | undefined`, see
+ * @ai-sdk/provider's index.d.ts). RFC 7231 allows either an integer seconds
+ * count or an HTTP-date for `Retry-After`; header casing is not guaranteed to
+ * survive whatever fetch/Headers normalization ran upstream, so the lookup is
+ * case-insensitive. Clamped to [1, 3600] so a provider's second-off or
+ * day-off value can never turn into a near-instant or near-infinite editor
+ * retry. Undefined when the header is absent or neither shape parses — the
+ * SSE error event then omits `retryAfterSeconds` entirely (see the `error`
+ * case in streamCompletion below).
+ */
+export function retryAfterSecondsFrom(error: unknown): number | undefined {
+    const headers = typeof error === 'object' && error !== null
+        ? (error as { responseHeaders?: Record<string, string> }).responseHeaders
+        : undefined;
+    if (!headers) return undefined;
+    const key = Object.keys(headers).find((k) => k.toLowerCase() === 'retry-after');
+    const raw = key ? headers[key]?.trim() : undefined;
+    if (!raw) return undefined;
+
+    let seconds: number | undefined;
+    if (/^\d+$/.test(raw)) {
+        seconds = parseInt(raw, 10);
+    } else {
+        const deltaMs = Date.parse(raw) - Date.now();
+        if (!Number.isNaN(deltaMs)) seconds = Math.ceil(deltaMs / 1000);
+    }
+    if (seconds === undefined || !Number.isFinite(seconds)) return undefined;
+    return Math.min(3600, Math.max(1, seconds));
+}
+
 type StreamTextFn = typeof streamText;
 
 export async function* streamCompletion(
@@ -483,10 +515,15 @@ export async function* streamCompletion(
                     emitted = true;
                     yield { type: 'thinking', thought: part.text, signature: '' };
                     break;
-                case 'error':
+                case 'error': {
                     emitted = true;
-                    yield { type: 'error', code: classifyStreamError(part.error), message: describeStreamError(part.error) };
+                    const retryAfterSeconds = retryAfterSecondsFrom(part.error);
+                    yield {
+                        type: 'error', code: classifyStreamError(part.error), message: describeStreamError(part.error),
+                        ...(retryAfterSeconds !== undefined ? { retryAfterSeconds } : {}),
+                    };
                     break;
+                }
             }
         }
         if (!rejected) return;

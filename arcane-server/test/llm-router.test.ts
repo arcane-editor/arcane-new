@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
     resolveModel, classifyStreamError, convertMessages, describeStreamError, streamCompletion,
-    isToolChoiceRejection, isEffortRejection, effortProviderOptions,
+    isToolChoiceRejection, isEffortRejection, effortProviderOptions, retryAfterSecondsFrom,
     LlmConfigError, type LlmEnv,
 } from '../src/services/llm-router.ts';
 import { SPARK_MODEL, DEFAULT_MODEL_ROUTING } from '../src/config/plans.ts';
@@ -88,6 +88,52 @@ describe('classifyStreamError', () => {
 
     it('falls back to model_error', () => {
         expect(classifyStreamError(new Error('boom'))).toBe('model_error');
+    });
+});
+
+describe('retryAfterSecondsFrom', () => {
+    it('reads an integer-seconds Retry-After header', () => {
+        const err = { responseHeaders: { 'retry-after': '30' } };
+        expect(retryAfterSecondsFrom(err)).toBe(30);
+    });
+
+    it('reads Retry-After case-insensitively', () => {
+        const err = { responseHeaders: { 'Retry-After': '45' } };
+        expect(retryAfterSecondsFrom(err)).toBe(45);
+    });
+
+    it('converts an HTTP-date Retry-After into a delta in seconds', () => {
+        const future = new Date(Date.now() + 20_000).toUTCString();
+        const err = { responseHeaders: { 'retry-after': future } };
+        const seconds = retryAfterSecondsFrom(err);
+        expect(seconds).toBeGreaterThanOrEqual(18);
+        expect(seconds).toBeLessThanOrEqual(21);
+    });
+
+    it('is undefined when responseHeaders is absent', () => {
+        expect(retryAfterSecondsFrom(new Error('boom'))).toBeUndefined();
+        expect(retryAfterSecondsFrom({})).toBeUndefined();
+        expect(retryAfterSecondsFrom(null)).toBeUndefined();
+        expect(retryAfterSecondsFrom(undefined)).toBeUndefined();
+    });
+
+    it('is undefined when the header itself is absent', () => {
+        expect(retryAfterSecondsFrom({ responseHeaders: { 'content-type': 'application/json' } })).toBeUndefined();
+    });
+
+    it('is undefined for a value that is neither seconds nor an HTTP-date', () => {
+        expect(retryAfterSecondsFrom({ responseHeaders: { 'retry-after': 'not-a-value' } })).toBeUndefined();
+    });
+
+    it('clamps a huge seconds value down to 3600', () => {
+        expect(retryAfterSecondsFrom({ responseHeaders: { 'retry-after': '999999' } })).toBe(3600);
+    });
+
+    it('clamps a zero/negative-delta value up to 1', () => {
+        expect(retryAfterSecondsFrom({ responseHeaders: { 'retry-after': '0' } })).toBe(1);
+        // A past HTTP-date yields a negative delta before clamping.
+        const past = new Date(Date.now() - 60_000).toUTCString();
+        expect(retryAfterSecondsFrom({ responseHeaders: { 'retry-after': past } })).toBe(1);
     });
 });
 
@@ -247,6 +293,24 @@ describe('streamCompletion event mapping', () => {
             { type: 'thinking', thought: 'thinking it through', signature: '' },
             { type: 'usage', model: '@cf/zai-org/glm-5.2', input_tokens: 10, output_tokens: 5, cached_input_tokens: 2 },
             { type: 'error', code: 'rate_limit', message: `${String(upstreamError)} [status 429]` },
+        ]);
+        // Locks in that the key is truly OMITTED (not present-as-undefined) —
+        // `toEqual` alone would pass either way.
+        expect(events[4]).not.toHaveProperty('retryAfterSeconds');
+    });
+
+    it('the error event carries retryAfterSeconds when the upstream error has a Retry-After header', async () => {
+        const upstreamError = Object.assign(new Error('rate limited'), {
+            statusCode: 429,
+            responseHeaders: { 'retry-after': '42' },
+        });
+        const impl = fakeStreamText([{ type: 'error', error: upstreamError }]);
+
+        const events: StreamEvent[] = [];
+        for await (const e of streamCompletion(REQ, ENV, impl)) events.push(e);
+
+        expect(events).toEqual([
+            { type: 'error', code: 'rate_limit', message: `${String(upstreamError)} [status 429]`, retryAfterSeconds: 42 },
         ]);
     });
 
