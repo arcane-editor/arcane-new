@@ -191,12 +191,30 @@ describe('contrast facts integration (P2.1)', () => {
     );
   });
 
-  // Task 18 (B11): `urp-newinput` now ships a seeded HUD (Assets/UI/HUD.uxml
-  // + Theme.uss, for the `codegen-ui-hud` eval task — see `tasks.ts`), so this
-  // golden string gained the subsystem-inventory line every other fixture
-  // with real UI Toolkit files already gets.
   it('urp-newinput (URP + new): urp-color, urp-postfx, input-new, + both deprecations', async () => {
     const facts = await buildFixtureFacts(FIXTURES + 'urp-newinput');
+    expect(facts).toBe(
+      [
+        '## Unity project facts (authoritative — match these)',
+        '- Unity version: 6000.3.5f2',
+        '- Render pipeline: URP',
+        '- Input system: Input System (new)',
+        '- Shader color property is `_BaseColor` (texture: `_BaseMap`). `_Color`/`_MainTex` are WRONG in this project (Built-in names).',
+        '- Full-screen effects: `OnRenderImage` does NOT run under URP — use a ScriptableRenderPass / Renderer Feature.',
+        '- New Input System is active: `Input.GetAxis/GetKey/GetButton/GetMouseButton` are WRONG here — use InputAction/PlayerInput.',
+        '- `WWW` is deprecated — use `UnityWebRequest` for networking/file loads instead.',
+        '- `Application.LoadLevel` is deprecated — use `SceneManager.LoadScene` instead.',
+      ].join('\n'),
+    );
+  });
+
+  // Task 18 (B11), review finding R15: `codegen-ui-hud`'s seeded HUD
+  // (Assets/UI/HUD.uxml + Theme.uss) lives ONLY in this isolated
+  // `urp-newinput-uitoolkit` fixture, precisely so the shared `urp-newinput`
+  // fixture's facts block (asserted immediately above) stays byte-identical
+  // for the nine other tasks that already run on it.
+  it('urp-newinput-uitoolkit (urp-newinput + a seeded UI Toolkit HUD): gains the subsystem-inventory line', async () => {
+    const facts = await buildFixtureFacts(FIXTURES + 'urp-newinput-uitoolkit');
     expect(facts).toBe(
       [
         '## Unity project facts (authoritative — match these)',

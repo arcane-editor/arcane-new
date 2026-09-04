@@ -94,6 +94,18 @@ function argPath(args: Record<string, unknown>, workspacePath?: string): string 
 }
 
 /**
+ * A non-blank string arg, or `undefined` — the shared "do I have enough to
+ * build a specific label" check the Unity subsystem/scene/UI-generation
+ * cases below all need, since every one of them falls back to a generic
+ * label (e.g. "Wrote a UI file") when the model's call didn't carry a usable
+ * value for the field that label is built from.
+ */
+function strArg(args: Record<string, unknown>, key: string): string | undefined {
+  const v = args[key];
+  return typeof v === 'string' && v.trim() !== '' ? v : undefined;
+}
+
+/**
  * Line-arithmetic +/- count via `structuredPatch`'s hunks — each hunk line
  * has an unambiguous single-char prefix (index 0 is ' '/'+'/'-'), so this
  * can't misread an added/removed line whose own content happens to start
@@ -219,28 +231,28 @@ function humanizeUnity(name: string, args: Record<string, unknown>): HumanizedTo
       return { title: `Planned Unity migration${kind ? ` (${kind})` : ''}` };
     }
     case 'unity_attach_ui_document': {
-      const gameObject = typeof args.gameObject === 'string' && args.gameObject.trim() !== '' ? args.gameObject : undefined;
+      const gameObject = strArg(args, 'gameObject');
       return { title: gameObject ? `Attached UIDocument to "${truncate(gameObject, 40)}"` : 'Attached a UIDocument' };
     }
     case 'unity_set_property': {
-      const property = typeof args.property === 'string' && args.property.trim() !== '' ? args.property : undefined;
-      const component = typeof args.component === 'string' && args.component.trim() !== '' ? args.component : undefined;
+      const property = strArg(args, 'property');
+      const component = strArg(args, 'component');
       return { title: property ? `Set ${component ? `${component}.` : ''}${property}` : 'Set a Unity property' };
     }
     case 'unity_ui_write': {
-      const path = typeof args.path === 'string' && args.path.trim() !== '' ? args.path : undefined;
+      const path = strArg(args, 'path');
       return { title: path ? `Wrote UI file ${basename(path)}` : 'Wrote a UI file' };
     }
     case 'unity_ui_layout': {
-      const document = typeof args.document === 'string' && args.document.trim() !== '' ? args.document : undefined;
+      const document = strArg(args, 'document');
       return { title: document ? `Previewed layout of ${basename(document)}` : 'Previewed a UI layout' };
     }
     case 'unity_ui_scaffold': {
-      const screen = typeof args.screen === 'string' && args.screen.trim() !== '' ? args.screen : undefined;
+      const screen = strArg(args, 'screen');
       return { title: screen ? `Drafted a ${screen} screen` : 'Drafted a UI screen' };
     }
     case 'unity_asset_edit': {
-      const path = typeof args.path === 'string' && args.path.trim() !== '' ? args.path : undefined;
+      const path = strArg(args, 'path');
       return { title: path ? `Edited Unity asset ${basename(path)}` : 'Edited a Unity asset' };
     }
     default:

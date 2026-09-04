@@ -43,20 +43,25 @@ export const TASKS: EvalTask[] = [
   },
 
   // ── codegen (UI generation) ──────────────────────────────────────────
-  // `urp-newinput`'s fixture ships a seeded HUD (Assets/UI/HUD.uxml +
-  // Theme.uss, copied verbatim from `editor/fixtures/uitoolkit/` — see that
-  // fixture's own doc comment) so the project already "counts as" UI
-  // Toolkit before this task's turn starts. `unity_ui_scaffold`/
-  // `unity_ui_write` aren't in the headless eval's toolset (see
-  // `run-task.ts`'s "Deliberately ABSENT" list — they need a live bridge to
-  // resolve GUIDs/PanelSettings), so the agent has to reach the same result
-  // through the generic `write` tool, the same as every other codegen task.
-  // Theme.uss's seeded `box-shadow` (a CSS property USS does not implement —
-  // see that file's own comment) is the trap: an agent that imitates the
-  // existing stylesheet's pattern instead of writing valid USS fails the
-  // `file_not_contains` check below.
+  // `urp-newinput-uitoolkit` is its own fixture — NOT the shared
+  // `urp-newinput` — precisely so seeding it with a HUD doesn't change the
+  // facts block of the nine other tasks that already run on `urp-newinput`
+  // (review finding R15: seeding the shared fixture gave every one of them a
+  // `Unity subsystems in use: UI Toolkit …` line it never had before, and
+  // told the uGUI-flavored `codegen-canvas-fade` the project uses UI
+  // Toolkit). It ships a seeded HUD (Assets/UI/HUD.uxml + Theme.uss, copied
+  // verbatim from `editor/fixtures/uitoolkit/` — see that fixture's own doc
+  // comment) so the project already "counts as" UI Toolkit before this
+  // task's turn starts. `unity_ui_scaffold`/`unity_ui_write` aren't in the
+  // headless eval's toolset (see `run-task.ts`'s "Deliberately ABSENT" list
+  // — they need a live bridge to resolve GUIDs/PanelSettings), so the agent
+  // has to reach the same result through the generic `write` tool, the same
+  // as every other codegen task. Theme.uss's seeded `box-shadow` (a CSS
+  // property USS does not implement — see that file's own comment) is the
+  // trap: an agent that imitates the existing stylesheet's pattern instead
+  // of writing valid USS fails the `file_not_contains` check below.
   {
-    id: 'codegen-ui-hud', family: 'codegen', fixture: 'urp-newinput', mode: 'agent',
+    id: 'codegen-ui-hud', family: 'codegen', fixture: 'urp-newinput-uitoolkit', mode: 'agent',
     prompt: 'This project already has a HUD built with UI Toolkit (Assets/UI/HUD.uxml, Assets/UI/Theme.uss). Add a new pause menu screen: create Assets/UI/PauseMenu.uxml and Assets/UI/PauseMenu.uss, styled consistently with the existing theme.',
     checks: [
       { type: 'file_exists', path: 'Assets/UI/PauseMenu.uxml' },
