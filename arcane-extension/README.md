@@ -51,11 +51,17 @@ The extension auto-detects UnityIDE from these default locations:
 ## Features
 
 - **Script Editing** — Double-click `.cs` files in Unity to open them in UnityIDE
-- **Console Streaming** — Unity logs appear in the IDE's console in real-time
+- **Console Streaming** — Unity logs appear in the IDE's console in real-time; the
+  IDE can also pull a point-in-time snapshot (`getConsoleSnapshot`) and clear the
+  console (`clearConsole`), which is what its post-turn console check is built on
 - **Play Controls** — Play, pause, stop, and step from the IDE toolbar
 - **Scene Hierarchy** — Live, read-only mirror of the open scenes in the IDE
 - **Play-mode Telemetry** — FPS, memory, and GC stats streamed while playing
-- **Test Runner** — Run EditMode and PlayMode tests from the IDE (requires `com.unity.test-framework`)
+- **Test Runner** — Run EditMode and PlayMode tests from the IDE (requires
+  `com.unity.test-framework`); individual results stream live as tests run,
+  with a pass/fail summary on completion
+- **UI Generation** — Attach a `UIDocument` to a GameObject and set serialized
+  properties on a component, a GameObject, or an asset directly from the IDE
 - **Project Generation** — Auto-generates `.sln`/`.csproj` for C# IntelliSense
 
 ## Requirements

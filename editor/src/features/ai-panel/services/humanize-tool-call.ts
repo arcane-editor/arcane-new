@@ -168,13 +168,23 @@ const UNITY_STATIC_LABELS: Record<string, string> = {
   unity_play: 'Entered Play Mode',
   unity_stop: 'Exited Play Mode',
   unity_refresh: 'Refreshed Unity assets',
+  unity_console_clear: 'Cleared Unity console',
   // Bridge/index-backed read tools (unity-tools/read-tools.ts, script-map-tool.ts)
   get_console_errors: 'Checked Unity console',
+  get_compile_errors: 'Checked Unity compile status',
   get_editor_state: 'Checked Unity editor state',
   get_scene_hierarchy: 'Read Unity scene hierarchy',
   get_game_object: 'Inspected a Unity GameObject',
   find_asset_references: 'Searched asset references',
   get_unity_script_map: 'Mapped Unity scripts',
+  // Subsystem tools (scriptable-objects-tool.ts, ui-toolkit-tool.ts,
+  // input-actions-tool.ts, so-drift-tool.ts, input-edit-tool.ts) — read/write
+  // an asset format the generic read/write tools do not understand.
+  unity_scriptable_objects: 'Read ScriptableObjects',
+  unity_ui_toolkit: 'Read UI Toolkit setup',
+  unity_input_actions: 'Read input actions',
+  unity_fix_so_drift: 'Repaired ScriptableObject drift',
+  unity_input_edit: 'Edited input actions',
 };
 
 function humanizeUnity(name: string, args: Record<string, unknown>): HumanizedToolCall {
@@ -208,6 +218,31 @@ function humanizeUnity(name: string, args: Record<string, unknown>): HumanizedTo
       const kind = typeof args.kind === 'string' ? args.kind : '';
       return { title: `Planned Unity migration${kind ? ` (${kind})` : ''}` };
     }
+    case 'unity_attach_ui_document': {
+      const gameObject = typeof args.gameObject === 'string' && args.gameObject.trim() !== '' ? args.gameObject : undefined;
+      return { title: gameObject ? `Attached UIDocument to "${truncate(gameObject, 40)}"` : 'Attached a UIDocument' };
+    }
+    case 'unity_set_property': {
+      const property = typeof args.property === 'string' && args.property.trim() !== '' ? args.property : undefined;
+      const component = typeof args.component === 'string' && args.component.trim() !== '' ? args.component : undefined;
+      return { title: property ? `Set ${component ? `${component}.` : ''}${property}` : 'Set a Unity property' };
+    }
+    case 'unity_ui_write': {
+      const path = typeof args.path === 'string' && args.path.trim() !== '' ? args.path : undefined;
+      return { title: path ? `Wrote UI file ${basename(path)}` : 'Wrote a UI file' };
+    }
+    case 'unity_ui_layout': {
+      const document = typeof args.document === 'string' && args.document.trim() !== '' ? args.document : undefined;
+      return { title: document ? `Previewed layout of ${basename(document)}` : 'Previewed a UI layout' };
+    }
+    case 'unity_ui_scaffold': {
+      const screen = typeof args.screen === 'string' && args.screen.trim() !== '' ? args.screen : undefined;
+      return { title: screen ? `Drafted a ${screen} screen` : 'Drafted a UI screen' };
+    }
+    case 'unity_asset_edit': {
+      const path = typeof args.path === 'string' && args.path.trim() !== '' ? args.path : undefined;
+      return { title: path ? `Edited Unity asset ${basename(path)}` : 'Edited a Unity asset' };
+    }
     default:
       return { title: name };
   }
@@ -220,6 +255,12 @@ const UNITY_TOOL_NAMES = new Set([
   'unity_api_search',
   'get_unity_docs',
   'unity_plan_migration',
+  'unity_attach_ui_document',
+  'unity_set_property',
+  'unity_ui_write',
+  'unity_ui_layout',
+  'unity_ui_scaffold',
+  'unity_asset_edit',
 ]);
 
 /**

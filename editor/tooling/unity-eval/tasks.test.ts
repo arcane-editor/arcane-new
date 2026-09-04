@@ -9,10 +9,13 @@
 
 import { describe, it, expect } from 'bun:test';
 import { existsSync, statSync } from 'node:fs';
+import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { TASKS } from './tasks';
 import type { CheckSpec } from './eval-types';
+import { runChecks } from './checks';
 
 const FIXTURES_DIR = fileURLToPath(new URL('./fixtures/', import.meta.url));
 
@@ -220,4 +223,108 @@ STOP — review and edit before execution.
       (c as { pattern?: string }).pattern?.includes('){5}'),
     ) as { type: string; pattern: string; flags?: string };
   }
+});
+
+/**
+ * `grounding-ui-stack` (Task 18): a discrimination check, same shape as the
+ * plan family's above — a known-good answer must pass every check, a
+ * known-bad one must fail at least one. Both `answer_matches`/
+ * `answer_not_matches`, so this reuses the plan family's own `run` logic
+ * rather than round-tripping through `runChecks`'s file I/O.
+ */
+describe('grounding-ui-stack checks discriminate uGUI from UI Toolkit answers', () => {
+  const task = TASKS.find((t) => t.id === 'grounding-ui-stack')!;
+
+  const run = (spec: { type: string; pattern?: string; flags?: string }, answer: string) => {
+    const hit = new RegExp(spec.pattern!, spec.flags).test(answer);
+    return spec.type === 'answer_matches' ? hit : !hit;
+  };
+
+  const GOOD_ANSWER =
+    "This project uses Unity's built-in UI (uGUI) — build the menu as a child of the existing " +
+    'Canvas, with a RectTransform and a couple of Button components, the same way the rest of the ' +
+    'project builds screens.';
+
+  // The wrong stack for this project: it recommends UI Toolkit's runtime
+  // component, which nothing in a Canvas-only scene can display.
+  const BAD_ANSWER =
+    'Add a UIDocument component to a GameObject and author the menu as UXML with a UI Toolkit ' +
+    'PanelSettings asset.';
+
+  it('added the task', () => {
+    expect(task).toBeDefined();
+  });
+
+  it('passes an answer grounded in the project\'s actual uGUI/Canvas setup', () => {
+    const failed = task.checks.filter((c) => !run(c as never, GOOD_ANSWER));
+    expect(failed).toEqual([]);
+  });
+
+  it('fails an answer that recommends UIDocument/UI Toolkit', () => {
+    const failed = task.checks.filter((c) => !run(c as never, BAD_ANSWER));
+    expect(failed.length).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * `codegen-ui-hud` (Task 18): unlike the answer-graded families above, this
+ * task's checks are file-based (`file_exists`/`file_not_contains`), so the
+ * discrimination test round-trips through the real `runChecks` against an
+ * actual temp dir rather than reimplementing the check logic — the same
+ * approach `checks.test.ts` uses for its own fixtures.
+ */
+describe('codegen-ui-hud checks discriminate valid USS from the seeded box-shadow trap', () => {
+  const task = TASKS.find((t) => t.id === 'codegen-ui-hud')!;
+
+  it('added the task', () => {
+    expect(task).toBeDefined();
+  });
+
+  it('passes a new screen written with valid USS', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'eval-tasks-ui-hud-good-'));
+    try {
+      await mkdir(join(dir, 'Assets/UI'), { recursive: true });
+      await writeFile(
+        join(dir, 'Assets/UI/PauseMenu.uxml'),
+        '<ui:UXML xmlns:ui="UnityEngine.UIElements"><ui:VisualElement name="pause-root" class="pause" /></ui:UXML>',
+      );
+      await writeFile(
+        join(dir, 'Assets/UI/PauseMenu.uss'),
+        '.pause {\n  flex-grow: 1;\n  background-color: rgba(0, 0, 0, 0.6);\n  border-radius: 4px;\n}\n',
+      );
+      const results = await runChecks(task.checks, { workDir: dir, finalAnswer: '' });
+      expect(results.every((r) => r.pass)).toBe(true);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('fails a new screen whose USS repeats the seeded Theme.uss box-shadow mistake', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'eval-tasks-ui-hud-bad-'));
+    try {
+      await mkdir(join(dir, 'Assets/UI'), { recursive: true });
+      await writeFile(
+        join(dir, 'Assets/UI/PauseMenu.uxml'),
+        '<ui:UXML xmlns:ui="UnityEngine.UIElements"><ui:VisualElement name="pause-root" class="pause" /></ui:UXML>',
+      );
+      await writeFile(
+        join(dir, 'Assets/UI/PauseMenu.uss'),
+        '.pause {\n  flex-grow: 1;\n  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);\n}\n',
+      );
+      const results = await runChecks(task.checks, { workDir: dir, finalAnswer: '' });
+      expect(results.every((r) => r.pass)).toBe(false);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('fails when the new files were never written at all', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'eval-tasks-ui-hud-missing-'));
+    try {
+      const results = await runChecks(task.checks, { workDir: dir, finalAnswer: '' });
+      expect(results.every((r) => r.pass)).toBe(false);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });

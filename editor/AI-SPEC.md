@@ -105,3 +105,86 @@ Two consequences of routing spark that are easy to miss. It is a `direct`-route 
 - **Context pack** (`prompts/context-pack.ts`, frozen per conversation): asmdef assembly map + graphify god-node key files + per-project memory digest, deterministic and effort-budgeted.
 - **`project_symbols` tool**: file/type symbol tables straight from graph.json (Rust `graphify_symbols`) — replaces whole-file reads used only to find a member.
 - **Per-project memory** (`services/memory/`): markdown entries under `Library/UnityIDE/memory` (user-visible/editable), written by a post-send distiller on the side-task lane, deduped-before-write, hard-capped per category with never-recalled-only eviction, consolidated near the cap, recalled via the digest + `memory_search`. Task context is one overwrite-only file. Setting: `ai.memory.enabled`.
+
+## Console feedback loop and UI generation (2026-09)
+
+### Post-turn console check
+A send now closes with one more pass, gated by `unity.consoleCheck.enabled`
+(default on): once the model's tool calls are done, `agent-service.ts` compares
+Unity's console against a **baseline** captured at send start
+(`console-check.ts`'s `ConsoleCheckBaseline` — the session ring's `seq`, the
+console epoch, whether a compile report and an awake editor were current, and the
+highest Unity console row already seen) and asks what appeared during THIS turn
+that a compiler never reported and the model never saw.
+
+- **Ring + snapshot merge.** The live session ring (everything streamed while
+  connected) is the primary record. A `getConsoleSnapshot` read (bridge protocol
+  4+) is merged on top two ways: ENRICHMENT gives a ring entry whose stack trace
+  never parsed the snapshot's `file:line`; ADOPTION takes a snapshot-only row when
+  Unity's own console row index proves it landed after the baseline — the
+  domain-reload gap the ring alone can miss. A failed snapshot read, or a window
+  where the editor was asleep, is a labeled degradation, never silence read as
+  clean (Global Constraint 2).
+- **One bounded repair pass.** When new errors, failing tests, or leftover
+  compiler errors are attributable to the project (not `external` — a
+  package/engine problem) and `unity.consoleCheck.autoRepair` is on, the agent
+  gets exactly one more turn to fix them (`MAX_CONSOLE_REPAIRS = 1`; a second pass
+  would be a loop, not a fix). The console/compile state is then re-collected and
+  diffed against the pre-repair snapshot.
+- **Honesty labels, not verdicts.** A console error can only ever come back
+  `notReobserved` after a repair — nothing short of reproducing the failure path
+  proves it gone — while a compiler error CAN be proven `fixed`, because the
+  post-repair pass compiles again. The Verified card's console row
+  (`consoleRowLabel`) always names what is unknown instead of defaulting to
+  "clean": `console unknown (Unity in background)`, `console unknown (Unity
+  reconnected mid-turn — history may be incomplete)`, `console: stream only
+  (update the bridge package for full history)`, and so on.
+- **`turn-telemetry.ts`'s `consoleRepairs` is its own counter, never
+  `repairCount`.** `repairCount` latches `send-escalation.ts`'s model-escalation
+  trigger (Global Constraint 8); a console repair pass is not evidence the
+  current model is struggling, so it must never inflate that count.
+
+### New tools
+- `get_compile_errors` — Unity's compiler diagnostics: instant against the last
+  reported compile, or `recompile:true` to force one and wait.
+- `unity_console_clear` — clears Unity's console and this IDE's log ring.
+- `unity_run_tests` now records a real run's outcome for the console check
+  (`recordTestRunForConsoleCheck`), so a failing test surfaces on the Verified
+  card's tests row even when the agent never re-reads its own result.
+- `unity_attach_ui_document` / `unity_set_property` — the bridge's first
+  scene-WRITE RPCs (`attachUiDocument` / `setSerializedProperty`), gated like
+  every mutate tool (human approval; the Unity-side `EditorGate` additionally
+  refuses to write during Play Mode, a domain reload, or Prefab Mode).
+- `unity_ui_write` / `unity_ui_layout` / `unity_ui_scaffold` — write validated
+  UXML/USS, preview a document's real rendered layout (an offscreen probe run
+  through the same pipeline as the human preview, not a re-read of the source),
+  and hand back a vetted screen template, respectively.
+- The six subsystem tools from the base commit (`unity_scriptable_objects`,
+  `unity_ui_toolkit`, `unity_input_actions`, `unity_asset_edit`,
+  `unity_fix_so_drift`, `unity_input_edit`) read/write the three Unity formats
+  that couple an asset to code through a bare string with no compiler backstop —
+  ScriptableObject fields, `Q<T>("name")` UI Toolkit lookups, Input System action
+  names — and now render with humanized labels in the transcript
+  (`humanize-tool-call.ts`) instead of their raw tool names.
+
+### UI generation flow
+Building a new screen chains four tools in order: **`unity_ui_scaffold`** (a
+vetted template — hud/main-menu/settings/dialog/inventory — parameterised by the
+project's own USS variables and PanelSettings reference resolution; it writes
+nothing, only returns the `unity_ui_write` calls to make) → **`unity_ui_write`**
+(the actual validated write, which allocates the UXML/USS GUIDs) →
+**`unity_ui_layout`** (renders the same pipeline the human preview uses, offscreen,
+and reports the real box every element laid out to, plus a geometry lint — the
+class of bug that compiles clean and is invisible to a string check) →
+**`unity_attach_ui_document`** (wires the finished document onto a GameObject in
+the open scene).
+
+### C# test scope
+Editor-dependent Unity tests (e.g. `arcane-extension/Tests/Editor/SceneMutationTests.cs`,
+which exercises `attachUiDocument`/`setSerializedProperty`) need a real scene, a
+real `AssetDatabase`, and a real `Undo` stack that only Unity's own Test Runner can
+provide — there is no headless Unity in CI. The local C# compile check (Global
+Constraint 13) proves they COMPILE; it does not, and cannot, execute them. A clean
+compile means "no syntax/type errors", not "the tests passed" — those are
+different claims, and reports on this class of change should say which one was
+checked.

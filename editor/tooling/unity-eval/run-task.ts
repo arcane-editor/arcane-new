@@ -82,12 +82,22 @@ export function buildTools(
   //
   // Deliberately ABSENT, and this is the list to check when a run diverges from
   // prod: `unity_input_actions`, `unity_scriptable_objects`, `unity_ui_toolkit`,
-  // `get_unity_script_map`, the bridge read tools and the three asset-mutate
-  // tools. Every one of them answers from a snapshot the editor maintains (the
-  // analyzers' `.inputactions`/UI Toolkit caches, the Rust GUID index, a live
-  // Unity bridge) that a headless run does not have. A stub that answered
-  // "no snapshot" would be worse than the omission: the model would learn to
-  // stop calling tools that work in production.
+  // `get_unity_script_map`, the bridge read tools (including `get_compile_errors`
+  // and `get_console_errors`), the three asset-mutate tools, the engine-mutate
+  // tools (`unity_play`/`unity_stop`/`unity_refresh`/`unity_run_tests`/
+  // `unity_console_clear` — the console tools), the scene-mutate tools
+  // (`unity_attach_ui_document`/`unity_set_property`), and the UI-generation
+  // trio (`unity_ui_write`/`unity_ui_layout`/`unity_ui_scaffold`). Every one of
+  // them answers from a snapshot the editor maintains, a live Unity console/
+  // compile report, or a live scene (the analyzers' `.inputactions`/UI Toolkit
+  // caches, the Rust GUID index, a connected Unity bridge) that a headless run
+  // does not have — `unity_ui_layout` additionally renders through the editor
+  // feature's own DOM pipeline (Global Constraint 4), and `unity_ui_scaffold`
+  // needs the store-backed project facts the other two feed. A stub that
+  // answered "no snapshot"/"no bridge" would be worse than the omission: the
+  // model would learn to stop calling tools that work in production. Codegen
+  // tasks that exercise UI Toolkit output (`codegen-ui-hud`) go through the
+  // generic `write` tool instead, same as every other codegen task.
   const unityTools: AgentTool[] = [
     createUnityApiSearchTool(groundingClient),
     createGetUnityDocsTool(() => unityVersion),

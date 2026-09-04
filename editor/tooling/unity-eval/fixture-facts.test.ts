@@ -191,6 +191,10 @@ describe('contrast facts integration (P2.1)', () => {
     );
   });
 
+  // Task 18 (B11): `urp-newinput` now ships a seeded HUD (Assets/UI/HUD.uxml
+  // + Theme.uss, for the `codegen-ui-hud` eval task — see `tasks.ts`), so this
+  // golden string gained the subsystem-inventory line every other fixture
+  // with real UI Toolkit files already gets.
   it('urp-newinput (URP + new): urp-color, urp-postfx, input-new, + both deprecations', async () => {
     const facts = await buildFixtureFacts(FIXTURES + 'urp-newinput');
     expect(facts).toBe(
@@ -199,6 +203,7 @@ describe('contrast facts integration (P2.1)', () => {
         '- Unity version: 6000.3.5f2',
         '- Render pipeline: URP',
         '- Input system: Input System (new)',
+        '- Unity subsystems in use: UI Toolkit (1 .uxml, 1 .uss)',
         '- Shader color property is `_BaseColor` (texture: `_BaseMap`). `_Color`/`_MainTex` are WRONG in this project (Built-in names).',
         '- Full-screen effects: `OnRenderImage` does NOT run under URP — use a ScriptableRenderPass / Renderer Feature.',
         '- New Input System is active: `Input.GetAxis/GetKey/GetButton/GetMouseButton` are WRONG here — use InputAction/PlayerInput.',

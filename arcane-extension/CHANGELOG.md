@@ -5,15 +5,42 @@ All notable changes to this package will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.0] - Unreleased
 
 ### Added
 - **Bridge wire-protocol bumped to version 4** (`Discovery.ProtocolVersion`,
-  pinned against `PROTOCOL_VERSION` in `unity_ipc.rs`). Scaffolding only in
-  this release — the RPCs it makes room for (console snapshot/clear, a queued
-  `runTests` with a `test_run_completed` push, `attachUiDocument` /
-  `setSerializedProperty`) land in follow-up releases. Package version bumped
-  to 0.2.0 to match the new protocol floor (`MIN_PACKAGE_VERSION`).
+  pinned against `PROTOCOL_VERSION` in `unity_ipc.rs`), and the RPCs it makes
+  room for now all ship:
+  - **`getConsoleSnapshot` / `clearConsole`** — a point-in-time read of the
+    console (for the IDE's post-turn check to merge against its own live
+    stream) and a way to clear it from the IDE. Backed by a bounded
+    (2000-entry) "hook ring" that persists its last 500 entries through a
+    domain reload (`SessionState`, plus the running `Seq`/`ClearEpoch`
+    counters), so a script recompile doesn't reset an agent's paging
+    baseline to zero.
+  - **`runTests`, queued, with a `test_run_completed` push.** A test run no
+    longer blocks a request/response pair on however long the suite takes:
+    `runTests` is dispatched through `RpcDispatcher.RegisterQueued` (coalesced
+    on a `"testRun"` key, so a second call while one is running joins the
+    first rather than starting a duplicate), and the IDE learns the outcome
+    from the awaited `test_run_completed` push — summary counts plus a capped
+    list of failures — decoupled from the `test_event` stream already used for
+    live per-test progress.
+  - **`attachUiDocument` / `setSerializedProperty`** — the bridge's first
+    scene-WRITE RPCs. `attachUiDocument` wires a UIDocument to a GameObject,
+    a `.uxml`, a PanelSettings and a theme in one call (creating whichever of
+    those is missing) and gets its own 25s timeout (`AttachTimeoutMs`) rather
+    than the default 8s, since it can touch several assets. Both go through
+    `EditorGate`, the shared guard that refuses a scene write outright when
+    Play Mode, a domain reload, or Prefab Mode would make it unsafe or would
+    silently land on the wrong scene.
+  - **Per-handler RPC timeouts.** `RpcDispatcher.Register` now takes an
+    optional `timeoutMs`, defaulting to `HandlerTimeoutMs` (8000); a handler
+    that legitimately needs longer (`attachUiDocument`) opts in explicitly
+    instead of the whole dispatcher's timeout floor moving for one RPC.
+
+  Package version bumped to 0.2.0 to match the new protocol floor
+  (`MIN_PACKAGE_VERSION`).
 - **The package now ships once per release channel.** The release build targets
   the UnityIDE application, `unityide://` and `~/.unityide`; the dev build
   (`com.unityide.editor.dev`) targets UnityIDE Dev, `unityide-dev://` and

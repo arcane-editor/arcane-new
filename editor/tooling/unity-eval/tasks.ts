@@ -42,6 +42,29 @@ export const TASKS: EvalTask[] = [
     ],
   },
 
+  // ── codegen (UI generation) ──────────────────────────────────────────
+  // `urp-newinput`'s fixture ships a seeded HUD (Assets/UI/HUD.uxml +
+  // Theme.uss, copied verbatim from `editor/fixtures/uitoolkit/` — see that
+  // fixture's own doc comment) so the project already "counts as" UI
+  // Toolkit before this task's turn starts. `unity_ui_scaffold`/
+  // `unity_ui_write` aren't in the headless eval's toolset (see
+  // `run-task.ts`'s "Deliberately ABSENT" list — they need a live bridge to
+  // resolve GUIDs/PanelSettings), so the agent has to reach the same result
+  // through the generic `write` tool, the same as every other codegen task.
+  // Theme.uss's seeded `box-shadow` (a CSS property USS does not implement —
+  // see that file's own comment) is the trap: an agent that imitates the
+  // existing stylesheet's pattern instead of writing valid USS fails the
+  // `file_not_contains` check below.
+  {
+    id: 'codegen-ui-hud', family: 'codegen', fixture: 'urp-newinput', mode: 'agent',
+    prompt: 'This project already has a HUD built with UI Toolkit (Assets/UI/HUD.uxml, Assets/UI/Theme.uss). Add a new pause menu screen: create Assets/UI/PauseMenu.uxml and Assets/UI/PauseMenu.uss, styled consistently with the existing theme.',
+    checks: [
+      { type: 'file_exists', path: 'Assets/UI/PauseMenu.uxml' },
+      { type: 'file_exists', path: 'Assets/UI/PauseMenu.uss' },
+      { type: 'file_not_contains', path: 'Assets/UI/PauseMenu.uss', pattern: 'box-shadow|grid-template', flags: 'i' },
+    ],
+  },
+
   // ── codegen (trap fixture: URP + legacy Input Manager) ──────────────
   // All four tasks below share `urp2022-legacyinput`, whose
   // `PlayerMover.cs` already models the project's actual (legacy)
@@ -262,6 +285,30 @@ export const TASKS: EvalTask[] = [
       { type: 'answer_matches', pattern: 'SceneManager\\.LoadScene' },
       // Application.LoadLevel → SceneManager.LoadScene since 5.3.
       { type: 'answer_not_matches', pattern: 'Application\\.LoadLevel\\s*\\(' },
+    ],
+  },
+
+  // ── grounding (UI stack — facts alone can't answer; needs project exploration) ──
+  // `builtin-legacy-ugui` is `builtin-legacy` plus one added scene
+  // (Assets/Scenes/SampleScene.unity) carrying a `--- !u!223` Canvas
+  // GameObject — a uGUI project, same as `builtin-legacy`, but this time
+  // provably so from an artifact in the project rather than by the absence of
+  // UI Toolkit files. Nothing in the injected facts block says "uGUI" or
+  // "UIDocument" (`detectFixtureInventory` only ever emits a UI Toolkit line
+  // when `.uxml` files exist, and never emits an explicit "this project does
+  // NOT use X" line for anything) — so a correct answer has to come from
+  // reading the project (the scene, the package manifest — no
+  // `com.unity.modules.uielements`-only signal either), not from reciting a
+  // fact already in the prompt.
+  {
+    id: 'grounding-ui-stack', family: 'grounding', fixture: 'builtin-legacy-ugui', mode: 'ask',
+    prompt: 'I need to add a new UI screen to this project — a simple menu with a couple of buttons. What should I use to build it?',
+    checks: [
+      { type: 'answer_matches', pattern: 'Canvas' },
+      // The wrong answer for a Canvas/uGUI project: UI Toolkit's runtime
+      // component. Recommending it here would build a screen nothing in the
+      // scene can show.
+      { type: 'answer_not_matches', pattern: 'UIDocument' },
     ],
   },
 
