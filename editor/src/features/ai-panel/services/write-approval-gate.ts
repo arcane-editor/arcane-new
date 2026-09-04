@@ -283,6 +283,23 @@ async function computePendingNewText(
     const result = applyEdits(currentContent, editInputs);
     return result.applied ? result.content : null;
   }
+  // Any other tool that carries the WHOLE new file in a top-level string
+  // `content` previews exactly like `write` does — same params shape, same
+  // diff. `unity_ui_write` is one (`ui-write-tool.ts`), and without this it was
+  // hard-refused under `ai.edits.applyMode: 'approve'`: no preview could be
+  // computed, so the gate returned "could not preview this unity_ui_write …
+  // The change was NOT applied" for every single call.
+  //
+  // KNOWN GAP: the FIELD-based Unity tools (`unity_asset_edit`,
+  // `unity_fix_so_drift`, `unity_input_edit`) describe their change as a list
+  // of property operations rather than as new file text, so no diff can be
+  // derived here without re-implementing each tool's apply step. They still
+  // refuse under approve mode. Giving them a preview means giving each one a
+  // pure "what would this write" seam of its own.
+  const content = (params as { content?: unknown; edits?: unknown }).content;
+  if (typeof content === 'string' && (params as { edits?: unknown }).edits === undefined) {
+    return content;
+  }
   return null;
 }
 

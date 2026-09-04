@@ -9,6 +9,7 @@ import { classifyFile, FilePriority } from '../../csharp';
 import { useSceneUsageStore } from '../../unity-context';
 import { BridgeInstallBanner } from '../../unity-bridge';
 import { fixConsoleError } from '../../ai-panel';
+import { describeClearOutcome } from '../services/clear-outcome';
 import type { UnityLogEntry, UnityLogType } from '../../../types/unity';
 
 const ERROR_TYPES: UnityLogType[] = ['Error', 'Exception', 'Assert'];
@@ -86,6 +87,11 @@ function UnityConsolePanel() {
   // hundreds of import and compile messages Unity logs in edit mode.
   const [modeFilter, setModeFilter] = useState<'all' | 'PlayMode' | 'EditMode'>('all');
   const [clearMenuOpen, setClearMenuOpen] = useState(false);
+  // What the last "Clear here and in Unity" actually managed. `null` on
+  // success — the emptied panel is the confirmation; a sentence otherwise,
+  // because the local ring empties either way and a silent failure reads as
+  // though both consoles were cleared.
+  const [clearNotice, setClearNotice] = useState<string | null>(null);
   const clearMenuRef = useRef<HTMLDivElement>(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -278,6 +284,7 @@ function UnityConsolePanel() {
                   role="menuitem"
                   onClick={() => {
                     setClearMenuOpen(false);
+                    setClearNotice(null);
                     void clearLogs();
                   }}
                   style={{
@@ -298,7 +305,10 @@ function UnityConsolePanel() {
                   role="menuitem"
                   onClick={() => {
                     setClearMenuOpen(false);
-                    void clearLogs({ unity: true });
+                    setClearNotice(null);
+                    void clearLogs({ unity: true }).then((outcome) => {
+                      setClearNotice(describeClearOutcome(outcome));
+                    });
                   }}
                   style={{
                     display: 'block',
@@ -320,7 +330,10 @@ function UnityConsolePanel() {
         ) : (
           <button
             title="Clear Console"
-            onClick={() => void clearLogs()}
+            onClick={() => {
+              setClearNotice(null);
+              void clearLogs();
+            }}
             style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: 2 }}
           >
             <Trash2 size={14} />
@@ -427,6 +440,43 @@ function UnityConsolePanel() {
           </button>
         )}
       </div>
+
+      {/* Why Unity's console survived a "Clear here and in Unity". Sits under
+          the toolbar rather than in a toast: the state it describes is about
+          this panel, and it stays until the next clear. */}
+      {clearNotice && (
+        <div
+          role="status"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 8,
+            padding: '4px 8px',
+            borderBottom: '1px solid var(--border)',
+            background: 'var(--bg-input)',
+            color: 'var(--warning)',
+            fontSize: 11,
+            flexShrink: 0,
+          }}
+        >
+          <span>{clearNotice}</span>
+          <button
+            title="Dismiss"
+            onClick={() => setClearNotice(null)}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: 'var(--text-secondary)',
+              cursor: 'pointer',
+              padding: 0,
+              fontSize: 11,
+            }}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       {/* Log entries */}
       <div
