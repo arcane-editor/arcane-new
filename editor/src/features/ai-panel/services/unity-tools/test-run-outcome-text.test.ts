@@ -73,7 +73,7 @@ describe('describeTestRunOutcome', () => {
         failuresTruncated: false,
       },
     });
-    expect(text).toContain('FAILED Foo.Bar.Test1');
+    expect(text).toContain('• Foo.Bar.Test1');
     expect(text).toContain('Expected 1 but was 2');
     expect(text).toContain('Assets/Tests/FooTests.cs:42');
     // Package/engine frames are not project frames and must not appear.

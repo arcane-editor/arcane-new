@@ -33,7 +33,10 @@ function projectFrames(stackTrace: string, max: number): string[] {
 }
 
 function formatFailure(f: TestRunFailure): string {
-  const lines = [`FAILED ${f.fullName}`];
+  // Bullet convention matches `compile-gate.ts`'s `formatError` — plain, no
+  // decorative all-caps label; the surrounding summary line already says how
+  // many tests failed.
+  const lines = [`• ${f.fullName}`];
   const message = capMessage(f.message ?? '');
   if (message) lines.push(`  ${message}`);
   lines.push(...projectFrames(f.stackTrace ?? '', MAX_FRAMES));
