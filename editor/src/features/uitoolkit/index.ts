@@ -15,6 +15,20 @@ export type { UiToolkitSummary } from './services/uxml-assets';
 export { loadUsageIndex, buildUsageIndex, EMPTY_USAGE_INDEX } from './services/usage-index';
 export type { UsageIndex } from './services/usage-index';
 
+// Exported for the AI harness's `unity_ui_layout` tool (Task 15): the same
+// stylesheet resolution, panel resolution, and offscreen layout probe the
+// human preview (`UxmlPreviewEditor.tsx`) is built on. The tool reaches these
+// only through a dynamic `import()` of this barrel -- `style-resolve.ts` and
+// `panel-resolve.ts` are otherwise feature-internal, and `layout-probe.ts`
+// touches real DOM (`document`, `attachShadow`, `getComputedStyle`), which is
+// exactly what makes this whole barrel unimportable under Bun.
+export { loadStyleSheets } from './services/style-resolve';
+export type { LoadedStyles, ResolvedHref } from './services/style-resolve';
+export { loadPanelSettings, NO_PANEL } from './services/panel-resolve';
+export type { PanelResolution, PanelConfidence } from './services/panel-resolve';
+export { probeLayout } from './services/layout-probe';
+export type { ProbeLayoutOptions, ProbeLayoutOutput } from './services/layout-probe';
+
 // UI Toolkit support (F-3.2 T7.3). Highlighting is delegated to Monaco's mature
 // built-in `css` (USS) and `xml` (UXML) languages — `.uss`/`.uxml` are mapped to
 // them in language-detect. Here we layer Unity-specific COMPLETIONS on top,

@@ -8,6 +8,7 @@ import { createUnityMigrationTool } from './migration-tool';
 import { createUnityInputActionsTool } from './input-actions-tool';
 import { createUnityScriptableObjectsTool } from './scriptable-objects-tool';
 import { createUnityUiToolkitTool } from './ui-toolkit-tool';
+import { createUnityUiLayoutTool } from './ui-layout-tool';
 import { createUnityAssetEditTool, defaultAssetEditDeps } from './asset-edit-tool';
 import { createUnityFixSoDriftTool, defaultSoDriftDeps } from './so-drift-tool';
 import { createUnityInputEditTool, defaultInputEditDeps } from './input-edit-tool';
@@ -59,6 +60,13 @@ export function withUnityCompileGate(tool: AgentTool, cwd: string): AgentTool {
  * None of the three produces a compiler error, so the agent cannot discover any
  * of them by writing code and reading the result.
  *
+ * `unity_ui_layout` (Task 15) is a fourth, geometry-shaped sibling of the UI
+ * Toolkit tool: it does not join strings, it renders the SAME pipeline the
+ * human preview does (offscreen) and reports the box every element actually
+ * laid out to, plus a lint pass — the class of bug (off-panel, invisible,
+ * clipped, low-contrast) that also compiles clean and is invisible to
+ * `unity_ui_toolkit`'s string checks, because it was never a string problem.
+ *
  * This barrel is the only place in `unity-tools/` that wires store-backed
  * production implementations into the DI seams `api-search-tool.ts` and
  * `docs-tool.ts` expose (see those files) — production behavior here is
@@ -71,6 +79,7 @@ export function createUnityReadTools(workspacePath: string): AgentTool[] {
     createUnityInputActionsTool(workspacePath),
     createUnityScriptableObjectsTool(workspacePath),
     createUnityUiToolkitTool(workspacePath),
+    createUnityUiLayoutTool(workspacePath),
     createGetUnityDocsTool(() => useProjectContextStore.getState().unityVersion),
     createUnityApiSearchTool({ search: unityApiSearch, lookup: unityApiLookup }),
     createUnityMigrationTool(),

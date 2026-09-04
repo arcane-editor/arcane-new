@@ -11,6 +11,8 @@
 // Pure and store/RPC-free by design, mirroring the other small per-send
 // registries in this codebase (`test-run-registry.ts`, `markConsoleTurnStart`).
 
+import { extractGuidFromMeta } from './meta-guid';
+
 let pending = new Map<string, string>(); // path -> guid
 
 /** Record a GUID `unity_ui_write` just allocated (or reused) for `path`. */
@@ -28,4 +30,28 @@ export function takePendingGuidChecks(): Array<{ path: string; guid: string }> {
 /** Clear the registry. Call at the start of every send, next to `resetTestRunRegistry()`. */
 export function resetPendingGuidChecks(): void {
   pending.clear();
+}
+
+// ── Post-import verification (Task 15, `unity_ui_layout`) ──────────────────
+
+export type GuidCheckOutcome =
+  /** Unity kept the GUID this session assigned. */
+  | { kind: 'match' }
+  /** Unity assigned a different one -- a collision it resolved on import (`meta-guid.ts`'s header). */
+  | { kind: 'mismatched'; actual: string }
+  /** The `.meta` exists but carries no readable `guid:` line. */
+  | { kind: 'unreadable' };
+
+/**
+ * Compare an allocated GUID against the `.meta` Unity actually wrote for that
+ * asset. Pure: `metaText` is already read off disk by the caller (`readFile`
+ * is an I/O concern the tool owns, per this module's DI-free-by-design
+ * header); a missing `.meta` altogether (Unity has not imported the asset
+ * yet) is the caller's concern too, since there is no text to compare here.
+ */
+export function compareMetaGuid(expected: string, metaText: string): GuidCheckOutcome {
+  const actual = extractGuidFromMeta(metaText);
+  if (actual === null) return { kind: 'unreadable' };
+  if (actual === expected.toLowerCase()) return { kind: 'match' };
+  return { kind: 'mismatched', actual };
 }
