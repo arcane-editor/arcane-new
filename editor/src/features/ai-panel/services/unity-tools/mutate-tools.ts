@@ -11,9 +11,17 @@ import { requestEngineApproval } from '../approval-gate';
 import { txt, bridgeConnected } from './shared';
 import { describeTestRunOutcome } from './test-run-outcome-text';
 import { recordTestRunForConsoleCheck } from './test-run-registry';
+import { createUnitySceneMutateTools } from './scene-mutate-tools';
 
-/** Run an engine action behind the connection check + inline approval gate. */
-async function gated(
+/**
+ * Run an engine action behind the connection check + inline approval gate.
+ *
+ * Exported for `scene-mutate-tools.ts`, which takes it as an injected
+ * dependency rather than importing it statically: this module reaches
+ * `stores/unity` and `stores/ai`, both of which are DOM-bound and unimportable
+ * under Bun (Global Constraint 4).
+ */
+export async function gated(
   toolCallId: string,
   toolName: string,
   verb: string,
@@ -179,6 +187,10 @@ export function createUnityMutateTools(): AgentTool[] {
       createUnityRefresh(),
       createUnityExecuteMenuItem(),
       createUnityConsoleClear(),
+      // Scene WRITES (B4). Same bridge setting, same per-call approval — they
+      // change the user's open scene, which is the strongest reason of all to
+      // ask first.
+      ...createUnitySceneMutateTools(),
     );
   }
   if (get('unity.testRunner.enabled') !== false) {

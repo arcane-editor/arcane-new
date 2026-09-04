@@ -155,6 +155,7 @@ namespace UnityIDE.Bridge
             DebuggerHandlers.Register(_client);
             TestRunnerHandlers.Register(_client);
             ConsoleHandlers.Register(_client);
+            SceneMutationHandlers.Register(_client);
 
             // Main-thread pump: drains the dispatcher and ticks the timed flushers.
             EditorApplication.update += Pump;

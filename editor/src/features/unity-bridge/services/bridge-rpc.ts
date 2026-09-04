@@ -111,6 +111,112 @@ export interface DebuggerEndpoint {
   pid: number;
 }
 
+/** A GameObject in a loaded scene, addressed by instance id or hierarchy path. */
+export interface SceneTarget {
+  instanceId?: number;
+  path?: string;
+}
+
+export interface AttachUiDocumentParams {
+  target: SceneTarget;
+  uxmlPath: string;
+  /** Create the GameObject (and any missing parents) when the path resolves to nothing. Default true. */
+  createIfMissing?: boolean;
+  panelSettingsPath?: string;
+  /** Create a PanelSettings asset when the project has none. Default true. */
+  createPanelSettingsIfMissing?: boolean;
+  /** Where a created PanelSettings goes. Default `Assets/UI/PanelSettings.asset`. */
+  panelSettingsCreatePath?: string;
+  sortingOrder?: number;
+}
+
+export interface AttachUiDocumentResult {
+  ok: true;
+  gameObject: { path: string; instanceId: number; created: boolean };
+  uiDocument: { instanceId: number; created: boolean };
+  panelSettings: {
+    path: string;
+    guid: string;
+    created: boolean;
+    /** True when a default runtime theme had to be written for it. */
+    themeCreated: boolean;
+    /**
+     * How the PanelSettings was chosen: the caller named it, it was the
+     * project's only one, or there were none and it was created.
+     */
+    confidence: 'given' | 'only' | 'created';
+  };
+  visualTreeAsset: { path: string; guid: string };
+  /** The scene is DIRTIED, never saved — saving stays the user's call. */
+  scene: { path: string; dirty: boolean };
+  undoGroup: string;
+}
+
+export type SerializedValueKind =
+  | 'int'
+  | 'float'
+  | 'bool'
+  | 'string'
+  | 'enum'
+  | 'color'
+  | 'vector2'
+  | 'vector3'
+  | 'objectRef'
+  | 'null';
+
+/** How an object reference is resolved, in this order: guid, asset path, scene path. */
+export interface SerializedObjectRef {
+  guid?: string;
+  assetPath?: string;
+  scenePath?: string;
+  /** With `scenePath`, the component on that GameObject to reference. */
+  componentType?: string;
+  /** With `guid`/`assetPath`, the sub-asset to pick out of the file. */
+  subAssetName?: string;
+}
+
+export interface SerializedValue {
+  kind: SerializedValueKind;
+  value?: unknown;
+  enumName?: string;
+  ref?: SerializedObjectRef;
+}
+
+export interface SetSerializedPropertyParams {
+  /** A scene object. Mutually exclusive with `assetPath`. */
+  target?: SceneTarget;
+  /** An asset (ScriptableObject, PanelSettings, prefab…). Mutually exclusive with `target`. */
+  assetPath?: string;
+  component?: string;
+  componentInstanceId?: number;
+  property: string;
+  value: SerializedValue;
+}
+
+export interface SetSerializedPropertyResult {
+  ok: true;
+  target: { path: string; instanceId: number; type: string; isAsset: boolean };
+  property: string;
+  /** Unity's `SerializedPropertyType` name, e.g. `Float`. */
+  propertyType: string;
+  /**
+   * The value before and after, in `getGameObject`'s property shape. Both are
+   * reported because a set that was coerced or clamped is otherwise
+   * indistinguishable from one that took.
+   */
+  previous: unknown;
+  applied: unknown;
+  sceneDirty: boolean;
+  undoGroup: string;
+}
+
+/**
+ * How long `attachUiDocument` may take. Well past the bridge's 10s default: the
+ * handler may force a synchronous import of a just-written .uxml, and on a cold
+ * project that import is the slow part.
+ */
+const ATTACH_UI_DOCUMENT_TIMEOUT_MS = 30_000;
+
 export const bridgeRpc = {
   getEditorState: () => rpc<EditorState>('getEditorState'),
   getSceneHierarchy: () => rpc<SceneHierarchy>('getSceneHierarchy'),
@@ -193,5 +299,29 @@ export const bridgeRpc = {
   clearConsole: () =>
     rpc<{ ok: true; cleared: 'logEntries' | 'hookRing'; epoch: number } | { ok: false; reason: string }>(
       'clearConsole',
+    ),
+  /**
+   * Attach a UIDocument to a GameObject, wired to a .uxml, a PanelSettings and
+   * a theme. Protocol 4+ (the write RPCs). Resolves with `{ ok:false, reason }`
+   * when Unity refuses — busy editor, an ambiguous PanelSettings, a .uxml that
+   * would not import — which is an answer, not an error.
+   *
+   * Blocking on the Unity side: it resolves once the scene really changed.
+   */
+  attachUiDocument: (p: AttachUiDocumentParams) =>
+    rpc<AttachUiDocumentResult | RpcRefusal>(
+      'attachUiDocument',
+      p as unknown as Record<string, unknown>,
+      ATTACH_UI_DOCUMENT_TIMEOUT_MS,
+    ),
+  /**
+   * Set one serialized property on a scene object or an asset, inside its own
+   * Unity undo group. Protocol 4+. Refusals (`{ ok:false, reason }`) name the
+   * real property/component names, so a miss is one retry away.
+   */
+  setSerializedProperty: (p: SetSerializedPropertyParams) =>
+    rpc<SetSerializedPropertyResult | RpcRefusal>(
+      'setSerializedProperty',
+      p as unknown as Record<string, unknown>,
     ),
 };
