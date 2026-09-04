@@ -38,6 +38,10 @@ const REPAIR_SENTINELS = [
   '[Unity USS]',
   '[Unity input actions]',
   '[Unity asset]',
+  // The post-turn console check's repair prompt (Task 13). It is the ONLY
+  // record of what Unity reported after the turn — elide it and the repair
+  // pass is asked to fix problems it can no longer see.
+  '[Console check]',
 ];
 
 /**

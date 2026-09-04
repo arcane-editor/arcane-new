@@ -9,6 +9,7 @@
  * operates on the current workspace + the right mode.
  */
 
+import { invoke } from '@tauri-apps/api/core';
 import { Agent } from './vendor/agent';
 import { convertToLlm } from './vendor/messages';
 import { createReadTool } from './vendor/tools/read';
@@ -47,6 +48,7 @@ import {
   resetCompileGate,
   markConsoleTurnStart,
   resetTestRunRegistry,
+  takeRecordedTestRuns,
 } from './unity-tools';
 import { resolveToCwd } from './vendor/tools/path-utils';
 import { withCheckpoint } from './checkpoints/checkpoint-gate';
@@ -69,6 +71,7 @@ import {
   resetTurnTelemetry,
   recordTelemetryEvent,
   recordGroundingLintHit,
+  recordConsoleRepair,
   recordEscalation,
   getPreviousSendNudgeCounts,
   getPreviousSendRepairCount,
@@ -80,7 +83,36 @@ import {
   touchedFileCount,
   touchedFileList,
   runVerifiedPass,
+  type VerifiedCardData,
 } from './verified-pass';
+import {
+  CONSOLE_REPAIR_CALL_GRANT,
+  CONSOLE_SNAPSHOT_LIMIT,
+  CONSOLE_MIN_PROTOCOL,
+  CONSOLE_ERROR_TYPES,
+  EXTERNAL_ONLY_NOTICE,
+  beginConsoleCheck,
+  consoleCheckBaseline,
+  consoleRepairAttempts,
+  recordConsoleRepairAttempt,
+  collectNewProblems,
+  shouldRepair,
+  repairTrigger,
+  repairNotice,
+  isExternalOnly,
+  diffAfterRepair,
+  consoleResult,
+  testsResult,
+  repairPromptProblems,
+  repairPromptFrames,
+  repairPromptCompileErrors,
+  type CollectedProblems,
+  type CompileProblem,
+  type ConsoleCheckBaseline,
+  type ConsoleEntryInput,
+  type SnapshotStatus,
+} from './console-check';
+import { buildConsoleRepairPrompt, buildRegions } from './prompts/console-repair';
 import { distillSend } from './memory/distiller';
 import { maybeConsolidate } from './memory/consolidate';
 import { createMemorySearchTool } from './memory/memory-tool';
@@ -100,6 +132,7 @@ import { useProjectContextStore } from '../../../stores/project-context';
 import { useSettingsStore } from '../../../stores/settings';
 import { useCheckpointsStore } from '../../../stores/checkpoints';
 import { useUnityStore } from '../../../stores/unity';
+import { bridgeRpc } from '../../unity-bridge';
 import { buildSystemPrompt, captureDecoration, defaultPromptModeFor, type PromptMode } from './prompts';
 import { graphChangedSinceFreeze, resetFrozenDecoration } from './prompts/frozen-context';
 import { buildPlanSendPrefix } from './prompts/plan-execution';
@@ -111,6 +144,7 @@ import { lintAnswer, buildReviseMessage } from './grounding-lint';
 import { resolveAttachments } from './attachments';
 import { classifyTurnError, detectTurnOutcome, loopCrashError } from './turn-errors';
 import type { Model, AgentTool, AgentMessage, TextContent } from './vendor/types';
+import type { UnityLogEntry } from '../../../types/unity';
 import type { Attachment, ChatMode, Effort } from './types';
 
 /** Convert saved UI messages back into vendor AgentMessages for resume. */
@@ -153,6 +187,122 @@ const TODO_NUDGE_TEXT = '[Reminder: maintain your todo list with todo_update for
 
 function getCurrentWorkspacePath(): string {
   return useWorkspaceStore.getState().workspacePath ?? '/';
+}
+
+// ---- Task 13: the post-turn console check's store/RPC boundary ----
+//
+// `console-check.ts` is pure and Bun-testable (Global Constraint 4); these
+// three helpers are the only place the check touches `stores/unity.ts` or the
+// bridge. They deliberately do no deciding — they read facts and hand them
+// over.
+
+/** The console baseline for the send about to start. */
+function consoleBaselineNow(): ConsoleCheckBaseline {
+  const unity = useUnityStore.getState();
+  return {
+    seq: unity.logSeq,
+    epoch: unity.consoleEpoch,
+    startedAt: Date.now(),
+    compileIdentity: unity.lastCompilation?.receivedAt ?? null,
+    editorAwake: unity.editorAwake,
+  };
+}
+
+/** The newest test run in a batch of recorded ones, or `null`. */
+function latestRun<T>(runs: T[]): T | null {
+  return runs.length > 0 ? runs[runs.length - 1] : null;
+}
+
+/**
+ * Compiler errors that describe THIS turn.
+ *
+ * Two independent conditions, and both are needed. The verified pass's own
+ * `compile` step is the authority on whether the fresh compile reported errors
+ * at all (it is the one that triggered it); `lastCompilation` is the only place
+ * the per-file diagnostics live, and it survives across sends — so a report
+ * whose `receivedAt` has not moved since the baseline is the PREVIOUS turn's
+ * and must never be handed to a repair pass.
+ */
+function freshCompileErrors(
+  pass: VerifiedCardData,
+  compileIdentity: number | null,
+): CompileProblem[] {
+  if (pass.compile === 'clean' || pass.compile === 'skipped') return [];
+  const last = useUnityStore.getState().lastCompilation;
+  const receivedAt = last?.receivedAt ?? null;
+  if (receivedAt == null) return [];
+  if (compileIdentity != null && receivedAt <= compileIdentity) return [];
+  return (last?.messages ?? [])
+    .filter((m) => m.type === 'Error')
+    .map((m) => ({ file: m.file, line: m.line, message: m.message }));
+}
+
+function ringEntry(e: UnityLogEntry): ConsoleEntryInput {
+  return {
+    logType: e.logType,
+    message: e.message,
+    seq: e.seq ?? null,
+    stackTrace: e.stackTrace,
+    parsedFrames: e.parsedFrames,
+    historical: e.historical,
+  };
+}
+
+/**
+ * Read the console the way the check needs it: the session ring always, plus
+ * one `getConsoleSnapshot` when the bridge can answer it.
+ *
+ * The snapshot RPC blocks on Unity's main thread and therefore FAILS outright
+ * whenever Unity is parked in the background — the normal state while the user
+ * is looking at this IDE. That is "snapshot unavailable", never an error of the
+ * check, so the ring result stands on its own.
+ */
+async function collectConsoleProblems(
+  baseline: ConsoleCheckBaseline,
+  pass: VerifiedCardData,
+  run: { failures?: Array<{ fullName: string; message: string }> } | null,
+): Promise<CollectedProblems> {
+  const unity = useUnityStore.getState();
+
+  let snapshot: ConsoleEntryInput[] | null = null;
+  let snapshotStatus: SnapshotStatus = 'not-attempted';
+  if (unity.connected && (unity.bridgeProtocol ?? 0) >= CONSOLE_MIN_PROTOCOL) {
+    try {
+      const snap = await bridgeRpc.getConsoleSnapshot({
+        order: 'newest',
+        limit: CONSOLE_SNAPSHOT_LIMIT,
+        types: [...CONSOLE_ERROR_TYPES],
+        includeStackTrace: true,
+      });
+      snapshot = snap.entries.map((row) => ({
+        logType: row.logType,
+        message: row.message,
+        // Unity's row index is a different numbering — never comparable to the
+        // ring's client-assigned seq (see `UnityLogEntry.unityRow`).
+        seq: null,
+        file: row.file || null,
+        line: row.line || null,
+        stackTrace: row.stackTrace,
+        count: row.count,
+      }));
+      snapshotStatus = 'used';
+    } catch {
+      snapshotStatus = 'unavailable';
+    }
+  }
+
+  return collectNewProblems({
+    baseline,
+    ring: unity.logs.map(ringEntry),
+    epoch: unity.consoleEpoch,
+    snapshot,
+    snapshotStatus,
+    connected: unity.connected,
+    bridgeProtocol: unity.bridgeProtocol,
+    editorAwake: unity.editorAwake,
+    compileErrors: freshCompileErrors(pass, baseline.compileIdentity),
+    testRun: run,
+  });
 }
 
 /**
@@ -624,6 +774,14 @@ export class AgentService {
     resetRepeatCallGuard();
     // Fresh touched-file registry for the verified-pass closing check (P3.4).
     beginVerifiedPass();
+    // Task 13: the console check's own baseline. Richer than
+    // `markConsoleTurnStart` above (which the `get_console_errors
+    // sinceTurnStart` tool keeps using) because the closing check also has to
+    // know whether the console was cleared mid-turn, whether the compile
+    // report on the store is this turn's, and whether Unity was ever awake
+    // during the window — otherwise "no new errors" gets reported as clean for
+    // an editor that was parked the whole time.
+    beginConsoleCheck(consoleBaselineNow());
 
     // Send-boundary escalation (spec §2): if the PREVIOUS send burned through
     // repeated compile/analyzer/LSP repairs, run this and every later send of
@@ -768,10 +926,10 @@ export class AgentService {
       if (opts.mode === 'ask') {
         await this.runGroundingLint();
       } else {
-        // Verified-pass closing check (P3.4): the agent/plan-execution sibling
-        // of the grounding linter above — runs once the whole send is done,
-        // over everything it touched.
-        await this.runVerifiedPassIfNeeded(promptMode);
+        // Closing checks (P3.4 + Task 13): the agent/plan-execution sibling of
+        // the grounding linter above — runs once the whole send is done, over
+        // everything it touched AND over what Unity reported while it worked.
+        await this.runClosingChecks(promptMode);
         // Memory distillation (spec §4): fire-and-forget on the cheap
         // side-task lane; a failure never surfaces as a send error.
         this.maybeDistillMemory(promptMode, text);
@@ -871,25 +1029,36 @@ export class AgentService {
   }
 
   /**
-   * Verified-pass closing check (P3.4). The agent/plan-execution sibling of
-   * `runGroundingLint` above: instead of linting the answer text, it re-checks
-   * everything the send actually touched (analyzers, a live compile, GUID
-   * integrity) and attaches the result as a compact "Verified" card. v1 renders
-   * results only — no loop re-entry (in-loop repair already happens via the
-   * per-write gates: analyzer-gate.ts, compile-gate.ts, lsp-gate.ts).
+   * Closing checks (P3.4 verified pass + Task 13 console check). The
+   * agent/plan-execution sibling of `runGroundingLint` above: instead of
+   * linting the answer text, it re-checks everything the send actually touched
+   * (analyzers, a live compile, GUID integrity, the three silent-failure
+   * subsystems) AND what Unity itself reported while the agent worked — new
+   * console errors, compiler errors that survived the turn, tests the agent
+   * left failing. When any of those is this project's to fix, ONE bounded
+   * repair pass runs and the card reports what it changed.
    *
-   * No-ops for non-Unity workspaces and when the setting is off (same gating
-   * shape as the compile/lsp gates in `createToolsForPromptMode`), when
-   * nothing was written/edited this send, and when the turn was aborted
-   * (same `stopReason` check `runGroundingLint` uses — nothing was "finished"
-   * to verify).
+   * The result is a single merged card: the pre-repair pass's own result is
+   * never shown, because "verified, then repaired, then verified again" is one
+   * outcome, not two.
+   *
+   * No-ops for non-Unity workspaces and when the verified-pass setting is off
+   * (same gating shape as the compile/lsp gates in
+   * `createToolsForPromptMode`), when the send neither wrote a file nor ran a
+   * test, and when the turn was aborted (same `stopReason` check
+   * `runGroundingLint` uses — nothing was "finished" to verify).
    */
-  private async runVerifiedPassIfNeeded(promptMode: PromptMode): Promise<void> {
+  private async runClosingChecks(promptMode: PromptMode): Promise<void> {
     if (promptMode !== 'agent' && promptMode !== 'plan-execution') return;
     // Same Stop guard as runGroundingLint: a cancelled send must not trigger
     // a live Unity recompile and a "Verified" card.
     if (this.abortRequested) return;
-    if (touchedFileCount() === 0) return;
+    // Drained here, once: `takeRecordedTestRuns()` is also the answer to "did
+    // this send run any tests", which is now a reason to run the closing
+    // checks even when no file was written (the agent can run a suite, watch
+    // it fail, and stop).
+    const recordedRuns = takeRecordedTestRuns();
+    if (touchedFileCount() === 0 && recordedRuns.length === 0) return;
     if (!useProjectContextStore.getState().isUnityProject) return;
     if (useSettingsStore.getState().getSetting('unity.verifiedPass.enabled') === false) return;
 
@@ -901,12 +1070,116 @@ export class AgentService {
     }
 
     try {
-      const data = await runVerifiedPass(getCurrentWorkspacePath());
-      useAiStore.getState().addVerifiedPassMessage(data);
+      const workspacePath = getCurrentWorkspacePath();
+      const data = await runVerifiedPass(workspacePath);
+
+      const baseline = consoleCheckBaseline();
+      const consoleEnabled =
+        useSettingsStore.getState().getSetting('unity.consoleCheck.enabled') !== false;
+      if (!consoleEnabled || !baseline) {
+        useAiStore.getState().addVerifiedPassMessage(data);
+        return;
+      }
+
+      const merged = await this.runConsoleCheck(baseline, data, recordedRuns, workspacePath);
+      useAiStore.getState().addVerifiedPassMessage(merged);
     } catch {
       // runVerifiedPass is already defensive per-step; this is just an extra
-      // safety net so a verified-pass failure never surfaces as a send error.
+      // safety net so a closing-check failure never surfaces as a send error.
     }
+  }
+
+  /**
+   * Task 13's console check, plus its ONE repair pass.
+   *
+   * Returns the card data to render — merged, so the caller emits exactly one
+   * card whether or not a repair ran.
+   */
+  private async runConsoleCheck(
+    baseline: ConsoleCheckBaseline,
+    firstPass: VerifiedCardData,
+    recordedRuns: ReturnType<typeof takeRecordedTestRuns>,
+    workspacePath: string,
+  ): Promise<VerifiedCardData> {
+    const before = await collectConsoleProblems(baseline, firstPass, latestRun(recordedRuns));
+
+    if (
+      !shouldRepair(before, consoleRepairAttempts(), {
+        autoRepair:
+          useSettingsStore.getState().getSetting('unity.consoleCheck.autoRepair') !== false,
+        aborted: this.abortRequested,
+        connected: useUnityStore.getState().connected,
+      })
+    ) {
+      // Nothing this project can fix. Say so when the errors are real but
+      // someone else's, rather than leaving a red row with no explanation.
+      if (isExternalOnly(before)) {
+        useAiStore.getState().addSystemMessage(EXTERNAL_ONLY_NOTICE);
+      }
+      return {
+        ...firstPass,
+        console: consoleResult(before, null),
+        tests: testsResult(latestRun(recordedRuns)),
+      };
+    }
+
+    const trigger = repairTrigger(before);
+    useAiStore.getState().addSystemMessage(repairNotice(before));
+    // Its own telemetry field, never `repairCount` — that one latches the
+    // conversation onto a costlier tier (Global Constraint 8).
+    recordConsoleRepair();
+    recordConsoleRepairAttempt();
+    grantExtraCalls(CONSOLE_REPAIR_CALL_GRANT);
+
+    const regions = await buildRegions(repairPromptFrames(before), {
+      readFile: (path) => invoke<string>('read_file', { path }),
+      workspacePath,
+    });
+    // Everything after this seq is evidence the repair did not work; the
+    // sightings before it are the ones the repair was asked about.
+    const repairStartSeq = useUnityStore.getState().logSeq;
+
+    let secondPass: VerifiedCardData;
+    let outcome: ReturnType<typeof diffAfterRepair>;
+    try {
+      await this.agent.prompt(
+        buildConsoleRepairPrompt({
+          console: repairPromptProblems(before),
+          compile: repairPromptCompileErrors(before),
+          tests: before.tests,
+          regions,
+        }),
+      );
+
+      // Re-verify from scratch: the repair wrote files, so the first pass's
+      // compile/analyzer/GUID results are stale.
+      secondPass = await runVerifiedPass(workspacePath);
+      const after = await collectConsoleProblems(baseline, secondPass, null);
+      outcome = diffAfterRepair(before, after, repairStartSeq);
+    } catch {
+      // The repair turn itself failed (stream error, cancelled mid-flight).
+      // The problems it was asked about are still there and still unproven, so
+      // the card reports them exactly as it would have with no repair at all —
+      // `repaired: true` with a zero outcome would render a green tick beside
+      // "2 new errors", which is the one thing this card must never do.
+      return {
+        ...firstPass,
+        console: consoleResult(before, null),
+        tests: testsResult(latestRun(recordedRuns)),
+      };
+    }
+
+    // The agent may have re-run the failing tests itself (approval-gated); the
+    // card reads the newest run it recorded, falling back to the pre-repair one.
+    const postRepairRuns = takeRecordedTestRuns();
+    const run = latestRun(postRepairRuns) ?? latestRun(recordedRuns);
+
+    return {
+      ...secondPass,
+      console: consoleResult(before, outcome),
+      tests: testsResult(run),
+      ...(trigger ? { repair: { attempted: true as const, trigger } } : {}),
+    };
   }
 
   /**

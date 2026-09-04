@@ -10,6 +10,8 @@
  * unit-tested, rather than being an incidental property of a boolean in JSX.
  */
 
+import type { ConsoleCheckResult, TestsCheckResult } from './console-check';
+
 export type CheckMarker = 'ok' | 'bad' | 'skip';
 
 export type VerifiedVerdict =
@@ -36,4 +38,35 @@ export function verdictTitle(verdict: VerifiedVerdict): string {
     case 'unverified':
       return 'Not verified';
   }
+}
+
+// ---- Task 13: the console and tests rows ----
+
+/**
+ * The console row's marker.
+ *
+ * The subtle case is a turn that left errors behind with NO repair pass (the
+ * user turned auto-repair off, or the bridge dropped): `remaining` is 0
+ * because nothing was re-observed, but the errors are still there. Reporting
+ * that as a pass is exactly the failure this card exists to prevent, so an
+ * un-repaired own-project error is `bad` on its own.
+ *
+ * `notReobserved` alone is `ok`: the repair ran and nothing came back. The
+ * card's own wording ("not seen again (needs Play Mode to confirm)") is what
+ * keeps that from over-claiming.
+ */
+export function consoleMarker(result: ConsoleCheckResult): CheckMarker {
+  if (result === 'skipped') return 'skip';
+  if (result === 'clean') return 'ok';
+  if ('unknown' in result) return 'skip';
+  if (result.remaining > 0) return 'bad';
+  const own = result.newErrors - result.external;
+  if (!result.repaired && own > 0) return 'bad';
+  return 'ok';
+}
+
+/** The tests row's marker. A failing test is a failing send, however many passed. */
+export function testsMarker(tests: TestsCheckResult): CheckMarker {
+  if (tests === 'skipped') return 'skip';
+  return tests.failed > 0 ? 'bad' : 'ok';
 }

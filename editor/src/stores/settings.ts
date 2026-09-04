@@ -32,6 +32,8 @@ const DEFAULT_SETTINGS: SettingsSchema = {
   'unity.lspGate.enabled': true,
   'unity.assetGate.enabled': true,
   'unity.verifiedPass.enabled': true,
+  'unity.consoleCheck.enabled': true,
+  'unity.consoleCheck.autoRepair': true,
   'unity.nearMissDiagnostics.enabled': true,
   'unity.rename.formerlySerializedAs': true,
   'unity.serializationDiagnostics.enabled': true,

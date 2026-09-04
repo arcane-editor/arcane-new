@@ -12,6 +12,18 @@ interface TurnTelemetry {
   repairCount: number;
   /** Ask-mode grounding-linter revise cycles fired this send (P2.2) — 0 or 1. */
   groundingLintHits: number;
+  /**
+   * Post-turn console-check repair passes fired this send (Task 13) — 0 or 1
+   * (`MAX_CONSOLE_REPAIRS`).
+   *
+   * Deliberately its own counter and NOT `repairCount`: `repairCount` drives
+   * `send-escalation.ts`, which latches the whole conversation onto a costlier
+   * model tier. The console check runs AFTER the loop is finished, once, on
+   * evidence the in-loop gates never saw — counting it as an in-loop repair
+   * would escalate the next send on the strength of a pass that already fixed
+   * the problem.
+   */
+  consoleRepairs: number;
   /** Repeat-call guard suppressions this send (P3.2) — now reported to the server (P4). */
   loopGuardHits: number;
   /**
@@ -38,6 +50,7 @@ const EMPTY_TELEMETRY: TurnTelemetry = {
   toolErrorCount: 0,
   repairCount: 0,
   groundingLintHits: 0,
+  consoleRepairs: 0,
   loopGuardHits: 0,
   escalated: false,
   groundingToolCalls: 0,
@@ -107,6 +120,14 @@ export function shouldNudgeTodoUpdate(mutatingCalls: number, todoUpdateCalls: nu
 /** Called once when the grounding linter fires a revise turn for this send (P2.2). */
 export function recordGroundingLintHit(): void {
   current.groundingLintHits++;
+}
+
+/**
+ * Called once when the post-turn console check fires its ONE repair pass
+ * (Task 13). Never touches `repairCount` — see `consoleRepairs` above.
+ */
+export function recordConsoleRepair(): void {
+  current.consoleRepairs++;
 }
 
 /** Called once per repeat-call-guard suppression this send (P3.2, `tool-guards.ts`). */

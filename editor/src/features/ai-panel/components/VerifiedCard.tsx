@@ -5,6 +5,12 @@
  * breakage a compile can never report (UI Toolkit, ScriptableObjects, Input),
  * plus the touched-file count, each with a ✓ / ✗ / – (skipped) marker.
  *
+ * Task 13 adds two more chips on the same rule: what Unity's own console said
+ * after the turn, and the latest test run the send made. Those two are the only
+ * evidence that the change actually WORKS rather than merely compiling, and a
+ * repair pass the check made is labelled honestly — a console error is never
+ * called "fixed", only "not seen again".
+ *
  * The three subsystem chips render only when their step actually ran. Unlike
  * compile/analyzers/GUIDs, which apply to every send, a send that touched no
  * .uxml has nothing to say about UI Toolkit — and a chip reading "UI Toolkit
@@ -26,7 +32,8 @@ import {
   ShieldQuestion,
 } from 'lucide-react';
 import type { AiMessage } from '../../../stores/ai';
-import { verifiedVerdict, verdictTitle } from '../services/verified-verdict';
+import { verifiedVerdict, verdictTitle, consoleMarker, testsMarker } from '../services/verified-verdict';
+import { consoleRowLabel, testsRowLabel } from '../services/console-check';
 
 interface Props {
   message: AiMessage;
@@ -54,8 +61,23 @@ function VerifiedCard({ message }: Props) {
   const data = message.verifiedPass;
   if (!data) return null;
 
-  const { files, touchedFiles, analyzers, compile, guids, uiToolkit, scriptableObjects, input } =
-    data;
+  const {
+    files,
+    touchedFiles,
+    analyzers,
+    compile,
+    guids,
+    uiToolkit,
+    scriptableObjects,
+    input,
+    // Task 13: `'skipped'` on both means the closing check never ran (not a
+    // Unity send, the setting is off, nothing was touched) — same rule the
+    // three subsystem chips follow, so the card does not grow two permanent
+    // "skipped" chips users learn to ignore.
+    console: consoleCheck = 'skipped',
+    tests = 'skipped',
+    repair,
+  } = data;
 
   const compileMarker: Marker = compile === 'clean' ? 'ok' : compile === 'skipped' ? 'skip' : 'bad';
   const compileLabel =
@@ -107,6 +129,12 @@ function VerifiedCard({ message }: Props) {
       ? 'input actions ok'
       : `input: ${plural(input.problems, 'problem')}`;
 
+  // ── What Unity itself said after the turn ─────────────────────────────────
+  const consoleCheckMarker = consoleMarker(consoleCheck);
+  const consoleLabel = consoleRowLabel(consoleCheck);
+  const testsCheckMarker = testsMarker(tests);
+  const testsLabel = testsRowLabel(tests);
+
   // A skipped check is NOT a passing one: when the bridge is down and the budget
   // runs out, all three skip — and this used to render a green "Verified".
   const verdict = verifiedVerdict([
@@ -116,9 +144,20 @@ function VerifiedCard({ message }: Props) {
     uiMarker,
     soMarker,
     inputMarker,
+    consoleCheckMarker,
+    testsCheckMarker,
   ]);
   const missingGuids = guids !== 'skipped' && guids !== 'intact' ? guids.missing : [];
-  const hasDetail = touchedFiles.length > 0 || missingGuids.length > 0;
+  const consoleItems =
+    consoleCheck !== 'skipped' && consoleCheck !== 'clean' && !('unknown' in consoleCheck)
+      ? consoleCheck.items
+      : [];
+  const testFailures = tests !== 'skipped' ? tests.failures : [];
+  const hasDetail =
+    touchedFiles.length > 0 ||
+    missingGuids.length > 0 ||
+    consoleItems.length > 0 ||
+    testFailures.length > 0;
 
   return (
     <div className={`ai-verified-card is-${verdict}`}>
@@ -187,6 +226,30 @@ function VerifiedCard({ message }: Props) {
               </span>
             </>
           )}
+          {consoleCheck !== 'skipped' && (
+            <>
+              <span className="ai-verified-sep">·</span>
+              <span className="ai-verified-item">
+                <MarkerIcon marker={consoleCheckMarker} />
+                {consoleLabel}
+              </span>
+            </>
+          )}
+          {tests !== 'skipped' && (
+            <>
+              <span className="ai-verified-sep">·</span>
+              <span className="ai-verified-item">
+                <MarkerIcon marker={testsCheckMarker} />
+                {testsLabel}
+              </span>
+            </>
+          )}
+          {repair && (
+            <>
+              <span className="ai-verified-sep">·</span>
+              <span className="ai-verified-item ai-verified-files">1 repair pass</span>
+            </>
+          )}
           <span className="ai-verified-sep">·</span>
           <span className="ai-verified-item ai-verified-files">{plural(files, 'file')}</span>
         </span>
@@ -210,6 +273,33 @@ function VerifiedCard({ message }: Props) {
               <ul className="ai-verified-file-list">
                 {missingGuids.map((f) => (
                   <li key={f}>{f}</li>
+                ))}
+              </ul>
+            </>
+          )}
+          {consoleItems.length > 0 && (
+            <>
+              <div className="ai-verified-body-label ai-verified-error-label">New console errors</div>
+              <ul className="ai-verified-file-list">
+                {consoleItems.map((item, i) => (
+                  <li key={`${item.logType}-${item.location ?? 'external'}-${i}`}>
+                    [{item.logType}] {item.firstLine}
+                    {item.location ? ` — ${item.location}` : ''}
+                    {item.count > 1 ? ` ×${item.count}` : ''}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+          {testFailures.length > 0 && (
+            <>
+              <div className="ai-verified-body-label ai-verified-error-label">Failed tests</div>
+              <ul className="ai-verified-file-list">
+                {testFailures.map((f) => (
+                  <li key={f.fullName}>
+                    {f.fullName}
+                    {f.message ? ` — ${f.message}` : ''}
+                  </li>
                 ))}
               </ul>
             </>

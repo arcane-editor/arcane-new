@@ -216,3 +216,104 @@ describe('agent-service.ts — abort wins in detectTurnOutcome (Task 4)', () => 
     expect(body).toContain('stopped');
   });
 });
+
+// Task 13 — the post-turn console check. Three wiring facts carry the whole
+// feature: the baseline is captured at SEND START (a baseline taken after the
+// turn would find nothing), the closing branch runs the merged check rather
+// than the bare verified pass, and the repair is bounded to one pass.
+describe('agent-service.ts — post-turn console check (Task 13)', () => {
+  const CONSOLE_CHECK_SRC = readFileSync(
+    path.resolve(import.meta.dir, './console-check.ts'),
+    'utf8',
+  );
+
+  it('captures the console baseline at send start, immediately after beginVerifiedPass()', () => {
+    const beginVerified = SRC.indexOf('beginVerifiedPass();');
+    const beginConsole = SRC.indexOf('beginConsoleCheck(consoleBaselineNow());');
+    expect(beginVerified).toBeGreaterThan(-1);
+    expect(beginConsole).toBeGreaterThan(beginVerified);
+    // Nothing between them but the comment explaining why the baseline is richer.
+    const between = SRC.slice(beginVerified + 'beginVerifiedPass();'.length, beginConsole);
+    expect(between.replace(/\s|\/\/[^\n]*/g, '')).toBe('');
+  });
+
+  it('keeps markConsoleTurnStart — the get_console_errors tool still uses that baseline', () => {
+    expect(SRC).toContain('markConsoleTurnStart(useUnityStore.getState().logSeq);');
+  });
+
+  it('builds the baseline from the store: seq, epoch, compile identity and liveness', () => {
+    expect(SRC).toMatch(
+      /function consoleBaselineNow\(\): ConsoleCheckBaseline \{[\s\S]*?seq: unity\.logSeq,[\s\S]*?epoch: unity\.consoleEpoch,[\s\S]*?compileIdentity: unity\.lastCompilation\?\.receivedAt \?\? null,[\s\S]*?editorAwake: unity\.editorAwake,/,
+    );
+  });
+
+  it('runs runClosingChecks in the non-ask branch, replacing the bare verified pass', () => {
+    expect(SRC).toContain('await this.runClosingChecks(promptMode);');
+    expect(SRC).not.toContain('runVerifiedPassIfNeeded');
+  });
+
+  it('still runs the grounding linter, not the closing checks, for ask mode', () => {
+    expect(SRC).toContain(
+      "if (opts.mode === 'ask') {\n        await this.runGroundingLint();\n      } else {",
+    );
+  });
+
+  it('runs the closing checks when a test ran even if no file was written', () => {
+    expect(SRC).toContain('const recordedRuns = takeRecordedTestRuns();');
+    expect(SRC).toContain('if (touchedFileCount() === 0 && recordedRuns.length === 0) return;');
+  });
+
+  it('bounds the repair at exactly one pass', () => {
+    expect(CONSOLE_CHECK_SRC).toContain('export const MAX_CONSOLE_REPAIRS = 1;');
+    expect(CONSOLE_CHECK_SRC).toMatch(
+      /if \(attempts >= MAX_CONSOLE_REPAIRS\) return false;/,
+    );
+    expect(SRC).toContain('recordConsoleRepairAttempt();');
+    expect(SRC).toContain('shouldRepair(before, consoleRepairAttempts(), {');
+  });
+
+  it('grants the repair pass its own call budget, like the grounding linter does', () => {
+    expect(SRC).toContain('grantExtraCalls(CONSOLE_REPAIR_CALL_GRANT);');
+  });
+
+  // Global Constraint 8: repairCount latches the whole conversation onto a
+  // costlier tier. The console check must never touch it.
+  it('reports the repair on its own telemetry field, never repairCount', () => {
+    expect(SRC).toContain('recordConsoleRepair();');
+    expect(SRC).not.toContain('recordRepair(');
+  });
+
+  it('emits exactly ONE card — the pre-repair pass is never shown on its own', () => {
+    const emits = SRC.match(/addVerifiedPassMessage\(/g) ?? [];
+    // The setting-off / no-baseline early return, and the merged result.
+    expect(emits).toHaveLength(2);
+    expect(SRC).toContain('useAiStore.getState().addVerifiedPassMessage(merged);');
+  });
+
+  it('gates the whole check on unity.consoleCheck.enabled and the repair on autoRepair', () => {
+    expect(SRC).toContain(
+      "useSettingsStore.getState().getSetting('unity.consoleCheck.enabled') !== false;",
+    );
+    expect(SRC).toContain(
+      "useSettingsStore.getState().getSetting('unity.consoleCheck.autoRepair') !== false,",
+    );
+  });
+
+  it('treats a failed console snapshot as unavailable, never as an error of the check', () => {
+    expect(SRC).toMatch(/\} catch \{\s*snapshotStatus = 'unavailable';\s*\}/);
+  });
+
+  it('reports the problems honestly when the repair turn itself fails', () => {
+    // `repaired: true` with a zero outcome renders a green tick beside "2 new
+    // errors". A failed repair must fall back to the un-repaired result.
+    expect(SRC).toMatch(
+      /\} catch \{[\s\S]*?return \{\s*\.\.\.firstPass,\s*console: consoleResult\(before, null\),/,
+    );
+  });
+
+  it('never compares a snapshot row against the ring seq', () => {
+    // Unity's row index is a different numbering; conflating the two is what
+    // sent `sinceTurnStart` filtering into the wrong space once already.
+    expect(SRC).toMatch(/snapshot = snap\.entries\.map\(\(row\) => \(\{[\s\S]*?seq: null,/);
+  });
+});

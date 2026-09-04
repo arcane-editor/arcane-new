@@ -327,3 +327,34 @@ describe('verified-pass — the silent-failure subsystems', () => {
     expect(card.input).toBe('skipped');
   });
 });
+
+// Task 13. The console and tests rows exist on the card, but the sweep itself
+// never fills them in: the check runs a SECOND `runVerifiedPass()` after its
+// one repair attempt, and only `agent-service.ts` can see both halves. A pass
+// that guessed here would put a console verdict on a card that never read the
+// console.
+describe('runVerifiedPass — the console/tests rows are the caller\'s to fill', () => {
+  beforeEach(() => beginVerifiedPass());
+
+  it('always reports them as skipped, whatever else the sweep found', async () => {
+    recordTouchedFile('/proj/Assets/Scripts/Foo.cs');
+    const data = await runVerifiedPass(WORKSPACE, fakeDeps());
+    expect(data.console).toBe('skipped');
+    expect(data.tests).toBe('skipped');
+    expect(data.repair).toBeUndefined();
+  });
+
+  it('reports them as skipped for a clean, fully-successful sweep too', async () => {
+    recordTouchedFile('/proj/Assets/Scripts/Foo.cs');
+    const data = await runVerifiedPass(
+      WORKSPACE,
+      fakeDeps({
+        bridgeConnected: () => true,
+        triggerRecompile: async () => ({ status: 'report', report: { started: false, messages: [] } }) as never,
+      }),
+    );
+    expect(data.compile).toBe('clean');
+    expect(data.console).toBe('skipped');
+    expect(data.tests).toBe('skipped');
+  });
+});

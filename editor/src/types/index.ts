@@ -191,6 +191,8 @@ export interface SettingsSchema {
   'unity.lspGate.enabled': boolean;
   'unity.assetGate.enabled': boolean;
   'unity.verifiedPass.enabled': boolean;
+  'unity.consoleCheck.enabled': boolean;
+  'unity.consoleCheck.autoRepair': boolean;
   'unity.nearMissDiagnostics.enabled': boolean;
   'unity.rename.formerlySerializedAs': boolean;
   'unity.serializationDiagnostics.enabled': boolean;

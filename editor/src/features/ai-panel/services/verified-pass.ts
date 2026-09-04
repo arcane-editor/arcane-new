@@ -33,6 +33,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { readScriptGuidFromMeta } from './unity-tools/script-guid';
 import type { CompileWaitOutcome } from '../../unity-bridge';
 import type { Finding } from '../../unity-analyzers';
+import type { ConsoleCheckResult, TestsCheckResult, RepairInfo } from './console-check';
 
 export interface VerifiedCardData {
   /** Total files touched by the send (any extension). */
@@ -53,6 +54,19 @@ export interface VerifiedCardData {
   uiToolkit: { queriesResolved: number; queriesTotal: number; problems: number } | 'clean' | 'skipped';
   scriptableObjects: { drift: number } | 'clean' | 'skipped';
   input: { problems: number } | 'clean' | 'skipped';
+  /**
+   * What Unity's console said after the turn (Task 13). Owned by
+   * `console-check.ts` and filled in by `agent-service.ts`'s closing
+   * sequence, NOT by `runVerifiedPass` — the check runs a second verified
+   * pass of its own after its one repair attempt, and only the caller can see
+   * both halves. `runVerifiedPass` therefore always returns `'skipped'` here,
+   * and the merged card carries the real value.
+   */
+  console: ConsoleCheckResult;
+  /** The latest Unity test run this send recorded (Task 13). Same ownership as `console`. */
+  tests: TestsCheckResult;
+  /** Present only when the console check actually made its one repair pass. */
+  repair?: RepairInfo;
 }
 
 // ---- Injected boundaries ----
@@ -466,5 +480,10 @@ export async function runVerifiedPass(
     uiToolkit,
     scriptableObjects,
     input,
+    // Owned by the caller (see `VerifiedCardData.console`): this pass has no
+    // way to tell a first sweep from a post-repair one, and guessing would
+    // put a console verdict on a card that never read the console.
+    console: 'skipped',
+    tests: 'skipped',
   };
 }
