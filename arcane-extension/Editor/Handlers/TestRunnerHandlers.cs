@@ -1,5 +1,6 @@
 // TestRunnerHandlers.cs — run Unity tests via TestRunnerApi and stream results
-// to the IDE as `test_event` pushes (F-8).
+// to the IDE as `test_event` pushes (F-8), plus a queued `runTests` and an
+// awaitable `test_run_completed` (B3).
 //
 // The Unity Test Framework (com.unity.test-framework) is a default package, but
 // to keep the bridge compiling even if a project removed it, all TestRunnerApi
@@ -10,16 +11,53 @@
 //
 // test_event payload phases (mirrored by the Rust headless path so the frontend
 // has ONE code path): runStarted / testStarted / testFinished / runFinished.
-
+// Every phase now carries the run's `runId` (null for an IDE that predates it).
+//
+// QUEUED, like refreshAssets/requestCompile: `runTests` used to be a BLOCKING
+// RPC that acked `{ok:true}` immediately and left the caller to infer
+// completion from the `test_event` stream. Blocking a queued reply on a main
+// thread Unity may have parked (its window unfocused, the normal state while
+// the user is looking at this IDE) means the caller either times out or is
+// left correlating a stream with no explicit "done" — so `runTests` is queued
+// exactly like those two, and its REAL completion is reported by its own
+// message: `test_run_completed`, carrying the summary and a capped failure
+// list so a caller can await one RPC instead of assembling the answer itself
+// out of a `test_event` stream.
+//
+// SURVIVING A DOMAIN RELOAD: a PlayMode run's domain reload tears down and
+// re-creates every static field in this file, INCLUDING the BridgeTestCallbacks
+// instance (see EnsureCallbacks' remarks) — so the run's identity cannot live
+// on that instance. It is persisted to SessionState instead (`ActiveRunKey`),
+// which is Unity's own mechanism for surviving exactly this reload, and read
+// back fresh on every callback rather than cached at construction time.
 #if UNITYIDE_HAS_TEST_FRAMEWORK
 using System;
+using System.Collections.Generic;
+using UnityEditor;
 using UnityEditor.TestTools.TestRunner.Api;
+using UnityEngine;
 
 namespace UnityIDE.Bridge
 {
     internal static class TestRunnerHandlers
     {
         private const int MaxMsgLen = 4096;
+
+        /// <summary>
+        /// How long to hold a backgrounded editor awake once a test run starts.
+        /// A test run is not one tick — Unity has to drive the whole suite (and,
+        /// for PlayMode, a domain reload) on the main thread, which an unfocused
+        /// editor supplies none of on its own. TestStarted/TestFinished refresh
+        /// this on every test, exactly as CompilationHook does per assembly.
+        /// </summary>
+        private const int TestWakeMs = 120000;
+
+        /// <summary>
+        /// SessionState key holding the active run's identity as serialized JSON
+        /// `{runId, mode, startedAt}`. See the file header for why this has to be
+        /// SessionState rather than an instance field.
+        /// </summary>
+        internal const string ActiveRunKey = "UnityIDE.Bridge.ActiveTestRun";
 
         private static BridgeClient _client;
         private static TestRunnerApi _api;
@@ -28,7 +66,11 @@ namespace UnityIDE.Bridge
         public static void Register(BridgeClient client)
         {
             _client = client;
-            RpcDispatcher.Register("runTests", RunTests);
+            // Queued: see the file header. "testRun" is its own coalescing key
+            // (distinct from "assetRefresh") — a test run is not an asset
+            // import, and coalescing the two would let a refresh silently eat a
+            // queued test run or vice versa.
+            RpcDispatcher.RegisterQueued("runTests", RunTests, "testRun");
             EnsureCallbacks();
         }
 
@@ -86,16 +128,18 @@ namespace UnityIDE.Bridge
         {
             string mode = p["mode"].AsStringOr("EditMode");
             string filter = p["filter"].AsString;
+            // Absent for an IDE built before runId existed — GetActiveRun's
+            // consumers (Push, RunFinished) all treat "" the same as missing and
+            // emit a null runId, which is the honest answer for that caller.
+            string runId = p["runId"].AsString;
 
             // Normally already registered by Register(); this covers a bridge
             // that reconnected without a domain reload in between.
             EnsureCallbacks();
             if (_api == null)
             {
-                var err = JsonValue.NewObject();
-                err["ok"] = false;
-                err["reason"] = "Unity's test runner is unavailable.";
-                return err;
+                PushRunCompleted(runId, mode, false, "test-framework-missing");
+                return Ok();
             }
 
             var f = new Filter
@@ -104,25 +148,120 @@ namespace UnityIDE.Bridge
             };
             if (!string.IsNullOrEmpty(filter)) f.testNames = new[] { filter };
 
-            _api.Execute(new ExecutionSettings(f));
+            SetActiveRun(runId, mode);
+            MainThreadDispatcher.RequestWake(TestWakeMs);
 
+            try
+            {
+                _api.Execute(new ExecutionSettings(f));
+            }
+            catch (Exception e)
+            {
+                // Execute() throws for a run already in progress, among other
+                // things — either way nothing is going to call RunFinished for
+                // THIS ask, so the caller must be told directly rather than left
+                // waiting on a completion that is never coming.
+                ClearActiveRun();
+                Debug.LogError("[UnityIDEBridge] runTests Execute failed: " + e);
+                PushRunCompleted(runId, mode, false, "runner-unavailable");
+            }
+
+            // Discarded by the queued dispatcher (see RpcDispatcher.DispatchQueued);
+            // kept non-null only for the downgraded blocking path an IDE older
+            // than protocol 3 still takes.
+            return Ok();
+        }
+
+        /// <summary>
+        /// Push `test_run_completed` directly — used for the two cases where no
+        /// run ever starts, so RunFinished is never going to fire for it: the
+        /// framework/runner is unavailable, or Execute() itself threw.
+        /// </summary>
+        private static void PushRunCompleted(string runId, string mode, bool ok, string reason)
+        {
+            if (_client == null) return;
+            var payload = JsonValue.NewObject();
+            payload["runId"] = string.IsNullOrEmpty(runId) ? JsonValue.Null : JsonValue.Of(runId);
+            payload["ok"] = ok;
+            if (!string.IsNullOrEmpty(reason)) payload["reason"] = reason;
+            if (!string.IsNullOrEmpty(mode)) payload["mode"] = mode;
+            try { _client.Send(Protocol.Envelope(MsgType.TestRunCompleted, payload)); }
+            catch { /* never throw on the main thread */ }
+        }
+
+        private static JsonValue Ok()
+        {
             var r = JsonValue.NewObject();
-            r["ok"] = true; // immediate ack; results stream as test_event
+            r["ok"] = true;
             return r;
+        }
+
+        // ── Active-run identity (SessionState-backed; see file header) ───────
+
+        internal static void SetActiveRun(string runId, string mode)
+        {
+            var v = JsonValue.NewObject();
+            v["runId"] = string.IsNullOrEmpty(runId) ? JsonValue.Null : JsonValue.Of(runId);
+            v["mode"] = string.IsNullOrEmpty(mode) ? "EditMode" : mode;
+            v["startedAt"] = Protocol.NowUnixSeconds();
+            SessionState.SetString(ActiveRunKey, v.Serialize());
+        }
+
+        /// <summary>The active run's `{runId, mode, startedAt}`, or null if none.</summary>
+        internal static JsonValue GetActiveRun()
+        {
+            string raw = SessionState.GetString(ActiveRunKey, "");
+            if (string.IsNullOrEmpty(raw)) return null;
+            return JsonValue.TryParse(raw);
+        }
+
+        internal static void ClearActiveRun()
+        {
+            SessionState.EraseString(ActiveRunKey);
         }
 
         // ── Streaming callbacks ──────────────────────────────────────────────
 
-        private sealed class BridgeTestCallbacks : ICallbacks
+        /// <summary>
+        /// Internal (not private) so `TestRunProtocolTests` can construct one
+        /// directly with an injectable sender, and drive it with fake
+        /// `ITestAdaptor`/`ITestResultAdaptor` implementations — no live Unity
+        /// Editor (and no real `BridgeClient`/journal) required to exercise the
+        /// runId-stamping and failure-capping logic.
+        /// </summary>
+        internal sealed class BridgeTestCallbacks : ICallbacks
         {
-            private readonly BridgeClient _c;
-            public BridgeTestCallbacks(BridgeClient c) { _c = c; }
+            /// <summary>Failures kept verbatim in `test_run_completed`; past this, only counted.</summary>
+            private const int MaxFailures = 50;
+
+            private readonly Action<JsonValue> _send;
+            private List<JsonValue> _failures = new List<JsonValue>();
+            private int _failCount;
+
+            public BridgeTestCallbacks(BridgeClient c)
+                : this(c == null ? (Action<JsonValue>)null : (Action<JsonValue>)(env => c.Send(env)))
+            {
+            }
+
+            /// <summary>Test-only seam: push envelopes to a captured delegate instead of a live BridgeClient.</summary>
+            internal BridgeTestCallbacks(Action<JsonValue> send)
+            {
+                _send = send;
+            }
 
             private void Push(JsonValue payload)
             {
-                if (_c == null) return;
-                try { _c.Send(Protocol.Envelope(MsgType.TestEvent, payload)); }
+                payload["runId"] = CurrentRunId();
+                if (_send == null) return;
+                try { _send(Protocol.Envelope(MsgType.TestEvent, payload)); }
                 catch { /* never throw on the main thread */ }
+            }
+
+            private static JsonValue CurrentRunId()
+            {
+                var active = GetActiveRun();
+                string id = active != null ? active["runId"].AsString : null;
+                return string.IsNullOrEmpty(id) ? JsonValue.Null : JsonValue.Of(id);
             }
 
             private static string Trunc(string s)
@@ -133,6 +272,8 @@ namespace UnityIDE.Bridge
 
             public void RunStarted(ITestAdaptor testsToRun)
             {
+                _failures = new List<JsonValue>();
+                _failCount = 0;
                 var o = JsonValue.NewObject();
                 o["phase"] = "runStarted";
                 o["total"] = CountTests(testsToRun);
@@ -142,6 +283,7 @@ namespace UnityIDE.Bridge
             public void TestStarted(ITestAdaptor test)
             {
                 if (test.IsSuite) return;
+                MainThreadDispatcher.RequestWake(TestWakeMs);
                 var o = JsonValue.NewObject();
                 o["phase"] = "testStarted";
                 o["fullName"] = test.FullName ?? "";
@@ -151,6 +293,7 @@ namespace UnityIDE.Bridge
             public void TestFinished(ITestResultAdaptor result)
             {
                 if (result.Test.IsSuite) return;
+                MainThreadDispatcher.RequestWake(TestWakeMs);
                 var o = JsonValue.NewObject();
                 o["phase"] = "testFinished";
                 o["fullName"] = result.Test.FullName ?? "";
@@ -159,10 +302,29 @@ namespace UnityIDE.Bridge
                 o["message"] = Trunc(result.Message);
                 o["stackTrace"] = Trunc(result.StackTrace);
                 Push(o);
+
+                if (result.TestStatus == TestStatus.Failed)
+                {
+                    _failCount++;
+                    if (_failures.Count < MaxFailures)
+                    {
+                        var f = JsonValue.NewObject();
+                        f["fullName"] = result.Test.FullName ?? "";
+                        f["status"] = result.TestStatus.ToString();
+                        f["message"] = Trunc(result.Message);
+                        f["stackTrace"] = Trunc(result.StackTrace);
+                        f["durationMs"] = (long)(result.Duration * 1000.0);
+                        _failures.Add(f);
+                    }
+                }
             }
 
             public void RunFinished(ITestResultAdaptor result)
             {
+                var active = GetActiveRun();
+                string runId = active != null ? active["runId"].AsString : null;
+                string mode = active != null ? active["mode"].AsStringOr("EditMode") : "EditMode";
+
                 var o = JsonValue.NewObject();
                 o["phase"] = "runFinished";
                 o["passed"] = result.PassCount;
@@ -170,6 +332,32 @@ namespace UnityIDE.Bridge
                 o["skipped"] = result.SkipCount;
                 o["durationMs"] = (long)(result.Duration * 1000.0);
                 Push(o);
+
+                var completed = JsonValue.NewObject();
+                completed["runId"] = string.IsNullOrEmpty(runId) ? JsonValue.Null : JsonValue.Of(runId);
+                completed["ok"] = true;
+                completed["mode"] = mode;
+                completed["total"] = result.PassCount + result.FailCount + result.SkipCount + result.InconclusiveCount;
+                completed["passed"] = result.PassCount;
+                completed["failed"] = result.FailCount;
+                completed["skipped"] = result.SkipCount;
+                completed["inconclusive"] = result.InconclusiveCount;
+                completed["durationMs"] = (long)(result.Duration * 1000.0);
+                var arr = JsonValue.NewArray();
+                foreach (var f in _failures) arr.Add(f);
+                completed["failures"] = arr;
+                // More tests failed than we kept verbatim — the caller must not
+                // read the list as exhaustive.
+                completed["failuresTruncated"] = _failCount > _failures.Count;
+
+                if (_send != null)
+                {
+                    try { _send(Protocol.Envelope(MsgType.TestRunCompleted, completed)); }
+                    catch { /* never throw on the main thread */ }
+                }
+
+                ClearActiveRun();
+                MainThreadDispatcher.RequestWake(0);
             }
 
             private static int CountTests(ITestAdaptor t)

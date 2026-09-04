@@ -133,6 +133,41 @@ export interface CompilationPayload {
   receivedAt?: number;
 }
 
+/** One failed test kept verbatim in a `test_run_completed` payload. */
+export interface TestRunFailure {
+  fullName: string;
+  /** Usually `"Failed"` — carried verbatim from the C# `TestStatus` enum. */
+  status: string;
+  message: string;
+  stackTrace: string;
+  durationMs: number;
+}
+
+/**
+ * A queued `runTests` run has actually finished. Mirrors `CompilationPayload`:
+ * the `rpc_response` to a queued `runTests` only ever means "accepted", never
+ * "done" — this is the real completion signal, and `stores/test-store.ts`
+ * stores it verbatim as `lastRunCompleted`.
+ */
+export interface TestRunCompletedPayload {
+  /** Null for a run an IDE older than this feature started (no runId sent). */
+  runId: string | null;
+  ok: boolean;
+  /** Present only when `ok` is false. */
+  reason?: 'test-framework-missing' | 'runner-unavailable';
+  mode?: UnityPlayMode;
+  total?: number;
+  passed?: number;
+  failed?: number;
+  skipped?: number;
+  inconclusive?: number;
+  durationMs?: number;
+  /** Capped at 50 — see `failuresTruncated`. */
+  failures?: TestRunFailure[];
+  /** True when more tests failed than `failures` kept verbatim. */
+  failuresTruncated?: boolean;
+}
+
 export interface OpenFilePayload {
   path: string;
   /**

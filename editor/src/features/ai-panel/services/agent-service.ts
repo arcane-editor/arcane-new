@@ -46,6 +46,7 @@ import {
   withLspDiagnosticsGate,
   resetCompileGate,
   markConsoleTurnStart,
+  resetTestRunRegistry,
 } from './unity-tools';
 import { resolveToCwd } from './vendor/tools/path-utils';
 import { withCheckpoint } from './checkpoints/checkpoint-gate';
@@ -618,6 +619,7 @@ export class AgentService {
     // createToolsForPromptMode), so their per-send state needs an explicit
     // reset here, same as the compile gate above.
     resetTurnGovernor();
+    resetTestRunRegistry();
     markConsoleTurnStart(useUnityStore.getState().logSeq);
     resetRepeatCallGuard();
     // Fresh touched-file registry for the verified-pass closing check (P3.4).

@@ -9,6 +9,8 @@ import { useUnityStore } from '../../../../stores/unity';
 import { useSettingsStore } from '../../../../stores/settings';
 import { requestEngineApproval } from '../approval-gate';
 import { txt, bridgeConnected } from './shared';
+import { describeTestRunOutcome } from './test-run-outcome-text';
+import { recordTestRunForConsoleCheck } from './test-run-registry';
 
 /** Run an engine action behind the connection check + inline approval gate. */
 async function gated(
@@ -78,6 +80,13 @@ const runTestsSchema = Type.Object({
     }),
   ),
   filter: Type.Optional(Type.String({ description: 'Optional NUnit full-name filter.' })),
+  timeoutSec: Type.Optional(
+    Type.Integer({
+      description:
+        'Override how long to wait for the run to finish, in seconds ' +
+        '(default 300 for EditMode, 900 for PlayMode).',
+    }),
+  ),
 });
 
 function createUnityRunTests(): AgentTool {
@@ -85,13 +94,23 @@ function createUnityRunTests(): AgentTool {
     name: 'unity_run_tests',
     label: 'unity run tests',
     description:
-      'Run Unity tests via the Test Runner. Results stream into the Test panel. Requires user approval.',
+      'Run Unity tests via the Test Runner and wait for the result — pass/fail counts and, for any ' +
+      'failure, its message and where it happened. Requires user approval.',
     parameters: runTestsSchema,
     execute: (id, params, signal) => {
-      const { mode = 'EditMode', filter } = params as Static<typeof runTestsSchema>;
+      const { mode = 'EditMode', filter, timeoutSec } = params as Static<typeof runTestsSchema>;
       return gated(id, 'unity_run_tests', `run ${mode} tests`, signal, async () => {
-        await bridgeRpc.runTests(mode, filter);
-        return txt(`Started ${mode} test run${filter ? ` (filter: ${filter})` : ''}. See the Test panel for results.`);
+        // Dynamic import: `unity-test-runner`'s barrel re-exports `TestPanel`
+        // (a React component), which would drag DOM-touching code into scope
+        // if imported statically — see Global Constraint 4 / `ui-toolkit-tool.ts`
+        // for the same seam.
+        const { waitForTestRun } = await import('../../../unity-test-runner');
+        const outcome = await waitForTestRun(mode, filter, {
+          signal,
+          timeoutMs: timeoutSec != null ? timeoutSec * 1000 : undefined,
+        });
+        if (outcome.status === 'report') recordTestRunForConsoleCheck(outcome.summary);
+        return txt(describeTestRunOutcome(outcome));
       });
     },
   };
@@ -150,8 +169,9 @@ export function createUnityMutateTools(): AgentTool[] {
     tools.push(createUnityRunTests());
   }
   // Every mutate tool blocks on `gated()` HUMAN approval (and unity_run_tests
-  // additionally rides a 5-minute bridge RPC) — opt out of the loop's per-tool
-  // budget so a user away from the keyboard doesn't cause spurious timeouts.
-  // The abort signal still cuts through (Stop always works).
+  // additionally awaits the run itself — up to 15 minutes for PlayMode) — opt
+  // out of the loop's per-tool budget so a user away from the keyboard, or a
+  // slow test suite, doesn't cause spurious timeouts. The abort signal still
+  // cuts through (Stop always works, and `waitForTestRun` races it).
   return tools.map((t) => ({ ...t, timeoutMs: Number.POSITIVE_INFINITY }));
 }

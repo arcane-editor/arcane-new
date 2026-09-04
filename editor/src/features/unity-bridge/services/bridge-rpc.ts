@@ -162,9 +162,17 @@ export const bridgeRpc = {
   setExternalScriptEditor: (path: string) =>
     rpc<{ ok: boolean }>('setExternalScriptEditor', { path }),
   getDebuggerEndpoint: () => rpc<DebuggerEndpoint>('getDebuggerEndpoint'),
-  /** Run Unity tests via the bridge (TestRunnerApi). Results stream as `unity-test-event`. */
-  runTests: (mode: 'EditMode' | 'PlayMode', filter?: string) =>
-    rpc<{ ok: boolean }>('runTests', { mode, filter }, 5 * 60_000),
+  /**
+   * Ask Unity to run tests. Queued on the Unity side (protocol 4+): this
+   * resolves once the ask is ACCEPTED, not once the run finishes — the real
+   * completion is the `unity-test-run-completed` push, matched by `runId`
+   * (see `unity-test-runner`'s `waitForTestRun`). An IDE-side `runId`, minted
+   * by the caller (`crypto.randomUUID()`), is what makes that match possible;
+   * a pre-protocol-4 package ignores the extra param and answers synchronously
+   * once the run finishes, exactly as before.
+   */
+  runTests: (mode: 'EditMode' | 'PlayMode', filter: string | undefined, runId: string) =>
+    rpc<QueuedAck | { ok: boolean }>('runTests', { mode, filter, runId }),
   /**
    * Read a page of Unity's console history. Protocol 4+ only — the caller is
    * responsible for checking `bridgeProtocol` before calling this; against an

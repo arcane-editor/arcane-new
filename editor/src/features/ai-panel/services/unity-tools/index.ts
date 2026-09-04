@@ -21,6 +21,11 @@ export { withLspDiagnosticsGate } from './lsp-gate';
 export { withUnityAssetGate } from './asset-gate';
 export { unityApiSearch, unityApiLookup } from './api-client';
 export { markConsoleTurnStart } from './read-tools';
+export {
+  recordTestRunForConsoleCheck,
+  takeRecordedTestRuns,
+  resetTestRunRegistry,
+} from './test-run-registry';
 
 /**
  * Compile-gate decorator, with the real (store-backed) grounding client wired

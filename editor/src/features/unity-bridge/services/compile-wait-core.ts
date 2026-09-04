@@ -28,6 +28,14 @@
 //      the turn on a window nobody is looking at.
 
 import type { CompilationPayload } from '../../../types/unity';
+// Shared with `unity-test-runner/services/test-run-wait-core.ts`, which lives
+// in a DIFFERENT feature — hence `utils/`, not a feature-internal `services/`
+// file, so both can import it without a cross-feature barrel hop (and without
+// unity-bridge's own barrel, whose other exports pull in React/Monaco and
+// would break the direct Bun-testability both wait-cores rely on).
+import { createSleepTracker, EDITOR_ASLEEP_GRACE_MS } from '../../../utils/sleep-accounting';
+
+export { EDITOR_ASLEEP_GRACE_MS } from '../../../utils/sleep-accounting';
 
 /** What a compile wait resolved to. Every branch is honest — no fake success. */
 export type CompileWaitOutcome =
@@ -110,20 +118,6 @@ export const OVERALL_TIMEOUT_MS = 90_000;
 export const NO_COMPILE_QUIET_MS = 5_000;
 /** After a REJECTED request: how long to watch for activity before acting. */
 export const PROBE_MS = 12_000;
-/**
- * How much CUMULATIVE sleep a parked editor gets before we answer
- * `editor-asleep`.
- *
- * Cumulative, not consecutive, and that distinction is the whole point. A
- * backgrounded editor ticking slowly sits right on the package's awake
- * threshold, so successive heartbeats alternate awake/asleep. Re-arming a
- * consecutive-sleep countdown on every flicker means it never completes, and
- * the fast honest answer silently degrades back into the 90s cap. Accumulating
- * instead makes a half-parked editor resolve in roughly twice the grace —
- * which is the right answer, because an editor asleep half the time is asleep
- * as far as a compile is concerned.
- */
-export const EDITOR_ASLEEP_GRACE_MS = 8_000;
 /** Retries after a rejection while still connected (the ask may have been swallowed by a reload flap). */
 const MAX_REFRESH_RETRIES = 1;
 
@@ -150,12 +144,7 @@ export function waitForCompileReport(
     let importRan = false;
     let retriesLeft = MAX_REFRESH_RETRIES;
     const handles: unknown[] = [];
-    let asleepHandle: unknown = null;
     let quietHandle: unknown = null;
-    /** Sleep already banked from earlier parked stretches. See the grace const. */
-    let sleepAccumMs = 0;
-    /** Clock reading when the current parked stretch began, or null while awake. */
-    let asleepSince: number | null = null;
     let unsub: (() => void) | null = null;
     let onAbort: (() => void) | null = null;
 
@@ -167,12 +156,21 @@ export function waitForCompileReport(
       if (settled) return;
       settled = true;
       for (const h of handles) timers.clear(h);
-      clearAsleepTimer();
+      sleep.clear();
       clearQuietWindow();
       unsub?.();
       if (onAbort && signal) signal.removeEventListener('abort', onAbort);
       resolve(outcome);
     };
+
+    const sleep = createSleepTracker({
+      timers,
+      graceMs: EDITOR_ASLEEP_GRACE_MS,
+      onAsleep: () => {
+        if (settled || activitySeen) return;
+        finish({ status: 'unknown', reason: 'editor-asleep', canWake: io.getSnap().editorCanWake });
+      },
+    });
 
     const arm = (fn: () => void, ms: number) => {
       handles.push(timers.set(fn, ms));
@@ -192,12 +190,6 @@ export function waitForCompileReport(
         return;
       }
       armQuietWindow();
-    };
-
-    const clearAsleepTimer = () => {
-      if (asleepHandle === null) return;
-      timers.clear(asleepHandle);
-      asleepHandle = null;
     };
 
     const clearQuietWindow = () => {
@@ -245,19 +237,12 @@ export function waitForCompileReport(
      */
     const evaluateSleep = (snap: UnitySnap) => {
       if (settled || activitySeen) {
-        clearAsleepTimer();
+        sleep.clear();
         return;
       }
-      const nowMs = timers.now();
 
       if (snap.editorAwake) {
-        // Bank the stretch that just ended; do NOT reset the total, or a
-        // flickering editor would restart the countdown forever.
-        if (asleepSince !== null) {
-          sleepAccumMs += nowMs - asleepSince;
-          asleepSince = null;
-        }
-        clearAsleepTimer();
+        sleep.update(true);
         // Awake again and still nothing compiling: the quiet window can resume.
         armQuietWindow();
         return;
@@ -265,21 +250,7 @@ export function waitForCompileReport(
 
       // Parked: a quiet window measured against a stopped editor is meaningless.
       clearQuietWindow();
-      if (asleepSince === null) asleepSince = nowMs;
-      if (asleepHandle !== null) return; // already counting down
-      const elapsed = sleepAccumMs + (nowMs - asleepSince);
-      const remaining = Math.max(0, EDITOR_ASLEEP_GRACE_MS - elapsed);
-      asleepHandle = timers.set(() => {
-        asleepHandle = null;
-        if (settled || activitySeen) return;
-        const s = io.getSnap();
-        // Woke while we were counting: recompute rather than resolve.
-        if (s.editorAwake) {
-          evaluateSleep(s);
-          return;
-        }
-        finish({ status: 'unknown', reason: 'editor-asleep', canWake: s.editorCanWake });
-      }, remaining);
+      sleep.update(false);
     };
 
     // Listen FIRST, so a fast compile can't finish before we're watching.
