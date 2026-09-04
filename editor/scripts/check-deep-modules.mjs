@@ -1,3 +1,14 @@
+/**
+ * Deep-module boundary check (Global Constraint 3, `editor/CLAUDE.md`):
+ * every feature is imported only through its `index.ts` barrel.
+ *
+ * The checking itself (`checkImportsIn`) is pure — it takes source text, not
+ * paths on disk — so it is unit-testable without a fixture tree
+ * (`check-deep-modules.test.ts`), the same split `version-sync.mjs` /
+ * `check-invoke-args.mjs` use next to it. `main()` is the thin runner that
+ * walks the real `src/` tree.
+ */
+
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 
@@ -24,9 +35,9 @@ function walk(dir) {
   return files;
 }
 
-function featureNameFor(absPath) {
-  const rel = path.relative(SRC_ROOT, absPath);
-  const parts = rel.split(path.sep);
+/** @param {string} relPosixPath SRC-root-relative, posix-separated (e.g. `features/uitoolkit/index.ts`). */
+function featureNameFor(relPosixPath) {
+  const parts = relPosixPath.split('/');
   return parts[0] === 'features' && parts[1] ? parts[1] : null;
 }
 
@@ -34,12 +45,15 @@ function lineForIndex(text, index) {
   return text.slice(0, index).split('\n').length;
 }
 
-function isPublicFeatureEntry(targetAbsPath, targetFeature) {
-  const rel = toPosix(path.relative(SRC_ROOT, targetAbsPath));
-  return rel === `features/${targetFeature}` || rel === `features/${targetFeature}/index`;
+/** @param {string} targetRelPosixPath extensionless, SRC-root-relative, posix-separated. */
+function isPublicFeatureEntry(targetRelPosixPath, targetFeature) {
+  return (
+    targetRelPosixPath === `features/${targetFeature}` ||
+    targetRelPosixPath === `features/${targetFeature}/index`
+  );
 }
 
-function checkFeatureIndexes() {
+export function checkFeatureIndexes() {
   if (!existsSync(FEATURES_ROOT)) return [];
   const violations = [];
   for (const entry of readdirSync(FEATURES_ROOT)) {
@@ -58,7 +72,7 @@ function checkFeatureIndexes() {
   return violations;
 }
 
-function extractImportSpecifiers(text) {
+export function extractImportSpecifiers(text) {
   const results = [];
   const patterns = [
     /(^|\n)\s*import\s+(?:type\s+)?(?:[^'";]*?\s+from\s+)?['"]([^'"]+)['"]/g,
@@ -76,36 +90,85 @@ function extractImportSpecifiers(text) {
 }
 
 /** `*.test.ts(x)` only — never a production file, however it is named. */
-function isTestFile(absPath) {
-  return /\.test\.tsx?$/.test(absPath);
+export function isTestFile(relPosixPath) {
+  return /\.test\.tsx?$/.test(relPosixPath);
 }
 
-function checkImports() {
+/**
+ * Deep imports a TEST FILE is allowed to make straight past a feature's
+ * barrel — an explicit `{ importer, target }` allowlist, each entry
+ * individually justified, not a blanket "every test is exempt" rule.
+ *
+ * Review round 1 (F2) found the first cut of this check exempted every
+ * `*.test.ts(x)` file from the barrel rule codebase-wide, when only ONE test
+ * — `ui-templates.test.ts` reaching `uitoolkit/services/render-plan.ts` —
+ * actually needed it. A blanket exemption hides every FUTURE unjustified
+ * deep import a test happens to make, not just this one; an allowlist keeps
+ * the check meaningful for anything not explicitly reasoned about here.
+ * `check-deep-modules.test.ts` proves a non-allowlisted test deep import is
+ * still flagged.
+ *
+ * `importer`/`target` are SRC-root-relative, posix-separated, extensionless
+ * — the shape `resolveSpecifier` produces.
+ */
+export const TEST_DEEP_IMPORT_ALLOWLIST = [
+  {
+    importer: 'features/ai-panel/services/unity-tools/ui-templates/ui-templates.test.ts',
+    target: 'features/uitoolkit/services/render-plan',
+    reason:
+      "features/uitoolkit's barrel (index.ts) statically imports React components " +
+      "(UnityUiPanel, UxmlPreviewEditor) that reach stores/theme.ts's module-scope " +
+      '`document` access, so the barrel cannot be imported under Bun at all — ' +
+      'production code reaches this feature only through a dynamic import() seam ' +
+      'inside execute() (see ui-toolkit-tool.ts / ui-layout-tool.ts), which a ' +
+      'static test import has no way to use. render-plan.ts itself is pure and ' +
+      'DOM-free, so the test reaches it directly instead of through the barrel.',
+  },
+];
+
+function isAllowlistedTestImport(importerRelPosix, targetRelPosix) {
+  return TEST_DEEP_IMPORT_ALLOWLIST.some(
+    (entry) => entry.importer === importerRelPosix && entry.target === targetRelPosix,
+  );
+}
+
+/**
+ * Resolve a relative import specifier against the importing file, both given
+ * as SRC-root-relative posix paths — pure string math (`path.posix`), no
+ * filesystem access, so it works identically for a real file or a fixture.
+ * `null` for a bare (non-relative) specifier, which this checker does not
+ * police.
+ */
+export function resolveSpecifier(importerRelPosix, specifier) {
+  if (!specifier.startsWith('.')) return null;
+  const dir = path.posix.dirname(`/${importerRelPosix}`);
+  const resolved = path.posix.normalize(path.posix.join(dir, specifier));
+  return resolved.replace(/^\/+/, '');
+}
+
+/**
+ * Pure: given every source file as `{ file, text }` (SRC-root-relative posix
+ * path + full text), find every cross-feature import that does not go
+ * through the target feature's `index.ts` barrel — except a deep import a
+ * TEST file makes that is explicitly named in `TEST_DEEP_IMPORT_ALLOWLIST`.
+ */
+export function checkImportsIn(files) {
   const violations = [];
-  for (const file of walk(SRC_ROOT)) {
-    const text = readFileSync(file, 'utf8');
+  for (const { file, text } of files) {
     const importerFeature = featureNameFor(file);
-    // Tests are exempt from the barrel-only rule: a test asserting against a
-    // pure leaf module (e.g. `features/uitoolkit/services/render-plan.ts`)
-    // needs to reach it directly, because importing the OTHER feature's
-    // barrel would pull in that feature's React components / DOM-touching
-    // code and break under Bun's DOM-less test runtime (Global Constraint 4)
-    // — the exact problem the barrel-only rule does not have for production
-    // code, which reaches the same modules through an injected-deps seam
-    // instead. Production files still cross features only through index.ts.
-    if (isTestFile(file)) continue;
 
     for (const { specifier, index } of extractImportSpecifiers(text)) {
-      if (!specifier.startsWith('.')) continue;
+      const targetRelPosix = resolveSpecifier(file, specifier);
+      if (targetRelPosix === null) continue;
 
-      const targetAbsPath = path.normalize(path.resolve(path.dirname(file), specifier));
-      const targetFeature = featureNameFor(targetAbsPath);
+      const targetFeature = featureNameFor(targetRelPosix);
       if (!targetFeature) continue;
       if (importerFeature === targetFeature) continue;
-      if (isPublicFeatureEntry(targetAbsPath, targetFeature)) continue;
+      if (isPublicFeatureEntry(targetRelPosix, targetFeature)) continue;
+      if (isTestFile(file) && isAllowlistedTestImport(file, targetRelPosix)) continue;
 
       violations.push({
-        file: toPosix(path.relative(process.cwd(), file)),
+        file: `src/${file}`,
         line: lineForIndex(text, index),
         specifier,
         message: `Feature '${targetFeature}' must be imported through src/features/${targetFeature}/index.ts`,
@@ -115,16 +178,25 @@ function checkImports() {
   return violations;
 }
 
-const violations = [...checkFeatureIndexes(), ...checkImports()];
+function main() {
+  const files = walk(SRC_ROOT).map((absPath) => ({
+    file: toPosix(path.relative(SRC_ROOT, absPath)),
+    text: readFileSync(absPath, 'utf8'),
+  }));
 
-if (violations.length > 0) {
-  console.error('Deep module boundary violations found:\n');
-  for (const violation of violations) {
-    const location = `${violation.file}:${violation.line}`;
-    const specifier = violation.specifier ? ` (${violation.specifier})` : '';
-    console.error(`- ${location}${specifier}\n  ${violation.message}`);
+  const violations = [...checkFeatureIndexes(), ...checkImportsIn(files)];
+
+  if (violations.length > 0) {
+    console.error('Deep module boundary violations found:\n');
+    for (const violation of violations) {
+      const location = `${violation.file}:${violation.line}`;
+      const specifier = violation.specifier ? ` (${violation.specifier})` : '';
+      console.error(`- ${location}${specifier}\n  ${violation.message}`);
+    }
+    process.exit(1);
   }
-  process.exit(1);
+
+  console.log('Deep module boundaries OK');
 }
 
-console.log('Deep module boundaries OK');
+if (import.meta.main) main();

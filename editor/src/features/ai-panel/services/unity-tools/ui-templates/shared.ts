@@ -312,8 +312,13 @@ export interface ScreenTemplate {
   uss: string;
   /**
    * `<Name>.uxml` content. Always carries two `<Style src="{{THEME_SRC}}" />`
-   * / `<Style src="{{USS_SRC}}" />` placeholders — `ui-scaffold-tool.ts`
-   * resolves both, never the template (see this module's header).
+   * / `<Style src="{{USS_SRC}}" />` placeholders — the template never
+   * resolves either (see this module's header). `ui-scaffold-tool.ts`
+   * resolves `{{THEME_SRC}}` itself ONLY when reusing an existing theme (a
+   * real, already-on-disk path, known up front — no write, nothing to wait
+   * on); `{{USS_SRC}}` is always left in place for the model to fill in from
+   * the component `.uss` write's own result, the same as `{{THEME_SRC}}`
+   * when a new theme is being written.
    */
   uxml: string;
   /** Every kebab-case element name the markup declares, in the order the controller should read them. */

@@ -113,12 +113,43 @@ describe.each(SCREENS)('ui-templates — $name', ({ screenName, build }) => {
     }
   });
 
-  it('the controller skeleton compiles as a single MonoBehaviour and queries only declared names', () => {
+  it('the controller skeleton compiles as a single MonoBehaviour and queries only declared names, at their declared UXML tag', () => {
     expect(template.controllerSkeleton).toContain('using UnityEngine.UIElements;');
     expect(template.controllerSkeleton).toContain(`public class ${screenName}Controller : MonoBehaviour`);
     expect(template.controllerSkeleton).toContain('[SerializeField] private UIDocument document;');
-    const queried = [...template.controllerSkeleton.matchAll(/Q<\w+>\(\$?"([a-z0-9-{}]+)/g)].map((m) => m[1]);
-    expect(queried.length).toBeGreaterThan(0);
+
+    // Ground truth: every named element in the markup, mapped to its real tag.
+    const doc = parseUxml(resolvedUxml(template.uxml));
+    const tagByName = new Map(
+      flatten(doc.root)
+        .filter((n): n is UxmlNode & { name: string } => n.name !== null)
+        .map((n) => [n.name, n.localName]),
+    );
+
+    const queries = [...template.controllerSkeleton.matchAll(/Q<(\w+)>\(\$?"([^"]*)"\)/g)].map((m) => ({
+      csType: m[1],
+      target: m[2],
+    }));
+    expect(queries.length).toBeGreaterThan(0);
+
+    for (const { csType, target } of queries) {
+      if (target.includes('{')) {
+        // A C# string-interpolated target (inventory's `$"{prefix}-slot-{i}"`
+        // loop, `shared.ts`'s per-field bindings never produce one) — assert
+        // the static prefix actually names real declared elements, all at
+        // the queried type, rather than skipping interpolated lines entirely.
+        const staticPrefix = target.split('{')[0];
+        const matches = [...tagByName.entries()].filter(([name]) => name.startsWith(staticPrefix));
+        expect(matches.length).toBeGreaterThan(0);
+        for (const [, tag] of matches) expect(tag).toBe(csType);
+        continue;
+      }
+      // A literal target: must be a declared element, queried at its real tag
+      // — catches BOTH a name the markup never declares AND a `Q<WrongType>`
+      // for a name that does exist.
+      expect(tagByName.has(target)).toBe(true);
+      expect(tagByName.get(target)).toBe(csType);
+    }
   });
 });
 
@@ -163,8 +194,14 @@ describe('ui-templates — theme.ts', () => {
   });
 });
 
+/** `[localName, name]` for `node` and every child, recursively — a tree shape you can assert against with `toEqual`. */
+function shapeOf(node: UxmlNode | null): unknown {
+  if (!node) return null;
+  return [node.localName, node.name, node.children.map(shapeOf)];
+}
+
 describe('ui-templates — hud golden structural comparison (fixtures/uitoolkit/HUD.uxml)', () => {
-  it('matches the fixture\'s shape: a root container, a top bar with hp/ammo panels, a pause button', () => {
+  it('the fixture nests as: root -> [health panel -> [hp label, hp bar], ammo panel -> [ammo label], pause button], in order', () => {
     const fixtureDir = path.resolve(import.meta.dir, '../../../../../../fixtures/uitoolkit');
     const fixtureText = readFileSync(path.join(fixtureDir, 'HUD.uxml'), 'utf8');
     const fixtureDoc = parseUxml(fixtureText);
@@ -172,30 +209,63 @@ describe('ui-templates — hud golden structural comparison (fixtures/uitoolkit/
     // comment: "its children are added straight onto rootVisualElement") —
     // the screen's actual root is its first real child.
     expect(fixtureDoc.root).not.toBeNull();
-    const fixtureScreenRoot = fixtureDoc.root!.children[0];
-    expect(fixtureScreenRoot?.localName).toBe('VisualElement');
+    const root = fixtureDoc.root!.children[0];
+    expect(root?.localName).toBe('VisualElement');
+    expect(root?.name).toBe('hud-root');
 
-    const fixtureNodes = flatten(fixtureDoc.root);
-    expect(fixtureNodes.some((n) => n.localName === 'Button')).toBe(true);
-    expect(fixtureNodes.filter((n) => n.localName === 'Label').length).toBeGreaterThanOrEqual(2);
-    expect(fixtureText).toContain('hp');
-    expect(fixtureText).toContain('ammo');
-    expect(fixtureText).toContain('pause');
+    // Exact nesting AND order — not "a Button exists somewhere", but root's
+    // three direct children are, in this order, the health panel, the ammo
+    // panel, and the pause button, each containing exactly what the fixture
+    // actually declares.
+    expect(shapeOf(root)).toEqual([
+      'VisualElement',
+      'hud-root',
+      [
+        ['VisualElement', 'health', [
+          ['Label', 'hp-label', []],
+          ['ProgressBar', 'hp-bar', []],
+        ]],
+        ['VisualElement', 'ammo', [
+          ['Label', 'ammo-count', []],
+        ]],
+        ['Button', 'pause-button', []],
+      ],
+    ]);
+  });
 
+  it('our own hud template nests as: root -> [topbar -> [health panel -> labels+bar, ammo panel -> labels, pause button], objective -> [label], in order', () => {
     const ctx = buildContext('HUD', { width: 1920, height: 1080 }, DEFAULT_PALETTE);
     const ours = buildHudTemplate(ctx);
     const oursDoc = parseUxml(resolvedUxml(ours.uxml));
     expect(oursDoc.root).not.toBeNull();
-    const oursScreenRoot = oursDoc.root!.children[0];
-    expect(oursScreenRoot?.localName).toBe('VisualElement');
-    expect(oursScreenRoot?.name).toBe('hud-root');
+    const root = oursDoc.root!.children[0];
 
-    const oursNodes = flatten(oursDoc.root);
-    expect(oursNodes.some((n) => n.localName === 'Button')).toBe(true);
-    expect(oursNodes.filter((n) => n.localName === 'Label').length).toBeGreaterThanOrEqual(2);
-    expect(ours.elementNames.some((n) => n.includes('hp'))).toBe(true);
-    expect(ours.elementNames.some((n) => n.includes('ammo'))).toBe(true);
-    expect(ours.elementNames.some((n) => n.includes('pause'))).toBe(true);
+    // The same shape as the fixture's — root, a bar of hp/ammo panels plus a
+    // pause button — PLUS the objective banner `hud.ts`'s header documents as
+    // the deliberate addition over the (intentionally minimal) fixture. Exact
+    // nesting and order, not flattened presence counts.
+    expect(shapeOf(root)).toEqual([
+      'VisualElement',
+      'hud-root',
+      [
+        ['VisualElement', 'hud-topbar', [
+          ['VisualElement', 'hud-health', [
+            ['Label', 'hud-hp-label', []],
+            ['ProgressBar', 'hud-hp-bar', []],
+            ['Label', 'hud-hp-value', []],
+          ]],
+          ['VisualElement', 'hud-ammo', [
+            ['Label', 'hud-ammo-label', []],
+            ['Label', 'hud-ammo-value', []],
+          ]],
+          ['Button', 'hud-pause-button', []],
+        ]],
+        ['VisualElement', 'hud-objective', [
+          ['Label', 'hud-objective-text', []],
+        ]],
+      ],
+    ]);
+
     // Our own naming style, unlike the fixture's (kept loose on purpose — the
     // fixture predates the "prefix every name" rule and deliberately still
     // carries the two mistakes `asset-checks.test.ts` exercises against it).
