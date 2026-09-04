@@ -121,6 +121,51 @@ describe('activeInputHandler parsing (ProjectSettings.asset authoritative over p
   });
 });
 
+// Task 16 (B9): `uiDesignFactLines` is correctly absent from every eval fixture
+// prompt, for the same reason the ScriptableObject/UI Toolkit/Input DETAIL
+// blocks are (see the comment in `buildFixtureFacts` next to `inventory`) —
+// production only appends it when `selectSubsystems` picks `uiToolkit`, which
+// requires an active file the headless eval never has. This fixture ships a
+// `.uxml`, a `.uss` with a `--color-bg` custom property, and a `.asset` that
+// serializes a `PanelSettings` — exactly the inputs that would make production
+// render "USS variables"/"Panel:" lines — to prove the absence is deliberate,
+// not an oversight that happens not to be exercised by the other fixtures.
+describe('buildFixtureFacts — uiDesign facts stay absent even when the project has UI Toolkit content (Task 16 parity)', () => {
+  it('never mentions USS variables or a Panel:, even with a themed .uss and a PanelSettings asset', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'eval-ui-design-'));
+    try {
+      await mkdir(join(dir, 'ProjectSettings'), { recursive: true });
+      await mkdir(join(dir, 'Packages'), { recursive: true });
+      await mkdir(join(dir, 'Assets', 'UI'), { recursive: true });
+      await writeFile(
+        join(dir, 'ProjectSettings', 'ProjectVersion.txt'),
+        'm_EditorVersion: 6000.3.5f2\n',
+      );
+      await writeFile(join(dir, 'Packages', 'manifest.json'), JSON.stringify({ dependencies: {} }));
+      await writeFile(
+        join(dir, 'Assets', 'UI', 'Hud.uxml'),
+        '<UXML><VisualElement name="root" /></UXML>',
+      );
+      await writeFile(
+        join(dir, 'Assets', 'UI', 'Theme.uss'),
+        ':root { --color-bg: #1b1726; }',
+      );
+      await writeFile(
+        join(dir, 'Assets', 'UI', 'GamePanel.asset'),
+        'MonoBehaviour:\n  m_Script: {...}\n  ...UnityEngine.UIElements.PanelSettings...\n  m_Name: GamePanel\n',
+      );
+
+      const facts = await buildFixtureFacts(dir);
+      expect(facts).toContain('UI Toolkit (1 .uxml, 1 .uss)');
+      expect(facts).not.toContain('USS variables');
+      expect(facts).not.toContain('Panel:');
+      expect(facts).not.toContain('--color-bg');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 // P2.1: contrastive anti-default facts (`unity-contrast.ts`) are appended as
 // ADDITIONS at the end of `buildFixtureFacts`'s output, derived from the same
 // pipeline/inputSystem values detected above. Full-string assertions here

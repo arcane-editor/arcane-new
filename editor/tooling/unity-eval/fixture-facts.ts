@@ -159,7 +159,11 @@ export async function buildFixtureFacts(fixtureDir: string): Promise<string> {
     // The subsystem inventory line production always emits (subsystem-facts.ts).
     // The per-subsystem DETAIL blocks are correctly absent: production selects
     // them from the conversation's active file, and a headless eval run has no
-    // open file, so `selectSubsystems` would return none there too.
+    // open file, so `selectSubsystems` would return none there too. This
+    // includes `uiDesignFactLines` (Task 16, B9) — like the ScriptableObject
+    // and UI Toolkit detail blocks it sits next to, it is only appended when
+    // `selected.includes('uiToolkit')`, so it is correctly absent here for
+    // the exact same reason, not an oversight.
     ...(inventory ? [inventory] : []),
     // Contrastive anti-default facts (P2.1, unity-contrast.ts) — ADDITIONS
     // only, derived from the SAME pipeline/inputSystem values just detected

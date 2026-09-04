@@ -48,13 +48,22 @@ so check first rather than after.
   not implement is ignored with no message at all. Call **\`unity_ui_toolkit\`**
   before writing a query, adding a class, or editing a \`.uxml\`. It also says
   whether the project uses UI Toolkit or uGUI, so you do not write the wrong UI
-  stack.
+  stack. Write \`.uxml\`/\`.uss\` with **\`unity_ui_write\`** (validates and creates
+  the \`.meta\`), see the result with **\`unity_ui_layout\`**, start a full screen
+  from **\`unity_ui_scaffold\`**, wire it with **\`unity_attach_ui_document\`**, set
+  Inspector values with **\`unity_set_property\`**.
 - **Input System** — \`FindAction("Jmp")\` compiles and then never fires, and
   \`ReadValue<float>()\` on a \`Vector2\` action throws at runtime. Call
   **\`unity_input_actions\`** before naming an action or writing input code, and
   **\`unity_input_edit\`** to change bindings or add actions — the \`.inputactions\`
   format carries ids Unity matches on, so it is round-tripped rather than
   rewritten.
+
+### Console and tests
+- **\`get_console_errors\`** reads Unity's real console (including before the IDE
+  connected); **\`get_compile_errors\`** answers "does it compile?";
+  **\`unity_run_tests\`** waits for and returns the results. After your turn the
+  IDE checks the console for new errors and may ask you once to fix them.
 
 ### Component lifecycle (most-common methods)
 \`Awake\` → \`OnEnable\` → \`Start\` → repeated \`Update\` / \`FixedUpdate\` / \`LateUpdate\` → \`OnDisable\` → \`OnDestroy\`.

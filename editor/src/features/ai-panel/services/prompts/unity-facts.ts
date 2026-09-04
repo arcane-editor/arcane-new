@@ -35,6 +35,13 @@ import {
 } from '../../../../utils/input-system';
 import { detectUiStack, type UiStack } from '../unity-tools/ui-stack';
 import { readUiStackSignals } from '../unity-tools/ui-stack-scan';
+import { parsePanelSettings } from '../../../../utils/panel-settings';
+import {
+  uiDesignFactLines,
+  type UiDesignFacts,
+  type UiDesignVariableFacts,
+  type UiDesignPanelFacts,
+} from './ui-design-facts';
 
 type RenderPipeline = 'URP' | 'HDRP' | 'Built-in';
 
@@ -57,9 +64,16 @@ interface UnityFacts {
    * Which UI stack the project uses (`ui-stack.ts`). Gathered once alongside
    * everything else here — `unity_ui_write` reads it via `getUnityUiStack`
    * to refuse writing UI Toolkit markup into an established uGUI project.
-   * Task 16 adds `uiDesign` next to this.
    */
   uiStack: UiStack;
+  /**
+   * The project's real USS custom-property variables and `PanelSettings`
+   * coordinate space, for `uiDesignFactLines`. Null under the same condition
+   * `uiToolkit` is — no `.uxml` documents means nothing for either block to
+   * say, and `getUnityFactsBlock`'s selection gate (below) never surfaces it
+   * in that case anyway.
+   */
+  uiDesign: UiDesignFacts | null;
 }
 
 let cache: UnityFacts | null = null;
@@ -150,14 +164,15 @@ async function runPrime(workspacePath: string): Promise<void> {
 
   const inputSystem = detectInputSystem(projectSettings, !!deps['com.unity.inputsystem']);
 
-  // All four snapshots in parallel: each is a bounded read the app performs
+  // All five snapshots in parallel: each is a bounded read the app performs
   // anyway, and priming is off the critical path (the first turn falls back
   // to the version-only block if it is not warm yet).
-  const [inputActions, so, ui, uiStackSignals] = await Promise.all([
+  const [inputActions, so, ui, uiStackSignals, panels] = await Promise.all([
     readInputActionsFacts(workspacePath, inputSystem),
     readScriptableObjectFacts(workspacePath),
     readUiToolkitFacts(workspacePath),
     readUiStackSignals(workspacePath),
+    readPanelSettingsFacts(workspacePath),
   ]);
   const scriptableObjects = so?.facts ?? null;
   const soAssetCount = so?.assetCount ?? 0;
@@ -168,6 +183,13 @@ async function runPrime(workspacePath: string): Promise<void> {
     panelSettingsCount: uiStackSignals.panelSettingsCount,
     canvasScenes: uiStackSignals.canvasScenes,
   });
+  // Null under the same condition `uiToolkit` is (see `UnityFacts.uiDesign`'s
+  // doc comment) — the selection gate in `getUnityFactsBlock` never surfaces
+  // it otherwise, so there is nothing worth keeping a panel/variable scan
+  // result for.
+  const uiDesign: UiDesignFacts | null = ui
+    ? { variables: ui.variables, panels, themeSheets: ui.themeSheets, stack: uiStack }
+    : null;
 
   cache = {
     workspacePath,
@@ -179,6 +201,7 @@ async function runPrime(workspacePath: string): Promise<void> {
     scriptableObjects,
     uiToolkit,
     uiStack,
+    uiDesign,
     inventory: {
       scriptableObjects: scriptableObjects
         ? { types: scriptableObjects.typeNames.length, assets: soAssetCount }
@@ -274,15 +297,21 @@ async function readScriptableObjectFacts(
 }
 
 /**
- * The project's UXML documents and every element name they declare.
+ * The project's UXML documents and every element name they declare, plus the
+ * theme's real USS custom-property variables (Task 16 — `uiDesignFactLines`).
  *
  * Reached through a dynamic import for the reason `readInputActionsFacts`
  * documents above, and shares the analyzers' snapshot for the same reason: the
- * names in the prompt are the ones UNITY0501 validates `Q<T>()` against.
+ * names in the prompt are the ones UNITY0501 validates `Q<T>()` against, and
+ * the variables are the ones a `var(--name)` in a written `.uss` resolves
+ * against.
  */
-async function readUiToolkitFacts(
-  workspacePath: string,
-): Promise<{ facts: UiToolkitFacts; stylesheetCount: number } | null> {
+async function readUiToolkitFacts(workspacePath: string): Promise<{
+  facts: UiToolkitFacts;
+  stylesheetCount: number;
+  variables: UiDesignVariableFacts[];
+  themeSheets: string[];
+} | null> {
   try {
     const mod = await import('../../../unity-analyzers');
     await mod.loadUiToolkitIndex(workspacePath, mod.blankStringsAndComments);
@@ -290,15 +319,125 @@ async function readUiToolkitFacts(
     if (!uxml || uxml.docCount === 0) return null;
     const relative = (p: string) =>
       p.startsWith(`${workspacePath}/`) ? p.slice(workspacePath.length + 1) : p;
+
+    const ussIndex = mod.getUssIndex();
+    // Declarations whose property starts with `--` (custom properties) —
+    // first declaration wins, in path-sorted order, so the "first sheet that
+    // declares it" is a deterministic, scan-order-independent choice rather
+    // than whatever order `read_files_bulk` happened to return.
+    const variables: UiDesignVariableFacts[] = [];
+    if (ussIndex) {
+      const sheetOfVar = new Set<string>();
+      const sortedPaths = [...ussIndex.docs.keys()].sort((a, b) => a.localeCompare(b));
+      for (const path of sortedPaths) {
+        const sheet = ussIndex.docs.get(path);
+        if (!sheet) continue;
+        const base = path.split('/').pop() ?? path;
+        for (const rule of sheet.rules) {
+          for (const decl of rule.declarations) {
+            if (!decl.property.startsWith('--') || sheetOfVar.has(decl.property)) continue;
+            sheetOfVar.add(decl.property);
+            variables.push({ name: decl.property, value: decl.value, sheet: base });
+          }
+        }
+      }
+    }
+    const themeSheets = [...new Set(variables.map((v) => v.sheet))].sort((a, b) => a.localeCompare(b));
+
     return {
       facts: {
         documents: [...uxml.docs.keys()].map(relative),
         elementNames: uxml.allNames,
       },
-      stylesheetCount: mod.getUssIndex()?.docCount ?? 0,
+      stylesheetCount: ussIndex?.docCount ?? 0,
+      variables,
+      themeSheets,
     };
   } catch {
     return null;
+  }
+}
+
+const PANEL_ASSET_SCAN_EXCLUDES = ['Library/**', 'Temp/**', 'obj/**', 'Logs/**', 'Build/**', 'Builds/**'];
+/** Mirrors `ui-stack-scan.ts`'s `MAX_SCENE_BYTES` — same technique, same cap. */
+const MAX_PANEL_ASSET_BYTES = 2 * 1024 * 1024;
+const PANEL_ASSET_READ_CHUNK = 200;
+
+/** A chunk that fails narrows the answer; it does not break the whole prime. */
+async function inChunks<T>(
+  list: readonly string[],
+  chunkSize: number,
+  fn: (chunk: string[]) => Promise<T[]>,
+): Promise<T[]> {
+  const out: T[] = [];
+  for (let i = 0; i < list.length; i += chunkSize) {
+    try {
+      out.push(...(await fn(list.slice(i, i + chunkSize))));
+    } catch {
+      /* see doc comment above */
+    }
+  }
+  return out;
+}
+
+/**
+ * Every `PanelSettings` asset in the project, for `uiDesign`'s panel facts.
+ *
+ * Same scan `panel-resolve.ts` runs to resolve ONE document's panel (`.asset`
+ * files containing `UnityEngine.UIElements.PanelSettings`, parsed with the
+ * same `parsePanelSettings`), but project-wide and size-gated the way
+ * `ui-stack-scan.ts`'s Canvas scan is: every candidate is stat'd first via
+ * `file_sizes_bulk`, and only the ones at or under the cap ever reach
+ * `read_files_bulk` — an oversized `.asset` is skipped before a single byte
+ * of it is read, not read in full and then discarded.
+ */
+async function readPanelSettingsFacts(workspacePath: string): Promise<UiDesignPanelFacts[]> {
+  try {
+    const paths = await invoke<string[]>('scan_all_files_v2', {
+      workspacePath,
+      extraExcludes: PANEL_ASSET_SCAN_EXCLUDES,
+    });
+    const assetPaths = paths.filter((p) => p.endsWith('.asset'));
+    if (assetPaths.length === 0) return [];
+
+    const sizes = await inChunks(assetPaths, PANEL_ASSET_READ_CHUNK, (chunk) =>
+      invoke<Array<{ path: string; size: number }>>('file_sizes_bulk', { paths: chunk }),
+    );
+    const underCap = sizes.filter((s) => s.size <= MAX_PANEL_ASSET_BYTES).map((s) => s.path);
+    if (underCap.length === 0) return [];
+
+    const files = await inChunks(underCap, PANEL_ASSET_READ_CHUNK, (chunk) =>
+      invoke<Array<{ path: string; content: string }>>('read_files_bulk', { paths: chunk }),
+    );
+
+    const relative = (p: string) =>
+      p.startsWith(`${workspacePath}/`) ? p.slice(workspacePath.length + 1) : p;
+
+    const panels: UiDesignPanelFacts[] = [];
+    for (const file of files) {
+      if (!file.content.includes('UnityEngine.UIElements.PanelSettings')) continue;
+      const parsed = parsePanelSettings(file.content, file.path);
+      if (!parsed) continue;
+      panels.push({
+        name: parsed.name,
+        path: relative(file.path),
+        scaleMode: parsed.scaleMode,
+        // Only `scale-with-screen` derives its layout box FROM the reference
+        // resolution (`panelLayoutSize`'s switch) — for the other two modes
+        // the number is present in the asset but plays no part in sizing, so
+        // stating it would claim a coordinate space that is not actually in
+        // effect.
+        referenceResolution:
+          parsed.scaleMode === 'scale-with-screen'
+            ? { w: parsed.referenceResolution.width, h: parsed.referenceResolution.height }
+            : null,
+        screenMatchMode: parsed.screenMatchMode,
+        match: parsed.match,
+      });
+    }
+    return panels;
+  } catch {
+    return [];
   }
 }
 
@@ -396,6 +535,9 @@ export function getUnityFactsBlock(): string | null {
     }
     if (selected.includes('uiToolkit') && facts.uiToolkit) {
       lines.push(...uiToolkitFactLines(facts.uiToolkit));
+    }
+    if (selected.includes('uiToolkit') && facts.uiDesign) {
+      lines.push(...uiDesignFactLines(facts.uiDesign));
     }
     if (facts.keyPackages.length > 0) {
       lines.push(
