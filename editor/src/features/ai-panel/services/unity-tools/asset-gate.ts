@@ -48,8 +48,13 @@ function relative(absPath: string, cwd: string): string {
  * static import would drag `stores/theme.ts` into the DOM-less runtime.
  * Failure yields the neutral context, which makes the gate quieter, never
  * louder.
+ *
+ * Exported for `ui-write-tool.ts`'s default deps: `unity_ui_write` validates
+ * a `.uxml` write with the exact same `checkUxml` context this gate builds
+ * for a raw one, so the two can never disagree about which `.uss` paths or
+ * declared classes exist.
  */
-async function uxmlContext(cwd: string): Promise<UxmlCheckContext> {
+export async function uxmlContext(cwd: string): Promise<UxmlCheckContext> {
   try {
     const mod = await import('../../../unity-analyzers');
     const uss = mod.getUssIndex();
@@ -125,11 +130,24 @@ export function withUnityAssetGate(tool: AgentTool, cwd: string): AgentTool {
         // A gate that throws must not take the write down with it.
         return res;
       }
-      if (findings.length === 0) return res;
 
+      // The raw write/edit tool has no idea `.uxml`/`.uss` have a purpose-built
+      // writer — one that also creates the `.meta` a brand-new file needs
+      // before `<Style src>`/`unity_attach_ui_document` can resolve it the
+      // same turn (`ui-write-tool.ts`). Nudge every raw write toward it, not
+      // just the ones with findings: a clean write is exactly the case where
+      // the missing `.meta` is the only problem.
+      const lowerP = p.toLowerCase();
+      const isUiAsset = lowerP.endsWith('.uxml') || lowerP.endsWith('.uss');
+      const tip = isUiAsset
+        ? '\n\nTip: unity_ui_write also creates the .meta and validates before writing.'
+        : '';
+      if (findings.length === 0 && !tip) return res;
+
+      const text = (findings.length > 0 ? formatFindings(p, findings) : '') + tip;
       return {
         ...res,
-        content: [...res.content, { type: 'text', text: formatFindings(p, findings) }],
+        content: [...res.content, { type: 'text', text }],
       };
     },
   };

@@ -193,6 +193,38 @@ describe('agent-service.ts — Unity subsystem tools', () => {
   });
 });
 
+// Task 14 — `unity_ui_write`'s per-send GUID-check registry
+// (`unity-tools/guid-verify.ts`) mirrors `test-run-registry.ts`'s: nothing
+// else clears it, so a send that never explicitly resets it would leak the
+// previous send's pending checks into Task 15's verifier.
+describe('agent-service.ts — unity_ui_write wiring (Task 14)', () => {
+  it('imports resetPendingGuidChecks from the unity-tools barrel', () => {
+    expect(SRC).toContain('resetPendingGuidChecks,');
+    expect(SRC).toContain("} from './unity-tools';");
+  });
+
+  it('resets the pending-guid-check registry every send, next to resetTestRunRegistry()', () => {
+    expect(SRC).toContain('resetTestRunRegistry();\n    resetPendingGuidChecks();');
+  });
+
+  it('registers unity_ui_write in createUnityAssetMutateTools, alongside the other asset-mutate tools', () => {
+    const barrel = readFileSync(
+      path.resolve(import.meta.dir, './unity-tools/index.ts'),
+      'utf8',
+    );
+    expect(barrel).toContain(
+      'createUnityUiWriteTool(workspacePath, { ...defaultUiWriteDeps, onWrite })',
+    );
+    // Same array `createUnityAssetMutateTools` returns, so it inherits the
+    // checkpoint/write-approval wrapping this file applies to every entry —
+    // no separate wiring block for it.
+    const fnStart = barrel.indexOf('export function createUnityAssetMutateTools(');
+    const fnBody = barrel.slice(fnStart, barrel.indexOf('\n}', fnStart));
+    expect(fnBody).toContain('createUnityAssetEditTool(');
+    expect(fnBody).toContain('createUnityUiWriteTool(');
+  });
+});
+
 describe('agent-service.ts — abort wins in detectTurnOutcome (Task 4)', () => {
   it('calls addStoppedMarker({ promptMode }) from the aborted outcome branch', () => {
     expect(SRC).toContain(

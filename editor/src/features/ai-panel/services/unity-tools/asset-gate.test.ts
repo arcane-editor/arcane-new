@@ -47,8 +47,26 @@ describe('withUnityAssetGate wiring', () => {
     expect(SRC).toMatch(/catch \{\s*\n\s*\/\/ A gate that throws[\s\S]*?return res;/);
   });
 
-  it('leaves the result untouched when there is nothing to report', () => {
-    expect(SRC).toContain('if (findings.length === 0) return res;');
+  it('leaves the result untouched when there is nothing to report and the path is not a UI asset', () => {
+    expect(SRC).toContain('if (findings.length === 0 && !tip) return res;');
+  });
+});
+
+describe('the raw-write nudge toward unity_ui_write', () => {
+  it('appends the tip for .uxml/.uss, even on a clean write with no findings', () => {
+    expect(SRC).toContain(
+      "? '\\n\\nTip: unity_ui_write also creates the .meta and validates before writing.'",
+    );
+    expect(SRC).toContain(
+      "const isUiAsset = lowerP.endsWith('.uxml') || lowerP.endsWith('.uss');",
+    );
+  });
+
+  it('never appends the tip for .inputactions/.asset', () => {
+    // `isUiAsset` is the only source of `tip`, and it names exactly the two
+    // UI Toolkit extensions — a raw write/edit gets no unity_ui_write nudge
+    // for a format that tool doesn't write.
+    expect(SRC).not.toMatch(/isUiAsset[\s\S]{0,80}inputactions/);
   });
 });
 

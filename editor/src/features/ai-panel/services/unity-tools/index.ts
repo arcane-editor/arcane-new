@@ -11,6 +11,7 @@ import { createUnityUiToolkitTool } from './ui-toolkit-tool';
 import { createUnityAssetEditTool, defaultAssetEditDeps } from './asset-edit-tool';
 import { createUnityFixSoDriftTool, defaultSoDriftDeps } from './so-drift-tool';
 import { createUnityInputEditTool, defaultInputEditDeps } from './input-edit-tool';
+import { createUnityUiWriteTool, defaultUiWriteDeps } from './ui-write-tool';
 import { createUnityScriptMapTool } from './script-map-tool';
 import { withUnityCompileGate as createCompileGate } from './compile-gate';
 
@@ -26,6 +27,11 @@ export {
   takeRecordedTestRuns,
   resetTestRunRegistry,
 } from './test-run-registry';
+export {
+  registerPendingGuidCheck,
+  takePendingGuidChecks,
+  resetPendingGuidChecks,
+} from './guid-verify';
 
 /**
  * Compile-gate decorator, with the real (store-backed) grounding client wired
@@ -95,5 +101,6 @@ export function createUnityAssetMutateTools(
     createUnityAssetEditTool({ ...defaultAssetEditDeps, onWrite }),
     createUnityFixSoDriftTool(workspacePath, { ...defaultSoDriftDeps, onWrite }),
     createUnityInputEditTool({ ...defaultInputEditDeps, onWrite }),
+    createUnityUiWriteTool(workspacePath, { ...defaultUiWriteDeps, onWrite }),
   ];
 }

@@ -33,6 +33,7 @@ import {
   inputSystemLabel,
   type InputSystemMode,
 } from '../../../../utils/input-system';
+import { detectUiStack, type UiStack } from '../unity-tools/ui-stack';
 
 type RenderPipeline = 'URP' | 'HDRP' | 'Built-in';
 
@@ -51,6 +52,13 @@ interface UnityFacts {
   scriptableObjects: ScriptableObjectFacts | null;
   /** Null when the project has no `.uxml` documents. */
   uiToolkit: UiToolkitFacts | null;
+  /**
+   * Which UI stack the project uses (`ui-stack.ts`). Gathered once alongside
+   * everything else here — `unity_ui_write` reads it via `getUnityUiStack`
+   * to refuse writing UI Toolkit markup into an established uGUI project.
+   * Task 16 adds `uiDesign` next to this.
+   */
+  uiStack: UiStack;
 }
 
 let cache: UnityFacts | null = null;
@@ -118,18 +126,24 @@ export async function primeUnityFacts(workspacePath: string): Promise<void> {
 
     const inputSystem = detectInputSystem(projectSettings, !!deps['com.unity.inputsystem']);
 
-    // All three snapshots in parallel: each is a bounded read the app performs
+    // All four snapshots in parallel: each is a bounded read the app performs
     // anyway, and priming is off the critical path (the first turn falls back
     // to the version-only block if it is not warm yet).
-    const [inputActions, so, ui] = await Promise.all([
+    const [inputActions, so, ui, uiStackSignals] = await Promise.all([
       readInputActionsFacts(workspacePath, inputSystem),
       readScriptableObjectFacts(workspacePath),
       readUiToolkitFacts(workspacePath),
+      readUiStackSignals(workspacePath),
     ]);
     const scriptableObjects = so?.facts ?? null;
     const soAssetCount = so?.assetCount ?? 0;
     const uiToolkit = ui?.facts ?? null;
     const ussCount = ui?.stylesheetCount ?? 0;
+    const uiStack = detectUiStack({
+      uxmlCount: ui?.facts.documents.length ?? 0,
+      panelSettingsCount: uiStackSignals.panelSettingsCount,
+      canvasScenes: uiStackSignals.canvasScenes,
+    });
 
     cache = {
       workspacePath,
@@ -140,6 +154,7 @@ export async function primeUnityFacts(workspacePath: string): Promise<void> {
       inputActions,
       scriptableObjects,
       uiToolkit,
+      uiStack,
       inventory: {
         scriptableObjects: scriptableObjects
           ? { types: scriptableObjects.typeNames.length, assets: soAssetCount }
@@ -264,6 +279,82 @@ async function readUiToolkitFacts(
   } catch {
     return null;
   }
+}
+
+/** Excludes shared with `panel-resolve.ts`'s project-wide scan — the same folders never carry source assets. */
+const UI_STACK_SCAN_EXCLUDES = ['Library/**', 'Temp/**', 'obj/**', 'Logs/**', 'Build/**', 'Builds/**'];
+const UI_STACK_READ_CHUNK = 200;
+/** `canvasScenes`' own size guard — see `ui-stack.ts`'s `UiStackSignals.canvasScenes`. */
+const UI_STACK_MAX_BYTES = 2 * 1024 * 1024;
+
+function byteLength(s: string): number {
+  return new TextEncoder().encode(s).length;
+}
+
+/**
+ * The two signals `readUiToolkitFacts` cannot supply: how many `PanelSettings`
+ * assets the project has (UI Toolkit's render target — a signal even before
+ * any `.uxml` exists), and how many scenes/prefabs place a Canvas (uGUI's).
+ * A project-wide read, same shape as `panel-resolve.ts`'s (chunked
+ * `read_files_bulk`, same excludes) — that module reads per-document, on
+ * demand; this one runs once per workspace, alongside everything else here.
+ * Failure degrades to "neither stack detected" (0/0), never a thrown prime.
+ */
+async function readUiStackSignals(
+  workspacePath: string,
+): Promise<{ panelSettingsCount: number; canvasScenes: number }> {
+  try {
+    const paths = await invoke<string[]>('scan_all_files_v2', {
+      workspacePath,
+      extraExcludes: UI_STACK_SCAN_EXCLUDES,
+    });
+
+    const readChunked = async (
+      list: string[],
+    ): Promise<Array<{ path: string; content: string }>> => {
+      const out: Array<{ path: string; content: string }> = [];
+      for (let i = 0; i < list.length; i += UI_STACK_READ_CHUNK) {
+        try {
+          out.push(
+            ...(await invoke<Array<{ path: string; content: string }>>('read_files_bulk', {
+              paths: list.slice(i, i + UI_STACK_READ_CHUNK),
+            })),
+          );
+        } catch {
+          // A chunk that fails to read narrows the answer; it does not break it.
+        }
+      }
+      return out;
+    };
+
+    const assets = await readChunked(paths.filter((p) => p.endsWith('.asset')));
+    const panelSettingsCount = assets.filter((a) =>
+      a.content.includes('UnityEngine.UIElements.PanelSettings'),
+    ).length;
+
+    const scenes = await readChunked(
+      paths.filter((p) => p.endsWith('.unity') || p.endsWith('.prefab')),
+    );
+    const canvasScenes = scenes.filter(
+      (s) => byteLength(s.content) <= UI_STACK_MAX_BYTES && s.content.includes('--- !u!223'),
+    ).length;
+
+    return { panelSettingsCount, canvasScenes };
+  } catch {
+    return { panelSettingsCount: 0, canvasScenes: 0 };
+  }
+}
+
+/**
+ * Which UI stack the project uses, or `null` when the facts cache is cold for
+ * this workspace. Kicks off a prime in that case (like `getUnityGroundingContext`)
+ * so the next call is warm; the caller (`unity_ui_write`'s default deps) treats
+ * `null` as `'none'`, the value that never triggers the uGUI refusal.
+ */
+export function getUnityUiStack(workspacePath: string): UiStack | null {
+  const facts = cache?.workspacePath === workspacePath ? cache : null;
+  if (!facts && workspacePath) void primeUnityFacts(workspacePath);
+  return facts?.uiStack ?? null;
 }
 
 /**

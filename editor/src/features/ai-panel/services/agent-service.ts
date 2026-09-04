@@ -48,6 +48,7 @@ import {
   markConsoleTurnStart,
   resetTestRunRegistry,
   takeRecordedTestRuns,
+  resetPendingGuidChecks,
 } from './unity-tools';
 import { resolveToCwd } from './vendor/tools/path-utils';
 import { withCheckpoint } from './checkpoints/checkpoint-gate';
@@ -651,6 +652,7 @@ export class AgentService {
     // reset here, same as the compile gate above.
     resetTurnGovernor();
     resetTestRunRegistry();
+    resetPendingGuidChecks();
     markConsoleTurnStart(useUnityStore.getState().logSeq);
     resetRepeatCallGuard();
     // Fresh touched-file registry for the verified-pass closing check (P3.4).
