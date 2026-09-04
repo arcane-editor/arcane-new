@@ -72,7 +72,7 @@ namespace UnityIDE.Bridge
             }
             else
             {
-                ConsoleHook.TrySnapshot(offset, limit, typeNames, includeStack, order, out entries, out total);
+                ConsoleHook.Snapshot(offset, limit, typeNames, includeStack, order, out entries, out total);
                 truncated = offset + entries.Count < total;
                 source = "hookRing";
                 hasHistory = false;

@@ -255,7 +255,7 @@ namespace UnityIDE.Bridge
         /// succeeds — this is the bridge's own bounded memory, never a reflected
         /// Unity API that can fail.
         /// </summary>
-        public static void TrySnapshot(
+        public static void Snapshot(
             int offset, int limit, HashSet<string> types, bool includeStack, string order,
             out List<JsonValue> entries, out int total)
         {

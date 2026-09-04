@@ -64,7 +64,7 @@ namespace UnityIDE.Tests
 
             List<JsonValue> entries;
             int ringTotal;
-            ConsoleHook.TrySnapshot(0, total, null, false, "oldest", out entries, out ringTotal);
+            ConsoleHook.Snapshot(0, total, null, false, "oldest", out entries, out ringTotal);
 
             Assert.AreEqual(2000, ringTotal, "the ring must cap at 2000 entries");
             Assert.AreEqual("msg 500", entries[0]["message"].AsString,
@@ -99,7 +99,7 @@ namespace UnityIDE.Tests
 
                 List<JsonValue> entries;
                 int total;
-                ConsoleHook.TrySnapshot(0, 10, null, true, "oldest", out entries, out total);
+                ConsoleHook.Snapshot(0, 10, null, true, "oldest", out entries, out total);
                 Assert.AreEqual(2, total);
                 Assert.AreEqual("alpha", entries[0]["message"].AsString);
                 Assert.AreEqual("beta", entries[1]["message"].AsString);
@@ -122,7 +122,7 @@ namespace UnityIDE.Tests
             Assert.AreEqual(epochBefore + 1, ConsoleHook.ClearEpoch);
             List<JsonValue> entries;
             int total;
-            ConsoleHook.TrySnapshot(0, 10, null, false, "newest", out entries, out total);
+            ConsoleHook.Snapshot(0, 10, null, false, "newest", out entries, out total);
             Assert.AreEqual(0, total, "clearing the ring must empty it");
         }
     }

@@ -143,9 +143,19 @@ function UnityConsolePanel() {
   const collapsed = useMemo(() => {
     const filteredLogs = logs.filter((entry) => {
       if (!showLog && entry.logType === 'Log') return false;
-      if (!showWarning && entry.logType === 'Warning') return false;
-      if (!showError && (entry.logType === 'Error' || entry.logType === 'Assert' || entry.logType === 'Exception')) return false;
-      if (modeFilter !== 'all' && entry.mode !== modeFilter) return false;
+      if (!showWarning && (entry.logType === 'Warning' || entry.logType === 'CompileWarning')) return false;
+      if (
+        !showError &&
+        (entry.logType === 'Error' ||
+          entry.logType === 'Assert' ||
+          entry.logType === 'Exception' ||
+          entry.logType === 'CompileError')
+      )
+        return false;
+      // `mode: 'Unknown'` (a getConsoleSnapshot/logEntries row — LogEntries
+      // does not record play/edit mode) is shown under EITHER filter, not
+      // hidden by one and not asserted into the other.
+      if (modeFilter !== 'all' && entry.mode !== 'Unknown' && entry.mode !== modeFilter) return false;
       if (needle && !entry.message.toLowerCase().includes(needle)) return false;
       return true;
     });
@@ -192,8 +202,14 @@ function UnityConsolePanel() {
     // One pass instead of three.
     for (const entry of logs) {
       if (entry.logType === 'Log') l++;
-      else if (entry.logType === 'Warning') w++;
-      else if (entry.logType === 'Error' || entry.logType === 'Assert' || entry.logType === 'Exception') e++;
+      else if (entry.logType === 'Warning' || entry.logType === 'CompileWarning') w++;
+      else if (
+        entry.logType === 'Error' ||
+        entry.logType === 'Assert' ||
+        entry.logType === 'Exception' ||
+        entry.logType === 'CompileError'
+      )
+        e++;
     }
     return { logCount: l, warnCount: w, errCount: e };
   }, [logs]);

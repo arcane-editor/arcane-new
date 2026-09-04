@@ -56,6 +56,10 @@ namespace UnityIDE.Bridge
         private static MethodInfo _clearMethod;
         private static MethodInfo _getCountsByType;
         private static MethodInfo _getEntryCount;
+        /// <summary>Optional: present on 2022.3 and 6000.x. When resolved,
+        /// preferred for `total` over `StartGettingEntries`' own return value
+        /// (the two normally agree; this is the belt to that braces).</summary>
+        private static MethodInfo _getCount;
         private static PropertyInfo _consoleFlagsProp;
         private static MethodInfo _setConsoleFlag;
 
@@ -118,6 +122,9 @@ namespace UnityIDE.Bridge
             _clearMethod = _logEntriesType.GetMethod("Clear", SB, null, Type.EmptyTypes, null);
             _getCountsByType = _logEntriesType.GetMethod("GetCountsByType", SB);
             _getEntryCount = _logEntriesType.GetMethod("GetEntryCount", SB);
+            // Optional: absence does not fail resolution — TrySnapshot falls
+            // back to StartGettingEntries' own return value for `total`.
+            _getCount = _logEntriesType.GetMethod("GetCount", SB, null, Type.EmptyTypes, null);
             _consoleFlagsProp = _logEntriesType.GetProperty("consoleFlags", SB);
             _setConsoleFlag = _logEntriesType.GetMethod("SetConsoleFlag", SB);
 
@@ -246,22 +253,23 @@ namespace UnityIDE.Bridge
             catch { /* best-effort */ }
         }
 
-        /// <summary>Force every level visible and collapse off, so a user's own
-        /// console filter can never hide rows from the agent.</summary>
-        private static void ForceReadableFlags()
+        /// <summary>
+        /// Force every level visible and collapse off, so a user's own console
+        /// filter can never hide rows from the agent — but ONLY when the
+        /// current flags were actually readable. Without a readable baseline
+        /// there is nothing honest to restore afterward: forcing bits via
+        /// `SetConsoleFlag` alone (no save) used to leave the user's own
+        /// Console window's filter changed with no way back. Reading with
+        /// whatever the user currently has set is the safe fallback — it may
+        /// under-report if they had a level hidden, but it never mutates
+        /// their UI state irreversibly.
+        /// </summary>
+        /// <returns>True if flags were forced (and must be restored).</returns>
+        private static bool TryForceReadableFlags(out int savedFlags)
         {
-            int flags;
-            if (TryGetConsoleFlags(out flags))
-            {
-                SetConsoleFlags((flags | _cfLogLevelLog | _cfLogLevelWarning | _cfLogLevelError) & ~_cfCollapse);
-            }
-            else
-            {
-                SetFlagBit(_cfLogLevelLog, true);
-                SetFlagBit(_cfLogLevelWarning, true);
-                SetFlagBit(_cfLogLevelError, true);
-                SetFlagBit(_cfCollapse, false);
-            }
+            if (!TryGetConsoleFlags(out savedFlags)) return false;
+            SetConsoleFlags((savedFlags | _cfLogLevelLog | _cfLogLevelWarning | _cfLogLevelError) & ~_cfCollapse);
+            return true;
         }
 
         /// <summary>
@@ -311,16 +319,36 @@ namespace UnityIDE.Bridge
             if (!TryResolve()) return false;
 
             int savedFlags;
-            bool hadFlags = TryGetConsoleFlags(out savedFlags);
-            ForceReadableFlags();
+            bool hadFlags = TryForceReadableFlags(out savedFlags);
+            // Guards EndGettingEntries in `finally`: calling it without a
+            // successful Start first is unbalanced and must not happen just
+            // because a later step in this method threw.
+            bool started = false;
             try
             {
                 int count;
                 try { count = Convert.ToInt32(_startGettingEntries.Invoke(null, null)); }
                 catch { return false; }
+                started = true;
+
+                // Prefer the resolved GetCount() when available — normally
+                // agrees with StartGettingEntries' own return value, kept as
+                // the fallback for a Unity version where GetCount is absent.
+                if (_getCount != null)
+                {
+                    try { count = Convert.ToInt32(_getCount.Invoke(null, null)); }
+                    catch { /* keep StartGettingEntries' value */ }
+                }
 
                 object entryObj = Activator.CreateInstance(_logEntryType);
-                var matched = new List<JsonValue>();
+
+                // Pass 1: filter + count only — no JsonValue/message-splitting
+                // work for rows outside the final page. Reading `mode` still
+                // costs one GetEntryInternal call per scanned row (unavoidable:
+                // it is the only way to know whether a row matches the filter),
+                // but everything BuildEntry does (UTF8 splitting/capping, the
+                // GetEntryCount lookup) is deferred to pass 2, for the page only.
+                var matchedRows = new List<int>();
                 int scanCount = Math.Min(count, MaxScanRows);
                 for (int row = 0; row < scanCount; row++)
                 {
@@ -334,17 +362,33 @@ namespace UnityIDE.Bridge
                     catch { continue; }
                     if (typeMask != 0 && (mode & typeMask) == 0) continue;
 
-                    matched.Add(BuildEntry(row, mode, entryObj, includeStack));
+                    matchedRows.Add(row);
                 }
 
-                total = matched.Count;
+                total = matchedRows.Count;
                 if (!string.Equals(order, "oldest", StringComparison.OrdinalIgnoreCase))
-                    matched.Reverse();
+                    matchedRows.Reverse();
 
                 int start = Math.Max(0, offset);
-                int end = Math.Min(matched.Count, start + Math.Max(0, limit));
-                for (int i = start; i < end; i++) entries.Add(matched[i]);
-                truncated = count > scanCount || end < matched.Count;
+                int end = Math.Min(matchedRows.Count, start + Math.Max(0, limit));
+
+                // Pass 2: only the page's rows get the full BuildEntry treatment.
+                for (int i = start; i < end; i++)
+                {
+                    int row = matchedRows[i];
+                    bool ok;
+                    try { ok = (bool)_getEntryInternal.Invoke(null, new object[] { row, entryObj }); }
+                    catch { continue; }
+                    if (!ok) continue;
+
+                    int mode;
+                    try { mode = Convert.ToInt32(_modeField.GetValue(entryObj)); }
+                    catch { continue; }
+
+                    entries.Add(BuildEntry(row, mode, entryObj, includeStack));
+                }
+
+                truncated = count > scanCount || end < matchedRows.Count;
                 return true;
             }
             catch
@@ -356,7 +400,10 @@ namespace UnityIDE.Bridge
             }
             finally
             {
-                try { _endGettingEntries.Invoke(null, null); } catch { /* best-effort */ }
+                if (started)
+                {
+                    try { _endGettingEntries.Invoke(null, null); } catch { /* best-effort */ }
+                }
                 if (hadFlags) SetConsoleFlags(savedFlags);
             }
         }

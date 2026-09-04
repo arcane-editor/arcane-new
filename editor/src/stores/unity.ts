@@ -44,10 +44,12 @@ interface UnityState {
   isCompiling: boolean;
   logs: UnityLogEntry[];
   /**
-   * Monotonic id assigned to the next log entry that arrives without its own
-   * `seq` (a bridge older than protocol 4, or the raw `unity-log` singular
-   * event). Every entry in `logs` ends up with SOME `seq` this way, so
-   * `sinceTurnStart` filtering has a consistent baseline regardless of source.
+   * Monotonic id assigned to EVERY log entry on ingest — streamed or
+   * backfilled alike. Always client-assigned, never taken off the wire: a
+   * `getConsoleSnapshot` row's own `seq` is Unity's console row index for a
+   * `logEntries`-sourced answer (see `UnityLogEntry.unityRow`), a different
+   * and incomparable numbering. `sinceTurnStart` filtering depends on every
+   * entry in `logs` sharing this one counter's space.
    */
   logSeq: number;
   /**
@@ -56,7 +58,15 @@ interface UnityState {
    * bridge, or an old protocol) still moves it.
    */
   consoleEpoch: number;
-  /** Bridge wire-protocol version, from `connection_init`'s `protocolVersion`. Null until connected. */
+  /**
+   * Bridge wire-protocol version. Null until known. Set from
+   * `connection_init`'s `protocolVersion` (the `unity-connection-changed`
+   * listener) AND recovered in `syncStatus` — a frontend that attaches its
+   * listeners after the handshake (the same late-attach race liveness has to
+   * cover) would otherwise never learn it, leaving `clearLogs({unity:true})`,
+   * `backfillConsoleHistory`, and the console panel's Clear menu believing
+   * the bridge predates protocol 4 for the rest of the session.
+   */
   bridgeProtocol: number | null;
   listenersActive: boolean;
   /** Whether the bridge package is embedded in the current project. */
@@ -308,21 +318,39 @@ export const useUnityStore = create<UnityState>((set, get) => ({
       // The RPC returns newest-first; prepending to the (oldest-first) `logs`
       // array needs the oldest of the backfilled batch first.
       const oldestFirst = [...snapshot.entries].reverse();
-      const historical: UnityLogEntry[] = oldestFirst.map((e) => ({
-        message: e.message,
-        stackTrace: e.stackTrace,
-        logType: e.logType,
-        timestamp: 0,
-        frameCount: 0,
-        mode: e.mode === 'Unknown' ? 'EditMode' : e.mode,
-        seq: e.seq,
-        historical: true,
-        parsedFrames: parseStackTrace(e.stackTrace ?? ''),
-      }));
-      set((s) => ({
-        logs: [...historical, ...s.logs],
-        consoleEpoch: Math.max(s.consoleEpoch, snapshot.epoch),
-      }));
+      set((s) => {
+        let nextSeq = s.logSeq;
+        const historical: UnityLogEntry[] = oldestFirst.map((e) => {
+          const seq = ++nextSeq;
+          return {
+            message: e.message,
+            stackTrace: e.stackTrace,
+            logType: e.logType,
+            timestamp: 0,
+            frameCount: 0,
+            // Keep 'Unknown' verbatim — LogEntries does not record play/edit
+            // mode per row, and guessing EditMode was actively wrong for
+            // anything backfilled from a play-session error.
+            mode: e.mode,
+            seq,
+            // Only a `source:"logEntries"` answer's own `seq` is really
+            // Unity's console row index; a hookRing answer's `seq` is the
+            // bridge's ring counter, not a row index, so it is dropped here
+            // rather than mislabeled.
+            unityRow: snapshot.source === 'logEntries' ? e.seq : undefined,
+            historical: true,
+            parsedFrames: parseStackTrace(e.stackTrace ?? ''),
+          };
+        });
+        // Re-apply the cap after prepending: a large backfill plus an
+        // already-full ring must not grow `logs` past MAX_LOG_ENTRIES.
+        const logs = [...historical, ...s.logs];
+        return {
+          logs: logs.length > MAX_LOG_ENTRIES ? logs.slice(-MAX_LOG_ENTRIES) : logs,
+          logSeq: nextSeq,
+          consoleEpoch: Math.max(s.consoleEpoch, snapshot.epoch),
+        };
+      });
     } catch {
       // Best-effort: an old package, a busy bridge, or a mid-connect hiccup
       // just leaves the session-only stream — still correct, only less complete.
@@ -356,6 +384,7 @@ export const useUnityStore = create<UnityState>((set, get) => ({
       running: boolean;
       editorAwake: boolean;
       editorCanWake: boolean;
+      bridgeProtocol: number | null;
     };
     let status: Status;
     try {
@@ -373,23 +402,37 @@ export const useUnityStore = create<UnityState>((set, get) => ({
       editorCanWake: status.editorCanWake,
     };
     set((state) => {
-      if (state.connected === status.connected) return liveness;
+      // Same late-attach race as liveness: `unity-connection-changed`'s
+      // `info.protocolVersion` can land before this window is listening, and
+      // without this recovery `bridgeProtocol` stays null (or stale) for the
+      // rest of the session — false "predates protocol 4" labels, a refused
+      // `clearLogs({unity:true})`, a backfill that never runs, and the
+      // console panel's Clear menu missing its "and in Unity" option.
+      const patch: Partial<UnityState> =
+        status.bridgeProtocol != null ? { ...liveness, bridgeProtocol: status.bridgeProtocol } : liveness;
+      if (state.connected === status.connected) return patch;
       return status.connected
         ? {
-            ...liveness,
+            ...patch,
             connected: true,
             bridgeInstalled: true,
             bridgeState: 'connected' as const,
             packageStale: false,
           }
         : {
-            ...liveness,
+            ...patch,
             connected: false,
             bridgeState: state.bridgeInstalled
               ? ('disconnected' as const)
               : ('not-installed' as const),
           };
     });
+    // Recovering the protocol here is also the second (idempotent) trigger
+    // for the backfill: `unity-connection-changed`'s own trigger can lose the
+    // same late-attach race.
+    if (status.connected && (status.bridgeProtocol ?? 0) >= CONSOLE_RPC_MIN_PROTOCOL) {
+      void get().backfillConsoleHistory();
+    }
   },
 
   setupListeners: async () => {
@@ -444,9 +487,14 @@ export const useUnityStore = create<UnityState>((set, get) => ({
       }
     });
 
+    // `seq` is ALWAYS assigned here, never taken off the wire: the bridge's
+    // own `seq` on a push entry is `ConsoleHook.Seq` (the hook ring's
+    // counter), a different numbering than this client-side one, and
+    // `sinceTurnStart` filtering requires every entry in `logs` to share one
+    // comparable space. See `UnityLogEntry.seq`/`.unityRow`.
     const u2 = await listenScoped<UnityLogEntry>('unity-log', (event) => {
       set((state) => {
-        const seq = event.payload.seq ?? state.logSeq + 1;
+        const seq = state.logSeq + 1;
         const entry = {
           ...event.payload,
           seq,
@@ -455,7 +503,7 @@ export const useUnityStore = create<UnityState>((set, get) => ({
         const logs = [...state.logs, entry];
         return {
           logs: logs.length > MAX_LOG_ENTRIES ? logs.slice(-MAX_LOG_ENTRIES) : logs,
-          logSeq: Math.max(state.logSeq, seq),
+          logSeq: seq,
         };
       });
     });
@@ -464,8 +512,7 @@ export const useUnityStore = create<UnityState>((set, get) => ({
       set((state) => {
         let nextSeq = state.logSeq;
         const entries = (event.payload ?? []).map((e) => {
-          const seq = e.seq ?? ++nextSeq;
-          nextSeq = Math.max(nextSeq, seq);
+          const seq = ++nextSeq;
           return { ...e, seq, parsedFrames: parseStackTrace(e.stackTrace ?? '') };
         });
         const logs = [...state.logs, ...entries];
@@ -485,9 +532,14 @@ export const useUnityStore = create<UnityState>((set, get) => ({
 
     const u5 = await listenScoped<CompilationPayload>('unity-compilation', (event) => {
       // started=true → compiling; started=false → finished (carries the report).
+      // `receivedAt` is stamped here, not sent by Unity — it is the IDE's own
+      // receipt time, which is what "N minutes ago" means to a caller of
+      // `get_compile_errors`.
       set({
         isCompiling: event.payload.started,
-        lastCompilation: event.payload.started ? get().lastCompilation : event.payload,
+        lastCompilation: event.payload.started
+          ? get().lastCompilation
+          : { ...event.payload, receivedAt: Date.now() },
       });
     });
 

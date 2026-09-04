@@ -3,7 +3,7 @@ use crate::unity_journal::{JournalReader, JournalWriter};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, Window};
@@ -161,6 +161,13 @@ pub struct UnityIpcInner {
     /// which changes the advice the agent gives from "Unity will pick this up"
     /// to "focus Unity", so it has to survive to the frontend.
     pub editor_can_wake: AtomicBool,
+    /// The connected bridge's negotiated protocol version, or 0 if unknown
+    /// (no session has ever handshaken in this window). Stored here — not just
+    /// read off the `unity-connection-changed` event — because a frontend that
+    /// attaches its listener after the handshake (the same late-attach race
+    /// `editor_awake` exists to cover) would otherwise never learn it; polled
+    /// back out via `unity_ipc_status`.
+    pub bridge_protocol: AtomicU32,
 }
 
 impl UnityIpcInner {
@@ -176,6 +183,7 @@ impl UnityIpcInner {
             // heartbeated yet should not be reported as a sleeping editor.
             editor_awake: AtomicBool::new(true),
             editor_can_wake: AtomicBool::new(false),
+            bridge_protocol: AtomicU32::new(0),
         }
     }
 }
@@ -588,6 +596,15 @@ async fn run_journal_session(
                     }
                     connected = true;
                     state.connected.store(true, Ordering::SeqCst);
+                    // Recovered by `unity_ipc_status` too, not just the
+                    // `unity-connection-changed` event — a frontend that attaches
+                    // its listener after this handshake would otherwise never
+                    // learn the protocol, leaving every protocol-gated feature
+                    // (console snapshot/clear, backfill) permanently believing
+                    // the bridge predates them.
+                    if let Some(pv) = msg.payload.get("protocolVersion").and_then(|v| v.as_u64()) {
+                        state.bridge_protocol.store(pv as u32, Ordering::SeqCst);
+                    }
                     // A fresh handshake retires any pending re-arm schedule.
                     last_rearm = None;
                     // The handshake landed, so the package is present — the
@@ -800,6 +817,10 @@ async fn announce_disconnect(app: &AppHandle, state: &Arc<UnityIpcInner>, label:
     // UnityIpcInner starts with.
     state.editor_awake.store(true, Ordering::SeqCst);
     state.editor_can_wake.store(false, Ordering::SeqCst);
+    // Unknown again until the next handshake reports it — a stale value here
+    // is harmless in practice (every protocol-gated check also requires
+    // `connected`), but "unknown" is the honest answer for a disconnected bridge.
+    state.bridge_protocol.store(0, Ordering::SeqCst);
     state.pending.lock().await.clear();
     let _ = app.emit_to(
         label,
@@ -1003,6 +1024,12 @@ pub struct UnityIpcStatus {
     pub editor_awake: bool,
     /// Whether Unity can be woken without stealing focus.
     pub editor_can_wake: bool,
+    /// The connected bridge's negotiated protocol version, or `null` if
+    /// unknown. Lets a frontend that attaches its listeners after the
+    /// handshake (e.g. a fresh `setupListeners` call) recover the protocol
+    /// gate for console snapshot/clear + backfill instead of it staying stuck
+    /// at "predates protocol 4" for the rest of the session.
+    pub bridge_protocol: Option<u32>,
 }
 
 /// Current bridge state for this window. Lets the frontend resync on mount
@@ -1012,11 +1039,16 @@ pub async fn unity_ipc_status(app: AppHandle, window: Window) -> Result<UnityIpc
     let label = window.label().to_string();
     let inner = app.state::<UnityIpcState>().get_or_create(&label);
     let running = inner.shutdown_tx.lock().await.is_some();
+    let bridge_protocol = match inner.bridge_protocol.load(Ordering::SeqCst) {
+        0 => None,
+        pv => Some(pv),
+    };
     Ok(UnityIpcStatus {
         connected: inner.connected.load(Ordering::SeqCst),
         running,
         editor_awake: inner.editor_awake.load(Ordering::SeqCst),
         editor_can_wake: inner.editor_can_wake.load(Ordering::SeqCst),
+        bridge_protocol,
     })
 }
 
@@ -1132,12 +1164,30 @@ mod tests {
             running: true,
             editor_awake: false,
             editor_can_wake: true,
+            bridge_protocol: Some(4),
         })
         .unwrap();
         assert_eq!(json["editorAwake"], false);
         assert_eq!(json["editorCanWake"], true);
         assert_eq!(json["connected"], true);
         assert_eq!(json["running"], true);
+        assert_eq!(json["bridgeProtocol"], 4);
+    }
+
+    #[test]
+    fn status_reports_bridge_protocol_as_null_when_unknown() {
+        // A window that has never seen a handshake (or whose bridge just
+        // disconnected) must say "unknown", not silently omit the field or
+        // report 0 as if that were a real (pre-journal) protocol version.
+        let json = serde_json::to_value(UnityIpcStatus {
+            connected: false,
+            running: false,
+            editor_awake: true,
+            editor_can_wake: false,
+            bridge_protocol: None,
+        })
+        .unwrap();
+        assert_eq!(json["bridgeProtocol"], serde_json::Value::Null);
     }
 
     #[test]

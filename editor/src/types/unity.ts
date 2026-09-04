@@ -25,14 +25,30 @@ export interface UnityLogEntry {
   logType: UnityLogType;
   timestamp: number;
   frameCount: number;
-  mode: UnityPlayMode;
+  /**
+   * `'Unknown'` for a `getConsoleSnapshot`/`logEntries` row — LogEntries does
+   * not record which mode a row was logged in, and the store must not guess
+   * one (that used to silently turn every backfilled entry into `EditMode`).
+   */
+  mode: UnityPlayMode | 'Unknown';
   parsedFrames?: StackFrame[];
   /**
-   * Monotonic ring position. Present on the wire from a protocol-4+ bridge
-   * (`ConsoleHook.Seq`); the store assigns one client-side on ingest for any
-   * entry that arrives without it, so every entry in `logs` always has one.
+   * ALWAYS a client-side monotonic id, assigned by `stores/unity.ts` on
+   * ingest for every entry — streamed or backfilled alike. Never taken
+   * directly off the wire: a `getConsoleSnapshot` row's own `seq` is Unity's
+   * console row index for a `logEntries`-sourced answer, a different and
+   * incomparable numbering (see `unityRow`) — conflating the two is what let
+   * `sinceTurnStart` filter against the wrong space entirely.
    */
   seq?: number;
+  /**
+   * Unity's own console row index for this entry, present only when it was
+   * backfilled from a `source:"logEntries"` `getConsoleSnapshot` answer.
+   * Informational only — never compared against `seq`, and never used for
+   * `sinceTurnStart` filtering (Unity's row numbering has no notion of "this
+   * turn").
+   */
+  unityRow?: number;
   /**
    * True for an entry `backfillConsoleHistory` pulled from Unity's own console
    * on connect — it happened before the IDE was streaming, not during this
@@ -108,6 +124,13 @@ export interface CompilationPayload {
   warnings?: number;
   /** Present on the `started:false` (finished) payload — the per-file diagnostics. */
   messages?: CompilerMessage[];
+  /**
+   * `Date.now()` when `stores/unity.ts` stored this as `lastCompilation` — NOT
+   * part of the wire payload (Unity has no clock-sync reason to send one; the
+   * IDE's own receipt time is what "N minutes ago" means to a caller of
+   * `get_compile_errors`).
+   */
+  receivedAt?: number;
 }
 
 export interface OpenFilePayload {
