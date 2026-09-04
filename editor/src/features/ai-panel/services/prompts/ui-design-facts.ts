@@ -105,8 +105,12 @@ const SCALE_MODE_LABEL: Record<PanelScaleMode, string> = {
  * (`uiDesignFactLines`) rather than competing with the per-project variable
  * and panel listings for space — those are what should shrink on a huge
  * project, not this.
+ *
+ * Exported so `unity_ui_scaffold` (Task 17) can put the same rule text at the
+ * tail of its recipe without duplicating it — the frozen system prompt and a
+ * scaffold recipe must never state the rules differently.
  */
-const DESIGN_RULES: readonly string[] = [
+export const DESIGN_RULES: readonly string[] = [
   '- Spacing scale: 4/8/12/16/24/32px only.',
   '- Type scale: 12/14/16/20/24/32px at the reference resolution.',
   '- Text contrast ≥ 4.5:1.',

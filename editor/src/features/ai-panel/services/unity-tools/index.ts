@@ -9,6 +9,7 @@ import { createUnityInputActionsTool } from './input-actions-tool';
 import { createUnityScriptableObjectsTool } from './scriptable-objects-tool';
 import { createUnityUiToolkitTool } from './ui-toolkit-tool';
 import { createUnityUiLayoutTool } from './ui-layout-tool';
+import { createUnityUiScaffoldTool } from './ui-scaffold-tool';
 import { createUnityAssetEditTool, defaultAssetEditDeps } from './asset-edit-tool';
 import { createUnityFixSoDriftTool, defaultSoDriftDeps } from './so-drift-tool';
 import { createUnityInputEditTool, defaultInputEditDeps } from './input-edit-tool';
@@ -80,6 +81,7 @@ export function createUnityReadTools(workspacePath: string): AgentTool[] {
     createUnityScriptableObjectsTool(workspacePath),
     createUnityUiToolkitTool(workspacePath),
     createUnityUiLayoutTool(workspacePath),
+    createUnityUiScaffoldTool(workspacePath),
     createGetUnityDocsTool(() => useProjectContextStore.getState().unityVersion),
     createUnityApiSearchTool({ search: unityApiSearch, lookup: unityApiLookup }),
     createUnityMigrationTool(),

@@ -483,6 +483,34 @@ export async function ensureUnityUiStack(workspacePath: string): Promise<UiStack
 }
 
 /**
+ * The project's real USS variables, `PanelSettings` and theme sheets
+ * (`UnityFacts.uiDesign`), for `unity_ui_scaffold` (Task 17) to parameterise
+ * its templates with — same bounded-wait shape as `ensureUnityUiStack`, for
+ * the same reason (fix round 1, M2): a scaffold call is often the first thing
+ * to touch this workspace's facts, so a cold cache is common, not an edge
+ * case, and treating it the same as "primed and found nothing" would silently
+ * hand back the theme template's defaults on a project that actually has its
+ * own palette.
+ *
+ * `null` covers two cases the caller cannot tell apart from this return
+ * alone: genuinely undetermined (never primed, and the bounded wait did not
+ * land), and "primed, and this project has no `.uxml` documents yet" (see
+ * `UnityFacts.uiDesign`'s doc comment). Both degrade the same safe way — the
+ * scaffold tool falls back to the theme template's own defaults, the same
+ * degrade `uiDesignFactLines`'s `NO_VARIABLES_LINE`/`NO_PANEL_LINE` performs —
+ * so collapsing them here costs nothing a caller actually needs.
+ */
+export async function getUnityUiDesign(workspacePath: string): Promise<UiDesignFacts | null> {
+  if (cache?.workspacePath === workspacePath) return cache.uiDesign;
+  if (!workspacePath) return null;
+  await Promise.race([
+    primeUnityFacts(workspacePath),
+    new Promise<void>((resolve) => setTimeout(resolve, ENSURE_UI_STACK_TIMEOUT_MS)),
+  ]);
+  return cache?.workspacePath === workspacePath ? cache.uiDesign : null;
+}
+
+/**
  * Build the Unity facts markdown block synchronously. Returns null for
  * non-Unity projects. Triggers a background prime when the cache is cold.
  */

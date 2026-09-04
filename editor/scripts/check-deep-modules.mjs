@@ -75,11 +75,25 @@ function extractImportSpecifiers(text) {
   return results;
 }
 
+/** `*.test.ts(x)` only — never a production file, however it is named. */
+function isTestFile(absPath) {
+  return /\.test\.tsx?$/.test(absPath);
+}
+
 function checkImports() {
   const violations = [];
   for (const file of walk(SRC_ROOT)) {
     const text = readFileSync(file, 'utf8');
     const importerFeature = featureNameFor(file);
+    // Tests are exempt from the barrel-only rule: a test asserting against a
+    // pure leaf module (e.g. `features/uitoolkit/services/render-plan.ts`)
+    // needs to reach it directly, because importing the OTHER feature's
+    // barrel would pull in that feature's React components / DOM-touching
+    // code and break under Bun's DOM-less test runtime (Global Constraint 4)
+    // — the exact problem the barrel-only rule does not have for production
+    // code, which reaches the same modules through an injected-deps seam
+    // instead. Production files still cross features only through index.ts.
+    if (isTestFile(file)) continue;
 
     for (const { specifier, index } of extractImportSpecifiers(text)) {
       if (!specifier.startsWith('.')) continue;
