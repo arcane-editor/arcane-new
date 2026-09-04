@@ -144,8 +144,16 @@ export async function collectConsoleProblems(
         // A snapshot row's wire `seq` is Unity's CONSOLE ROW INDEX, a different
         // and incomparable numbering (see `UnityLogEntry.unityRow`). It goes in
         // `unityRow`, where the adoption rule can date it, and never in `seq`.
+        //
+        // ONLY for a `source:'logEntries'` answer, though. The reflection
+        // fallback (`source:'hookRing'`) answers from the bridge's own ring,
+        // whose `seq` is a per-session ring counter — not a row index — and
+        // comparing it against the send-start high-water mark adopted
+        // hours-old errors as "new this turn" after a console clear. Mirrors
+        // `stores/unity.ts`'s `backfillConsoleHistory`, which drops it for the
+        // same reason.
         seq: null,
-        unityRow: row.seq,
+        unityRow: snap.source === 'logEntries' ? row.seq : null,
         file: row.file || null,
         line: row.line || null,
         stackTrace: row.stackTrace,

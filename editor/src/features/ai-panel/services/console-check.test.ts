@@ -394,8 +394,7 @@ describe('collectNewProblems', () => {
     expect(collectNewProblems(input({ connected: false })).degraded).toBe('no-bridge');
   });
 
-  it('reports editor-asleep only when Unity was parked at BOTH ends of the window', () => {
-    expect(collectNewProblems(input({ editorAwake: false })).degraded).toBeNull();
+  it('reports editor-asleep when Unity was parked at both ends of the window', () => {
     expect(
       collectNewProblems(
         input({ editorAwake: false, baseline: { ...BASE, editorAwake: false } }),
@@ -403,11 +402,37 @@ describe('collectNewProblems', () => {
     ).toBe('editor-asleep');
   });
 
+  // I4. This used to be `null` — "it was awake at the start, so it streamed".
+  // It streamed the HEAD of the window. `ConsoleHook.Tick()` flushes on Unity's
+  // main thread, so everything after it parked is unobserved, and the snapshot
+  // that could have covered that tail fails against the very same parked
+  // thread. Calling that "console clean" is the card's expensive lie.
+  it('reports editor-asleep for a window that STARTED awake and ended parked', () => {
+    expect(collectNewProblems(input({ editorAwake: false })).degraded).toBe('editor-asleep');
+  });
+
+  it('a snapshot that was actually served rescues it — it proves Unity ticked', () => {
+    expect(
+      collectNewProblems(input({ editorAwake: false, snapshot: [], snapshotStatus: 'used' }))
+        .degraded,
+    ).toBeNull();
+    // A snapshot that was ATTEMPTED and failed proves the opposite.
+    expect(
+      collectNewProblems(input({ editorAwake: false, snapshotStatus: 'unavailable' })).degraded,
+    ).toBe('editor-asleep');
+  });
+
   it('reports old-package below the console-snapshot protocol floor', () => {
     expect(collectNewProblems(input({ bridgeProtocol: 3 })).degraded).toBe('old-package');
     expect(collectNewProblems(input({ bridgeProtocol: CONSOLE_MIN_PROTOCOL })).degraded).toBeNull();
-    // Unknown protocol is not a claim that the package is old.
-    expect(collectNewProblems(input({ bridgeProtocol: null })).degraded).toBeNull();
+  });
+
+  // I4. Connected with no protocol yet is not the same fact as "the package is
+  // old" — but it is not a clean console either, and it used to render as one.
+  it('reports protocol-unknown while connected with no protocol version yet', () => {
+    expect(collectNewProblems(input({ bridgeProtocol: null })).degraded).toBe('protocol-unknown');
+    // Not a claim that the package is old: the stream-only caveat stays off.
+    expect(collectNewProblems(input({ bridgeProtocol: null })).streamOnly).toBe(false);
   });
 
   it('tracks stream-only separately, so the caveat survives a more urgent degradation', () => {
@@ -920,6 +945,15 @@ describe('the card rows', () => {
     );
     expect(consoleRowLabel({ repairAttempted: true, recheck: 'old-package' })).toBe(
       'console: repair attempted, re-check unavailable (stream only — update the bridge package for full history)',
+    );
+    expect(consoleRowLabel({ repairAttempted: true, recheck: 'protocol-unknown' })).toBe(
+      "console: repair attempted, re-check unavailable (the bridge's protocol version isn't known yet)",
+    );
+  });
+
+  it('names the unknown-protocol state instead of calling the console clean', () => {
+    expect(consoleRowLabel({ unknown: 'protocol-unknown' })).toBe(
+      "console unknown (the bridge's protocol version isn't known yet)",
     );
   });
 

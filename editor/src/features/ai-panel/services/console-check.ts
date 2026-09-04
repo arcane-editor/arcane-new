@@ -252,7 +252,14 @@ export type ConsoleDegradation =
   | 'editor-asleep'
   /** The bridge reconnected mid-turn and backfilled — the ring has a hole in it. */
   | 'reconnected'
-  | 'old-package';
+  | 'old-package'
+  /**
+   * Connected, but the handshake's `protocolVersion` has not landed yet, so
+   * whether Unity can answer for console history at all is genuinely unknown
+   * — it is neither `old-package` (a fact) nor clean. `read-tools.ts`'s
+   * `unavailableSessionLabel` names the same state for the read tool.
+   */
+  | 'protocol-unknown';
 
 /** What the `getConsoleSnapshot` merge was able to do, for the record. */
 export type SnapshotAdoption = 'adopted' | 'none-matched' | 'no-baseline' | 'not-attempted';
@@ -430,9 +437,20 @@ function degradationOf(input: CollectInput, reconnected: boolean): ConsoleDegrad
   // Parked at BOTH ends of the window: nothing could have streamed, so silence
   // is not evidence. An editor that woke up at any point did stream.
   if (!input.editorAwake && !input.baseline.editorAwake) return 'editor-asleep';
+  // Parked at the END of the window (I4). `ConsoleHook.Tick()` flushes on
+  // Unity's main thread, so a turn that started awake and finished parked has
+  // an UNOBSERVED tail however lively its start was — and the snapshot, which
+  // is the only other way to see that tail, fails against the same parked main
+  // thread. A snapshot that WAS served is proof Unity ticked, so it is the one
+  // thing that rescues this case.
+  if (!input.editorAwake && input.snapshotStatus !== 'used') return 'editor-asleep';
   if (input.bridgeProtocol != null && input.bridgeProtocol < CONSOLE_MIN_PROTOCOL) {
     return 'old-package';
   }
+  // Connected but the protocol is still unknown: "no snapshot was read" could
+  // mean the package predates the RPC or just that the handshake has not landed
+  // yet, and neither is a clean console.
+  if (input.bridgeProtocol == null) return 'protocol-unknown';
   return null;
 }
 
@@ -826,6 +844,8 @@ export function consoleRowLabel(result: ConsoleCheckResult): string {
         return 'console unknown (Unity reconnected mid-turn — history may be incomplete)';
       case 'old-package':
         return 'console: stream only (update the bridge package for full history)';
+      case 'protocol-unknown':
+        return "console unknown (the bridge's protocol version isn't known yet)";
     }
   }
   if ('repairAttempted' in result) {
@@ -850,6 +870,7 @@ const RECHECK_REASON: Record<ConsoleDegradation, string> = {
   'editor-asleep': 'Unity in background',
   reconnected: 'Unity reconnected mid-turn',
   'old-package': 'stream only — update the bridge package for full history',
+  'protocol-unknown': "the bridge's protocol version isn't known yet",
 };
 
 /**
