@@ -12,9 +12,7 @@ const SRC = readFileSync(path.resolve(import.meta.dir, './fix-console-error.ts')
 
 describe('fix-console-error.ts — prompt assembly is not duplicated (Task 13)', () => {
   it('imports the shared builder instead of assembling the prompt itself', () => {
-    expect(SRC).toContain(
-      "import { buildFixPrompt, type RegionDeps } from './prompts/console-repair';",
-    );
+    expect(SRC).toContain("import { buildFixPrompt } from './prompts/console-repair';");
     expect(SRC).toContain('await buildFixPrompt(entry, tauriRegionDeps())');
   });
 
@@ -28,9 +26,22 @@ describe('fix-console-error.ts — prompt assembly is not duplicated (Task 13)',
     expect(SRC).not.toContain('parseStackTrace');
   });
 
-  it('supplies the production region reader: Tauri read_file rooted at the open workspace', () => {
-    expect(SRC).toContain("readFile: (path) => invoke<string>('read_file', { path }),");
-    expect(SRC).toContain('workspacePath: useWorkspaceStore.getState().workspacePath,');
+  it('shares the production region reader with the console check rather than re-declaring it', () => {
+    expect(SRC).toContain("import { tauriRegionDeps } from './console-check-io';");
+    expect(SRC).toContain('buildFixPrompt(entry, tauriRegionDeps())');
+    // The reader itself lives in the io module; two copies would be two ways to
+    // resolve a project-relative frame path.
+    expect(SRC).not.toContain("invoke<string>('read_file'");
+    const IO = readFileSync(path.resolve(import.meta.dir, './console-check-io.ts'), 'utf8');
+    expect(IO).toContain("readFile: (path) => invoke<string>('read_file', { path }),");
+    expect(IO).toContain('workspacePath: useWorkspaceStore.getState().workspacePath,');
+  });
+
+  // `buildRegions` grew a `dedupe` option for the console check's repair
+  // prompt. It must stay OFF here: the pre-extraction code emitted one region
+  // per frame, recursion included, and that prompt is byte-pinned.
+  it('does not turn on region de-duplication, which would change the pinned prompt', () => {
+    expect(SRC).not.toMatch(/dedupe:\s*true/);
   });
 
   it('still sends at the user\'s current effort in agent mode, never a hardcoded tier', () => {

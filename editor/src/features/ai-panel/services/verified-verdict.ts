@@ -59,6 +59,10 @@ export function consoleMarker(result: ConsoleCheckResult): CheckMarker {
   if (result === 'skipped') return 'skip';
   if (result === 'clean') return 'ok';
   if ('unknown' in result) return 'skip';
+  // A repair ran on real errors and the read that was supposed to judge it was
+  // degraded. `skip` would let the shield go green over an unproven repair, so
+  // this is the one "unknown" that counts against the card.
+  if ('repairAttempted' in result) return 'bad';
   if (result.remaining > 0) return 'bad';
   const own = result.newErrors - result.external;
   if (!result.repaired && own > 0) return 'bad';

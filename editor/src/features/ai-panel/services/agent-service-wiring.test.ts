@@ -226,6 +226,7 @@ describe('agent-service.ts — post-turn console check (Task 13)', () => {
     path.resolve(import.meta.dir, './console-check.ts'),
     'utf8',
   );
+  const IO_SRC = readFileSync(path.resolve(import.meta.dir, './console-check-io.ts'), 'utf8');
 
   it('captures the console baseline at send start, immediately after beginVerifiedPass()', () => {
     const beginVerified = SRC.indexOf('beginVerifiedPass();');
@@ -241,9 +242,17 @@ describe('agent-service.ts — post-turn console check (Task 13)', () => {
     expect(SRC).toContain('markConsoleTurnStart(useUnityStore.getState().logSeq);');
   });
 
-  it('builds the baseline from the store: seq, epoch, compile identity and liveness', () => {
-    expect(SRC).toMatch(
-      /function consoleBaselineNow\(\): ConsoleCheckBaseline \{[\s\S]*?seq: unity\.logSeq,[\s\S]*?epoch: unity\.consoleEpoch,[\s\S]*?compileIdentity: unity\.lastCompilation\?\.receivedAt \?\? null,[\s\S]*?editorAwake: unity\.editorAwake,/,
+  it('keeps the store/RPC boundary out of agent-service.ts entirely', () => {
+    // `console-check.ts` is pure; `console-check-io.ts` is the one place the
+    // check reads a store, calls the bridge, or touches the filesystem.
+    expect(SRC).toContain("from './console-check-io';");
+    expect(SRC).not.toContain('bridgeRpc');
+    expect(SRC).not.toContain('getConsoleSnapshot');
+  });
+
+  it('builds the baseline from the store: seq, compile identity, liveness and the Unity row high-water mark', () => {
+    expect(IO_SRC).toMatch(
+      /export function consoleBaselineNow\(\): ConsoleCheckBaseline \{[\s\S]*?seq: unity\.logSeq,[\s\S]*?compileIdentity: unity\.lastCompilation\?\.receivedAt \?\? null,[\s\S]*?editorAwake: unity\.editorAwake,[\s\S]*?maxUnityRow: maxUnityRow\(unity\.logs\),/,
     );
   });
 
@@ -279,8 +288,13 @@ describe('agent-service.ts — post-turn console check (Task 13)', () => {
   // Global Constraint 8: repairCount latches the whole conversation onto a
   // costlier tier. The console check must never touch it.
   it('reports the repair on its own telemetry field, never repairCount', () => {
-    expect(SRC).toContain('recordConsoleRepair();');
-    expect(SRC).not.toContain('recordRepair(');
+    const method = SRC.match(/private async runConsoleCheck\([\s\S]*?\n  \}\n/);
+    expect(method).not.toBeNull();
+    // Comments stripped: the code, not the prose explaining it, is what runs.
+    const body = method![0].replace(/\/\/[^\n]*/g, '');
+    expect(body).toContain('recordConsoleRepair();');
+    // Nothing in the repair branch may read or write the escalation counter.
+    expect(body).not.toMatch(/repairCount/i);
   });
 
   it('emits exactly ONE card — the pre-repair pass is never shown on its own', () => {
@@ -300,7 +314,29 @@ describe('agent-service.ts — post-turn console check (Task 13)', () => {
   });
 
   it('treats a failed console snapshot as unavailable, never as an error of the check', () => {
-    expect(SRC).toMatch(/\} catch \{\s*snapshotStatus = 'unavailable';\s*\}/);
+    expect(IO_SRC).toMatch(/\} catch \{\s*snapshotStatus = 'unavailable';\s*\}/);
+  });
+
+  // F2. A Stop mid-tool leaves a 'toolUse'/'error' tail, so `prompt()` resolves
+  // rather than throwing — without this guard a cancelled send triggered a live
+  // recompile and the card claimed a repaired outcome.
+  it('re-checks the abort flag after the repair prompt, before the second verified pass', () => {
+    const method = SRC.match(/private async runConsoleCheck\([\s\S]*?\n  \}\n/)![0];
+    const promptIdx = method.indexOf('buildConsoleRepairPrompt({');
+    const abortIdx = method.indexOf('if (this.abortRequested) {');
+    const secondPassIdx = method.indexOf('secondPass = await runVerifiedPass(workspacePath);');
+    expect(abortIdx).toBeGreaterThan(promptIdx);
+    expect(secondPassIdx).toBeGreaterThan(abortIdx);
+    expect(method).toContain(
+      "return unrepaired({ attempted: true, trigger: trigger ?? 'console', interrupted: true });",
+    );
+  });
+
+  // F1. `after` carries the post-repair degradation; without it an empty
+  // second read ("we could not look") rendered as a successful repair.
+  it('judges the repair against the post-repair read, and only calls a compile clean when it IS clean', () => {
+    expect(SRC).toContain('console: consoleResult(before, outcome, after),');
+    expect(SRC).toContain("secondCompileClean: secondPass.compile === 'clean',");
   });
 
   it('reports the problems honestly when the repair turn itself fails', () => {
@@ -311,9 +347,16 @@ describe('agent-service.ts — post-turn console check (Task 13)', () => {
     );
   });
 
-  it('never compares a snapshot row against the ring seq', () => {
+  it('never compares a snapshot row against the ring seq — its index goes in unityRow', () => {
     // Unity's row index is a different numbering; conflating the two is what
     // sent `sinceTurnStart` filtering into the wrong space once already.
-    expect(SRC).toMatch(/snapshot = snap\.entries\.map\(\(row\) => \(\{[\s\S]*?seq: null,/);
+    expect(IO_SRC).toMatch(
+      /snapshot = snap\.entries\.map\(\(row\) => \(\{[\s\S]*?seq: null,\s*unityRow: row\.seq,/,
+    );
+  });
+
+  it('de-duplicates the repair prompt\'s code regions, unlike the byte-pinned fix prompt', () => {
+    expect(SRC).toContain('buildRegions(repairPromptFrames(before), tauriRegionDeps(), {');
+    expect(SRC).toContain('dedupe: true,');
   });
 });

@@ -38,9 +38,12 @@ const REPAIR_SENTINELS = [
   '[Unity USS]',
   '[Unity input actions]',
   '[Unity asset]',
-  // The post-turn console check's repair prompt (Task 13). It is the ONLY
-  // record of what Unity reported after the turn — elide it and the repair
-  // pass is asked to fix problems it can no longer see.
+  // The post-turn console check's repair prompt (Task 13). Defensive: the
+  // sentinels are only consulted on toolResult messages and that prompt is a
+  // USER message (which the last-resort truncation already spares while it is
+  // the newest one). Listed so that if the marker ever reaches a tool result —
+  // echoed back by a nested harness, or a future gate note — the one record of
+  // what Unity reported after the turn is not elided out from under the repair.
   '[Console check]',
 ];
 

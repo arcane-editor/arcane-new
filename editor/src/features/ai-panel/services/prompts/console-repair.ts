@@ -76,20 +76,30 @@ async function readRegion(frame: StackFrame, deps: RegionDeps): Promise<string |
 }
 
 /**
- * `<region>` blocks for a set of frames, unreadable ones dropped and duplicate
- * `path:line` pairs collapsed (two problems in the same method otherwise embed
- * the same twenty-five lines twice).
+ * `<region>` blocks for a set of frames, with unreadable ones dropped.
+ *
+ * `dedupe` collapses repeated `path:line` pairs, which matters for the console
+ * check (several problems in one method would otherwise embed the same
+ * twenty-five lines over and over). It is OFF by default because the one-click
+ * fix prompt emitted one region per frame before this module existed, recursion
+ * included, and that prompt is byte-pinned.
  */
-export async function buildRegions(frames: StackFrame[], deps: RegionDeps): Promise<string[]> {
-  const seen = new Set<string>();
-  const unique: StackFrame[] = [];
-  for (const f of frames) {
-    const key = `${f.filePath}:${f.lineNumber}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    unique.push(f);
+export async function buildRegions(
+  frames: StackFrame[],
+  deps: RegionDeps,
+  opts: { dedupe?: boolean } = {},
+): Promise<string[]> {
+  let wanted = frames;
+  if (opts.dedupe) {
+    const seen = new Set<string>();
+    wanted = frames.filter((f) => {
+      const key = `${f.filePath}:${f.lineNumber}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
   }
-  const regions = await Promise.all(unique.map((f) => readRegion(f, deps)));
+  const regions = await Promise.all(wanted.map((f) => readRegion(f, deps)));
   return regions.filter((r): r is string => r !== null);
 }
 

@@ -44,6 +44,7 @@ describe('consoleMarker (Task 13)', () => {
     fixed: 0,
     notReobserved: 0,
     remaining: 0,
+    streamOnly: false,
     items: [],
     ...over,
   });
@@ -52,7 +53,19 @@ describe('consoleMarker (Task 13)', () => {
     expect(consoleMarker('skipped')).toBe('skip');
     expect(consoleMarker({ unknown: 'no-bridge' })).toBe('skip');
     expect(consoleMarker({ unknown: 'editor-asleep' })).toBe('skip');
+    expect(consoleMarker({ unknown: 'reconnected' })).toBe('skip');
     expect(consoleMarker({ unknown: 'old-package' })).toBe('skip');
+  });
+
+  // "Repair attempted, re-check unavailable" is the one unknown that counts
+  // against the card: real errors were found, a repair ran, and nothing was
+  // proven. `skip` there would let the shield go green over that.
+  it('is "bad" when the repair could not be re-checked', () => {
+    expect(consoleMarker({ repairAttempted: true, recheck: 'editor-asleep' })).toBe('bad');
+    expect(consoleMarker({ repairAttempted: true, recheck: 'no-bridge' })).toBe('bad');
+    expect(
+      verifiedVerdict(['ok', 'ok', consoleMarker({ repairAttempted: true, recheck: 'no-bridge' })]),
+    ).toBe('failed');
   });
 
   it('is "ok" for a clean console', () => {

@@ -149,7 +149,10 @@ function VerifiedCard({ message }: Props) {
   ]);
   const missingGuids = guids !== 'skipped' && guids !== 'intact' ? guids.missing : [];
   const consoleItems =
-    consoleCheck !== 'skipped' && consoleCheck !== 'clean' && !('unknown' in consoleCheck)
+    consoleCheck !== 'skipped' &&
+    consoleCheck !== 'clean' &&
+    !('unknown' in consoleCheck) &&
+    !('repairAttempted' in consoleCheck)
       ? consoleCheck.items
       : [];
   const testFailures = tests !== 'skipped' ? tests.failures : [];
@@ -247,7 +250,9 @@ function VerifiedCard({ message }: Props) {
           {repair && (
             <>
               <span className="ai-verified-sep">·</span>
-              <span className="ai-verified-item ai-verified-files">1 repair pass</span>
+              <span className="ai-verified-item ai-verified-files">
+                {repair.interrupted ? '1 repair pass (stopped)' : '1 repair pass'}
+              </span>
             </>
           )}
           <span className="ai-verified-sep">·</span>
@@ -286,6 +291,7 @@ function VerifiedCard({ message }: Props) {
                     [{item.logType}] {item.firstLine}
                     {item.location ? ` — ${item.location}` : ''}
                     {item.count > 1 ? ` ×${item.count}` : ''}
+                    {item.external ? ' (package/engine)' : ''}
                   </li>
                 ))}
               </ul>

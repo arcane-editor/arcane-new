@@ -9,7 +9,6 @@
  * operates on the current workspace + the right mode.
  */
 
-import { invoke } from '@tauri-apps/api/core';
 import { Agent } from './vendor/agent';
 import { convertToLlm } from './vendor/messages';
 import { createReadTool } from './vendor/tools/read';
@@ -87,15 +86,11 @@ import {
 } from './verified-pass';
 import {
   CONSOLE_REPAIR_CALL_GRANT,
-  CONSOLE_SNAPSHOT_LIMIT,
-  CONSOLE_MIN_PROTOCOL,
-  CONSOLE_ERROR_TYPES,
   EXTERNAL_ONLY_NOTICE,
   beginConsoleCheck,
   consoleCheckBaseline,
   consoleRepairAttempts,
   recordConsoleRepairAttempt,
-  collectNewProblems,
   shouldRepair,
   repairTrigger,
   repairNotice,
@@ -107,11 +102,15 @@ import {
   repairPromptFrames,
   repairPromptCompileErrors,
   type CollectedProblems,
-  type CompileProblem,
   type ConsoleCheckBaseline,
-  type ConsoleEntryInput,
-  type SnapshotStatus,
+  type RepairInfo,
 } from './console-check';
+import {
+  collectConsoleProblems,
+  consoleBaselineNow,
+  latestRun,
+  tauriRegionDeps,
+} from './console-check-io';
 import { buildConsoleRepairPrompt, buildRegions } from './prompts/console-repair';
 import { distillSend } from './memory/distiller';
 import { maybeConsolidate } from './memory/consolidate';
@@ -132,7 +131,6 @@ import { useProjectContextStore } from '../../../stores/project-context';
 import { useSettingsStore } from '../../../stores/settings';
 import { useCheckpointsStore } from '../../../stores/checkpoints';
 import { useUnityStore } from '../../../stores/unity';
-import { bridgeRpc } from '../../unity-bridge';
 import { buildSystemPrompt, captureDecoration, defaultPromptModeFor, type PromptMode } from './prompts';
 import { graphChangedSinceFreeze, resetFrozenDecoration } from './prompts/frozen-context';
 import { buildPlanSendPrefix } from './prompts/plan-execution';
@@ -144,7 +142,6 @@ import { lintAnswer, buildReviseMessage } from './grounding-lint';
 import { resolveAttachments } from './attachments';
 import { classifyTurnError, detectTurnOutcome, loopCrashError } from './turn-errors';
 import type { Model, AgentTool, AgentMessage, TextContent } from './vendor/types';
-import type { UnityLogEntry } from '../../../types/unity';
 import type { Attachment, ChatMode, Effort } from './types';
 
 /** Convert saved UI messages back into vendor AgentMessages for resume. */
@@ -187,122 +184,6 @@ const TODO_NUDGE_TEXT = '[Reminder: maintain your todo list with todo_update for
 
 function getCurrentWorkspacePath(): string {
   return useWorkspaceStore.getState().workspacePath ?? '/';
-}
-
-// ---- Task 13: the post-turn console check's store/RPC boundary ----
-//
-// `console-check.ts` is pure and Bun-testable (Global Constraint 4); these
-// three helpers are the only place the check touches `stores/unity.ts` or the
-// bridge. They deliberately do no deciding — they read facts and hand them
-// over.
-
-/** The console baseline for the send about to start. */
-function consoleBaselineNow(): ConsoleCheckBaseline {
-  const unity = useUnityStore.getState();
-  return {
-    seq: unity.logSeq,
-    epoch: unity.consoleEpoch,
-    startedAt: Date.now(),
-    compileIdentity: unity.lastCompilation?.receivedAt ?? null,
-    editorAwake: unity.editorAwake,
-  };
-}
-
-/** The newest test run in a batch of recorded ones, or `null`. */
-function latestRun<T>(runs: T[]): T | null {
-  return runs.length > 0 ? runs[runs.length - 1] : null;
-}
-
-/**
- * Compiler errors that describe THIS turn.
- *
- * Two independent conditions, and both are needed. The verified pass's own
- * `compile` step is the authority on whether the fresh compile reported errors
- * at all (it is the one that triggered it); `lastCompilation` is the only place
- * the per-file diagnostics live, and it survives across sends — so a report
- * whose `receivedAt` has not moved since the baseline is the PREVIOUS turn's
- * and must never be handed to a repair pass.
- */
-function freshCompileErrors(
-  pass: VerifiedCardData,
-  compileIdentity: number | null,
-): CompileProblem[] {
-  if (pass.compile === 'clean' || pass.compile === 'skipped') return [];
-  const last = useUnityStore.getState().lastCompilation;
-  const receivedAt = last?.receivedAt ?? null;
-  if (receivedAt == null) return [];
-  if (compileIdentity != null && receivedAt <= compileIdentity) return [];
-  return (last?.messages ?? [])
-    .filter((m) => m.type === 'Error')
-    .map((m) => ({ file: m.file, line: m.line, message: m.message }));
-}
-
-function ringEntry(e: UnityLogEntry): ConsoleEntryInput {
-  return {
-    logType: e.logType,
-    message: e.message,
-    seq: e.seq ?? null,
-    stackTrace: e.stackTrace,
-    parsedFrames: e.parsedFrames,
-    historical: e.historical,
-  };
-}
-
-/**
- * Read the console the way the check needs it: the session ring always, plus
- * one `getConsoleSnapshot` when the bridge can answer it.
- *
- * The snapshot RPC blocks on Unity's main thread and therefore FAILS outright
- * whenever Unity is parked in the background — the normal state while the user
- * is looking at this IDE. That is "snapshot unavailable", never an error of the
- * check, so the ring result stands on its own.
- */
-async function collectConsoleProblems(
-  baseline: ConsoleCheckBaseline,
-  pass: VerifiedCardData,
-  run: { failures?: Array<{ fullName: string; message: string }> } | null,
-): Promise<CollectedProblems> {
-  const unity = useUnityStore.getState();
-
-  let snapshot: ConsoleEntryInput[] | null = null;
-  let snapshotStatus: SnapshotStatus = 'not-attempted';
-  if (unity.connected && (unity.bridgeProtocol ?? 0) >= CONSOLE_MIN_PROTOCOL) {
-    try {
-      const snap = await bridgeRpc.getConsoleSnapshot({
-        order: 'newest',
-        limit: CONSOLE_SNAPSHOT_LIMIT,
-        types: [...CONSOLE_ERROR_TYPES],
-        includeStackTrace: true,
-      });
-      snapshot = snap.entries.map((row) => ({
-        logType: row.logType,
-        message: row.message,
-        // Unity's row index is a different numbering — never comparable to the
-        // ring's client-assigned seq (see `UnityLogEntry.unityRow`).
-        seq: null,
-        file: row.file || null,
-        line: row.line || null,
-        stackTrace: row.stackTrace,
-        count: row.count,
-      }));
-      snapshotStatus = 'used';
-    } catch {
-      snapshotStatus = 'unavailable';
-    }
-  }
-
-  return collectNewProblems({
-    baseline,
-    ring: unity.logs.map(ringEntry),
-    epoch: unity.consoleEpoch,
-    snapshot,
-    snapshotStatus,
-    connected: unity.connected,
-    bridgeProtocol: unity.bridgeProtocol,
-    editorAwake: unity.editorAwake,
-    compileErrors: freshCompileErrors(pass, baseline.compileIdentity),
-    testRun: run,
-  });
 }
 
 /**
@@ -1124,6 +1005,14 @@ export class AgentService {
     }
 
     const trigger = repairTrigger(before);
+    /** The pre-repair state, reported as though no repair had run. */
+    const unrepaired = (repair?: RepairInfo): VerifiedCardData => ({
+      ...firstPass,
+      console: consoleResult(before, null),
+      tests: testsResult(latestRun(recordedRuns)),
+      ...(repair ? { repair } : {}),
+    });
+
     useAiStore.getState().addSystemMessage(repairNotice(before));
     // Its own telemetry field, never `repairCount` — that one latches the
     // conversation onto a costlier tier (Global Constraint 8).
@@ -1131,9 +1020,8 @@ export class AgentService {
     recordConsoleRepairAttempt();
     grantExtraCalls(CONSOLE_REPAIR_CALL_GRANT);
 
-    const regions = await buildRegions(repairPromptFrames(before), {
-      readFile: (path) => invoke<string>('read_file', { path }),
-      workspacePath,
+    const regions = await buildRegions(repairPromptFrames(before), tauriRegionDeps(), {
+      dedupe: true,
     });
     // Everything after this seq is evidence the repair did not work; the
     // sightings before it are the ones the repair was asked about.
@@ -1141,6 +1029,7 @@ export class AgentService {
 
     let secondPass: VerifiedCardData;
     let outcome: ReturnType<typeof diffAfterRepair>;
+    let after: CollectedProblems;
     try {
       await this.agent.prompt(
         buildConsoleRepairPrompt({
@@ -1151,32 +1040,45 @@ export class AgentService {
         }),
       );
 
+      // A Stop during the repair turn does not necessarily throw: an abort
+      // mid-tool leaves a 'toolUse' or 'error' tail and `prompt()` resolves
+      // normally (see runGroundingLint's header). Re-check here, before
+      // triggering a live recompile on a send the user cancelled — and report
+      // the pre-repair state, because nothing was re-checked.
+      if (this.abortRequested) {
+        return unrepaired({ attempted: true, trigger: trigger ?? 'console', interrupted: true });
+      }
+
       // Re-verify from scratch: the repair wrote files, so the first pass's
       // compile/analyzer/GUID results are stale.
       secondPass = await runVerifiedPass(workspacePath);
-      const after = await collectConsoleProblems(baseline, secondPass, null);
-      outcome = diffAfterRepair(before, after, repairStartSeq);
+      after = await collectConsoleProblems(baseline, secondPass, null);
+      outcome = diffAfterRepair(before, after, {
+        repairStartSeq,
+        // Only a genuinely CLEAN report proves a compiler error gone. A
+        // skipped/timed-out second compile also has no errors to hand over,
+        // and treating that as proof reported every one of them as fixed.
+        secondCompileClean: secondPass.compile === 'clean',
+      });
     } catch {
       // The repair turn itself failed (stream error, cancelled mid-flight).
       // The problems it was asked about are still there and still unproven, so
       // the card reports them exactly as it would have with no repair at all —
       // `repaired: true` with a zero outcome would render a green tick beside
       // "2 new errors", which is the one thing this card must never do.
-      return {
-        ...firstPass,
-        console: consoleResult(before, null),
-        tests: testsResult(latestRun(recordedRuns)),
-      };
+      return unrepaired();
     }
 
     // The agent may have re-run the failing tests itself (approval-gated); the
     // card reads the newest run it recorded, falling back to the pre-repair one.
-    const postRepairRuns = takeRecordedTestRuns();
-    const run = latestRun(postRepairRuns) ?? latestRun(recordedRuns);
+    const run = latestRun(takeRecordedTestRuns()) ?? latestRun(recordedRuns);
 
     return {
       ...secondPass,
-      console: consoleResult(before, outcome),
+      // `after` is passed so a DEGRADED re-read (bridge dropped, Unity asleep,
+      // reconnected) reports "re-check unavailable" instead of letting an
+      // empty read read as a successful repair.
+      console: consoleResult(before, outcome, after),
       tests: testsResult(run),
       ...(trigger ? { repair: { attempted: true as const, trigger } } : {}),
     };

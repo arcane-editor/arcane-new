@@ -146,13 +146,17 @@ export function wasCapReachedThisSend(): boolean {
 }
 
 /**
- * Grant extra calls for the current send only. Used by grounding-lint's revise
- * turn (P2.2) to bypass the turn cap when running a second `agent.prompt` after
- * the main send has exhausted the budget. The grant is consumed by the next
- * over-cap call and cleared by `resetTurnGovernor`.
+ * Grant extra calls for the current send only, so a closing pass can run a
+ * second `agent.prompt` after the main send has exhausted the budget. The
+ * grant is consumed by the next over-cap call and cleared by
+ * `resetTurnGovernor`.
  *
- * **Single intended caller**: agent-service.ts `runGroundingLint`, immediately
- * before the revise `agent.prompt(buildReviseMessage(...))`.
+ * **Intended callers** — both in agent-service.ts, both immediately before the
+ * `agent.prompt` they are reserving for:
+ *   - `runGroundingLint` (P2.2), 1 call for the ask-mode revise turn.
+ *   - `runConsoleCheck` (Task 13), `CONSOLE_REPAIR_CALL_GRANT` calls for the
+ *     post-turn console repair pass, which has real work to do (read, edit,
+ *     re-run tests) rather than a single rewrite.
  */
 export function grantExtraCalls(n = 1): void {
   extraCallsGranted += n;

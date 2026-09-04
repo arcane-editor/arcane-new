@@ -9,23 +9,18 @@
 // same `<region>` blocks for its repair pass, and a second copy of this text
 // would drift. This file keeps the store/Tauri wiring and nothing else; the
 // prompt it produces is byte-identical to the one it produced before the
-// extraction (`fix-console-error.test.ts`).
+// extraction (`fix-console-error.test.ts`), including one region per frame
+// (`buildRegions`' `dedupe` is off by default for exactly that reason).
+//
+// The Tauri reader itself lives in `console-check-io.ts`, the check's
+// store/RPC boundary, so both callers embed code the same way.
 
-import { invoke } from '@tauri-apps/api/core';
 import { getAgentService } from './agent-service';
-import { buildFixPrompt, type RegionDeps } from './prompts/console-repair';
+import { buildFixPrompt } from './prompts/console-repair';
+import { tauriRegionDeps } from './console-check-io';
 import { useAiStore } from '../../../stores/ai';
 import { useUiStore } from '../../../stores/ui';
-import { useWorkspaceStore } from '../../../stores/workspace';
 import type { UnityLogEntry } from '../../../types/unity';
-
-/** The production region reader: Tauri file reads, rooted at the open workspace. */
-export function tauriRegionDeps(): RegionDeps {
-  return {
-    readFile: (path) => invoke<string>('read_file', { path }),
-    workspacePath: useWorkspaceStore.getState().workspacePath,
-  };
-}
 
 /**
  * Drive the agent to fix a console error/exception. Sends at the user's

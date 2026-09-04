@@ -21,27 +21,44 @@
 // started". Unity's own console row index (`unityRow`, and a snapshot row's
 // wire `seq`) is a different, incomparable numbering.
 //
+// The epoch is NOT part of that comparison. `backfillConsoleHistory` bumps
+// `consoleEpoch` while PREPENDING Unity's console history to `logs`
+// (`stores/unity.ts`), and a reconnect re-arms it — so "the epoch moved, take
+// the whole ring" turned a mid-turn reconnect into "every error Unity has ever
+// shown happened during this turn". `clearLogs()` does not reset `logSeq`, so
+// `seq > baseline.seq` is already correct after a real clear; the epoch is kept
+// on the baseline only as the recorded state of the console at send start.
+//
 // Two entries are deliberately excluded:
 //
 //   * `historical: true` — backfilled from Unity's console on connect. Those
-//     rows are assigned a FRESH `seq` on ingest, so a bridge reconnect during
-//     the turn would otherwise present Unity's entire console history as
-//     "errors this turn" and send the agent off repairing things the user has
-//     had for weeks. The cost is that a mid-turn domain reload can hide a
-//     genuinely new runtime error behind the backfill; the compile path covers
-//     the compiler half of that gap, and the card never claims otherwise.
+//     rows are assigned a FRESH `seq` on ingest, so counting them would again
+//     present Unity's whole history as this turn's. Their PRESENCE past the
+//     baseline is still a fact, and an important one: it means the bridge
+//     reconnected mid-turn and the ring is no longer a complete record, which
+//     is reported as the `reconnected` degradation rather than swallowed.
 //   * `[UnityIDEBridge]`-prefixed messages — this IDE's own bridge talking
 //     about itself (`arcane-extension/Editor/BridgeBootstrap.cs`). Never the
 //     project's bug.
 //
-// A `getConsoleSnapshot` read (protocol 4+, connected) is merged in by DEDUP
-// KEY, and only ever to ENRICH a key the ring already found this turn: Unity's
-// collapsed `count`, and a `file:line` for an entry whose stack trace did not
-// parse. Snapshot-only keys are NOT adopted — a snapshot row carries no
-// timestamp and no comparable sequence, so "it is in Unity's console" is not
-// evidence that it arrived during this turn. The snapshot RPC also fails
-// outright whenever Unity is parked in the background; that is recorded as
-// `snapshot: 'unavailable'` and is never an error of the check.
+// A `getConsoleSnapshot` read (protocol 4+, connected) is merged in two ways:
+//
+//   * ENRICHMENT. An exact key match takes Unity's collapsed `count`. A LOOSE
+//     match (`logType|firstLine`) against a ring entry that has no location at
+//     all — its stack trace did not parse — takes the snapshot's `file:line`,
+//     which is the only way such an entry ever stops being classified as
+//     `external`. (Matching on the full key alone could never do this: the
+//     location is part of the key, so the two twins never met.)
+//   * ADOPTION, for the domain-reload gap. A snapshot row that matches nothing
+//     in the ring is adopted only when its Unity console row index
+//     (`unityRow`) is beyond the high-water mark recorded at send start. With
+//     no high-water mark there is nothing to compare against and the row is
+//     NOT adopted (`snapshotAdoption: 'no-baseline'`) — "it is in Unity's
+//     console" is not on its own evidence that it arrived during this turn.
+//
+// The snapshot RPC fails outright whenever Unity is parked in the background;
+// that is recorded as `snapshot: 'unavailable'` and is never an error of the
+// check.
 
 import { parseStackTrace, type StackFrame, type UnityLogType } from '../../../types/unity';
 import { REPAIR_MAX_FRAMES, type RepairPromptProblem } from './prompts/console-repair';
@@ -85,22 +102,35 @@ const BRIDGE_MESSAGE_PREFIX = '[UnityIDEBridge]';
  *
  * Richer than `markConsoleTurnStart`'s bare seq (which the
  * `get_console_errors sinceTurnStart` tool keeps using) because this check has
- * to answer three more questions honestly: was the console cleared mid-turn
- * (`epoch`), is the compile report on the store from THIS turn
- * (`compileIdentity`), and was Unity awake at any point in the window
- * (`editorAwake`, so "no errors" is never reported as clean for an editor that
- * was parked the whole time).
+ * to answer three more questions honestly: is the compile report on the store
+ * from THIS turn (`compileIdentity`), was Unity awake at any point in the
+ * window (`editorAwake`, so "no errors" is never reported as clean for an
+ * editor that was parked the whole time), and how far had Unity's own console
+ * got by the time the send started (`maxUnityRow`, the only thing that can
+ * date a `getConsoleSnapshot` row).
  */
 export interface ConsoleCheckBaseline {
   /** `stores/unity.ts`'s `logSeq` at send start. */
   seq: number;
-  /** `consoleEpoch` at send start — a change means the console was cleared. */
+  /**
+   * `consoleEpoch` at send start. Recorded state only — deliberately NOT part
+   * of the "is this entry new" test (see the header): a backfill moves it
+   * without anything having been cleared.
+   */
   epoch: number;
   startedAt: number;
   /** `lastCompilation.receivedAt` at send start, or `null` when there was none. */
   compileIdentity: number | null;
   /** Whether Unity's main thread was servicing work at send start. */
   editorAwake: boolean;
+  /**
+   * Highest Unity console row index (`UnityLogEntry.unityRow`) the ring held at
+   * send start, or `null` when nothing in the ring had ever been backfilled
+   * from Unity's own console. It is the ONLY thing that can date a
+   * `getConsoleSnapshot` row, so with no high-water mark no snapshot-only row
+   * is ever adopted.
+   */
+  maxUnityRow: number | null;
 }
 
 let baseline: ConsoleCheckBaseline | null = null;
@@ -146,6 +176,12 @@ export interface ConsoleEntryInput {
   historical?: boolean;
   /** Unity's own collapsed repeat count, present on snapshot rows. */
   count?: number;
+  /**
+   * Unity's own console row index. Present on every snapshot row and on ring
+   * entries that were backfilled. Monotonic within Unity's console, and the
+   * only ordering a snapshot row carries — never comparable to `seq`.
+   */
+  unityRow?: number | null;
 }
 
 export interface CompileProblem {
@@ -174,8 +210,6 @@ export interface CollectInput {
   baseline: ConsoleCheckBaseline;
   /** The whole session ring, unfiltered — the baseline filter is applied here. */
   ring: ConsoleEntryInput[];
-  /** `consoleEpoch` now; a change from the baseline means a mid-turn clear. */
-  epoch: number;
   /** Rows from `getConsoleSnapshot`, or `null` when it was not attempted or failed. */
   snapshot: ConsoleEntryInput[] | null;
   snapshotStatus: SnapshotStatus;
@@ -200,14 +234,28 @@ export interface ConsoleProblem {
   count: number;
   /** No in-`Assets/` frame at all — a package or engine problem. Listed, never repaired. */
   external: boolean;
-  /** Newest ring seq seen for this key. */
+  /** Newest ring seq seen for this key, or 0 for a problem adopted from the snapshot. */
   seq: number;
+  /**
+   * True when this problem exists only because a `getConsoleSnapshot` row was
+   * adopted — it never streamed to this IDE, so it has no ring seq and the
+   * post-repair diff can only ever report it as "not seen again".
+   */
+  fromSnapshot: boolean;
   /** In-`Assets/` frames, for the repair prompt's code regions. */
   frames: StackFrame[];
 }
 
 /** Why the console read cannot be trusted to be complete. `null` when it can. */
-export type ConsoleDegradation = 'no-bridge' | 'editor-asleep' | 'old-package';
+export type ConsoleDegradation =
+  | 'no-bridge'
+  | 'editor-asleep'
+  /** The bridge reconnected mid-turn and backfilled — the ring has a hole in it. */
+  | 'reconnected'
+  | 'old-package';
+
+/** What the `getConsoleSnapshot` merge was able to do, for the record. */
+export type SnapshotAdoption = 'adopted' | 'none-matched' | 'no-baseline' | 'not-attempted';
 
 export interface CollectedProblems {
   /** Deduped problems, most recent first, capped at `MAX_CONSOLE_ITEMS`. */
@@ -220,7 +268,15 @@ export interface CollectedProblems {
   tests: TestFailureProblem[];
   testRun: TestRunSummaryInput | null;
   degraded: ConsoleDegradation | null;
+  /**
+   * The bridge cannot answer for console history at all (protocol < 4), so
+   * everything here came from this session's stream. Tracked separately from
+   * `degraded` because it stays true — and stays worth saying — even when a
+   * more urgent degradation outranks it.
+   */
+  streamOnly: boolean;
   snapshot: SnapshotStatus;
+  snapshotAdoption: SnapshotAdoption;
 }
 
 // ---- Card data (the `console` / `tests` / `repair` fields of VerifiedCardData) ----
@@ -230,6 +286,8 @@ export interface ConsoleCardItem {
   firstLine: string;
   location: string | null;
   count: number;
+  /** No in-`Assets/` frame — a package or engine problem, listed but never repaired. */
+  external: boolean;
 }
 
 export type ConsoleCheckResult =
@@ -239,6 +297,12 @@ export type ConsoleCheckResult =
   | 'skipped'
   /** Ran, but cannot say — never rendered as a pass. */
   | { unknown: ConsoleDegradation }
+  /**
+   * The repair ran, but the read that was supposed to judge it could not be
+   * trusted (the bridge dropped, Unity went to sleep, it reconnected). Nothing
+   * was proven either way, so this must never render as a repaired outcome.
+   */
+  | { repairAttempted: true; recheck: ConsoleDegradation }
   | {
       newErrors: number;
       external: number;
@@ -246,6 +310,8 @@ export type ConsoleCheckResult =
       fixed: number;
       notReobserved: number;
       remaining: number;
+      /** Protocol < 4: this is the session stream only, not Unity's history. */
+      streamOnly: boolean;
       items: ConsoleCardItem[];
     };
 
@@ -262,6 +328,8 @@ export type TestsCheckResult =
 export interface RepairInfo {
   attempted: true;
   trigger: 'console' | 'compile' | 'tests' | 'mixed';
+  /** The user pressed Stop while the repair pass was running — nothing was re-checked. */
+  interrupted?: true;
 }
 
 // ---- Keying ----
@@ -310,27 +378,48 @@ function isBridgeChatter(message: string): boolean {
 /**
  * Entries that arrived during this send.
  *
- * A mid-turn console clear (`epoch` moved) empties the ring, so everything
- * still in it is post-clear and therefore this turn's — the baseline seq no
- * longer means anything and is deliberately not applied.
+ * `seq > baseline.seq` and nothing else. There used to be an "if the epoch
+ * moved, take the whole ring" branch on the theory that a clear empties it;
+ * `backfillConsoleHistory` moves the epoch too, while PREPENDING history, so
+ * that branch turned every mid-turn reconnect into a repair pass aimed at
+ * hours-old errors. `clearLogs()` leaves `logSeq` alone, so the seq test is
+ * already right after a real clear.
  */
 export function selectNewEntries(
   ring: ConsoleEntryInput[],
   base: ConsoleCheckBaseline,
-  epoch: number,
 ): ConsoleEntryInput[] {
-  const cleared = epoch !== base.epoch;
   return ring.filter((e) => {
     if (e.historical) return false;
     if (!isRepairableType(e.logType)) return false;
     if (isBridgeChatter(e.message)) return false;
-    if (cleared) return true;
     return (e.seq ?? 0) > base.seq;
   });
 }
 
-function degradationOf(input: CollectInput): ConsoleDegradation | null {
+/**
+ * Did the bridge reconnect and backfill during this send?
+ *
+ * A backfilled row is stamped `historical` and given a fresh ring `seq` on
+ * ingest, so a historical row sitting past the baseline is exactly the
+ * fingerprint of a mid-turn reconnect — and it means the live stream has a
+ * hole in it for however long the bridge was gone.
+ */
+export function detectReconnect(ring: ConsoleEntryInput[], base: ConsoleCheckBaseline): boolean {
+  return ring.some((e) => e.historical === true && (e.seq ?? 0) > base.seq);
+}
+
+/** `logType|firstLine` — matches a snapshot row to a ring entry whose trace never parsed. */
+function looseKey(entry: { logType: UnityLogType; message?: string; firstLine?: string }): string {
+  const line = entry.firstLine ?? firstLine(entry.message ?? '');
+  return `${entry.logType}|${line}`;
+}
+
+function degradationOf(input: CollectInput, reconnected: boolean): ConsoleDegradation | null {
   if (!input.connected) return 'no-bridge';
+  // Ahead of liveness: a hole in the record is a fact about the record, and it
+  // stays true whether or not Unity happens to be awake right now.
+  if (reconnected) return 'reconnected';
   // Parked at BOTH ends of the window: nothing could have streamed, so silence
   // is not evidence. An editor that woke up at any point did stream.
   if (!input.editorAwake && !input.baseline.editorAwake) return 'editor-asleep';
@@ -345,7 +434,7 @@ function degradationOf(input: CollectInput): ConsoleDegradation | null {
  * compile's errors, and the latest test run's failures.
  */
 export function collectNewProblems(input: CollectInput): CollectedProblems {
-  const fresh = selectNewEntries(input.ring, input.baseline, input.epoch);
+  const fresh = selectNewEntries(input.ring, input.baseline);
 
   const byKey = new Map<string, ConsoleProblem>();
   for (const entry of fresh) {
@@ -366,19 +455,72 @@ export function collectNewProblems(input: CollectInput): CollectedProblems {
       count: 1,
       external: location === null,
       seq: entry.seq ?? 0,
+      fromSnapshot: false,
       frames: projectFrames(entry).slice(0, REPAIR_MAX_FRAMES),
     });
   }
 
-  // Enrichment only — see this file's header for why a snapshot-only key is
-  // never adopted as "new this turn".
+  // Ring entries with no location at all — a snapshot row is the only thing
+  // that can give them one, and their full key can never match it.
+  const locationless = new Map<string, ConsoleProblem>();
+  for (const p of byKey.values()) {
+    if (p.location === null && !locationless.has(looseKey(p))) locationless.set(looseKey(p), p);
+  }
+
+  let adoption: SnapshotAdoption =
+    input.snapshotStatus === 'used' ? 'none-matched' : 'not-attempted';
+
   for (const row of input.snapshot ?? []) {
     if (!isRepairableType(row.logType)) continue;
     if (isBridgeChatter(row.message)) continue;
-    const existing = byKey.get(problemKey(row));
-    if (!existing) continue;
-    if (row.count != null && row.count > existing.count) existing.count = row.count;
-    if (existing.frames.length === 0) existing.frames = projectFrames(row).slice(0, REPAIR_MAX_FRAMES);
+
+    const exact = byKey.get(problemKey(row));
+    if (exact) {
+      if (row.count != null && row.count > exact.count) exact.count = row.count;
+      if (exact.frames.length === 0) exact.frames = projectFrames(row).slice(0, REPAIR_MAX_FRAMES);
+      continue;
+    }
+
+    // Enrichment: give a location-less ring entry the snapshot's `file:line`.
+    // This is the only path by which such an entry stops being `external`, so
+    // it is also the only path by which it becomes repairable at all.
+    const loose = locationless.get(looseKey(row));
+    const rowLocation = problemLocation(row);
+    if (loose && rowLocation) {
+      byKey.delete(loose.key);
+      locationless.delete(looseKey(loose));
+      loose.location = rowLocation;
+      loose.external = false;
+      loose.key = `${loose.logType}|${loose.firstLine}|${rowLocation}`;
+      if (loose.frames.length === 0) loose.frames = projectFrames(row).slice(0, REPAIR_MAX_FRAMES);
+      if (row.count != null && row.count > loose.count) loose.count = row.count;
+      byKey.set(loose.key, loose);
+      continue;
+    }
+    if (loose) continue; // Matched, but the snapshot has no project location either.
+
+    // Adoption — the domain-reload gap. Only Unity's own row index can date a
+    // snapshot row, and only against a high-water mark taken at send start.
+    if (input.baseline.maxUnityRow == null) {
+      adoption = 'no-baseline';
+      continue;
+    }
+    if (row.unityRow == null || row.unityRow <= input.baseline.maxUnityRow) continue;
+    const key = problemKey(row);
+    if (byKey.has(key)) continue;
+    byKey.set(key, {
+      key,
+      logType: row.logType,
+      firstLine: firstLine(row.message),
+      location: rowLocation,
+      count: row.count ?? 1,
+      external: rowLocation === null,
+      // No ring seq exists for a row that never streamed here.
+      seq: 0,
+      fromSnapshot: true,
+      frames: projectFrames(row).slice(0, REPAIR_MAX_FRAMES),
+    });
+    adoption = 'adopted';
   }
 
   const all = [...byKey.values()].sort((a, b) => b.seq - a.seq);
@@ -389,6 +531,8 @@ export function collectNewProblems(input: CollectInput): CollectedProblems {
     message: f.message,
   }));
 
+  const reconnected = detectReconnect(input.ring, input.baseline);
+
   return {
     console: all.slice(0, MAX_CONSOLE_ITEMS),
     consoleTotal: all.length,
@@ -396,8 +540,11 @@ export function collectNewProblems(input: CollectInput): CollectedProblems {
     compile: input.compileErrors,
     tests,
     testRun,
-    degraded: degradationOf(input),
+    degraded: degradationOf(input, reconnected),
+    streamOnly:
+      input.bridgeProtocol != null && input.bridgeProtocol < CONSOLE_MIN_PROTOCOL,
     snapshot: input.snapshotStatus,
+    snapshotAdoption: adoption,
   };
 }
 
@@ -443,12 +590,26 @@ export function repairTrigger(problems: CollectedProblems): RepairInfo['trigger'
 // ---- After the repair ----
 
 export interface RepairOutcome {
-  /** Proven gone by fresh evidence — compiler errors, when the new report is clean. */
+  /** Proven gone by fresh evidence — compiler errors, when the new report is CLEAN. */
   fixed: number;
   /** Did not appear again. Absence is not proof; the card says so. */
   notReobserved: number;
-  /** Observed AGAIN after the repair began. */
+  /** Observed AGAIN after the repair began, or never re-checked at all. */
   remaining: number;
+}
+
+export interface RepairEvidence {
+  /** Ring seq at the moment the repair prompt went out. */
+  repairStartSeq: number;
+  /**
+   * Whether the POST-repair verified pass produced a clean compile REPORT.
+   *
+   * Not "no errors came back": a compile that was skipped, timed out, or ran
+   * against a parked editor also has no errors to hand over, and treating that
+   * as a clean report reported every compiler error as fixed on the strength
+   * of a compile that never happened.
+   */
+  secondCompileClean: boolean;
 }
 
 /**
@@ -458,11 +619,15 @@ export interface RepairOutcome {
  * re-entering Play Mode and reproducing the path proves it gone, and the card
  * must not pretend otherwise. `remaining` requires positive evidence — the
  * same key seen again at a ring seq newer than the moment the repair started.
+ *
+ * Compiler errors are the one thing that CAN be proven, because the post-repair
+ * pass compiles again — but only when that compile actually produced a clean
+ * report. Anything else leaves them counted as `remaining`.
  */
 export function diffAfterRepair(
   before: CollectedProblems,
   after: CollectedProblems,
-  repairStartSeq: number,
+  evidence: RepairEvidence,
 ): RepairOutcome {
   const afterByKey = new Map(after.console.map((p) => [p.key, p]));
   let notReobserved = 0;
@@ -470,10 +635,16 @@ export function diffAfterRepair(
   for (const item of before.console) {
     if (item.external) continue;
     const again = afterByKey.get(item.key);
-    if (again && again.seq > repairStartSeq) remaining++;
+    if (again && again.seq > evidence.repairStartSeq) remaining++;
     else notReobserved++;
   }
-  const fixed = before.compile.length > 0 && after.compile.length === 0 ? before.compile.length : 0;
+  // BOTH conditions, deliberately: the fresh pass must have said "clean", and
+  // the re-collection must have found no errors to report. Either one alone is
+  // satisfied by a compile that never ran.
+  const compileProven =
+    before.compile.length > 0 && evidence.secondCompileClean && after.compile.length === 0;
+  const fixed = compileProven ? before.compile.length : 0;
+  if (before.compile.length > 0 && !compileProven) remaining += before.compile.length;
   return { fixed, notReobserved, remaining };
 }
 
@@ -482,10 +653,25 @@ export function diffAfterRepair(
 export function consoleResult(
   before: CollectedProblems,
   outcome: RepairOutcome | null,
+  after: CollectedProblems | null = null,
 ): ConsoleCheckResult {
   // A dropped bridge is the one degradation that overrides everything: with no
   // connection there is no console to read, so nothing here can be a verdict.
   if (before.degraded === 'no-bridge') return { unknown: 'no-bridge' };
+
+  // The repair ran and the read that was supposed to judge it was degraded —
+  // an empty `after` then means "we could not look", not "it is gone". Without
+  // this branch every item fell through to `notReobserved` and the row read as
+  // a successful repair.
+  //
+  // A degradation the FIRST read already had is not a fresh obstacle: both
+  // halves then read the same ring under the same conditions, so the diff
+  // between them is still meaningful and the detail is worth more than the
+  // caveat. Only something that went wrong between the two reads invalidates
+  // the comparison.
+  if (outcome !== null && after !== null && after.degraded !== null && after.degraded !== before.degraded) {
+    return { repairAttempted: true, recheck: after.degraded };
+  }
 
   const nothingToShow =
     before.consoleTotal === 0 &&
@@ -505,11 +691,13 @@ export function consoleResult(
     fixed: outcome?.fixed ?? 0,
     notReobserved: outcome?.notReobserved ?? 0,
     remaining: outcome?.remaining ?? 0,
+    streamOnly: before.streamOnly,
     items: before.console.map((p) => ({
       logType: p.logType,
       firstLine: p.firstLine,
       location: p.location,
       count: p.count,
+      external: p.external,
     })),
   };
 }
@@ -613,18 +801,35 @@ export function consoleRowLabel(result: ConsoleCheckResult): string {
         return 'console (no Unity bridge)';
       case 'editor-asleep':
         return 'console unknown (Unity in background)';
+      case 'reconnected':
+        return 'console unknown (Unity reconnected mid-turn — history may be incomplete)';
       case 'old-package':
         return 'console: stream only (update the bridge package for full history)';
     }
   }
-  if (result.fixed > 0 || result.remaining > 0) {
-    return `console: ${result.fixed} fixed, ${result.remaining} remaining`;
+  if ('repairAttempted' in result) {
+    return `console: repair attempted, re-check unavailable (${RECHECK_REASON[result.recheck]})`;
   }
-  if (result.notReobserved > 0) {
-    return `console: ${result.notReobserved} not seen again (needs Play Mode to confirm)`;
-  }
-  return `console: ${plural(result.newErrors, 'new error')}`;
+  const body =
+    result.fixed > 0 || result.remaining > 0
+      ? `console: ${result.fixed} fixed, ${result.remaining} remaining`
+      : result.notReobserved > 0
+        ? `console: ${result.notReobserved} not seen again (needs Play Mode to confirm)`
+        : `console: ${plural(result.newErrors, 'new error')}`;
+  // The stream-only caveat survives finding problems: what the row cannot say
+  // either way is how many MORE there were before this session started
+  // listening.
+  return result.streamOnly
+    ? `${body} (stream only — update the bridge package for full history)`
+    : body;
 }
+
+const RECHECK_REASON: Record<ConsoleDegradation, string> = {
+  'no-bridge': 'no Unity bridge',
+  'editor-asleep': 'Unity in background',
+  reconnected: 'Unity reconnected mid-turn',
+  'old-package': 'stream only — update the bridge package for full history',
+};
 
 /** The tests row on the Verified card. */
 export function testsRowLabel(result: TestsCheckResult): string {

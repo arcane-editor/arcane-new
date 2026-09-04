@@ -26,8 +26,10 @@ import {
   repairPromptFrames,
   consoleRowLabel,
   testsRowLabel,
+  detectReconnect,
   type CollectInput,
   type CollectedProblems,
+  type ConsoleProblem,
   type ConsoleCheckBaseline,
   type ConsoleEntryInput,
 } from './console-check';
@@ -38,6 +40,7 @@ const BASE: ConsoleCheckBaseline = {
   startedAt: 1_000,
   compileIdentity: null,
   editorAwake: true,
+  maxUnityRow: null,
 };
 
 function entry(overrides: Partial<ConsoleEntryInput> = {}): ConsoleEntryInput {
@@ -54,7 +57,6 @@ function input(overrides: Partial<CollectInput> = {}): CollectInput {
   return {
     baseline: BASE,
     ring: [],
-    epoch: BASE.epoch,
     snapshot: null,
     snapshotStatus: 'not-attempted',
     connected: true,
@@ -75,8 +77,25 @@ function collected(overrides: Partial<CollectedProblems> = {}): CollectedProblem
     tests: [],
     testRun: null,
     degraded: null,
+    streamOnly: false,
     snapshot: 'not-attempted',
+    snapshotAdoption: 'not-attempted',
     ...overrides,
+  };
+}
+
+function problem(over: Partial<ConsoleProblem> = {}): ConsoleProblem {
+  return {
+    key: 'k',
+    logType: 'Exception',
+    firstLine: 'boom',
+    location: 'Assets/A.cs:1',
+    count: 1,
+    external: false,
+    seq: 11,
+    fromSnapshot: false,
+    frames: [],
+    ...over,
   };
 }
 
@@ -102,20 +121,23 @@ describe('selectNewEntries', () => {
     const kept = selectNewEntries(
       [entry({ seq: 9 }), entry({ seq: 10 }), entry({ seq: 11 })],
       BASE,
-      BASE.epoch,
     );
     expect(kept.map((e) => e.seq)).toEqual([11]);
   });
 
-  it('takes everything still in the ring when the console was cleared mid-turn (epoch moved)', () => {
-    // After a clear the ring is emptied, so whatever is in it is post-clear —
-    // and the baseline seq no longer describes anything.
-    const kept = selectNewEntries([entry({ seq: 1 }), entry({ seq: 2 })], BASE, BASE.epoch + 1);
-    expect(kept).toHaveLength(2);
+  // The regression. `backfillConsoleHistory` bumps `consoleEpoch` while
+  // PREPENDING Unity's history to the ring, so "the epoch moved, take
+  // everything" turned every mid-turn reconnect into a repair pass aimed at
+  // hours-old errors. `clearLogs()` leaves `logSeq` alone, so the seq test is
+  // already correct after a real clear.
+  it('never selects an entry at or below the baseline seq, whatever the epoch did', () => {
+    const older = [entry({ seq: 1 }), entry({ seq: 9 }), entry({ seq: 10 })];
+    expect(selectNewEntries(older, BASE)).toHaveLength(0);
+    expect(collectNewProblems(input({ ring: older, snapshotStatus: 'not-attempted' })).consoleTotal).toBe(0);
   });
 
   it('drops entries backfilled from Unity\'s own console history', () => {
-    const kept = selectNewEntries([entry({ seq: 11, historical: true })], BASE, BASE.epoch);
+    const kept = selectNewEntries([entry({ seq: 11, historical: true })], BASE);
     expect(kept).toHaveLength(0);
   });
 
@@ -128,7 +150,6 @@ describe('selectNewEntries', () => {
         entry({ seq: 14, logType: 'Assert' }),
       ],
       BASE,
-      BASE.epoch,
     );
     expect(kept.map((e) => e.logType)).toEqual(['Assert']);
     expect([...CONSOLE_ERROR_TYPES]).toEqual(['Error', 'Assert', 'Exception', 'CompileError']);
@@ -141,7 +162,6 @@ describe('selectNewEntries', () => {
         entry({ seq: 12, message: 'Real problem' }),
       ],
       BASE,
-      BASE.epoch,
     );
     expect(kept.map((e) => e.message)).toEqual(['Real problem']);
   });
@@ -243,7 +263,7 @@ describe('collectNewProblems', () => {
     const out = collectNewProblems(
       input({
         ring: [entry({ seq: 11 })],
-        snapshot: [entry({ seq: null, count: 9 })],
+        snapshot: [entry({ seq: null, unityRow: 500, count: 9 })],
         snapshotStatus: 'used',
       }),
     );
@@ -252,15 +272,112 @@ describe('collectNewProblems', () => {
     expect(out.snapshot).toBe('used');
   });
 
-  it('never adopts a snapshot-only key — a snapshot row carries no proof it is from this turn', () => {
+  // The merge used to be inert: the location is part of the dedup key, so a
+  // ring entry whose trace never parsed could not match its own snapshot twin,
+  // and the snapshot's `file:line` — the only thing that could stop it being
+  // classified `external` — never reached it.
+  it('gives a location-less ring entry the snapshot\'s file:line, so it stops being external', () => {
     const out = collectNewProblems(
       input({
-        ring: [],
-        snapshot: [entry({ seq: null, message: 'An error from an hour ago' })],
+        ring: [entry({ seq: 11, message: 'Boom', stackTrace: 'unparseable garbage' })],
+        snapshot: [
+          entry({
+            seq: null,
+            unityRow: 500,
+            message: 'Boom',
+            stackTrace: '',
+            file: 'Assets/Scripts/Player.cs',
+            line: 42,
+          }),
+        ],
         snapshotStatus: 'used',
       }),
     );
-    expect(out.console).toHaveLength(0);
+    expect(out.console).toHaveLength(1);
+    expect(out.console[0].location).toBe('Assets/Scripts/Player.cs:42');
+    expect(out.console[0].external).toBe(false);
+    expect(out.externalTotal).toBe(0);
+    // And it is now repairable, which it was not before the merge.
+    expect(repairableCount(out)).toBe(1);
+  });
+
+  it('leaves a location-less entry external when the snapshot has no project location either', () => {
+    const out = collectNewProblems(
+      input({
+        ring: [entry({ seq: 11, message: 'Boom', stackTrace: 'garbage' })],
+        snapshot: [
+          entry({
+            seq: null,
+            unityRow: 500,
+            message: 'Boom',
+            stackTrace: '',
+            file: 'Library/PackageCache/x/A.cs',
+            line: 3,
+          }),
+        ],
+        snapshotStatus: 'used',
+      }),
+    );
+    expect(out.consoleTotal).toBe(1);
+    expect(out.console[0].external).toBe(true);
+  });
+
+  // The domain-reload gap: an error thrown while the bridge was down never
+  // streamed, so only Unity's own console has it. Its row index is the only
+  // thing that can date it.
+  it('adopts a snapshot-only row whose Unity row index is past the send-start high-water mark', () => {
+    const out = collectNewProblems(
+      input({
+        baseline: { ...BASE, maxUnityRow: 100 },
+        ring: [],
+        snapshot: [entry({ seq: null, unityRow: 101, message: 'Thrown across the reload' })],
+        snapshotStatus: 'used',
+      }),
+    );
+    expect(out.consoleTotal).toBe(1);
+    expect(out.console[0].firstLine).toBe('Thrown across the reload');
+    expect(out.console[0].fromSnapshot).toBe(true);
+    expect(out.snapshotAdoption).toBe('adopted');
+  });
+
+  it('does not adopt a row at or below the high-water mark — it predates the send', () => {
+    const out = collectNewProblems(
+      input({
+        baseline: { ...BASE, maxUnityRow: 100 },
+        ring: [],
+        snapshot: [
+          entry({ seq: null, unityRow: 100, message: 'Old A' }),
+          entry({ seq: null, unityRow: 4, message: 'Old B' }),
+        ],
+        snapshotStatus: 'used',
+      }),
+    );
+    expect(out.consoleTotal).toBe(0);
+    expect(out.snapshotAdoption).toBe('none-matched');
+  });
+
+  it('adopts nothing at all when there is no high-water mark to compare against', () => {
+    const out = collectNewProblems(
+      input({
+        baseline: { ...BASE, maxUnityRow: null },
+        ring: [],
+        snapshot: [entry({ seq: null, unityRow: 9_999, message: 'An error from an hour ago' })],
+        snapshotStatus: 'used',
+      }),
+    );
+    expect(out.consoleTotal).toBe(0);
+    expect(out.snapshotAdoption).toBe('no-baseline');
+  });
+
+  it('does not adopt a row that carries no Unity row index', () => {
+    const out = collectNewProblems(
+      input({
+        baseline: { ...BASE, maxUnityRow: 100 },
+        ring: [],
+        snapshot: [entry({ seq: null, unityRow: null, message: 'Undateable' })],
+        snapshotStatus: 'used',
+      }),
+    );
     expect(out.consoleTotal).toBe(0);
   });
 
@@ -293,6 +410,42 @@ describe('collectNewProblems', () => {
     expect(collectNewProblems(input({ bridgeProtocol: null })).degraded).toBeNull();
   });
 
+  it('tracks stream-only separately, so the caveat survives a more urgent degradation', () => {
+    expect(collectNewProblems(input({ bridgeProtocol: 3 })).streamOnly).toBe(true);
+    expect(
+      collectNewProblems(input({ bridgeProtocol: 3, connected: false })).degraded,
+    ).toBe('no-bridge');
+    expect(collectNewProblems(input({ bridgeProtocol: 3, connected: false })).streamOnly).toBe(true);
+    expect(collectNewProblems(input({ bridgeProtocol: 4 })).streamOnly).toBe(false);
+  });
+
+  // A historical row past the baseline is the fingerprint of a mid-turn
+  // reconnect: the backfill stamps it and gives it a fresh ring seq. The rows
+  // themselves are still excluded, but their presence means the live stream has
+  // a hole in it and the check must not claim it saw everything.
+  it('reports a mid-turn reconnect, and never calls that console clean', () => {
+    const ring = [entry({ seq: 11, historical: true })];
+    expect(detectReconnect(ring, BASE)).toBe(true);
+    const out = collectNewProblems(input({ ring }));
+    expect(out.consoleTotal).toBe(0);
+    expect(out.degraded).toBe('reconnected');
+    expect(consoleResult(out, null)).toEqual({ unknown: 'reconnected' });
+  });
+
+  it('does not call a pre-baseline historical row a reconnect', () => {
+    expect(detectReconnect([entry({ seq: 9, historical: true })], BASE)).toBe(false);
+    expect(collectNewProblems(input({ ring: [entry({ seq: 9, historical: true })] })).degraded).toBeNull();
+  });
+
+  it('still reports the problems it did find during a reconnect', () => {
+    const out = collectNewProblems(
+      input({ ring: [entry({ seq: 11, historical: true }), entry({ seq: 12 })] }),
+    );
+    expect(out.degraded).toBe('reconnected');
+    expect(out.consoleTotal).toBe(1);
+    expect(consoleResult(out, null)).toMatchObject({ newErrors: 1 });
+  });
+
   it('carries the compile errors and the latest run\'s test failures through', () => {
     const out = collectNewProblems(
       input({
@@ -313,20 +466,7 @@ describe('collectNewProblems', () => {
 
 describe('shouldRepair', () => {
   const opts = { autoRepair: true, aborted: false, connected: true };
-  const withOne = collected({ console: [oneOwn()], consoleTotal: 1 });
-
-  function oneOwn() {
-    return {
-      key: 'k',
-      logType: 'Exception' as const,
-      firstLine: 'boom',
-      location: 'Assets/A.cs:1',
-      count: 1,
-      external: false,
-      seq: 11,
-      frames: [],
-    };
-  }
+  const withOne = collected({ console: [problem()], consoleTotal: 1 });
 
   it('runs once when there is something repairable', () => {
     expect(shouldRepair(withOne, 0, opts)).toBe(true);
@@ -344,7 +484,7 @@ describe('shouldRepair', () => {
 
   it('does not run for external-only problems — they are not this project\'s to fix', () => {
     const external = collected({
-      console: [{ ...oneOwn(), external: true, location: null }],
+      console: [problem({ external: true, location: null })],
       consoleTotal: 1,
       externalTotal: 1,
     });
@@ -365,25 +505,23 @@ describe('shouldRepair', () => {
     expect(shouldRepair(withOne, 0, { ...opts, connected: false })).toBe(false);
   });
 
+  it('may still run on the problems it did find during a reconnect', () => {
+    const reconnected = collected({
+      console: [problem()],
+      consoleTotal: 1,
+      degraded: 'reconnected',
+    });
+    expect(shouldRepair(reconnected, 0, opts)).toBe(true);
+  });
+
   it('grants a bounded call budget to the pass', () => {
     expect(CONSOLE_REPAIR_CALL_GRANT).toBe(6);
   });
 });
 
 describe('repairTrigger', () => {
-  const own = {
-    key: 'k',
-    logType: 'Exception' as const,
-    firstLine: 'boom',
-    location: 'Assets/A.cs:1',
-    count: 1,
-    external: false,
-    seq: 11,
-    frames: [],
-  };
-
   it('names the single category that fired', () => {
-    expect(repairTrigger(collected({ console: [own] }))).toBe('console');
+    expect(repairTrigger(collected({ console: [problem()] }))).toBe('console');
     expect(repairTrigger(collected({ compile: [{ file: 'A', line: 1, message: 'm' }] }))).toBe(
       'compile',
     );
@@ -392,34 +530,30 @@ describe('repairTrigger', () => {
 
   it('is "mixed" when more than one fired, and null when none did', () => {
     expect(
-      repairTrigger(collected({ console: [own], tests: [{ fullName: 't', message: 'm' }] })),
+      repairTrigger(collected({ console: [problem()], tests: [{ fullName: 't', message: 'm' }] })),
     ).toBe('mixed');
     expect(repairTrigger(collected())).toBeNull();
   });
 });
 
 describe('diffAfterRepair', () => {
-  const item = (key: string, seq: number, external = false) => ({
-    key,
-    logType: 'Exception' as const,
-    firstLine: key,
-    location: external ? null : 'Assets/A.cs:1',
-    count: 1,
-    external,
-    seq,
-    frames: [],
-  });
+  const item = (key: string, seq: number, external = false) =>
+    problem({ key, firstLine: key, location: external ? null : 'Assets/A.cs:1', external, seq });
+  const clean = { repairStartSeq: 20, secondCompileClean: true };
 
   it('counts a key that never came back as notReobserved, never as fixed', () => {
     const before = collected({ console: [item('a', 11)], consoleTotal: 1 });
-    const out = diffAfterRepair(before, collected(), 20);
-    expect(out).toEqual({ fixed: 0, notReobserved: 1, remaining: 0 });
+    expect(diffAfterRepair(before, collected(), clean)).toEqual({
+      fixed: 0,
+      notReobserved: 1,
+      remaining: 0,
+    });
   });
 
   it('counts a key seen again AFTER the repair started as remaining', () => {
     const before = collected({ console: [item('a', 11)], consoleTotal: 1 });
     const after = collected({ console: [item('a', 25)], consoleTotal: 1 });
-    expect(diffAfterRepair(before, after, 20)).toEqual({
+    expect(diffAfterRepair(before, after, clean)).toEqual({
       fixed: 0,
       notReobserved: 0,
       remaining: 1,
@@ -430,7 +564,7 @@ describe('diffAfterRepair', () => {
     const before = collected({ console: [item('a', 11)], consoleTotal: 1 });
     // Same entry, still in the ring — its seq is older than the repair start.
     const after = collected({ console: [item('a', 11)], consoleTotal: 1 });
-    expect(diffAfterRepair(before, after, 20)).toEqual({
+    expect(diffAfterRepair(before, after, clean)).toEqual({
       fixed: 0,
       notReobserved: 1,
       remaining: 0,
@@ -439,41 +573,62 @@ describe('diffAfterRepair', () => {
 
   it('ignores external problems entirely — they were never repaired', () => {
     const before = collected({ console: [item('e', 11, true)], consoleTotal: 1, externalTotal: 1 });
-    expect(diffAfterRepair(before, collected(), 20)).toEqual({
+    expect(diffAfterRepair(before, collected(), clean)).toEqual({
       fixed: 0,
       notReobserved: 0,
       remaining: 0,
     });
   });
 
-  it('counts compile errors as fixed only when the FRESH report is clean', () => {
+  it('counts compile errors as fixed only when the fresh report is CLEAN', () => {
     const before = collected({
       compile: [
         { file: 'A.cs', line: 1, message: 'x' },
         { file: 'B.cs', line: 2, message: 'y' },
       ],
     });
-    expect(diffAfterRepair(before, collected(), 20).fixed).toBe(2);
+    expect(diffAfterRepair(before, collected(), clean).fixed).toBe(2);
+    // Errors still in the fresh report: nothing was proven, and they stay counted.
+    const stillBroken = diffAfterRepair(
+      before,
+      collected({ compile: [{ file: 'A.cs', line: 1, message: 'x' }] }),
+      clean,
+    );
+    expect(stillBroken.fixed).toBe(0);
+    expect(stillBroken.remaining).toBe(2);
+  });
+
+  // The regression. A second compile that was SKIPPED (no bridge, budget
+  // exhausted, editor asleep) reports no errors for the same reason a clean one
+  // does — and every compiler error was being called fixed on the strength of a
+  // compile that never ran.
+  it('never calls a compiler error fixed when the second compile did not produce a clean report', () => {
+    const before = collected({ compile: [{ file: 'A.cs', line: 1, message: 'x' }] });
+    const out = diffAfterRepair(before, collected(), {
+      repairStartSeq: 20,
+      secondCompileClean: false,
+    });
+    expect(out.fixed).toBe(0);
+    expect(out.remaining).toBe(1);
+  });
+
+  it('adds unproven compiler errors to remaining alongside re-observed console errors', () => {
+    const before = collected({
+      console: [item('a', 11)],
+      consoleTotal: 1,
+      compile: [{ file: 'A.cs', line: 1, message: 'x' }],
+    });
+    const after = collected({ console: [item('a', 25)], consoleTotal: 1 });
     expect(
-      diffAfterRepair(before, collected({ compile: [{ file: 'A.cs', line: 1, message: 'x' }] }), 20)
-        .fixed,
-    ).toBe(0);
+      diffAfterRepair(before, after, { repairStartSeq: 20, secondCompileClean: false }),
+    ).toEqual({ fixed: 0, notReobserved: 0, remaining: 2 });
   });
 });
 
 describe('consoleResult', () => {
-  const item = {
-    key: 'a',
-    logType: 'Exception' as const,
-    firstLine: 'boom',
-    location: 'Assets/A.cs:1',
-    count: 2,
-    external: false,
-    seq: 11,
-    frames: [],
-  };
+  const item = problem({ key: 'a', count: 2 });
 
-  it('is "clean" only when the read was complete and found nothing', () => {
+  it('is "clean" only for a complete, empty read', () => {
     expect(consoleResult(collected(), null)).toBe('clean');
   });
 
@@ -483,6 +638,9 @@ describe('consoleResult', () => {
     });
     expect(consoleResult(collected({ degraded: 'old-package' }), null)).toEqual({
       unknown: 'old-package',
+    });
+    expect(consoleResult(collected({ degraded: 'reconnected' }), null)).toEqual({
+      unknown: 'reconnected',
     });
   });
 
@@ -494,30 +652,87 @@ describe('consoleResult', () => {
   });
 
   it('reports the problems it found, with the items it carries', () => {
-    const result = consoleResult(collected({ console: [item], consoleTotal: 1 }), null);
-    expect(result).toEqual({
+    expect(consoleResult(collected({ console: [item], consoleTotal: 1 }), null)).toEqual({
       newErrors: 1,
       external: 0,
       repaired: false,
       fixed: 0,
       notReobserved: 0,
       remaining: 0,
-      items: [{ logType: 'Exception', firstLine: 'boom', location: 'Assets/A.cs:1', count: 2 }],
+      streamOnly: false,
+      items: [
+        {
+          logType: 'Exception',
+          firstLine: 'boom',
+          location: 'Assets/A.cs:1',
+          count: 2,
+          external: false,
+        },
+      ],
     });
   });
 
   it('folds the repair outcome in and marks the result as repaired', () => {
-    const result = consoleResult(collected({ console: [item], consoleTotal: 1 }), {
-      fixed: 2,
-      notReobserved: 0,
-      remaining: 1,
-    });
+    const result = consoleResult(
+      collected({ console: [item], consoleTotal: 1 }),
+      { fixed: 2, notReobserved: 0, remaining: 1 },
+      collected(),
+    );
     expect(result).toMatchObject({ repaired: true, fixed: 2, remaining: 1 });
   });
 
   it('still reports a compile-only repair even though no console entry appeared', () => {
-    const result = consoleResult(collected(), { fixed: 3, notReobserved: 0, remaining: 0 });
+    const result = consoleResult(
+      collected(),
+      { fixed: 3, notReobserved: 0, remaining: 0 },
+      collected(),
+    );
     expect(result).toMatchObject({ newErrors: 0, repaired: true, fixed: 3 });
+  });
+
+  // The regression. An empty post-repair read means "we could not look", not
+  // "it is gone" — and every item was falling through to notReobserved, which
+  // rendered a degraded second read as a successful repair.
+  it('never proves a repair off a DEGRADED re-read', () => {
+    const before = collected({ console: [item], consoleTotal: 1 });
+    for (const recheck of ['no-bridge', 'editor-asleep', 'reconnected', 'old-package'] as const) {
+      expect(
+        consoleResult(
+          before,
+          { fixed: 0, notReobserved: 1, remaining: 0 },
+          collected({ degraded: recheck }),
+        ),
+      ).toEqual({ repairAttempted: true, recheck });
+    }
+  });
+
+  it('still reports the diff when the SAME degradation was already there before the repair', () => {
+    // Both halves read the same ring under the same conditions, so the
+    // comparison between them still means something; only a NEW obstacle
+    // invalidates it.
+    expect(
+      consoleResult(
+        collected({ console: [item], consoleTotal: 1, degraded: 'reconnected' }),
+        { fixed: 0, notReobserved: 1, remaining: 0 },
+        collected({ degraded: 'reconnected' }),
+      ),
+    ).toMatchObject({ repaired: true, notReobserved: 1 });
+  });
+
+  it('reports a normal outcome when the re-read itself was fine', () => {
+    expect(
+      consoleResult(
+        collected({ console: [item], consoleTotal: 1 }),
+        { fixed: 0, notReobserved: 1, remaining: 0 },
+        collected({ degraded: null }),
+      ),
+    ).toMatchObject({ repaired: true, notReobserved: 1 });
+  });
+
+  it('carries the stream-only flag through so the row can keep saying so', () => {
+    expect(
+      consoleResult(collected({ console: [item], consoleTotal: 1, streamOnly: true }), null),
+    ).toMatchObject({ streamOnly: true });
   });
 });
 
@@ -540,20 +755,14 @@ describe('testsResult', () => {
 });
 
 describe('the repair prompt inputs', () => {
-  const own = {
+  const own = problem({
     key: 'a',
-    logType: 'Exception' as const,
-    firstLine: 'boom',
-    location: 'Assets/A.cs:1',
-    count: 1,
-    external: false,
-    seq: 11,
     frames: [
       { className: 'A', methodName: 'M', filePath: 'Assets/A.cs', lineNumber: 1 },
       { className: 'A', methodName: 'N', filePath: 'Assets/B.cs', lineNumber: 2 },
     ],
-  };
-  const external = { ...own, key: 'e', external: true, location: null, frames: [] };
+  });
+  const external = problem({ key: 'e', external: true, location: null });
 
   it('lists every problem, external ones included, so the model can see the whole picture', () => {
     const problems = repairPromptProblems(collected({ console: [own, external] }));
@@ -568,22 +777,13 @@ describe('the repair prompt inputs', () => {
 });
 
 describe('the system notices', () => {
-  const own = {
-    key: 'a',
-    logType: 'Exception' as const,
-    firstLine: 'boom',
-    location: 'Assets/A.cs:1',
-    count: 1,
-    external: false,
-    seq: 11,
-    frames: [],
-  };
+  const own = problem({ key: 'a' });
 
   it('names console errors and failed tests as things that appeared during the turn', () => {
     expect(
       repairNotice(
         collected({
-          console: [own, { ...own, key: 'b' }],
+          console: [own, problem({ key: 'b' })],
           consoleTotal: 2,
           tests: [{ fullName: 't', message: 'm' }],
         }),
@@ -626,7 +826,7 @@ describe('the system notices', () => {
 
   it('has a distinct notice for the case where nothing is this project\'s to fix', () => {
     const externalOnly = collected({
-      console: [{ ...own, external: true, location: null }],
+      console: [problem({ external: true, location: null })],
       consoleTotal: 1,
       externalTotal: 1,
     });
@@ -640,7 +840,7 @@ describe('the system notices', () => {
     expect(
       isExternalOnly(
         collected({
-          console: [{ ...own, external: true, location: null }],
+          console: [problem({ external: true, location: null })],
           consoleTotal: 1,
           externalTotal: 1,
           compile: [{ file: 'A', line: 1, message: 'x' }],
@@ -660,6 +860,7 @@ describe('the card rows', () => {
       fixed: number;
       notReobserved: number;
       remaining: number;
+      streamOnly: boolean;
     }> = {},
   ) => ({
     newErrors: 1,
@@ -668,6 +869,7 @@ describe('the card rows', () => {
     fixed: 0,
     notReobserved: 0,
     remaining: 0,
+    streamOnly: false,
     items: [],
     ...over,
   });
@@ -680,6 +882,9 @@ describe('the card rows', () => {
     expect(consoleRowLabel({ unknown: 'no-bridge' })).toBe('console (no Unity bridge)');
     expect(consoleRowLabel({ unknown: 'editor-asleep' })).toBe(
       'console unknown (Unity in background)',
+    );
+    expect(consoleRowLabel({ unknown: 'reconnected' })).toBe(
+      'console unknown (Unity reconnected mid-turn — history may be incomplete)',
     );
     expect(consoleRowLabel({ unknown: 'old-package' })).toBe(
       'console: stream only (update the bridge package for full history)',
@@ -701,6 +906,32 @@ describe('the card rows', () => {
     expect(consoleRowLabel(result({ newErrors: 1, repaired: true, notReobserved: 1 }))).toBe(
       'console: 1 not seen again (needs Play Mode to confirm)',
     );
+  });
+
+  it('says plainly that a repair was attempted but could not be re-checked', () => {
+    expect(consoleRowLabel({ repairAttempted: true, recheck: 'editor-asleep' })).toBe(
+      'console: repair attempted, re-check unavailable (Unity in background)',
+    );
+    expect(consoleRowLabel({ repairAttempted: true, recheck: 'no-bridge' })).toBe(
+      'console: repair attempted, re-check unavailable (no Unity bridge)',
+    );
+    expect(consoleRowLabel({ repairAttempted: true, recheck: 'reconnected' })).toBe(
+      'console: repair attempted, re-check unavailable (Unity reconnected mid-turn)',
+    );
+    expect(consoleRowLabel({ repairAttempted: true, recheck: 'old-package' })).toBe(
+      'console: repair attempted, re-check unavailable (stream only — update the bridge package for full history)',
+    );
+  });
+
+  // The caveat is not only about finding nothing: it is that nobody knows how
+  // much MORE there was before this session started listening.
+  it('keeps the stream-only caveat visible even when problems were found', () => {
+    expect(consoleRowLabel(result({ newErrors: 2, streamOnly: true }))).toBe(
+      'console: 2 new errors (stream only — update the bridge package for full history)',
+    );
+    expect(
+      consoleRowLabel(result({ newErrors: 2, repaired: true, fixed: 1, remaining: 1, streamOnly: true })),
+    ).toBe('console: 1 fixed, 1 remaining (stream only — update the bridge package for full history)');
   });
 
   it('reads the test counts off the latest run', () => {

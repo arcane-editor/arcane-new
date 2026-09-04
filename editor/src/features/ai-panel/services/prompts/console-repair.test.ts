@@ -75,12 +75,32 @@ describe('buildRegions', () => {
     expect(regions[0]).toContain('Assets/A.cs');
   });
 
-  it('collapses duplicate path:line pairs so the same lines are never embedded twice', async () => {
-    const regions = await buildRegions(
-      [frame('Assets/A.cs', 3), frame('Assets/A.cs', 3), frame('Assets/A.cs', 9)],
-      deps(),
+  it('collapses duplicate path:line pairs only when asked to', async () => {
+    const frames = [frame('Assets/A.cs', 3), frame('Assets/A.cs', 3), frame('Assets/A.cs', 9)];
+    expect(await buildRegions(frames, deps(), { dedupe: true })).toHaveLength(2);
+    // Off by default — the one-click fix prompt emitted one region per frame
+    // before this module existed (a recursive trace repeats a frame), and that
+    // prompt is byte-pinned.
+    expect(await buildRegions(frames, deps())).toHaveLength(3);
+  });
+});
+
+// Same guarantee at the prompt level: a recursive stack trace produced two
+// identical regions before the extraction, and still must.
+describe('buildFixPrompt — duplicate frames', () => {
+  it('emits one region per in-project frame, repeats included', async () => {
+    const text = await buildFixPrompt(
+      {
+        logType: 'Error',
+        message: 'Stack overflow',
+        stackTrace: [
+          'A.Recurse () (at Assets/A.cs:2)',
+          'A.Recurse () (at Assets/A.cs:2)',
+        ].join('\n'),
+      },
+      { readFile: async () => 'a\nb\nc', workspacePath: '/proj' },
     );
-    expect(regions).toHaveLength(2);
+    expect(text.split('<region ').length - 1).toBe(2);
   });
 });
 
