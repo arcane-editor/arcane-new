@@ -187,12 +187,14 @@ describe('unity_ui_write — .meta creation', () => {
     expect(out).toContain('and HUD.uss.meta.');
   });
 
-  it('does not recreate a .meta that already exists, and registers no pending guid check for it', async () => {
+  it('does not recreate a .meta that already exists, and registers no pending guid check when the ASSET already existed too', async () => {
     const { deps, written, notified, existsSet, files } = harness();
-    const metaAbs = `${WS}/Assets/UI/HUD.uss.meta`;
+    const assetAbs = `${WS}/Assets/UI/HUD.uss`;
+    const metaAbs = `${assetAbs}.meta`;
     const existingGuid = 'c'.repeat(32);
     files.set(metaAbs, `fileFormatVersion: 2\nguid: ${existingGuid}\n`);
     existsSet.add(metaAbs);
+    existsSet.add(assetAbs); // rewriting content on an asset Unity already imported
 
     const out = await run({ path: 'Assets/UI/HUD.uss', content: SIMPLE_USS }, deps);
 
@@ -200,8 +202,24 @@ describe('unity_ui_write — .meta creation', () => {
     expect(notified).toEqual(['Assets/UI/HUD.uss']);
     expect(out).toContain(`(guid ${existingGuid})`);
     expect(out).not.toContain('and HUD.uss.meta.');
-    // An existing .meta's guid is already Unity-confirmed — nothing pending.
+    // Both the asset and its .meta pre-existed — this guid is already
+    // Unity-confirmed, nothing pending.
     expect(takePendingGuidChecks()).toEqual([]);
+  });
+
+  it('registers a pending guid check for an orphan .meta whose asset did not exist yet — a first import from Unity\'s point of view (M1)', async () => {
+    const { deps, existsSet, files } = harness();
+    const metaAbs = `${WS}/Assets/UI/HUD.uss.meta`;
+    const orphanGuid = 'e'.repeat(32);
+    files.set(metaAbs, `fileFormatVersion: 2\nguid: ${orphanGuid}\n`);
+    existsSet.add(metaAbs);
+    // The asset path itself is deliberately NOT pre-seeded — it does not
+    // exist until this write.
+
+    const out = await run({ path: 'Assets/UI/HUD.uss', content: SIMPLE_USS }, deps);
+
+    expect(out).toContain(`(guid ${orphanGuid})`);
+    expect(takePendingGuidChecks()).toEqual([{ path: 'Assets/UI/HUD.uss', guid: orphanGuid }]);
   });
 
   it('registers a freshly allocated guid as pending, for Task 15 to verify once Unity imports it', async () => {
@@ -242,5 +260,58 @@ describe('unity_ui_write — .meta creation', () => {
     const out = await run({ path: 'Assets/UI/HUD.uss', content: SIMPLE_USS }, deps);
     expect(out).toContain('GUID is unknown');
     expect(out).toContain('<Style src="Assets/UI/HUD.uss" />');
+  });
+});
+
+describe('unity_ui_write — degraded guid-index lookup (F2)', () => {
+  it('still writes, still allocates and registers a guid, and notes the degraded collision check', async () => {
+    const { deps, written } = harness({
+      guidMap: async () => {
+        throw new Error('unity_index_guid_map unavailable');
+      },
+    });
+
+    const out = await run({ path: 'Assets/UI/HUD.uss', content: SIMPLE_USS }, deps);
+
+    const metaAbs = `${WS}/Assets/UI/HUD.uss.meta`;
+    expect(written.find((w) => w.path === metaAbs)).toBeDefined();
+    expect(out).toContain(
+      'Note: the project GUID index was unavailable, so this GUID was checked only against files written this send.',
+    );
+    // Still registered — this IS the check that would catch a collision the
+    // degraded lookup here could not.
+    expect(takePendingGuidChecks()).toHaveLength(1);
+  });
+
+  it('does not append the degraded-index note when the guid map lookup succeeds', async () => {
+    const { deps } = harness();
+    const out = await run({ path: 'Assets/UI/HUD.uss', content: SIMPLE_USS }, deps);
+    expect(out).not.toContain('GUID index was unavailable');
+  });
+});
+
+describe('unity_ui_write — undetermined UI stack (M2)', () => {
+  it('proceeds (never refuses) and notes that the stack could not be determined, when stack() resolves null', async () => {
+    const { deps, written } = harness({ stack: async () => null });
+    const out = await run({ path: 'Assets/UI/HUD.uxml', content: SIMPLE_UXML }, deps);
+    expect(out).not.toContain('uGUI (Canvas)');
+    expect(written.map((w) => w.path)).toContain(`${WS}/Assets/UI/HUD.uxml`);
+    expect(out).toContain("Note: the project's UI stack could not be determined before writing.");
+  });
+
+  it('proceeds and notes it the same way when stack() itself throws', async () => {
+    const { deps } = harness({
+      stack: async () => {
+        throw new Error('unity-facts unavailable');
+      },
+    });
+    const out = await run({ path: 'Assets/UI/HUD.uxml', content: SIMPLE_UXML }, deps);
+    expect(out).toContain("Note: the project's UI stack could not be determined before writing.");
+  });
+
+  it('does not append the undetermined-stack note once the stack is actually known', async () => {
+    const { deps } = harness({ stack: async () => 'none' });
+    const out = await run({ path: 'Assets/UI/HUD.uxml', content: SIMPLE_UXML }, deps);
+    expect(out).not.toContain('UI stack could not be determined');
   });
 });

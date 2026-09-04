@@ -34,6 +34,7 @@ import {
   type InputSystemMode,
 } from '../../../../utils/input-system';
 import { detectUiStack, type UiStack } from '../unity-tools/ui-stack';
+import { readUiStackSignals } from '../unity-tools/ui-stack-scan';
 
 type RenderPipeline = 'URP' | 'HDRP' | 'Built-in';
 
@@ -62,7 +63,14 @@ interface UnityFacts {
 }
 
 let cache: UnityFacts | null = null;
-let priming: string | null = null; // workspacePath currently being primed
+// The in-flight prime, shared by every caller for the same workspace — not
+// just a "don't kick off twice" flag. `ensureUnityUiStack` (fix round 1, M2)
+// needs a SECOND caller's `await primeUnityFacts(...)` to actually wait for
+// a prime a FIRST caller's `void primeUnityFacts(...)` already started
+// (e.g. `getUnityFactsBlock`'s own warm-for-next-turn call, moments before
+// the model's first tool call of the turn) — a bare re-entrancy flag with no
+// shared promise would let the second call return immediately, still cold.
+let inFlight: { workspacePath: string; promise: Promise<void> } | null = null;
 
 // Packages worth surfacing to the agent (drives API/idiom choices).
 const KEY_PACKAGES = [
@@ -85,91 +93,104 @@ function detectRenderPipeline(deps: Record<string, string>): RenderPipeline {
   return 'Built-in';
 }
 
-/** Populate the facts cache for a workspace (idempotent, best-effort). */
-export async function primeUnityFacts(workspacePath: string): Promise<void> {
-  if (!workspacePath || priming === workspacePath) return;
-  if (cache?.workspacePath === workspacePath) return;
-  priming = workspacePath;
+/**
+ * Populate the facts cache for a workspace (idempotent, best-effort).
+ *
+ * Concurrent calls for the SAME workspace share one in-flight promise rather
+ * than racing: a caller that only fires this to warm the cache for later
+ * (`void primeUnityFacts(...)`, throughout this file) and a caller that
+ * needs the result NOW (`ensureUnityUiStack`) can both call this and both
+ * get the one real prime's completion.
+ */
+export function primeUnityFacts(workspacePath: string): Promise<void> {
+  if (!workspacePath) return Promise.resolve();
+  if (cache?.workspacePath === workspacePath) return Promise.resolve();
+  if (inFlight?.workspacePath === workspacePath) return inFlight.promise;
+
+  const promise = runPrime(workspacePath).finally(() => {
+    if (inFlight?.workspacePath === workspacePath) inFlight = null;
+  });
+  inFlight = { workspacePath, promise };
+  return promise;
+}
+
+async function runPrime(workspacePath: string): Promise<void> {
+  let deps: Record<string, string> = {};
   try {
-    let deps: Record<string, string> = {};
-    try {
-      const manifest = await invoke<string>('read_file', {
-        path: `${workspacePath}/Packages/manifest.json`,
-      });
-      deps = (JSON.parse(manifest).dependencies as Record<string, string>) ?? {};
-    } catch {
-      /* no manifest — leave deps empty */
-    }
-
-    let projectSettings: string | null = null;
-    try {
-      projectSettings = await invoke<string>('read_file', {
-        path: `${workspacePath}/ProjectSettings/ProjectSettings.asset`,
-      });
-    } catch {
-      /* ignore */
-    }
-
-    let unityRules: string | null = null;
-    try {
-      unityRules = await invoke<string>('read_file', {
-        path: `${workspacePath}/.ai/unity-rules.md`,
-      });
-    } catch {
-      /* none — that's fine */
-    }
-
-    const keyPackages = KEY_PACKAGES.filter((p) => deps[p]).map((name) => ({
-      name,
-      version: deps[name],
-    }));
-
-    const inputSystem = detectInputSystem(projectSettings, !!deps['com.unity.inputsystem']);
-
-    // All four snapshots in parallel: each is a bounded read the app performs
-    // anyway, and priming is off the critical path (the first turn falls back
-    // to the version-only block if it is not warm yet).
-    const [inputActions, so, ui, uiStackSignals] = await Promise.all([
-      readInputActionsFacts(workspacePath, inputSystem),
-      readScriptableObjectFacts(workspacePath),
-      readUiToolkitFacts(workspacePath),
-      readUiStackSignals(workspacePath),
-    ]);
-    const scriptableObjects = so?.facts ?? null;
-    const soAssetCount = so?.assetCount ?? 0;
-    const uiToolkit = ui?.facts ?? null;
-    const ussCount = ui?.stylesheetCount ?? 0;
-    const uiStack = detectUiStack({
-      uxmlCount: ui?.facts.documents.length ?? 0,
-      panelSettingsCount: uiStackSignals.panelSettingsCount,
-      canvasScenes: uiStackSignals.canvasScenes,
+    const manifest = await invoke<string>('read_file', {
+      path: `${workspacePath}/Packages/manifest.json`,
     });
-
-    cache = {
-      workspacePath,
-      renderPipeline: detectRenderPipeline(deps),
-      inputSystem,
-      keyPackages,
-      unityRules,
-      inputActions,
-      scriptableObjects,
-      uiToolkit,
-      uiStack,
-      inventory: {
-        scriptableObjects: scriptableObjects
-          ? { types: scriptableObjects.typeNames.length, assets: soAssetCount }
-          : null,
-        uiToolkit: uiToolkit
-          ? { documents: uiToolkit.documents.length, stylesheets: ussCount }
-          : null,
-        input: inputActions
-          ? { assets: inputActions.assetPaths.length, maps: inputActions.maps.length }
-          : null,
-      },
-    };
-  } finally {
-    priming = null;
+    deps = (JSON.parse(manifest).dependencies as Record<string, string>) ?? {};
+  } catch {
+    /* no manifest — leave deps empty */
   }
+
+  let projectSettings: string | null = null;
+  try {
+    projectSettings = await invoke<string>('read_file', {
+      path: `${workspacePath}/ProjectSettings/ProjectSettings.asset`,
+    });
+  } catch {
+    /* ignore */
+  }
+
+  let unityRules: string | null = null;
+  try {
+    unityRules = await invoke<string>('read_file', {
+      path: `${workspacePath}/.ai/unity-rules.md`,
+    });
+  } catch {
+    /* none — that's fine */
+  }
+
+  const keyPackages = KEY_PACKAGES.filter((p) => deps[p]).map((name) => ({
+    name,
+    version: deps[name],
+  }));
+
+  const inputSystem = detectInputSystem(projectSettings, !!deps['com.unity.inputsystem']);
+
+  // All four snapshots in parallel: each is a bounded read the app performs
+  // anyway, and priming is off the critical path (the first turn falls back
+  // to the version-only block if it is not warm yet).
+  const [inputActions, so, ui, uiStackSignals] = await Promise.all([
+    readInputActionsFacts(workspacePath, inputSystem),
+    readScriptableObjectFacts(workspacePath),
+    readUiToolkitFacts(workspacePath),
+    readUiStackSignals(workspacePath),
+  ]);
+  const scriptableObjects = so?.facts ?? null;
+  const soAssetCount = so?.assetCount ?? 0;
+  const uiToolkit = ui?.facts ?? null;
+  const ussCount = ui?.stylesheetCount ?? 0;
+  const uiStack = detectUiStack({
+    uxmlCount: ui?.facts.documents.length ?? 0,
+    panelSettingsCount: uiStackSignals.panelSettingsCount,
+    canvasScenes: uiStackSignals.canvasScenes,
+  });
+
+  cache = {
+    workspacePath,
+    renderPipeline: detectRenderPipeline(deps),
+    inputSystem,
+    keyPackages,
+    unityRules,
+    inputActions,
+    scriptableObjects,
+    uiToolkit,
+    uiStack,
+    inventory: {
+      scriptableObjects: scriptableObjects
+        ? { types: scriptableObjects.typeNames.length, assets: soAssetCount }
+        : null,
+      uiToolkit: uiToolkit
+        ? { documents: uiToolkit.documents.length, stylesheets: ussCount }
+        : null,
+      input: inputActions
+        ? { assets: inputActions.assetPaths.length, maps: inputActions.maps.length }
+        : null,
+    },
+  };
 }
 
 /**
@@ -281,80 +302,54 @@ async function readUiToolkitFacts(
   }
 }
 
-/** Excludes shared with `panel-resolve.ts`'s project-wide scan — the same folders never carry source assets. */
-const UI_STACK_SCAN_EXCLUDES = ['Library/**', 'Temp/**', 'obj/**', 'Logs/**', 'Build/**', 'Builds/**'];
-const UI_STACK_READ_CHUNK = 200;
-/** `canvasScenes`' own size guard — see `ui-stack.ts`'s `UiStackSignals.canvasScenes`. */
-const UI_STACK_MAX_BYTES = 2 * 1024 * 1024;
-
-function byteLength(s: string): number {
-  return new TextEncoder().encode(s).length;
-}
-
-/**
- * The two signals `readUiToolkitFacts` cannot supply: how many `PanelSettings`
- * assets the project has (UI Toolkit's render target — a signal even before
- * any `.uxml` exists), and how many scenes/prefabs place a Canvas (uGUI's).
- * A project-wide read, same shape as `panel-resolve.ts`'s (chunked
- * `read_files_bulk`, same excludes) — that module reads per-document, on
- * demand; this one runs once per workspace, alongside everything else here.
- * Failure degrades to "neither stack detected" (0/0), never a thrown prime.
- */
-async function readUiStackSignals(
-  workspacePath: string,
-): Promise<{ panelSettingsCount: number; canvasScenes: number }> {
-  try {
-    const paths = await invoke<string[]>('scan_all_files_v2', {
-      workspacePath,
-      extraExcludes: UI_STACK_SCAN_EXCLUDES,
-    });
-
-    const readChunked = async (
-      list: string[],
-    ): Promise<Array<{ path: string; content: string }>> => {
-      const out: Array<{ path: string; content: string }> = [];
-      for (let i = 0; i < list.length; i += UI_STACK_READ_CHUNK) {
-        try {
-          out.push(
-            ...(await invoke<Array<{ path: string; content: string }>>('read_files_bulk', {
-              paths: list.slice(i, i + UI_STACK_READ_CHUNK),
-            })),
-          );
-        } catch {
-          // A chunk that fails to read narrows the answer; it does not break it.
-        }
-      }
-      return out;
-    };
-
-    const assets = await readChunked(paths.filter((p) => p.endsWith('.asset')));
-    const panelSettingsCount = assets.filter((a) =>
-      a.content.includes('UnityEngine.UIElements.PanelSettings'),
-    ).length;
-
-    const scenes = await readChunked(
-      paths.filter((p) => p.endsWith('.unity') || p.endsWith('.prefab')),
-    );
-    const canvasScenes = scenes.filter(
-      (s) => byteLength(s.content) <= UI_STACK_MAX_BYTES && s.content.includes('--- !u!223'),
-    ).length;
-
-    return { panelSettingsCount, canvasScenes };
-  } catch {
-    return { panelSettingsCount: 0, canvasScenes: 0 };
-  }
-}
+// The `.uxml`-independent UI-stack signals (`PanelSettings`/Canvas counts) are
+// gathered by `ui-stack-scan.ts` — moved there (fix round 1, F1) so the
+// `.unity`/`.prefab` size cap can bound the WORK (stat first, read only what's
+// under the cap) rather than being applied to `content.length` after every
+// file was already read in full. That split also makes the scan directly
+// Bun-testable, which this file (statically importing `stores/workspace.ts`)
+// is not.
 
 /**
  * Which UI stack the project uses, or `null` when the facts cache is cold for
- * this workspace. Kicks off a prime in that case (like `getUnityGroundingContext`)
- * so the next call is warm; the caller (`unity_ui_write`'s default deps) treats
- * `null` as `'none'`, the value that never triggers the uGUI refusal.
+ * this workspace. Synchronous (like `getUnityGroundingContext`) so the
+ * synchronous prompt builder can call it — kicks off a background prime when
+ * cold, for the NEXT call. A caller that can afford to wait for THIS call
+ * (`unity_ui_write`'s default `stack` dep) should use `ensureUnityUiStack`
+ * instead — treating a cold `null` here as `'none'` would silently let a
+ * write through a uGUI-project refusal it only missed because it ran first.
  */
 export function getUnityUiStack(workspacePath: string): UiStack | null {
   const facts = cache?.workspacePath === workspacePath ? cache : null;
   if (!facts && workspacePath) void primeUnityFacts(workspacePath);
   return facts?.uiStack ?? null;
+}
+
+/** `ensureUnityUiStack`'s wait budget — see its own doc comment. */
+const ENSURE_UI_STACK_TIMEOUT_MS = 5000;
+
+/**
+ * Like `getUnityUiStack`, but for a caller that can afford to actually WAIT
+ * for a cold cache to warm rather than treating "not primed yet" the same as
+ * "primed and found nothing" (fix round 1, M2 — a `unity_ui_write` call is
+ * often the very first thing to touch this workspace's facts, so `null` here
+ * is common, not an edge case).
+ *
+ * Bounded: a prime this slow (or genuinely hung — a stalled Tauri IPC round
+ * trip) must not hang the write tool call indefinitely. On timeout, the
+ * prime is left running in the background (still useful for the NEXT call)
+ * and this resolves `null`, same as a cold `getUnityUiStack` — the caller's
+ * job, not this function's, to say honestly that the stack could not be
+ * determined in time.
+ */
+export async function ensureUnityUiStack(workspacePath: string): Promise<UiStack | null> {
+  if (cache?.workspacePath === workspacePath) return cache.uiStack;
+  if (!workspacePath) return null;
+  await Promise.race([
+    primeUnityFacts(workspacePath),
+    new Promise<void>((resolve) => setTimeout(resolve, ENSURE_UI_STACK_TIMEOUT_MS)),
+  ]);
+  return cache?.workspacePath === workspacePath ? cache.uiStack : null;
 }
 
 /**

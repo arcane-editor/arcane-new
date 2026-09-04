@@ -26,6 +26,19 @@
  * `withCheckpoint`/`withWriteApproval` cover it with no special case, and the
  * cs-gates are correctly never applied to it (it never touches `.cs`, and its
  * own validation already covers what the asset gate would re-check).
+ *
+ * Two degradation cases are surfaced honestly rather than silently absorbed
+ * (Global Constraint 2 — no degraded path reads as success), both from
+ * review round 1:
+ *   - The uGUI-stack check needs `unity-facts.ts`'s cache warm to mean
+ *     anything; a cold/undetermined stack proceeds (never a false refusal)
+ *     but says so in the result, after `stack()`'s default dep actually
+ *     waits (bounded) for a prime rather than treating cold the same as
+ *     "checked, and it's none" (M2).
+ *   - A guid-index lookup failure still writes (checked only against this
+ *     send's own allocations) and still registers for Task 15's post-import
+ *     verification — exactly the check that would catch a collision this
+ *     pass could not — but says the check was degraded (F2).
  */
 
 import { invoke } from '@tauri-apps/api/core';
@@ -86,8 +99,13 @@ export interface UiWriteToolDeps {
   guidMap: (workspacePath: string) => Promise<Record<string, string>>;
   /** The `checkUxml` context (declared classes, C# refs, .uss paths) — same construction `asset-gate.ts` uses. */
   snapshot: (workspacePath: string) => Promise<UxmlCheckContext>;
-  /** Which UI stack the project uses (`unity-facts.ts`'s cached `UnityFacts.uiStack`). */
-  stack: (workspacePath: string) => Promise<UiStack>;
+  /**
+   * Which UI stack the project uses (`unity-facts.ts`'s cached
+   * `UnityFacts.uiStack`). `null` means genuinely undetermined — not primed
+   * yet and a bounded wait for it did not land in time — which `execute()`
+   * treats as "proceed, but say so" (fix round 1, M2), never as `'none'`.
+   */
+  stack: (workspacePath: string) => Promise<UiStack | null>;
 }
 
 export const defaultUiWriteDeps: UiWriteToolDeps = {
@@ -108,8 +126,12 @@ export const defaultUiWriteDeps: UiWriteToolDeps = {
     return uxmlContext(workspacePath);
   },
   async stack(workspacePath) {
-    const { getUnityUiStack } = await import('../prompts/unity-facts');
-    return getUnityUiStack(workspacePath) ?? 'none';
+    // `ensureUnityUiStack`, not the synchronous `getUnityUiStack`: this call
+    // can afford to wait (bounded) for a cold cache to warm, so it should —
+    // see `UiWriteToolDeps.stack`'s doc comment for why treating cold the
+    // same as "checked, and it's none" would be wrong here specifically.
+    const { ensureUnityUiStack } = await import('../prompts/unity-facts');
+    return ensureUnityUiStack(workspacePath);
   },
   recordPreWrite(absPath, beforeContent) {
     useCheckpointsStore.getState().recordPreWrite(absPath, beforeContent);
@@ -196,7 +218,12 @@ export function createUnityUiWriteTool(
         );
       }
 
-      const stack = await deps.stack(workspacePath).catch(() => 'none' as UiStack);
+      const stackResult = await deps.stack(workspacePath).catch(() => null);
+      // `null` (undetermined, even after a bounded wait) proceeds like
+      // `'none'` — never refuses on a fact it does not actually have — but,
+      // unlike a genuine `'none'`, says so in the result (fix round 1, M2).
+      const stackUnknown = stackResult === null;
+      const stack: UiStack = stackResult ?? 'none';
       if (stack === 'ugui' && !adoptUiToolkit) {
         return txt(UGUI_REFUSAL);
       }
@@ -240,6 +267,11 @@ export function createUnityUiWriteTool(
         if (findings.length > 0) warnNote = formatFindings(relPath, findings);
       }
 
+      // Before the write, not after: once `deps.write` lands, `deps.exists(abs)`
+      // would always report true, and M1 below needs to know whether the ASSET
+      // (not the .meta) is new.
+      const assetExistedBefore = await deps.exists(abs).catch(() => false);
+
       try {
         await deps.write(abs, content);
       } catch (e) {
@@ -254,11 +286,19 @@ export function createUnityUiWriteTool(
 
       let guid: string | null = null;
       let metaCreated = false;
+      // A guidMap fetch failure degrades the collision check to "checked only
+      // against this send's own allocations" (fix round 1, F2) — still write,
+      // but say so, and still register for post-import verification, since
+      // that check is exactly what catches a collision this pass could not.
+      let guidMapUnavailable = false;
       if (metaExists) {
         const existingMeta = await deps.readFile(metaAbs);
         guid = existingMeta ? extractGuidFromMeta(existingMeta) : null;
       } else {
-        const guidMap = await deps.guidMap(workspacePath).catch(() => ({}) as Record<string, string>);
+        const guidMap = await deps.guidMap(workspacePath).catch(() => {
+          guidMapUnavailable = true;
+          return {} as Record<string, string>;
+        });
         const taken = (g: string) => Object.prototype.hasOwnProperty.call(guidMap, g);
         try {
           guid = allocateGuid({ taken, issued: issuedThisSend });
@@ -282,10 +322,14 @@ export function createUnityUiWriteTool(
         }
       }
 
-      // Only a FRESHLY allocated guid is "pending" — one read back from an
-      // already-existing .meta is one Unity already confirmed by writing that
-      // .meta in the first place, so there is nothing left to verify.
-      if (guid && metaCreated) registerPendingGuidCheck(relPath, guid);
+      // "Pending" (needs Task 15's post-import check) covers two cases, not
+      // just a freshly allocated guid: an orphan .meta — one that existed
+      // before this write but whose ASSET did not — is a first import from
+      // Unity's point of view too (fix round 1, M1). A guid read back from a
+      // .meta whose asset already existed is one Unity already confirmed;
+      // nothing pending there.
+      const isFirstImport = metaCreated || (metaExists && !assetExistedBefore);
+      if (guid && isFirstImport) registerPendingGuidCheck(relPath, guid);
 
       const metaBaseName = metaRelPath.split('/').pop() ?? metaRelPath;
       const lines: string[] = [];
@@ -315,6 +359,15 @@ export function createUnityUiWriteTool(
         lines.push(
           'Next: unity_ui_layout to see how it lays out; unity_attach_ui_document to put it on a GameObject.',
         );
+      }
+
+      if (guidMapUnavailable && metaCreated) {
+        lines.push(
+          'Note: the project GUID index was unavailable, so this GUID was checked only against files written this send.',
+        );
+      }
+      if (stackUnknown) {
+        lines.push("Note: the project's UI stack could not be determined before writing.");
       }
 
       return txt(cap(lines.join('\n') + warnNote));

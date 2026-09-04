@@ -462,6 +462,73 @@ fn read_files_bulk(paths: Vec<String>) -> Result<Vec<FileContent>, String> {
     Ok(results)
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct FileSizeEntry {
+    pub path: String,
+    pub size: u64,
+}
+
+/// A cheap size probe for a batch of paths, so a caller that only needs to
+/// bound WORK by size — `unity-facts.ts`'s Canvas-scene scan, which must
+/// never pull a multi-hundred-MB baked scene through `read_files_bulk` just
+/// to find out afterward that it was too big to bother with — never pays for
+/// the read. `fs::metadata` alone (no `read_to_string`), same `filter_map`
+/// skip-on-error shape as `read_files_bulk`: a path that vanished or is
+/// unreadable narrows the answer, it does not fail the whole batch.
+#[tauri::command(async)]
+fn file_sizes_bulk(paths: Vec<String>) -> Vec<FileSizeEntry> {
+    paths
+        .into_iter()
+        .filter_map(|path| {
+            let size = fs::metadata(&path).ok()?.len();
+            Some(FileSizeEntry { path, size })
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod file_sizes_bulk_tests {
+    use super::file_sizes_bulk;
+
+    #[test]
+    fn reports_each_readable_path_s_size() {
+        let dir = std::env::temp_dir().join("uid_fsb_sizes");
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("five_bytes.txt");
+        std::fs::write(&f, "hello").unwrap();
+        let got = file_sizes_bulk(vec![f.to_string_lossy().into_owned()]);
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].size, 5);
+    }
+
+    #[test]
+    fn a_missing_path_is_omitted_rather_than_failing_the_batch() {
+        let dir = std::env::temp_dir().join("uid_fsb_missing");
+        std::fs::create_dir_all(&dir).unwrap();
+        let present = dir.join("present.txt");
+        std::fs::write(&present, "hi").unwrap();
+        let got = file_sizes_bulk(vec![
+            present.to_string_lossy().into_owned(),
+            "/no/such/path/at/all".into(),
+        ]);
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].path, present.to_string_lossy());
+    }
+
+    #[test]
+    fn does_not_read_file_content_just_its_size() {
+        // A 3 MB file would be expensive to read but cheap to stat — this is
+        // the whole point of the command existing separately from
+        // `read_files_bulk`.
+        let dir = std::env::temp_dir().join("uid_fsb_large");
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("large.bin");
+        std::fs::write(&f, vec![0u8; 3 * 1024 * 1024]).unwrap();
+        let got = file_sizes_bulk(vec![f.to_string_lossy().into_owned()]);
+        assert_eq!(got[0].size, 3 * 1024 * 1024);
+    }
+}
+
 /// Scans ALL .d.ts files in node_modules — this is how VS Code resolves
 /// subpath imports like `@trpc/server/adapters/express`.
 ///
@@ -1031,6 +1098,7 @@ pub fn run() {
             delete_path,
             fs_copy::copy_path,
             read_files_bulk,
+            file_sizes_bulk,
             read_file_checked,
             scan_node_modules_types,
             #[cfg(debug_assertions)]
