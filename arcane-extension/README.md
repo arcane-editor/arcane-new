@@ -68,6 +68,12 @@ The extension auto-detects UnityIDE from these default locations:
 
 - **Unity 2021.3 LTS** or later (2022.3 LTS and Unity 6 also supported)
 - **UnityIDE** installed — [download here](https://unityide.app)
+- Package **0.2.0** speaks bridge **protocol 4** — pair it with a UnityIDE build
+  that speaks protocol 4 too (0.3.3+). An older pairing still connects (with a
+  protocol-mismatch banner) but the protocol-4 features — console
+  snapshot/clear and the UI-write RPCs — report they need an update instead
+  of running; the test runner falls back to its older, blocking behavior
+  rather than the queued one.
 
 ## Troubleshooting
 
