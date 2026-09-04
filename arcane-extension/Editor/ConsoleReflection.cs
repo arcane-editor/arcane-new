@@ -392,6 +392,11 @@ namespace UnityIDE.Bridge
             e["stackTrace"] = includeStack ? CapUtf8(stack, MaxStackBytes) : "";
             e["file"] = file;
             e["line"] = line;
+            // LogEntries does not record whether a row was logged in Play or Edit
+            // mode — unlike the hook ring (which stamps it from EditorApplication
+            // .isPlaying at flush time), so this is honestly "Unknown" rather than
+            // guessed.
+            e["mode"] = "Unknown";
             e["count"] = rowCount;
             return e;
         }
