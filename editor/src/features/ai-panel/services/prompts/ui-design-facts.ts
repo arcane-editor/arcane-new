@@ -49,6 +49,44 @@ export interface UiDesignFacts {
   stack: UiStack;
 }
 
+/** One `.uss` document's declarations, flattened across all its rules — the shape `collectUssVariables` needs. */
+export interface UssSheetDeclarations {
+  /** Project path (or any path — only used for sort order and the basename). */
+  path: string;
+  declarations: Array<{ property: string; value: string }>;
+}
+
+/**
+ * Custom-property (`--foo`) declarations across a project's `.uss` sheets,
+ * deduped to one variable per name.
+ *
+ * Pulled out of `unity-facts.ts` (fix round 1, F2) so this is directly
+ * testable under Bun: `unity-facts.ts` statically imports `stores/
+ * workspace.ts`, which is not. Sheets are sorted by path HERE — not trusted
+ * to arrive pre-sorted — so "the first sheet that declares it" is
+ * deterministic regardless of the order the caller's scan happened to return
+ * them in (e.g. `read_files_bulk` chunk order, which is not guaranteed).
+ */
+export function collectUssVariables(
+  sheets: readonly UssSheetDeclarations[],
+): { variables: UiDesignVariableFacts[]; themeSheets: string[] } {
+  const sorted = [...sheets].sort((a, b) => a.path.localeCompare(b.path));
+  const seen = new Set<string>();
+  const variables: UiDesignVariableFacts[] = [];
+
+  for (const sheet of sorted) {
+    const base = sheet.path.split('/').pop() ?? sheet.path;
+    for (const decl of sheet.declarations) {
+      if (!decl.property.startsWith('--') || seen.has(decl.property)) continue;
+      seen.add(decl.property);
+      variables.push({ name: decl.property, value: decl.value, sheet: base });
+    }
+  }
+
+  const themeSheets = uniqSorted(variables.map((v) => v.sheet));
+  return { variables, themeSheets };
+}
+
 /** Character budget for the variable/panel listing (frozen per conversation, re-sent every turn). */
 const DEFAULT_BUDGET = 900;
 

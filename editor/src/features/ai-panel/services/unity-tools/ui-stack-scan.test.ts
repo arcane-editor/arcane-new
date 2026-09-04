@@ -98,6 +98,32 @@ describe('readUiStackSignals — PanelSettings', () => {
     const result = await readUiStackSignals(WS, deps);
     expect(result.panelSettingsCount).toBe(1);
   });
+
+  // Fix round 1, M2: this scan and `unity-facts.ts`'s `readPanelSettingsFacts`
+  // must not disagree about which `.asset` files are even eligible to be
+  // read — same 2 MB stat-first cap on both.
+  it('never passes an oversized .asset path to readFiles, and does not count it', async () => {
+    const { deps, readCalls, sizeCalls } = harness({
+      scan: async () => ['Assets/UI/Small.asset', 'Assets/UI/Huge.asset'],
+      sizesOf: async (paths) =>
+        paths.map((path) => ({
+          path,
+          size: path.includes('Huge') ? 3 * 1024 * 1024 : 1024,
+        })),
+      readFiles: async (paths) =>
+        paths.map((path) => ({
+          path,
+          content: 'MonoBehaviour:\n  m_Script: {...}\n  ...UnityEngine.UIElements.PanelSettings...',
+        })),
+    });
+    const result = await readUiStackSignals(WS, deps);
+    expect(sizeCalls.flat()).toContain('Assets/UI/Small.asset');
+    expect(sizeCalls.flat()).toContain('Assets/UI/Huge.asset');
+    expect(readCalls.flat()).toContain('Assets/UI/Small.asset');
+    expect(readCalls.flat()).not.toContain('Assets/UI/Huge.asset');
+    // Only the under-cap asset was ever read, so only it can be counted.
+    expect(result.panelSettingsCount).toBe(1);
+  });
 });
 
 describe('readUiStackSignals — degradation', () => {

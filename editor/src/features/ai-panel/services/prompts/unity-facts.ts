@@ -38,9 +38,11 @@ import { readUiStackSignals } from '../unity-tools/ui-stack-scan';
 import { parsePanelSettings } from '../../../../utils/panel-settings';
 import {
   uiDesignFactLines,
+  collectUssVariables,
   type UiDesignFacts,
   type UiDesignVariableFacts,
   type UiDesignPanelFacts,
+  type UssSheetDeclarations,
 } from './ui-design-facts';
 
 type RenderPipeline = 'URP' | 'HDRP' | 'Built-in';
@@ -320,29 +322,18 @@ async function readUiToolkitFacts(workspacePath: string): Promise<{
     const relative = (p: string) =>
       p.startsWith(`${workspacePath}/`) ? p.slice(workspacePath.length + 1) : p;
 
+    // Declarations whose property starts with `--` (custom properties), one
+    // per name — `collectUssVariables` (ui-design-facts.ts, pure) does the
+    // dedup/sort/themeSheets derivation; here we only flatten each sheet's
+    // rules into its declaration list, which is the shape it takes.
     const ussIndex = mod.getUssIndex();
-    // Declarations whose property starts with `--` (custom properties) —
-    // first declaration wins, in path-sorted order, so the "first sheet that
-    // declares it" is a deterministic, scan-order-independent choice rather
-    // than whatever order `read_files_bulk` happened to return.
-    const variables: UiDesignVariableFacts[] = [];
-    if (ussIndex) {
-      const sheetOfVar = new Set<string>();
-      const sortedPaths = [...ussIndex.docs.keys()].sort((a, b) => a.localeCompare(b));
-      for (const path of sortedPaths) {
-        const sheet = ussIndex.docs.get(path);
-        if (!sheet) continue;
-        const base = path.split('/').pop() ?? path;
-        for (const rule of sheet.rules) {
-          for (const decl of rule.declarations) {
-            if (!decl.property.startsWith('--') || sheetOfVar.has(decl.property)) continue;
-            sheetOfVar.add(decl.property);
-            variables.push({ name: decl.property, value: decl.value, sheet: base });
-          }
-        }
-      }
-    }
-    const themeSheets = [...new Set(variables.map((v) => v.sheet))].sort((a, b) => a.localeCompare(b));
+    const sheets: UssSheetDeclarations[] = ussIndex
+      ? [...ussIndex.docs.entries()].map(([path, sheet]) => ({
+          path,
+          declarations: sheet.rules.flatMap((rule) => rule.declarations),
+        }))
+      : [];
+    const { variables, themeSheets } = collectUssVariables(sheets);
 
     return {
       facts: {

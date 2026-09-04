@@ -10,11 +10,15 @@
  * `panel-resolve.ts` uses for the same reason, just with the IO half made
  * injectable instead of untestable.
  *
- * The `.unity`/`.prefab` size guard bounds WORK, not just the answer: sizes
- * are fetched first (a cheap stat, `file_sizes_bulk` — no file content
- * read), and only paths at or under the cap are ever handed to
- * `read_files_bulk`. A multi-hundred-MB baked scene is skipped before a
- * single byte of it is read, not filtered out afterward.
+ * The `.unity`/`.prefab` AND `.asset` size guards both bound WORK, not just
+ * the answer: sizes are fetched first (a cheap stat, `file_sizes_bulk` — no
+ * file content read), and only paths at or under the cap are ever handed to
+ * `read_files_bulk`. A multi-hundred-MB baked scene (or a huge serialized
+ * ScriptableObject `.asset`) is skipped before a single byte of it is read,
+ * not filtered out afterward. Same cap, same technique, for the same reason
+ * `unity-facts.ts`'s `readPanelSettingsFacts` (Task 16) applies to its own
+ * `.asset` scan — fix round 1, M2: this scan and that one must not disagree
+ * about which `.asset` files are even eligible to be read.
  */
 
 import { invoke } from '@tauri-apps/api/core';
@@ -23,6 +27,8 @@ const SCAN_EXCLUDES = ['Library/**', 'Temp/**', 'obj/**', 'Logs/**', 'Build/**',
 const READ_CHUNK = 200;
 /** `canvasScenes`' own size guard — see `ui-stack.ts`'s `UiStackSignals.canvasScenes`. */
 const MAX_SCENE_BYTES = 2 * 1024 * 1024;
+/** `panelSettingsCount`'s own size guard — same cap as `unity-facts.ts`'s `MAX_PANEL_ASSET_BYTES`. */
+const MAX_ASSET_BYTES = 2 * 1024 * 1024;
 
 export interface UiStackScanResult {
   panelSettingsCount: number;
@@ -77,7 +83,12 @@ export async function readUiStackSignals(
     return { panelSettingsCount: 0, canvasScenes: 0 };
   }
 
-  const assets = await inChunks(paths.filter((p) => p.endsWith('.asset')), READ_CHUNK, deps.readFiles);
+  // Size-first, same shape as the scene/prefab scan below: stat every `.asset`
+  // candidate, then read only the ones at or under the cap.
+  const assetCandidates = paths.filter((p) => p.endsWith('.asset'));
+  const assetSizes = await inChunks(assetCandidates, READ_CHUNK, deps.sizesOf);
+  const assetsUnderCap = assetSizes.filter((s) => s.size <= MAX_ASSET_BYTES).map((s) => s.path);
+  const assets = await inChunks(assetsUnderCap, READ_CHUNK, deps.readFiles);
   const panelSettingsCount = assets.filter((a) =>
     a.content.includes('UnityEngine.UIElements.PanelSettings'),
   ).length;

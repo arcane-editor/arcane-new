@@ -8,7 +8,12 @@
 import { describe, it, expect } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { uiDesignFactLines, type UiDesignFacts } from './ui-design-facts';
+import {
+  uiDesignFactLines,
+  collectUssVariables,
+  type UiDesignFacts,
+  type UssSheetDeclarations,
+} from './ui-design-facts';
 
 const EMPTY: UiDesignFacts = { variables: [], panels: [], themeSheets: [], stack: 'uitoolkit' };
 
@@ -239,6 +244,67 @@ describe('uiDesignFactLines — panels', () => {
     expect(iZ).toBeGreaterThan(-1);
     expect(iA).toBeLessThan(iZ);
   });
+
+  // Fix round 1, F1: `panelsLines`' "always show the first panel" rule and
+  // its "(+K more)" tail had no direct coverage.
+  describe('budget behavior (fix round 1, F1)', () => {
+    const threePanels: UiDesignFacts = {
+      variables: [],
+      themeSheets: [],
+      stack: 'uitoolkit',
+      panels: [
+        { ...ONE_PANEL.panels[0], name: 'Zebra', path: 'Assets/UI/Zebra.asset' },
+        { ...ONE_PANEL.panels[0], name: 'Middle', path: 'Assets/UI/Middle.asset' },
+        { ...ONE_PANEL.panels[0], name: 'Ampersand', path: 'Assets/UI/Ampersand.asset' },
+      ],
+    };
+
+    it('keeps the first (path-sorted) panel even when the budget is too small for even one line', () => {
+      // budget: 1 leaves ~0 chars for the variable/panel section once the
+      // fixed design rules are reserved out of it first.
+      const lines = uiDesignFactLines(threePanels, 1);
+      expect(lines).toContain(
+        '- Panel: Ampersand — ScaleWithScreenSize, reference 1920×1080 (match width). Lay out in those pixels.',
+      );
+    });
+
+    it('drops the rest and reports exactly how many were not shown', () => {
+      const lines = uiDesignFactLines(threePanels, 1);
+      expect(lines).toContain('- Panel: (+2 more not shown — call unity_ui_toolkit for the rest).');
+      // Only the kept panel and the tail line — Middle/Zebra never render.
+      expect(lines.filter((l) => l.startsWith('- Panel:'))).toHaveLength(2);
+      expect(lines.join('\n')).not.toContain('Middle');
+      expect(lines.join('\n')).not.toContain('Zebra');
+    });
+
+    it('reports the correct count for a different number of dropped panels', () => {
+      const fivePanels: UiDesignFacts = {
+        ...threePanels,
+        panels: [
+          ...threePanels.panels,
+          { ...ONE_PANEL.panels[0], name: 'Delta', path: 'Assets/UI/Delta.asset' },
+          { ...ONE_PANEL.panels[0], name: 'Echo', path: 'Assets/UI/Echo.asset' },
+        ],
+      };
+      const lines = uiDesignFactLines(fivePanels, 1);
+      expect(lines).toContain('- Panel: (+4 more not shown — call unity_ui_toolkit for the rest).');
+    });
+
+    it('emits a single panel in full even when it alone exceeds the budget, with no "more" tail', () => {
+      const lines = uiDesignFactLines(ONE_PANEL, 1);
+      expect(lines).toContain(
+        '- Panel: GamePanel — ScaleWithScreenSize, reference 1920×1080 (match width). Lay out in those pixels.',
+      );
+      expect(lines.some((l) => l.includes('more not shown'))).toBe(false);
+      expect(lines.filter((l) => l.startsWith('- Panel:'))).toHaveLength(1);
+    });
+
+    it('shows every panel, no tail, when the budget is generous enough for all of them', () => {
+      const lines = uiDesignFactLines(threePanels, 3000);
+      expect(lines.filter((l) => l.startsWith('- Panel:'))).toHaveLength(3);
+      expect(lines.some((l) => l.includes('more not shown'))).toBe(false);
+    });
+  });
 });
 
 describe('uiDesignFactLines — mixed stack caution', () => {
@@ -282,5 +348,87 @@ describe('unity-facts.ts wiring (source pin — Bun cannot import the module its
     expect(src).toContain('file_sizes_bulk');
     expect(src).toContain('MAX_PANEL_ASSET_BYTES');
     expect(src).toContain('parsePanelSettings');
+  });
+
+  it('derives variables/themeSheets via the shared pure collectUssVariables, not an inline dedup', () => {
+    expect(src).toContain('collectUssVariables(sheets)');
+    expect(src).not.toContain('sheetOfVar');
+  });
+});
+
+// Fix round 1, F2: the USS-variable dedup ("first sheet wins" in path-sorted
+// order) and `themeSheets` derivation used to live inline inside
+// `readUiToolkitFacts` (unity-facts.ts), which is not Bun-importable — the
+// only coverage was source-string pins. Extracted to `collectUssVariables`
+// (ui-design-facts.ts, pure) so it is testable directly.
+describe('collectUssVariables', () => {
+  it('resolves a variable declared in two sheets to the path-sorted FIRST sheet, not the last', () => {
+    const sheets: UssSheetDeclarations[] = [
+      { path: 'Assets/UI/Zebra.uss', declarations: [{ property: '--color-bg', value: '#000000' }] },
+      { path: 'Assets/UI/Ampersand.uss', declarations: [{ property: '--color-bg', value: '#1b1726' }] },
+    ];
+    const { variables } = collectUssVariables(sheets);
+    expect(variables).toEqual([{ name: '--color-bg', value: '#1b1726', sheet: 'Ampersand.uss' }]);
+  });
+
+  it('is deterministic regardless of the input order of sheets', () => {
+    const a: UssSheetDeclarations = {
+      path: 'Assets/UI/Ampersand.uss',
+      declarations: [{ property: '--color-bg', value: '#1b1726' }],
+    };
+    const z: UssSheetDeclarations = {
+      path: 'Assets/UI/Zebra.uss',
+      declarations: [{ property: '--color-bg', value: '#000000' }],
+    };
+    expect(collectUssVariables([a, z])).toEqual(collectUssVariables([z, a]));
+  });
+
+  it('ignores declarations whose property is not a custom property (does not start with --)', () => {
+    const sheets: UssSheetDeclarations[] = [
+      {
+        path: 'Assets/UI/Theme.uss',
+        declarations: [
+          { property: 'background-color', value: '#1b1726' },
+          { property: '--color-bg', value: '#1b1726' },
+        ],
+      },
+    ];
+    const { variables } = collectUssVariables(sheets);
+    expect(variables).toEqual([{ name: '--color-bg', value: '#1b1726', sheet: 'Theme.uss' }]);
+  });
+
+  it('keeps the first declaration of a repeated variable WITHIN one sheet too', () => {
+    const sheets: UssSheetDeclarations[] = [
+      {
+        path: 'Assets/UI/Theme.uss',
+        declarations: [
+          { property: '--color-bg', value: '#1b1726' },
+          { property: '--color-bg', value: '#ffffff' },
+        ],
+      },
+    ];
+    const { variables } = collectUssVariables(sheets);
+    expect(variables).toEqual([{ name: '--color-bg', value: '#1b1726', sheet: 'Theme.uss' }]);
+  });
+
+  it('themeSheets lists exactly the sheets that declare at least one variable, sorted, deduped', () => {
+    const sheets: UssSheetDeclarations[] = [
+      { path: 'Assets/UI/Zebra.uss', declarations: [{ property: '--radius-sm', value: '4px' }] },
+      { path: 'Assets/UI/Ampersand.uss', declarations: [{ property: '--color-bg', value: '#1b1726' }] },
+      // Declares no custom property at all — must not appear in themeSheets.
+      { path: 'Assets/UI/Layout.uss', declarations: [{ property: 'flex-grow', value: '1' }] },
+      // Same basename as Ampersand's sheet, different path — themeSheets is
+      // deduped by basename, not by full path.
+      { path: 'Assets/Other/Ampersand.uss', declarations: [{ property: '--spacing-md', value: '8px' }] },
+    ];
+    const { themeSheets } = collectUssVariables(sheets);
+    expect(themeSheets).toEqual(['Ampersand.uss', 'Zebra.uss']);
+  });
+
+  it('returns empty variables/themeSheets for no sheets and for sheets with no custom properties', () => {
+    expect(collectUssVariables([])).toEqual({ variables: [], themeSheets: [] });
+    expect(
+      collectUssVariables([{ path: 'Assets/UI/Layout.uss', declarations: [{ property: 'flex-grow', value: '1' }] }]),
+    ).toEqual({ variables: [], themeSheets: [] });
   });
 });
