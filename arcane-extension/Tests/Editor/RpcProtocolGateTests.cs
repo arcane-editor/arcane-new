@@ -68,7 +68,12 @@ namespace UnityIDE.Tests
         {
             int ran = 0;
             RpcDispatcher.RegisterQueued("refreshAssets", p => { ran++; return JsonValue.NewObject(); });
-            RpcDispatcher.SetIdeProtocolVersion(Discovery.ProtocolVersion - 1);
+            // 2 predates protocol 3, which introduced queued acks — NOT
+            // Discovery.ProtocolVersion - 1. MinQueuedProtocol stays fixed at 3
+            // as the overall protocol version climbs for unrelated reasons (new
+            // RPCs), so "one below the current protocol" stops meaning "an IDE
+            // that predates queueing" the moment the two diverge.
+            RpcDispatcher.SetIdeProtocolVersion(2);
 
             JsonValue reply = null;
             RpcDispatcher.Dispatch(Request("1", "refreshAssets"), r => reply = r);

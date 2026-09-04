@@ -36,6 +36,8 @@ namespace UnityIDE.Bridge
         ///   3 = queued commands: refreshAssets/requestCompile answer
         ///       `{queued:true}` on ACCEPTANCE and report real completion with
         ///       `refresh_completed`.
+        ///   4 = console snapshot/clear RPCs, queued `runTests` +
+        ///       `test_run_completed`, `attachUiDocument`/`setSerializedProperty`.
         ///
         /// The bump is what keeps an IDE that predates 3 safe. Such an IDE reads
         /// an rpc_response to refreshAssets as "the import finished", so handing
@@ -45,7 +47,7 @@ namespace UnityIDE.Bridge
         /// the IDE's advertised version against this and keeps the old blocking
         /// behaviour for anything older.
         /// </summary>
-        public const int ProtocolVersion = 3;
+        public const int ProtocolVersion = 4;
 
         /// <summary>projectRoot = parent of Application.dataPath ("…/Assets").</summary>
         public static string ProjectRoot(string applicationDataPath)

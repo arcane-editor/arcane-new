@@ -97,7 +97,9 @@ namespace UnityIDE.Tests
             //
             // 3 = queued commands (refreshAssets/requestCompile ack on
             // ACCEPTANCE, real completion arrives as refresh_completed).
-            Assert.AreEqual(3, Discovery.ProtocolVersion);
+            // 4 = console snapshot/clear RPCs, queued runTests +
+            // test_run_completed, attachUiDocument/setSerializedProperty.
+            Assert.AreEqual(4, Discovery.ProtocolVersion);
         }
     }
 }

@@ -75,6 +75,14 @@ namespace UnityIDE.Bridge
         public const string HierarchyChanged = "hierarchy_changed";
         public const string TestEvent = "test_event";
         public const string PlayModeStats = "playmode_stats";
+        /// <summary>
+        /// A queued `runTests` run has actually finished. Payload carries the
+        /// run's outcome, mirroring the `refresh_completed` pattern: the
+        /// rpc_response to a queued runTests only ever means "accepted", never
+        /// "done" — the editor may be asleep and the run may not start for a
+        /// while. Additive — an IDE that does not know this type ignores it.
+        /// </summary>
+        public const string TestRunCompleted = "test_run_completed";
 
         // ── IDE → C# (we receive) ────────────────────────────────────────────
         public const string HeartbeatAck = "heartbeat_ack";

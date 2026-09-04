@@ -50,7 +50,7 @@ namespace UnityIDE.Bridge
         /// Mirrors "version" in package.json. Reported in connection_init so the
         /// IDE can tell an outdated package from a missing one. Keep in lockstep.
         /// </summary>
-        private const string PackageVersion = "0.1.0";
+        private const string PackageVersion = "0.2.0";
 
         private static BridgeClient _client;
         private static bool _started;

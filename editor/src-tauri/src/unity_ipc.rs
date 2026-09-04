@@ -18,13 +18,15 @@ use tokio::sync::{mpsc, oneshot, Mutex};
 ///   2 = journal transport.
 ///   3 = queued commands: refreshAssets/requestCompile ack on ACCEPTANCE and
 ///       report real completion with `refresh_completed`.
+///   4 = console snapshot/clear RPCs, queued `runTests` + `test_run_completed`,
+///       `attachUiDocument`/`setSerializedProperty`.
 ///
 /// Bumping it is what makes the queued-command change safe to ship on its own.
 /// The Unity package updates independently of this app, and an IDE older than 3
 /// reads any rpc_response to refreshAssets as "the import finished" — so the
 /// version is the signal that lets the package keep the old blocking behaviour
 /// for such an IDE, and lets a current IDE tell the user their package is stale.
-const PROTOCOL_VERSION: u32 = 3;
+const PROTOCOL_VERSION: u32 = 4;
 /// Default timeout for an RPC request to the Unity bridge (spec §11 — every
 /// bridge call must have a timeout so a hung Unity never freezes the IDE).
 const DEFAULT_RPC_TIMEOUT_MS: u64 = 10_000;
@@ -61,7 +63,7 @@ const STALE_PACKAGE_AFTER_MS: u64 = 15_000;
 /// Oldest `com.unityide.editor` this IDE will work with. Must stay in lockstep
 /// with `minPackageVersion` in `write_bridge_discovery` and `PackageVersion` in
 /// `arcane-extension/Editor/BridgeBootstrap.cs`.
-const MIN_PACKAGE_VERSION: &str = "0.1.0";
+const MIN_PACKAGE_VERSION: &str = "0.2.0";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -809,6 +811,40 @@ async fn announce_disconnect(app: &AppHandle, state: &Arc<UnityIpcInner>, label:
     );
 }
 
+/// Window event a pure-passthrough arm of `route_message` forwards `msg.payload`
+/// to unchanged, keyed by wire `msg_type`. Every arm that does nothing but
+/// `app.emit_to(label, <event>, &msg.payload)` belongs here instead of being
+/// inlined, so a new push type cannot be wired into `route_message` without
+/// also being pinned by `push_event_name_table_matches_every_passthrough_arm`.
+///
+/// NOT here — these stay hand-written in `route_message` because they carry
+/// extra logic beyond a bare forward: `connection_init`/`project_info`
+/// (protocol-mismatch check + connection state), `heartbeat` (acks + liveness
+/// tracking), `rpc_response` (resolves a pending request), `compilation_started`
+/// /`compilation_finished` (build a payload that is NOT `msg.payload`), and
+/// `focus_window` (raises the window; never emits).
+fn push_event_name(msg_type: &str) -> Option<&'static str> {
+    Some(match msg_type {
+        "log" => "unity-log",
+        "log_batch" => "unity-log-batch",
+        "playstate_changed" => "unity-playstate-changed",
+        "playmode_stats" => "unity-playmode-stats",
+        // A queued import actually ran on Unity's main thread. The
+        // rpc_response for a queued command only ever meant "accepted", so
+        // this is the first point at which the IDE may reason about what
+        // Unity did or did not have to compile.
+        "refresh_completed" => "unity-refresh-completed",
+        "open_file" => "unity-open-file",
+        "build_progress" => "unity-build-progress",
+        "build_result" => "unity-build-result",
+        "test_event" => "unity-test-event",
+        "selection_changed" => "unity-selection-changed",
+        "hierarchy_changed" => "unity-hierarchy-changed",
+        "test_run_completed" => "unity-test-run-completed",
+        _ => return None,
+    })
+}
+
 async fn route_message(app: &AppHandle, state: &Arc<UnityIpcInner>, label: &str, msg: UnityMessage) {
     match msg.msg_type.as_str() {
         "connection_init" | "project_info" => {
@@ -878,13 +914,6 @@ async fn route_message(app: &AppHandle, state: &Arc<UnityIpcInner>, label: &str,
                 );
             }
         }
-        "refresh_completed" => {
-            // A queued import actually ran on Unity's main thread. The
-            // rpc_response for a queued command only ever meant "accepted", so
-            // this is the first point at which the IDE may reason about what
-            // Unity did or did not have to compile.
-            let _ = app.emit_to(label, "unity-refresh-completed", &msg.payload);
-        }
         "rpc_response" => {
             // Complete the matching in-flight request. payload is
             // `{result: ...}` or `{error: {code, message}}`.
@@ -894,18 +923,6 @@ async fn route_message(app: &AppHandle, state: &Arc<UnityIpcInner>, label: &str,
                     let _ = tx.send(msg.payload);
                 }
             }
-        }
-        "log" => {
-            let _ = app.emit_to(label, "unity-log", &msg.payload);
-        }
-        "log_batch" => {
-            let _ = app.emit_to(label, "unity-log-batch", &msg.payload);
-        }
-        "playstate_changed" => {
-            let _ = app.emit_to(label, "unity-playstate-changed", &msg.payload);
-        }
-        "playmode_stats" => {
-            let _ = app.emit_to(label, "unity-playmode-stats", &msg.payload);
         }
         "compilation_started" => {
             let _ = app.emit_to(label, "unity-compilation", serde_json::json!({ "started": true }));
@@ -917,24 +934,6 @@ async fn route_message(app: &AppHandle, state: &Arc<UnityIpcInner>, label: &str,
             }
             let _ = app.emit_to(label, "unity-compilation", &payload);
         }
-        "open_file" => {
-            let _ = app.emit_to(label, "unity-open-file", &msg.payload);
-        }
-        "build_progress" => {
-            let _ = app.emit_to(label, "unity-build-progress", &msg.payload);
-        }
-        "build_result" => {
-            let _ = app.emit_to(label, "unity-build-result", &msg.payload);
-        }
-        "test_event" => {
-            let _ = app.emit_to(label, "unity-test-event", &msg.payload);
-        }
-        "selection_changed" => {
-            let _ = app.emit_to(label, "unity-selection-changed", &msg.payload);
-        }
-        "hierarchy_changed" => {
-            let _ = app.emit_to(label, "unity-hierarchy-changed", &msg.payload);
-        }
         "focus_window" => {
             // Unity asking to be brought forward — sent alongside `open_file`
             // when the user double-clicks a script and this window already has
@@ -942,8 +941,15 @@ async fn route_message(app: &AppHandle, state: &Arc<UnityIpcInner>, label: &str,
             // would raise us.
             crate::window_registry::raise_by_label(app, label);
         }
-        _ => {
-            // Unknown message type — ignore
+        other => {
+            // Every pure passthrough (forward `msg.payload` to a window event
+            // unchanged, nothing else) is routed through the pinned table so a
+            // new one cannot be added here without also being pinned. Anything
+            // not in the table — including a genuinely unknown message type —
+            // is ignored.
+            if let Some(event) = push_event_name(other) {
+                let _ = app.emit_to(label, event, &msg.payload);
+            }
         }
     }
 }
@@ -1200,6 +1206,76 @@ mod tests {
     }
 
     #[test]
+    fn protocol_version_literal_matches_the_csharp_package() {
+        // PROTOCOL_VERSION here and Discovery.ProtocolVersion in the C# package
+        // are two independent literals with nothing enforcing agreement except
+        // this test — a mismatch is not cosmetic: the IDE raises a permanent
+        // "update bridge" banner, and the package silently drops to the
+        // pre-queue blocking path.
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../arcane-extension/Editor/Discovery.cs");
+        let text = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read {}: {}", path.display(), e));
+        assert!(
+            text.contains("ProtocolVersion = 4;"),
+            "Discovery.cs must declare `ProtocolVersion = 4;` to match PROTOCOL_VERSION"
+        );
+        assert_eq!(PROTOCOL_VERSION, 4);
+    }
+
+    #[test]
+    fn push_event_name_table_matches_every_passthrough_arm() {
+        // Every arm of route_message that does nothing but forward
+        // `msg.payload` unchanged to a window event must be listed here. A new
+        // passthrough added to route_message without an entry here silently
+        // falls through the fallback arm and reaches no listener.
+        let expected: &[(&str, &str)] = &[
+            ("log", "unity-log"),
+            ("log_batch", "unity-log-batch"),
+            ("playstate_changed", "unity-playstate-changed"),
+            ("playmode_stats", "unity-playmode-stats"),
+            ("refresh_completed", "unity-refresh-completed"),
+            ("open_file", "unity-open-file"),
+            ("build_progress", "unity-build-progress"),
+            ("build_result", "unity-build-result"),
+            ("test_event", "unity-test-event"),
+            ("selection_changed", "unity-selection-changed"),
+            ("hierarchy_changed", "unity-hierarchy-changed"),
+            ("test_run_completed", "unity-test-run-completed"),
+        ];
+        for (msg_type, event) in expected {
+            assert_eq!(
+                push_event_name(msg_type),
+                Some(*event),
+                "msg_type={msg_type}"
+            );
+        }
+        assert_eq!(
+            expected.len(),
+            12,
+            "update this list (and the count) when adding or removing a passthrough"
+        );
+
+        // Arms with logic beyond a bare forward are NOT in the table.
+        for msg_type in [
+            "connection_init",
+            "project_info",
+            "heartbeat",
+            "rpc_response",
+            "compilation_started",
+            "compilation_finished",
+            "focus_window",
+            "some_unknown_future_type",
+        ] {
+            assert_eq!(
+                push_event_name(msg_type),
+                None,
+                "msg_type={msg_type} must not be in the passthrough table"
+            );
+        }
+    }
+
+    #[test]
     fn rearm_waits_out_a_domain_reload_then_retries_on_a_fixed_cadence() {
         // Connected sessions never re-arm, however long they have been up.
         assert!(!rearm_is_due(999_999, true, true, 0, None));
@@ -1323,7 +1399,7 @@ mod tests {
         let parsed: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&written).unwrap()).unwrap();
         assert_eq!(parsed["transport"], "journal");
-        assert_eq!(parsed["protocolVersion"], 3);
+        assert_eq!(parsed["protocolVersion"], PROTOCOL_VERSION);
         assert_eq!(parsed["ideSessionId"], "sess-1");
         // The tmp file must not survive the atomic rename.
         assert!(!bridge_dir(ws).join("bridge.json.tmp").exists());

@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Bridge wire-protocol bumped to version 4** (`Discovery.ProtocolVersion`,
+  pinned against `PROTOCOL_VERSION` in `unity_ipc.rs`). Scaffolding only in
+  this release — the RPCs it makes room for (console snapshot/clear, a queued
+  `runTests` with a `test_run_completed` push, `attachUiDocument` /
+  `setSerializedProperty`) land in follow-up releases. Package version bumped
+  to 0.2.0 to match the new protocol floor (`MIN_PACKAGE_VERSION`).
 - **The package now ships once per release channel.** The release build targets
   the UnityIDE application, `unityide://` and `~/.unityide`; the dev build
   (`com.unityide.editor.dev`) targets UnityIDE Dev, `unityide-dev://` and

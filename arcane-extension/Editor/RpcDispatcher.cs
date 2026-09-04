@@ -92,6 +92,17 @@ namespace UnityIDE.Bridge
         }
 
         /// <summary>
+        /// What the connected IDE advertised in bridge.json (0 until the first
+        /// EnsureSession). Read-only counterpart to <see cref="SetIdeProtocolVersion"/>,
+        /// for callers that need to gate on the negotiated version themselves
+        /// rather than through <see cref="QueuedRepliesUnderstood"/>.
+        /// </summary>
+        public static int IdeProtocolVersion
+        {
+            get { return _ideProtocolVersion; }
+        }
+
+        /// <summary>
         /// Whether the connected IDE can be answered with a queued ack. An older
         /// IDE reads any rpc_response as completion, so it gets the pre-queue
         /// blocking behaviour — slow against a parked editor, but never a lie.

@@ -1,6 +1,6 @@
 {
     "name": "com.unityide.editor",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "displayName": "UnityIDE Integration",
     "description": "Connects Unity Editor to the UnityIDE for AI-powered game development. Provides real-time IPC communication, console log streaming, play mode controls, build management, Inspector field sync, and test runner integration.",
     "unity": "2021.3",
