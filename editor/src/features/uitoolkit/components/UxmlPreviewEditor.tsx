@@ -1,12 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { PanelsTopLeft, AlertTriangle, Frame } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { PanelsTopLeft, AlertTriangle } from 'lucide-react';
 import { useWorkspaceStore } from '../../../stores/workspace';
 import { useUnityIndexStore } from '../../../stores/unity-index';
 import { parseUxml } from '../../../utils/uxml-model';
 import { buildRenderPlan } from '../services/render-plan';
 import { loadStyleSheets } from '../services/style-resolve';
 import type { UssStyleSheet } from '../../../utils/uss-model';
-import { PreviewStage } from './PreviewStage';
+import { PreviewCanvas } from './PreviewCanvas';
+import { PreviewToolbar } from './PreviewToolbar';
+import { usePreviewCamera, type StageBackground } from '../hooks/usePreviewCamera';
 import { ElementInspector } from './ElementInspector';
 import { cascadeFor, targetFor } from '../services/cascade';
 import { loadUsageIndex, EMPTY_USAGE_INDEX, type UsageIndex } from '../services/usage-index';
@@ -42,39 +44,10 @@ export function UxmlPreviewEditor({ path, name, content }: Props) {
   const [sheets, setSheets] = useState<UssStyleSheet[]>([]);
   const [unresolved, setUnresolved] = useState<string[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const canvasRef = useRef<HTMLDivElement>(null);
-  const [stageWidth, setStageWidth] = useState(0);
   const [usages, setUsages] = useState<UsageIndex>(EMPTY_USAGE_INDEX);
   const [showBoxes, setShowBoxes] = useState(false);
+  const [background, setBackground] = useState<StageBackground>('dark');
   const [panel, setPanel] = useState<PanelResolution>(NO_PANEL);
-
-  // Lay the document out at the REFERENCE RESOLUTION, then scale the whole
-  // thing to fit. Rendering at 1:1 CSS pixels made every proportion wrong: a
-  // `width: 420px` card is 22% of a 1920px screen but was filling 44% of a
-  // 960px stage -- twice its real size. `transform` does not affect layout, so
-  // 420px stays 420px in a 1920px world and only the presentation shrinks.
-  //
-  // The stage is sized in JS against BOTH axes rather than by `aspect-ratio`
-  // plus `max-height`: that CSS pair does not reliably re-derive the width when
-  // the height clamps, and the failure mode is a squashed stage. This also
-  // fixes the stage being pinned at 960px in a panel twice that tall, which
-  // left the preview small with a dead band underneath it.
-  useEffect(() => {
-    const node = canvasRef.current;
-    if (!node) return;
-    const measure = () => {
-      // `clientWidth`/`clientHeight` include padding, so the stage would be
-      // sized to the padded box and overflow it.
-      const w = node.clientWidth - CANVAS_PADDING * 2;
-      const h = node.clientHeight - CANVAS_PADDING * 2;
-      setStageWidth(Math.max(0, Math.min(w, h * (SCREEN.width / SCREEN.height))));
-    };
-    measure();
-    if (typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(measure);
-    ro.observe(node);
-    return () => ro.disconnect();
-  }, []);
 
   // The panel decides the coordinate space, so this has to land before any
   // measurement means anything. Keyed on the path, not the buffer: typing in
@@ -103,9 +76,16 @@ export function UxmlPreviewEditor({ path, name, content }: Props) {
     [panel.settings],
   );
 
-  // Guarded: a zero-width stage before the first measure would put a division
-  // by zero into the selection chrome's `calc()`, invalidating the whole rule.
-  const scale = stageWidth > 0 ? stageWidth / layout.width : 1;
+  /**
+   * The camera over that box.
+   *
+   * The document is laid out at the layout box's own size and the CAMERA does
+   * all the scaling, which is what keeps every proportion honest: a
+   * `width: 420px` card is 22% of a 1920px panel at every zoom, where laying
+   * out at 1:1 CSS pixels in a 960px stage would draw it at twice its real
+   * size.
+   */
+  const camera = usePreviewCamera(layout, CANVAS_PADDING);
 
   const doc = useMemo(() => parseUxml(content), [content]);
 
@@ -192,53 +172,27 @@ export function UxmlPreviewEditor({ path, name, content }: Props) {
             : `${sheets.length} stylesheet${sheets.length === 1 ? '' : 's'}`}
         </span>
         <PanelChip panel={panel} layout={layout} />
-        {/* The stage is scaled to fit, and how far is worth stating: it is why
-            a 420px card looks small, and it is what the selection chrome is
-            dividing by to stay visible. */}
-        <span style={METRIC}>{Math.round(scale * 100)}%</span>
-        <button
-          type="button"
-          className={`uxml-preview-toggle${showBoxes ? ' active' : ''}`}
-          aria-pressed={showBoxes}
-          onClick={() => setShowBoxes((v) => !v)}
-          title="Outline every element — UI Toolkit layouts are mostly containers you cannot see"
-        >
-          <Frame size={11} />
-          Boxes
-        </button>
+        <PreviewToolbar
+          camera={camera}
+          background={background}
+          onBackground={setBackground}
+          showBoxes={showBoxes}
+          onShowBoxes={setShowBoxes}
+        />
       </div>
 
       <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
-      <div style={CANVAS} ref={canvasRef}>
-        <div
-          style={{
-            ...STAGE,
-            width: stageWidth,
-            height: (stageWidth * SCREEN.height) / SCREEN.width,
-          }}
-        >
-          <div
-            style={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              width: layout.width,
-              height: layout.height,
-              transformOrigin: 'top left',
-              transform: `scale(${scale})`,
-            }}
-          >
-            <PreviewStage
-              css={plan.css}
-              root={plan.root}
-              selectedId={selectedId}
-              onSelect={setSelectedId}
-              scale={scale}
-              showBoxes={showBoxes}
-            />
-          </div>
-        </div>
-      </div>
+      <PreviewCanvas
+        camera={camera}
+        layout={layout}
+        css={plan.css}
+        root={plan.root}
+        selectedId={selectedId}
+        onSelect={setSelectedId}
+        showBoxes={showBoxes}
+        background={background}
+        label={stageLabel(panel, layout)}
+      />
       <ElementInspector
         node={selectedNode}
         usages={selectedNode?.name ? usages.byElement.get(selectedNode.name) ?? [] : []}
@@ -260,6 +214,18 @@ export function UxmlPreviewEditor({ path, name, content }: Props) {
       )}
     </div>
   );
+}
+
+/**
+ * The name above the frame, the way a design tool names an artboard.
+ *
+ * Prefers the PanelSettings asset's name over the raw numbers: on a canvas the
+ * useful question is *which panel am I looking at*, and the resolution is
+ * already in the header chip that also carries where it came from.
+ */
+function stageLabel(panel: PanelResolution, layout: { width: number; height: number }): string {
+  const size = `${layout.width} × ${layout.height}`;
+  return panel.settings ? `${panel.settings.name} · ${size}` : size;
 }
 
 /**
@@ -315,20 +281,8 @@ const METRIC: React.CSSProperties = {
   fontSize: 10.5,
 };
 
-/** Breathing room around the stage, and the amount `measure` must discount. */
-const CANVAS_PADDING = 20;
-
-const CANVAS: React.CSSProperties = {
-  flex: 1,
-  minHeight: 0,
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  padding: CANVAS_PADDING,
-  background:
-    'repeating-linear-gradient(0deg, transparent 0 23px, rgba(255,255,255,0.02) 23px 24px),' +
-    'repeating-linear-gradient(90deg, transparent 0 23px, rgba(255,255,255,0.02) 23px 24px)',
-};
+/** Breathing room the fit leaves around the stage, in canvas pixels. */
+const CANVAS_PADDING = 28;
 
 /**
  * The screen the panel is imagined to be on.
@@ -339,19 +293,6 @@ const CANVAS: React.CSSProperties = {
  * the layout box is derived from it and the project's PanelSettings.
  */
 const SCREEN = { width: 1920, height: 1080 };
-
-/**
- * A fixed 16:9 stage rather than a fluid box. The document is laid out against
- * a screen, so giving it the panel's shape would show a layout the game never
- * has.
- */
-const STAGE: React.CSSProperties = {
-  position: 'relative',
-  background: 'linear-gradient(160deg, #1B1726 0%, #0D0B14 100%)',
-  boxShadow: '0 0 0 1px rgba(255,255,255,0.10), 0 18px 48px rgba(0,0,0,0.45)',
-  overflow: 'hidden',
-  flexShrink: 0,
-};
 
 const STRIP: React.CSSProperties = {
   display: 'flex',

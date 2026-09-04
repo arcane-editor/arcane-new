@@ -9521,7 +9521,6 @@ html, body, #root {
   display: flex;
   align-items: center;
   gap: 5px;
-  margin-left: auto;
   padding: 2px 8px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -9541,4 +9540,166 @@ html, body, #root {
   border-color: var(--accent);
   color: var(--accent);
   background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+/* The toolbar owns the right edge of the header; the toggles inside it no
+   longer each claim it for themselves. */
+.uxml-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+/* A segmented control: out, the readout, in. The readout is a button because
+   it does something — 1:1 — and the number is where you look to change it. */
+.uxml-zoom {
+  display: flex;
+  align-items: stretch;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.uxml-zoom button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 6px;
+  border: 0;
+  background: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.uxml-zoom button:hover {
+  background: var(--hover);
+  color: var(--text-primary);
+}
+
+.uxml-zoom-value {
+  min-width: 46px;
+  border-left: 1px solid var(--border) !important;
+  border-right: 1px solid var(--border) !important;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── UXML preview: the canvas ──
+   A viewport, not a scroll container: the camera in `usePreviewCamera` owns
+   the position, so this clips and never scrolls. `touch-action: none` keeps
+   the browser from claiming a drag as a scroll before the pointer handlers
+   see it. */
+.uxml-canvas {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  outline: none;
+  touch-action: none;
+  user-select: none;
+  cursor: grab;
+  background:
+    radial-gradient(120% 90% at 50% 0%, rgba(212, 176, 98, 0.05), transparent 60%),
+    linear-gradient(180deg, #14121C 0%, #0B0A10 100%);
+}
+
+/* Over the stage the pointer selects rather than pans, so it must not promise
+   a drag. Inside the preview the shadow root's own `cursor` takes it from
+   here. */
+.uxml-canvas .uxml-stage {
+  cursor: default;
+}
+
+/* Drag states beat both of the above, including the `cursor: pointer` inside
+   the shadow root — during a captured drag the gesture is the only thing
+   happening, wherever the pointer wanders. */
+.uxml-canvas.is-panning,
+.uxml-canvas.is-panning * {
+  cursor: grabbing !important;
+}
+
+.uxml-canvas.is-grab,
+.uxml-canvas.is-grab * {
+  cursor: grab !important;
+}
+
+/* Four tiled 1px lines: fine grid, then coarse every fifth cell. Sizes and
+   offset are set in JS from the camera, so the grid moves and scales with it. */
+.uxml-canvas-grid {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.028) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.028) 1px, transparent 1px),
+    linear-gradient(to right, rgba(255, 255, 255, 0.055) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.055) 1px, transparent 1px);
+  transition: opacity 120ms ease;
+}
+
+/* The frame, in SCREEN pixels — hence the hairline and the shadow stay put
+   while the document inside is scaled. `overflow: hidden` is what makes this a
+   screen: a panel clips, and a preview that let content spill would show a
+   layout the game never has. */
+.uxml-stage {
+  position: absolute;
+  overflow: hidden;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.11),
+    0 1px 0 0 rgba(255, 255, 255, 0.06) inset,
+    0 24px 64px rgba(0, 0, 0, 0.55),
+    0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.uxml-stage-surface {
+  position: absolute;
+  inset: 0;
+}
+
+.uxml-stage-surface[data-bg='dark'] {
+  background: linear-gradient(160deg, #1B1726 0%, #0D0B14 100%);
+}
+
+.uxml-stage-surface[data-bg='light'] {
+  background: linear-gradient(160deg, #FFFFFF 0%, #D9DCE4 100%);
+}
+
+/* Fixed 16px squares in SCREEN space, the convention for "nothing is here" —
+   scaling them with the zoom would read as content. */
+.uxml-stage-surface[data-bg='checker'] {
+  background-color: #6E7079;
+  background-image:
+    linear-gradient(45deg, #4C4E56 25%, transparent 25%, transparent 75%, #4C4E56 75%),
+    linear-gradient(45deg, #4C4E56 25%, transparent 25%, transparent 75%, #4C4E56 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 8px 8px;
+}
+
+/* World space: the only element the camera's scale is applied to. */
+.uxml-stage-world {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+/* Names the frame, the way a design tool labels an artboard. Sits above the
+   stage in screen space, so it holds its size at any zoom and never covers the
+   document. */
+.uxml-stage-label {
+  position: absolute;
+  transform: translateY(-100%);
+  padding-bottom: 5px;
+  pointer-events: none;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+  color: var(--text-secondary);
+  opacity: 0.75;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
