@@ -72,5 +72,8 @@ export function consoleMarker(result: ConsoleCheckResult): CheckMarker {
 /** The tests row's marker. A failing test is a failing send, however many passed. */
 export function testsMarker(tests: TestsCheckResult): CheckMarker {
   if (tests === 'skipped') return 'skip';
+  // A run that never finished proved nothing either way, so it must not go
+  // green — and it is not a failure the agent caused, so it must not go red.
+  if ('unfinished' in tests) return 'skip';
   return tests.failed > 0 ? 'bad' : 'ok';
 }

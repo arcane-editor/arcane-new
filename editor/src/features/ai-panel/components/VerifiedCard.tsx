@@ -155,7 +155,7 @@ function VerifiedCard({ message }: Props) {
     !('repairAttempted' in consoleCheck)
       ? consoleCheck.items
       : [];
-  const testFailures = tests !== 'skipped' ? tests.failures : [];
+  const testFailures = tests !== 'skipped' && !('unfinished' in tests) ? tests.failures : [];
   const hasDetail =
     touchedFiles.length > 0 ||
     missingGuids.length > 0 ||

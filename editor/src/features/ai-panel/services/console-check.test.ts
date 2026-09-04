@@ -942,4 +942,52 @@ describe('the card rows', () => {
       testsRowLabel({ mode: 'EditMode', passed: 12, failed: 2, skipped: 0, failures: [] }),
     ).toBe('tests: 2 of 14 failed');
   });
+
+  // R11: this row had no reachable "did not finish" branch at all, so a run
+  // against a backgrounded Unity was indistinguishable from no run at all.
+  it('says a run did not finish, and why, rather than "tests skipped"', () => {
+    expect(testsRowLabel({ unfinished: 'editor-asleep' })).toBe(
+      'tests: run did not finish (Unity in background)',
+    );
+    expect(testsRowLabel({ unfinished: 'bridge-lost' })).toBe(
+      'tests: run did not finish (the Unity bridge disconnected)',
+    );
+    expect(testsRowLabel({ unfinished: 'timeout' })).toBe(
+      "tests: run did not finish (timed out waiting for Unity's result)",
+    );
+    expect(testsRowLabel({ unfinished: 'test-framework-missing' })).toBe(
+      'tests: run did not finish (the Test Framework is not installed)',
+    );
+  });
+
+  it('falls back to the raw reason token rather than dropping an unnamed one', () => {
+    expect(testsRowLabel({ unfinished: 'something-new' })).toBe(
+      'tests: run did not finish (something-new)',
+    );
+  });
+});
+
+describe('testsResult — runs vs unfinished attempts (R11)', () => {
+  const run = { mode: 'EditMode', passed: 3, failed: 0, skipped: 0, failures: [] };
+
+  it('is "skipped" only when nothing was even asked for', () => {
+    expect(testsResult(null)).toBe('skipped');
+    expect(testsResult(null, [])).toBe('skipped');
+  });
+
+  it('reports the LAST unfinished attempt when no run finished', () => {
+    expect(
+      testsResult(null, [{ reason: 'timeout' }, { reason: 'editor-asleep' }]),
+    ).toEqual({ unfinished: 'editor-asleep' });
+  });
+
+  it('lets a finished run win over an earlier failed attempt — the agent did get a result', () => {
+    expect(testsResult(run, [{ reason: 'editor-asleep' }])).toEqual({
+      mode: 'EditMode',
+      passed: 3,
+      failed: 0,
+      skipped: 0,
+      failures: [],
+    });
+  });
 });

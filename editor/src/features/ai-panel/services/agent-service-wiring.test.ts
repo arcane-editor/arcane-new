@@ -301,7 +301,22 @@ describe('agent-service.ts — post-turn console check (Task 13)', () => {
 
   it('runs the closing checks when a test ran even if no file was written', () => {
     expect(SRC).toContain('const recordedRuns = takeRecordedTestRuns();');
-    expect(SRC).toContain('if (touchedFileCount() === 0 && recordedRuns.length === 0) return;');
+    expect(SRC).toContain(
+      'if (touchedFileCount() === 0 && recordedRuns.length === 0 && runAttempts.length === 0) return;',
+    );
+  });
+
+  // R11: an unfinished run used to leave the whole card unrendered.
+  it('drains the unfinished attempts separately and runs the checks for them too', () => {
+    expect(SRC).toContain('const runAttempts = takeRecordedTestRunAttempts();');
+    expect(SRC).toContain('takeRecordedTestRunAttempts,');
+  });
+
+  it('never feeds an attempt to collectNewProblems as a run — it only reaches testsResult', () => {
+    // `latestRun(...)` is the only thing handed to the problem collector; the
+    // attempts go to the row copy, which says the run did not finish.
+    expect(SRC).toContain('testsResult(latestRun(recordedRuns), runAttempts)');
+    expect(SRC).not.toContain('latestRun(runAttempts)');
   });
 
   it('bounds the repair at exactly one pass', () => {

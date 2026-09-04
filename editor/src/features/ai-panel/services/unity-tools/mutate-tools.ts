@@ -10,7 +10,7 @@ import { useSettingsStore } from '../../../../stores/settings';
 import { requestEngineApproval } from '../approval-gate';
 import { txt, bridgeConnected } from './shared';
 import { describeTestRunOutcome } from './test-run-outcome-text';
-import { recordTestRunForConsoleCheck } from './test-run-registry';
+import { recordTestRunForConsoleCheck, recordTestRunAttempt } from './test-run-registry';
 import { createUnitySceneMutateTools } from './scene-mutate-tools';
 
 /**
@@ -128,11 +128,22 @@ function createUnityRunTests(): AgentTool {
           signal,
           timeoutMs: clamped != null ? clamped * 1000 : undefined,
         });
-        // Only a REAL run — Task 13's console check must not think a run
-        // happened when it never started (`ok:false` means Unity refused or
-        // couldn't, not that anything ran).
+        // Only a REAL run gets counted — Task 13's console check must not think
+        // a run happened when it never started (`ok:false` means Unity refused
+        // or couldn't, not that anything ran). Every OTHER outcome is recorded
+        // as an ATTEMPT (R11): it is not a run, but it is also not nothing, and
+        // a turn whose only action was this call has to still produce a card
+        // that says the run did not finish.
         if (outcome.status === 'report' && outcome.summary.ok) {
           recordTestRunForConsoleCheck(outcome.summary);
+        } else {
+          recordTestRunAttempt({
+            status: 'unknown',
+            reason:
+              outcome.status === 'report'
+                ? (outcome.summary.reason ?? 'runner-unavailable')
+                : outcome.reason,
+          });
         }
         return txt(describeTestRunOutcome(outcome));
       });

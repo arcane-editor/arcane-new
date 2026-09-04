@@ -317,6 +317,13 @@ export type ConsoleCheckResult =
 
 export type TestsCheckResult =
   | 'skipped'
+  /**
+   * `unity_run_tests` ran but never produced a result (R11). NOT `'skipped'`
+   * — the agent did ask for a run, and "tests skipped" would read as though it
+   * never tried. `reason` is the wait outcome's own token; `testsRowLabel`
+   * words it.
+   */
+  | { unfinished: string }
   | {
       mode: string;
       passed: number;
@@ -702,9 +709,23 @@ export function consoleResult(
   };
 }
 
-/** The card's tests row, read from the LATEST recorded run (a re-run supersedes an earlier one). */
-export function testsResult(run: TestRunSummaryInput | null): TestsCheckResult {
-  if (!run) return 'skipped';
+/**
+ * The card's tests row, read from the LATEST recorded run (a re-run supersedes
+ * an earlier one).
+ *
+ * A finished run always wins: an agent that watched a run die of a background
+ * Unity and then re-ran it successfully has a real result, and that is what the
+ * card should say. Only when NO run finished do the unfinished attempts speak
+ * (R11) — and then it is the last one, for the same "latest wins" reason.
+ */
+export function testsResult(
+  run: TestRunSummaryInput | null,
+  attempts: readonly { reason: string }[] = [],
+): TestsCheckResult {
+  if (!run) {
+    const last = attempts[attempts.length - 1];
+    return last ? { unfinished: last.reason } : 'skipped';
+  }
   return {
     mode: run.mode ?? 'EditMode',
     passed: run.passed ?? 0,
@@ -831,9 +852,30 @@ const RECHECK_REASON: Record<ConsoleDegradation, string> = {
   'old-package': 'stream only — update the bridge package for full history',
 };
 
+/**
+ * How each unfinished-run reason reads on the card. Anything not listed falls
+ * back to its raw token rather than to silence — an unnamed reason is still a
+ * reason, and inventing "unknown" for it would be less honest than the token.
+ */
+const TEST_ATTEMPT_REASON: Record<string, string> = {
+  'editor-asleep': 'Unity in background',
+  timeout: "timed out waiting for Unity's result",
+  aborted: 'cancelled',
+  'bridge-lost': 'the Unity bridge disconnected',
+  'not-installed': 'the Test Framework is not installed',
+  'test-framework-missing': 'the Test Framework is not installed',
+  'nothing-matched': 'no tests matched the mode/filter',
+  'runner-unavailable': "Unity's test runner was busy",
+};
+
 /** The tests row on the Verified card. */
 export function testsRowLabel(result: TestsCheckResult): string {
   if (result === 'skipped') return 'tests skipped';
+  // Never a pass and never a silent skip: the agent asked for a run and did
+  // not get one (Global Constraint 2).
+  if ('unfinished' in result) {
+    return `tests: run did not finish (${TEST_ATTEMPT_REASON[result.unfinished] ?? result.unfinished})`;
+  }
   if (result.failed > 0) {
     const total = result.passed + result.failed + result.skipped;
     return `tests: ${result.failed} of ${total} failed`;

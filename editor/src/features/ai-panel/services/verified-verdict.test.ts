@@ -108,6 +108,12 @@ describe('testsMarker (Task 13)', () => {
       testsMarker({ mode: 'EditMode', passed: 12, failed: 0, skipped: 2, failures: [] }),
     ).toBe('ok');
   });
+
+  // R11: a run that never came back proved nothing — it must not go green, and
+  // it is not a failure the agent caused, so it must not go red either.
+  it('is "skip" for a run that did not finish', () => {
+    expect(testsMarker({ unfinished: 'editor-asleep' })).toBe('skip');
+  });
 });
 
 describe('the verdict folds the new rows in', () => {

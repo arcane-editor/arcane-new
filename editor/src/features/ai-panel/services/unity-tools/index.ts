@@ -26,8 +26,11 @@ export { unityApiSearch, unityApiLookup } from './api-client';
 export { markConsoleTurnStart } from './read-tools';
 export {
   recordTestRunForConsoleCheck,
+  recordTestRunAttempt,
   takeRecordedTestRuns,
+  takeRecordedTestRunAttempts,
   resetTestRunRegistry,
+  type TestRunAttempt,
 } from './test-run-registry';
 export {
   registerPendingGuidCheck,

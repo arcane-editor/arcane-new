@@ -48,6 +48,7 @@ import {
   markConsoleTurnStart,
   resetTestRunRegistry,
   takeRecordedTestRuns,
+  takeRecordedTestRunAttempts,
   resetPendingGuidChecks,
 } from './unity-tools';
 import { resolveToCwd } from './vendor/tools/path-utils';
@@ -941,7 +942,14 @@ export class AgentService {
     // checks even when no file was written (the agent can run a suite, watch
     // it fail, and stop).
     const recordedRuns = takeRecordedTestRuns();
-    if (touchedFileCount() === 0 && recordedRuns.length === 0) return;
+    // R11: a run that never came back (Unity parked in the background, bridge
+    // lost, no Test Framework) is drained separately — it is NOT a run, so it
+    // must never reach `collectNewProblems` as one, but it IS a reason to emit
+    // a card. Without this, the one turn whose only action was
+    // `unity_run_tests` against a backgrounded Unity produced no card at all,
+    // and the tool's honest "it has not started" was the turn's only trace.
+    const runAttempts = takeRecordedTestRunAttempts();
+    if (touchedFileCount() === 0 && recordedRuns.length === 0 && runAttempts.length === 0) return;
     if (!useProjectContextStore.getState().isUnityProject) return;
     if (useSettingsStore.getState().getSetting('unity.verifiedPass.enabled') === false) return;
 
@@ -960,11 +968,19 @@ export class AgentService {
       const consoleEnabled =
         useSettingsStore.getState().getSetting('unity.consoleCheck.enabled') !== false;
       if (!consoleEnabled || !baseline) {
-        useAiStore.getState().addVerifiedPassMessage(data);
+        useAiStore
+          .getState()
+          .addVerifiedPassMessage({ ...data, tests: testsResult(latestRun(recordedRuns), runAttempts) });
         return;
       }
 
-      const merged = await this.runConsoleCheck(baseline, data, recordedRuns, workspacePath);
+      const merged = await this.runConsoleCheck(
+        baseline,
+        data,
+        recordedRuns,
+        runAttempts,
+        workspacePath,
+      );
       useAiStore.getState().addVerifiedPassMessage(merged);
     } catch {
       // runVerifiedPass is already defensive per-step; this is just an extra
@@ -982,6 +998,7 @@ export class AgentService {
     baseline: ConsoleCheckBaseline,
     firstPass: VerifiedCardData,
     recordedRuns: ReturnType<typeof takeRecordedTestRuns>,
+    runAttempts: ReturnType<typeof takeRecordedTestRunAttempts>,
     workspacePath: string,
   ): Promise<VerifiedCardData> {
     const before = await collectConsoleProblems(baseline, firstPass, latestRun(recordedRuns));
@@ -1002,7 +1019,7 @@ export class AgentService {
       return {
         ...firstPass,
         console: consoleResult(before, null),
-        tests: testsResult(latestRun(recordedRuns)),
+        tests: testsResult(latestRun(recordedRuns), runAttempts),
       };
     }
 
@@ -1011,7 +1028,7 @@ export class AgentService {
     const unrepaired = (repair?: RepairInfo): VerifiedCardData => ({
       ...firstPass,
       console: consoleResult(before, null),
-      tests: testsResult(latestRun(recordedRuns)),
+      tests: testsResult(latestRun(recordedRuns), runAttempts),
       ...(repair ? { repair } : {}),
     });
 
@@ -1074,6 +1091,9 @@ export class AgentService {
     // The agent may have re-run the failing tests itself (approval-gated); the
     // card reads the newest run it recorded, falling back to the pre-repair one.
     const run = latestRun(takeRecordedTestRuns()) ?? latestRun(recordedRuns);
+    // Drained here too, so a repair turn that asked for a run and did not get
+    // one still says so rather than falling back to "tests skipped".
+    const attempts = [...runAttempts, ...takeRecordedTestRunAttempts()];
 
     return {
       ...secondPass,
@@ -1081,7 +1101,7 @@ export class AgentService {
       // reconnected) reports "re-check unavailable" instead of letting an
       // empty read read as a successful repair.
       console: consoleResult(before, outcome, after),
-      tests: testsResult(run),
+      tests: testsResult(run, attempts),
       ...(trigger ? { repair: { attempted: true as const, trigger } } : {}),
     };
   }
