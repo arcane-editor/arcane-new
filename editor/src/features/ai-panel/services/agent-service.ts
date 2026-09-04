@@ -652,6 +652,10 @@ export class AgentService {
     // createToolsForPromptMode), so their per-send state needs an explicit
     // reset here, same as the compile gate above.
     resetTurnGovernor();
+    // The working row's "N model calls" count belongs to the CURRENT submit.
+    // Nothing ever cleared it, so the row opened showing the previous send's
+    // total until the first governed call of this one reported in (M12).
+    useAiStore.getState().setModelCallBudget(null);
     resetTestRunRegistry();
     resetPendingGuidChecks();
     markConsoleTurnStart(useUnityStore.getState().logSeq);

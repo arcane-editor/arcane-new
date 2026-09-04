@@ -167,7 +167,10 @@ describe('get_console_errors — source fallback labels', () => {
     const res = await tool.execute('id', {}, undefined, undefined);
     const text = textOf(res);
     expect(text).toContain("Unity's own console API is unavailable on this Editor version");
-    expect(text).toContain('(source: Unity console)');
+    // M10: the header used to say plain "Unity console" for an answer that
+    // never touched Unity's console — the source label now names what was
+    // actually read.
+    expect(text).toContain('(source: Unity console (bridge ring))');
   });
 
   it('RPC call throws (Unity backgrounded / worker timeout): a label distinct from "predates protocol 4"', async () => {

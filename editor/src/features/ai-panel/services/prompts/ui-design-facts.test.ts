@@ -11,9 +11,11 @@ import path from 'node:path';
 import {
   uiDesignFactLines,
   collectUssVariables,
+  DESIGN_RULES,
   type UiDesignFacts,
   type UssSheetDeclarations,
 } from './ui-design-facts';
+import { HUD_EDGE_MARGIN } from '../../../../utils/layout-lint';
 
 const EMPTY: UiDesignFacts = { variables: [], panels: [], themeSheets: [], stack: 'uitoolkit' };
 
@@ -430,5 +432,18 @@ describe('collectUssVariables', () => {
     expect(
       collectUssVariables([{ path: 'Assets/UI/Layout.uss', declarations: [{ property: 'flex-grow', value: '1' }] }]),
     ).toEqual({ variables: [], themeSheets: [] });
+  });
+});
+
+// M7. The prompt states the design rules and `unity_ui_layout`'s lint enforces
+// them, so a number that appears in both has to BE the same number. It was
+// not: the prompt asked for a 24px HUD safe area while the lint only complained
+// below 16, and a HUD at 20px therefore broke the stated rule and passed the
+// check that exists to catch it.
+describe('the stated design rules match the lint that enforces them', () => {
+  it('states the HUD safe area as exactly the margin layout-lint uses', () => {
+    const rule = DESIGN_RULES.find((r) => r.includes('HUD safe area'));
+    expect(rule).toBeDefined();
+    expect(rule).toBe(`- HUD safe area ≥ ${HUD_EDGE_MARGIN}px from every edge.`);
   });
 });

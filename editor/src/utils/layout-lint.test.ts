@@ -339,13 +339,24 @@ describe('lintLayout — button too small', () => {
 });
 
 describe('lintLayout — HUD edge', () => {
-  it('flags a HUD-named element within 16px of the panel edge', () => {
+  it('flags a HUD-named element inside the 24px safe area', () => {
     const findings = lintLayout(
       result([node({ name: 'hud-corner', box: { x: 5, y: 100, w: 40, h: 40 } })]),
       PANEL,
     );
     expect(codes(findings)).toEqual(['hud-edge']);
     expect(findings[0].message).toContain('left');
+    expect(findings[0].message).toContain('24px HUD safe area');
+  });
+
+  // M7: the lint used to stop at 16px while the prompt asked for 24, so this
+  // exact placement broke the stated design rule and passed the check.
+  it('flags an element between the old 16px threshold and the stated 24px rule', () => {
+    const findings = lintLayout(
+      result([node({ name: 'hud-corner', box: { x: 20, y: 100, w: 40, h: 40 } })]),
+      PANEL,
+    );
+    expect(codes(findings)).toEqual(['hud-edge']);
   });
 
   it('matches on class as well as name, case-insensitively', () => {

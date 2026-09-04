@@ -45,7 +45,16 @@ const DEFAULT_STAGE_BG: Rgba = { r: 0x1b, g: 0x17, b: 0x26, a: 1 };
 
 const MIN_CONTRAST = 4.5;
 const MIN_BUTTON_HEIGHT = 32;
-const HUD_EDGE_MARGIN = 16;
+/**
+ * The HUD safe-area margin, in reference-resolution px.
+ *
+ * Must equal the number the system prompt states as a design rule
+ * (`prompts/ui-design-facts.ts`'s `DESIGN_RULES`). The two drifted — the prompt
+ * asked for ≥ 24px and the lint only complained below 16 — so a HUD placed at
+ * exactly 20px broke the stated rule and passed the check that exists to
+ * enforce it. `ui-design-facts.test.ts` pins them together.
+ */
+export const HUD_EDGE_MARGIN = 24;
 
 function label(node: LayoutNode): string {
   return node.name ? `#${node.name}` : `<${node.kind}> (${node.id})`;
@@ -263,7 +272,7 @@ function lintHudEdge(nodes: readonly LayoutNode[], panel: Size): LintFinding[] {
       severity: 'warn',
       code: 'hud-edge',
       node,
-      message: `${label(node)} sits ${Math.round(dist)}px from the ${edge} edge — inside the ${HUD_EDGE_MARGIN}px safe-area margin on some devices.`,
+      message: `${label(node)} sits ${Math.round(dist)}px from the ${edge} edge — inside the ${HUD_EDGE_MARGIN}px HUD safe area (the design rule asks for at least ${HUD_EDGE_MARGIN}px from every edge).`,
     });
   }
   return out;

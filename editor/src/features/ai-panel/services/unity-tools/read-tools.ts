@@ -215,7 +215,11 @@ interface ConsolePageInfo {
 export function renderConsoleErrors(
   entries: ConsoleDisplayEntry[],
   counts: { errors: number; warnings: number; logs: number },
-  sourceLabel: 'Unity console' | 'this session',
+  // Three sources, three labels. A `hookRing` answer is NOT Unity's console —
+  // it is the bridge's own log ring, standing in because Unity's console API
+  // is unavailable on that Editor version — and labelling it "Unity console"
+  // told the model it had read something it had not (Global Constraint 2).
+  sourceLabel: 'Unity console' | 'Unity console (bridge ring)' | 'this session',
   degradedNote: string,
   includeStackTrace: boolean,
   pageInfo: ConsolePageInfo,
@@ -362,19 +366,26 @@ export function createGetConsoleErrors(deps: ConsoleToolDeps = defaultConsoleToo
           order: 'newest',
         });
         const entries = snapshot.entries.map(toDisplayEntry);
-        const degradedNote =
-          snapshot.source === 'hookRing'
-            ? "Unity's own console API is unavailable on this Editor version — showing the bridge's own " +
-              'log history instead of Unity\'s real console.\n\n'
-            : '';
+        const fromHookRing = snapshot.source === 'hookRing';
+        const degradedNote = fromHookRing
+          ? "Unity's own console API is unavailable on this Editor version — showing the bridge's own " +
+            'log history instead of Unity\'s real console.\n\n'
+          : '';
         return txt(
           cap(
-            renderConsoleErrors(entries, snapshot.counts, 'Unity console', degradedNote, includeStackTrace, {
-              total: snapshot.total,
-              page,
-              limit,
-              truncated: snapshot.truncated,
-            }),
+            renderConsoleErrors(
+              entries,
+              snapshot.counts,
+              fromHookRing ? 'Unity console (bridge ring)' : 'Unity console',
+              degradedNote,
+              includeStackTrace,
+              {
+                total: snapshot.total,
+                page,
+                limit,
+                truncated: snapshot.truncated,
+              },
+            ),
           ),
         );
       } catch {

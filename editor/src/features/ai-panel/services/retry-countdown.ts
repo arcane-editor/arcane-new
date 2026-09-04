@@ -40,3 +40,34 @@ export function formatRetryCountdown(retryAt: number, now: number): string {
   }
   return `${minutes}:${pad2(seconds)}`;
 }
+
+/**
+ * The error detail line as it should read RIGHT NOW.
+ *
+ * `turn-errors.ts` writes the lockout copy with a literal `{countdown}`
+ * placeholder so the classification stays pure and only the render layer knows
+ * about wall-clock time. Filling it in unconditionally produced "Retry unlocks
+ * in 0:00." the moment the lockout elapsed — and immediately, for a restored
+ * session whose `retryAt` is already in the past. Once it is unlocked there is
+ * no countdown to state, so the sentence that states one is dropped and the
+ * rest of the detail stands on its own (the same text the no-`retryAt` variant
+ * would have carried).
+ *
+ * Returns `undefined` when nothing is left to say, so the caller renders no
+ * detail row at all rather than an empty one.
+ */
+export function resolveErrorDetail(
+  detail: string | undefined,
+  retryAt: number | undefined,
+  now: number,
+): string | undefined {
+  if (!detail || retryAt === undefined) return detail;
+  if (!retryUnlocked(retryAt, now)) return detail.replace('{countdown}', formatRetryCountdown(retryAt, now));
+
+  const sentences = detail.match(/[^.!?]+[.!?]*/g) ?? [detail];
+  const kept = sentences
+    .filter((sentence) => !sentence.includes('{countdown}'))
+    .join('')
+    .trim();
+  return kept.length > 0 ? kept : undefined;
+}

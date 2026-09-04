@@ -12,7 +12,7 @@ import { AlertTriangle, ChevronRight, ChevronDown } from 'lucide-react';
 import { useAiStore, type AiMessage } from '../../../stores/ai';
 import { useAuthStore } from '../../../stores/auth';
 import { retryFailedTurn } from '../services/retry-turn';
-import { formatRetryCountdown, retryUnlocked } from '../services/retry-countdown';
+import { formatRetryCountdown, resolveErrorDetail, retryUnlocked } from '../services/retry-countdown';
 
 interface Props {
   message: AiMessage;
@@ -47,13 +47,12 @@ function ErrorBlock({ message }: Props) {
   if (!turnError) return null;
 
   // `detail` may carry a literal `{countdown}` placeholder (turn-errors.ts's
-  // hourly_cap/rate_limit copy) — filled in here with the live countdown so
-  // the classification stays pure/deterministic and only the render layer
-  // knows about wall-clock time.
-  const detail =
-    turnError.detail && retryAt !== undefined
-      ? turnError.detail.replace('{countdown}', formatRetryCountdown(retryAt, now))
-      : turnError.detail;
+  // hourly_cap/rate_limit copy) — filled in with the live countdown so the
+  // classification stays pure/deterministic and only the render layer knows
+  // about wall-clock time. Once the lockout has elapsed (or a restored session
+  // brings back a `retryAt` already in the past) the countdown sentence is
+  // dropped instead of rendering "Retry unlocks in 0:00."
+  const detail = resolveErrorDetail(turnError.detail, retryAt, now);
 
   function handleRetry() {
     // Last-resort net (same pattern ChatInput uses): retryFailedTurn's replay

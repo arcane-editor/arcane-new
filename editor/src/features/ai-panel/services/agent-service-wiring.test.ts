@@ -203,6 +203,15 @@ describe('agent-service.ts — unity_ui_write wiring (Task 14)', () => {
     expect(SRC).toContain("} from './unity-tools';");
   });
 
+  // M12: the working row's model-call count is per-submit, and nothing cleared
+  // it — so a new send opened showing the previous one's total.
+  it('clears the working row\'s model-call count at send start, next to resetTurnGovernor()', () => {
+    expect(SRC).toContain(
+      'resetTurnGovernor();\n    // The working row\'s "N model calls" count belongs to the CURRENT submit.',
+    );
+    expect(SRC).toContain('useAiStore.getState().setModelCallBudget(null);');
+  });
+
   it('resets the pending-guid-check registry every send, next to resetTestRunRegistry()', () => {
     expect(SRC).toContain('resetTestRunRegistry();\n    resetPendingGuidChecks();');
   });
@@ -396,9 +405,11 @@ describe('agent-service.ts — post-turn console check (Task 13)', () => {
 
   it('never compares a snapshot row against the ring seq — its index goes in unityRow', () => {
     // Unity's row index is a different numbering; conflating the two is what
-    // sent `sinceTurnStart` filtering into the wrong space once already.
+    // sent `sinceTurnStart` filtering into the wrong space once already. And
+    // only a `logEntries` answer HAS a row index — see console-check-io.test.ts
+    // for the hookRing half (I3).
     expect(IO_SRC).toMatch(
-      /snapshot = snap\.entries\.map\(\(row\) => \(\{[\s\S]*?seq: null,\s*unityRow: row\.seq,/,
+      /snapshot = snap\.entries\.map\(\(row\) => \(\{[\s\S]*?seq: null,\s*unityRow: snap\.source === 'logEntries' \? row\.seq : null,/,
     );
   });
 
