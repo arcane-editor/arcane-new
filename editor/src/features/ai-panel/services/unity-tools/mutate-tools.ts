@@ -83,11 +83,21 @@ const runTestsSchema = Type.Object({
   timeoutSec: Type.Optional(
     Type.Integer({
       description:
-        'Override how long to wait for the run to finish, in seconds ' +
+        'Override how long to wait for the run to finish, in seconds, clamped to 10-3600 ' +
         '(default 300 for EditMode, 900 for PlayMode).',
     }),
   ),
 });
+
+/** Min/max `unity_run_tests(timeoutSec:...)` — see MIN_TIMEOUT_SEC/MAX_TIMEOUT_SEC. */
+const MIN_TIMEOUT_SEC = 10;
+const MAX_TIMEOUT_SEC = 3600;
+
+/** 0/negative/absent all mean "use the per-mode default"; anything else is clamped to [10, 3600]. */
+function clampTimeoutSec(timeoutSec: number | undefined): number | undefined {
+  if (timeoutSec == null || timeoutSec <= 0) return undefined;
+  return Math.min(MAX_TIMEOUT_SEC, Math.max(MIN_TIMEOUT_SEC, timeoutSec));
+}
 
 function createUnityRunTests(): AgentTool {
   return {
@@ -105,11 +115,17 @@ function createUnityRunTests(): AgentTool {
         // if imported statically — see Global Constraint 4 / `ui-toolkit-tool.ts`
         // for the same seam.
         const { waitForTestRun } = await import('../../../unity-test-runner');
+        const clamped = clampTimeoutSec(timeoutSec);
         const outcome = await waitForTestRun(mode, filter, {
           signal,
-          timeoutMs: timeoutSec != null ? timeoutSec * 1000 : undefined,
+          timeoutMs: clamped != null ? clamped * 1000 : undefined,
         });
-        if (outcome.status === 'report') recordTestRunForConsoleCheck(outcome.summary);
+        // Only a REAL run — Task 13's console check must not think a run
+        // happened when it never started (`ok:false` means Unity refused or
+        // couldn't, not that anything ran).
+        if (outcome.status === 'report' && outcome.summary.ok) {
+          recordTestRunForConsoleCheck(outcome.summary);
+        }
         return txt(describeTestRunOutcome(outcome));
       });
     },

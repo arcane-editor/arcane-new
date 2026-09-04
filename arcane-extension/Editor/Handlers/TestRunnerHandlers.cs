@@ -122,6 +122,7 @@ namespace UnityIDE.Bridge
             _api = null;
             _callbacks = null;
             _client = null;
+            SendOverrideForTests = null;
         }
 
         private static JsonValue RunTests(JsonValue p)
@@ -133,13 +134,26 @@ namespace UnityIDE.Bridge
             // emit a null runId, which is the honest answer for that caller.
             string runId = p["runId"].AsString;
 
+            // A run is already in flight — refuse this ask WITHOUT touching the
+            // active-run key, which still belongs to that other run. Overwriting
+            // it here was the bug: SetActiveRun below would stomp the first
+            // run's identity with this ask's, so when the FIRST run finished,
+            // RunFinished would read THIS ask's runId back out of SessionState
+            // and push completion under the wrong id — the first run's waiter
+            // would never see a match and would burn its whole timeout.
+            if (GetActiveRun() != null)
+            {
+                PushRunCompleted(runId, mode, false, "runner-unavailable");
+                return Failed("runner-unavailable");
+            }
+
             // Normally already registered by Register(); this covers a bridge
             // that reconnected without a domain reload in between.
             EnsureCallbacks();
             if (_api == null)
             {
                 PushRunCompleted(runId, mode, false, "test-framework-missing");
-                return Ok();
+                return Failed("test-framework-missing");
             }
 
             var f = new Filter
@@ -160,10 +174,20 @@ namespace UnityIDE.Bridge
                 // Execute() throws for a run already in progress, among other
                 // things — either way nothing is going to call RunFinished for
                 // THIS ask, so the caller must be told directly rather than left
-                // waiting on a completion that is never coming.
-                ClearActiveRun();
+                // waiting on a completion that is never coming. Only erase the
+                // key if it is still the one THIS ask wrote — never clear an
+                // identity another ask did not write (defensive: the early
+                // bail-out above is the primary guard, but this must hold even
+                // if that guard is ever bypassed).
+                var active = GetActiveRun();
+                string activeRunId = active != null ? active["runId"].AsString : null;
+                if (active != null && string.Equals(activeRunId ?? "", runId ?? "", StringComparison.Ordinal))
+                {
+                    ClearActiveRun();
+                }
                 Debug.LogError("[UnityIDEBridge] runTests Execute failed: " + e);
                 PushRunCompleted(runId, mode, false, "runner-unavailable");
+                return Failed("runner-unavailable");
             }
 
             // Discarded by the queued dispatcher (see RpcDispatcher.DispatchQueued);
@@ -173,19 +197,40 @@ namespace UnityIDE.Bridge
         }
 
         /// <summary>
-        /// Push `test_run_completed` directly — used for the two cases where no
-        /// run ever starts, so RunFinished is never going to fire for it: the
-        /// framework/runner is unavailable, or Execute() itself threw.
+        /// Push `test_run_completed` directly — used for the cases where no run
+        /// ever starts, so RunFinished is never going to fire for it: another
+        /// run is already active, the framework/runner is unavailable, or
+        /// Execute() itself threw.
         /// </summary>
         private static void PushRunCompleted(string runId, string mode, bool ok, string reason)
         {
-            if (_client == null) return;
             var payload = JsonValue.NewObject();
             payload["runId"] = string.IsNullOrEmpty(runId) ? JsonValue.Null : JsonValue.Of(runId);
             payload["ok"] = ok;
             if (!string.IsNullOrEmpty(reason)) payload["reason"] = reason;
             if (!string.IsNullOrEmpty(mode)) payload["mode"] = mode;
-            try { _client.Send(Protocol.Envelope(MsgType.TestRunCompleted, payload)); }
+            SendEnvelope(Protocol.Envelope(MsgType.TestRunCompleted, payload));
+        }
+
+        /// <summary>
+        /// Test-only override for where pushes go — lets `TestRunProtocolTests`
+        /// capture what `RunTests`/`PushRunCompleted` send without a live,
+        /// started `BridgeClient` (whose `Send` is a silent no-op until
+        /// `Start()` has run a real worker thread). Reset to null in
+        /// `Shutdown()`; production always goes through `_client`.
+        /// </summary>
+        internal static Action<JsonValue> SendOverrideForTests;
+
+        private static void SendEnvelope(JsonValue envelope)
+        {
+            if (SendOverrideForTests != null)
+            {
+                try { SendOverrideForTests(envelope); }
+                catch { /* never throw on the main thread */ }
+                return;
+            }
+            if (_client == null) return;
+            try { _client.Send(envelope); }
             catch { /* never throw on the main thread */ }
         }
 
@@ -193,6 +238,21 @@ namespace UnityIDE.Bridge
         {
             var r = JsonValue.NewObject();
             r["ok"] = true;
+            return r;
+        }
+
+        /// <summary>
+        /// The same shape `PushRunCompleted` sends, for the RPC reply itself —
+        /// so a blocking-downgrade caller (an IDE older than protocol 3) sees
+        /// the SAME refusal a current IDE gets via the push, not a bare
+        /// `{ok:true}` that reads as success. Discarded by the queued
+        /// dispatcher for a current IDE (see RunTests' own comment).
+        /// </summary>
+        private static JsonValue Failed(string reason)
+        {
+            var r = JsonValue.NewObject();
+            r["ok"] = false;
+            r["reason"] = reason;
             return r;
         }
 

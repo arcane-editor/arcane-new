@@ -51,7 +51,6 @@ function describeCompletedRun(summary: {
   skipped?: number;
   durationMs?: number;
   failures?: TestRunFailure[];
-  failuresTruncated?: boolean;
 }): string {
   const mode = summary.mode ?? 'EditMode';
   const passed = summary.passed ?? 0;
@@ -60,13 +59,27 @@ function describeCompletedRun(summary: {
   const summaryLine = `${mode} tests: ${passed} passed, ${failed} failed, ${skipped} skipped (${formatDurationS(summary.durationMs)}s)`;
 
   const failures = summary.failures ?? [];
-  if (failures.length === 0) return summaryLine;
+
+  if (failures.length === 0) {
+    // `failed > 0` with an EMPTY list is not "clean" — it means the details
+    // never arrived (most likely a domain reload tore down the accumulator
+    // mid-run), and saying only the bare count would read as though nothing
+    // more is knowable, when the Test panel usually still has it.
+    if (failed > 0) {
+      return (
+        `${summaryLine}\n\n${failed} failed — failure details were not delivered ` +
+        '(a domain reload may have dropped them); see the Test panel.'
+      );
+    }
+    return summaryLine;
+  }
 
   const blocks = failures.map(formatFailure);
+  // Based on the counts alone, not a truncation flag: a mismatch between
+  // `failed` and how many we actually have is the fact that matters, however
+  // it came about.
   const tail =
-    summary.failuresTruncated && failed > failures.length
-      ? `\n…and ${failed - failures.length} more failures not shown.`
-      : '';
+    failed > failures.length ? `\n…and ${failed - failures.length} more failures not shown.` : '';
   return `${summaryLine}\n\n${blocks.join('\n\n')}${tail}`;
 }
 
@@ -94,6 +107,8 @@ export function describeTestRunOutcome(outcome: TestRunWaitOutcome): string {
     case 'not-installed':
       return "Unity's Test Framework is not installed in this project — install " +
         '`com.unity.test-framework` to run tests.';
+    case 'runner-unavailable':
+      return "Unity's test runner was busy with another run; try again when it finishes.";
     case 'editor-asleep':
       return "Test run accepted, but Unity's window is in the background so it has not started; " +
         'results appear in the Test panel when it ticks.';
@@ -102,7 +117,11 @@ export function describeTestRunOutcome(outcome: TestRunWaitOutcome): string {
         'It reconnects automatically after a reload — check the Test panel once it does.';
     case 'timeout':
     default:
-      return "Test run status unknown: timed out waiting for Unity's result. " +
-        'Check the Test panel — the run may still be in progress.';
+      return outcome.coalesced
+        ? 'Test run status unknown: this request was folded into an identical run already ' +
+            "queued, and timed out waiting for that one — it may still be in progress. Check " +
+            'the Test panel.'
+        : "Test run status unknown: timed out waiting for Unity's result. " +
+            'Check the Test panel — the run may still be in progress.';
   }
 }

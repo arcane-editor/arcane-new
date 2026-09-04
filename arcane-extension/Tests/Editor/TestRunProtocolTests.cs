@@ -47,6 +47,7 @@ namespace UnityIDE.Tests
             MainThreadDispatcher.Clear();
             RpcDispatcher.SetIdeProtocolVersion(0);
             TestRunnerHandlers.ClearActiveRun();
+            TestRunnerHandlers.SendOverrideForTests = null;
             TestRunnerHandlers.Shutdown();
         }
 
@@ -161,6 +162,61 @@ namespace UnityIDE.Tests
 
             Assert.IsNull(TestRunnerHandlers.GetActiveRun(),
                 "RunFinished must erase the active-run marker so it cannot leak into the next run's early pushes");
+        }
+
+        [Test]
+        public void SecondAskWhileActiveDoesNotDisturbTheFirstRunsKey()
+        {
+            // Fix-round-1 review finding F2: SetActiveRun used to run
+            // unconditionally, so a second `runTests` arriving while run A was
+            // still active would stomp A's key with B's — and when A actually
+            // finished, RunFinished would read B's runId back out of
+            // SessionState and push completion under the WRONG id, so A's
+            // waiter burned its whole timeout waiting for a match that could
+            // never come. `RunTests` must now bail out for the SECOND ask
+            // before ever touching the key.
+            var sent = new List<JsonValue>();
+            TestRunnerHandlers.SendOverrideForTests = env => sent.Add(env);
+            TestRunnerHandlers.Register(null);
+            RpcDispatcher.SetIdeProtocolVersion(Discovery.ProtocolVersion);
+
+            TestRunnerHandlers.SetActiveRun("run-A", "EditMode");
+
+            JsonValue reply = null;
+            RpcDispatcher.Dispatch(RunTestsRequest("2", "EditMode", null, "run-B"), r => reply = r);
+            MainThreadDispatcher.Pump(); // actually run RunTests for the second ask
+
+            var active = TestRunnerHandlers.GetActiveRun();
+            Assert.IsNotNull(active, "run A's key must survive a second ask arriving while it is active");
+            Assert.AreEqual("run-A", active["runId"].AsString);
+
+            var completed = sent.FirstOrDefault(e => e["type"].AsString == MsgType.TestRunCompleted);
+            Assert.IsNotNull(completed,
+                "the second ask must get its OWN test_run_completed — RunFinished will never fire for it");
+            Assert.AreEqual("run-B", completed["payload"]["runId"].AsString);
+            Assert.IsFalse(completed["payload"]["ok"].AsBool);
+            Assert.AreEqual("runner-unavailable", completed["payload"]["reason"].AsString);
+        }
+
+        [Test]
+        public void BlockingDowngradeGetsAnHonestFailureReplyNotOkTrue()
+        {
+            // F3: an IDE older than protocol 3 takes the BLOCKING dispatch
+            // path, so RunTests' own RETURN VALUE becomes the RPC reply — it
+            // used to return a bare Ok() on every failure branch (framework
+            // missing, Execute() threw, another run active), so a refused ask
+            // read as success to that IDE.
+            TestRunnerHandlers.SetActiveRun("run-already-active", "EditMode");
+            TestRunnerHandlers.Register(null);
+            RpcDispatcher.SetIdeProtocolVersion(2); // predates queued acks (MinQueuedProtocol = 3)
+
+            JsonValue reply = null;
+            RpcDispatcher.Dispatch(RunTestsRequest("1", "EditMode", null, "run-new"), r => reply = r);
+
+            Assert.IsNotNull(reply);
+            var result = reply["payload"]["result"];
+            Assert.IsFalse(result["ok"].AsBool, "a refused ask must not read as ok:true to an old IDE");
+            Assert.AreEqual("runner-unavailable", result["reason"].AsString);
         }
 
         [Test]

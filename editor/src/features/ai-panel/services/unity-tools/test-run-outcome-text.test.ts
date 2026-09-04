@@ -141,6 +141,60 @@ describe('describeTestRunOutcome', () => {
     expect(text).toContain('…and 59 more failures not shown.');
   });
 
+  it('F4: notes truncation based on the counts alone, even with failuresTruncated omitted', () => {
+    const text = describeTestRunOutcome({
+      status: 'report',
+      summary: {
+        runId: 'r1',
+        ok: true,
+        mode: 'EditMode',
+        total: 3,
+        passed: 0,
+        failed: 3,
+        skipped: 0,
+        failures: [failure()],
+        // failuresTruncated deliberately omitted — the tail must not depend on it.
+      },
+    });
+    expect(text).toContain('…and 2 more failures not shown.');
+  });
+
+  it('F4: an empty failures array with failed > 0 says details were not delivered, not a clean pass', () => {
+    const text = describeTestRunOutcome({
+      status: 'report',
+      summary: {
+        runId: 'r1',
+        ok: true,
+        mode: 'EditMode',
+        total: 5,
+        passed: 0,
+        failed: 5,
+        skipped: 0,
+        failures: [],
+      },
+    });
+    expect(text).toContain(
+      '5 failed — failure details were not delivered (a domain reload may have dropped them); see the Test panel.',
+    );
+  });
+
+  it('F4: an empty failures array with failed === 0 is still just the clean summary line', () => {
+    const text = describeTestRunOutcome({
+      status: 'report',
+      summary: {
+        runId: 'r1',
+        ok: true,
+        mode: 'EditMode',
+        total: 3,
+        passed: 3,
+        failed: 0,
+        skipped: 0,
+        failures: [],
+      },
+    });
+    expect(text).toBe('EditMode tests: 3 passed, 0 failed, 0 skipped (0.0s)');
+  });
+
   it('ok:false / test-framework-missing', () => {
     const text = describeTestRunOutcome({
       status: 'report',
@@ -176,9 +230,24 @@ describe('describeTestRunOutcome', () => {
     expect(text).toContain("Unity's Test Framework is not installed");
   });
 
+  it('F1: unknown/runner-unavailable — the verbatim copy', () => {
+    const text = describeTestRunOutcome({ status: 'unknown', reason: 'runner-unavailable' });
+    expect(text).toBe("Unity's test runner was busy with another run; try again when it finishes.");
+  });
+
   it('unknown/timeout', () => {
     const text = describeTestRunOutcome({ status: 'unknown', reason: 'timeout' });
     expect(text).toContain('timed out');
+  });
+
+  it('M3: unknown/timeout with coalesced:true mentions the coalescing', () => {
+    const text = describeTestRunOutcome({ status: 'unknown', reason: 'timeout', coalesced: true });
+    expect(text.toLowerCase()).toContain('folded into an identical run');
+  });
+
+  it('M3: unknown/timeout with coalesced:false (or absent) uses the plain timeout copy', () => {
+    const text = describeTestRunOutcome({ status: 'unknown', reason: 'timeout' });
+    expect(text.toLowerCase()).not.toContain('folded into');
   });
 
   it('unknown/bridge-lost', () => {

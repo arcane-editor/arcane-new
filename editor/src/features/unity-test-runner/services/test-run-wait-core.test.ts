@@ -57,7 +57,10 @@ interface Harness {
   ackLegacy(): Promise<void>;
   /** Resolve the request the way the framework-absent stub / an old package does. */
   ackNotInstalled(): Promise<void>;
+  /** `{queued:true, accepted:false}` — coalesced behind an identical pending ask. */
+  ackCoalesced(): Promise<void>;
   rejectRequest(): Promise<void>;
+  rejectRequestWith(message: string): Promise<void>;
   requestCalls(): number;
 }
 
@@ -85,9 +88,9 @@ function makeHarness(initial?: Partial<TestRunWaitSnap>): Harness {
     await Promise.resolve();
   };
 
-  const settle = async (v: unknown, fail?: boolean) => {
+  const settle = async (v: unknown, fail?: boolean, failMessage?: string) => {
     const p = pending.shift();
-    if (fail) p?.reject(new Error('RPC rejected'));
+    if (fail) p?.reject(new Error(failMessage ?? 'RPC rejected'));
     else p?.resolve(v);
     await Promise.resolve();
     await Promise.resolve();
@@ -112,7 +115,9 @@ function makeHarness(initial?: Partial<TestRunWaitSnap>): Harness {
     ackQueued: () => settle({ queued: true, accepted: true, editorIdleMs: 0 }),
     ackLegacy: () => settle({ ok: true }),
     ackNotInstalled: () => settle({ ok: false, error: 'Unity Test Framework is not installed.' }),
+    ackCoalesced: () => settle({ queued: true, accepted: false, editorIdleMs: 0 }),
     rejectRequest: () => settle(undefined, true),
+    rejectRequestWith: (message: string) => settle(undefined, true, message),
     requestCalls: () => calls,
   };
 }
@@ -204,6 +209,67 @@ describe('waitForTestRun', () => {
       // Genuinely unknown on the legacy path — must not be guessed.
       expect(outcome.summary.skipped).toBeUndefined();
     }
+  });
+
+  // ── F1: a prior/unrelated run must never be reported as this request's ──
+  //
+  // Reviewer repro: a run was already active when the wait started; the ask
+  // itself was rejected ("a test run is already in progress"); the wait must
+  // resolve runner-unavailable, and must NOT later report the OTHER run's
+  // results once IT finishes and `run.active` flips false.
+
+  it('F1: does not report a prior run\'s results when Unity rejects because a run is already in progress', async () => {
+    const h = makeHarness({
+      bridgeProtocol: 3,
+      run: { active: true, mode: 'EditMode', total: 9, passed: 0, failed: 0 }, // a DIFFERENT, already-in-flight run
+      results: new Map([['Other.Test', { status: 'failed', message: 'unrelated', stackTrace: '', durationMs: 1 }]]),
+    });
+    const p = waitForTestRun(h.io, { runId: 'run-1', mode: 'EditMode', timers: h.timers });
+
+    await h.rejectRequestWith('a test run is already in progress');
+
+    // The OTHER run finishes shortly after — this must NOT resolve the wait
+    // with ITS results (the exact bug the reviewer reproduced).
+    await h.update({ run: { active: false, mode: 'EditMode', total: 9, passed: 8, failed: 1 } });
+
+    expect(await p).toEqual({ status: 'unknown', reason: 'runner-unavailable' });
+  });
+
+  it('F1: prior-active + any rejection also resolves runner-unavailable, even without a matching message', async () => {
+    const h = makeHarness({
+      bridgeProtocol: 3,
+      run: { active: true, mode: 'EditMode', total: 1, passed: 0, failed: 0 },
+    });
+    const p = waitForTestRun(h.io, { runId: 'run-1', mode: 'EditMode', timers: h.timers });
+    await h.rejectRequest(); // generic message, no "already in progress" text
+    expect(await p).toEqual({ status: 'unknown', reason: 'runner-unavailable' });
+  });
+
+  it('F1: a rejection message saying "already running" resolves runner-unavailable even with no prior active run', async () => {
+    const h = makeHarness({ bridgeProtocol: 4 });
+    const p = waitForTestRun(h.io, { runId: 'run-1', mode: 'EditMode', timers: h.timers });
+    await h.rejectRequestWith('Exception: a test is already running');
+    expect(await p).toEqual({ status: 'unknown', reason: 'runner-unavailable' });
+  });
+
+  it('F1: an unrelated rejection with no prior-active evidence still falls through to the probe/timeout path', async () => {
+    const h = makeHarness({ bridgeProtocol: 3 }); // legacy, but NOT active at baseline
+    const p = waitForTestRun(h.io, { runId: 'run-1', mode: 'EditMode', timers: h.timers });
+    await h.rejectRequest();
+    await h.timers.advance(PROBE_MS);
+    expect(await p).toEqual({ status: 'unknown', reason: 'timeout' });
+  });
+
+  it('M1: the legacy summary uses the REQUESTED mode, not run.mode\'s EditMode default', async () => {
+    const h = makeHarness({ bridgeProtocol: 3 });
+    const p = waitForTestRun(h.io, { runId: 'run-1', mode: 'PlayMode', timers: h.timers });
+    await h.ackLegacy();
+    // The store echoes 'EditMode' (its own default) even though we asked PlayMode.
+    await h.update({ run: { active: true, mode: 'EditMode', total: 1, passed: 0, failed: 0 } });
+    await h.update({ run: { active: false, mode: 'EditMode', total: 1, passed: 1, failed: 0 } });
+    const outcome = await p;
+    expect(outcome.status).toBe('report');
+    if (outcome.status === 'report') expect(outcome.summary.mode).toBe('PlayMode');
   });
 
   it('legacy fallback excludes a result that was ALREADY failed before this request (baseline)', async () => {
@@ -315,6 +381,22 @@ describe('waitForTestRun', () => {
     expect(await p).toEqual({ status: 'unknown', reason: 'timeout' });
   });
 
+  it('M4: resolves bridge-lost promptly if the bridge disconnects mid-wait, without waiting the full cap', async () => {
+    const h = makeHarness();
+    const p = waitForTestRun(h.io, { runId: 'run-1', mode: 'PlayMode', timers: h.timers });
+    await h.ackQueued();
+    await h.timers.advance(1_000);
+    await h.update({ connected: false });
+    expect(await p).toEqual({ status: 'unknown', reason: 'bridge-lost' });
+  });
+
+  it('M4: resolves bridge-lost immediately when already disconnected at the start — never even asks', async () => {
+    const h = makeHarness({ connected: false });
+    const p = waitForTestRun(h.io, { runId: 'run-1', timers: h.timers });
+    expect(await p).toEqual({ status: 'unknown', reason: 'bridge-lost' });
+    expect(h.requestCalls()).toBe(0);
+  });
+
   // ── Not installed ─────────────────────────────────────────────────────────
 
   it('resolves not-installed on a synchronous {ok:false} ack — nothing is ever going to complete this run', async () => {
@@ -322,6 +404,35 @@ describe('waitForTestRun', () => {
     const p = waitForTestRun(h.io, { runId: 'run-1', timers: h.timers });
     await h.ackNotInstalled();
     expect(await p).toEqual({ status: 'unknown', reason: 'not-installed' });
+  });
+
+  // ── Coalesced (M3) ───────────────────────────────────────────────────────
+
+  it('M3: a coalesced ack ({queued:true, accepted:false}) keeps waiting, and a subsequent timeout is flagged', async () => {
+    const h = makeHarness();
+    const p = waitForTestRun(h.io, { runId: 'run-1', mode: 'EditMode', timers: h.timers });
+    await h.ackCoalesced();
+    await h.timers.advance(EDIT_MODE_TIMEOUT_MS);
+    expect(await p).toEqual({ status: 'unknown', reason: 'timeout', coalesced: true });
+  });
+
+  it('M3: a coalesced ack still resolves report normally if the pending ask completes', async () => {
+    const h = makeHarness();
+    const p = waitForTestRun(h.io, { runId: 'run-1', timers: h.timers });
+    await h.ackCoalesced();
+    const summary = completed();
+    await h.update({ lastRunCompleted: summary });
+    expect(await p).toEqual({ status: 'report', summary });
+  });
+
+  it('an ordinary (non-coalesced) timeout carries coalesced:undefined', async () => {
+    const h = makeHarness();
+    const p = waitForTestRun(h.io, { runId: 'run-1', timers: h.timers });
+    await h.ackQueued();
+    await h.timers.advance(EDIT_MODE_TIMEOUT_MS);
+    const outcome = await p;
+    expect(outcome).toEqual({ status: 'unknown', reason: 'timeout' });
+    if (outcome.status === 'unknown') expect(outcome.coalesced).toBeUndefined();
   });
 
   // ── Defaults ──────────────────────────────────────────────────────────────
