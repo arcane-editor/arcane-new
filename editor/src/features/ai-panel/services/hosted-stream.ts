@@ -31,7 +31,16 @@ import { convertToOpenAI } from './openai-format';
 import { getStreamExtras } from './stream-extras';
 import { getSendPlanPhase, getSendPromptMode } from './send-context';
 import { difficultyForRequest } from './difficulty';
-import { combineSignals, computeBackoffMs, isTransient, raceWithTimeout, sleep, TimeoutRaceError } from './stream-retry';
+import {
+  combineSignals,
+  computeBackoffMs,
+  isTransient,
+  parseRetryAfter,
+  raceWithTimeout,
+  rateLimitRetryPlan,
+  sleep,
+  TimeoutRaceError,
+} from './stream-retry';
 import { API_URL } from '../../../config/api';
 
 const HOSTED_SERVER_URL = API_URL;
@@ -95,6 +104,14 @@ interface HostedStreamEvent {
    * than substring-matching `message`).
    */
   code?: 'model_error' | 'rate_limit' | 'server_error';
+  /**
+   * Seconds until a provider-side rate limit clears, read off the provider's
+   * own `Retry-After` (server's `retryAfterSecondsFrom`, `llm-router.ts`).
+   * Present only when the provider actually sent one — undefined is the
+   * common case (most provider 429s carry no such header). Folded into the
+   * same `[code:<x> retryAfter:<n>]` marker the 429 connect-phase path uses.
+   */
+  retryAfterSeconds?: number;
 }
 
 export interface HostedStreamHardeningConfig {
@@ -439,6 +456,54 @@ async function doStream(
         throw new Error(body.error ?? 'You are out of AI credits. Open Account to upgrade or buy credits.');
       }
 
+      if (attemptResponse.status === 429) {
+        // Split out of the generic isTransient branch below: a 429 needs its
+        // own retry decision (rateLimitRetryPlan) driven by the server's
+        // actual `retryAfterSeconds` — the account hourly cap (free plan
+        // only, T7) reports a real reset time up to an hour out, which the
+        // OLD flat linear backoff threw away in favour of "wait a moment,"
+        // sending the user straight back into another 429. Read the body
+        // ONCE (both the retry decision and the eventual error message need
+        // it) alongside the `Retry-After` header.
+        const bodyText = await attemptResponse.text().catch(() => '');
+        let parsedBody: { error?: string; code?: string; retryAfterSeconds?: unknown } | null = null;
+        if (bodyText) {
+          try {
+            parsedBody = JSON.parse(bodyText) as { error?: string; code?: string; retryAfterSeconds?: unknown };
+          } catch {
+            // Not JSON (a proxy or gateway 429) — fall back to the generic message below.
+          }
+        }
+        const retryAfterSeconds = parseRetryAfter(attemptResponse.headers.get('Retry-After'), parsedBody);
+        const plan = rateLimitRetryPlan({
+          retryAfterSeconds,
+          attempt,
+          maxAttempts: cfg.maxAttempts,
+          baseDelayMs: cfg.retryBaseDelayMs,
+        });
+        if (plan.retry) {
+          try {
+            await sleep(plan.delayMs, options.signal);
+          } catch {
+            stream.push({ type: 'done', message: abortedMessage() });
+            return;
+          }
+          continue;
+        }
+        // Terminal: either attempts are exhausted, or retryAfterSeconds is
+        // long enough (the hourly cap) that blocking the send inline would
+        // be wrong — surface a classified, countdown-carrying error instead.
+        // `classifyTurnError` (turn-errors.ts) strips the marker and maps
+        // `code` precisely; an absent `code` (a bare gateway/proxy 429) falls
+        // back to 'rate_limit' so the marker is always well-formed.
+        const marker = `[code:${parsedBody?.code ?? 'rate_limit'}${
+          retryAfterSeconds !== undefined ? ` retryAfter:${Math.round(retryAfterSeconds)}` : ''
+        }]`;
+        throw new Error(
+          `${marker} Rate limit exceeded. ${parsedBody?.error ?? 'Please wait a moment and try again.'}`,
+        );
+      }
+
       if (isTransient(attemptResponse.status) && attempt < cfg.maxAttempts) {
         const delay = computeBackoffMs(attempt, cfg.retryBaseDelayMs);
         try {
@@ -451,24 +516,6 @@ async function doStream(
       }
 
       const errorText = await attemptResponse.text().catch(() => 'Unknown error');
-      if (attemptResponse.status === 429) {
-        // The server computes an actual reset time for the hourly spend cap
-        // ("Try again in ~47 minute(s)") and this threw it away in favour of
-        // "wait a moment" — which is wrong by up to an hour and sends the user
-        // back to retry immediately. Keep the "Rate limit exceeded." prefix:
-        // `classifyTurnError` substring-matches it to route the rate_limit kind.
-        let detail: string | undefined;
-        try {
-          detail = (JSON.parse(errorText) as { error?: string }).error;
-        } catch {
-          // Not JSON (a proxy or gateway 429) — fall back to the generic text.
-        }
-        throw new Error(
-          detail
-            ? `Rate limit exceeded. ${detail}`
-            : 'Rate limit exceeded. Please wait a moment and try again.',
-        );
-      }
       throw new Error(`Server error (${attemptResponse.status}): ${errorText}`);
     }
 
@@ -658,9 +705,17 @@ async function doStream(
             // A structured `code` (T1's gateway work) takes precedence: fold
             // it into a leading `[code:<x>]` marker that `classifyTurnError`
             // strips and maps precisely, instead of substring-matching
-            // `message` alone.
+            // `message` alone. `retryAfterSeconds` (present only when the
+            // provider itself sent a `Retry-After`) folds into the same
+            // marker as `retryAfter:<n>`, the same shape the 429 connect-phase
+            // path above produces, so both reach `classifyTurnError` through
+            // one marker grammar.
+            const retryAfterPart =
+              event.code && event.retryAfterSeconds !== undefined
+                ? ` retryAfter:${Math.round(event.retryAfterSeconds)}`
+                : '';
             const message = event.code
-              ? `[code:${event.code}] ${event.message ?? 'Unknown server error'}`
+              ? `[code:${event.code}${retryAfterPart}] ${event.message ?? 'Unknown server error'}`
               : (event.message ?? 'Unknown server error');
             stream.push({
               type: 'error',

@@ -89,6 +89,16 @@ describe('classifyTurnError', () => {
     expect(err.title).toBe('Network error');
   });
 
+  it('classifies "Stream ended unexpectedly mid-response" as network, "Response cut off"', () => {
+    const err = classifyTurnError('Stream ended unexpectedly mid-response');
+    expect(err.kind).toBe('network');
+    expect(err.title).toBe('Response cut off');
+    expect(err.retriable).toBe(true);
+    expect(err.detail).toBe(
+      'The connection dropped before the reply finished. Retry sends this message again and replaces the partial reply above.',
+    );
+  });
+
   it('classifies "response corrupted" as corrupted', () => {
     const err = classifyTurnError('Response corrupted');
     expect(err.kind).toBe('corrupted');
@@ -196,6 +206,51 @@ describe('classifyTurnError — [code:] marker', () => {
     expect(err.retriable).toBe(false);
     expect(err.detail).toBe('Deep Think and Max are available on paid plans.');
   });
+
+  // ---- retryAfter:<seconds> hint ----
+
+  it('maps an hourly_cap marker with a retryAfter hint to kind hourly_cap, retriable, retryAt within tolerance', () => {
+    const before = Date.now();
+    const err = classifyTurnError(
+      '[code:hourly_cap retryAfter:2820] Too many AI requests in a short window. Try again in ~47 minute(s).',
+    );
+    const after = Date.now();
+    expect(err.kind).toBe('hourly_cap');
+    expect(err.title).toBe('Hourly usage limit reached');
+    expect(err.retriable).toBe(true);
+    expect(err.raw).toBe('Too many AI requests in a short window. Try again in ~47 minute(s).');
+    expect(err.detail).toBe("You have used this hour's AI spend allowance. Retry unlocks in {countdown}.");
+    expect(err.retryAt).toBeDefined();
+    // retryAt = classification time + 2820s, +/- the wall-clock window the
+    // assertions above bracket it in.
+    expect(err.retryAt).toBeGreaterThanOrEqual(before + 2820_000);
+    expect(err.retryAt).toBeLessThanOrEqual(after + 2820_000);
+  });
+
+  it('maps an hourly_cap marker with no retryAfter hint to a fixed copy and no retryAt', () => {
+    const err = classifyTurnError('[code:hourly_cap] Too many AI requests in a short window.');
+    expect(err.kind).toBe('hourly_cap');
+    expect(err.retriable).toBe(true);
+    expect(err.detail).toBe('Try again in about an hour.');
+    expect(err.retryAt).toBeUndefined();
+  });
+
+  it('maps a rate_limit marker with a retryAfter hint to a provider-busy detail and a retryAt', () => {
+    const before = Date.now();
+    const err = classifyTurnError('[code:rate_limit retryAfter:5] slow down');
+    const after = Date.now();
+    expect(err.kind).toBe('rate_limit');
+    expect(err.detail).toBe('The model provider is busy. Retry unlocks in {countdown}.');
+    expect(err.retryAt).toBeGreaterThanOrEqual(before + 5_000);
+    expect(err.retryAt).toBeLessThanOrEqual(after + 5_000);
+  });
+
+  it('a rate_limit marker with no retryAfter hint keeps the existing copy and carries no retryAt', () => {
+    const err = classifyTurnError('[code:rate_limit] slow down');
+    expect(err.kind).toBe('rate_limit');
+    expect(err.detail).toBe('Too many requests — wait a moment and try again.');
+    expect(err.retryAt).toBeUndefined();
+  });
 });
 
 // ---- classifyServerCode ----
@@ -215,6 +270,10 @@ describe('classifyServerCode', () => {
 
   it('maps tier_not_available to tier_gated', () => {
     expect(classifyServerCode('tier_not_available')).toBe('tier_gated');
+  });
+
+  it('maps hourly_cap to hourly_cap', () => {
+    expect(classifyServerCode('hourly_cap')).toBe('hourly_cap');
   });
 
   it('no longer recognizes the removed provider/gateway fallback codes', () => {
@@ -374,6 +433,27 @@ describe('detectTurnOutcome', () => {
   it('reports the same empty-response error when stopReason is undefined (normal-end, never set)', () => {
     const result = detectTurnOutcome([assistantMsg({ stopReason: undefined, content: [] })], false);
     expect(result).toEqual({ type: 'error', raw: 'Empty response from the model' });
+  });
+
+  // A tail that did real work (tool call -> toolResult) and then hit a
+  // network failure mid-turn must still classify as an actionable 'error'
+  // (with the network text as `raw`, ready for classifyTurnError to route to
+  // kind 'network'/'Response cut off') — not 'crash', which points the user
+  // at devtools instead of Retry.
+  it('reports error (not crash) on a toolResult-then-network-error tail', () => {
+    const result = detectTurnOutcome(
+      [
+        userMsg(),
+        assistantMsg({
+          stopReason: 'toolUse',
+          content: [{ type: 'toolCall', id: 't1', name: 'read', arguments: {} }],
+        }),
+        { role: 'toolResult', toolCallId: 't1', toolName: 'read', content: 'ok', timestamp: 2 } as AgentMessage,
+        assistantMsg({ stopReason: 'error', errorMessage: 'Stream ended unexpectedly mid-response' }),
+      ],
+      false,
+    );
+    expect(result).toEqual({ type: 'error', raw: 'Stream ended unexpectedly mid-response' });
   });
 });
 
