@@ -141,6 +141,12 @@ export interface AttachUiDocumentResult {
     /** True when a default runtime theme had to be written for it. */
     themeCreated: boolean;
     /**
+     * The theme now assigned, whether found or written. Named rather than just
+     * flagged because a created asset survives Ctrl/Cmd+Z — the caller has to
+     * be able to tell the user what was left behind.
+     */
+    themePath: string;
+    /**
      * How the PanelSettings was chosen: the caller named it, it was the
      * project's only one, or there were none and it was created.
      */
@@ -214,6 +220,12 @@ export interface SetSerializedPropertyResult {
  * How long `attachUiDocument` may take. Well past the bridge's 10s default: the
  * handler may force a synchronous import of a just-written .uxml, and on a cold
  * project that import is the slow part.
+ *
+ * Deliberately ABOVE the 25s budget the Unity side registers the handler with
+ * (`SceneMutationHandlers.AttachTimeoutMs`), so Unity is always the side that
+ * gives up first and answers with the specific reason. Whoever gives up, the
+ * handler is not cancelled — it finishes and its scene write lands — which is
+ * why the caller treats a timeout as "may have landed", never as a failure.
  */
 const ATTACH_UI_DOCUMENT_TIMEOUT_MS = 30_000;
 

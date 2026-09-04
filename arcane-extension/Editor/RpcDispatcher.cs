@@ -6,8 +6,9 @@
 //
 // TWO DELIVERY MODES:
 //
-//   Register        — blocking. The worker waits up to HandlerTimeoutMs for the
-//                     main thread to produce a result, then replies with it.
+//   Register        — blocking. The worker waits up to HandlerTimeoutMs (or the
+//                     per-method override passed to Register) for the main
+//                     thread to produce a result, then replies with it.
 //                     Right for a query: the caller wants the answer.
 //
 //   RegisterQueued  — non-blocking. The work is queued for the main thread and
@@ -54,10 +55,14 @@ namespace UnityIDE.Bridge
         private static readonly Dictionary<string, string> QueuedMethods =
             new Dictionary<string, string>(StringComparer.Ordinal);
 
+        /// <summary>method → main-thread budget, for the handlers that override the default.</summary>
+        private static readonly Dictionary<string, int> HandlerTimeouts =
+            new Dictionary<string, int>(StringComparer.Ordinal);
+
         // How long an RPC handler may run on the main thread before we give up
         // and return an error (keeps a hung handler from wedging the worker
         // thread forever; the IDE also has its own 10s RPC timeout).
-        private const int HandlerTimeoutMs = 8000;
+        internal const int HandlerTimeoutMs = 8000;
 
         /// <summary>
         /// How long a queued command stays worth running. Past this the editor
@@ -112,11 +117,29 @@ namespace UnityIDE.Bridge
             get { return _ideProtocolVersion >= MinQueuedProtocol; }
         }
 
-        public static void Register(string method, RpcHandler handler)
+        /// <summary>
+        /// Register a blocking handler: the worker waits for the main thread to
+        /// produce a result, then replies with it.
+        /// </summary>
+        /// <param name="timeoutMs">
+        /// How long the worker waits before giving up. The default suits a
+        /// query; raise it for a handler whose slow step is unavoidable — an
+        /// AssetDatabase import on a cold project can outlast eight seconds.
+        ///
+        /// This is NOT a nicety. Giving up does not cancel a handler that is
+        /// already running on the main thread: it finishes, and its scene write
+        /// lands, while the worker has already answered with a TimeoutException.
+        /// The caller then reads "failed" over a project that really did change
+        /// — the exact class of lie Global Constraint 2 exists to prevent — so
+        /// the budget has to cover the work the handler can actually do.
+        /// </param>
+        public static void Register(string method, RpcHandler handler, int timeoutMs = HandlerTimeoutMs)
         {
             if (string.IsNullOrEmpty(method) || handler == null) return;
             Handlers[method] = handler;
             QueuedMethods.Remove(method);
+            if (timeoutMs > 0 && timeoutMs != HandlerTimeoutMs) HandlerTimeouts[method] = timeoutMs;
+            else HandlerTimeouts.Remove(method);
         }
 
         /// <summary>
@@ -140,6 +163,16 @@ namespace UnityIDE.Bridge
         {
             Handlers.Clear();
             QueuedMethods.Clear();
+            HandlerTimeouts.Clear();
+        }
+
+        /// <summary>The main-thread budget a method is registered with.</summary>
+        internal static int TimeoutForMethod(string method)
+        {
+            int budget;
+            return method != null && HandlerTimeouts.TryGetValue(method, out budget)
+                ? budget
+                : HandlerTimeoutMs;
         }
 
         /// <summary>
@@ -182,7 +215,7 @@ namespace UnityIDE.Bridge
             {
                 // Run the handler on the main thread and wait for its result.
                 JsonValue result = MainThreadDispatcher.EnqueueAndWait(
-                    () => handler(@params) ?? JsonValue.Null, HandlerTimeoutMs);
+                    () => handler(@params) ?? JsonValue.Null, TimeoutForMethod(method));
                 reply = Protocol.RpcResult(id, result);
             }
             catch (Exception e)

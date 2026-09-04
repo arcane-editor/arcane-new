@@ -33,6 +33,7 @@ function attachReply(over: Partial<AttachUiDocumentResult> = {}): AttachUiDocume
       guid: 'aaaa',
       created: true,
       themeCreated: true,
+      themePath: 'Assets/UI Toolkit/UnityThemes/UnityDefaultRuntimeTheme.tss',
       confidence: 'created',
     },
     visualTreeAsset: { path: 'Assets/UI/HUD.uxml', guid: 'bbbb' },
@@ -98,6 +99,8 @@ const SET_ARGS = { gameObject: 'Player', component: 'PlayerController', property
 const NOT_SAVED_NOTE =
   'The scene is modified but not saved — save it in Unity (Ctrl/Cmd+S). ' +
   "Undo is available in Unity's Edit menu.";
+
+const CREATED_THEME_PATH = 'Assets/UI Toolkit/UnityThemes/UnityDefaultRuntimeTheme.tss';
 
 describe('scene-mutate tools — registration', () => {
   it('registers exactly the two scene-write tools', () => {
@@ -172,13 +175,38 @@ describe('unity_attach_ui_document', () => {
     expect(h.recorded).toEqual([]);
   });
 
-  it('names the PanelSettings it created and ends with the not-saved note', async () => {
+  it('names the PanelSettings it created and says Undo will not take the created assets back', async () => {
     const h = harness();
     const text = textOf(await h.attach.execute('c1', ATTACH_ARGS, undefined));
 
     expect(text).toContain('Attached a UIDocument to "UI/HUD" (created it), showing Assets/UI/HUD.uxml.');
     expect(text).toContain('Created the PanelSettings Assets/UI/PanelSettings.asset.');
     expect(text).toContain('a default runtime theme was created for it');
+    expect(text).toContain('The scene is modified but not saved — save it in Unity (Ctrl/Cmd+S).');
+    // Ctrl+Z does not delete a created asset, so the bare "Undo is available"
+    // promise would be one the Edit menu does not keep.
+    expect(text).toContain(
+      "Undo (Unity's Edit menu) reverses the scene changes but not the created assets at " +
+        `Assets/UI/PanelSettings.asset and ${CREATED_THEME_PATH} — delete those by hand if you undo.`,
+    );
+    expect(text).not.toContain("Undo is available in Unity's Edit menu.");
+  });
+
+  it('ends with the plain not-saved note when it created nothing', async () => {
+    const h = harness({
+      attachUiDocument: async () =>
+        attachReply({
+          panelSettings: {
+            path: 'Assets/UI/PanelSettings.asset',
+            guid: 'aaaa',
+            created: false,
+            themeCreated: false,
+            themePath: 'Assets/UI Toolkit/UnityThemes/Existing.tss',
+            confidence: 'given',
+          },
+        }),
+    });
+    const text = textOf(await h.attach.execute('c1', ATTACH_ARGS, undefined));
     expect(text.endsWith(NOT_SAVED_NOTE)).toBe(true);
   });
 
@@ -193,6 +221,7 @@ describe('unity_attach_ui_document', () => {
             guid: 'aaaa',
             created: false,
             themeCreated: false,
+            themePath: 'Assets/UI Toolkit/UnityThemes/Existing.tss',
             confidence: 'only',
           },
         }),
@@ -210,6 +239,76 @@ describe('unity_attach_ui_document', () => {
     const h = harness();
     await h.attach.execute('c1', ATTACH_ARGS, undefined);
     expect(h.recorded).toEqual(['unity: attach a UIDocument (HUD.uxml) to "UI/HUD"']);
+  });
+
+  it('treats an RPC timeout as "may have landed" — records the change and says the outcome is unknown', async () => {
+    // Unity does not cancel a handler when the wait expires: it finishes, and
+    // its scene write lands, after the reply already said "timed out". A plain
+    // failure here would leave the checkpoint row claiming restorable over a
+    // modified scene, and would invite a retry that attaches a SECOND UIDocument.
+    const h = harness({
+      attachUiDocument: async () => {
+        throw new Error("Unity RPC 'attachUiDocument' timed out");
+      },
+    });
+
+    const text = textOf(await h.attach.execute('c1', ATTACH_ARGS, undefined));
+
+    expect(text).toContain('timed out waiting for Unity, so its outcome is unknown');
+    expect(text).toContain('may have landed');
+    expect(text).toContain('get_game_object("UI/HUD")');
+    expect(h.recorded).toEqual(['unity: attach UIDocument (may have landed)']);
+  });
+
+  it('reads the C# handler-timeout message as indeterminate too, not as a failure', async () => {
+    const h = harness({
+      attachUiDocument: async () => {
+        throw new Error(
+          "Unity RPC 'attachUiDocument' error: Main-thread RPC handler timed out after 25000ms (editor idle for 4000ms)",
+        );
+      },
+    });
+    await h.attach.execute('c1', ATTACH_ARGS, undefined);
+    expect(h.recorded).toEqual(['unity: attach UIDocument (may have landed)']);
+  });
+
+  it('labels an old bridge package instead of surfacing "Unknown method", and records nothing', async () => {
+    const h = harness({
+      attachUiDocument: async () => {
+        throw new Error("Unity RPC 'attachUiDocument' error: Unknown method: attachUiDocument");
+      },
+    });
+
+    const text = textOf(await h.attach.execute('c1', ATTACH_ARGS, undefined));
+
+    expect(text).toContain('predates protocol 4');
+    expect(text).toContain('update the package in Unity');
+    expect(text).not.toContain('Unknown method');
+    expect(h.recorded).toEqual([]);
+  });
+
+  it('lets any other RPC failure through to the approval gate, unrecorded', async () => {
+    const boom = new Error('Unity disconnected before responding to \'attachUiDocument\'');
+    let seen: unknown = null;
+    const h = harness({
+      attachUiDocument: async () => {
+        throw boom;
+      },
+      gated: async (_id, _name, _verb, _signal, action) => {
+        try {
+          return await action();
+        } catch (e) {
+          seen = e;
+          return { content: [{ type: 'text', text: 'gated caught it' }] };
+        }
+      },
+    });
+
+    const text = textOf(await h.attach.execute('c1', ATTACH_ARGS, undefined));
+
+    expect(text).toBe('gated caught it');
+    expect(seen).toBe(boom);
+    expect(h.recorded).toEqual([]);
   });
 });
 
@@ -263,7 +362,9 @@ describe('unity_set_property', () => {
       setSerializedProperty: async () =>
         setReply({
           target: { path: 'Assets/Data/Enemy.asset', instanceId: 21, type: 'EnemyData', isAsset: true },
-          sceneDirty: false,
+          // sceneDirty is deliberately left TRUE: the note must key off what was
+          // written, not off a flag an asset write has no business setting.
+          sceneDirty: true,
         }),
     });
 
@@ -283,6 +384,20 @@ describe('unity_set_property', () => {
     const h = harness();
     await h.setProperty.execute('c1', SET_ARGS, undefined);
     expect(h.recorded).toEqual(['unity: set PlayerController.speed = 7 on "Player"']);
+  });
+
+  it('treats an RPC timeout as "may have landed" and tells the model to re-read before retrying', async () => {
+    const h = harness({
+      setSerializedProperty: async () => {
+        throw new Error("Unity RPC 'setSerializedProperty' timed out");
+      },
+    });
+
+    const text = textOf(await h.setProperty.execute('c1', SET_ARGS, undefined));
+
+    expect(text).toContain('timed out waiting for Unity, so its outcome is unknown');
+    expect(text).toContain('get_game_object("Player")');
+    expect(h.recorded).toEqual(['unity: set speed (may have landed)']);
   });
 
   it('refuses, without asking for approval, when neither a gameObject nor an assetPath is given', async () => {

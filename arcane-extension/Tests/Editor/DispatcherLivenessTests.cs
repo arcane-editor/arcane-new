@@ -2,6 +2,7 @@ using System;
 using System.Threading;
 using UnityIDE.Bridge;
 using NUnit.Framework;
+using UnityEngine.TestTools;
 
 namespace UnityIDE.Tests
 {
@@ -32,6 +33,7 @@ namespace UnityIDE.Tests
         public void TearDown()
         {
             MainThreadDispatcher.Clear();
+            RpcDispatcher.Clear();
         }
 
         [Test]
@@ -82,6 +84,71 @@ namespace UnityIDE.Tests
                 "work whose caller already gave up must not run later; replaying it is " +
                 "what made a dozen dead refreshes all fire on focus");
             worker.Join(1000);
+        }
+
+        [Test]
+        public void ABlockingHandlerGivesUpAtItsRegisteredBudgetNotTheDefault()
+        {
+            // Giving up is not cancelling: a handler that has already started on
+            // the main thread runs to completion and its side effects land, long
+            // after the worker answered "timed out". That makes the budget a
+            // correctness knob, not a nicety — a scene write given 8s when it
+            // needs 20 reports failure over a project that really changed. So a
+            // slow handler registers its own budget, and this pins that the
+            // registration is actually honoured rather than silently ignored.
+            bool priorIgnore = LogAssert.ignoreFailingMessages;
+            // Dispatch reports the give-up with Debug.LogError. That IS the
+            // behaviour under test, not a failure of it.
+            LogAssert.ignoreFailingMessages = true;
+            try
+            {
+                bool ran = false;
+                RpcDispatcher.Register("slowRpc", _ => { ran = true; return JsonValue.NewObject(); }, 150);
+
+                JsonValue reply = null;
+                var done = new ManualResetEventSlim(false);
+                // This thread stands in for a PARKED main thread: it registered
+                // itself as main in SetUp and deliberately never pumps.
+                var worker = new Thread(() =>
+                    RpcDispatcher.Dispatch(RpcRequest("1", "slowRpc"), r => { reply = r; done.Set(); }));
+                worker.IsBackground = true;
+
+                DateTime started = DateTime.UtcNow;
+                worker.Start();
+                bool answered = done.Wait(4000);
+                double elapsedMs = (DateTime.UtcNow - started).TotalMilliseconds;
+                worker.Join(1000);
+
+                Assert.IsTrue(answered,
+                    "the dispatch must give up at its own 150ms budget, not the 8s default");
+                Assert.Less(elapsedMs, 3000,
+                    "…and the SHORT budget is the one that has to have been used");
+                Assert.IsFalse(reply["payload"]["error"].IsNull,
+                    "a handler the worker gave up on answers with an error, never a result");
+                Assert.IsFalse(ran, "nothing ran — the main thread never ticked");
+            }
+            finally
+            {
+                LogAssert.ignoreFailingMessages = priorIgnore;
+            }
+        }
+
+        [Test]
+        public void AHandlerRegisteredWithoutABudgetKeepsTheDefault()
+        {
+            RpcDispatcher.Register("plainRpc", _ => JsonValue.NewObject());
+            Assert.AreEqual(RpcDispatcher.HandlerTimeoutMs, RpcDispatcher.TimeoutForMethod("plainRpc"));
+            Assert.AreEqual(RpcDispatcher.HandlerTimeoutMs, RpcDispatcher.TimeoutForMethod("neverRegistered"));
+        }
+
+        private static JsonValue RpcRequest(string id, string method)
+        {
+            var payload = JsonValue.NewObject();
+            payload["method"] = method;
+            payload["params"] = JsonValue.NewObject();
+            JsonValue msg = Protocol.Envelope(MsgType.RpcRequest, payload);
+            msg["id"] = id;
+            return msg;
         }
 
         [Test]

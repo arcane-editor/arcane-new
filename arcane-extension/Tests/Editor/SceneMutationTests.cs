@@ -101,7 +101,7 @@ namespace UnityIDE.Tests
         {
             PanelSettings panel = CreatePanelSettings(PanelSettingsPath);
 
-            JsonValue result = Call("attachUiDocument",
+            JsonValue result = CallAttach(
                 AttachParams("UnityIDE_TestRoot/HUD", PanelSettingsPath));
 
             AssertOk(result);
@@ -123,6 +123,8 @@ namespace UnityIDE.Tests
                 "panelSettings must be wired — a null one renders nothing and logs nothing");
             Assert.IsNotNull(doc.panelSettings.themeStyleSheet,
                 "a themeless PanelSettings renders nothing and logs nothing");
+            Assert.IsNotEmpty(result["panelSettings"]["themePath"].AsStringOr(""),
+                "the theme in use must be named, whether it was found or written");
             Assert.IsTrue(_scene.isDirty, "the scene itself must be marked dirty");
         }
 
@@ -135,7 +137,7 @@ namespace UnityIDE.Tests
 
             JsonValue p = AttachParams("UnityIDE_TestHud", PanelSettingsPath);
             p["sortingOrder"] = 3.5d;
-            JsonValue result = Call("attachUiDocument", p);
+            JsonValue result = CallAttach(p);
 
             AssertOk(result);
             Assert.IsFalse(result["gameObject"]["created"].AsBool, "an existing GameObject is not re-created");
@@ -147,7 +149,7 @@ namespace UnityIDE.Tests
         public void UndoRemovesTheCreatedGameObject()
         {
             CreatePanelSettings(PanelSettingsPath);
-            AssertOk(Call("attachUiDocument", AttachParams("UnityIDE_TestRoot/HUD", PanelSettingsPath)));
+            AssertOk(CallAttach(AttachParams("UnityIDE_TestRoot/HUD", PanelSettingsPath)));
             Assert.IsNotNull(GameObject.Find("UnityIDE_TestRoot/HUD"));
 
             Undo.PerformUndo();
@@ -165,7 +167,7 @@ namespace UnityIDE.Tests
             var existing = new GameObject("UnityIDE_TestHud");
             Undo.RegisterCreatedObjectUndo(existing, "fixture");
 
-            AssertOk(Call("attachUiDocument", AttachParams("UnityIDE_TestHud", PanelSettingsPath)));
+            AssertOk(CallAttach(AttachParams("UnityIDE_TestHud", PanelSettingsPath)));
             Assert.IsNotNull(existing.GetComponent<UIDocument>());
 
             Undo.PerformUndo();
@@ -188,7 +190,7 @@ namespace UnityIDE.Tests
 
             JsonValue p = AttachParams("UnityIDE_TestRoot/HUD", null);
             p["panelSettingsCreatePath"] = PanelSettingsPath;
-            JsonValue result = Call("attachUiDocument", p);
+            JsonValue result = CallAttach(p);
 
             AssertOk(result);
             Assert.AreEqual("created", result["panelSettings"]["confidence"].AsString);
@@ -199,9 +201,10 @@ namespace UnityIDE.Tests
             Assert.IsNotNull(created, "the PanelSettings asset must exist on disk");
             Assert.IsNotNull(created.themeStyleSheet, "a created PanelSettings must come with a theme");
 
-            _themeWasCreated = result["panelSettings"]["themeCreated"].AsBool;
-            if (_themeWasCreated)
+            if (result["panelSettings"]["themeCreated"].AsBool)
             {
+                Assert.AreEqual(DefaultThemePath, result["panelSettings"]["themePath"].AsString,
+                    "a created theme must be NAMED, since Ctrl+Z cannot take an asset back");
                 Assert.IsNotNull(AssetDatabase.LoadAssetAtPath<ThemeStyleSheet>(DefaultThemePath),
                     "themeCreated:true must mean the default runtime theme really imported");
             }
@@ -213,7 +216,7 @@ namespace UnityIDE.Tests
             CreatePanelSettings(PanelSettingsPath);
             CreatePanelSettings(SecondPanelSettingsPath);
 
-            JsonValue result = Call("attachUiDocument", AttachParams("UnityIDE_TestRoot/HUD", null));
+            JsonValue result = CallAttach(AttachParams("UnityIDE_TestRoot/HUD", null));
 
             AssertRefused(result);
             string reason = result["reason"].AsString;
@@ -232,7 +235,7 @@ namespace UnityIDE.Tests
             JsonValue p = AttachParams("UnityIDE_TestRoot/HUD", PanelSettingsPath);
             p["uxmlPath"] = TmpFolder + "/NotThere.uxml";
 
-            JsonValue result = Call("attachUiDocument", p);
+            JsonValue result = CallAttach(p);
 
             AssertRefused(result);
             StringAssert.Contains("NotThere.uxml", result["reason"].AsString);
@@ -240,11 +243,56 @@ namespace UnityIDE.Tests
         }
 
         [Test]
+        public void ARefusedAttachCreatesNoAssets()
+        {
+            // The order this pins is the whole point: target validation is
+            // non-destructive and runs first, so a refusal leaves the project
+            // byte-identical. Ctrl+Z cannot delete a created asset, which makes
+            // "refused but wrote two files" strictly worse than doing nothing.
+            const string NeverCreated = TmpFolder + "/UnityIDE_NotCreated.asset";
+            bool themeExistedBefore =
+                AssetDatabase.LoadAssetAtPath<ThemeStyleSheet>(DefaultThemePath) != null;
+
+            JsonValue p = AttachParams("UnityIDE_TestMissing", null);
+            p["createIfMissing"] = false;
+            p["panelSettingsCreatePath"] = NeverCreated;
+
+            JsonValue result = CallAttach(p);
+
+            AssertRefused(result);
+            StringAssert.Contains("UnityIDE_TestMissing", result["reason"].AsString);
+            Assert.IsNull(AssetDatabase.LoadAssetAtPath<PanelSettings>(NeverCreated),
+                "a refused attach must not leave a PanelSettings asset behind");
+            Assert.IsFalse(File.Exists(AbsolutePath(NeverCreated)),
+                "a refused attach must not leave a PanelSettings file on disk");
+            if (!themeExistedBefore)
+            {
+                Assert.IsFalse(File.Exists(AbsolutePath(DefaultThemePath)),
+                    "a refused attach must not leave a default theme behind");
+            }
+        }
+
+        [Test]
+        public void AttachIsRegisteredWithABudgetThatCoversAColdImport()
+        {
+            // Giving up does not cancel a handler already running on the main
+            // thread — it finishes and its scene write lands, while the worker
+            // has answered "timed out". The default 8s budget is smaller than a
+            // cold synchronous import, so this RPC must carry its own.
+            Assert.Greater(RpcDispatcher.TimeoutForMethod("attachUiDocument"),
+                RpcDispatcher.HandlerTimeoutMs,
+                "attachUiDocument must be registered with a budget above the default");
+            Assert.AreEqual(RpcDispatcher.HandlerTimeoutMs,
+                RpcDispatcher.TimeoutForMethod("setSerializedProperty"),
+                "setSerializedProperty is millisecond work and keeps the default");
+        }
+
+        [Test]
         public void AttachRefusesWhenTheEditorGateSaysBusy()
         {
             EditorGate.IsBusy = () => "Unity is compiling. Try again once the compile finishes.";
 
-            JsonValue result = Call("attachUiDocument", AttachParams("UnityIDE_TestRoot/HUD", PanelSettingsPath));
+            JsonValue result = CallAttach(AttachParams("UnityIDE_TestRoot/HUD", PanelSettingsPath));
 
             AssertRefused(result);
             Assert.AreEqual("Unity is compiling. Try again once the compile finishes.",
@@ -367,6 +415,22 @@ namespace UnityIDE.Tests
         }
 
         [Test]
+        public void SetSerializedPropertyNamesTheStringFixWhenTheValueWasReadAsANumber()
+        {
+            var go = new GameObject("UnityIDE_TestLight");
+            go.AddComponent<Light>();
+
+            // The single most likely miss: kind:'auto' reads "7" as a number and
+            // the field is text (a version, an id, a scene name). A bare type
+            // mismatch would cost the model a turn working out the fix.
+            JsonValue result = Call("setSerializedProperty",
+                SetParams("UnityIDE_TestLight", null, "m_Name", "float", JsonValue.Of(7d)));
+
+            AssertRefused(result);
+            StringAssert.Contains("kind:'string'", result["reason"].AsString);
+        }
+
+        [Test]
         public void SetSerializedPropertyRefusesATypeItCannotCoerce()
         {
             var go = new GameObject("UnityIDE_TestLight");
@@ -447,6 +511,19 @@ namespace UnityIDE.Tests
                 method + " errored: " + reply["payload"]["error"]["message"].AsStringOr(""));
             JsonValue result = reply["payload"]["result"];
             Assert.IsFalse(result["queued"].AsBool, method + " must be blocking, not queued");
+            return result;
+        }
+
+        /// <summary>
+        /// Dispatch `attachUiDocument` and remember whether THIS run created the
+        /// default runtime theme, so TearDown deletes exactly what it made and
+        /// never a theme the project shipped with.
+        /// </summary>
+        private JsonValue CallAttach(JsonValue @params)
+        {
+            JsonValue result = Call("attachUiDocument", @params);
+            if (result["ok"].AsBool && result["panelSettings"]["themeCreated"].AsBool)
+                _themeWasCreated = true;
             return result;
         }
 

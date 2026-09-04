@@ -35,13 +35,73 @@ import type {
 } from '../../../unity-bridge';
 import { txt } from './text-result';
 
-/** What every successful scene mutation tells the user, verbatim. */
-const NOT_SAVED_NOTE =
-  'The scene is modified but not saved — save it in Unity (Ctrl/Cmd+S). ' +
-  "Undo is available in Unity's Edit menu.";
-
-/** The asset counterpart: an asset write IS saved, because it would be lost otherwise. */
+/** The asset counterpart to the scene note: an asset write IS saved, because it would be lost otherwise. */
 const ASSET_SAVED_NOTE = "The asset is saved. Undo is available in Unity's Edit menu.";
+
+/**
+ * How a successful mutation ends: what the user still has to do, and what Undo
+ * will and will not take back.
+ *
+ * `createdAssets` is not decoration. Ctrl/Cmd+Z reverses the scene changes and
+ * leaves a created PanelSettings or .tss on disk, so promising a bare "Undo is
+ * available" after creating one is a claim the Edit menu does not honour.
+ */
+function closingNote(sceneDirty: boolean, createdAssets: string[] = []): string {
+  const undo =
+    createdAssets.length > 0
+      ? `Undo (Unity's Edit menu) reverses the scene changes but not the created ` +
+        `asset${createdAssets.length > 1 ? 's' : ''} at ${createdAssets.join(' and ')} — ` +
+        `delete ${createdAssets.length > 1 ? 'those' : 'that'} by hand if you undo.`
+      : "Undo is available in Unity's Edit menu.";
+  return sceneDirty
+    ? `The scene is modified but not saved — save it in Unity (Ctrl/Cmd+S). ${undo}`
+    : undo;
+}
+
+/**
+ * A failed RPC whose outcome is genuinely UNKNOWN rather than negative.
+ *
+ * Unity does not cancel a handler when the wait expires: it runs to completion
+ * and its scene write lands, after the reply has already said "timed out".
+ * Reporting that as a plain failure is how the turn's checkpoint row ends up
+ * claiming "restorable" over a scene that really did change.
+ */
+function isIndeterminateFailure(message: string): boolean {
+  return /timed out|timeout/i.test(message);
+}
+
+/**
+ * An installed bridge older than these RPCs answers "Unknown method", which on
+ * its own reads as an IDE bug. Named the way `read-tools.ts` names the same
+ * situation for the console RPCs.
+ */
+function oldPackageNote(message: string): string | null {
+  if (!/unknown method/i.test(message)) return null;
+  return (
+    'The installed UnityIDE bridge package predates protocol 4, which added the scene-write RPCs — ' +
+    'update the package in Unity, then retry. Until then, ask the user to make this change in the Inspector.'
+  );
+}
+
+/**
+ * Turn a thrown RPC failure into the honest result for it: an old package says
+ * so, an indeterminate failure records the change and warns, and anything else
+ * is rethrown for `gated()` to report as the failure it is.
+ */
+async function rpcFailureResult(
+  e: unknown,
+  deps: SceneMutateDeps,
+  onIndeterminate: { record: string; text: string },
+): Promise<AgentToolResult> {
+  const message = e instanceof Error ? e.message : String(e);
+  const old = oldPackageNote(message);
+  if (old) return txt(old);
+  if (isIndeterminateFailure(message)) {
+    await deps.recordUncheckpointedChange(onIndeterminate.record);
+    return txt(onIndeterminate.text);
+  }
+  throw e;
+}
 
 /** `mutate-tools.ts`'s connection check + inline approval gate, as a dependency. */
 export type GatedFn = (
@@ -130,15 +190,33 @@ export function createUnityAttachUiDocumentTool(deps: SceneMutateDeps): AgentToo
       const { gameObject, uxmlPath, panelSettingsPath, sortingOrder } = params as AttachParams;
       const verb = `attach a UIDocument (${baseName(uxmlPath)}) to "${gameObject}"`;
       return deps.gated(id, 'unity_attach_ui_document', verb, signal, async () => {
-        const r = await deps.attachUiDocument({
-          target: { path: gameObject },
-          uxmlPath,
-          ...(panelSettingsPath ? { panelSettingsPath } : {}),
-          ...(sortingOrder != null ? { sortingOrder } : {}),
-        });
+        let r: AttachUiDocumentResult | RpcRefusal;
+        try {
+          r = await deps.attachUiDocument({
+            target: { path: gameObject },
+            uxmlPath,
+            ...(panelSettingsPath ? { panelSettingsPath } : {}),
+            ...(sortingOrder != null ? { sortingOrder } : {}),
+          });
+        } catch (e) {
+          return rpcFailureResult(e, deps, {
+            record: 'unity: attach UIDocument (may have landed)',
+            text:
+              'The attach request timed out waiting for Unity, so its outcome is unknown — Unity finishes ' +
+              'a scene write even after the deadline passes, so this one may have landed. Do not retry ' +
+              `blindly: check with get_game_object("${gameObject}") or get_scene_hierarchy first, or you ` +
+              'may end up with two UIDocuments on the same GameObject.',
+          });
+        }
         if (isRefusal(r)) return txt(r.reason);
 
         await deps.recordUncheckpointedChange(`unity: ${verb}`);
+
+        const createdAssets: string[] = [];
+        if (r.panelSettings.created) createdAssets.push(r.panelSettings.path);
+        if (r.panelSettings.themeCreated && r.panelSettings.themePath) {
+          createdAssets.push(r.panelSettings.themePath);
+        }
 
         const lines = [
           `Attached a UIDocument to "${r.gameObject.path}"` +
@@ -153,7 +231,7 @@ export function createUnityAttachUiDocumentTool(deps: SceneMutateDeps): AgentToo
               'renders nothing.',
           );
         }
-        lines.push(NOT_SAVED_NOTE);
+        lines.push(closingNote(r.scene.dirty, createdAssets));
         return txt(lines.join('\n'));
       });
     },
@@ -281,13 +359,25 @@ export function createUnitySetPropertyTool(deps: SceneMutateDeps): AgentTool {
         `set ${component ? `${component}.` : ''}${property} = ${shownValue} on ${where}`;
 
       return deps.gated(id, 'unity_set_property', verb, signal, async () => {
-        const r = await deps.setSerializedProperty({
-          ...(gameObject ? { target: { path: gameObject } } : {}),
-          ...(assetPath ? { assetPath } : {}),
-          ...(component ? { component } : {}),
-          property,
-          value: toSerializedValue(kind, value),
-        });
+        let r: SetSerializedPropertyResult | RpcRefusal;
+        try {
+          r = await deps.setSerializedProperty({
+            ...(gameObject ? { target: { path: gameObject } } : {}),
+            ...(assetPath ? { assetPath } : {}),
+            ...(component ? { component } : {}),
+            property,
+            value: toSerializedValue(kind, value),
+          });
+        } catch (e) {
+          return rpcFailureResult(e, deps, {
+            record: `unity: set ${property} (may have landed)`,
+            text:
+              `The write to ${property} timed out waiting for Unity, so its outcome is unknown — Unity ` +
+              'finishes the write even after the deadline passes, so it may have landed. Read the current ' +
+              `value with ${gameObject ? `get_game_object("${gameObject}")` : `read ${assetPath}`} before ` +
+              'retrying.',
+          });
+        }
         if (isRefusal(r)) return txt(r.reason);
 
         await deps.recordUncheckpointedChange(`unity: ${verb}`);
@@ -295,7 +385,10 @@ export function createUnitySetPropertyTool(deps: SceneMutateDeps): AgentTool {
         return txt(
           `Set ${component ? `${component}.` : ''}${r.property} on ${r.target.path}: ` +
             `${formatPropertyValue(r.previous)} → ${formatPropertyValue(r.applied)} (${r.propertyType}).\n` +
-            `${r.sceneDirty ? NOT_SAVED_NOTE : ASSET_SAVED_NOTE}`,
+            // Keyed on WHAT was written, not on whether a scene happened to be
+            // dirtied: an asset write is already saved and telling the user to
+            // save a scene for it is noise.
+            `${r.target.isAsset ? ASSET_SAVED_NOTE : closingNote(r.sceneDirty)}`,
         );
       });
     },

@@ -39,56 +39,6 @@ using UnityEngine.UIElements;
 
 namespace UnityIDE.Bridge
 {
-    /// <summary>
-    /// The shared "is the Editor in a state where a scene write is safe?" guard.
-    /// </summary>
-    /// <remarks>
-    /// Three states make a scene write a bad idea, and all three fail QUIETLY
-    /// without this check — which is the worst possible outcome for an agent
-    /// that will report success and move on:
-    ///
-    ///   * Play Mode — everything written is thrown away on exit.
-    ///   * Compiling — the domain is about to reload underneath the handler.
-    ///   * Prefab Mode — `SceneManager` sees the prefab stage's throwaway scene,
-    ///     so a hierarchy path resolves against the wrong thing (or not at all)
-    ///     and MarkSceneDirty dirties a scene the user never opened.
-    ///
-    /// <see cref="IsBusy"/> is a field, not a method, so tests can inject a
-    /// state no headless test process could otherwise reach.
-    /// </remarks>
-    internal static class EditorGate
-    {
-        /// <summary>
-        /// Returns a user-facing reason the Editor is busy, or null when a write
-        /// is safe. Replaceable for tests; call <see cref="ResetForTests"/> to
-        /// restore the real check.
-        /// </summary>
-        internal static Func<string> IsBusy = DefaultIsBusy;
-
-        /// <summary>The busy reason, or null. Null-safe against a cleared IsBusy.</summary>
-        internal static string BusyReason()
-        {
-            Func<string> probe = IsBusy;
-            return probe == null ? null : probe();
-        }
-
-        internal static void ResetForTests()
-        {
-            IsBusy = DefaultIsBusy;
-        }
-
-        private static string DefaultIsBusy()
-        {
-            if (EditorApplication.isPlayingOrWillChangePlaymode || EditorApplication.isPlaying)
-                return "Unity is in Play Mode. Exit Play Mode and try again — changes made in Play Mode are discarded.";
-            if (EditorApplication.isCompiling)
-                return "Unity is compiling. Try again once the compile finishes.";
-            if (PrefabStageUtility.GetCurrentPrefabStage() != null)
-                return "Unity has a prefab open in Prefab Mode. Go back to the scene (the arrow in the Hierarchy breadcrumb) and try again.";
-            return null;
-        }
-    }
-
     internal static class SceneMutationHandlers
     {
         private const string AttachUndoGroup = "UnityIDE: Attach UIDocument";
@@ -101,9 +51,20 @@ namespace UnityIDE.Bridge
         /// <summary>Cap on the property names a refusal lists, so a fat component can't flood the reply.</summary>
         private const int MaxNamesInRefusal = 60;
 
+        /// <summary>
+        /// How long the worker waits for `attachUiDocument`. Above the 8s
+        /// default because a force import of a just-written .uxml on a cold
+        /// project can take most of that on its own — and a handler that
+        /// outlasts its budget still finishes and still writes the scene, so an
+        /// under-sized budget produces a "failed" reply over a changed project.
+        /// Kept under the IDE's own 30s client timeout so the C# side is always
+        /// the one that gives up first, with the more specific message.
+        /// </summary>
+        private const int AttachTimeoutMs = 25000;
+
         public static void Register(BridgeClient client)
         {
-            RpcDispatcher.Register("attachUiDocument", AttachUiDocument);
+            RpcDispatcher.Register("attachUiDocument", AttachUiDocument, AttachTimeoutMs);
             RpcDispatcher.Register("setSerializedProperty", SetSerializedProperty);
         }
 
@@ -137,6 +98,18 @@ namespace UnityIDE.Bridge
             if (string.IsNullOrEmpty(uxmlPath))
                 return HierarchyHandlers.Refused("attachUiDocument requires a 'uxmlPath'.");
 
+            // ORDER MATTERS, cheapest and least destructive first. Every step
+            // that can refuse runs before every step that can CREATE something:
+            // a refusal must leave the project byte-identical, and asset
+            // creation is the one thing here that Ctrl+Z cannot take back.
+            //
+            //   1. validate the target  — reads only
+            //   2. load/import the UXML — imports a file the user already wrote
+            //   3. PanelSettings + theme — may CREATE assets
+            //   4. the scene mutation itself, inside one undo group
+            GameObject preexisting = ResolveExistingTarget(p, out string targetRefusal);
+            if (targetRefusal != null) return HierarchyHandlers.Refused(targetRefusal);
+
             VisualTreeAsset vta = AssetDatabase.LoadAssetAtPath<VisualTreeAsset>(uxmlPath);
             if (vta == null)
             {
@@ -151,19 +124,12 @@ namespace UnityIDE.Bridge
                     "check the Console for import errors.");
             }
 
-            // Everything refusable is settled BEFORE the first scene mutation, so
-            // a refusal never leaves a half-attached GameObject behind. The
-            // asset-side work (creating a PanelSettings, writing a theme) is not
-            // undoable anyway, which is why it belongs outside the group.
             PanelSettings panelSettings = ResolvePanelSettings(p, out string psConfidence,
                 out bool psCreated, out string psRefusal);
             if (panelSettings == null) return HierarchyHandlers.Refused(psRefusal);
 
-            bool themeCreated = EnsureTheme(panelSettings, out string themeRefusal);
+            bool themeCreated = EnsureTheme(panelSettings, out string themePath, out string themeRefusal);
             if (themeRefusal != null) return HierarchyHandlers.Refused(themeRefusal);
-
-            GameObject preexisting = ResolveExistingTarget(p, out string targetRefusal);
-            if (targetRefusal != null) return HierarchyHandlers.Refused(targetRefusal);
 
             // The undo group opens BEFORE the first mutation so the GameObject
             // creation collapses into it — an undo that leaves an orphan
@@ -190,6 +156,7 @@ namespace UnityIDE.Bridge
             if (doc == null)
             {
                 Undo.RevertAllDownToGroup(undoGroup);
+                Undo.CollapseUndoOperations(undoGroup);
                 return HierarchyHandlers.Refused(
                     "Could not add a UIDocument to \"" + HierarchyHandlers.HierarchyPath(go.transform) + "\".");
             }
@@ -224,6 +191,9 @@ namespace UnityIDE.Bridge
             psInfo["guid"] = AssetDatabase.AssetPathToGUID(psPath ?? "") ?? "";
             psInfo["created"] = psCreated;
             psInfo["themeCreated"] = themeCreated;
+            // Named, not just flagged: a created asset survives Ctrl+Z, so the
+            // tool has to be able to tell the user exactly what it left behind.
+            psInfo["themePath"] = themePath ?? "";
             psInfo["confidence"] = psConfidence;
 
             var vtaInfo = JsonValue.NewObject();
@@ -448,12 +418,20 @@ namespace UnityIDE.Bridge
         /// <remarks>
         /// A themeless PanelSettings renders NOTHING and logs nothing, so the
         /// agent would attach a perfectly correct UIDocument and report success
-        /// over a blank screen. Returns whether a .tss was written.
+        /// over a blank screen. Returns whether a .tss was WRITTEN (as opposed
+        /// to found or already assigned); <paramref name="themePath"/> always
+        /// names the theme now in use, because a created asset is not undoable
+        /// and the caller has to be able to name it.
         /// </remarks>
-        private static bool EnsureTheme(PanelSettings panelSettings, out string refusal)
+        private static bool EnsureTheme(PanelSettings panelSettings, out string themePath, out string refusal)
         {
             refusal = null;
-            if (panelSettings.themeStyleSheet != null) return false;
+            themePath = null;
+            if (panelSettings.themeStyleSheet != null)
+            {
+                themePath = AssetDatabase.GetAssetPath(panelSettings.themeStyleSheet);
+                return false;
+            }
 
             bool wroteFile = false;
             ThemeStyleSheet theme = null;
@@ -495,6 +473,7 @@ namespace UnityIDE.Bridge
                 wroteFile = true;
             }
 
+            themePath = AssetDatabase.GetAssetPath(theme);
             panelSettings.themeStyleSheet = theme;
             EditorUtility.SetDirty(panelSettings);
             AssetDatabase.SaveAssetIfDirty(panelSettings);
@@ -607,40 +586,54 @@ namespace UnityIDE.Bridge
 
             string undoGroupName = "UnityIDE: Set " + property;
 
+            JsonValue previous;
+            JsonValue applied;
+            string propertyType;
+            int undoGroup;
+
             var so = new SerializedObject(obj);
-            SerializedProperty prop = FindPropertyFlexible(so, property);
-            if (prop == null)
+            try
             {
-                string names = VisiblePropertyNames(so);
-                so.Dispose();
-                return HierarchyHandlers.Refused(
-                    "\"" + obj.name + "\" (" + obj.GetType().Name + ") has no serialized property \"" +
-                    property + "\". It has: " + names + ".");
+                SerializedProperty prop = FindPropertyFlexible(so, property);
+                if (prop == null)
+                {
+                    return HierarchyHandlers.Refused(
+                        "\"" + obj.name + "\" (" + obj.GetType().Name + ") has no serialized property \"" +
+                        property + "\". It has: " + VisiblePropertyNames(so) + ".");
+                }
+
+                previous = HierarchyHandlers.SerializePropertyValue(prop);
+                propertyType = prop.propertyType.ToString();
+
+                // ApplyValue only writes into the SerializedProperty's in-memory
+                // copy — nothing reaches the object until ApplyModifiedProperties —
+                // so a refusal here costs the user nothing and needs no undo group
+                // opened around it.
+                string applyRefusal = ApplyValue(prop, value);
+                if (applyRefusal != null) return HierarchyHandlers.Refused(applyRefusal);
+
+                Undo.IncrementCurrentGroup();
+                Undo.SetCurrentGroupName(undoGroupName);
+                undoGroup = Undo.GetCurrentGroup();
+
+                // ApplyModifiedProperties writes the Undo entry itself, which is why
+                // there is no RecordObject above it.
+                so.ApplyModifiedProperties();
+
+                // Re-read from the OBJECT, not from the copy that was just
+                // written: an OnValidate that clamps the value (or a setter that
+                // rounds it) is exactly the case `applied` exists to expose, and
+                // without Update() the reply would echo the request instead.
+                so.Update();
+                SerializedProperty after = FindPropertyFlexible(so, property);
+                applied = after != null
+                    ? HierarchyHandlers.SerializePropertyValue(after)
+                    : HierarchyHandlers.SerializePropertyValue(prop);
             }
-
-            JsonValue previous = HierarchyHandlers.SerializePropertyValue(prop);
-            string propertyType = prop.propertyType.ToString();
-
-            // ApplyValue only writes into the SerializedProperty's in-memory
-            // copy — nothing reaches the object until ApplyModifiedProperties —
-            // so a refusal here costs the user nothing and needs no undo group
-            // opened around it.
-            string applyRefusal = ApplyValue(prop, value);
-            if (applyRefusal != null)
+            finally
             {
                 so.Dispose();
-                return HierarchyHandlers.Refused(applyRefusal);
             }
-
-            Undo.IncrementCurrentGroup();
-            Undo.SetCurrentGroupName(undoGroupName);
-            int undoGroup = Undo.GetCurrentGroup();
-
-            // ApplyModifiedProperties writes the Undo entry itself, which is why
-            // there is no RecordObject above it.
-            so.ApplyModifiedProperties();
-            JsonValue applied = HierarchyHandlers.SerializePropertyValue(prop);
-            so.Dispose();
 
             bool sceneDirty = false;
             if (isAsset)
@@ -899,6 +892,15 @@ namespace UnityIDE.Bridge
                         if (prop.propertyType == SerializedPropertyType.Enum)
                         {
                             return SetEnumByIndex(prop, (int)Math.Round(n));
+                        }
+                        if (prop.propertyType == SerializedPropertyType.String)
+                        {
+                            // The single most likely miss: kind:'auto' reads
+                            // "7" or "2.5" as a number, and the field is text
+                            // (a version string, an id, a scene name). Name the
+                            // one-word fix rather than the type mismatch alone.
+                            return "\"" + prop.name + "\" is a String, but the value was read as a " + kind +
+                                   ". Pass kind:'string' to set it as text.";
                         }
                         return WrongType(prop, kind);
                     }
