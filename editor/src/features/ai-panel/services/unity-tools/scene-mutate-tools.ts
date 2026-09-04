@@ -65,9 +65,17 @@ function closingNote(sceneDirty: boolean, createdAssets: string[] = []): string 
  * and its scene write lands, after the reply has already said "timed out".
  * Reporting that as a plain failure is how the turn's checkpoint row ends up
  * claiming "restorable" over a scene that really did change.
+ *
+ * The transport has TWO ways of not answering, and both mean the same thing
+ * here. `unity_ipc.rs` returns "Unity RPC '<method>' timed out" when the wait
+ * expires and "Unity disconnected before responding to '<method>'" when the
+ * pending map is drained by a disconnect — which is precisely the domain-reload
+ * case: Unity tears the connection down mid-handler and the write lands on the
+ * other side of the reload. Matching only the timeout wording sent that one
+ * through as a plain failure, unrecorded.
  */
 function isIndeterminateFailure(message: string): boolean {
-  return /timed out|timeout/i.test(message);
+  return /timed out|timeout|disconnected before responding/i.test(message);
 }
 
 /**
@@ -202,10 +210,11 @@ export function createUnityAttachUiDocumentTool(deps: SceneMutateDeps): AgentToo
           return rpcFailureResult(e, deps, {
             record: 'unity: attach UIDocument (may have landed)',
             text:
-              'The attach request timed out waiting for Unity, so its outcome is unknown — Unity finishes ' +
-              'a scene write even after the deadline passes, so this one may have landed. Do not retry ' +
-              `blindly: check with get_game_object("${gameObject}") or get_scene_hierarchy first, or you ` +
-              'may end up with two UIDocuments on the same GameObject.',
+              'The attach request did not get an answer from Unity (timeout or disconnect), so its outcome ' +
+              'is unknown — Unity finishes a scene write even when the reply never arrives, so the change ' +
+              'MAY have landed. Do not retry blindly: re-read with ' +
+              `get_game_object("${gameObject}") or get_scene_hierarchy first, or you may end up with two ` +
+              'UIDocuments on the same GameObject.',
           });
         }
         if (isRefusal(r)) return txt(r.reason);
@@ -372,10 +381,10 @@ export function createUnitySetPropertyTool(deps: SceneMutateDeps): AgentTool {
           return rpcFailureResult(e, deps, {
             record: `unity: set ${property} (may have landed)`,
             text:
-              `The write to ${property} timed out waiting for Unity, so its outcome is unknown — Unity ` +
-              'finishes the write even after the deadline passes, so it may have landed. Read the current ' +
-              `value with ${gameObject ? `get_game_object("${gameObject}")` : `read ${assetPath}`} before ` +
-              'retrying.',
+              `The write to ${property} did not get an answer from Unity (timeout or disconnect), so its ` +
+              'outcome is unknown — Unity finishes the write even when the reply never arrives, so it MAY ' +
+              'have landed. Re-read the current value with ' +
+              `${gameObject ? `get_game_object("${gameObject}")` : `read ${assetPath}`} before retrying.`,
           });
         }
         if (isRefusal(r)) return txt(r.reason);

@@ -254,8 +254,8 @@ describe('unity_attach_ui_document', () => {
 
     const text = textOf(await h.attach.execute('c1', ATTACH_ARGS, undefined));
 
-    expect(text).toContain('timed out waiting for Unity, so its outcome is unknown');
-    expect(text).toContain('may have landed');
+    expect(text).toContain('did not get an answer from Unity (timeout or disconnect)');
+    expect(text).toContain('MAY have landed');
     expect(text).toContain('get_game_object("UI/HUD")');
     expect(h.recorded).toEqual(['unity: attach UIDocument (may have landed)']);
   });
@@ -287,8 +287,31 @@ describe('unity_attach_ui_document', () => {
     expect(h.recorded).toEqual([]);
   });
 
-  it('lets any other RPC failure through to the approval gate, unrecorded', async () => {
-    const boom = new Error('Unity disconnected before responding to \'attachUiDocument\'');
+  // R10. This test used to PIN the opposite behaviour ("lets any other RPC
+  // failure through … unrecorded") with this exact message as its example.
+  // `unity_ipc.rs` returns it whenever a disconnect drains the pending map —
+  // the domain-reload case, in which Unity keeps running the handler and the
+  // scene write lands on the far side of the reload. Reporting that as a plain
+  // failure left the checkpoint row claiming the turn was restorable over a
+  // scene that really had changed, and invited a retry that attaches a SECOND
+  // UIDocument. It is indeterminate, exactly like a timeout.
+  it('treats a mid-RPC disconnect as "may have landed" too — records the change and says the outcome is unknown', async () => {
+    const h = harness({
+      attachUiDocument: async () => {
+        throw new Error("Unity disconnected before responding to 'attachUiDocument'");
+      },
+    });
+
+    const text = textOf(await h.attach.execute('c1', ATTACH_ARGS, undefined));
+
+    expect(text).toContain('did not get an answer from Unity (timeout or disconnect)');
+    expect(text).toContain('MAY have landed');
+    expect(text).toContain('get_game_object("UI/HUD")');
+    expect(h.recorded).toEqual(['unity: attach UIDocument (may have landed)']);
+  });
+
+  it('still lets a genuinely different RPC failure through to the approval gate, unrecorded', async () => {
+    const boom = new Error("Unity RPC 'attachUiDocument' error: target is not a GameObject");
     let seen: unknown = null;
     const h = harness({
       attachUiDocument: async () => {
@@ -395,8 +418,24 @@ describe('unity_set_property', () => {
 
     const text = textOf(await h.setProperty.execute('c1', SET_ARGS, undefined));
 
-    expect(text).toContain('timed out waiting for Unity, so its outcome is unknown');
+    expect(text).toContain('did not get an answer from Unity (timeout or disconnect)');
     expect(text).toContain('get_game_object("Player")');
+    expect(h.recorded).toEqual(['unity: set speed (may have landed)']);
+  });
+
+  // R10, the write half: a disconnect mid-RPC is the domain-reload case, and
+  // the write lands on the far side of the reload.
+  it('treats a mid-RPC disconnect as "may have landed" too', async () => {
+    const h = harness({
+      setSerializedProperty: async () => {
+        throw new Error("Unity disconnected before responding to 'setSerializedProperty'");
+      },
+    });
+
+    const text = textOf(await h.setProperty.execute('c1', SET_ARGS, undefined));
+
+    expect(text).toContain('did not get an answer from Unity (timeout or disconnect)');
+    expect(text).toContain('MAY have landed');
     expect(h.recorded).toEqual(['unity: set speed (may have landed)']);
   });
 
