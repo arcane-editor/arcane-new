@@ -45,6 +45,7 @@ import {
   withUnityCompileGate,
   withLspDiagnosticsGate,
   resetCompileGate,
+  markConsoleTurnStart,
 } from './unity-tools';
 import { resolveToCwd } from './vendor/tools/path-utils';
 import { withCheckpoint } from './checkpoints/checkpoint-gate';
@@ -97,6 +98,7 @@ import { useWorkspaceStore } from '../../../stores/workspace';
 import { useProjectContextStore } from '../../../stores/project-context';
 import { useSettingsStore } from '../../../stores/settings';
 import { useCheckpointsStore } from '../../../stores/checkpoints';
+import { useUnityStore } from '../../../stores/unity';
 import { buildSystemPrompt, captureDecoration, defaultPromptModeFor, type PromptMode } from './prompts';
 import { graphChangedSinceFreeze, resetFrozenDecoration } from './prompts/frozen-context';
 import { buildPlanSendPrefix } from './prompts/plan-execution';
@@ -616,6 +618,7 @@ export class AgentService {
     // createToolsForPromptMode), so their per-send state needs an explicit
     // reset here, same as the compile gate above.
     resetTurnGovernor();
+    markConsoleTurnStart(useUnityStore.getState().logSeq);
     resetRepeatCallGuard();
     // Fresh touched-file registry for the verified-pass closing check (P3.4).
     beginVerifiedPass();

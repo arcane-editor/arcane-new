@@ -20,6 +20,7 @@ export { resetCompileGate } from './compile-gate';
 export { withLspDiagnosticsGate } from './lsp-gate';
 export { withUnityAssetGate } from './asset-gate';
 export { unityApiSearch, unityApiLookup } from './api-client';
+export { markConsoleTurnStart } from './read-tools';
 
 /**
  * Compile-gate decorator, with the real (store-backed) grounding client wired
@@ -54,7 +55,7 @@ export function withUnityCompileGate(tool: AgentTool, cwd: string): AgentTool {
  */
 export function createUnityReadTools(workspacePath: string): AgentTool[] {
   return [
-    ...createUnityBridgeReadTools(),
+    ...createUnityBridgeReadTools({ search: unityApiSearch, lookup: unityApiLookup }),
     createUnityScriptMapTool(),
     createUnityInputActionsTool(workspacePath),
     createUnityScriptableObjectsTool(workspacePath),

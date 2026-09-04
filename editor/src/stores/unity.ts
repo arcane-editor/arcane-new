@@ -4,6 +4,7 @@ import type { UnlistenFn } from '@tauri-apps/api/event';
 import { listenScoped } from '../utils/tauri-listener';
 import type {
   UnityLogEntry,
+  UnityLogType,
   UnityProjectInfo,
   UnityPlayState,
   ConnectionChangedPayload,
@@ -15,13 +16,18 @@ import type {
 import { parseStackTrace } from '../types/unity';
 import { useWorkspaceStore } from './workspace';
 import { useNotificationsStore, notify } from './notifications';
-import { isBridgeInstalled, installBridge } from '../features/unity-bridge';
+import { isBridgeInstalled, installBridge, bridgeRpc } from '../features/unity-bridge';
 import { setPendingNavigation } from '../utils/editor-navigation';
 import { raiseCurrentWindow } from '../utils/window-focus';
 
 const MAX_LOG_ENTRIES = 10_000;
 /** How long after a disconnect we assume Unity is mid-domain-reload (not gone). */
 const RELOAD_GRACE_MS = 15_000;
+/** Bridge protocol version from which the console snapshot/clear RPCs exist. */
+const CONSOLE_RPC_MIN_PROTOCOL = 4;
+/** Error/Exception/Assert/CompileError — what `backfillConsoleHistory` pulls. */
+const BACKFILL_TYPES: UnityLogType[] = ['Error', 'Exception', 'Assert', 'CompileError'];
+const BACKFILL_LIMIT = 200;
 
 /** UI-facing bridge connection state for the status cluster. */
 export type BridgeState =
@@ -37,6 +43,21 @@ interface UnityState {
   playState: UnityPlayState;
   isCompiling: boolean;
   logs: UnityLogEntry[];
+  /**
+   * Monotonic id assigned to the next log entry that arrives without its own
+   * `seq` (a bridge older than protocol 4, or the raw `unity-log` singular
+   * event). Every entry in `logs` ends up with SOME `seq` this way, so
+   * `sinceTurnStart` filtering has a consistent baseline regardless of source.
+   */
+  logSeq: number;
+  /**
+   * Last known console clear epoch, from `getConsoleSnapshot`/`clearConsole`.
+   * Bumped locally on every `clearLogs()` too, so a purely-local clear (no
+   * bridge, or an old protocol) still moves it.
+   */
+  consoleEpoch: number;
+  /** Bridge wire-protocol version, from `connection_init`'s `protocolVersion`. Null until connected. */
+  bridgeProtocol: number | null;
   listenersActive: boolean;
   /** Whether the bridge package is embedded in the current project. */
   bridgeInstalled: boolean;
@@ -87,7 +108,24 @@ interface UnityState {
   sendPause: () => Promise<void>;
   sendStop: () => Promise<void>;
   sendStep: () => Promise<void>;
-  clearLogs: () => void;
+  /**
+   * Clear the IDE's own log ring. With `{ unity: true }` on a protocol-4+
+   * bridge, also asks Unity to clear its real console via `clearConsole` — the
+   * RPC's `ok:false` (an unsupported Unity version) still leaves the IDE ring
+   * cleared. `unityReason` is set whenever `unity:true` was asked for but
+   * Unity's own console was NOT cleared — either the RPC's own refusal reason,
+   * or (no bridge / too old) a reason this store states itself.
+   */
+  clearLogs: (opts?: { unity?: boolean }) => Promise<{ clearedUnity: boolean; unityReason?: string }>;
+  /**
+   * Pull the newest Error/Exception/Assert/CompileError entries from Unity's
+   * real console and prepend them (flagged `historical: true`) so the panel
+   * shows what happened before this IDE connected — Unity's console history
+   * did not start at the moment the bridge handshook. Best-effort and
+   * idempotent per connection: a failure or an old protocol just leaves the
+   * session-only log stream, which is still correct, only less complete.
+   */
+  backfillConsoleHistory: () => Promise<void>;
   /**
    * Drop everything that belongs to the project being left.
    *
@@ -106,6 +144,9 @@ interface UnityState {
 let unlisteners: UnlistenFn[] = [];
 /** Timer that demotes 'reloading' → 'disconnected' if Unity doesn't come back. */
 let reloadGraceTimer: ReturnType<typeof setTimeout> | null = null;
+/** One backfill per connection — a reconnect clears this, a domain reload's
+ * `reloading` state does not (the session survives it, so history is still current). */
+let historicalBackfillDone = false;
 
 export const useUnityStore = create<UnityState>((set, get) => ({
   connected: false,
@@ -113,6 +154,9 @@ export const useUnityStore = create<UnityState>((set, get) => ({
   playState: 'Stopped',
   isCompiling: false,
   logs: [],
+  logSeq: 0,
+  consoleEpoch: 0,
+  bridgeProtocol: null,
   listenersActive: false,
   bridgeInstalled: false,
   bridgeState: 'disconnected',
@@ -220,11 +264,78 @@ export const useUnityStore = create<UnityState>((set, get) => ({
     await invoke('unity_ipc_send', { messageJson: msg }).catch(() => {});
   },
 
-  clearLogs: () => set({ logs: [] }),
+  clearLogs: async (opts) => {
+    const { unity = false } = opts ?? {};
+    const state = get();
+    let clearedUnity = false;
+    let unityReason: string | undefined;
 
-  resetForWorkspaceChange: () =>
+    if (unity) {
+      if (!state.connected) {
+        unityReason = "Unity's console was not cleared: the bridge is not connected.";
+      } else if ((state.bridgeProtocol ?? 0) < CONSOLE_RPC_MIN_PROTOCOL) {
+        unityReason = "Unity's console was not cleared: the installed bridge package predates protocol 4.";
+      } else {
+        try {
+          const result = await bridgeRpc.clearConsole();
+          clearedUnity = result.ok === true;
+          if (result.ok) {
+            set((s) => ({ consoleEpoch: Math.max(s.consoleEpoch, result.epoch) }));
+          } else {
+            unityReason = result.reason;
+          }
+        } catch (e) {
+          unityReason = `Unity's console was not cleared: ${e instanceof Error ? e.message : String(e)}`;
+        }
+      }
+    }
+
+    set((s) => ({ logs: [], consoleEpoch: s.consoleEpoch + 1 }));
+    return { clearedUnity, unityReason };
+  },
+
+  backfillConsoleHistory: async () => {
+    if (historicalBackfillDone) return;
+    historicalBackfillDone = true;
+    try {
+      const snapshot = await bridgeRpc.getConsoleSnapshot({
+        limit: BACKFILL_LIMIT,
+        types: BACKFILL_TYPES,
+        order: 'newest',
+        includeStackTrace: true,
+      });
+      if (snapshot.entries.length === 0) return;
+      // The RPC returns newest-first; prepending to the (oldest-first) `logs`
+      // array needs the oldest of the backfilled batch first.
+      const oldestFirst = [...snapshot.entries].reverse();
+      const historical: UnityLogEntry[] = oldestFirst.map((e) => ({
+        message: e.message,
+        stackTrace: e.stackTrace,
+        logType: e.logType,
+        timestamp: 0,
+        frameCount: 0,
+        mode: e.mode === 'Unknown' ? 'EditMode' : e.mode,
+        seq: e.seq,
+        historical: true,
+        parsedFrames: parseStackTrace(e.stackTrace ?? ''),
+      }));
+      set((s) => ({
+        logs: [...historical, ...s.logs],
+        consoleEpoch: Math.max(s.consoleEpoch, snapshot.epoch),
+      }));
+    } catch {
+      // Best-effort: an old package, a busy bridge, or a mid-connect hiccup
+      // just leaves the session-only stream — still correct, only less complete.
+    }
+  },
+
+  resetForWorkspaceChange: () => {
+    historicalBackfillDone = false;
     set({
       logs: [],
+      logSeq: 0,
+      consoleEpoch: 0,
+      bridgeProtocol: null,
       lastCompilation: null,
       playState: 'Stopped',
       isCompiling: false,
@@ -236,7 +347,8 @@ export const useUnityStore = create<UnityState>((set, get) => ({
       refreshCompiling: false,
       // `connected` and the listeners are owned by the IPC lifecycle, which
       // setWorkspace restarts separately — clearing them here would race it.
-    }),
+    });
+  },
 
   syncStatus: async () => {
     type Status = {
@@ -291,14 +403,22 @@ export const useUnityStore = create<UnityState>((set, get) => ({
         reloadGraceTimer = null;
       }
       if (isConnected) {
+        const protocolVersion = event.payload.info?.protocolVersion ?? null;
         set({
           connected: true,
           projectInfo: event.payload.info ?? get().projectInfo,
           bridgeInstalled: true, // it connected, so it's installed
           bridgeState: 'connected',
           packageStale: false, // a handshake proves the package is current
+          bridgeProtocol: protocolVersion,
         });
+        if ((protocolVersion ?? 0) >= CONSOLE_RPC_MIN_PROTOCOL) {
+          void get().backfillConsoleHistory();
+        }
       } else {
+        // A fresh reconnect gets its own backfill — the stream that follows
+        // starts a new gap between "what streamed" and "what Unity actually has".
+        historicalBackfillDone = false;
         // A domain reload no longer looks like a drop — Unity announces it as
         // `reloading` and the connection is held open across it. So a drop here
         // is a genuine loss, and the backend is already re-arming: show
@@ -325,21 +445,34 @@ export const useUnityStore = create<UnityState>((set, get) => ({
     });
 
     const u2 = await listenScoped<UnityLogEntry>('unity-log', (event) => {
-      const entry = { ...event.payload, parsedFrames: parseStackTrace(event.payload.stackTrace ?? '') };
       set((state) => {
+        const seq = event.payload.seq ?? state.logSeq + 1;
+        const entry = {
+          ...event.payload,
+          seq,
+          parsedFrames: parseStackTrace(event.payload.stackTrace ?? ''),
+        };
         const logs = [...state.logs, entry];
-        return { logs: logs.length > MAX_LOG_ENTRIES ? logs.slice(-MAX_LOG_ENTRIES) : logs };
+        return {
+          logs: logs.length > MAX_LOG_ENTRIES ? logs.slice(-MAX_LOG_ENTRIES) : logs,
+          logSeq: Math.max(state.logSeq, seq),
+        };
       });
     });
 
     const u3 = await listenScoped<UnityLogEntry[]>('unity-log-batch', (event) => {
-      const entries = (event.payload ?? []).map((e) => ({
-        ...e,
-        parsedFrames: parseStackTrace(e.stackTrace ?? ''),
-      }));
       set((state) => {
+        let nextSeq = state.logSeq;
+        const entries = (event.payload ?? []).map((e) => {
+          const seq = e.seq ?? ++nextSeq;
+          nextSeq = Math.max(nextSeq, seq);
+          return { ...e, seq, parsedFrames: parseStackTrace(e.stackTrace ?? '') };
+        });
         const logs = [...state.logs, ...entries];
-        return { logs: logs.length > MAX_LOG_ENTRIES ? logs.slice(-MAX_LOG_ENTRIES) : logs };
+        return {
+          logs: logs.length > MAX_LOG_ENTRIES ? logs.slice(-MAX_LOG_ENTRIES) : logs,
+          logSeq: nextSeq,
+        };
       });
     });
 

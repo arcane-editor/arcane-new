@@ -34,6 +34,7 @@ import { resolveToCwd } from '../vendor/tools/path-utils';
 import type { CompileWaitOutcome } from '../../../unity-bridge';
 import type { CompilerMessage } from '../../../../types/unity';
 import { buildCompileHints, type HintLookup } from './compile-hints';
+import { describeCompileOutcome } from './compile-outcome-text';
 import { isRejectedWrite, isSuccessfulWrite } from '../write-approval-gate';
 
 const MAX_ATTEMPTS = 4;
@@ -163,52 +164,25 @@ export function withUnityCompileGate(
       const outcome = await deps.recompile({ signal });
 
       if (outcome.status === 'no-compile') {
-        return appendNote(res, `\n\n[Unity compile] Assets refreshed — no recompile was needed.`);
+        return appendNote(res, `\n\n[Unity compile] ${describeCompileOutcome(outcome)}`);
       }
       if (outcome.status === 'unknown') {
+        // An aborted turn already returned its own result; there is no compile
+        // outcome to report on top of it.
         if (outcome.reason === 'aborted') return res;
         // A backgrounded Unity is the common case, not an incident: the user is
         // looking at THIS window, so Unity's editor loop is parked and it has
         // not imported anything yet. Calling that a timeout reads as a broken
         // bridge and invites the model to rewrite the file to "force" a compile,
         // which is the one response that cannot help.
-        if (outcome.reason === 'editor-asleep') {
-          // Whether waiting can possibly help is the difference between these
-          // two messages, so they must not be collapsed. With no focus-free
-          // wake available (Linux, or a P/Invoke that latched off), the compile
-          // genuinely will not happen until a human focuses Unity, and telling
-          // the model to sit tight would be telling it to wait forever.
-          const tail =
-            outcome.canWake === false
-              ? `This build of the bridge cannot wake Unity without focus, so the compile ` +
-                `will not run until someone focuses the Unity window.`
-              : `The import is queued and runs as soon as Unity ticks — compiler errors, ` +
-                `if any, arrive then.`;
-          return appendNote(
-            res,
-            `\n\n[Unity compile] Unity's window is in the background, so its editor loop is ` +
-              `parked and it has not reported a compile for this change. ${tail} ` +
-              `This is NOT a failure: the write succeeded — continue with the remaining file ` +
-              `work. Do not rewrite the file to try to force a compile.`,
-          );
-        }
-        const why =
-          outcome.reason === 'bridge-lost'
-            ? 'Unity bridge was lost mid-compile; it reconnects automatically after the reload'
-            : "timed out waiting for Unity's report";
-        return appendNote(
-          res,
-          `\n\n[Unity compile] Compile status unknown (${why}). ` +
-            `This is NOT a failure: the write succeeded — continue with the remaining file work, ` +
-            `and verify before finishing the task.`,
-        );
+        return appendNote(res, `\n\n[Unity compile] ${describeCompileOutcome(outcome)}`);
       }
 
       const report = outcome.report;
       const errors = (report.messages ?? []).filter((m) => m.type === 'Error');
       if (errors.length === 0) {
         compileAttempts.delete(absWritten);
-        return appendNote(res, `\n\n[Unity compile] Clean — no compiler errors.`);
+        return appendNote(res, `\n\n[Unity compile] ${describeCompileOutcome(outcome)}`);
       }
 
       // Partition: errors in the file we just wrote vs. elsewhere in the project.

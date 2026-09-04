@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback, useMemo, useDeferredValue } from 'react';
-import { Search, Trash2, ArrowDown, ArrowUpRight, Sparkles } from 'lucide-react';
+import { Search, Trash2, ArrowDown, ArrowUpRight, Sparkles, ChevronDown } from 'lucide-react';
 import { useVirtualizer, type Virtualizer } from '@tanstack/react-virtual';
 import { useUnityStore } from '../../../stores/unity';
 import { useWorkspaceStore } from '../../../stores/workspace';
@@ -19,6 +19,8 @@ const LOG_TYPE_COLORS: Record<UnityLogType, string> = {
   Error: 'var(--error-text)',
   Assert: 'var(--error-text)',
   Exception: 'var(--error-text)',
+  CompileError: 'var(--error-text)',
+  CompileWarning: 'var(--warning)',
 };
 
 const LOG_TYPE_LABELS: Record<UnityLogType, string> = {
@@ -27,6 +29,8 @@ const LOG_TYPE_LABELS: Record<UnityLogType, string> = {
   Error: 'ERR',
   Assert: 'AST',
   Exception: 'EXC',
+  CompileError: 'CER',
+  CompileWarning: 'CWR',
 };
 
 interface CollapsedEntry {
@@ -38,7 +42,15 @@ function collapseEntries(logs: UnityLogEntry[]): CollapsedEntry[] {
   const collapsed: CollapsedEntry[] = [];
   for (const entry of logs) {
     const last = collapsed[collapsed.length - 1];
-    if (last && last.entry.message === entry.message && last.entry.logType === entry.logType) {
+    // `historical` is part of the identity too: a backfilled entry and a
+    // live-streamed one with the same message must never merge into one row —
+    // that would silently drop the boundary the "Earlier" divider depends on.
+    if (
+      last &&
+      last.entry.message === entry.message &&
+      last.entry.logType === entry.logType &&
+      !last.entry.historical === !entry.historical
+    ) {
       last.count++;
     } else {
       collapsed.push({ entry, count: 1 });
@@ -58,6 +70,7 @@ function isMonoBehaviourFrame(filePath: string, workspacePath: string | null): b
 function UnityConsolePanel() {
   const logs = useUnityStore((s) => s.logs);
   const clearLogs = useUnityStore((s) => s.clearLogs);
+  const bridgeProtocol = useUnityStore((s) => s.bridgeProtocol);
   const openFile = useWorkspaceStore((s) => s.openFile);
   const workspacePath = useWorkspaceStore((s) => s.workspacePath);
   const isUnityProject = useProjectContextStore((s) => s.isUnityProject);
@@ -72,6 +85,8 @@ function UnityConsolePanel() {
   // panel just never used it. Chasing a runtime bug means ignoring the
   // hundreds of import and compile messages Unity logs in edit mode.
   const [modeFilter, setModeFilter] = useState<'all' | 'PlayMode' | 'EditMode'>('all');
+  const [clearMenuOpen, setClearMenuOpen] = useState(false);
+  const clearMenuRef = useRef<HTMLDivElement>(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   // The auto-scroll effect runs before `virtualizer`/`collapsed` are in scope
@@ -95,6 +110,27 @@ function UnityConsolePanel() {
     setAutoScroll(isAtBottom);
   }, []);
 
+  // Protocol 4+ can also clear Unity's own console — below that, Clear stays
+  // the single "clear here" button it always was (`clearConsole` is not an
+  // RPC the bridge understands yet).
+  const canClearUnity = (bridgeProtocol ?? 0) >= 4;
+
+  useEffect(() => {
+    if (!clearMenuOpen) return;
+    function onDown(e: MouseEvent) {
+      if (!clearMenuRef.current?.contains(e.target as Node)) setClearMenuOpen(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setClearMenuOpen(false);
+    }
+    window.addEventListener('mousedown', onDown);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('mousedown', onDown);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [clearMenuOpen]);
+
   // Filter logs — defer the text filter so rapid typing doesn't block reconciliation
   const deferredFilter = useDeferredValue(filter);
   const needle = deferredFilter.toLowerCase();
@@ -116,6 +152,20 @@ function UnityConsolePanel() {
     return collapseEntries(filteredLogs);
   }, [logs, showLog, showWarning, showError, needle, modeFilter]);
 
+  // Historical entries (`backfillConsoleHistory`) are always prepended as a
+  // leading run, so "how many at the front are historical" is enough to know
+  // where to render the "Earlier — from Unity's console" divider.
+  const historicalCount = useMemo(() => {
+    let n = 0;
+    while (n < collapsed.length && collapsed[n]!.entry.historical) n++;
+    return n;
+  }, [collapsed]);
+  const hasDivider = historicalCount > 0;
+  // The divider is a real virtualized row (index 0) so scroll offsets/heights
+  // stay correct; every other row shifts down by one when it is present.
+  const rowOffset = hasDivider ? 1 : 0;
+  const virtualCount = collapsed.length + rowOffset;
+
   // Virtualized: Unity emits thousands of lines in a play session and the
   // store caps at 10,000. Rendering every row built ~10k DOM subtrees, each
   // with its own click handler and possible stack-frame children, which is
@@ -124,14 +174,14 @@ function UnityConsolePanel() {
   // Dynamic measurement rather than a fixed row height: a row expands to show
   // parsed stack frames, so its height is not knowable up front.
   const virtualizer = useVirtualizer({
-    count: collapsed.length,
+    count: virtualCount,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => 20,
     overscan: 12,
   });
 
   virtualizerRef.current = virtualizer;
-  collapsedCountRef.current = collapsed.length;
+  collapsedCountRef.current = virtualCount;
 
   // Counts are over the unfiltered list, so they depend only on `logs` —
   // typing in the filter box must not re-count.
@@ -172,13 +222,94 @@ function UnityConsolePanel() {
         borderBottom: '1px solid var(--border)',
         flexShrink: 0,
       }}>
-        <button
-          title="Clear Console"
-          onClick={clearLogs}
-          style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: 2 }}
-        >
-          <Trash2 size={14} />
-        </button>
+        {canClearUnity ? (
+          <div ref={clearMenuRef} style={{ position: 'relative' }}>
+            <button
+              title="Clear Console"
+              onClick={() => setClearMenuOpen((o) => !o)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 1,
+                background: 'none',
+                border: 'none',
+                color: 'var(--text-secondary)',
+                cursor: 'pointer',
+                padding: 2,
+              }}
+            >
+              <Trash2 size={14} />
+              <ChevronDown size={10} />
+            </button>
+            {clearMenuOpen && (
+              <div
+                role="menu"
+                style={{
+                  position: 'absolute',
+                  top: '100%',
+                  left: 0,
+                  marginTop: 2,
+                  background: 'var(--bg-input)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 4,
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.25)',
+                  zIndex: 20,
+                  minWidth: 190,
+                  overflow: 'hidden',
+                }}
+              >
+                <button
+                  role="menuitem"
+                  onClick={() => {
+                    setClearMenuOpen(false);
+                    void clearLogs();
+                  }}
+                  style={{
+                    display: 'block',
+                    width: '100%',
+                    textAlign: 'left',
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--text-primary)',
+                    fontSize: 12,
+                    padding: '6px 10px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Clear here
+                </button>
+                <button
+                  role="menuitem"
+                  onClick={() => {
+                    setClearMenuOpen(false);
+                    void clearLogs({ unity: true });
+                  }}
+                  style={{
+                    display: 'block',
+                    width: '100%',
+                    textAlign: 'left',
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--text-primary)',
+                    fontSize: 12,
+                    padding: '6px 10px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Clear here and in Unity
+                </button>
+              </div>
+            )}
+          </div>
+        ) : (
+          <button
+            title="Clear Console"
+            onClick={() => void clearLogs()}
+            style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: 2 }}
+          >
+            <Trash2 size={14} />
+          </button>
+        )}
 
         <div style={{ position: 'relative', flex: 1, maxWidth: 200 }}>
           <Search size={12} style={{ position: 'absolute', left: 6, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-secondary)' }} />
@@ -289,8 +420,40 @@ function UnityConsolePanel() {
       >
         <div style={{ height: virtualizer.getTotalSize(), position: 'relative', width: '100%' }}>
         {virtualizer.getVirtualItems().map((virtualRow) => {
-          const item = collapsed[virtualRow.index];
-          const idx = virtualRow.index;
+          if (hasDivider && virtualRow.index === 0) {
+            return (
+              <div
+                key={virtualRow.key}
+                data-index={virtualRow.index}
+                ref={virtualizer.measureElement}
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  width: '100%',
+                  transform: `translateY(${virtualRow.start}px)`,
+                }}
+              >
+                <div
+                  style={{
+                    padding: '4px 8px',
+                    fontSize: 10,
+                    fontWeight: 600,
+                    letterSpacing: 0.4,
+                    textTransform: 'uppercase',
+                    color: 'var(--text-secondary)',
+                    background: 'var(--bg-input)',
+                    borderBottom: '1px solid var(--border)',
+                  }}
+                >
+                  Earlier — from Unity's console
+                </div>
+              </div>
+            );
+          }
+          const idx = virtualRow.index - rowOffset;
+          const item = collapsed[idx];
+          if (!item) return null;
           return (
           <div
             key={virtualRow.key}

@@ -1,6 +1,13 @@
 // Unity protocol types — ported from unityide-ui/src/common/unity/unity-protocol.ts
 
-export type UnityLogType = 'Log' | 'Warning' | 'Error' | 'Assert' | 'Exception';
+export type UnityLogType =
+  | 'Log'
+  | 'Warning'
+  | 'Error'
+  | 'Assert'
+  | 'Exception'
+  | 'CompileError'
+  | 'CompileWarning';
 export type UnityPlayMode = 'EditMode' | 'PlayMode';
 export type UnityPlayState = 'Stopped' | 'Playing' | 'Paused';
 export type UnityScriptingBackend = 'Mono' | 'IL2CPP';
@@ -20,6 +27,18 @@ export interface UnityLogEntry {
   frameCount: number;
   mode: UnityPlayMode;
   parsedFrames?: StackFrame[];
+  /**
+   * Monotonic ring position. Present on the wire from a protocol-4+ bridge
+   * (`ConsoleHook.Seq`); the store assigns one client-side on ingest for any
+   * entry that arrives without it, so every entry in `logs` always has one.
+   */
+  seq?: number;
+  /**
+   * True for an entry `backfillConsoleHistory` pulled from Unity's own console
+   * on connect — it happened before the IDE was streaming, not during this
+   * session. Absent (not `false`) for everything that streamed live.
+   */
+  historical?: boolean;
 }
 
 export interface UnityProjectInfo {
@@ -29,6 +48,40 @@ export interface UnityProjectInfo {
   companyName: string;
   productName: string;
   scriptingBackend: UnityScriptingBackend;
+  /** Bridge wire-protocol version — absent on a pre-protocol-tracking package. */
+  protocolVersion?: number;
+}
+
+/** One entry as returned by the `getConsoleSnapshot` bridge RPC. */
+export interface ConsoleSnapshotEntry {
+  seq: number;
+  logType: UnityLogType;
+  message: string;
+  stackTrace: string;
+  file: string;
+  line: number;
+  mode: UnityPlayMode | 'Unknown';
+  /** How many consecutive times Unity collapsed this exact row (console `count`). */
+  count: number;
+}
+
+/** Result of the `getConsoleSnapshot` bridge RPC. */
+export interface ConsoleSnapshot {
+  /** `"logEntries"` reads Unity's real console via reflection; `"hookRing"` is
+   * this bridge's own capped memory, used when reflection is unavailable. */
+  source: 'logEntries' | 'hookRing';
+  epoch: number;
+  total: number;
+  offset: number;
+  counts: { errors: number; warnings: number; logs: number };
+  entries: ConsoleSnapshotEntry[];
+  truncated: boolean;
+  capabilities: {
+    canClear: boolean;
+    /** True only for `source: "logEntries"` — a hookRing answer only goes back
+     * as far as this bridge session has been listening. */
+    hasHistoryBeforeConnect: boolean;
+  };
 }
 
 export interface PlaystateChangedPayload {

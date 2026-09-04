@@ -97,6 +97,21 @@ function createUnityRunTests(): AgentTool {
   };
 }
 
+function createUnityConsoleClear(): AgentTool {
+  return {
+    name: 'unity_console_clear',
+    label: 'unity console clear',
+    description:
+      "Clear Unity's console (and this IDE's log ring). Requires user approval.",
+    parameters: Type.Object({}),
+    execute: (id, _p, signal) =>
+      gated(id, 'unity_console_clear', 'clear the Unity console', signal, async () => {
+        const { clearedUnity, unityReason } = await useUnityStore.getState().clearLogs({ unity: true });
+        return txt(clearedUnity ? "Cleared Unity's console." : unityReason ?? "Unity's console was not cleared.");
+      }),
+  };
+}
+
 const menuItemSchema = Type.Object({
   path: Type.String({ description: 'Menu path, e.g. "Assets/Refresh".' }),
 });
@@ -123,7 +138,13 @@ export function createUnityMutateTools(): AgentTool[] {
   const get = useSettingsStore.getState().getSetting;
   const tools: AgentTool[] = [];
   if (get('unity.bridge.enabled') !== false) {
-    tools.push(createUnityPlay(), createUnityStop(), createUnityRefresh(), createUnityExecuteMenuItem());
+    tools.push(
+      createUnityPlay(),
+      createUnityStop(),
+      createUnityRefresh(),
+      createUnityExecuteMenuItem(),
+      createUnityConsoleClear(),
+    );
   }
   if (get('unity.testRunner.enabled') !== false) {
     tools.push(createUnityRunTests());

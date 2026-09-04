@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import type { ConsoleSnapshot, UnityLogType } from '../../../types/unity';
 
 /**
  * Typed wrappers over the `unity_ipc_request` Tauri command, which sends an
@@ -164,4 +165,25 @@ export const bridgeRpc = {
   /** Run Unity tests via the bridge (TestRunnerApi). Results stream as `unity-test-event`. */
   runTests: (mode: 'EditMode' | 'PlayMode', filter?: string) =>
     rpc<{ ok: boolean }>('runTests', { mode, filter }, 5 * 60_000),
+  /**
+   * Read a page of Unity's console history. Protocol 4+ only — the caller is
+   * responsible for checking `bridgeProtocol` before calling this; against an
+   * older bridge the RPC rejects with "Unknown method".
+   */
+  getConsoleSnapshot: (opts: {
+    offset?: number;
+    limit?: number;
+    types?: UnityLogType[];
+    includeStackTrace?: boolean;
+    order?: 'newest' | 'oldest';
+  } = {}) => rpc<ConsoleSnapshot>('getConsoleSnapshot', opts),
+  /**
+   * Clear Unity's console. Protocol 4+ only. `ok:false` means Unity's own
+   * console specifically could not be cleared (an unsupported Editor version)
+   * — the bridge's own hook ring is cleared either way.
+   */
+  clearConsole: () =>
+    rpc<{ ok: true; cleared: 'logEntries' | 'hookRing'; epoch: number } | { ok: false; reason: string }>(
+      'clearConsole',
+    ),
 };

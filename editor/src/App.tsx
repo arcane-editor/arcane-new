@@ -1679,7 +1679,7 @@ function App() {
       id: 'unity.clearConsole',
       label: 'Clear Unity Console',
       category: 'Unity',
-      handler: () => useUnityStore.getState().clearLogs(),
+      handler: () => void useUnityStore.getState().clearLogs(),
       when: () => useProjectContextStore.getState().isUnityProject,
     },
     {
