@@ -57,7 +57,7 @@ fn ts_unix() -> String {
 }
 
 /// Append a single tagged line. `prefix` is one of `->`, `<-`, `!!`.
-fn trace_append(language: &str, prefix: &str, body: &str) {
+pub(crate) fn trace_append(language: &str, prefix: &str, body: &str) {
     let slot = match TRACE.get() {
         Some(s) => s,
         None => return,
@@ -143,8 +143,10 @@ fn resolve_bundled_sidecar(name: &str) -> Option<PathBuf> {
 /// Resolve the path to the LSP server binary for a given language.
 ///
 /// Resolution order per language:
-/// - **csharp**: `~/.dotnet/tools/csharp-ls` → fall back to PATH. Bundling
-///   csharp-ls isn't useful because the user needs the .NET SDK anyway.
+/// - **csharp**: delegated to `csharp_ls::resolve_existing`, which checks the
+///   user's own install first and the editor-managed one last. The bare name
+///   is returned only when nothing was found, so the spawn produces the
+///   "not installed" error the frontend already knows how to surface.
 /// - **typescript**: bundled sidecar (Tauri externalBin) → fall back to PATH
 ///   if the user sets `EDITOR_USE_SYSTEM_LSP=1` or the sidecar is missing.
 /// - **python**: PATH only. Pyright bundling is a known follow-up — pkg has
@@ -153,20 +155,9 @@ fn resolve_bundled_sidecar(name: &str) -> Option<PathBuf> {
 ///   matches what the editor did before bundling was introduced.
 fn resolve_server_binary(language: &str) -> String {
     match language {
-        "csharp" => {
-            if let Some(home) = dirs::home_dir() {
-                let tool_name = if cfg!(target_os = "windows") {
-                    "csharp-ls.exe"
-                } else {
-                    "csharp-ls"
-                };
-                let dotnet_tool = home.join(".dotnet").join("tools").join(tool_name);
-                if dotnet_tool.exists() {
-                    return dotnet_tool.to_string_lossy().to_string();
-                }
-            }
-            "csharp-ls".to_string()
-        }
+        "csharp" => crate::csharp_ls::resolve_existing()
+            .map(|(path, _)| path.to_string_lossy().to_string())
+            .unwrap_or_else(|| crate::csharp_ls::exe_name("csharp-ls")),
         "python" => {
             if cfg!(target_os = "windows") {
                 "pyright-langserver.cmd".to_string()
@@ -201,7 +192,7 @@ fn resolve_server_binary(language: &str) -> String {
 /// standard install locations + existing env hints, and return the parent
 /// directory so callers can both prepend it to PATH and use it as
 /// DOTNET_ROOT.
-fn find_dotnet_dir() -> Option<PathBuf> {
+pub(crate) fn find_dotnet_dir() -> Option<PathBuf> {
     let exe_name = if cfg!(target_os = "windows") {
         "dotnet.exe"
     } else {
@@ -276,17 +267,19 @@ fn find_dotnet_dir() -> Option<PathBuf> {
     None
 }
 
-/// Whether the .NET SDK is installed on this machine. Used by the frontend
-/// to decide whether to surface the "install dotnet" modal before attempting
-/// to start csharp-ls for a Unity project. Cheap to call; reuses the same
-/// probe as the LSP start path.
+/// Whether a `dotnet` executable exists on this machine.
+///
+/// Superseded for the C# gate by `csharp_ls::csharp_ls_status`, which also
+/// reports whether there is an SDK and whether the runtime is new enough —
+/// "dotnet exists" is not sufficient to run the pinned language server. Kept
+/// as the cheap yes/no probe for callers that only need presence.
 #[tauri::command]
 pub fn check_dotnet_installed() -> bool {
     find_dotnet_dir().is_some()
 }
 
 /// Build a PATH value with `extra` prepended to the current PATH.
-fn path_with_prepended(extra: &Path) -> String {
+pub(crate) fn path_with_prepended(extra: &Path) -> String {
     let existing = std::env::var_os("PATH").unwrap_or_default();
     let mut paths: Vec<PathBuf> = vec![extra.to_path_buf()];
     paths.extend(std::env::split_paths(&existing));

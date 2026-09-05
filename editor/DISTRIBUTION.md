@@ -48,7 +48,18 @@ A few things worth knowing:
 - The `.dmg` wrapper itself doesn't need to be signed for the recipient flow above to work.
 - The bundled `unityide-graph` sidecar is signed by Tauri automatically as part of the main bundle, so recipients don't need to do anything for it.
 - **typescript-language-server is bundled** as a sidecar — TypeScript / JavaScript IntelliSense works out of the box without Node.js installed. The bundle ships with TypeScript 6 embedded.
-- **csharp-ls is not bundled**. If the recipient wants C# language features they need the .NET SDK + `dotnet tool install -g csharp-ls`. For Unity projects the editor surfaces a modal when dotnet is missing; non-Unity workspaces get a quieter toast hint.
+- **csharp-ls is bundled as a NuGet package and installed on first use.** The recipient does
+  *not* run `dotnet tool install`. `bun run prepare:csharp-ls` vendors the pinned, SHA-512
+  verified `csharp-ls.<version>.nupkg` into `src-tauri/resources/csharp-ls/` (CI passes
+  `--require`, so a release that lost it fails the build), and on the first C# start
+  `csharp_ls.rs` runs `dotnet tool install` against that file as the **only** NuGet source —
+  offline, version-pinned, into the app's data dir, never into the user's global tool store.
+  A csharp-ls the recipient already has always wins over ours.
+- **The .NET prerequisite is a major version, not just "dotnet".** The pinned csharp-ls targets
+  `net10.0`, so the machine needs the .NET 10 runtime *and* an SDK (`dotnet tool` is an SDK
+  command). Both are probed before installing: Unity projects get a modal naming the actual
+  gap, non-Unity workspaces get a toast, and the editor stays fully usable without C# features
+  either way.
 - **pyright is not bundled (yet)**. Python LSP still requires `npm install -g pyright` on the recipient's machine. Bundling is a known follow-up — see [LSP sidecar bundling](#lsp-sidecar-bundling) below.
 
 ## Windows

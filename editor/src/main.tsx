@@ -8,6 +8,7 @@ import ErrorBoundary from './components/ErrorBoundary';
 import { notify } from './stores/notifications';
 import { hydratePersistence } from './utils/persistence';
 import { isMac, isWindows } from './utils/platform';
+import { reportCrash } from './utils/crash-report';
 
 // Apply theme before React renders to prevent FOUC
 import { getTheme, DEFAULT_THEME_ID, applyTheme, ensureMonacoTheme } from './features/theme';
@@ -60,9 +61,22 @@ window.addEventListener('unhandledrejection', (event) => {
   console.error('[main] unhandled promise rejection:', reason);
   const msg = reason instanceof Error ? reason.message : typeof reason === 'string' ? reason : String(reason);
   notify.error(`Unexpected error: ${msg}`);
+  // Reported only past the benign filter above — the LSP/Monaco trickle is
+  // normal operation, and shipping it would bury the real crashes.
+  reportCrash({
+    kind: 'unhandled-rejection',
+    message: msg,
+    stack: reason instanceof Error ? reason.stack : undefined,
+  });
 });
 window.addEventListener('error', (event) => {
   console.error('[main] uncaught error:', event.error ?? event.message);
+  if (isBenignBackgroundError(event.error ?? event.message)) return;
+  reportCrash({
+    kind: 'window-error',
+    message: event.error instanceof Error ? event.error.message : String(event.message ?? ''),
+    stack: event.error instanceof Error ? event.error.stack : undefined,
+  });
 });
 
 const storedThemeId = (() => {

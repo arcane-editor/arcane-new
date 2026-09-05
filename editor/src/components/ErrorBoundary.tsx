@@ -1,4 +1,5 @@
 import React from 'react';
+import { reportCrash } from '../utils/crash-report';
 
 interface ErrorBoundaryState {
   hasError: boolean;
@@ -31,6 +32,14 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
   componentDidCatch(error: Error, info: React.ErrorInfo) {
     console.error('[ErrorBoundary] Caught:', error, info);
     this.setState({ componentStack: info.componentStack ?? null });
+    // Fire-and-forget; `reportCrash` never throws (see its header). A packaged
+    // build has no console, so this is the only way the crash leaves the machine.
+    reportCrash({
+      kind: 'react-error-boundary',
+      message: error.message,
+      stack: error.stack,
+      componentStack: info.componentStack ?? undefined,
+    });
   }
 
   handleReload = () => {
@@ -52,7 +61,27 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
   render() {
     if (this.state.hasError) {
       if (this.props.fallback !== undefined) {
-        return this.props.fallback;
+        // The caller's copy stays the headline, but the error itself must be
+        // reachable. A bare fallback discarded the message and the component
+        // stack outright, which left the person hitting the crash with nothing
+        // to report and no way to get it — the exact reason this class keeps
+        // `componentStack` in state.
+        return (
+          <div style={compactWrapStyle}>
+            {this.props.fallback}
+            <details style={compactDetailsStyle}>
+              <summary style={compactSummaryStyle}>Error details</summary>
+              <pre style={compactPreStyle}>
+                {[this.state.error?.message ?? '', this.state.componentStack?.trim() ?? '']
+                  .filter(Boolean)
+                  .join('\n\n')}
+              </pre>
+              <button onClick={this.handleCopy} style={compactCopyStyle}>
+                Copy details
+              </button>
+            </details>
+          </div>
+        );
       }
       return (
         <div
@@ -148,5 +177,50 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
     return this.props.children;
   }
 }
+
+// Compact-fallback styling. Inline for the same reason the full-screen error UI
+// above is inline: this renders when something is already broken, so it must not
+// depend on a stylesheet having loaded.
+const compactWrapStyle: React.CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 8,
+  padding: 12,
+};
+
+const compactDetailsStyle: React.CSSProperties = {
+  fontSize: 11,
+  color: 'var(--text-secondary, #999)',
+};
+
+const compactSummaryStyle: React.CSSProperties = {
+  cursor: 'pointer',
+  userSelect: 'none',
+};
+
+const compactPreStyle: React.CSSProperties = {
+  maxHeight: 200,
+  overflow: 'auto',
+  marginTop: 8,
+  padding: 8,
+  border: '1px solid var(--border, #444)',
+  borderRadius: 4,
+  background: 'var(--bg-input, #252526)',
+  fontFamily: 'var(--font-mono, monospace)',
+  fontSize: 10,
+  lineHeight: 1.5,
+  whiteSpace: 'pre-wrap',
+};
+
+const compactCopyStyle: React.CSSProperties = {
+  marginTop: 8,
+  padding: '4px 10px',
+  background: 'transparent',
+  color: 'var(--text-primary, #d4d4d4)',
+  border: '1px solid var(--border, #444)',
+  borderRadius: 4,
+  fontSize: 11,
+  cursor: 'pointer',
+};
 
 export default ErrorBoundary;

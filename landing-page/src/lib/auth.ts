@@ -357,6 +357,14 @@ export async function adminGetFeedback(token: string) {
     return res.json();
 }
 
+/** Desktop crash reports (POST /v1/client-error). The durable half — Workers
+ *  Logs holds the same rows for a few days, this outlives them. */
+export async function adminGetClientErrors(token: string) {
+    const res = await fetch(`${API_URL}/v1/admin/client-errors`, { headers: adminHeaders(token) });
+    if (!res.ok) throw new Error('Failed to fetch client errors');
+    return res.json();
+}
+
 // ─── Admin: model routing + pricing config ───────────────────
 // Shapes mirror arcane-server/src/lib/app-config.ts (ModelRoutingDoc /
 // ModelPricingDoc) — kept as a parallel client-side definition rather than a

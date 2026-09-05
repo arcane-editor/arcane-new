@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { DiagnosticItem, DiagnosticSource } from '../types';
+import type { DotnetBlock } from '../features/lsp';
 
 export type SidebarView = 'explorer' | 'source-control' | 'search' | 'scene-context' | 'hierarchy' | 'test' | 'debug' | 'input' | 'scriptable-objects' | 'unity-ui';
 /** Per-file view mode for Unity YAML assets: structured tree vs raw Monaco. */
@@ -99,8 +100,14 @@ interface UiState {
   graphifyIntroOpen: boolean;
   setGraphifyIntroOpen: (open: boolean) => void;
 
-  dotnetMissingModalOpen: boolean;
-  setDotnetMissingModalOpen: (open: boolean) => void;
+  /**
+   * Why C# support is unavailable, or `null` when it is fine. Carries the
+   * reason rather than a bare boolean because "no .NET" and "the wrong .NET
+   * major" need different copy — a user with .NET 8 who is told to "install
+   * .NET" will install .NET 8 again.
+   */
+  dotnetMissingModal: DotnetBlock | null;
+  setDotnetMissingModal: (block: DotnetBlock | null) => void;
 
   cursorPosition: EditorCursorInfo | null;
   setCursorPosition: (pos: EditorCursorInfo | null) => void;
@@ -215,8 +222,8 @@ export const useUiStore = create<UiState>((set, get) => ({
   graphifyIntroOpen: false,
   setGraphifyIntroOpen: (open) => set({ graphifyIntroOpen: open }),
 
-  dotnetMissingModalOpen: false,
-  setDotnetMissingModalOpen: (open) => set({ dotnetMissingModalOpen: open }),
+  dotnetMissingModal: null,
+  setDotnetMissingModal: (block) => set({ dotnetMissingModal: block }),
 
   cursorPosition: null,
   setCursorPosition: (pos) => set({ cursorPosition: pos }),

@@ -6,7 +6,7 @@ import {
     findAllUsersWithUsage, createUser, deleteUser, findUserById,
     updatePasswordBumpVersion,
     getCurrentPeriodStart,
-    findAllFeedback,
+    findAllFeedback, findRecentClientErrors,
     findUserByEmail, grantPlanCredits,
 } from '../lib/db.ts';
 import { hashPassword, digestsMatch } from '../lib/crypto.ts';
@@ -117,6 +117,15 @@ adminRouter.delete('/v1/admin/users/:id', async (c) => {
 adminRouter.get('/v1/admin/feedback', async (c) => {
     const feedback = await findAllFeedback(c.env.arcane_db);
     return c.json({ feedback });
+});
+
+// ─── API: Client crash reports (admin view) ──────────────────
+//
+// The durable half of POST /v1/client-error. Workers Logs holds the same
+// reports for a few days; this is what is still readable after that.
+adminRouter.get('/v1/admin/client-errors', async (c) => {
+    const clientErrors = await findRecentClientErrors(c.env.arcane_db);
+    return c.json({ clientErrors });
 });
 
 // ─── API: Config (model routing + pricing) ───────────────────

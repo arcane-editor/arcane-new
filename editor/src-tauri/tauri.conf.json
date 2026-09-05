@@ -4,7 +4,7 @@
   "version": "../package.json",
   "identifier": "app.unityide.desktop",
   "build": {
-    "beforeDevCommand": "bun run sync:bridge && bun run dev",
+    "beforeDevCommand": "bun run sync:bridge && bun run prepare:csharp-ls && bun run dev",
     "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "bun run sync:bridge && bun run build",
     "frontendDist": "../dist"
@@ -47,7 +47,7 @@
     "createUpdaterArtifacts": true,
     "targets": "all",
     "externalBin": ["binaries/unityide-graph", "binaries/typescript-language-server"],
-    "resources": { "../unity-bridge": "unity-bridge" },
+    "resources": { "../unity-bridge": "unity-bridge", "resources/csharp-ls": "csharp-ls" },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
