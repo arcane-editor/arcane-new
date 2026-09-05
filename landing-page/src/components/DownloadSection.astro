@@ -1,6 +1,6 @@
 ---
 import { readFileSync } from "node:fs";
-import { downloadUrls, manifestUrls, versionFromManifest, type UpdatePlatform } from "../lib/releases";
+import { downloadUrls, manifestUrls, uncachedManifestUrl, unityExtensionUrl, versionFromManifest, type UpdatePlatform } from "../lib/releases";
 
 // Stable "latest" links — the Release workflow uploads each installer to both
 // arcane-releases/<tag>/ and arcane-releases/latest/, so these never need editing
@@ -12,13 +12,23 @@ const apiUrl = import.meta.env.PUBLIC_API_URL ?? "";
 const isDev = apiUrl.includes("api-dev");
 const urls = downloadUrls(apiUrl);
 const manifests = manifestUrls(apiUrl);
+const unityExtHref = unityExtensionUrl(apiUrl);
+
+/** The version a workspace declares, read from the repo at build time. */
+function pkgVersion(workspace: string): string {
+  const url = new URL(`../../../${workspace}/package.json`, import.meta.url);
+  return JSON.parse(readFileSync(url, "utf8")).version;
+}
 
 /** The version in the repo — used when the manifest cannot be reached, so a
  *  network blip during CI degrades to a slightly stale number instead of
  *  failing the site build. */
-const fallbackVersion: string = JSON.parse(
-  readFileSync(new URL("../../../editor/package.json", import.meta.url), "utf8"),
-).version;
+const fallbackVersion: string = pkgVersion("editor");
+
+/** The Unity plugin has no update manifest to read — it is a UPM tarball, not
+ *  a Tauri target — so its own package.json is the only source of truth. It
+ *  sat on a hardcoded "v0.0.1" while the package shipped 0.2.0. */
+const unityExtVersion: string = pkgVersion("arcane-extension");
 
 /**
  * The version this platform can actually download, read at build time.
@@ -33,7 +43,7 @@ const fallbackVersion: string = JSON.parse(
  */
 async function shippedVersion(url: string, platform: UpdatePlatform): Promise<string> {
   try {
-    const res = await fetch(url);
+    const res = await fetch(uncachedManifestUrl(url));
     if (!res.ok) return fallbackVersion;
     return versionFromManifest(await res.json(), platform) ?? fallbackVersion;
   } catch {
@@ -45,6 +55,7 @@ async function shippedVersion(url: string, platform: UpdatePlatform): Promise<st
 // noise, so it keeps the existing "dev build" label.
 const macVersion = isDev ? "dev build" : `v${await shippedVersion(manifests.macArm, "darwin-aarch64")}`;
 const winVersion = isDev ? "dev build" : `v${await shippedVersion(manifests.windows, "windows-x86_64")}`;
+const unityExtLabel = isDev ? "dev build" : `v${unityExtVersion}`;
 const osCards = [
   {
     id: "macos-arm",
@@ -135,9 +146,9 @@ const osCards = [
             <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" x2="12" y1="22.08" y2="12"/></svg>
           </div>
           <h3 class="mb-1 font-display text-xl font-semibold">Unity Extension</h3>
-          <p class="mb-1 font-mono text-xs text-primary/70">v0.0.1</p>
+          <p class="mb-1 font-mono text-xs text-primary/70">{unityExtLabel}</p>
           <p class="mb-5 text-xs text-muted-foreground">Unity 2021.3+ (UPM Package)</p>
-          <a href="https://releases.unityide.app/unity-extension-releases/latest/com.unityide.editor.tgz" class="inline-flex items-center justify-center gap-2 w-full whitespace-nowrap rounded-md font-semibold text-base bg-primary text-primary-foreground hover:bg-primary/90 glow-orange-sm h-9 px-3 transition-colors text-sm">
+          <a href={unityExtHref} class="inline-flex items-center justify-center gap-2 w-full whitespace-nowrap rounded-md font-semibold text-base bg-primary text-primary-foreground hover:bg-primary/90 glow-orange-sm h-9 px-3 transition-colors text-sm">
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-1 h-4 w-4"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
             Download .tgz
           </a>

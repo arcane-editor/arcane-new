@@ -207,3 +207,12 @@ jobs:
           SHA7="${GITHUB_SHA:0:7}"
           bunx wrangler r2 object put "arcane-releases/unity-extension-releases/dev/$SHA7/${TGZ}"                    --file "$TGZ" --remote
           bunx wrangler r2 object put "arcane-releases/unity-extension-releases/dev/latest/com.unityide.editor.dev.tgz" --file "$TGZ" --remote
+
+  # Same as release.yml: rebuild dev.unityide.app once dev/latest/ holds the new
+  # build, so the dev site's download cards match what the dev channel serves.
+  deploy-landing:
+    needs: [build, unity-extension-dev]
+    uses: ./.github/workflows/deploy-landing.yml
+    with:
+      environment: dev
+    secrets: inherit

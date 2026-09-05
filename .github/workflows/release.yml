@@ -222,3 +222,16 @@ jobs:
           test -f "$TGZ" || { echo "::error::expected $TGZ from deploy.sh, not found"; exit 1; }
           bunx wrangler r2 object put "arcane-releases/unity-extension-releases/${TGZ}"                --file "$TGZ" --remote
           bunx wrangler r2 object put "arcane-releases/unity-extension-releases/latest/${NAME}.tgz"    --file "$TGZ" --remote
+
+  # Rebuild unityide.app against the release that just landed. The landing page
+  # reads the update manifests during `astro build`, so its download cards are
+  # only as fresh as its last deploy — without this the site kept advertising
+  # the previous version until someone remembered to dispatch Deploy Landing.
+  # `needs` both build jobs so it runs after latest/ actually holds the new
+  # installers and manifests, never against a half-published release.
+  deploy-landing:
+    needs: [build, unity-extension]
+    uses: ./.github/workflows/deploy-landing.yml
+    with:
+      environment: production
+    secrets: inherit
