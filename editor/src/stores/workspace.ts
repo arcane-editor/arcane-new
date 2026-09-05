@@ -18,6 +18,11 @@ import {
   fileUri,
   markCsharpProjectLoaded,
   resetCsharpProjectLoaded,
+  ensureCsharpLs,
+  resetCsharpLsProvisioning,
+  describeDotnetBlock,
+  type CsharpLsStatus,
+  type DotnetBlock,
   type LspClient,
 } from '../features/lsp';
 import { useGitStore } from './git';
@@ -376,6 +381,22 @@ async function runLspStart(
   await ensureMonacoProvidersRegistered();
 
   if (language === 'csharp') {
+    // Make sure a server exists before trying to start one. Returns
+    // immediately when the user already has csharp-ls; otherwise installs the
+    // pinned copy bundled with the app. A failure here is not fatal to the
+    // editor — it degrades to the same "no C# language features" state a
+    // missing binary has always produced.
+    const provisioned = await ensureCsharpLs({
+      onProgress: (message) => useUiStore.getState().setLspProgress(message),
+    });
+    if (!provisioned.ok) {
+      lspFailedLanguages.add(language);
+      useUiStore.getState().setLspStatus('error');
+      useUiStore.getState().setLspProgress(null);
+      notify.error(provisioned.message);
+      return;
+    }
+
     releasePriorLspAttempt();
     // Close the C# diagnostics gate before the server exists, so a pull
     // scheduled by a model created during startup is held rather than answered
@@ -531,7 +552,9 @@ function handleClientCrash(language: string): void {
 function installHintFor(language: string): string | null {
   switch (language) {
     case 'csharp':
-      return 'csharp-ls not found — install with: dotnet tool install -g csharp-ls';
+      // Reached only when provisioning reported success and the spawn still
+      // failed — a server that vanished between the two, or a stale override.
+      return 'The C# language server could not be started. Reopen the project to reinstall it.';
     case 'python':
       return 'Pyright not found — install with: npm install -g pyright';
     case 'typescript':
@@ -900,6 +923,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     // second chance in case the user installed the missing server.
     lspRestartTimestamps.clear();
     lspFailedLanguages.clear();
+    resetCsharpLsProvisioning();
     useUiStore.getState().setLspStatus('starting');
 
     // Stop the previous workspace's file watcher and tear down its event
@@ -1031,15 +1055,20 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     // .cs file without dotnet, the lazy path surfaces a plain toast — only
     // Unity gets the dedicated modal.
     if (unityInfo.is_unity) {
-      let dotnetInstalled = true;
+      // `dotnet` merely being present is not the requirement: the pinned
+      // csharp-ls targets a specific .NET major, so a machine with an older
+      // runtime installs it successfully and then cannot run it. Ask the
+      // backend what it can actually support rather than whether dotnet exists.
+      let block: DotnetBlock | null = null;
       try {
-        dotnetInstalled = await invoke<boolean>('check_dotnet_installed');
+        const status = await invoke<CsharpLsStatus>('csharp_ls_status');
+        block = describeDotnetBlock(status);
       } catch (err) {
-        console.warn('[Workspace] Dotnet check failed:', err);
+        console.warn('[Workspace] C# prerequisite check failed:', err);
       }
 
-      if (!dotnetInstalled) {
-        useUiStore.getState().setDotnetMissingModalOpen(true);
+      if (block) {
+        useUiStore.getState().setDotnetMissingModal(block);
       } else {
         let solutionPath: string | null = null;
         try {
@@ -1812,6 +1841,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     resetDocumentVersions();
     lspRestartTimestamps.clear();
     lspFailedLanguages.clear();
+    resetCsharpLsProvisioning();
 
     await attemptLspStartFor('csharp', path, csharpSolutionPath);
   },

@@ -1,3 +1,4 @@
+mod csharp_ls;
 mod git;
 mod lsp;
 mod terminal;
@@ -1075,6 +1076,7 @@ pub fn run() {
         .manage(cli::PendingOpen::default())
         .manage(window_registry::WindowWorkspaces::default())
         .manage(lsp::LspState::new())
+        .manage(csharp_ls::CsharpLsState::new())
         .manage(terminal::TerminalState::new())
         .manage(file_scanner::FileWatcherState::new())
         .manage(file_index::FileIndexState::new())
@@ -1116,6 +1118,8 @@ pub fn run() {
             lsp::lsp_stop_all,
             lsp::lsp_trace_path,
             lsp::check_dotnet_installed,
+            csharp_ls::csharp_ls_status,
+            csharp_ls::csharp_ls_install,
             git::git_status,
             git::git_repo_root,
             git::git_list_branches,

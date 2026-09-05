@@ -68,3 +68,18 @@ export {
   resetWorkspaceDiagnostics,
   type WorkspaceAnalysisResult,
 } from './services/workspace-diagnostics';
+
+// Provisioning the C# server itself, so the user never runs
+// `dotnet tool install -g csharp-ls` by hand — see services/csharp-ls-provision.ts.
+export {
+  ensureCsharpLs,
+  resetCsharpLsProvisioning,
+  describeProvisionFailure,
+  describeDotnetBlock,
+  type CsharpLsStatus,
+  type CsharpLsSource,
+  type CsharpLsInstallError,
+  type DotnetBlock,
+  type DotnetBlockReason,
+  type EnsureResult,
+} from './services/csharp-ls-provision';

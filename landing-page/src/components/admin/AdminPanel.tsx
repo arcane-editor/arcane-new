@@ -2,13 +2,27 @@ import { useState, useEffect, useCallback } from "react";
 import {
     getStoredToken, setStoredToken, clearStoredToken, decodeToken,
     adminLogin, adminGetUsers, adminCreateUser, adminDeleteUser,
-    adminGetFeedback, adminGetModelConfig, adminPutModelConfig,
+    adminGetFeedback, adminGetClientErrors, adminGetModelConfig, adminPutModelConfig,
     adminGetPricingConfig, adminPutPricingConfig,
     adminGetHarnessConfig, adminPutHarnessConfig, adminGrant,
     type AdminUserRow, type ModelRoutingDoc, type ModelPricingDoc, type ModelInfo, type HarnessLimitsDoc,
 } from "@/lib/auth";
 
-type Tab = "users" | "feedback" | "models" | "pricing" | "harness" | "grants";
+type Tab = "users" | "feedback" | "crashes" | "models" | "pricing" | "harness" | "grants";
+
+interface ClientErrorItem {
+    id: number;
+    kind: string;
+    message: string;
+    stack: string;
+    component_stack: string;
+    app_version: string;
+    channel: string;
+    os: string;
+    session_id: string;
+    user_id: string | null;
+    created_at: string;
+}
 
 interface FeedbackItem {
     id: number;
@@ -132,6 +146,7 @@ export default function AdminPanel() {
     // Users / Feedback data
     const [users, setUsers] = useState<AdminUserRow[]>([]);
     const [feedback, setFeedback] = useState<FeedbackItem[]>([]);
+    const [clientErrors, setClientErrors] = useState<ClientErrorItem[]>([]);
 
     // Users tab: create-user form
     const [newUserEmail, setNewUserEmail] = useState("");
@@ -203,12 +218,14 @@ export default function AdminPanel() {
 
     const loadAll = async (t: string) => {
         try {
-            const [u, f] = await Promise.all([
+            const [u, f, ce] = await Promise.all([
                 adminGetUsers(t),
                 adminGetFeedback(t),
+                adminGetClientErrors(t),
             ]);
             setUsers(u);
             setFeedback(f.feedback ?? []);
+            setClientErrors(ce.clientErrors ?? []);
         } catch (err) {
             showToast("Failed to load data", "error");
         }
@@ -478,6 +495,7 @@ export default function AdminPanel() {
     const tabs: { id: Tab; label: string; count?: number }[] = [
         { id: "users", label: "Users", count: users.length },
         { id: "feedback", label: "Feedback", count: feedback.length },
+        { id: "crashes", label: "Crashes", count: clientErrors.length },
         { id: "models", label: "Models" },
         { id: "pricing", label: "Pricing" },
         { id: "harness", label: "Harness" },
@@ -576,6 +594,39 @@ export default function AdminPanel() {
                                     </div>
                                     <p className="text-sm text-foreground">{f.message}</p>
                                     {f.email && <p className="text-xs text-muted-foreground mt-1">{f.email}</p>}
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {/* Crashes Tab — desktop client error reports (POST /v1/client-error) */}
+            {tab === "crashes" && (
+                <div>
+                    {clientErrors.length === 0 ? (
+                        <p className="text-muted-foreground text-sm py-8 text-center">No crash reports. Good sign.</p>
+                    ) : (
+                        <div className="flex flex-col gap-3">
+                            {clientErrors.map(e => (
+                                <div key={e.id} className="glass rounded-xl p-4">
+                                    <div className="flex items-center gap-2 mb-2 flex-wrap">
+                                        <span className="text-xs rounded-full bg-secondary/50 px-2 py-0.5">{e.kind}</span>
+                                        {e.app_version && <span className="text-xs text-muted-foreground">v{e.app_version}</span>}
+                                        {e.channel && <span className="text-xs text-muted-foreground">{e.channel}</span>}
+                                        {e.os && <span className="text-xs text-muted-foreground">{e.os}</span>}
+                                        {e.user_id && <span className="text-xs text-muted-foreground">user {e.user_id}</span>}
+                                        <span className="text-xs text-muted-foreground ml-auto">{new Date(e.created_at).toLocaleString()}</span>
+                                    </div>
+                                    <p className="text-sm text-foreground font-mono break-words">{e.message}</p>
+                                    {(e.component_stack || e.stack) && (
+                                        <details className="mt-2">
+                                            <summary className="text-xs text-muted-foreground cursor-pointer">Stack</summary>
+                                            <pre className="text-[10px] text-muted-foreground mt-2 p-2 rounded bg-secondary/30 overflow-x-auto whitespace-pre-wrap">
+{[e.component_stack, e.stack].filter(Boolean).join('\n\n')}
+                                            </pre>
+                                        </details>
+                                    )}
                                 </div>
                             ))}
                         </div>

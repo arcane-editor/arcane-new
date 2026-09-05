@@ -97,6 +97,12 @@ jobs:
       - name: Build typescript-language-server sidecar (host only)
         run: cd editor && CI= bun run build:lsp-sidecars
 
+      # The offline C# provisioning package. `--require` because an installer
+      # that quietly lost it falls back to a network install on the user's
+      # machine — the exact failure this bundling exists to remove.
+      - name: Vendor csharp-ls package
+        run: cd editor && bun run prepare:csharp-ls --require
+
       # `bunx tauri` (binary), NOT `bun run tauri`. Shell env beats
       # .env.production in Vite, so the dev URLs win at build time.
       - name: Build Tauri app (dev config)

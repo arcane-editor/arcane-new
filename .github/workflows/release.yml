@@ -118,6 +118,12 @@ jobs:
       - name: Build typescript-language-server sidecar (host only)
         run: cd editor && CI= bun run build:lsp-sidecars
 
+      # The offline C# provisioning package. `--require` because an installer
+      # that quietly lost it falls back to a network install on the user's
+      # machine — the exact failure this bundling exists to remove.
+      - name: Vendor csharp-ls package
+        run: cd editor && bun run prepare:csharp-ls --require
+
       # Use the tauri BINARY (`bunx tauri`), NOT `bun run tauri` — the npm script
       # re-runs build-lsp-sidecars under CI=true (all targets). The frontend build
       # is handled by tauri's beforeBuildCommand. ad-hoc mac / unsigned Windows

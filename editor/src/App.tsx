@@ -234,8 +234,8 @@ function App() {
   const aiPanelMaximized = useUiStore((s) => s.aiPanelMaximized);
   const graphifyIntroOpen = useUiStore((s) => s.graphifyIntroOpen);
   const setGraphifyIntroOpen = useUiStore((s) => s.setGraphifyIntroOpen);
-  const dotnetMissingModalOpen = useUiStore((s) => s.dotnetMissingModalOpen);
-  const setDotnetMissingModalOpen = useUiStore((s) => s.setDotnetMissingModalOpen);
+  const dotnetMissingModal = useUiStore((s) => s.dotnetMissingModal);
+  const setDotnetMissingModal = useUiStore((s) => s.setDotnetMissingModal);
   const restoredRef = useRef(false);
   const [showThemePicker, setShowThemePicker] = useState(false);
   const [paletteMode, setPaletteMode] = useState<'commands' | 'files' | 'symbols' | null>(null);
@@ -1999,8 +1999,11 @@ function App() {
           }}
         />
       )}
-      {dotnetMissingModalOpen && (
-        <DotnetMissingModal onClose={() => setDotnetMissingModalOpen(false)} />
+      {dotnetMissingModal && (
+        <DotnetMissingModal
+          block={dotnetMissingModal}
+          onClose={() => setDotnetMissingModal(null)}
+        />
       )}
     </div>
   );

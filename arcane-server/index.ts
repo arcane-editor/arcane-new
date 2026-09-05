@@ -17,6 +17,7 @@ import { usageRouter } from './src/routes/usage.ts';
 import { configRouter } from './src/routes/config.ts';
 import { adminRouter } from './src/routes/admin.ts';
 import { feedbackRouter } from './src/routes/feedback.ts';
+import { clientErrorRouter } from './src/routes/client-error.ts';
 import { billingRouter } from './src/routes/billing.ts';
 import { billingWebhookRouter } from './src/routes/billing-webhook.ts';
 
@@ -57,6 +58,10 @@ for (const path of [
 const poll = rateLimit('RL_AUTH_POLL');
 app.use('/v1/auth/editor/attempt', poll);
 app.use('/v1/auth/editor/poll', poll);
+// Crash reports are public and fired from a failing client, so a crash LOOP is
+// the expected abuse shape. IP-keyed like the auth limiters; fails open when
+// the binding is absent (tests).
+app.use('/v1/client-error', rateLimit('RL_CLIENT_ERROR'));
 
 // Public routes
 app.get('/health', (c) => c.json({ status: 'ok' }));
@@ -66,6 +71,7 @@ app.route('/', authGoogleRouter);
 app.route('/', authGithubRouter);
 app.route('/', authEditorRouter);
 app.route('/', feedbackRouter);
+app.route('/', clientErrorRouter);
 // Billing: the webhook is PUBLIC (Dodo signs it, no user JWT) — mount it with
 // the other public routers, before the AI auth gates. The billingRouter's own
 // routes self-apply authMiddleware (except the public /v1/billing/plans).
