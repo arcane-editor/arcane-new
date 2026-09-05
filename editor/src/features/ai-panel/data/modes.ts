@@ -1,5 +1,5 @@
 /**
- * The three chat modes, as data.
+ * The chat modes, as data.
  *
  * Lifted out of `ModeSelector` so the composer pill and the empty state
  * describe a mode with the same words. They are the same claim about what
@@ -8,7 +8,7 @@
  * believing they were in Ask.
  */
 
-import { Infinity as InfinityIcon, ListChecks, MessageSquare } from 'lucide-react';
+import { Infinity as InfinityIcon, ListChecks, MessageSquare, PenLine } from 'lucide-react';
 import type { ChatMode } from '../services/types';
 
 export interface ModeOption {
@@ -55,3 +55,34 @@ export const MODES: ModeOption[] = [
 export const MODE_LADDER: ModeOption[] = ['ask', 'plan', 'agent'].map(
   (value) => MODES.find((m) => m.value === value)!,
 );
+
+/**
+ * Design mode, which is deliberately NOT in `MODES` and not rendered by the
+ * sidebar at all.
+ *
+ * It is entered from the design dock on an open `.uxml` and is meaningless
+ * without one, so offering it in a menu that can be opened with nothing on the
+ * canvas would be offering a mode that immediately refuses to do anything.
+ * It keeps a descriptor because it is a real `ChatMode` that the empty state
+ * still owes starters for — see `modeOptionFor` for why the sidebar shows
+ * Agent in its place instead.
+ */
+export const DESIGN_MODE: ModeOption = {
+  value: 'design',
+  label: 'Design',
+  description: 'Reshaping the .uxml open on the canvas. Pick another mode to leave it.',
+  Icon: PenLine,
+};
+
+/**
+ * The descriptor the SIDEBAR renders for a mode.
+ *
+ * Design deliberately resolves to Agent here rather than to `DESIGN_MODE`: the
+ * design chat is the canvas dock's, and the sidebar's mode control has no
+ * business advertising a mode it cannot enter and the user did not choose
+ * there. `ChatInput` keeps that honest by actually leaving design mode when you
+ * send from the sidebar, so the pill is never a claim the next send disproves.
+ */
+export function modeOptionFor(mode: ChatMode): ModeOption {
+  return MODES.find((m) => m.value === mode) ?? MODES[1];
+}

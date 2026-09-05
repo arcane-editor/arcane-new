@@ -19,6 +19,12 @@
     "defineConstraints": [
         "UNITY_INCLUDE_TESTS"
     ],
-    "versionDefines": [],
+    "versionDefines": [
+        {
+            "name": "com.unity.test-framework",
+            "expression": "1.0.0",
+            "define": "UNITYIDE_HAS_TEST_FRAMEWORK"
+        }
+    ],
     "noEngineReferences": false
 }

@@ -2,6 +2,8 @@ import { describe, it, expect } from 'bun:test';
 import {
   createServerConfigStore,
   effectiveContextWindow,
+  effectiveTurnCap,
+  turnCapsFromConfig,
   allowedEfforts,
   maxAllowedEffort,
   shouldPreplanTier,
@@ -123,12 +125,55 @@ describe('effectiveContextWindow', () => {
 
   // Mirrors TIER_CONTEXT_WINDOWS in features/ai-panel/services/types.ts —
   // the duplicate these two files deliberately keep in step (see that file's
-  // header). Both moved off spark's flat 131k on 2026-08-27, and off grok's
-  // 500k mid planner on 2026-08-30.
+  // header). Both moved off spark's flat 131k on 2026-08-27, and back onto it
+  // on 2026-09-03 when spark 1.3 retook every executor slot.
   it('falls back to the hardcoded offline window when config is null', () => {
-    expect(effectiveContextWindow(null, 'low')).toBe(1_048_576);
-    expect(effectiveContextWindow(null, 'mid')).toBe(1_048_576);
-    expect(effectiveContextWindow(null, 'high')).toBe(400_000);
+    expect(effectiveContextWindow(null, 'low')).toBe(131_072);
+    expect(effectiveContextWindow(null, 'mid')).toBe(131_072);
+    expect(effectiveContextWindow(null, 'high')).toBe(131_072);
+  });
+});
+
+describe('effectiveTurnCap', () => {
+  it('uses the per-tier config value when present', () => {
+    const withCaps: ServerConfig = {
+      ...VALID_CONFIG,
+      tiers: VALID_CONFIG.tiers.map((t) => ({
+        ...t,
+        maxModelCalls: t.id === 'low' ? 100 : t.id === 'mid' ? 500 : 900,
+      })),
+    };
+    expect(effectiveTurnCap(withCaps, 'low')).toBe(100);
+    expect(effectiveTurnCap(withCaps, 'mid')).toBe(500);
+    expect(effectiveTurnCap(withCaps, 'high')).toBe(900);
+  });
+
+  // VALID_CONFIG's tiers don't set maxModelCalls — the field an older server
+  // (Task 2 not yet deployed, or not yet rolled out) simply never sends.
+  it('falls back to the hardcoded offline cap when the field is missing (older server)', () => {
+    expect(effectiveTurnCap(VALID_CONFIG, 'low')).toBe(1000);
+    expect(effectiveTurnCap(VALID_CONFIG, 'mid')).toBe(1600);
+    expect(effectiveTurnCap(VALID_CONFIG, 'high')).toBe(2000);
+  });
+
+  it('falls back to the hardcoded offline cap when config is null', () => {
+    expect(effectiveTurnCap(null, 'low')).toBe(1000);
+    expect(effectiveTurnCap(null, 'mid')).toBe(1600);
+    expect(effectiveTurnCap(null, 'high')).toBe(2000);
+  });
+});
+
+describe('turnCapsFromConfig', () => {
+  it('returns every effort cap, config-first with a per-tier fallback', () => {
+    const partiallyConfigured: ServerConfig = {
+      ...VALID_CONFIG,
+      tiers: VALID_CONFIG.tiers.map((t) => (t.id === 'mid' ? { ...t, maxModelCalls: 42 } : t)),
+    };
+    expect(turnCapsFromConfig(partiallyConfigured)).toEqual({ low: 1000, mid: 42, high: 2000 });
+  });
+
+  it('falls back to the hardcoded literals entirely when config is null', () => {
+    expect(turnCapsFromConfig(null)).toEqual({ low: 1000, mid: 1600, high: 2000 });
   });
 });
 

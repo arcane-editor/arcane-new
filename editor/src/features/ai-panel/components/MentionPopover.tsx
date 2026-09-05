@@ -612,9 +612,22 @@ function extOf(relPath: string): string {
 
 
 /**
+ * File extensions offered in a Unity project's Files picker.
+ *
+ * `.cs` is what gets discussed most; the other four are the Unity assets whose
+ * CONTENTS the AI reasons about directly, because each is one half of a string
+ * contract with the C#: action names against every `FindAction` literal,
+ * element names against every `Q<T>()`, USS classes against every
+ * `AddToClassList`, and serialized field names against every `.asset` that
+ * stores them. Leaving one out means a user cannot point the agent at it at
+ * all.
+ */
+const UNITY_PICKER_EXTENSIONS = ['.cs', '.inputactions', '.uxml', '.uss', '.asset'];
+
+/**
  * Whether `absPath` should appear in the Files picker for the current project.
- * Unity: only `.cs` scripts under `Assets/`. Non-Unity: any file, common
- * build/dependency dirs filtered out.
+ * Unity: `.cs` scripts plus the asset types listed in `UNITY_PICKER_EXTENSIONS`,
+ * under `Assets/`. Non-Unity: any file, common build/dependency dirs filtered out.
  */
 function isPickerEligible(
   absPath: string,
@@ -623,7 +636,8 @@ function isPickerEligible(
 ): boolean {
   const rel = relPathOf(absPath, workspacePath);
   if (isUnityProject) {
-    if (!absPath.toLowerCase().endsWith('.cs')) return false;
+    const lower = absPath.toLowerCase();
+    if (!UNITY_PICKER_EXTENSIONS.some((e) => lower.endsWith(e))) return false;
     return rel.startsWith('Assets/');
   }
   for (const prefix of NOISE_DIR_PREFIXES) {

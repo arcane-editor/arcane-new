@@ -50,7 +50,7 @@ namespace UnityIDE.Bridge
         /// Mirrors "version" in package.json. Reported in connection_init so the
         /// IDE can tell an outdated package from a missing one. Keep in lockstep.
         /// </summary>
-        private const string PackageVersion = "0.1.0";
+        private const string PackageVersion = "0.2.0";
 
         private static BridgeClient _client;
         private static bool _started;
@@ -134,6 +134,11 @@ namespace UnityIDE.Bridge
             _started = true;
 
             MainThreadDispatcher.CaptureMainThread();
+            // Must follow CaptureMainThread and must run ON the main thread:
+            // Windows needs the OS-level id of this very thread to post it a
+            // wake-up message later, from the worker.
+            EditorWakeup.Reset();
+            EditorWakeup.CaptureMainThread();
 
             string projectRoot = Discovery.ProjectRoot(Application.dataPath);
 
@@ -149,6 +154,8 @@ namespace UnityIDE.Bridge
             HierarchyHandlers.Register(_client);
             DebuggerHandlers.Register(_client);
             TestRunnerHandlers.Register(_client);
+            ConsoleHandlers.Register(_client);
+            SceneMutationHandlers.Register(_client);
 
             // Main-thread pump: drains the dispatcher and ticks the timed flushers.
             EditorApplication.update += Pump;

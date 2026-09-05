@@ -77,6 +77,7 @@ function categoryFor(entry: UnityApiName): string {
       'SphereCollider',
       'CapsuleCollider',
       'MeshCollider',
+      'CharacterController',
       'Physics',
       'Physics2D',
       'Ray',

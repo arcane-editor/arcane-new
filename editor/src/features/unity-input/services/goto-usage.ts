@@ -17,7 +17,15 @@
 import { openExcerptAt } from '../../search';
 import type { ActionReference } from './action-refs';
 
-/** Open the file as a tab, scroll the reference into view, and focus it. */
+/**
+ * Open the file as a tab, scroll the reference into view, focus it, and flash
+ * the line.
+ *
+ * The highlight is not decoration here: the jump starts in a different panel
+ * and often lands in a file the user has never seen, so without it there is no
+ * signal that anything happened, let alone which of forty similar lines was
+ * meant.
+ */
 export async function gotoActionReference(ref: ActionReference): Promise<void> {
-  await openExcerptAt(ref.filePath, ref.line, ref.column);
+  await openExcerptAt(ref.filePath, ref.line, ref.column, { highlight: true });
 }

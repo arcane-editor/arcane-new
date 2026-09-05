@@ -33,6 +33,55 @@ const GRAPH_UNAVAILABLE_TEXT =
   'No codebase graph has been built for this workspace yet. Suggest the user builds one from the Graphify panel; until then, use read/list to explore the codebase directly.';
 
 /**
+ * Extensions the codebase graph structurally cannot contain.
+ *
+ * The graph is built from SOURCE files — for a Unity project `.cs` only
+ * (`build-opts.ts`: `includeExt: ['.cs']`). A Unity data asset can therefore
+ * never be a node, but the sidecar answered any zero-match lookup with a
+ * generic "rebuild the graph if the file is new", and models relayed that to
+ * users as "the file was not indexed" — advice that could never work. Answer
+ * with the real reason instead, and name the tool that can help.
+ */
+const NON_SOURCE_EXTENSIONS = [
+  '.inputactions',
+  '.prefab',
+  '.unity',
+  '.asset',
+  '.mat',
+  '.anim',
+  '.controller',
+  '.meta',
+  '.asmdef',
+  '.asmref',
+  '.uxml',
+  '.uss',
+  '.shadergraph',
+  '.json',
+];
+
+/** Guidance for a `file` the graph cannot hold, or null when it is source. */
+export function nonSourceSymbolsGuidance(file: string): string | null {
+  const lower = file.toLowerCase();
+  const ext = NON_SOURCE_EXTENSIONS.find((e) => lower.endsWith(e));
+  if (!ext) return null;
+  // Each of these has a tool that answers in a fraction of the tokens `read`
+  // would spend, and — for `.asset` — answers questions the file alone cannot
+  // (its schema lives in the C# class, and the drift between them in neither).
+  const REDIRECTS: Record<string, string> = {
+    '.inputactions': 'Call unity_input_actions to list its maps, actions and bindings',
+    '.uxml': 'Call unity_ui_toolkit to get its element tree, names and stylesheets',
+    '.uss': 'Call unity_ui_toolkit to get the classes it declares and where they are used',
+    '.asset': 'Call unity_scriptable_objects to get its typed field values and its class schema',
+  };
+  const alternative = REDIRECTS[ext] ?? 'Use read to open it directly';
+  return (
+    `project_symbols only covers source code: the codebase graph indexes C# scripts, not ${ext} ` +
+    `data assets, so ${file} will never appear in it and rebuilding the graph will not change that. ` +
+    `${alternative}.`
+  );
+}
+
+/**
  * Default availability check. The graphify store is reached via a dynamic
  * import (same pattern as turn-governor's `defaultOnCapReached`): its import
  * chain transitively touches `document` via the theme store, which is fatal
@@ -129,8 +178,13 @@ export function createProjectSymbolsTool(workspacePath: string, opts?: GraphifyT
       'Prefer this over read when you only need to know what exists or where a member is declared.',
     parameters: symbolsArgs,
     async execute(_id: string, params: unknown): Promise<AgentToolResult> {
-      if (await gateUnavailable(opts)) return textResult(GRAPH_UNAVAILABLE_TEXT);
       const { file, type } = params as SymbolsArgs;
+      // Checked BEFORE the availability gate: a data asset is permanently
+      // absent from the graph, so "build a graph" would be wrong advice even
+      // when no graph exists yet.
+      const guidance = file ? nonSourceSymbolsGuidance(file) : null;
+      if (guidance) return textResult(guidance);
+      if (await gateUnavailable(opts)) return textResult(GRAPH_UNAVAILABLE_TEXT);
       try {
         const out = await graphifySymbols(workspacePath, { file, typeName: type });
         return textResult(out || '(empty)');

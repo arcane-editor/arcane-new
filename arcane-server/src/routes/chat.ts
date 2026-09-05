@@ -5,7 +5,7 @@ import { streamCompletion } from '../services/llm-router.ts';
 import { DEFAULT_INTENSITY, getIntensityConfig } from '../config/plans.ts';
 import { resolveModelForSend } from '../config/routing.ts';
 import { isTierAllowed, minPlanForTier, TIERS } from '../config/tiers.ts';
-import { checkAiBudget } from '../lib/credits.ts';
+import { checkAiBudget, budgetErrorBody } from '../lib/credits.ts';
 import { getUserBillingRow } from '../lib/db.ts';
 import { getModelRouting, getEffectivePricing } from '../lib/app-config.ts';
 import { recordUsage } from '../lib/usage.ts';
@@ -53,7 +53,10 @@ chatRouter.post('/v1/chat/completions', async (c) => {
     // Credit balance + anti-abuse hourly cap. 402 = out of credits (upgrade /
     // top up); 429 = short-window rate limit.
     const budget = await checkAiBudget(c.env.arcane_db, userId);
-    if (!budget.ok) return c.json({ error: budget.error, code: budget.code }, budget.status);
+    if (!budget.ok) {
+        if (budget.retryAfterSeconds !== undefined) c.header('Retry-After', String(budget.retryAfterSeconds));
+        return c.json(budgetErrorBody(budget), budget.status);
+    }
 
     // Resolve model — config-driven routing (config/routing.ts against the
     // runtime `model_routing` doc, lib/app-config.ts). Model choice is 100%
@@ -82,9 +85,13 @@ chatRouter.post('/v1/chat/completions', async (c) => {
     }
 
     if (c.env.ENVIRONMENT === 'development') {
-        console.log(`[chat] user=${user.sub} tier="${requestedTier}" resolved="${decision.model}" routedTier="${decision.routedTier}" reason=${decision.reason}`);
+        console.log(`[chat] user=${user.sub} tier="${requestedTier}" resolved="${decision.model}" routedTier="${decision.routedTier}" reason=${decision.reason} effort=${decision.effort ?? 'none'}`);
     }
     body.model = decision.model;
+    // Effort travels as an ARGUMENT to streamCompletion, not on `body` — a
+    // client-sent field can therefore never reach the provider, the way
+    // `body.model` is overwritten above.
+    const effort = decision.effort;
 
     const startTime = Date.now();
     const env = c.env;
@@ -99,7 +106,7 @@ chatRouter.post('/v1/chat/completions', async (c) => {
         let cachedInputTokens = 0;
         let sawUsage = false;
         try {
-            for await (const event of streamCompletion(body, env, undefined, undefined, pricing.catalog)) {
+            for await (const event of streamCompletion(body, env, undefined, undefined, pricing.catalog, effort)) {
                 if (event.type === 'text') content += event.content;
                 if (event.type === 'tool_call') toolCalls.push({ id: event.id, name: event.name, arguments: event.arguments });
                 if (event.type === 'usage') {
@@ -214,7 +221,7 @@ chatRouter.post('/v1/chat/completions', async (c) => {
 
         try {
             const upstreamSignal = AbortSignal.any([clientSignal, upstreamStall.signal]);
-            for await (const event of streamCompletion(body, env, undefined, upstreamSignal, pricing.catalog)) {
+            for await (const event of streamCompletion(body, env, undefined, upstreamSignal, pricing.catalog, effort)) {
                 heartbeat.sawEvent();
                 if (event.type === 'text') streamedChars += event.content.length;
                 if (event.type === 'tool_call') streamedChars += event.arguments.length;

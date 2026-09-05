@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import { useWorkspaceStore } from '../../../stores/workspace';
 import { useProjectContextStore } from '../../../stores/project-context';
 import { useSettingsStore } from '../../../stores/settings';
@@ -9,6 +10,9 @@ import { inspectorView, scriptPathGate } from '../services/so-inspector-gate';
 import { instanceRows } from '../services/so-instance-columns';
 import InspectorTabs from './InspectorTabs';
 import SoInstancesTab from './SoInstancesTab';
+import SoDriftTab from './SoDriftTab';
+import { computeDrift, type DriftFinding } from '../services/so-drift';
+import type { SoAssetSnapshot } from '../services/asset-fields-client';
 
 /**
  * The `unity-inspector` view of the right sidebar.
@@ -33,7 +37,11 @@ function UnityInspectorPanel() {
   const isLoading = useSceneUsageStore((s) => s.isLoading);
   const loadForScript = useSceneUsageStore((s) => s.loadForScript);
 
-  const [activeTab, setActiveTab] = useState<'instances' | 'usages'>('instances');
+  const [activeTab, setActiveTab] = useState<'instances' | 'usages' | 'drift'>('instances');
+  const [drift, setDrift] = useState<DriftFinding[]>([]);
+  const [hashes, setHashes] = useState<Map<string, string>>(new Map());
+  const [driftLoading, setDriftLoading] = useState(false);
+  const [driftToken, setDriftToken] = useState(0);
 
   const gate = useMemo(
     () =>
@@ -64,6 +72,53 @@ function UnityInspectorPanel() {
 
   const instances = useMemo(() => instanceRows(entries), [entries]);
 
+  const instancePaths = useMemo(
+    () => instances.map((i) => i.assetPath).join('\n'),
+    [instances],
+  );
+
+  // Drift needs every instance READ, not just listed, so it runs once per
+  // (class, instance set) rather than on every render. One batch command
+  // instead of N invokes — a 40-weapon type would otherwise be 40 IPC hops.
+  useEffect(() => {
+    if (!schema || instancePaths.length === 0) {
+      setDrift([]);
+      setHashes(new Map());
+      return;
+    }
+    let cancelled = false;
+    setDriftLoading(true);
+    const paths = instancePaths.split('\n');
+    void invoke<Array<{ path: string; snapshot: SoAssetSnapshot }>>('unity_asset_read_many', {
+      paths,
+    })
+      .then((read) => {
+        if (cancelled) return;
+        setHashes(new Map(read.map((r) => [r.path, r.snapshot.sha1])));
+        setDrift(
+          computeDrift({
+            schema,
+            instances: read.map((r) => ({
+              path: r.path,
+              name: r.path.split('/').pop()?.replace(/\.asset$/i, '') ?? r.path,
+              snapshot: r.snapshot,
+            })),
+          }),
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setDrift([]);
+      })
+      .finally(() => {
+        if (!cancelled) setDriftLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [schema, instancePaths, driftToken]);
+
+  const reloadDrift = useCallback(() => setDriftToken((n) => n + 1), []);
+
   if (!enabled || !gate || !schema) return <SceneUsagePanel />;
 
   if (inspectorView(schema.baseKind, instances.length) === 'sceneUsage') {
@@ -86,19 +141,25 @@ function UnityInspectorPanel() {
         tabs={[
           { id: 'instances', label: 'Instances', count: instances.length },
           { id: 'usages', label: 'Usages', count: usageCount },
+          // Only when there is something to say. A permanent "Drift 0" tab
+          // trains people to ignore it, which defeats the point.
+          ...(drift.length > 0
+            ? [{ id: 'drift', label: 'Drift', count: drift.length }]
+            : []),
         ]}
-        activeId={activeTab}
-        onSelect={(id) => setActiveTab(id as 'instances' | 'usages')}
+        activeId={drift.length === 0 && activeTab === 'drift' ? 'instances' : activeTab}
+        onSelect={(id) => setActiveTab(id as 'instances' | 'usages' | 'drift')}
       />
 
-      {activeTab === 'instances' ? (
-        <SoInstancesTab
+      {activeTab === 'drift' && drift.length > 0 ? (
+        <SoDriftTab
           schema={schema}
-          instances={instances}
-          isLoading={isLoading}
-          unresolvedBase={schema.unresolvedBase}
+          findings={drift}
+          hashes={hashes}
+          loading={driftLoading}
+          onReload={reloadDrift}
         />
-      ) : (
+      ) : activeTab === 'usages' ? (
         // Instances have their own tab, so hide that section here rather than
         // showing every asset twice.
         //
@@ -109,6 +170,15 @@ function UnityInspectorPanel() {
         <div className="so-inspector-nested">
           <SceneUsagePanel hideScriptableObjects />
         </div>
+      ) : (
+        // Instances is also the fallback: when the last drift finding is fixed
+        // the Drift tab disappears, and the selection has to land somewhere.
+        <SoInstancesTab
+          schema={schema}
+          instances={instances}
+          isLoading={isLoading}
+          unresolvedBase={schema.unresolvedBase}
+        />
       )}
     </div>
   );

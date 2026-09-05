@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { env, SELF } from 'cloudflare:test';
 import { seedPasswordUser, tokenFor } from './helpers.ts';
-import { createUser } from '../src/lib/db.ts';
+import { createUser, createRequestLog } from '../src/lib/db.ts';
 import { checkAiBudget } from '../src/lib/credits.ts';
 import { SIGNUP_TRIAL_MICRO } from '../src/config/tiers.ts';
 import { clearConfigCache, putConfigDoc } from '../src/lib/app-config.ts';
@@ -106,5 +106,70 @@ describe('the signup trial — one-time, not a recurring grant', () => {
         const r = await env.arcane_db.prepare('SELECT plan_credits_micro FROM users WHERE id = ?')
             .bind(user.id).first<{ plan_credits_micro: number }>();
         expect(r!.plan_credits_micro).toBe(0); // still zero — no lazy regrant
+    });
+});
+
+// Task 7: both 429 shapes now carry a machine-readable retry-after. This
+// half covers checkAiBudget's hourly_cap 429 (the OTHER shape — a provider
+// 429 relayed over SSE — is covered in llm-router.test.ts, since it never
+// reaches an HTTP status code). Every route that calls checkAiBudget and
+// returns its 429 must set the header AND the body field identically.
+describe('checkAiBudget 429s (hourly_cap) carry a structured retry-after', () => {
+    const AI_BUDGET_ROUTES: Array<{ path: string; body: unknown }> = [
+        { path: '/v1/chat/completions', body: { model: 'x', messages: [] } },
+        { path: '/v1/embeddings', body: { input: 'hello' } },
+        { path: '/v1/graph/enrich', body: { stats: { nodes: 1, edges: 0, communities: 0 }, communities: [], godNodes: [] } },
+        { path: '/v1/unity/api/search', body: { query: 'Rigidbody', unityVersion: '6000.3' } },
+    ];
+
+    for (const { path, body } of AI_BUDGET_ROUTES) {
+        it(`${path}: sets Retry-After header + retryAfterSeconds body field on the free-plan hourly cap`, async () => {
+            const user = await seedPasswordUser(`hourly-${path.replace(/\W+/g, '-')}@test.dev`, 'password123');
+            await env.arcane_db.prepare(
+                "UPDATE users SET plan = 'free', plan_credits_micro = 500000, topup_credits_micro = 0 WHERE id = ?"
+            ).bind(user.id).run();
+            // A single over-cap request log busts the $1/hr backstop.
+            await createRequestLog(env.arcane_db, {
+                userId: user.id, model: 'test-model', inputTokens: 1, outputTokens: 1, costUsd: 1.5, durationMs: 10,
+            });
+            const token = await tokenFor(user);
+
+            const res = await post(path, token, body);
+            expect(res.status, path).toBe(429);
+
+            const retryAfterHeader = res.headers.get('Retry-After');
+            expect(retryAfterHeader, path).not.toBeNull();
+            const retryAfter = Number(retryAfterHeader);
+            expect(retryAfter, path).toBeGreaterThanOrEqual(60);
+            expect(retryAfter, path).toBeLessThanOrEqual(3600);
+
+            const json = await res.json() as { error: string; code: string; retryAfterSeconds?: number };
+            expect(json.code, path).toBe('hourly_cap');
+            expect(json.retryAfterSeconds, path).toBe(retryAfter);
+            // Prose kept verbatim so an editor reading only `error` still works.
+            expect(json.error, path).toMatch(/Try again in ~\d+ minute/);
+        });
+    }
+
+    it('a paid user over $1/h is NOT hourly-capped on the chat route (bounded by balance instead)', async () => {
+        const user = await seedPasswordUser('hourly-paid-chat@test.dev', 'password123');
+        await env.arcane_db.prepare(
+            "UPDATE users SET plan = 'pro', plan_credits_micro = 500000, topup_credits_micro = 0, plan_period_end = '2099-01-01T00:00:00.000Z' WHERE id = ?"
+        ).bind(user.id).run();
+        await createRequestLog(env.arcane_db, {
+            userId: user.id, model: 'test-model', inputTokens: 1, outputTokens: 1, costUsd: 1.5, durationMs: 10,
+        });
+        const token = await tokenFor(user);
+
+        await putConfigDoc(env.arcane_db, 'model_routing', CF_ONLY_ROUTING);
+        try {
+            const res = await post('/v1/chat/completions', token, { model: 'x', messages: [] });
+            // Gate passed — 'mid'/'high' tiers would 403 first, so this is
+            // proof the hourly cap itself didn't fire; the request may still
+            // fail downstream (no real AI binding in the test env).
+            expect(res.status).not.toBe(429);
+        } finally {
+            await resetModelRouting();
+        }
     });
 });

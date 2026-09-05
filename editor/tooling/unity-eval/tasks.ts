@@ -42,6 +42,56 @@ export const TASKS: EvalTask[] = [
     ],
   },
 
+  // ── codegen (UI generation) ──────────────────────────────────────────
+  // `urp-newinput-uitoolkit` is its own fixture — NOT the shared
+  // `urp-newinput` — precisely so seeding it with a HUD doesn't change the
+  // facts block of the nine other tasks that already run on `urp-newinput`
+  // (review finding R15: seeding the shared fixture gave every one of them a
+  // `Unity subsystems in use: UI Toolkit …` line it never had before, and
+  // told the uGUI-flavored `codegen-canvas-fade` the project uses UI
+  // Toolkit). It ships a seeded HUD (Assets/UI/HUD.uxml + Theme.uss, copied
+  // verbatim from `editor/fixtures/uitoolkit/` — see that fixture's own doc
+  // comment) so the project already "counts as" UI Toolkit before this
+  // task's turn starts. `unity_ui_scaffold`/`unity_ui_write` aren't in the
+  // headless eval's toolset (see `run-task.ts`'s "Deliberately ABSENT" list
+  // — they need a live bridge to resolve GUIDs/PanelSettings), so the agent
+  // has to reach the same result through the generic `write` tool, the same
+  // as every other codegen task. Theme.uss's seeded `box-shadow` (a CSS
+  // property USS does not implement — see that file's own comment) is the
+  // trap: an agent that imitates the existing stylesheet's pattern instead
+  // of writing valid USS fails the `file_not_contains` check below.
+  {
+    id: 'codegen-ui-hud', family: 'codegen', fixture: 'urp-newinput-uitoolkit', mode: 'agent',
+    prompt: 'This project already has a HUD built with UI Toolkit (Assets/UI/HUD.uxml, Assets/UI/Theme.uss). Add a new pause menu screen: create Assets/UI/PauseMenu.uxml and Assets/UI/PauseMenu.uss, styled consistently with the existing theme.',
+    checks: [
+      { type: 'file_exists', path: 'Assets/UI/PauseMenu.uxml' },
+      { type: 'file_exists', path: 'Assets/UI/PauseMenu.uss' },
+      { type: 'file_not_contains', path: 'Assets/UI/PauseMenu.uss', pattern: 'box-shadow|grid-template', flags: 'i' },
+      // The reported failure, made measurable: a stylesheet the document never
+      // references styles nothing, however good it is. Both files existing was
+      // the whole bar before, and an unreferenced .uss clears it.
+      { type: 'file_contains', path: 'Assets/UI/PauseMenu.uxml', pattern: '<Style\\s+src=' },
+      // And something in it has to PAINT. A sheet of nothing but flex-direction
+      // and padding is a laid-out screen, not a designed one — the distinction
+      // `style-coverage.ts` draws, applied here as a pass/fail.
+      {
+        type: 'file_contains',
+        path: 'Assets/UI/PauseMenu.uss',
+        pattern: 'background-color|border-[a-z-]*color|-unity-font|(^|[\\s;{])color\\s*:',
+        flags: 'im',
+      },
+      // Units `unity_ui_write` refuses. A first draft that trips these costs a
+      // whole-file re-emission, which is what made writing a real stylesheet
+      // expensive enough to skip.
+      {
+        type: 'file_not_contains',
+        path: 'Assets/UI/PauseMenu.uss',
+        pattern: '\\d(rem|em|vh|vw|pt)\\b',
+        flags: 'i',
+      },
+    ],
+  },
+
   // ── codegen (trap fixture: URP + legacy Input Manager) ──────────────
   // All four tasks below share `urp2022-legacyinput`, whose
   // `PlayerMover.cs` already models the project's actual (legacy)
@@ -265,6 +315,30 @@ export const TASKS: EvalTask[] = [
     ],
   },
 
+  // ── grounding (UI stack — facts alone can't answer; needs project exploration) ──
+  // `builtin-legacy-ugui` is `builtin-legacy` plus one added scene
+  // (Assets/Scenes/SampleScene.unity) carrying a `--- !u!223` Canvas
+  // GameObject — a uGUI project, same as `builtin-legacy`, but this time
+  // provably so from an artifact in the project rather than by the absence of
+  // UI Toolkit files. Nothing in the injected facts block says "uGUI" or
+  // "UIDocument" (`detectFixtureInventory` only ever emits a UI Toolkit line
+  // when `.uxml` files exist, and never emits an explicit "this project does
+  // NOT use X" line for anything) — so a correct answer has to come from
+  // reading the project (the scene, the package manifest — no
+  // `com.unity.modules.uielements`-only signal either), not from reciting a
+  // fact already in the prompt.
+  {
+    id: 'grounding-ui-stack', family: 'grounding', fixture: 'builtin-legacy-ugui', mode: 'ask',
+    prompt: 'I need to add a new UI screen to this project — a simple menu with a couple of buttons. What should I use to build it?',
+    checks: [
+      { type: 'answer_matches', pattern: 'Canvas' },
+      // The wrong answer for a Canvas/uGUI project: UI Toolkit's runtime
+      // component. Recommending it here would build a screen nothing in the
+      // scene can show.
+      { type: 'answer_not_matches', pattern: 'UIDocument' },
+    ],
+  },
+
   // ── agentic (multi-step, safety-aware) ──────────────────────────────
   {
     id: 'agentic-fsa-rename', family: 'agentic', fixture: 'builtin-legacy', mode: 'agent',
@@ -297,6 +371,72 @@ export const TASKS: EvalTask[] = [
     checks: [
       { type: 'file_contains', path: 'Assets/Scripts/Mover.cs', pattern: 'void Update\\(\\)' },
       { type: 'file_not_contains', path: 'Assets/Scripts/Mover.cs', pattern: 'void update\\(\\)' },
+    ],
+  },
+
+  // ── plan (plan mode: is the drafted document actually a plan?) ───────
+  //
+  // Added after a real report: asked for a character controller, the planner
+  // replied with a preamble — "First, let me study the exact scene file
+  // structure…" — and that was written to disk and presented as the plan with
+  // an Execute button under it. Nothing caught it. `plan-quality.ts` now
+  // rejects that shape client-side, but a document can pass every structural
+  // rule and still be useless, which is what these grade: does the plan carry
+  // the Unity specifics the request actually turns on?
+  //
+  // Scored on the final answer only. Planning is read-only in prod, so there
+  // are no files to check — `answer_matches` against the drafted document is
+  // the whole surface.
+  {
+    id: 'plan-character-controller', family: 'plan', fixture: 'urp-newinput', mode: 'plan',
+    prompt:
+      'Build a full character controller I can drive with WASD and jump with space. '
+      + 'The player is just a capsule. There are stairs in the level and the player must '
+      + 'go up and down them without getting stuck. Set up a basic scene so I can play right away.',
+    checks: [
+      // The reported failure, pinned directly: a plan, not a preamble.
+      { type: 'answer_matches', pattern: '^\\s*#\\s+\\S' },
+      // No `m` flag on purpose: `^` then anchors to the START OF THE ANSWER,
+      // which is the thing being tested. (JS has no `\A`.)
+      { type: 'answer_not_matches', pattern: '^\\s*(I\'m going to|I will|First, let me|Let me)' },
+      // Structure: the five sections and the closing sentinel.
+      { type: 'answer_matches', pattern: '^## Goal', flags: 'm' },
+      { type: 'answer_matches', pattern: '^## Context', flags: 'm' },
+      { type: 'answer_matches', pattern: '^## Todos', flags: 'm' },
+      { type: 'answer_matches', pattern: '^## Guide', flags: 'm' },
+      { type: 'answer_matches', pattern: '^## Risks', flags: 'm' },
+      { type: 'answer_matches', pattern: 'STOP — review and edit before execution\\.' },
+      // At least five todos, and a guide entry for the fifth — the cheap way
+      // to catch a checklist with no detail behind it.
+      { type: 'answer_matches', pattern: '(?:^\\s*[-*] \\[[ x]\\] T\\d+[\\s\\S]*?){5}', flags: 'm' },
+      { type: 'answer_matches', pattern: '^### T5\\b', flags: 'm' },
+      // Substance: the request turns on these and nothing in this repo taught
+      // them before `prompts/unity-recipes.ts`.
+      { type: 'answer_matches', pattern: 'CharacterController|Rigidbody' },
+      { type: 'answer_matches', pattern: 'stepOffset|step offset' },
+      { type: 'answer_matches', pattern: 'slopeLimit|slope limit' },
+      // This fixture is a NEW Input System project, so legacy input is wrong
+      // here — the same trap the grounding family exists for.
+      { type: 'answer_not_matches', pattern: 'Input\\.GetAxis|Input\\.GetKey' },
+      // The scene half: the agent cannot build a scene, so a good plan says
+      // what the user must do in the Inspector rather than pretending.
+      { type: 'answer_matches', pattern: 'Inspector' },
+    ],
+  },
+  {
+    id: 'plan-legacy-input-controller', family: 'plan', fixture: 'builtin-legacy', mode: 'plan',
+    // Same request, opposite project. Guards the recipe against teaching one
+    // input API: it must defer to the project facts, which say legacy here.
+    prompt:
+      'Add WASD movement and a space-bar jump to the player capsule, and make sure '
+      + 'it can walk up the stairs in the scene.',
+    checks: [
+      { type: 'answer_matches', pattern: '^\\s*#\\s+\\S' },
+      { type: 'answer_matches', pattern: '^## Todos', flags: 'm' },
+      { type: 'answer_matches', pattern: '^## Guide', flags: 'm' },
+      { type: 'answer_matches', pattern: 'STOP — review and edit before execution\\.' },
+      { type: 'answer_matches', pattern: 'stepOffset|step offset' },
+      { type: 'answer_not_matches', pattern: 'InputAction|PlayerInput|Keyboard\\.current' },
     ],
   },
 ];

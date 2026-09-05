@@ -78,6 +78,12 @@ import {
   highlightAiPanelDropTarget,
   isDropOnAiPanel,
 } from './features/ai-panel';
+import {
+  DESIGN_STAGE_PATHS,
+  clearDesignDockDropTarget,
+  highlightDesignDockDropTarget,
+  isDropOnDesignDock,
+} from './features/design-chat';
 import { useUnitySceneStore } from './stores/unity-scene';
 import { useRegisterCommands } from './hooks/useRegisterCommands';
 import { useAutoSave } from './hooks/useAutoSave';
@@ -190,8 +196,12 @@ function cycleAiMode(): void {
   // cycles isn't even rendered (AgentConfigBar takes that slot), so firing
   // would silently change a hidden value that nothing reads.
   if (ai.selectedAgent !== 'hosted') return;
+  // Design is deliberately absent: it is entered from the design dock on a
+  // .uxml, never cycled into from a keyboard chord with no document in sight.
+  // Cycling out of it is allowed, and lands on Ask.
   const order: Array<'ask' | 'agent' | 'plan'> = ['ask', 'agent', 'plan'];
-  ai.setMode(order[(order.indexOf(ai.mode) + 1) % order.length]);
+  const at = order.indexOf(ai.mode as 'ask' | 'agent' | 'plan');
+  ai.setMode(order[(at + 1) % order.length]);
   useUiStore.getState().setActiveRightSidebarView('ai-panel');
   useUiStore.getState().setRightSidebarVisible(true);
 }
@@ -704,18 +714,21 @@ function App() {
           highlightTerminalDropTarget(event.payload.position);
           highlightExplorerDropTarget(event.payload.position);
           highlightAiPanelDropTarget(event.payload.position);
+          highlightDesignDockDropTarget(event.payload.position);
           return;
         }
         if (event.payload.type === 'leave') {
           clearTerminalDropTarget();
           clearExplorerDropTarget();
           clearAiPanelDropTarget();
+          clearDesignDockDropTarget();
           return;
         }
 
         const paths = event.payload.paths;
         clearExplorerDropTarget();
         clearAiPanelDropTarget();
+        clearDesignDockDropTarget();
         if (await handleTerminalDrop(event.payload.position, paths)) return;
 
         // Dropped on the AI panel: stage as chat context rather than opening
@@ -724,6 +737,15 @@ function App() {
         // under the cursor — that fallback is what every OS drop did until now,
         // and it is why dragging a file from Finder onto the chat opened it in
         // the editor instead of attaching it.
+        // Checked BEFORE the AI panel: the design dock floats over the canvas,
+        // so it is the more specific target wherever both could match, and a
+        // reference image dropped on the dock is meant for the screen you are
+        // looking at rather than for whatever thread the panel is showing.
+        if (isDropOnDesignDock(event.payload.position)) {
+          window.dispatchEvent(new CustomEvent(DESIGN_STAGE_PATHS, { detail: { paths } }));
+          return;
+        }
+
         if (isDropOnAiPanel(event.payload.position)) {
           window.dispatchEvent(new CustomEvent('ai-stage-paths', { detail: { paths } }));
           return;
@@ -1310,12 +1332,46 @@ function App() {
       },
     },
     {
+      // No keybinding on purpose: a chord here would also have to be mirrored
+      // in src-tauri/src/menu.rs, whose accelerators win on macOS, and
+      // keybinding-parity.test.ts enforces that. The command is still
+      // reachable from the command palette and supplies the tooltip.
+      id: 'view.scriptableObjects',
+      label: 'Scriptable Objects',
+      category: 'View',
+      handler: () => {
+        useUiStore.getState().setActiveSidebarView('scriptable-objects');
+        useUiStore.getState().setSidebarVisible(true);
+      },
+    },
+    {
       id: 'view.testRunner',
       label: 'Unity Tests',
       category: 'View',
       keybinding: 'mod+shift+u',
       handler: () => {
         useUiStore.getState().setActiveSidebarView('test');
+        useUiStore.getState().setSidebarVisible(true);
+      },
+    },
+    {
+      id: 'view.toggleAssetSource',
+      label: 'Toggle Source / Preview',
+      category: 'View',
+      handler: () => {
+        const path = useWorkspaceStore.getState().activeFilePath;
+        if (!path) return;
+        const ui = useUiStore.getState();
+        const mode = ui.assetViewerMode[path];
+        ui.setAssetViewerMode(path, mode === 'structured' || mode === undefined ? 'raw-edit' : 'structured');
+      },
+    },
+    {
+      id: 'view.unityUi',
+      label: 'Unity UI',
+      category: 'View',
+      handler: () => {
+        useUiStore.getState().setActiveSidebarView('unity-ui');
         useUiStore.getState().setSidebarVisible(true);
       },
     },
@@ -1645,7 +1701,7 @@ function App() {
       id: 'unity.clearConsole',
       label: 'Clear Unity Console',
       category: 'Unity',
-      handler: () => useUnityStore.getState().clearLogs(),
+      handler: () => void useUnityStore.getState().clearLogs(),
       when: () => useProjectContextStore.getState().isUnityProject,
     },
     {

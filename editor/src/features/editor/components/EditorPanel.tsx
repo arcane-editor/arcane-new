@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import MonacoEditor, { DiffEditor } from '@monaco-editor/react';
 import type { editor as MonacoEditorNs } from 'monaco-editor';
 import { ask } from '@tauri-apps/plugin-dialog';
 import { useWorkspaceStore } from '../../../stores/workspace';
+import { useAiStore } from '../../../stores/ai';
 import { useUiStore, type AssetViewerMode, type DiffViewMode } from '../../../stores/ui';
 import { useThemeStore } from '../../../stores/theme';
 import { useSettingsStore } from '../../../stores/settings';
@@ -22,10 +23,20 @@ import { registerUnityDocsHover } from '../services/unity-docs-hover';
 import { registerBlameHoverProvider, attachGitGutter } from '../../git';
 import { PackageCacheBanner, isPackageCachePath } from '../../unity-packages';
 import { initUsageCodeLens } from '../../unity-context';
+import { BinaryFileNotice } from './BinaryFileNotice';
+import { applyPendingNavigation } from '../services/nav-landing';
 import { initUnityAnalyzers } from '../../unity-analyzers';
 import { initUnityCompilerDiagnostics } from '../../unity-compiler';
 import { AssetViewer, isUnityAssetFile, SceneDiffViewer } from '../../unity-asset-viewer';
 import { InputActionsEditor, isInputActionsFile } from '../../unity-input';
+import { UxmlPreviewEditor, isUxmlFile } from '../../uitoolkit';
+// The composition point for the design dock. `uitoolkit` takes it as a slot and
+// imports nothing from `ai-panel`/`design-chat`; this file already imports both
+// sides, so it is where they meet. See `design-chat/index.ts` for why the
+// dependency has to run one way.
+import { DesignChatDock } from '../../design-chat';
+import { useDesignChatStore } from '../../../stores/design-chat';
+import { toRelativePath } from '../../../utils/relative-path';
 import { ScriptableObjectEditor, initSoInstanceCodeLens } from '../../unity-scriptable-objects';
 import { attachUnityDecorations } from '../../csharp';
 import { initTestCodeLens } from '../../unity-test-runner';
@@ -37,6 +48,10 @@ import { SearchResultsTab } from '../../search';
 import { fileUri } from '../../lsp';
 
 const detectLanguage = getMonacoLanguageId;
+
+/** Module-level so a plan with no notes hands PlanDocumentView the SAME array
+ *  every render — a fresh `[]` would re-run its re-anchoring effect forever. */
+const EMPTY_NOTES: PlanNote[] = [];
 
 function EditorPanel() {
   const openFiles = useWorkspaceStore((s) => s.openFiles);
@@ -53,14 +68,26 @@ function EditorPanel() {
   const editorCursorBlinking = useSettingsStore((s) => s.settings['editor.cursorBlinking']);
   const editorBracketPairColorization = useSettingsStore((s) => s.settings['editor.bracketPairColorization']);
   const editorRenderWhitespace = useSettingsStore((s) => s.settings['editor.renderWhitespace']);
+  const workspacePath = useWorkspaceStore((s) => s.workspacePath);
+  const designDockOpen = useDesignChatStore((s) => s.open);
   const isUnityProject = useProjectContextStore((s) => s.isUnityProject);
   const structuredDefault = useSettingsStore((s) => s.settings['unity.assetViewer.structuredDefault']);
   const assetViewerModeMap = useUiStore((s) => s.assetViewerMode);
   const diffViewModeMap = useUiStore((s) => s.diffViewMode);
   const markdownViewModeMap = useUiStore((s) => s.markdownViewMode);
-  // Suggestions live with the open document, not in the .md — the file
-  // stays clean because execution re-reads it from disk.
-  const [planNotes, setPlanNotes] = useState<PlanNote[]>([]);
+  // Suggestions live with the open document, not in the .md — the file stays
+  // clean because execution re-reads it from disk. They are held in the ai
+  // store KEYED BY PLAN PATH, not in local state here: this component is the
+  // single editor pane for every tab, so one shared array meant a second plan
+  // re-anchored the first one's notes against itself, and a reload threw away
+  // comments the user had written.
+  const planNotesByPath = useAiStore((s) => s.planNotes);
+  const setPlanNotesFor = useAiStore((s) => s.setPlanNotes);
+  // Read here (not inside PlanDocumentView's onExecute prop, which is just a
+  // callback) so the plan-tab toolbar's primary button can resume an
+  // interrupted run instead of re-executing from the top — mirrors
+  // PlanActions.tsx's `interrupted` branch (Task 5/6).
+  const planPhase = useAiStore((s) => s.planPhase);
 
   const editorRef = useRef<MonacoEditorNs.IStandaloneCodeEditor | null>(null);
 
@@ -80,11 +107,7 @@ function EditorPanel() {
     // Defer one frame so the model swap initiated by the path-prop
     // change has actually completed before we move the cursor / focus.
     requestAnimationFrame(() => {
-      if (nav) {
-        const position = { lineNumber: nav.line, column: nav.column };
-        editor.setPosition(position);
-        editor.revealPositionInCenter(position);
-      }
+      if (nav) applyPendingNavigation(editor, nav);
       editor.focus();
     });
   }, [activeFilePath]);
@@ -162,9 +185,17 @@ function EditorPanel() {
   // Unity YAML assets (+ Input System .inputactions) render in a structured
   // viewer by default (per setting), with per-file "View raw" / "Edit raw"
   // overrides tracked in the ui store.
+  // First in the ladder on purpose: `unity_parse_asset` reads the file as a
+  // string too, so routing a binary `.asset` to the structured viewer would
+  // just move the same UTF-8 failure one step later.
+  if (activeFile.isBinary) {
+    return <BinaryFileNotice name={activeFile.name} byteSize={activeFile.byteSize} />;
+  }
+
   const isUnityAsset = isUnityProject && isUnityAssetFile(activeFile.name);
   const isInputActions = isUnityProject && isInputActionsFile(activeFile.name);
-  const structuredCandidate = isUnityAsset || isInputActions;
+  const isUxml = isUnityProject && isUxmlFile(activeFile.name);
+  const structuredCandidate = isUnityAsset || isInputActions || isUxml;
   const assetMode: AssetViewerMode | null = structuredCandidate
     ? assetViewerModeMap[activeFile.path] ?? (structuredDefault ? 'structured' : 'raw-edit')
     : null;
@@ -172,6 +203,14 @@ function EditorPanel() {
 
   const setRawView = () => useUiStore.getState().setAssetViewerMode(activeFile.path, 'raw-view');
   const setRawEdit = async () => {
+    // UXML is markup people write by hand; scenes and prefabs are machine-
+    // serialised YAML where a stray edit silently breaks GUID references. Only
+    // the second deserves a warning, and showing one for the first teaches
+    // people to click through the one that matters.
+    if (isUxml) {
+      useUiStore.getState().setAssetViewerMode(activeFile.path, 'raw-edit');
+      return;
+    }
     const ok = await ask(
       'Editing this asset by hand can corrupt it and silently break references. Continue?',
       { title: 'Edit Raw', kind: 'warning' },
@@ -201,13 +240,30 @@ function EditorPanel() {
         <ScriptableObjectEditor
           path={activeFile.path}
           name={activeFile.name}
-          onViewRaw={setRawView}
-          onEditRaw={setRawEdit}
           fallback={assetViewer}
         />
       );
     }
     return assetViewer;
+  }
+  if (isUxml && assetMode === 'structured') {
+    return (
+      <UxmlPreviewEditor
+        path={activeFile.path}
+        name={activeFile.name}
+        content={activeFile.content}
+        overlay={
+          designDockOpen ? (
+            <DesignChatDock
+              // Workspace-relative, because that is the form the agent's tools,
+              // the session record and the scope guard all speak.
+              documentPath={toRelativePath(activeFile.path, workspacePath)}
+              documentName={activeFile.name}
+            />
+          ) : null
+        }
+      />
+    );
   }
   if (isInputActions && assetMode === 'structured') {
     return (
@@ -215,7 +271,6 @@ function EditorPanel() {
         name={activeFile.name}
         content={activeFile.content}
         onViewRaw={setRawView}
-        onEditRaw={setRawEdit}
       />
     );
   }
@@ -235,14 +290,19 @@ function EditorPanel() {
   const isPlainMarkdown =
     isMarkdownPath(activeFile.name) && !activeFile.diff && !isPlanPath(activeFile.path);
   if (isPlanPath(activeFile.path) && !activeFile.diff) {
+    const notes = planNotesByPath[activeFile.path] ?? EMPTY_NOTES;
     return (
       <PlanDocumentView
         path={activeFile.path}
         content={activeFile.content}
-        notes={planNotes}
-        onNotesChange={setPlanNotes}
-        onRevise={() => planController.reviseWithNotes(activeFile.path, planNotes)}
-        onExecute={() => planController.executePlan(activeFile.path)}
+        notes={notes}
+        onNotesChange={(next) => setPlanNotesFor(activeFile.path, next)}
+        onRevise={() => planController.reviseWithNotes(activeFile.path, notes)}
+        onExecute={() =>
+          planPhase === 'interrupted'
+            ? planController.resumeExecution('Continue executing the remaining steps.')
+            : planController.executePlan(activeFile.path)
+        }
         onStop={() => planController.abortExecution()}
       />
     );
@@ -388,16 +448,20 @@ function EditorPanel() {
           }}
         >
           <span>
-            {assetMode === 'raw-edit'
-              ? '⚠ Editing raw YAML — hand-edits can break this asset.'
-              : 'Raw YAML (read-only).'}
+            {isUxml
+              ? assetMode === 'raw-edit'
+                ? 'Editing UXML source.'
+                : 'UXML source (read-only).'
+              : assetMode === 'raw-edit'
+                ? '⚠ Editing raw YAML — hand-edits can break this asset.'
+                : 'Raw YAML (read-only).'}
           </span>
           <button
             className="asset-viewer-btn"
             style={{ marginLeft: 'auto' }}
             onClick={() => useUiStore.getState().setAssetViewerMode(activeFile.path, 'structured')}
           >
-            Structured View
+            {isUxml ? 'Preview' : 'Structured View'}
           </button>
         </div>
       )}
@@ -473,13 +537,14 @@ function EditorPanel() {
           const disposeGitGutter = attachGitGutter(editor, monaco);
           editor.onDidDispose(disposeGitGutter);
 
-          // Handle pending Go to Definition navigation
+          // Handle a pending navigation. This is the path taken whenever the
+          // jump STARTS in a structured asset viewer (the Input Hub, the asset
+          // viewer, a scene diff), because those unmount Monaco entirely --
+          // the effect above finds a null editorRef and defers to here.
           const nav = getPendingNavigation();
           if (nav) {
             clearPendingNavigation();
-            const position = { lineNumber: nav.line, column: nav.column };
-            editor.setPosition(position);
-            editor.revealPositionInCenter(position);
+            applyPendingNavigation(editor, nav);
           }
 
           // Focus the editor on mount so the very first file opened in a

@@ -303,6 +303,12 @@ namespace UnityIDE.Bridge
         /// </summary>
         private bool EnsureSession(BridgeDiscovery disc)
         {
+            // Before anything can be dispatched: whether this IDE understands a
+            // queued ack is decided by the version it advertised in bridge.json.
+            // Re-set on every call because a domain reload wipes the static and a
+            // warm resume takes the same path.
+            RpcDispatcher.SetIdeProtocolVersion(disc.ProtocolVersion);
+
             bool freshHandshake = _unitySessionId == null || _ideSessionId != disc.IdeSessionId;
 
             if (_writer == null)
@@ -372,6 +378,15 @@ namespace UnityIDE.Bridge
             {
                 int now = Environment.TickCount;
 
+                // Keep Unity's main thread ticking while anything we started is
+                // still outstanding. This thread is never parked, so it is the
+                // only place that can drive a backgrounded editor THROUGH an
+                // import, a compile and the domain reload that follows — a
+                // single poke at enqueue time gets the import going and then
+                // lets Unity fall straight back asleep mid-compile.
+                bool wantsWake = MainThreadDispatcher.WantsWake;
+                if (wantsWake) EditorWakeup.Nudge(MainThreadDispatcher.MsSincePump);
+
                 // Outbound.
                 bool wrote = FlushOutbox();
                 if (unchecked(now - lastHeartbeat) >= HeartbeatMs)
@@ -390,7 +405,10 @@ namespace UnityIDE.Bridge
                 // Heartbeats deliberately do NOT reset the backoff — otherwise the
                 // 2s heartbeat would pin polling at 25ms forever and idle CPU
                 // would never drop.
-                if (wrote || lines.Count > 0) lastTraffic = now;
+                // An outstanding wake counts as traffic: the idle cadence (250ms)
+                // would throttle the nudge rate to four a second, which is not
+                // enough to drive an assembly build.
+                if (wrote || lines.Count > 0 || wantsWake) lastTraffic = now;
                 int interval = unchecked(now - lastTraffic) >= IdleAfterMs ? PollIdleMs : PollActiveMs;
 
                 // Re-check bridge.json about once a second: an IDE restart mints a
@@ -491,11 +509,39 @@ namespace UnityIDE.Bridge
             return true;
         }
 
+        /// <summary>
+        /// Above this, treat Unity's main thread as not servicing work. A focused
+        /// editor ticks many times a second, so anything approaching a second
+        /// means the window is in the background (or stuck in a long import) —
+        /// either way the honest answer to "can Unity run an RPC right now" is no.
+        /// </summary>
+        private const int EditorAwakeThresholdMs = 1000;
+
         private void EnqueueHeartbeat()
         {
-            // Empty payload per spec. With no socket to close, a journal that stops
-            // growing IS the disconnect signal, so this doubles as liveness.
-            Send(Protocol.Envelope(MsgType.Heartbeat, JsonValue.NewObject()));
+            // With no socket to close, a journal that stops growing IS the
+            // disconnect signal, so this doubles as transport liveness.
+            //
+            // It now also carries EDITOR liveness, which is a different thing and
+            // the one that was missing. This worker thread keeps running while
+            // Unity's main thread is parked (unfocused), so a heartbeat used to
+            // assert a healthy bridge at the exact moment every RPC was timing
+            // out against a sleeping editor. `awake` is what lets the IDE tell
+            // "Unity is alive" from "Unity can actually do something".
+            var payload = JsonValue.NewObject();
+            int idleMs = MainThreadDispatcher.MsSincePump;
+            payload["editorIdleMs"] = idleMs;
+            // Busy counts as awake. A big project's AssetDatabase.Refresh()
+            // blocks the main thread for seconds, which looks identical to a
+            // parked editor from here — and calling that asleep would tell the
+            // IDE to give up on the very import it asked for.
+            bool busy = MainThreadDispatcher.IsBusy;
+            payload["awake"] = busy || idleMs < EditorAwakeThresholdMs;
+            payload["busy"] = busy;
+            // Whether a focus-free wake is even possible here, so the IDE can
+            // choose between waiting it out and offering to raise Unity.
+            payload["canWake"] = EditorWakeup.Supported;
+            Send(Protocol.Envelope(MsgType.Heartbeat, payload));
         }
 
         // ── Inbound handling ─────────────────────────────────────────────────

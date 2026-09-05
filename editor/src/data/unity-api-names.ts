@@ -41,6 +41,19 @@ export const UNITY_API_NAMES: UnityApiName[] = [
   { name: 'SphereCollider', kind: 'type', detail: 'UnityEngine' },
   { name: 'CapsuleCollider', kind: 'type', detail: 'UnityEngine' },
   { name: 'MeshCollider', kind: 'type', detail: 'UnityEngine' },
+  // The component almost every player capsule is built on, and it was missing
+  // — so `get_unity_docs('CharacterController')` answered "no exact match" for
+  // the single most common gameplay question this editor gets asked.
+  { name: 'CharacterController', kind: 'type', detail: 'UnityEngine' },
+  // `detail` is the OWNER TYPE, not the namespace — that is what builds the
+  // member URL (`Owner.Member.html` for methods, `Owner-Member.html` for
+  // properties) and the `Owner.Member` display name.
+  { name: 'Move', kind: 'method', detail: 'CharacterController' },
+  { name: 'SimpleMove', kind: 'method', detail: 'CharacterController' },
+  { name: 'isGrounded', kind: 'property', detail: 'CharacterController' },
+  { name: 'stepOffset', kind: 'property', detail: 'CharacterController' },
+  { name: 'slopeLimit', kind: 'property', detail: 'CharacterController' },
+  { name: 'skinWidth', kind: 'property', detail: 'CharacterController' },
   { name: 'Camera', kind: 'type', detail: 'UnityEngine' },
   { name: 'Light', kind: 'type', detail: 'UnityEngine' },
   { name: 'AudioSource', kind: 'type', detail: 'UnityEngine' },

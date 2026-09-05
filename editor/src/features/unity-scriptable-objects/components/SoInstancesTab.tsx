@@ -73,6 +73,10 @@ function SoInstancesTab({ schema, instances, isLoading, unresolvedBase }: SoInst
           placeholder="Filter instances..."
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
+          spellCheck={false}
+          autoComplete="off"
+          autoCorrect="off"
+          autoCapitalize="off"
         />
       </div>
 

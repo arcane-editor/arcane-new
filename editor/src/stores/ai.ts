@@ -22,6 +22,7 @@ import {
   type ClaudeConnectState,
   type Effort,
   type PlanRef,
+  type PromptMode,
   type SaveSessionInput,
   type SessionData,
   type StopReason,
@@ -33,6 +34,7 @@ import {
   coerceEffort,
   findPendingQuestion,
   normalizePlanRestore,
+  planModeTransition,
   resetWriteApprovalSession,
   resolvePendingQuestion,
   restoreEffort,
@@ -41,6 +43,10 @@ import {
 // and the barrel is mid-evaluation when this module runs (barrel → AiChatPanel
 // → here), so a barrel import resolved to a module whose own `const`s had not
 // been initialized yet — a TDZ ReferenceError before the app could even render.
+// From types/, NOT the markdown-preview barrel: that barrel exports
+// PlanDocumentView, which imports this store. Going through it would close a
+// runtime cycle — see the note on PlanNote in types/index.ts.
+import type { PlanNote } from '../types';
 import { createUpdateCoalescer } from '../utils/update-coalescer';
 import { useWorkspaceStore } from './workspace';
 import { useCheckpointsStore } from './checkpoints';
@@ -83,7 +89,8 @@ export interface AiMessage {
     | 'permissionRequest'
     | 'questionRequest'
     | 'verifiedPass'
-    | 'error';
+    | 'error'
+    | 'stopped';
   /** User message text */
   text?: string;
   /** Assistant message content blocks (text, thinking, tool calls) */
@@ -94,6 +101,14 @@ export interface AiMessage {
    * only plumbs the field through the store/persistence layer.
    */
   turnError?: TurnError;
+  /**
+   * Marks a deliberate user Stop (T4's `detectTurnOutcome` rule 0, `role:
+   * 'stopped'` only) — rendered as `StoppedBlock`'s latest-only Resume
+   * button. `promptMode` is the mode the aborted send was running under, so
+   * a future task deciding what "resume" means (e.g. plan phase) has it
+   * without re-deriving it from other store state.
+   */
+  stopped?: { promptMode: PromptMode };
   /**
    * Assistant provenance copied verbatim from the vendor `AssistantMessage`
    * at `message_end` (`role: 'assistant'` only) — how the turn ended and,
@@ -190,8 +205,17 @@ export interface HostedPlanEntry {
   difficulty?: 'easy' | 'hard';
 }
 
-/** Plan-mode lifecycle. */
-export type PlanPhase = 'idle' | 'planning' | 'awaiting-execute' | 'executing';
+/**
+ * Plan-mode lifecycle.
+ *
+ * `interrupted` is a plan whose execution run ended without finishing —
+ * capped, aborted, or errored (`plan-run.ts`) — or whose `executing` phase
+ * was found dead on restore/mode-switch (`normalizeLivePlanState`). It is
+ * resumable, unlike `awaiting-execute` which has never been started: the
+ * plan file's `[x]` ticks carry the progress, and `routePlanSend` maps it to
+ * `'resume'` the same way it maps `executing`.
+ */
+export type PlanPhase = 'idle' | 'planning' | 'awaiting-execute' | 'executing' | 'interrupted';
 
 /**
  * Session-cumulative token usage (P4) — accumulated from the UnityIDE server's
@@ -309,6 +333,18 @@ interface AiState {
   planPhase: PlanPhase;
   /** Workspace-absolute path to the most recent plan markdown file. */
   activePlanPath: string | null;
+  /**
+   * Pending suggestions per plan, keyed by the plan's workspace-absolute path.
+   *
+   * Keyed, and held here rather than in the editor pane, for two reasons the
+   * previous `useState<PlanNote[]>` in `EditorPanel` got wrong: that array was
+   * shared by every open tab, so opening a second plan re-anchored the first
+   * plan's notes against it; and it lived only in a component, so a reload
+   * discarded comments the user had written while `planPhase`/`activePlanPath`
+   * beside it survived. Notes are a user's own words about a specific
+   * document — losing them silently is the worst available outcome.
+   */
+  planNotes: Record<string, PlanNote[]>;
   /** Last user prompt sent in plan-mode, used by Regenerate. */
   pendingPrompt: string | null;
   /** Snapshot of the attachments the last plan was created with. */
@@ -316,6 +352,16 @@ interface AiState {
 
   /** Session-cumulative token usage (P4) — see `SessionUsage`. */
   sessionUsage: SessionUsage;
+
+  /**
+   * Live turn-governor progress for the working row's "N model calls" count
+   * (Task 3) — `used`/`cap` for the CURRENT submit, mirroring
+   * `turn-governor.ts`'s `onProgress` callback. `null` until the first
+   * governed call of a send/submit reports in. UI-only: never persisted
+   * (absent from `SaveSessionInput`/`buildSaveInput`) and reset to `null` on
+   * a new conversation and on session restore, same as `pendingServedModel`.
+   */
+  modelCallBudget: { used: number; cap: number } | null;
 
   // Actions
   handleAgentEvent: (event: AgentEvent) => void;
@@ -326,6 +372,8 @@ interface AiState {
   setVerificationRequired: (required: boolean) => void;
   /** Appends a `role: 'error'` message (T5's outcome-detection choke point) and flushes it to disk immediately — an error must survive an instant quit. Returns the new message id. */
   addTurnError: (error: TurnError) => string;
+  /** Appends a `role: 'stopped'` message (T4's `detectTurnOutcome` rule 0 — abort wins) and flushes it to disk immediately, same instant-quit rule as `addTurnError`. Returns the new message id. */
+  addStoppedMarker: (info: { promptMode: PromptMode }) => string;
   /** Drops all messages after `messageId` (keeping it), prunes now-orphaned `toolCalls` entries, and schedules a save. Used by Retry (T5) to roll history back before re-sending. */
   truncateAfterMessage: (messageId: string) => void;
   resetConversation: () => void;
@@ -333,6 +381,17 @@ interface AiState {
   loadSessionIntoStore: (session: SessionData) => void;
   /** Cancel any pending debounced save and persist the session immediately. */
   flushSessionNow: () => Promise<void>;
+  /**
+   * The `.uxml` this conversation is a DESIGN session for, workspace-relative,
+   * or `null` for every ordinary chat.
+   *
+   * Persisted with the session, which is how the design dock finds the thread
+   * belonging to the document on the canvas. It is set when the dock adopts a
+   * session and cleared by `resetConversation` like everything else, so a New
+   * Chat started from the AI panel is never mistaken for a design thread.
+   */
+  designDocument: string | null;
+  setDesignDocument: (path: string | null) => void;
   setMode: (mode: ChatMode) => void;
   setEffort: (effort: Effort) => void;
   setSelectedAgent: (agent: AgentKind) => void;
@@ -386,6 +445,9 @@ interface AiState {
   clearAttachments: () => void;
   setPlanPhase: (phase: PlanPhase) => void;
   setActivePlanPath: (path: string | null) => void;
+  /** Replace the suggestions held against one plan. An empty array drops the
+   *  key entirely, so a plan with nothing pending costs nothing to persist. */
+  setPlanNotes: (path: string, notes: PlanNote[]) => void;
   /**
    * Plans produced by the current session, persisted with it so they are
    * reachable from chat history. Re-adding the same path replaces its entry
@@ -400,6 +462,8 @@ interface AiState {
   recordSessionUsage: (inputTokens: number, outputTokens: number) => void;
   /** Stashes the in-flight request's served model id, read back at `message_end` (see `pendingServedModel`). */
   recordServedModel: (model: string) => void;
+  /** Sets the working row's live turn-governor progress (see `modelCallBudget`). */
+  setModelCallBudget: (budget: { used: number; cap: number } | null) => void;
 }
 
 let messageCounter = 0;
@@ -488,6 +552,8 @@ function buildSaveInput(): SaveSessionInput | null {
     plans: state.sessionPlans,
     planPhase: state.planPhase,
     activePlanPath: state.activePlanPath,
+    planNotes: state.planNotes,
+    designDocument: state.designDocument,
   };
 }
 
@@ -599,10 +665,15 @@ export const useAiStore = create<AiState>((set, get) => ({
   pendingServedModel: null,
   attachments: [],
   planPhase: 'idle',
+  planNotes: {},
   activePlanPath: null,
   pendingPrompt: null,
   lastAttachments: [],
   sessionUsage: { input: 0, output: 0, requests: 0 },
+  modelCallBudget: null,
+  designDocument: null,
+
+  setDesignDocument: (path: string | null) => set({ designDocument: path }),
 
   handleAgentEvent: (event: AgentEvent) => {
     switch (event.type) {
@@ -826,6 +897,21 @@ export const useAiStore = create<AiState>((set, get) => ({
     return id;
   },
 
+  addStoppedMarker: (info: { promptMode: PromptMode }) => {
+    const id = nextId();
+    const msg: AiMessage = {
+      id,
+      role: 'stopped',
+      stopped: info,
+      timestamp: Date.now(),
+    };
+    set((s) => ({ messages: [...s.messages, msg] }));
+    // Same instant-quit rule as addTurnError — a Stop right before quitting
+    // must not lose the marker.
+    void flushSave();
+    return id;
+  },
+
   truncateAfterMessage: (messageId: string) => {
     const idx = get().messages.findIndex((m) => m.id === messageId);
     if (idx === -1) return;
@@ -863,10 +949,14 @@ export const useAiStore = create<AiState>((set, get) => ({
       sessionPlans: [],
       attachments: [],
       planPhase: 'idle',
+      planNotes: {},
       activePlanPath: null,
       pendingPrompt: null,
       lastAttachments: [],
       sessionUsage: { input: 0, output: 0, requests: 0 },
+      modelCallBudget: null,
+      // A New Chat is never a design thread, whatever the last one was.
+      designDocument: null,
       ...externalAgentReset(),
     });
     useCheckpointsStore.getState().reset();
@@ -912,9 +1002,19 @@ export const useAiStore = create<AiState>((set, get) => ({
       // no longer exists in this process; 'awaiting-execute' + the plan file's
       // [x] ticks are what can honestly be resumed.
       ...normalizePlanRestore(session.planPhase, session.activePlanPath),
+      // Suggestions are the user's own words about a specific document, so
+      // they come back exactly as saved — unlike planPhase, none of this is
+      // process state that a reload could invalidate.
+      planNotes: session.planNotes ?? {},
+      // Absent on every session written before the design dock existed, and on
+      // every ordinary chat since.
+      designDocument: session.designDocument ?? null,
       pendingPrompt: null,
       lastAttachments: [],
       sessionUsage: { input: 0, output: 0, requests: 0 },
+      // A restored transcript has no in-flight submit either — see
+      // `modelCallBudget`'s doc.
+      modelCallBudget: null,
       // A restored transcript is not a live agent connection: the subprocess is
       // gone and its advertised config/commands went with it. Only
       // `acpSessionId` survives, and only so the backend can offer to resume.
@@ -928,7 +1028,34 @@ export const useAiStore = create<AiState>((set, get) => ({
     resetWriteApprovalSession();
   },
 
-  setMode: (mode: ChatMode) => set({ mode }),
+  setMode: (mode: ChatMode) => {
+    const state = get();
+    const transition = planModeTransition({
+      from: state.mode,
+      to: mode,
+      planPhase: state.planPhase,
+      activePlanPath: state.activePlanPath,
+      isAgentRunning: state.isAgentRunning,
+    });
+    // `blocked` (an agent is running) and `noop` (already in that mode) both
+    // do nothing — the UI-level disables (ModeSelector, cycleAiMode) are the
+    // affordance; this is the enforcement. See `mode-transition.ts`.
+    if (transition.kind !== 'switch') return;
+    set((s) => ({
+      mode: transition.mode,
+      planPhase: transition.planPhase,
+      activePlanPath: transition.activePlanPath,
+      ...(transition.notice
+        ? {
+            messages: [
+              ...s.messages,
+              { id: nextId(), role: 'system', text: transition.notice, timestamp: Date.now() },
+            ],
+          }
+        : {}),
+    }));
+    scheduleSave();
+  },
 
   setEffort: (effort: Effort) => set({ effort }),
 
@@ -1105,8 +1232,22 @@ export const useAiStore = create<AiState>((set, get) => ({
 
   clearAttachments: () => set({ attachments: [] }),
 
-  setPlanPhase: (phase: PlanPhase) => set({ planPhase: phase }),
+  setPlanPhase: (phase: PlanPhase) => {
+    // Plan state belongs to UnityIDE's plan controller. An external agent runs
+    // its own loop and must never own it — the one phase it CAN reach is
+    // 'idle' (clearing state on session reset/reconnect); anything else here
+    // while an external agent is selected is silently ignored.
+    if (phase !== 'idle' && get().selectedAgent !== 'hosted') return;
+    set({ planPhase: phase });
+  },
   setActivePlanPath: (path: string | null) => set({ activePlanPath: path }),
+  setPlanNotes: (path: string, notes: PlanNote[]) =>
+    set((s) => {
+      const next = { ...s.planNotes };
+      if (notes.length === 0) delete next[path];
+      else next[path] = notes;
+      return { planNotes: next };
+    }),
   sessionPlans: [],
   addSessionPlan: (plan) =>
     set((s) => ({
@@ -1126,6 +1267,8 @@ export const useAiStore = create<AiState>((set, get) => ({
     })),
 
   recordServedModel: (model: string) => set({ pendingServedModel: model }),
+
+  setModelCallBudget: (budget) => set({ modelCallBudget: budget }),
 }));
 
 /**

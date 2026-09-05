@@ -20,10 +20,9 @@ import { useEffect, useRef, useState } from 'react';
 import { ArrowUp, Square } from 'lucide-react';
 import { useAiStore, selectPendingQuestion } from '../../../stores/ai';
 import { useWorkspaceStore } from '../../../stores/workspace';
-import { getChatBackend, sendChatMessage } from '../services/chat-backend';
-import { getAgentService } from '../services/agent-service';
-import { planController } from '../services/plan-controller';
-import { agentModeController } from '../services/preplan-controller';
+import { getChatBackend } from '../services/chat-backend';
+import { dispatchComposerSend } from '../services/composer-dispatch';
+import { routePlanSend } from '../services/plan-route';
 import { shouldRouteToQuestion } from '../services/question-routing';
 import { composerPlaceholder } from '../data/composer-copy';
 import LexicalChatInput, { type LexicalChatInputHandle } from './LexicalChatInput';
@@ -36,11 +35,9 @@ import ImageAttachButton from './ImageAttachButton';
 function ChatInput() {
   const isAgentRunning = useAiStore((s) => s.isAgentRunning);
   const mode = useAiStore((s) => s.mode);
-  const effort = useAiStore((s) => s.effort);
   const selectedAgent = useAiStore((s) => s.selectedAgent);
   const planPhase = useAiStore((s) => s.planPhase);
   const activePlanPath = useAiStore((s) => s.activePlanPath);
-  const addUserMessage = useAiStore((s) => s.addUserMessage);
   const workspacePath = useWorkspaceStore((s) => s.workspacePath);
   const attachmentCount = useAiStore((s) => s.attachments.length);
   const pendingQuestion = useAiStore(selectPendingQuestion);
@@ -71,46 +68,16 @@ function ChatInput() {
       return;
     }
 
-    if (!workspacePath) return;
-    const attachments = useAiStore.getState().attachments;
-    addUserMessage(text, attachments);
-    useAiStore.getState().clearAttachments();
-
-    // The ONE place the panel branches on which agent is selected. An external
-    // agent runs its own loop and exposes its own modes (plan, accept-edits, …)
-    // as session config options, so UnityIDE's plan controller — which writes
-    // .unityide/plans/*.aplan and swaps prompt modes on the vendor loop — has no
-    // meaning for it and is skipped entirely.
-    if (selectedAgent !== 'hosted') {
-      void sendChatMessage(text, { mode, effort, attachments }).catch((e) =>
-        useAiStore.getState().setError(String(e)),
-      );
-      return;
+    // Sending from the SIDEBAR leaves the design chat's mode behind. The mode
+    // pill here shows Agent for a design thread (`modeOptionFor`), and this is
+    // what makes that true rather than a label the next send contradicts — the
+    // design chat belongs to the canvas dock, which sets the mode back when you
+    // send from there.
+    if (useAiStore.getState().mode === 'design') {
+      useAiStore.getState().setMode('agent');
     }
 
-    if (mode === 'plan') {
-      // Phase-aware: with a plan awaiting execution (or stuck 'executing'),
-      // typed text RESUMES the remaining steps instead of re-planning — the
-      // old unconditional startPlanning() here re-created the plan on any
-      // message, with the write tools stripped so the model couldn't resume.
-      // Last-resort net (T5): agent-service/plan-controller already surface
-      // their own errors via the store, but a bug that throws before that
-      // point would otherwise become an unhandled rejection.
-      void planController
-        .sendPlanModeMessage(text, attachments)
-        .catch((e) => useAiStore.getState().setError(String(e)));
-    } else if (mode === 'agent') {
-      // Preplanning flow (Task 11): on tiers with it enabled and no live todo
-      // list, this runs a read-only context-gathering pass first, then
-      // chains into execution — see preplan-controller.ts.
-      void agentModeController
-        .sendAgentModeMessage(text, attachments)
-        .catch((e) => useAiStore.getState().setError(String(e)));
-    } else {
-      void getAgentService()
-        .sendMessage(text, { mode, effort, attachments })
-        .catch((e) => useAiStore.getState().setError(String(e)));
-    }
+    dispatchComposerSend(text, useAiStore.getState().attachments);
   }
 
   function handleStop() {
@@ -122,15 +89,14 @@ function ChatInput() {
   // is blocked mid-run, but answering the question is exactly what unblocks it.
   const canSend = !!workspacePath && hasText && (!isAgentRunning || !!pendingQuestion);
 
-  const planResumePending =
-    mode === 'plan' && !!activePlanPath && (planPhase === 'awaiting-execute' || planPhase === 'executing');
   // The placeholder is a promise about what Enter does, so it has to know who
   // is receiving the message — `mode` is UnityIDE's and an external agent never
-  // reads it. See `data/composer-copy.ts`.
+  // reads it. See `data/composer-copy.ts`. The plan-mode branch asks the same
+  // function the send path uses, so the two cannot disagree.
   const placeholder = composerPlaceholder({
     agent: selectedAgent,
     mode,
-    planResumePending,
+    planRoute: routePlanSend(planPhase, activePlanPath),
     pendingQuestion: !!pendingQuestion,
   });
 

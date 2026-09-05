@@ -6,6 +6,7 @@ import { useWorkspaceStore } from '../../../stores/workspace';
 import { useProjectContextStore } from '../../../stores/project-context';
 import { useDebugStore } from '../../../stores/debug';
 import { notify } from '../../../stores/notifications';
+import type { TestRunCompletedPayload } from '../../../types/unity';
 
 export type TestMode = 'EditMode' | 'PlayMode';
 export type TestStatus = 'passed' | 'failed' | 'skipped' | 'running' | 'not-run';
@@ -48,6 +49,8 @@ interface RunState {
   done: number;
   passed: number;
   failed: number;
+  /** The run's id, from the `runStarted` test_event's `runId` (absent for a pre-protocol-4 package). */
+  runId?: string;
 }
 
 interface HeadlessResult {
@@ -83,6 +86,13 @@ interface TestState {
   results: Map<string, TestResult>;
   run: RunState | null;
   discovering: boolean;
+  /**
+   * The most recent `test_run_completed` push, verbatim. `null` until the
+   * first run of this session finishes — a caller awaiting a SPECIFIC run
+   * (see `unity-test-runner/services/test-run-wait-core.ts`) matches on its
+   * `runId`, not on this alone.
+   */
+  lastRunCompleted: TestRunCompletedPayload | null;
 
   discover: (workspacePath?: string) => Promise<void>;
   runAll: (mode: TestMode) => Promise<void>;
@@ -90,6 +100,8 @@ interface TestState {
   debugTest: (fullName: string, mode: TestMode) => Promise<void>;
   /** Apply a streamed `unity-test-event` payload (live bridge path). */
   applyEvent: (payload: Record<string, unknown>) => void;
+  /** Apply a `unity-test-run-completed` push — the real completion of a queued `runTests`. */
+  applyRunCompleted: (payload: TestRunCompletedPayload) => void;
 }
 
 export const useTestStore = create<TestState>((set, get) => ({
@@ -97,6 +109,7 @@ export const useTestStore = create<TestState>((set, get) => ({
   results: new Map(),
   run: null,
   discovering: false,
+  lastRunCompleted: null,
 
   discover: async (workspacePath) => {
     const ws = workspacePath ?? useWorkspaceStore.getState().workspacePath;
@@ -128,7 +141,7 @@ export const useTestStore = create<TestState>((set, get) => ({
     }
     try {
       await useDebugStore.getState().attach(false);
-      await bridgeRpc.runTests(mode, fullName);
+      await bridgeRpc.runTests(mode, fullName, crypto.randomUUID());
     } catch (err) {
       notify.error(`Debug test failed: ${err}`);
     }
@@ -146,6 +159,7 @@ export const useTestStore = create<TestState>((set, get) => ({
           done: 0,
           passed: 0,
           failed: 0,
+          runId: (payload.runId as string | null | undefined) ?? undefined,
         },
       });
     } else if (phase === 'testStarted') {
@@ -178,6 +192,16 @@ export const useTestStore = create<TestState>((set, get) => ({
       set((s) => (s.run ? { run: { ...s.run, active: false } } : {}));
     }
   },
+
+  applyRunCompleted: (payload) => {
+    set((s) => ({
+      lastRunCompleted: payload,
+      // The old `test_event` runFinished (above) already flips this for the
+      // live path; this covers a caller that only listens for the completed
+      // push, and is a no-op if runFinished already ran.
+      run: s.run ? { ...s.run, active: false } : s.run,
+    }));
+  },
 }));
 
 function markResult(
@@ -203,7 +227,7 @@ async function runWith(
   if (useUnityStore.getState().connected) {
     // Live path — results stream via `unity-test-event` → applyEvent.
     try {
-      await bridgeRpc.runTests(mode, filter);
+      await bridgeRpc.runTests(mode, filter, crypto.randomUUID());
     } catch (err) {
       notify.error(`Test run failed: ${err}`);
     }

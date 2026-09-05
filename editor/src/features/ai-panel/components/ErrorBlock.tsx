@@ -7,11 +7,12 @@
  * `ThinkingBlock`), and a Retry button when the error is retriable.
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { AlertTriangle, ChevronRight, ChevronDown } from 'lucide-react';
 import { useAiStore, type AiMessage } from '../../../stores/ai';
 import { useAuthStore } from '../../../stores/auth';
 import { retryFailedTurn } from '../services/retry-turn';
+import { formatRetryCountdown, resolveErrorDetail, retryUnlocked } from '../services/retry-countdown';
 
 interface Props {
   message: AiMessage;
@@ -26,7 +27,32 @@ function ErrorBlock({ message }: Props) {
   // last message's id.
   const isLatest = useAiStore((s) => s.messages[s.messages.length - 1]?.id === message.id);
   const turnError = message.turnError;
+  const retryAt = turnError?.retryAt;
+  const [now, setNow] = useState(() => Date.now());
+  const locked = retryAt !== undefined && !retryUnlocked(retryAt, now);
+
+  // Ticks `now` once a second ONLY while locked, so the countdown below
+  // stays live and the Retry button self-enables the moment it unlocks —
+  // with no remount, since `locked` (derived from `now` every render) is
+  // what the disabled prop reads. Cleared on unmount and the instant the
+  // lockout clears (the effect re-runs when `locked` flips to false and, on
+  // that run, `retryUnlocked` is already true, so no new interval is armed).
+  useEffect(() => {
+    if (retryAt === undefined || retryUnlocked(retryAt, now)) return;
+    const interval = setInterval(() => setNow(Date.now()), 1_000);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `now` is deliberately excluded: it's the effect's OWN output (via setNow), not an input that should restart the interval.
+  }, [retryAt, locked]);
+
   if (!turnError) return null;
+
+  // `detail` may carry a literal `{countdown}` placeholder (turn-errors.ts's
+  // hourly_cap/rate_limit copy) — filled in with the live countdown so the
+  // classification stays pure/deterministic and only the render layer knows
+  // about wall-clock time. Once the lockout has elapsed (or a restored session
+  // brings back a `retryAt` already in the past) the countdown sentence is
+  // dropped instead of rendering "Retry unlocks in 0:00."
+  const detail = resolveErrorDetail(turnError.detail, retryAt, now);
 
   function handleRetry() {
     // Last-resort net (same pattern ChatInput uses): retryFailedTurn's replay
@@ -43,7 +69,7 @@ function ErrorBlock({ message }: Props) {
         <span className="ai-message-error-title">{turnError.title}</span>
       </div>
 
-      {turnError.detail && <div className="ai-message-error-detail">{turnError.detail}</div>}
+      {detail && <div className="ai-message-error-detail">{detail}</div>}
 
       <button
         type="button"
@@ -62,8 +88,14 @@ function ErrorBlock({ message }: Props) {
               type="button"
               className="ai-message-error-retry"
               onClick={handleRetry}
-              disabled={isAgentRunning || !isLatest}
-              title={isLatest ? 'Retry' : 'Only the most recent turn can be retried'}
+              disabled={isAgentRunning || !isLatest || locked}
+              title={
+                locked && retryAt !== undefined
+                  ? `Retry unlocks in ${formatRetryCountdown(retryAt, now)}`
+                  : isLatest
+                    ? 'Retry'
+                    : 'Only the most recent turn can be retried'
+              }
             >
               Retry
             </button>

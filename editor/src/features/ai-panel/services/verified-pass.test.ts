@@ -29,6 +29,13 @@ function fakeDeps(overrides: Partial<VerifiedPassDeps> = {}): VerifiedPassDeps {
     bridgeConnected: () => false,
     triggerRecompile: async () => ({ status: 'unknown', reason: 'timeout' } as const),
     readGuid: async () => 'abc123',
+    // The subsystem and layout steps default to `'skipped'` here so the
+    // existing cases keep asserting exactly what they always did; the cases
+    // that care override them.
+    checkLayout: async () => 'skipped',
+    checkUiToolkit: async () => 'skipped',
+    checkScriptableObjects: async () => 'skipped',
+    checkInput: async () => 'skipped',
     ...overrides,
   };
 }
@@ -254,5 +261,200 @@ describe('runVerifiedPass', () => {
     expect(second.touchedFiles.sort()).toEqual(
       ['Assets/Scripts/Bar.cs', 'Assets/Scripts/Baz.cs'].sort(),
     );
+  });
+});
+
+
+// The three subsystems a compile can never speak for. The card's job is to say
+// what was actually checked, so the cases that matter are the ones where a step
+// must NOT claim a pass: nothing relevant was touched, or the step ran out of
+// budget.
+describe('verified-pass — the silent-failure subsystems', () => {
+  beforeEach(() => {
+    beginVerifiedPass();
+  });
+
+  it('reports each subsystem result on the card', async () => {
+    recordTouchedFile('/proj/Assets/UI/HUD.uxml');
+    const card = await runVerifiedPass(
+      WORKSPACE,
+      fakeDeps({
+        checkUiToolkit: async () => ({ queriesResolved: 11, queriesTotal: 12, problems: 2 }),
+        checkScriptableObjects: async () => ({ drift: 3 }),
+        checkInput: async () => 'clean',
+      }),
+    );
+    expect(card.uiToolkit).toEqual({ queriesResolved: 11, queriesTotal: 12, problems: 2 });
+    expect(card.scriptableObjects).toEqual({ drift: 3 });
+    expect(card.input).toBe('clean');
+  });
+
+  it('passes the touched files and the workspace to every step', async () => {
+    recordTouchedFile('/proj/Assets/UI/HUD.uxml');
+    let seen: { files: string[]; ws: string } | undefined;
+    await runVerifiedPass(
+      WORKSPACE,
+      fakeDeps({
+        checkUiToolkit: async (files, ws) => {
+          seen = { files, ws };
+          return 'clean';
+        },
+      }),
+    );
+    expect(seen).toEqual({ files: ['/proj/Assets/UI/HUD.uxml'], ws: WORKSPACE });
+  });
+
+  it('degrades a throwing step to skipped rather than failing the pass', async () => {
+    recordTouchedFile('/proj/Assets/UI/HUD.uxml');
+    const card = await runVerifiedPass(
+      WORKSPACE,
+      fakeDeps({
+        checkUiToolkit: async () => {
+          throw new Error('snapshot unavailable');
+        },
+        checkInput: async () => 'clean',
+      }),
+    );
+    expect(card.uiToolkit).toBe('skipped');
+    // The other steps still ran — one failure must not take the card down.
+    expect(card.input).toBe('clean');
+  });
+
+  it('never reports a subsystem as clean when the step said skipped', async () => {
+    recordTouchedFile('/proj/Assets/Scripts/Foo.cs');
+    const card = await runVerifiedPass(WORKSPACE, fakeDeps());
+    expect(card.uiToolkit).toBe('skipped');
+    expect(card.scriptableObjects).toBe('skipped');
+    expect(card.input).toBe('skipped');
+  });
+});
+
+// Task 13. The console and tests rows exist on the card, but the sweep itself
+// never fills them in: the check runs a SECOND `runVerifiedPass()` after its
+// one repair attempt, and only `agent-service.ts` can see both halves. A pass
+// that guessed here would put a console verdict on a card that never read the
+// console.
+describe('runVerifiedPass — the console/tests rows are the caller\'s to fill', () => {
+  beforeEach(() => beginVerifiedPass());
+
+  it('always reports them as skipped, whatever else the sweep found', async () => {
+    recordTouchedFile('/proj/Assets/Scripts/Foo.cs');
+    const data = await runVerifiedPass(WORKSPACE, fakeDeps());
+    expect(data.console).toBe('skipped');
+    expect(data.tests).toBe('skipped');
+    expect(data.repair).toBeUndefined();
+  });
+
+  it('reports them as skipped for a clean, fully-successful sweep too', async () => {
+    recordTouchedFile('/proj/Assets/Scripts/Foo.cs');
+    const data = await runVerifiedPass(
+      WORKSPACE,
+      fakeDeps({
+        bridgeConnected: () => true,
+        triggerRecompile: async () => ({ status: 'report', report: { started: false, messages: [] } }) as never,
+      }),
+    );
+    expect(data.compile).toBe('clean');
+    expect(data.console).toBe('skipped');
+    expect(data.tests).toBe('skipped');
+  });
+});
+
+describe('skipCompile — a design turn must not trigger a Unity recompile', () => {
+  it('reports the compile as skipped without calling the bridge', async () => {
+    beginVerifiedPass();
+    recordTouchedFile('/proj/Assets/UI/Main.uxml');
+    let recompiles = 0;
+    const card = await runVerifiedPass(
+      WORKSPACE,
+      fakeDeps({
+        bridgeConnected: async () => true,
+        triggerRecompile: async () => {
+          recompiles++;
+          return { status: 'report', report: { messages: [] } } as never;
+        },
+      }),
+      { skipCompile: true },
+    );
+    // A turn that wrote only .uxml/.uss cannot have introduced a compile error,
+    // and this step waits on a real Unity round trip rather than reading a
+    // cached verdict.
+    expect(recompiles).toBe(0);
+    expect(card.compile).toBe('skipped');
+  });
+
+  it('still compiles by default, so agent mode is untouched', async () => {
+    beginVerifiedPass();
+    recordTouchedFile('/proj/Assets/Scripts/A.cs');
+    let recompiles = 0;
+    await runVerifiedPass(
+      WORKSPACE,
+      fakeDeps({
+        bridgeConnected: async () => true,
+        triggerRecompile: async () => {
+          recompiles++;
+          return { status: 'report', report: { messages: [] } } as never;
+        },
+      }),
+    );
+    expect(recompiles).toBe(1);
+  });
+});
+
+describe('the layout row — the only check that renders anything', () => {
+  it('reports what was measured, so the count is evidence rather than a claim', async () => {
+    beginVerifiedPass();
+    recordTouchedFile('/proj/Assets/UI/Main.uxml');
+    const card = await runVerifiedPass(
+      WORKSPACE,
+      fakeDeps({ checkLayout: async () => ({ documents: 1, elements: 14, problems: 0, unstyled: 0 }) }),
+    );
+    expect(card.layout).toEqual({ documents: 1, elements: 14, problems: 0, unstyled: 0 });
+  });
+
+  it('carries the unstyled count, which a clean geometry pass hides completely', async () => {
+    // The failure this row could not previously see: every box the right size,
+    // zero geometry problems, and the screen renders as flat default grey.
+    beginVerifiedPass();
+    recordTouchedFile('/proj/Assets/UI/Main.uxml');
+    const card = await runVerifiedPass(
+      WORKSPACE,
+      fakeDeps({
+        checkLayout: async () => ({ documents: 1, elements: 14, problems: 0, unstyled: 9 }),
+      }),
+    );
+    expect(card.layout).toEqual({ documents: 1, elements: 14, problems: 0, unstyled: 9 });
+  });
+
+  it('carries geometry problems through, which no string check in this pass can see', async () => {
+    beginVerifiedPass();
+    recordTouchedFile('/proj/Assets/UI/Main.uxml');
+    const card = await runVerifiedPass(
+      WORKSPACE,
+      fakeDeps({ checkLayout: async () => ({ documents: 1, elements: 14, problems: 2, unstyled: 0 }) }),
+    );
+    expect(card.layout).toMatchObject({ problems: 2 });
+  });
+
+  it('is skipped, never clean, when the probe could not run', async () => {
+    // Global Constraint 2 — an unmeasured layout must not read as a good one.
+    beginVerifiedPass();
+    recordTouchedFile('/proj/Assets/UI/Main.uxml');
+    const card = await runVerifiedPass(WORKSPACE, fakeDeps({ checkLayout: async () => 'skipped' }));
+    expect(card.layout).toBe('skipped');
+  });
+
+  it('degrades to skipped rather than failing the pass when it throws', async () => {
+    beginVerifiedPass();
+    recordTouchedFile('/proj/Assets/UI/Main.uxml');
+    const card = await runVerifiedPass(
+      WORKSPACE,
+      fakeDeps({
+        checkLayout: async () => {
+          throw new Error('no DOM');
+        },
+      }),
+    );
+    expect(card.layout).toBe('skipped');
   });
 });

@@ -89,9 +89,12 @@ export const MODEL_CATALOG: Record<string, ModelInfo> = {
             inputCostPer1M: 0.40, outputCostPer1M: 1.80, cachedInputCostPer1M: 0.04,
         },
     },
-    // Standard/Deep-Think/Max EXECUTOR, and the low tier's planner (2026-08-27).
-    // Replaced spark/muse-spark-1.2-contributor in DEFAULT_MODEL_ROUTING — see
-    // config/plans.ts. Rates from the model page, verified 2026-08-27.
+    // UNROUTED since 2026-09-03: spark/muse-spark-1.3-contributor took every
+    // slot this held (Standard/Deep-Think/Max executor + the Standard
+    // planner), which it had itself taken from spark 1.2 on 2026-08-27. Kept
+    // as the documented rollback and for historical usage rows — see
+    // config/plans.ts's FLASH_MODEL. Rates from the model page, verified
+    // 2026-08-27.
     //
     // Context window: the model page publishes 1,048,576 while the live
     // /accounts/*/models catalog reports 1,310,720. Seeded at the SMALLER of
@@ -179,14 +182,35 @@ export const MODEL_CATALOG: Record<string, ModelInfo> = {
         inputCostPer1M: 5.00, outputCostPer1M: 30.00, cachedInputCostPer1M: 0.50,
         contextWindow: 400_000, maxOutput: 128_000,
     },
-    // Direct OpenAI-compatible provider (owner's Spark key; no CF gateway).
-    // NO LONGER ROUTED TO as of 2026-08-27 — glm-5.3-flash took every slot it
-    // held (config/plans.ts). Kept for two reasons that both still bite if it
-    // is deleted: usage rows are keyed by model id, so historical debits stop
-    // costing out, and it is the one-line rollback if glm-5.3-flash regresses.
-    // Output rate confirmed by owner; input/cached SEEDED = output rate as a
-    // conservative over-charge until the owner enters real prices via the
-    // admin Pricing panel. Context window conservative for the same reason.
+    // Standard/Deep-Think/Max EXECUTOR, and the Standard tier's planner
+    // (2026-09-03). Direct OpenAI-compatible provider called with the owner's
+    // own Spark key — no Workers AI, no AI Gateway, no Cloudflare in the
+    // request path at all, which is what `route: 'direct'` means here and the
+    // reason this entry is the only one whose availability is not Cloudflare's.
+    //
+    // Rates and window are CARRIED OVER VERBATIM from the 1.2 seed below and
+    // are deliberately conservative: input/cached seeded equal to the
+    // owner-confirmed output rate (a flat over-charge, never an under-charge)
+    // and a 131,072 window well under what the endpoint likely serves. Both
+    // are the owner's to correct through the admin Pricing panel.
+    //
+    // The window is not just a billing number: routes/config.ts publishes each
+    // tier's usable context as the MINIMUM across that tier's role models, so
+    // this 131,072 is once again the binding constraint on all three tiers
+    // (they read 1,048,576 / 1,048,576 / 400,000 while glm-5.3-flash held the
+    // executor slots). Raising it here raises every tier's window.
+    //
+    // It is also the ONLY model permitted to run at 'max' reasoning effort —
+    // config/routing.ts clamps every other provider to 'xhigh'.
+    'spark/muse-spark-1.3-contributor': {
+        route: 'direct',
+        inputCostPer1M: 0.20, outputCostPer1M: 0.20, cachedInputCostPer1M: 0.20,
+        contextWindow: 131_072, maxOutput: 16_384,
+    },
+    // Retired 2026-08-27 (glm-5.3-flash took its slots) and superseded
+    // outright by 1.3 on 2026-09-03. Unrouted; kept because usage rows are
+    // keyed by model id, so deleting it stops every historical debit against
+    // it from costing out.
     'spark/muse-spark-1.2-contributor': {
         route: 'direct',
         inputCostPer1M: 0.20, outputCostPer1M: 0.20, cachedInputCostPer1M: 0.20,

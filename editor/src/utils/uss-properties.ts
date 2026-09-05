@@ -189,3 +189,78 @@ export const USS_DEFAULTS: Readonly<Record<string, string>> = {
   'align-items': 'stretch',
   'flex-basis': 'auto',
 };
+
+// ── Property grouping, for reading a resolved style ──────────────────────────
+
+/**
+ * The four questions a UI Toolkit style answers.
+ *
+ * Alphabetical order is right for a lookup and wrong for reading: `align-items`
+ * and `flex-direction` decide the same thing and sort twelve properties apart.
+ * Grouping puts them together, and putting Layout first matches the order the
+ * problem is usually debugged in — where and how big, then what it looks like.
+ */
+export type UssPropertyGroup = 'Layout' | 'Appearance' | 'Text' | 'Motion';
+
+export const USS_PROPERTY_GROUP_ORDER: readonly UssPropertyGroup[] = [
+  'Layout',
+  'Appearance',
+  'Text',
+  'Motion',
+];
+
+/** Prefix rules, longest match first. Order within a group is not significant. */
+const GROUP_PREFIXES: ReadonlyArray<[UssPropertyGroup, readonly string[]]> = [
+  ['Motion', ['transition', 'transform-origin', 'translate', 'rotate', 'scale']],
+  [
+    'Text',
+    [
+      'color', 'font-size', 'letter-spacing', 'word-spacing', 'white-space',
+      'text-overflow', 'text-shadow',
+      '-unity-font', '-unity-text', '-unity-paragraph', '-unity-word-wrap',
+      '-unity-rich-text', '-unity-editor-text-rendering-mode',
+    ],
+  ],
+  [
+    'Appearance',
+    [
+      'background', 'border', 'opacity', 'visibility', 'cursor',
+      '-unity-background', '-unity-slice', '-unity-scaled-backgrounds',
+      '-unity-overflow-clip-box', '-unity-clipping', '-unity-image-position',
+    ],
+  ],
+  [
+    'Layout',
+    [
+      'align', 'flex', 'justify-content', 'display', 'position',
+      'left', 'top', 'right', 'bottom',
+      'width', 'height', 'min-width', 'min-height', 'max-width', 'max-height',
+      'overflow', 'margin', 'padding',
+      '-unity-stretch', '-unity-content-offset',
+    ],
+  ],
+];
+
+/**
+ * Which group a property reads under.
+ *
+ * Anything unrecognised — a typo, a CSS-only property, a Unity property added
+ * after this list — falls to Appearance rather than being dropped, because a
+ * declaration the panel silently omits is worse than one filed imprecisely.
+ */
+export function ussPropertyGroup(property: string): UssPropertyGroup {
+  const name = property.trim().toLowerCase();
+  let best: UssPropertyGroup = 'Appearance';
+  let bestLength = -1;
+  for (const [group, prefixes] of GROUP_PREFIXES) {
+    for (const prefix of prefixes) {
+      if (name === prefix || name.startsWith(`${prefix}-`)) {
+        if (prefix.length > bestLength) {
+          best = group;
+          bestLength = prefix.length;
+        }
+      }
+    }
+  }
+  return best;
+}

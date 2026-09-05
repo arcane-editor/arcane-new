@@ -11,10 +11,13 @@ function walk(dir: string): string[] {
   for (const entry of readdirSync(dir)) {
     const full = path.join(dir, entry);
     if (statSync(full).isDirectory()) out.push(...walk(full));
-    else if (/\.tsx?$/.test(full) && !/\.test\.tsx?$/.test(full)) out.push(full);
+    else if (/\.tsx?$/.test(full)) out.push(full);
   }
   return out;
 }
+
+const ALL_SOURCES = walk(SRC);
+const SHIPPING_SOURCES = ALL_SOURCES.filter((f) => !/\.test\.tsx?$/.test(f));
 
 /**
  * A document URI is built in one place, `fileUri()`, and read back by
@@ -36,7 +39,7 @@ function walk(dir: string): string[] {
 describe('file:// URI construction', () => {
   it('is not hand-rolled outside document-sync.ts', () => {
     const offenders: string[] = [];
-    for (const file of walk(SRC)) {
+    for (const file of SHIPPING_SOURCES) {
       if (file === CANONICAL) continue;
       const text = readFileSync(file, 'utf8');
       text.split('\n').forEach((line, i) => {
@@ -46,6 +49,34 @@ describe('file:// URI construction', () => {
           offenders.push(`${path.relative(SRC, file)}:${i + 1}`);
         }
       });
+    }
+    expect(offenders).toEqual([]);
+  });
+});
+
+/**
+ * The same conversion in the other direction, and the same Windows-only blast
+ * radius: `new URL('.', import.meta.url).pathname` is "/D:/a/…" there, a path
+ * with a leading slash that `join` turns into "\D:\a\…" and no fs call can
+ * open. It reads perfectly on macOS and Linux, so it lands green and breaks
+ * only on windows-latest — which is exactly how it got in twice, first in
+ * `external-agent-billing.test.ts` and again in `design-session-wiring.test.ts`
+ * after that one was fixed. `fileURLToPath` is the only correct reader, and
+ * test files count: this rule scans them too, because both offenders were tests.
+ */
+describe('file URL -> path conversion', () => {
+  it('never reads .pathname off import.meta.url', () => {
+    const offenders: string[] = [];
+    for (const file of ALL_SOURCES) {
+      // This file spells the pattern out in prose above; everything else means it.
+      if (file === import.meta.path) continue;
+      readFileSync(file, 'utf8')
+        .split('\n')
+        .forEach((line, i) => {
+          if (/import\.meta\.url\s*\)[^\n]*\.pathname/.test(line)) {
+            offenders.push(`${path.relative(SRC, file)}:${i + 1}`);
+          }
+        });
     }
     expect(offenders).toEqual([]);
   });

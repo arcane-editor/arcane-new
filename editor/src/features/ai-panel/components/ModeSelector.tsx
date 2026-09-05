@@ -3,6 +3,10 @@
  * chevron, opening a popover menu for ASK / AGENT / PLAN. Replaces the prior
  * three-segment control to free up horizontal space in the composer toolbar
  * and to match the user's reference design.
+ *
+ * DESIGN is shown but never listed: the design dock on a `.uxml` canvas is the
+ * only way in, so the pill reports it (`modeOptionFor`) and the menu offers the
+ * three modes you can leave it for.
  */
 
 import { useEffect, useRef, useState } from 'react';
@@ -10,7 +14,7 @@ import { createPortal } from 'react-dom';
 import { ChevronDown, Check } from 'lucide-react';
 import { useAiStore } from '../../../stores/ai';
 import type { ChatMode } from '../services/types';
-import { MODES } from '../data/modes';
+import { MODES, modeOptionFor } from '../data/modes';
 import Tooltip from '../../../components/Tooltip';
 
 const POPOVER_WIDTH = 240;
@@ -25,7 +29,7 @@ function ModeSelector() {
   const popoverRef = useRef<HTMLDivElement>(null);
   const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
 
-  const active = MODES.find((m) => m.value === mode) ?? MODES[1];
+  const active = modeOptionFor(mode);
   const ActiveIcon = active.Icon;
 
   function toggle() {

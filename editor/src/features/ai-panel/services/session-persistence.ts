@@ -13,6 +13,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { join } from '@tauri-apps/api/path';
 import type { AiMessage, HostedPlanEntry, PlanPhase } from '../../../stores/ai';
+import type { PlanNote } from '../../../types';
 import { deleteCheckpointsFile } from './checkpoints/checkpoint-store-io';
 import { deleteReviewsFile } from './edit-review/review-store-io';
 import { coerceAgentKind, type AgentKind, type ChatMode, type Effort } from './types';
@@ -67,6 +68,13 @@ export interface SessionData {
   planPhase?: PlanPhase;
   activePlanPath?: string | null;
   /**
+   * Pending suggestions per plan path. Unlike `planPhase`, this is not process
+   * state — it is what the user typed about a document — so it restores
+   * verbatim rather than through a normalizer. Absent on legacy files and on
+   * sessions with nothing pending.
+   */
+  planNotes?: Record<string, PlanNote[]>;
+  /**
    * The EXTERNAL agent's own session id (`agentKind !== 'hosted'`), so a
    * reopened transcript can be resumed with its full context via ACP
    * `session/load` rather than restarting cold.
@@ -76,6 +84,16 @@ export interface SessionData {
    * `session/load` failing is a soft-resume, not an error.
    */
   acpSessionId?: string | null;
+  /**
+   * The `.uxml` a DESIGN session is scoped to, workspace-relative.
+   *
+   * This is what makes the design dock's thread findable: the dock asks
+   * `listSessions` which saved session belongs to the document on the canvas,
+   * rather than keeping a second index file that could disagree with the
+   * session directory. Absent on every non-design session, which is all of
+   * them before this existed.
+   */
+  designDocument?: string | null;
 }
 
 /** Lightweight header used by the history list (no full message bodies). */
@@ -89,6 +107,8 @@ export interface SessionSummary {
   messageCount: number;
   /** How many plans this session produced; 0 for sessions that made none. */
   planCount: number;
+  /** See `SessionData.designDocument`. `null` for every ordinary chat. */
+  designDocument: string | null;
 }
 
 export interface SaveSessionInput {
@@ -106,8 +126,12 @@ export interface SaveSessionInput {
   /** See `SessionData.planPhase` / `activePlanPath`. */
   planPhase?: PlanPhase;
   activePlanPath?: string | null;
+  /** See `SessionData.planNotes`. */
+  planNotes?: Record<string, PlanNote[]>;
   /** See `SessionData.acpSessionId`. */
   acpSessionId?: string | null;
+  /** See `SessionData.designDocument`. */
+  designDocument?: string | null;
 }
 
 let sessionsDir: string | null = null;
@@ -185,17 +209,27 @@ export function buildSessionData(input: SaveSessionInput): SessionData {
     ...(input.activePlanPath && input.planPhase && input.planPhase !== 'idle'
       ? { planPhase: input.planPhase, activePlanPath: input.activePlanPath }
       : {}),
+    // Same omission rule, but keyed on the notes themselves rather than on
+    // plan phase: a note belongs to a plan FILE, and outlives any particular
+    // phase the session happened to be in when it was saved.
+    ...(input.planNotes && Object.keys(input.planNotes).length > 0
+      ? { planNotes: input.planNotes }
+      : {}),
     // Same omission rule again: a UnityIDE session never carries an agent id.
     ...(input.acpSessionId ? { acpSessionId: input.acpSessionId } : {}),
+    // And again: only a design session names a document.
+    ...(input.designDocument ? { designDocument: input.designDocument } : {}),
   };
 }
 
 /**
  * Pure — maps saved plan state to what a fresh process can honestly claim.
- * 'executing' ⇒ 'awaiting-execute' (the run died with the old process; the
- * plan file's [x] ticks carry the progress), 'planning' ⇒ 'idle' (nothing to
- * resume — the plan was never written), and a pending phase without a plan
- * path degrades to 'idle'.
+ * 'executing' ⇒ 'interrupted' (the run died with the old process; the plan
+ * file's [x] ticks carry the progress, and 'interrupted' — unlike
+ * 'awaiting-execute' — is what tells `routePlanSend` this plan resumes
+ * rather than starts fresh), 'interrupted' ⇒ 'interrupted' (already honest),
+ * 'planning' ⇒ 'idle' (nothing to resume — the plan was never written), and
+ * a pending phase without a plan path degrades to 'idle'.
  */
 export function normalizePlanRestore(
   phase: PlanPhase | undefined,
@@ -203,8 +237,11 @@ export function normalizePlanRestore(
 ): { planPhase: PlanPhase; activePlanPath: string | null } {
   const path = activePlanPath ?? null;
   if (!path) return { planPhase: 'idle', activePlanPath: null };
-  if (phase === 'awaiting-execute' || phase === 'executing') {
+  if (phase === 'awaiting-execute') {
     return { planPhase: 'awaiting-execute', activePlanPath: path };
+  }
+  if (phase === 'executing' || phase === 'interrupted') {
+    return { planPhase: 'interrupted', activePlanPath: path };
   }
   return { planPhase: 'idle', activePlanPath: null };
 }
@@ -397,6 +434,7 @@ export async function listSessions(workspacePath?: string | null): Promise<Sessi
         messageCount: data.messages?.length ?? 0,
         // Absent on sessions written before plans were linked.
         planCount: data.plans?.length ?? 0,
+        designDocument: data.designDocument ?? null,
       });
     } catch {
       // skip malformed files

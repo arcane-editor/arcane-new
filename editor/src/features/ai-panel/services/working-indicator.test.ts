@@ -3,6 +3,8 @@ import {
   isAwaitingUser,
   showsInlineIndicator,
   showsTailIndicator,
+  modelCallLabel,
+  showsModelCallCount,
 } from './working-indicator';
 import type { AiMessage } from '../../../stores/ai';
 
@@ -112,5 +114,37 @@ describe('showsTailIndicator', () => {
 
   it('shows on a turn that has started before its first message exists', () => {
     expect(showsTailIndicator({ isAgentRunning: true, last: null })).toBe(true);
+  });
+});
+
+describe('modelCallLabel', () => {
+  it('is singular at exactly 1', () => {
+    expect(modelCallLabel(1)).toBe('1 model call');
+  });
+
+  it('is plural for every other count, including 0', () => {
+    expect(modelCallLabel(12)).toBe('12 model calls');
+    expect(modelCallLabel(0)).toBe('0 model calls');
+    expect(modelCallLabel(2)).toBe('2 model calls');
+  });
+});
+
+describe('showsModelCallCount', () => {
+  it('is true while running with at least one call reported', () => {
+    expect(showsModelCallCount(true, { used: 1 })).toBe(true);
+    expect(showsModelCallCount(true, { used: 12 })).toBe(true);
+  });
+
+  it('is false while the agent is idle, even with a stale budget', () => {
+    expect(showsModelCallCount(false, { used: 5 })).toBe(false);
+  });
+
+  it('is false when no call has been reported yet (used === 0)', () => {
+    expect(showsModelCallCount(true, { used: 0 })).toBe(false);
+  });
+
+  it('is false when there is no budget at all', () => {
+    expect(showsModelCallCount(true, null)).toBe(false);
+    expect(showsModelCallCount(false, null)).toBe(false);
   });
 });

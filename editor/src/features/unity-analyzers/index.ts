@@ -30,6 +30,11 @@ import {
 } from './services/unity-events-cache';
 import { useUnityIndexStore } from '../../stores/unity-index';
 import { blankStringsAndComments } from './services/csharp-scan';
+export { blankStringsAndComments } from './services/csharp-scan';
+import {
+  registerUiToolkitCsProviders,
+  disposeUiToolkitCsProviders,
+} from './services/uitoolkit-providers';
 import { useWorkspaceStore } from '../../stores/workspace';
 
 let initialized = false;
@@ -50,6 +55,10 @@ export function initUnityAnalyzers(monaco: Monaco): void {
   registerAllRules();
   stopEngineFn = startEngine(monaco);
   registerFsaRename();
+  // Completion, hover and go-to-definition for the `Q<T>("name")` boundary.
+  // Registered next to csharp-ls, not instead of it: Monaco merges completions,
+  // stacks hovers, and csharp-ls has no definition for a string literal.
+  registerUiToolkitCsProviders(monaco, () => useWorkspaceStore.getState().workspacePath);
 
   // The ProjectSettings snapshot backs the tag/layer/scene/input checks. It is
   // loaded per workspace and re-run afterwards, because the rules read it
@@ -86,6 +95,28 @@ export function initUnityAnalyzers(monaco: Monaco): void {
       dropAllListenerSnapshots();
       refreshAll(monaco);
     }
+    // Its own counter, not `indexRevision`: reloading the input snapshot costs
+    // a project scan, and it is only stale when the assets themselves changed.
+    // Without this the rules keep validating literals against the actions the
+    // asset had at workspace open, so renaming an action in Unity makes
+    // UNITY0401 report a live action as missing until the project is reopened.
+    if (state.inputActionsRevision !== prev.inputActionsRevision) {
+      void loadInputActions(useWorkspaceStore.getState().workspacePath).then(() =>
+        refreshAll(monaco),
+      );
+    }
+    // Same treatment, same reason: without this, editing a `.uxml` or `.uss` in
+    // Unity leaves the query check — and the AI's `unity_ui_toolkit` — reading
+    // the documents as they were when the workspace was opened. `loadUiToolkitIndex`
+    // resolves after its cheap first phase and fires `onUiToolkitIndexChanged`
+    // when the project-wide C# walk lands, so the subscription above re-runs
+    // the rules a second time on its own.
+    if (state.uiToolkitRevision !== prev.uiToolkitRevision) {
+      void loadUiToolkitIndex(
+        useWorkspaceStore.getState().workspacePath,
+        blankStringsAndComments,
+      ).then(() => refreshAll(monaco));
+    }
   });
 }
 
@@ -98,6 +129,7 @@ export function stopUnityAnalyzers(): void {
     stopEngine();
   }
   unregisterFsaRename();
+  disposeUiToolkitCsProviders();
   unsubWorkspace?.();
   unsubWorkspace = null;
   unsubUiToolkit?.();
@@ -174,3 +206,44 @@ export type {
   SoWidgetKind,
   SoBaseKind,
 } from './services/so-schema';
+
+// ── Input System snapshot ────────────────────────────────────────────────────
+//
+// Exported for the AI harness's `unity_input_actions` tool, which needs the
+// same parsed view of the project's `.inputactions` assets the rules validate
+// against. Sharing the cache rather than re-scanning means the agent and the
+// Problems panel can never disagree about which actions exist.
+export {
+  getInputActionsIndex,
+  loadInputActions,
+  buildInputActionsIndex,
+} from './services/inputactions-cache';
+export type {
+  InputActionsIndex,
+  KnownAction,
+} from './services/inputactions-cache';
+
+// ── UI Toolkit snapshot ──────────────────────────────────────────────────────
+//
+// Exported for the AI harness's `unity_ui_toolkit` tool and its write gate, for
+// the same reason the Input System block above is exported: the agent must read
+// the SAME parsed view of `.uxml`/`.uss` that UNITY0501 validates `Q<T>("name")`
+// against. A private scan here would let the agent and the Problems panel
+// disagree about which element names exist, which is the one thing that makes a
+// grounded tool worse than no tool.
+export {
+  getUxmlIndex,
+  getUssIndex,
+  getCsUiRefIndex,
+  loadUiToolkitIndex,
+  onUiToolkitIndexChanged,
+  buildUxmlIndex,
+  buildUssIndex,
+  buildCsUiRefIndex,
+} from './services/uitoolkit-cache';
+export type {
+  UxmlIndex,
+  UssIndex,
+  CsUiRefIndex,
+  ElementDecl,
+} from './services/uitoolkit-cache';

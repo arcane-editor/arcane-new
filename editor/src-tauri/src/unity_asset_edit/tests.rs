@@ -443,6 +443,19 @@ fn edit(file_id: &str, path: &str, value: &str) -> AssetEdit {
         path: path.into(),
         value: value.into(),
         expected: None,
+        if_missing: IfMissing::Reject,
+        remove: false,
+    }
+}
+
+fn remove(file_id: &str, path: &str) -> AssetEdit {
+    AssetEdit { remove: true, ..edit(file_id, path, "") }
+}
+
+fn insert_after(file_id: &str, path: &str, value: &str, anchor: &str) -> AssetEdit {
+    AssetEdit {
+        if_missing: IfMissing::InsertAfter { anchor: anchor.into() },
+        ..edit(file_id, path, value)
     }
 }
 
@@ -872,4 +885,377 @@ fn reading_a_missing_file_errors_without_creating_it() {
     let path = dir.path().join("Nope.asset");
     assert!(unity_asset_read_fields(path.to_string_lossy().to_string(), None).is_err());
     assert!(!path.exists());
+}
+
+// ── Project inventory ───────────────────────────────────────────────────────
+
+#[test]
+fn script_guid_is_read_from_the_monobehaviour_document() {
+    let c = weapon();
+    assert_eq!(
+        script_guid_of(&c).as_deref(),
+        Some("a1b2c3d4e5f60718293a4b5c6d7e8f90")
+    );
+}
+
+#[test]
+fn script_guid_is_read_from_a_crlf_asset() {
+    assert_eq!(
+        script_guid_of(&crlf(&weapon())).as_deref(),
+        Some("a1b2c3d4e5f60718293a4b5c6d7e8f90")
+    );
+}
+
+#[test]
+fn an_asset_with_no_monobehaviour_document_has_no_script_guid() {
+    // e.g. a ProjectSettings-style asset — must be skipped, not guessed at.
+    let src = "%YAML 1.1\n--- !u!1001 &1\nPrefabInstance:\n  m_Name: x\n";
+    assert_eq!(script_guid_of(src), None);
+}
+
+#[test]
+fn script_guid_ignores_a_guid_on_a_later_line() {
+    // The icon reference below must not be mistaken for the script.
+    let c = weapon();
+    let guid = script_guid_of(&c).unwrap();
+    assert_ne!(guid, "0f1e2d3c4b5a69788796a5b4c3d2e1f0", "picked up the icon guid");
+}
+
+// ── Insertion ───────────────────────────────────────────────────────────────
+//
+// A field added to the C# class after the asset was authored is simply not in
+// the file. Unity supplies the default at load, so nothing is broken — but the
+// value can never be tuned until someone writes the key.
+
+#[test]
+fn a_missing_key_is_rejected_by_default() {
+    let content = weapon();
+    let err = apply_edits_to_text(&content, &[edit("11400000", "armorPierce", "0.15")]).unwrap_err();
+    assert!(matches!(err[0], EditRejection::KeyNotFound { .. }));
+}
+
+#[test]
+fn inserts_after_the_named_anchor_keeping_serialization_order() {
+    let content = weapon();
+    let out = apply_edits_to_text(
+        &content,
+        &[insert_after("11400000", "armorPierce", "0.15", "damage")],
+    )
+    .unwrap();
+    assert!(out.contains("  damage: 12\n  armorPierce: 0.15\n  attackSpeed: 1.35"), "got:\n{out}");
+}
+
+#[test]
+fn an_inserted_line_copies_the_anchor_indent_and_terminator() {
+    for (flavour, content) in flavours(&weapon()) {
+        let out = apply_edits_to_text(
+            &content,
+            &[insert_after("11400000", "armorPierce", "0.15", "damage")],
+        )
+        .unwrap();
+        let needle = if flavour.starts_with("crlf") {
+            "\r\n  armorPierce: 0.15\r\n"
+        } else {
+            "\n  armorPierce: 0.15\n"
+        };
+        assert!(out.contains(needle), "{flavour}: wrong line ending or indent");
+    }
+}
+
+#[test]
+fn insertion_changes_nothing_but_the_inserted_line() {
+    // P2 with a zero-length span: pure insertion, nothing displaced.
+    let content = weapon();
+    let e = entries_of(&content);
+    let at = entry(&e, "damage").entry_span.end;
+    let out = apply_edits_to_text(
+        &content,
+        &[insert_after("11400000", "armorPierce", "0.15", "damage")],
+    )
+    .unwrap();
+    let inserted = "\n  armorPierce: 0.15";
+    assert_only_span_changed(content.as_bytes(), out.as_bytes(), at..at, inserted.len());
+}
+
+#[test]
+fn insert_at_end_targets_the_document_not_the_file() {
+    let content = fixture("WeaponSubAssets.asset");
+    let mut e = edit("11400000", "added", "1");
+    e.if_missing = IfMissing::InsertAtEnd;
+    let out = apply_edits_to_text(&content, &[e]).unwrap();
+    // Lands before the second document's header, not at EOF.
+    let added = out.find("added: 1").unwrap();
+    let second = out.find("--- !u!114 &11400002").unwrap();
+    assert!(added < second, "the key escaped into the next document");
+}
+
+#[test]
+fn insert_at_the_end_of_a_file_without_a_trailing_newline_adds_none() {
+    let content = no_final_newline(&weapon());
+    let mut e = edit("11400000", "added", "1");
+    e.if_missing = IfMissing::InsertAtEnd;
+    let out = apply_edits_to_text(&content, &[e]).unwrap();
+    assert!(out.ends_with("added: 1"), "got tail: {:?}", &out[out.len() - 40..]);
+    assert!(!out.ends_with('\n'));
+}
+
+#[test]
+fn an_unknown_anchor_falls_back_to_the_end_of_the_document() {
+    let content = weapon();
+    let out = apply_edits_to_text(
+        &content,
+        &[insert_after("11400000", "added", "1", "noSuchField")],
+    )
+    .unwrap();
+    assert!(out.contains("added: 1"));
+}
+
+#[test]
+fn an_inserted_value_is_validated_like_any_other() {
+    let content = weapon();
+    let err = apply_edits_to_text(
+        &content,
+        &[insert_after("11400000", "armorPierce", "line\nbreak", "damage")],
+    )
+    .unwrap_err();
+    assert!(matches!(err[0], EditRejection::IllegalValue { .. }));
+}
+
+#[test]
+fn an_insertion_is_a_readable_asset_afterwards() {
+    let content = weapon();
+    let out = apply_edits_to_text(
+        &content,
+        &[insert_after("11400000", "armorPierce", "0.15", "damage")],
+    )
+    .unwrap();
+    let e = entries_of(&out);
+    assert_eq!(value_text(&out, entry(&e, "armorPierce")), "0.15");
+    // And nothing else moved.
+    assert_eq!(value_text(&out, entry(&e, "attackSpeed")), "1.35");
+    assert_eq!(value_text(&out, entry(&e, "tint")), "{r: 1, g: 0.5, b: 0, a: 1}");
+}
+
+#[test]
+fn several_insertions_in_one_batch_all_land() {
+    let content = weapon();
+    let out = apply_edits_to_text(
+        &content,
+        &[
+            insert_after("11400000", "armorPierce", "0.15", "damage"),
+            insert_after("11400000", "critChance", "0.05", "attackSpeed"),
+        ],
+    )
+    .unwrap();
+    assert!(out.contains("armorPierce: 0.15"));
+    assert!(out.contains("critChance: 0.05"));
+}
+
+#[test]
+fn insertion_wire_payload_deserializes() {
+    // Copied from the TS call site; `check-invoke-args.mjs` cannot see inside
+    // `edits`, so this is what catches a tag or field rename.
+    let json = r#"[
+      { "fileId": "11400000", "path": "armorPierce", "value": "0",
+        "ifMissing": { "mode": "insertAfter", "anchor": "damage" } },
+      { "fileId": "11400000", "path": "x", "value": "1",
+        "ifMissing": { "mode": "insertAtEnd" } }
+    ]"#;
+    let edits: Vec<AssetEdit> = serde_json::from_str(json).expect("wire payload must deserialize");
+    assert!(matches!(&edits[0].if_missing, IfMissing::InsertAfter { anchor } if anchor == "damage"));
+    assert!(matches!(edits[1].if_missing, IfMissing::InsertAtEnd));
+}
+
+// ── Removal ─────────────────────────────────────────────────────────────────
+//
+// Needed for the drift report: a field rename is insert-new + delete-old, and
+// both have to land in one atomic write or a crash between them loses the value.
+
+#[test]
+fn removes_a_key_and_its_line() {
+    let content = weapon();
+    let out = apply_edits_to_text(&content, &[remove("11400000", "damage")]).unwrap();
+    assert!(!out.contains("damage: 12"));
+    // No blank line left behind.
+    assert!(out.contains("  displayName: Iron Sword\n  attackSpeed: 1.35"), "got:\n{out}");
+}
+
+#[test]
+fn removal_leaves_every_other_byte_alone() {
+    let content = weapon();
+    let e = entries_of(&content);
+    let span = removal_span(&content, entry(&e, "damage"));
+    let out = apply_edits_to_text(&content, &[remove("11400000", "damage")]).unwrap();
+    assert_only_span_changed(content.as_bytes(), out.as_bytes(), span, 0);
+}
+
+#[test]
+fn removes_a_block_valued_key_with_all_its_lines() {
+    let content = weapon();
+    let out = apply_edits_to_text(&content, &[remove("11400000", "resistances")]).unwrap();
+    assert!(!out.contains("resistances:"));
+    assert!(!out.contains("- fire"));
+    assert!(!out.contains("- ice"));
+    // The following key survives intact.
+    assert!(out.contains("nested:"));
+}
+
+#[test]
+fn removal_works_in_a_crlf_file() {
+    let content = crlf(&weapon());
+    let out = apply_edits_to_text(&content, &[remove("11400000", "damage")]).unwrap();
+    assert_eq!(out.matches("\r\n").count(), out.matches('\n').count());
+    assert!(!out.contains("damage: 12"));
+}
+
+#[test]
+fn removing_the_last_key_of_a_file_without_a_trailing_newline() {
+    let content = no_final_newline(&weapon());
+    let out = apply_edits_to_text(&content, &[remove("11400000", "trailingSpaces")]).unwrap();
+    assert!(!out.contains("trailingSpaces"));
+    assert!(!out.ends_with('\n'), "must not gain a trailing newline");
+    assert!(out.ends_with("    damage: 999"), "got tail: {:?}", &out[out.len() - 30..]);
+}
+
+#[test]
+fn removing_an_absent_key_is_rejected() {
+    let content = weapon();
+    let err = apply_edits_to_text(&content, &[remove("11400000", "nope")]).unwrap_err();
+    assert!(matches!(err[0], EditRejection::KeyNotFound { .. }));
+}
+
+#[test]
+fn a_guarded_removal_refuses_when_the_value_moved() {
+    let content = weapon();
+    let mut r = remove("11400000", "damage");
+    r.expected = Some("999".into());
+    let err = apply_edits_to_text(&content, &[r]).unwrap_err();
+    assert!(matches!(err[0], EditRejection::ValueMismatch { .. }));
+}
+
+#[test]
+fn rename_is_one_atomic_insert_plus_delete() {
+    // The drift fix: `dmg` becomes `damage`, value preserved, in ONE write.
+    let (content, _) = scan_snippet("  dmg: 14.5\n  fireRate: 11.2\n");
+    let out = apply_edits_to_text(
+        &content,
+        &[
+            insert_after("1", "damage", "14.5", "dmg"),
+            remove("1", "dmg"),
+        ],
+    )
+    .unwrap();
+    assert!(out.contains("  damage: 14.5"), "got:\n{out}");
+    assert!(!out.contains("dmg:"), "old key survived:\n{out}");
+    assert!(out.contains("  fireRate: 11.2"));
+}
+
+#[test]
+fn removal_wire_payload_deserializes() {
+    let json = r#"[{ "fileId": "1", "path": "legacyKick", "value": "", "remove": true }]"#;
+    let edits: Vec<AssetEdit> = serde_json::from_str(json).expect("must deserialize");
+    assert!(edits[0].remove);
+}
+
+#[test]
+fn rename_preserves_line_endings_and_neighbours() {
+    for (flavour, base) in flavours("--- !u!114 &1\nMonoBehaviour:\n  a: 1\n  dmg: 14.5\n  b: 2\n") {
+        let out = apply_edits_to_text(
+            &base,
+            &[insert_after("1", "damage", "14.5", "dmg"), remove("1", "dmg")],
+        )
+        .unwrap_or_else(|r| panic!("{flavour}: {r:?}"));
+        let nl = if flavour.starts_with("crlf") { "\r\n" } else { "\n" };
+        assert!(out.contains(&format!("  a: 1{nl}  damage: 14.5{nl}  b: 2")), "{flavour}:\n{out:?}");
+        if flavour.starts_with("crlf") {
+            assert_eq!(out.matches("\r\n").count(), out.matches('\n').count(), "{flavour}");
+        }
+        if flavour.contains("no-final-nl") {
+            assert!(!out.ends_with('\n'), "{flavour}");
+        }
+    }
+}
+
+#[test]
+fn renaming_the_last_key_keeps_the_files_trailing_shape() {
+    let base = no_final_newline("--- !u!114 &1\nMonoBehaviour:\n  a: 1\n  dmg: 14.5\n");
+    let out = apply_edits_to_text(
+        &base,
+        &[insert_after("1", "damage", "14.5", "dmg"), remove("1", "dmg")],
+    )
+    .unwrap();
+    assert!(out.ends_with("  damage: 14.5"), "got: {out:?}");
+    assert!(!out.contains("dmg:"));
+}
+
+#[test]
+fn a_rename_and_an_unrelated_edit_coexist_in_one_batch() {
+    let (content, _) = scan_snippet("  a: 1\n  dmg: 14.5\n  b: 2\n");
+    let out = apply_edits_to_text(
+        &content,
+        &[
+            insert_after("1", "damage", "14.5", "dmg"),
+            remove("1", "dmg"),
+            edit("1", "b", "9"),
+        ],
+    )
+    .unwrap();
+    assert!(out.contains("  damage: 14.5"));
+    assert!(out.contains("  b: 9"));
+    assert!(!out.contains("dmg:"));
+}
+
+#[test]
+fn two_edits_on_the_same_key_are_still_rejected() {
+    // The merge must not weaken the real conflict check.
+    let content = weapon();
+    let err = apply_edits_to_text(
+        &content,
+        &[edit("11400000", "damage", "1"), edit("11400000", "damage", "2")],
+    )
+    .unwrap_err();
+    assert!(matches!(err[0], EditRejection::OverlappingEdits { .. }), "got {err:?}");
+}
+
+// ── The browser lists the user's types, not the packages' ───────────────────
+//
+// A Unity project is full of `.asset` files owned by packages — input actions,
+// TMP settings, render-pipeline assets. Their `m_Script` points into
+// `Library/PackageCache`, which the index does not walk, so the guid never
+// resolves. Listing those as `guid 2ec4…` is noise.
+
+#[test]
+fn a_script_under_assets_is_the_users_own() {
+    assert!(is_project_script("/proj", "/proj/Assets/Combat/WeaponDef.cs"));
+    assert!(is_project_script("/proj/", "/proj/Assets/WeaponDef.cs"));
+}
+
+#[test]
+fn an_embedded_package_counts_as_the_users_own() {
+    // Packages/ holds EMBEDDED packages, which are project-local source.
+    assert!(is_project_script("/proj", "/proj/Packages/com.me.core/Runtime/Def.cs"));
+}
+
+#[test]
+fn a_cached_registry_package_does_not() {
+    assert!(!is_project_script(
+        "/proj",
+        "/proj/Library/PackageCache/com.unity.inputsystem/InputActionAsset.cs"
+    ));
+    assert!(!is_project_script(
+        "/proj",
+        "/proj/Packages/PackageCache/com.unity.x/Thing.cs"
+    ));
+}
+
+#[test]
+fn a_non_script_target_does_not() {
+    // A guid that resolves to something that is not code is not a type.
+    assert!(!is_project_script("/proj", "/proj/Assets/Art/icon.png"));
+}
+
+#[test]
+fn a_path_outside_the_indexed_roots_does_not() {
+    assert!(!is_project_script("/proj", "/proj/ProjectSettings/Thing.cs"));
+    assert!(!is_project_script("/proj", "/elsewhere/Assets/Thing.cs"));
 }

@@ -10,6 +10,7 @@
 // automatically known to the other. `uss-registry-parity.test.ts` pins that.
 
 import { USS_PROPERTY_REGISTRY } from '../../../utils/uss-properties';
+import { USS_PSEUDO_CLASSES } from '../../../utils/uss-model';
 
 /**
  * Property names offered as completions in `.uss` files.
@@ -20,14 +21,14 @@ import { USS_PROPERTY_REGISTRY } from '../../../utils/uss-properties';
 export const USS_PROPERTIES: readonly string[] = USS_PROPERTY_REGISTRY;
 
 /**
- * USS pseudo-classes (state selectors).
+ * USS pseudo-classes (state selectors), colon-prefixed for completions.
  *
- * Kept local: these are selector syntax rather than properties, nothing
- * validates against them, and the renderer needs its own mapping for them
- * anyway (`:checked` and `:selected` have no DOM equivalent, and `:root` has to
- * become `:host` inside a shadow root).
+ * Derived from `uss-model.ts`'s `USS_PSEUDO_CLASSES` rather than listed here:
+ * the renderer already has to know the exact set (`:checked` and `:selected`
+ * have no DOM equivalent, `:root` becomes `:host` inside a shadow root, and
+ * anything else is dropped), and `asset-checks.ts` now reports a pseudo-class
+ * outside it. Three copies of one list is two too many.
  */
-export const USS_PSEUDO: string[] = [
-  ':hover', ':active', ':focus', ':selected', ':disabled', ':enabled',
-  ':checked', ':root', ':inactive',
-];
+export const USS_PSEUDO: readonly string[] = [...USS_PSEUDO_CLASSES]
+  .sort((a, b) => a.localeCompare(b))
+  .map((name) => `:${name}`);

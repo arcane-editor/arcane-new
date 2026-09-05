@@ -4,6 +4,7 @@ import type { UnlistenFn } from '@tauri-apps/api/event';
 import { listenScoped } from '../utils/tauri-listener';
 import type {
   UnityLogEntry,
+  UnityLogType,
   UnityProjectInfo,
   UnityPlayState,
   ConnectionChangedPayload,
@@ -15,13 +16,18 @@ import type {
 import { parseStackTrace } from '../types/unity';
 import { useWorkspaceStore } from './workspace';
 import { useNotificationsStore, notify } from './notifications';
-import { isBridgeInstalled, installBridge } from '../features/unity-bridge';
+import { isBridgeInstalled, installBridge, bridgeRpc } from '../features/unity-bridge';
 import { setPendingNavigation } from '../utils/editor-navigation';
 import { raiseCurrentWindow } from '../utils/window-focus';
 
 const MAX_LOG_ENTRIES = 10_000;
 /** How long after a disconnect we assume Unity is mid-domain-reload (not gone). */
 const RELOAD_GRACE_MS = 15_000;
+/** Bridge protocol version from which the console snapshot/clear RPCs exist. */
+const CONSOLE_RPC_MIN_PROTOCOL = 4;
+/** Error/Exception/Assert/CompileError — what `backfillConsoleHistory` pulls. */
+const BACKFILL_TYPES: UnityLogType[] = ['Error', 'Exception', 'Assert', 'CompileError'];
+const BACKFILL_LIMIT = 200;
 
 /** UI-facing bridge connection state for the status cluster. */
 export type BridgeState =
@@ -37,6 +43,31 @@ interface UnityState {
   playState: UnityPlayState;
   isCompiling: boolean;
   logs: UnityLogEntry[];
+  /**
+   * Monotonic id assigned to EVERY log entry on ingest — streamed or
+   * backfilled alike. Always client-assigned, never taken off the wire: a
+   * `getConsoleSnapshot` row's own `seq` is Unity's console row index for a
+   * `logEntries`-sourced answer (see `UnityLogEntry.unityRow`), a different
+   * and incomparable numbering. `sinceTurnStart` filtering depends on every
+   * entry in `logs` sharing this one counter's space.
+   */
+  logSeq: number;
+  /**
+   * Last known console clear epoch, from `getConsoleSnapshot`/`clearConsole`.
+   * Bumped locally on every `clearLogs()` too, so a purely-local clear (no
+   * bridge, or an old protocol) still moves it.
+   */
+  consoleEpoch: number;
+  /**
+   * Bridge wire-protocol version. Null until known. Set from
+   * `connection_init`'s `protocolVersion` (the `unity-connection-changed`
+   * listener) AND recovered in `syncStatus` — a frontend that attaches its
+   * listeners after the handshake (the same late-attach race liveness has to
+   * cover) would otherwise never learn it, leaving `clearLogs({unity:true})`,
+   * `backfillConsoleHistory`, and the console panel's Clear menu believing
+   * the bridge predates protocol 4 for the rest of the session.
+   */
+  bridgeProtocol: number | null;
   listenersActive: boolean;
   /** Whether the bridge package is embedded in the current project. */
   bridgeInstalled: boolean;
@@ -51,6 +82,29 @@ interface UnityState {
    * identical from here — both are simply "never connected".
    */
   packageStale: boolean;
+  /**
+   * Whether Unity's MAIN THREAD is currently servicing work.
+   *
+   * Deliberately separate from `connected`. Unity parks its main thread while
+   * its window is unfocused, but the bridge's worker thread keeps heartbeating
+   * from a background thread — so `connected` stayed true through the exact
+   * window in which every RPC was timing out against an editor that could not
+   * answer, and the UI showed a healthy green bridge the whole time.
+   */
+  editorAwake: boolean;
+  /** Whether the package can wake Unity's main thread without stealing focus. */
+  editorCanWake: boolean;
+  /**
+   * Bumped whenever Unity reports that a QUEUED asset import actually ran.
+   * Queued commands ack on acceptance, so this is the only honest "it happened".
+   */
+  refreshCompletedAt: number;
+  /**
+   * Whether Unity had a compile in flight when that import finished. Positive
+   * evidence: silence alone cannot tell "nothing to build" from "a compile
+   * Unity scheduled for a tick it has not run yet".
+   */
+  refreshCompiling: boolean;
 
   startIpc: (workspacePath: string) => Promise<void>;
   stopIpc: () => Promise<void>;
@@ -64,7 +118,24 @@ interface UnityState {
   sendPause: () => Promise<void>;
   sendStop: () => Promise<void>;
   sendStep: () => Promise<void>;
-  clearLogs: () => void;
+  /**
+   * Clear the IDE's own log ring. With `{ unity: true }` on a protocol-4+
+   * bridge, also asks Unity to clear its real console via `clearConsole` — the
+   * RPC's `ok:false` (an unsupported Unity version) still leaves the IDE ring
+   * cleared. `unityReason` is set whenever `unity:true` was asked for but
+   * Unity's own console was NOT cleared — either the RPC's own refusal reason,
+   * or (no bridge / too old) a reason this store states itself.
+   */
+  clearLogs: (opts?: { unity?: boolean }) => Promise<{ clearedUnity: boolean; unityReason?: string }>;
+  /**
+   * Pull the newest Error/Exception/Assert/CompileError entries from Unity's
+   * real console and prepend them (flagged `historical: true`) so the panel
+   * shows what happened before this IDE connected — Unity's console history
+   * did not start at the moment the bridge handshook. Best-effort and
+   * idempotent per connection: a failure or an old protocol just leaves the
+   * session-only log stream, which is still correct, only less complete.
+   */
+  backfillConsoleHistory: () => Promise<void>;
   /**
    * Drop everything that belongs to the project being left.
    *
@@ -83,6 +154,9 @@ interface UnityState {
 let unlisteners: UnlistenFn[] = [];
 /** Timer that demotes 'reloading' → 'disconnected' if Unity doesn't come back. */
 let reloadGraceTimer: ReturnType<typeof setTimeout> | null = null;
+/** One backfill per connection — a reconnect clears this, a domain reload's
+ * `reloading` state does not (the session survives it, so history is still current). */
+let historicalBackfillDone = false;
 
 export const useUnityStore = create<UnityState>((set, get) => ({
   connected: false,
@@ -90,11 +164,20 @@ export const useUnityStore = create<UnityState>((set, get) => ({
   playState: 'Stopped',
   isCompiling: false,
   logs: [],
+  logSeq: 0,
+  consoleEpoch: 0,
+  bridgeProtocol: null,
   listenersActive: false,
   bridgeInstalled: false,
   bridgeState: 'disconnected',
   lastCompilation: null,
   packageStale: false,
+  // Optimistic until Unity says otherwise, matching the Rust side's default:
+  // a bridge that has not heartbeated yet is not a sleeping editor.
+  editorAwake: true,
+  editorCanWake: false,
+  refreshCompletedAt: 0,
+  refreshCompiling: false,
 
   startIpc: async (workspacePath: string) => {
     try {
@@ -132,7 +215,13 @@ export const useUnityStore = create<UnityState>((set, get) => ({
       // Ignore
     }
     get().teardownListeners();
-    set({ connected: false, projectInfo: null, playState: 'Stopped', isCompiling: false });
+    set({
+      connected: false,
+      projectInfo: null,
+      playState: 'Stopped',
+      isCompiling: false,
+      editorAwake: true,
+    });
   },
 
   reconnect: async () => {
@@ -185,33 +274,165 @@ export const useUnityStore = create<UnityState>((set, get) => ({
     await invoke('unity_ipc_send', { messageJson: msg }).catch(() => {});
   },
 
-  clearLogs: () => set({ logs: [] }),
+  clearLogs: async (opts) => {
+    const { unity = false } = opts ?? {};
+    const state = get();
+    let clearedUnity = false;
+    let unityReason: string | undefined;
 
-  resetForWorkspaceChange: () =>
+    if (unity) {
+      if (!state.connected) {
+        unityReason = "Unity's console was not cleared: the bridge is not connected.";
+      } else if ((state.bridgeProtocol ?? 0) < CONSOLE_RPC_MIN_PROTOCOL) {
+        unityReason = "Unity's console was not cleared: the installed bridge package predates protocol 4.";
+      } else {
+        try {
+          const result = await bridgeRpc.clearConsole();
+          clearedUnity = result.ok === true;
+          if (result.ok) {
+            set((s) => ({ consoleEpoch: Math.max(s.consoleEpoch, result.epoch) }));
+          } else {
+            unityReason = result.reason;
+          }
+        } catch (e) {
+          unityReason = `Unity's console was not cleared: ${e instanceof Error ? e.message : String(e)}`;
+        }
+      }
+    }
+
+    set((s) => ({ logs: [], consoleEpoch: s.consoleEpoch + 1 }));
+    return { clearedUnity, unityReason };
+  },
+
+  backfillConsoleHistory: async () => {
+    if (historicalBackfillDone) return;
+    historicalBackfillDone = true;
+    try {
+      const snapshot = await bridgeRpc.getConsoleSnapshot({
+        limit: BACKFILL_LIMIT,
+        types: BACKFILL_TYPES,
+        order: 'newest',
+        includeStackTrace: true,
+      });
+      if (snapshot.entries.length === 0) return;
+      // The RPC returns newest-first; prepending to the (oldest-first) `logs`
+      // array needs the oldest of the backfilled batch first.
+      const oldestFirst = [...snapshot.entries].reverse();
+      set((s) => {
+        let nextSeq = s.logSeq;
+        const historical: UnityLogEntry[] = oldestFirst.map((e) => {
+          const seq = ++nextSeq;
+          return {
+            message: e.message,
+            stackTrace: e.stackTrace,
+            logType: e.logType,
+            timestamp: 0,
+            frameCount: 0,
+            // Keep 'Unknown' verbatim — LogEntries does not record play/edit
+            // mode per row, and guessing EditMode was actively wrong for
+            // anything backfilled from a play-session error.
+            mode: e.mode,
+            seq,
+            // Only a `source:"logEntries"` answer's own `seq` is really
+            // Unity's console row index; a hookRing answer's `seq` is the
+            // bridge's ring counter, not a row index, so it is dropped here
+            // rather than mislabeled.
+            unityRow: snapshot.source === 'logEntries' ? e.seq : undefined,
+            historical: true,
+            parsedFrames: parseStackTrace(e.stackTrace ?? ''),
+          };
+        });
+        // Re-apply the cap after prepending: a large backfill plus an
+        // already-full ring must not grow `logs` past MAX_LOG_ENTRIES.
+        const logs = [...historical, ...s.logs];
+        return {
+          logs: logs.length > MAX_LOG_ENTRIES ? logs.slice(-MAX_LOG_ENTRIES) : logs,
+          logSeq: nextSeq,
+          consoleEpoch: Math.max(s.consoleEpoch, snapshot.epoch),
+        };
+      });
+    } catch {
+      // Best-effort: an old package, a busy bridge, or a mid-connect hiccup
+      // just leaves the session-only stream — still correct, only less complete.
+    }
+  },
+
+  resetForWorkspaceChange: () => {
+    historicalBackfillDone = false;
     set({
       logs: [],
+      logSeq: 0,
+      consoleEpoch: 0,
+      bridgeProtocol: null,
       lastCompilation: null,
       playState: 'Stopped',
       isCompiling: false,
       projectInfo: null,
       packageStale: false,
+      editorAwake: true,
+      editorCanWake: false,
+      refreshCompletedAt: 0,
+      refreshCompiling: false,
       // `connected` and the listeners are owned by the IPC lifecycle, which
       // setWorkspace restarts separately — clearing them here would race it.
-    }),
+    });
+  },
 
   syncStatus: async () => {
-    let status: { connected: boolean; running: boolean };
+    type Status = {
+      connected: boolean;
+      running: boolean;
+      editorAwake: boolean;
+      editorCanWake: boolean;
+      bridgeProtocol: number | null;
+    };
+    let status: Status;
     try {
-      status = await invoke<{ connected: boolean; running: boolean }>('unity_ipc_status');
+      status = await invoke<Status>('unity_ipc_status');
     } catch {
       return; // no session for this window — leave the UI as it is
     }
+    // Liveness is reconciled UNCONDITIONALLY, even when `connected` is
+    // unchanged. `unity-editor-awake` fires only on a change, and startIpc
+    // awaits unity_ipc_start before attaching listeners — so the first
+    // awake→asleep transition can be emitted with nobody listening, leaving the
+    // store permanently convinced Unity is servicing work when it is parked.
+    const liveness = {
+      editorAwake: status.editorAwake,
+      editorCanWake: status.editorCanWake,
+    };
     set((state) => {
-      if (state.connected === status.connected) return {};
+      // Same late-attach race as liveness: `unity-connection-changed`'s
+      // `info.protocolVersion` can land before this window is listening, and
+      // without this recovery `bridgeProtocol` stays null (or stale) for the
+      // rest of the session — false "predates protocol 4" labels, a refused
+      // `clearLogs({unity:true})`, a backfill that never runs, and the
+      // console panel's Clear menu missing its "and in Unity" option.
+      const patch: Partial<UnityState> =
+        status.bridgeProtocol != null ? { ...liveness, bridgeProtocol: status.bridgeProtocol } : liveness;
+      if (state.connected === status.connected) return patch;
       return status.connected
-        ? { connected: true, bridgeInstalled: true, bridgeState: 'connected', packageStale: false }
-        : { connected: false, bridgeState: state.bridgeInstalled ? 'disconnected' : 'not-installed' };
+        ? {
+            ...patch,
+            connected: true,
+            bridgeInstalled: true,
+            bridgeState: 'connected' as const,
+            packageStale: false,
+          }
+        : {
+            ...patch,
+            connected: false,
+            bridgeState: state.bridgeInstalled
+              ? ('disconnected' as const)
+              : ('not-installed' as const),
+          };
     });
+    // Recovering the protocol here is also the second (idempotent) trigger
+    // for the backfill: `unity-connection-changed`'s own trigger can lose the
+    // same late-attach race.
+    if (status.connected && (status.bridgeProtocol ?? 0) >= CONSOLE_RPC_MIN_PROTOCOL) {
+      void get().backfillConsoleHistory();
+    }
   },
 
   setupListeners: async () => {
@@ -225,14 +446,22 @@ export const useUnityStore = create<UnityState>((set, get) => ({
         reloadGraceTimer = null;
       }
       if (isConnected) {
+        const protocolVersion = event.payload.info?.protocolVersion ?? null;
         set({
           connected: true,
           projectInfo: event.payload.info ?? get().projectInfo,
           bridgeInstalled: true, // it connected, so it's installed
           bridgeState: 'connected',
           packageStale: false, // a handshake proves the package is current
+          bridgeProtocol: protocolVersion,
         });
+        if ((protocolVersion ?? 0) >= CONSOLE_RPC_MIN_PROTOCOL) {
+          void get().backfillConsoleHistory();
+        }
       } else {
+        // A fresh reconnect gets its own backfill — the stream that follows
+        // starts a new gap between "what streamed" and "what Unity actually has".
+        historicalBackfillDone = false;
         // A domain reload no longer looks like a drop — Unity announces it as
         // `reloading` and the connection is held open across it. So a drop here
         // is a genuine loss, and the backend is already re-arming: show
@@ -242,6 +471,10 @@ export const useUnityStore = create<UnityState>((set, get) => ({
           playState: 'Stopped',
           isCompiling: false,
           bridgeState: 'connecting',
+          // Liveness belongs to the session that reported it. Carrying "asleep"
+          // into a reconnect would have the next handshake arrive already
+          // believing Unity is parked.
+          editorAwake: true,
         });
         reloadGraceTimer = setTimeout(() => {
           reloadGraceTimer = null;
@@ -254,22 +487,39 @@ export const useUnityStore = create<UnityState>((set, get) => ({
       }
     });
 
+    // `seq` is ALWAYS assigned here, never taken off the wire: the bridge's
+    // own `seq` on a push entry is `ConsoleHook.Seq` (the hook ring's
+    // counter), a different numbering than this client-side one, and
+    // `sinceTurnStart` filtering requires every entry in `logs` to share one
+    // comparable space. See `UnityLogEntry.seq`/`.unityRow`.
     const u2 = await listenScoped<UnityLogEntry>('unity-log', (event) => {
-      const entry = { ...event.payload, parsedFrames: parseStackTrace(event.payload.stackTrace ?? '') };
       set((state) => {
+        const seq = state.logSeq + 1;
+        const entry = {
+          ...event.payload,
+          seq,
+          parsedFrames: parseStackTrace(event.payload.stackTrace ?? ''),
+        };
         const logs = [...state.logs, entry];
-        return { logs: logs.length > MAX_LOG_ENTRIES ? logs.slice(-MAX_LOG_ENTRIES) : logs };
+        return {
+          logs: logs.length > MAX_LOG_ENTRIES ? logs.slice(-MAX_LOG_ENTRIES) : logs,
+          logSeq: seq,
+        };
       });
     });
 
     const u3 = await listenScoped<UnityLogEntry[]>('unity-log-batch', (event) => {
-      const entries = (event.payload ?? []).map((e) => ({
-        ...e,
-        parsedFrames: parseStackTrace(e.stackTrace ?? ''),
-      }));
       set((state) => {
+        let nextSeq = state.logSeq;
+        const entries = (event.payload ?? []).map((e) => {
+          const seq = ++nextSeq;
+          return { ...e, seq, parsedFrames: parseStackTrace(e.stackTrace ?? '') };
+        });
         const logs = [...state.logs, ...entries];
-        return { logs: logs.length > MAX_LOG_ENTRIES ? logs.slice(-MAX_LOG_ENTRIES) : logs };
+        return {
+          logs: logs.length > MAX_LOG_ENTRIES ? logs.slice(-MAX_LOG_ENTRIES) : logs,
+          logSeq: nextSeq,
+        };
       });
     });
 
@@ -282,9 +532,14 @@ export const useUnityStore = create<UnityState>((set, get) => ({
 
     const u5 = await listenScoped<CompilationPayload>('unity-compilation', (event) => {
       // started=true → compiling; started=false → finished (carries the report).
+      // `receivedAt` is stamped here, not sent by Unity — it is the IDE's own
+      // receipt time, which is what "N minutes ago" means to a caller of
+      // `get_compile_errors`.
       set({
         isCompiling: event.payload.started,
-        lastCompilation: event.payload.started ? get().lastCompilation : event.payload,
+        lastCompilation: event.payload.started
+          ? get().lastCompilation
+          : { ...event.payload, receivedAt: Date.now() },
       });
     });
 
@@ -368,7 +623,38 @@ export const useUnityStore = create<UnityState>((set, get) => ({
       });
     });
 
-    unlisteners = [u1, u2, u3, u4, u5, u6, u7, u8, u9];
+    // Unity's main thread going to sleep or waking up. This is what lets the
+    // agent gate say "your write landed, Unity is asleep" instead of stalling a
+    // turn for ninety seconds against an unfocused window.
+    const u10 = await listenScoped<{
+      awake: boolean;
+      editorIdleMs: number;
+      canWake: boolean;
+    }>('unity-editor-awake', (event) => {
+      const { awake, canWake } = event.payload;
+      set({ editorAwake: awake, editorCanWake: canWake });
+    });
+
+    // A queued import actually ran. The rpc_response for a queued command only
+    // ever meant "accepted", so this is the first moment anything may conclude
+    // that Unity had nothing to compile.
+    const u11 = await listenScoped<{ compileRequested?: boolean; compiling?: boolean }>(
+      'unity-refresh-completed',
+      (event) => {
+        // Deliberately does NOT touch `editorAwake`. Liveness is owned by the
+        // heartbeat, and Rust emits `unity-editor-awake` only when the value
+        // CHANGES — so synthesising an "awake" here left the store believing
+        // that forever, since Rust (still holding `false`) had no change to
+        // report. The next write then never saw a parked editor and waited out
+        // the full 90s cap, reinstating the stall this whole path removes.
+        set({
+          refreshCompletedAt: Date.now(),
+          refreshCompiling: event.payload?.compiling === true,
+        });
+      },
+    );
+
+    unlisteners = [u1, u2, u3, u4, u5, u6, u7, u8, u9, u10, u11];
     set({ listenersActive: true });
 
     // Reconcile against the backend now that we are listening. Events emitted

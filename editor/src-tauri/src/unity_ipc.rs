@@ -3,7 +3,7 @@ use crate::unity_journal::{JournalReader, JournalWriter};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, Window};
@@ -14,7 +14,19 @@ use tokio::sync::{mpsc, oneshot, Mutex};
 /// Bridge wire-protocol major version. The C# package announces its own in
 /// `connection_init`; a major mismatch surfaces an "Update bridge" prompt.
 /// 2 = the journal transport (1 was Unix sockets / named pipes).
-const PROTOCOL_VERSION: u32 = 2;
+/// Bridge wire-protocol major version.
+///   2 = journal transport.
+///   3 = queued commands: refreshAssets/requestCompile ack on ACCEPTANCE and
+///       report real completion with `refresh_completed`.
+///   4 = console snapshot/clear RPCs, queued `runTests` + `test_run_completed`,
+///       `attachUiDocument`/`setSerializedProperty`.
+///
+/// Bumping it is what makes the queued-command change safe to ship on its own.
+/// The Unity package updates independently of this app, and an IDE older than 3
+/// reads any rpc_response to refreshAssets as "the import finished" — so the
+/// version is the signal that lets the package keep the old blocking behaviour
+/// for such an IDE, and lets a current IDE tell the user their package is stale.
+const PROTOCOL_VERSION: u32 = 4;
 /// Default timeout for an RPC request to the Unity bridge (spec §11 — every
 /// bridge call must have a timeout so a hung Unity never freezes the IDE).
 const DEFAULT_RPC_TIMEOUT_MS: u64 = 10_000;
@@ -51,7 +63,7 @@ const STALE_PACKAGE_AFTER_MS: u64 = 15_000;
 /// Oldest `com.unityide.editor` this IDE will work with. Must stay in lockstep
 /// with `minPackageVersion` in `write_bridge_discovery` and `PackageVersion` in
 /// `arcane-extension/Editor/BridgeBootstrap.cs`.
-const MIN_PACKAGE_VERSION: &str = "0.1.0";
+const MIN_PACKAGE_VERSION: &str = "0.2.0";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -134,6 +146,28 @@ pub struct UnityIpcInner {
     /// Forces an immediate session re-arm (the manual "Reconnect" path). A
     /// capacity-1 channel is deliberate: several clicks coalesce into one.
     pub rearm_tx: Mutex<Option<mpsc::Sender<()>>>,
+    /// Last `awake` value reported by Unity's heartbeat, so the change — not the
+    /// 2s repetition — is what reaches the frontend.
+    ///
+    /// This is NOT the same thing as `connected`, and conflating them is the bug
+    /// this exists to end. Unity's bridge worker is a background thread that
+    /// keeps heartbeating while the editor's main thread is parked (which is its
+    /// normal state whenever the user is looking at this IDE instead of Unity).
+    /// `connected` therefore stayed true through the exact window in which every
+    /// RPC was timing out against a thread that could not answer.
+    pub editor_awake: AtomicBool,
+    /// Whether the connected package can wake Unity's main thread without
+    /// stealing focus. False on Linux, or once the P/Invoke has latched off —
+    /// which changes the advice the agent gives from "Unity will pick this up"
+    /// to "focus Unity", so it has to survive to the frontend.
+    pub editor_can_wake: AtomicBool,
+    /// The connected bridge's negotiated protocol version, or 0 if unknown
+    /// (no session has ever handshaken in this window). Stored here — not just
+    /// read off the `unity-connection-changed` event — because a frontend that
+    /// attaches its listener after the handshake (the same late-attach race
+    /// `editor_awake` exists to cover) would otherwise never learn it; polled
+    /// back out via `unity_ipc_status`.
+    pub bridge_protocol: AtomicU32,
 }
 
 impl UnityIpcInner {
@@ -145,6 +179,11 @@ impl UnityIpcInner {
             req_counter: AtomicU64::new(0),
             connected: AtomicBool::new(false),
             rearm_tx: Mutex::new(None),
+            // Optimistic until Unity says otherwise: a bridge that has not
+            // heartbeated yet should not be reported as a sleeping editor.
+            editor_awake: AtomicBool::new(true),
+            editor_can_wake: AtomicBool::new(false),
+            bridge_protocol: AtomicU32::new(0),
         }
     }
 }
@@ -557,6 +596,15 @@ async fn run_journal_session(
                     }
                     connected = true;
                     state.connected.store(true, Ordering::SeqCst);
+                    // Recovered by `unity_ipc_status` too, not just the
+                    // `unity-connection-changed` event — a frontend that attaches
+                    // its listener after this handshake would otherwise never
+                    // learn the protocol, leaving every protocol-gated feature
+                    // (console snapshot/clear, backfill) permanently believing
+                    // the bridge predates them.
+                    if let Some(pv) = msg.payload.get("protocolVersion").and_then(|v| v.as_u64()) {
+                        state.bridge_protocol.store(pv as u32, Ordering::SeqCst);
+                    }
                     // A fresh handshake retires any pending re-arm schedule.
                     last_rearm = None;
                     // The handshake landed, so the package is present — the
@@ -763,6 +811,16 @@ fn rearm_is_due(
 /// leaving callers to hang until their own timeout), and tell the frontend.
 async fn announce_disconnect(app: &AppHandle, state: &Arc<UnityIpcInner>, label: &str) {
     state.connected.store(false, Ordering::SeqCst);
+    // Reset liveness with the session. Leaving it false would make the next
+    // connection's first heartbeat look like a state change and emit a spurious
+    // "editor woke up"; leaving it true is the same optimistic default a fresh
+    // UnityIpcInner starts with.
+    state.editor_awake.store(true, Ordering::SeqCst);
+    state.editor_can_wake.store(false, Ordering::SeqCst);
+    // Unknown again until the next handshake reports it — a stale value here
+    // is harmless in practice (every protocol-gated check also requires
+    // `connected`), but "unknown" is the honest answer for a disconnected bridge.
+    state.bridge_protocol.store(0, Ordering::SeqCst);
     state.pending.lock().await.clear();
     let _ = app.emit_to(
         label,
@@ -772,6 +830,40 @@ async fn announce_disconnect(app: &AppHandle, state: &Arc<UnityIpcInner>, label:
             info: None,
         },
     );
+}
+
+/// Window event a pure-passthrough arm of `route_message` forwards `msg.payload`
+/// to unchanged, keyed by wire `msg_type`. Every arm that does nothing but
+/// `app.emit_to(label, <event>, &msg.payload)` belongs here instead of being
+/// inlined, so a new push type cannot be wired into `route_message` without
+/// also being pinned by `push_event_name_table_matches_every_passthrough_arm`.
+///
+/// NOT here — these stay hand-written in `route_message` because they carry
+/// extra logic beyond a bare forward: `connection_init`/`project_info`
+/// (protocol-mismatch check + connection state), `heartbeat` (acks + liveness
+/// tracking), `rpc_response` (resolves a pending request), `compilation_started`
+/// /`compilation_finished` (build a payload that is NOT `msg.payload`), and
+/// `focus_window` (raises the window; never emits).
+fn push_event_name(msg_type: &str) -> Option<&'static str> {
+    Some(match msg_type {
+        "log" => "unity-log",
+        "log_batch" => "unity-log-batch",
+        "playstate_changed" => "unity-playstate-changed",
+        "playmode_stats" => "unity-playmode-stats",
+        // A queued import actually ran on Unity's main thread. The
+        // rpc_response for a queued command only ever meant "accepted", so
+        // this is the first point at which the IDE may reason about what
+        // Unity did or did not have to compile.
+        "refresh_completed" => "unity-refresh-completed",
+        "open_file" => "unity-open-file",
+        "build_progress" => "unity-build-progress",
+        "build_result" => "unity-build-result",
+        "test_event" => "unity-test-event",
+        "selection_changed" => "unity-selection-changed",
+        "hierarchy_changed" => "unity-hierarchy-changed",
+        "test_run_completed" => "unity-test-run-completed",
+        _ => return None,
+    })
 }
 
 async fn route_message(app: &AppHandle, state: &Arc<UnityIpcInner>, label: &str, msg: UnityMessage) {
@@ -809,6 +901,39 @@ async fn route_message(app: &AppHandle, state: &Arc<UnityIpcInner>, label: &str,
             if let Some(tx) = state.client_tx.lock().await.as_ref() {
                 let _ = tx.send(ack.to_string()).await;
             }
+
+            // Editor liveness rides along on the heartbeat. Absent (an older
+            // package) is treated as awake, which is exactly the pre-liveness
+            // behaviour and keeps the field additive.
+            let awake = msg
+                .payload
+                .get("awake")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true);
+            let can_wake = msg
+                .payload
+                .get("canWake")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            // Stored every beat, not just on a change, so `unity_ipc_status` can
+            // hand the truth to a frontend that attached its listeners late.
+            state.editor_can_wake.store(can_wake, Ordering::SeqCst);
+            if state.editor_awake.swap(awake, Ordering::SeqCst) != awake {
+                let idle_ms = msg
+                    .payload
+                    .get("editorIdleMs")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0);
+                let _ = app.emit_to(
+                    label,
+                    "unity-editor-awake",
+                    serde_json::json!({
+                        "awake": awake,
+                        "editorIdleMs": idle_ms,
+                        "canWake": can_wake,
+                    }),
+                );
+            }
         }
         "rpc_response" => {
             // Complete the matching in-flight request. payload is
@@ -820,18 +945,6 @@ async fn route_message(app: &AppHandle, state: &Arc<UnityIpcInner>, label: &str,
                 }
             }
         }
-        "log" => {
-            let _ = app.emit_to(label, "unity-log", &msg.payload);
-        }
-        "log_batch" => {
-            let _ = app.emit_to(label, "unity-log-batch", &msg.payload);
-        }
-        "playstate_changed" => {
-            let _ = app.emit_to(label, "unity-playstate-changed", &msg.payload);
-        }
-        "playmode_stats" => {
-            let _ = app.emit_to(label, "unity-playmode-stats", &msg.payload);
-        }
         "compilation_started" => {
             let _ = app.emit_to(label, "unity-compilation", serde_json::json!({ "started": true }));
         }
@@ -842,24 +955,6 @@ async fn route_message(app: &AppHandle, state: &Arc<UnityIpcInner>, label: &str,
             }
             let _ = app.emit_to(label, "unity-compilation", &payload);
         }
-        "open_file" => {
-            let _ = app.emit_to(label, "unity-open-file", &msg.payload);
-        }
-        "build_progress" => {
-            let _ = app.emit_to(label, "unity-build-progress", &msg.payload);
-        }
-        "build_result" => {
-            let _ = app.emit_to(label, "unity-build-result", &msg.payload);
-        }
-        "test_event" => {
-            let _ = app.emit_to(label, "unity-test-event", &msg.payload);
-        }
-        "selection_changed" => {
-            let _ = app.emit_to(label, "unity-selection-changed", &msg.payload);
-        }
-        "hierarchy_changed" => {
-            let _ = app.emit_to(label, "unity-hierarchy-changed", &msg.payload);
-        }
         "focus_window" => {
             // Unity asking to be brought forward — sent alongside `open_file`
             // when the user double-clicks a script and this window already has
@@ -867,8 +962,15 @@ async fn route_message(app: &AppHandle, state: &Arc<UnityIpcInner>, label: &str,
             // would raise us.
             crate::window_registry::raise_by_label(app, label);
         }
-        _ => {
-            // Unknown message type — ignore
+        other => {
+            // Every pure passthrough (forward `msg.payload` to a window event
+            // unchanged, nothing else) is routed through the pinned table so a
+            // new one cannot be added here without also being pinned. Anything
+            // not in the table — including a genuinely unknown message type —
+            // is ignored.
+            if let Some(event) = push_event_name(other) {
+                let _ = app.emit_to(label, event, &msg.payload);
+            }
         }
     }
 }
@@ -906,11 +1008,28 @@ pub async fn unity_ipc_reconnect(app: AppHandle, window: Window) -> Result<(), S
 }
 
 #[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct UnityIpcStatus {
     /// The handshake currently holds.
     pub connected: bool,
     /// A session loop is running for this window (whether or not Unity answered).
     pub running: bool,
+    /// Whether Unity's MAIN THREAD is servicing work — a different question from
+    /// `connected`, which only says the bridge's background worker is alive.
+    ///
+    /// Carried here because `unity-editor-awake` is emitted only when the value
+    /// CHANGES: a frontend that attaches its listener after the first transition
+    /// would otherwise never learn the editor is parked, and would sit through
+    /// its full compile timeout instead of answering promptly.
+    pub editor_awake: bool,
+    /// Whether Unity can be woken without stealing focus.
+    pub editor_can_wake: bool,
+    /// The connected bridge's negotiated protocol version, or `null` if
+    /// unknown. Lets a frontend that attaches its listeners after the
+    /// handshake (e.g. a fresh `setupListeners` call) recover the protocol
+    /// gate for console snapshot/clear + backfill instead of it staying stuck
+    /// at "predates protocol 4" for the rest of the session.
+    pub bridge_protocol: Option<u32>,
 }
 
 /// Current bridge state for this window. Lets the frontend resync on mount
@@ -920,9 +1039,16 @@ pub async fn unity_ipc_status(app: AppHandle, window: Window) -> Result<UnityIpc
     let label = window.label().to_string();
     let inner = app.state::<UnityIpcState>().get_or_create(&label);
     let running = inner.shutdown_tx.lock().await.is_some();
+    let bridge_protocol = match inner.bridge_protocol.load(Ordering::SeqCst) {
+        0 => None,
+        pv => Some(pv),
+    };
     Ok(UnityIpcStatus {
         connected: inner.connected.load(Ordering::SeqCst),
         running,
+        editor_awake: inner.editor_awake.load(Ordering::SeqCst),
+        editor_can_wake: inner.editor_can_wake.load(Ordering::SeqCst),
+        bridge_protocol,
     })
 }
 
@@ -1026,6 +1152,45 @@ mod tests {
     use super::*;
 
     #[test]
+    fn status_carries_editor_liveness_in_camel_case() {
+        // The frontend reconciles liveness from this on every syncStatus,
+        // because `unity-editor-awake` is emitted only on a CHANGE — a window
+        // that attached its listener after the first transition would otherwise
+        // never learn the editor is parked and would sit through its whole
+        // compile timeout. Renaming or dropping either field breaks that
+        // silently, in the direction of a hang.
+        let json = serde_json::to_value(UnityIpcStatus {
+            connected: true,
+            running: true,
+            editor_awake: false,
+            editor_can_wake: true,
+            bridge_protocol: Some(4),
+        })
+        .unwrap();
+        assert_eq!(json["editorAwake"], false);
+        assert_eq!(json["editorCanWake"], true);
+        assert_eq!(json["connected"], true);
+        assert_eq!(json["running"], true);
+        assert_eq!(json["bridgeProtocol"], 4);
+    }
+
+    #[test]
+    fn status_reports_bridge_protocol_as_null_when_unknown() {
+        // A window that has never seen a handshake (or whose bridge just
+        // disconnected) must say "unknown", not silently omit the field or
+        // report 0 as if that were a real (pre-journal) protocol version.
+        let json = serde_json::to_value(UnityIpcStatus {
+            connected: false,
+            running: false,
+            editor_awake: true,
+            editor_can_wake: false,
+            bridge_protocol: None,
+        })
+        .unwrap();
+        assert_eq!(json["bridgeProtocol"], serde_json::Value::Null);
+    }
+
+    #[test]
     fn message_id_is_optional_and_backward_compatible() {
         // Old messages with no id still deserialize.
         let no_id: UnityMessage =
@@ -1088,6 +1253,76 @@ mod tests {
             "bridge.json and the runtime check must not drift apart"
         );
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn protocol_version_literal_matches_the_csharp_package() {
+        // PROTOCOL_VERSION here and Discovery.ProtocolVersion in the C# package
+        // are two independent literals with nothing enforcing agreement except
+        // this test — a mismatch is not cosmetic: the IDE raises a permanent
+        // "update bridge" banner, and the package silently drops to the
+        // pre-queue blocking path.
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../arcane-extension/Editor/Discovery.cs");
+        let text = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read {}: {}", path.display(), e));
+        assert!(
+            text.contains("ProtocolVersion = 4;"),
+            "Discovery.cs must declare `ProtocolVersion = 4;` to match PROTOCOL_VERSION"
+        );
+        assert_eq!(PROTOCOL_VERSION, 4);
+    }
+
+    #[test]
+    fn push_event_name_table_matches_every_passthrough_arm() {
+        // Every arm of route_message that does nothing but forward
+        // `msg.payload` unchanged to a window event must be listed here. A new
+        // passthrough added to route_message without an entry here silently
+        // falls through the fallback arm and reaches no listener.
+        let expected: &[(&str, &str)] = &[
+            ("log", "unity-log"),
+            ("log_batch", "unity-log-batch"),
+            ("playstate_changed", "unity-playstate-changed"),
+            ("playmode_stats", "unity-playmode-stats"),
+            ("refresh_completed", "unity-refresh-completed"),
+            ("open_file", "unity-open-file"),
+            ("build_progress", "unity-build-progress"),
+            ("build_result", "unity-build-result"),
+            ("test_event", "unity-test-event"),
+            ("selection_changed", "unity-selection-changed"),
+            ("hierarchy_changed", "unity-hierarchy-changed"),
+            ("test_run_completed", "unity-test-run-completed"),
+        ];
+        for (msg_type, event) in expected {
+            assert_eq!(
+                push_event_name(msg_type),
+                Some(*event),
+                "msg_type={msg_type}"
+            );
+        }
+        assert_eq!(
+            expected.len(),
+            12,
+            "update this list (and the count) when adding or removing a passthrough"
+        );
+
+        // Arms with logic beyond a bare forward are NOT in the table.
+        for msg_type in [
+            "connection_init",
+            "project_info",
+            "heartbeat",
+            "rpc_response",
+            "compilation_started",
+            "compilation_finished",
+            "focus_window",
+            "some_unknown_future_type",
+        ] {
+            assert_eq!(
+                push_event_name(msg_type),
+                None,
+                "msg_type={msg_type} must not be in the passthrough table"
+            );
+        }
     }
 
     #[test]
@@ -1214,7 +1449,7 @@ mod tests {
         let parsed: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&written).unwrap()).unwrap();
         assert_eq!(parsed["transport"], "journal");
-        assert_eq!(parsed["protocolVersion"], 2);
+        assert_eq!(parsed["protocolVersion"], PROTOCOL_VERSION);
         assert_eq!(parsed["ideSessionId"], "sess-1");
         // The tmp file must not survive the atomic rename.
         assert!(!bridge_dir(ws).join("bridge.json.tmp").exists());

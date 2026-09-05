@@ -1,31 +1,38 @@
 // Runtime-editable AI config, stored in the `app_config` D1 table (key/value
-// JSON documents; migration 0022). Two documents live here:
-//   'model_routing' — which model each effort tier (low/mid/high) routes to,
-//                      plus the inline (tab-completion) model.
-//   'model_pricing' — per-model rate overrides merged OVER the code-default
-//                      MODEL_CATALOG, plus the gatewayFee/margin multipliers.
-// Both are optional: an empty table falls back to the code defaults
-// (DEFAULT_MODEL_ROUTING / {MODEL_CATALOG, GATEWAY_FEE, MARGIN}) SILENTLY —
-// that is the normal, defaults-active state of every fresh deploy, not an
-// anomaly. A row that EXISTS but fails to parse or fails validation ALSO
-// falls back to the same defaults, but that IS an anomaly (someone stored a
-// bad doc) — that path logs one structured line so it's visible in the tail
-// without throwing.
+// JSON documents; migration 0022). Three documents live here:
+//   'model_routing'  — which model each effort tier (low/mid/high) routes
+//                       to, plus the inline (tab-completion) model.
+//   'model_pricing'  — per-model rate overrides merged OVER the code-default
+//                       MODEL_CATALOG, plus the gatewayFee/margin multipliers.
+//   'harness_limits' — per-tier cap on model calls within one composer
+//                       submit (the editor's turn governor), served over
+//                       GET /v1/config's `maxModelCalls` field.
+// All three are optional: an empty table falls back to the code defaults
+// (DEFAULT_MODEL_ROUTING / {MODEL_CATALOG, GATEWAY_FEE, MARGIN} /
+// DEFAULT_HARNESS_LIMITS) SILENTLY — that is the normal, defaults-active
+// state of every fresh deploy, not an anomaly. A row that EXISTS but fails
+// to parse or fails validation ALSO falls back to the same defaults, but
+// that IS an anomaly (someone stored a bad doc) — that path logs one
+// structured line so it's visible in the tail without throwing.
 //
 // Reads are cached per-isolate for TTL_MS (60s) to keep this off the hot
 // path — one D1 read per doc per isolate per minute, not per request.
 // putConfigDoc invalidates THIS isolate's cache immediately; other isolates
 // pick up the change within TTL_MS. That staleness window is accepted: an
-// admin price/routing change does not need to be instant.
+// admin price/routing/limits change does not need to be instant.
 //
-// The two docs are NOT independent: getModelRouting validates the stored
-// routing doc against the EFFECTIVE (pricing-merged) catalog, so a
-// model_pricing write can change whether a cached model_routing doc is still
-// considered valid. putConfigDoc therefore invalidates BOTH cache keys on
-// every write, regardless of which doc was written.
+// model_routing and model_pricing are NOT independent: getModelRouting
+// validates the stored routing doc against the EFFECTIVE (pricing-merged)
+// catalog, so a model_pricing write can change whether a cached
+// model_routing doc is still considered valid. harness_limits has no such
+// cross-dependency on the other two. putConfigDoc invalidates ALL THREE
+// cache keys on every write regardless of which doc was written — the two
+// that must be cross-invalidated for correctness, and harness_limits simply
+// to keep the function's behavior uniform rather than branching on key.
 import { MODEL_CATALOG, type ModelInfo, type LongContextRates } from './costs.ts';
 import { GATEWAY_FEE, MARGIN } from '../config/tiers.ts';
-import { DEFAULT_MODEL_ROUTING } from '../config/plans.ts';
+import { DEFAULT_MODEL_ROUTING, DEFAULT_HARNESS_LIMITS } from '../config/plans.ts';
+import type { HarnessLimitsDoc, HarnessTierLimits } from '../config/plans.ts';
 
 export interface TierRouting {
     planner: string;
@@ -57,7 +64,7 @@ export interface EffectivePricing {
     margin: number;
 }
 
-type ConfigKey = 'model_routing' | 'model_pricing';
+type ConfigKey = 'model_routing' | 'model_pricing' | 'harness_limits';
 
 const TTL_MS = 60_000;
 
@@ -104,13 +111,17 @@ export async function readConfigDoc(
  *  routes/admin.ts expose this over HTTP). Invalidates this isolate's cache
  *  immediately; see module comment for the cross-isolate staleness window.
  *
- *  Invalidates BOTH keys, not just the one written: getModelRouting's cached
- *  value is validated against the EFFECTIVE (pricing-merged) catalog, so a
+ *  Invalidates ALL THREE keys, not just the one written. model_routing and
+ *  model_pricing genuinely depend on each other (getModelRouting's cached
+ *  value is validated against the EFFECTIVE, pricing-merged catalog, so a
  *  model_pricing write can flip a cached model_routing doc's validity in
- *  either direction (a custom model newly available to route to, or one just
- *  removed that a cached "valid" routing doc depended on). Cross-invalidating
- *  is cheap — config writes are rare admin actions, not hot-path traffic —
- *  and keeps the two caches coherent with each other. */
+ *  either direction — a custom model newly available to route to, or one
+ *  just removed that a cached "valid" routing doc depended on).
+ *  harness_limits has no such cross-dependency; it is invalidated
+ *  unconditionally too purely to keep this function's behavior simple and
+ *  uniform (one write always busts the whole per-isolate cache) rather than
+ *  branching on which key was written. Cross-invalidating is cheap — config
+ *  writes are rare admin actions, not hot-path traffic. */
 export async function putConfigDoc(db: D1Database, key: ConfigKey, value: object): Promise<void> {
     await db.prepare(
         `INSERT INTO app_config (key, value, updated_at) VALUES (?1, ?2, datetime('now'))
@@ -118,6 +129,7 @@ export async function putConfigDoc(db: D1Database, key: ConfigKey, value: object
     ).bind(key, JSON.stringify(value)).run();
     cache.delete('model_routing');
     cache.delete('model_pricing');
+    cache.delete('harness_limits');
 }
 
 /** Shared read → JSON.parse → validate pipeline for both getters below.
@@ -187,6 +199,27 @@ export async function getEffectivePricing(db: D1Database): Promise<EffectivePric
         ? { catalog: { ...MODEL_CATALOG, ...pricingDoc.models }, gatewayFee: pricingDoc.gatewayFee, margin: pricingDoc.margin }
         : { catalog: MODEL_CATALOG, gatewayFee: GATEWAY_FEE, margin: MARGIN };
     writeCache('model_pricing', result);
+    return result;
+}
+
+/** Per-tier cap on model calls within one composer submit (the editor's turn
+ *  governor), served over GET /v1/config's `maxModelCalls` field
+ *  (routes/config.ts). Falls back to DEFAULT_HARNESS_LIMITS (plans.ts) when
+ *  the table has no row (silently — the normal state of a fresh deploy) or
+ *  when the row fails to parse or fails validateHarnessLimitsDoc (an
+ *  anomaly — logged). Same read → validate → cache (60s) → fallback shape as
+ *  getModelRouting/getEffectivePricing above; unlike getModelRouting, this
+ *  doc has no cross-dependency on the pricing catalog, so validation needs
+ *  no extra argument. */
+export async function getHarnessLimits(db: D1Database): Promise<HarnessLimitsDoc> {
+    const cached = readCache<HarnessLimitsDoc>('harness_limits');
+    if (cached) return cached;
+
+    const { doc, error } = await readAndValidate(db, 'harness_limits', validateHarnessLimitsDoc);
+    if (error) logInvalid('harness_limits', error);
+
+    const result = (doc as HarnessLimitsDoc | null) ?? DEFAULT_HARNESS_LIMITS;
+    writeCache('harness_limits', result);
     return result;
 }
 
@@ -288,5 +321,34 @@ export function validateModelPricingDoc(x: unknown): string | null {
 
     if (typeof doc.gatewayFee !== 'number' || !(doc.gatewayFee >= 1)) return 'gatewayFee must be >= 1';
     if (typeof doc.margin !== 'number' || !(doc.margin >= 1)) return 'margin must be >= 1';
+    return null;
+}
+
+/**
+ * Validates a parsed `harness_limits` doc: `tiers` must define all three
+ * intensities (low/mid/high), each with an integer `maxModelCalls` in
+ * [1, 100_000]. Returns an error message naming the offending tier/field, or
+ * null when the doc is valid — same style/return type as
+ * validateModelRoutingDoc / validateModelPricingDoc above.
+ */
+export function validateHarnessLimitsDoc(x: unknown): string | null {
+    if (typeof x !== 'object' || x === null) return 'doc is not an object';
+    const doc = x as Partial<HarnessLimitsDoc>;
+
+    if (typeof doc.tiers !== 'object' || doc.tiers === null) return 'tiers must be an object';
+    const tiers = doc.tiers as Record<string, Partial<HarnessTierLimits> | undefined>;
+
+    for (const tierName of ['low', 'mid', 'high'] as const) {
+        const tier = tiers[tierName];
+        if (!tier || typeof tier !== 'object') return `missing tier: ${tierName}`;
+
+        const { maxModelCalls } = tier;
+        if (typeof maxModelCalls !== 'number' || !Number.isInteger(maxModelCalls)) {
+            return `${tierName}.maxModelCalls must be an integer`;
+        }
+        if (maxModelCalls < 1 || maxModelCalls > 100_000) {
+            return `${tierName}.maxModelCalls must be in [1, 100000]`;
+        }
+    }
     return null;
 }

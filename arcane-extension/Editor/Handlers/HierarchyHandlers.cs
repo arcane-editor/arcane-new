@@ -158,8 +158,12 @@ namespace UnityIDE.Bridge
             return ok;
         }
 
-        /// <summary>A refusal the UI can show verbatim, distinct from a crash.</summary>
-        private static JsonValue Refused(string reason)
+        /// <summary>
+        /// A refusal the UI can show verbatim, distinct from a crash. Internal
+        /// rather than private so every bridge refusal — here and in
+        /// SceneMutationHandlers — has exactly one wire shape.
+        /// </summary>
+        internal static JsonValue Refused(string reason)
         {
             var o = JsonValue.NewObject();
             o["ok"] = false;
@@ -199,7 +203,12 @@ namespace UnityIDE.Bridge
             return result;
         }
 
-        private static GameObject ResolveGameObject(JsonValue p)
+        /// <summary>
+        /// A `{ instanceId }` / `{ path }` target to a GameObject. Shared with
+        /// SceneMutationHandlers so a write RPC addresses objects exactly the
+        /// way the read RPCs do.
+        /// </summary>
+        internal static GameObject ResolveGameObject(JsonValue p)
         {
             // By instanceId (preferred — unambiguous).
             if (p["instanceId"].IsNumber)
@@ -228,7 +237,8 @@ namespace UnityIDE.Bridge
             return null;
         }
 
-        private static GameObject FindByHierarchyPath(string path)
+        /// <summary>"Parent/Child/Leaf", searched across every loaded scene.</summary>
+        internal static GameObject FindByHierarchyPath(string path)
         {
             string[] parts = path.Split('/');
             if (parts.Length == 0) return null;
@@ -308,7 +318,12 @@ namespace UnityIDE.Bridge
             return obj;
         }
 
-        private static JsonValue SerializePropertyValue(SerializedProperty prop)
+        /// <summary>
+        /// One SerializedProperty as JSON. Shared with SceneMutationHandlers so a
+        /// write RPC reports its before/after values in the same shape
+        /// getGameObject already reports every property in.
+        /// </summary>
+        internal static JsonValue SerializePropertyValue(SerializedProperty prop)
         {
             switch (prop.propertyType)
             {
@@ -465,7 +480,8 @@ namespace UnityIDE.Bridge
                 ScanForScript(t.GetChild(i), sceneName, guid, outArr);
         }
 
-        private static string HierarchyPath(Transform t)
+        /// <summary>The scene path of a transform, as "Parent/Child/Leaf".</summary>
+        internal static string HierarchyPath(Transform t)
         {
             string path = t.name;
             Transform cur = t.parent;

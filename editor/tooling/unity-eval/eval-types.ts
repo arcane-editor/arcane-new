@@ -12,9 +12,14 @@ export type CheckSpec =
 
 export interface EvalTask {
   id: string;
-  family: 'codegen' | 'grounding' | 'agentic';
-  fixture: 'builtin-legacy' | 'urp-newinput' | 'urp2022-legacyinput';
-  mode: 'ask' | 'agent';
+  family: 'codegen' | 'grounding' | 'agentic' | 'plan';
+  fixture:
+    | 'builtin-legacy'
+    | 'urp-newinput'
+    | 'urp2022-legacyinput'
+    | 'builtin-legacy-ugui'
+    | 'urp-newinput-uitoolkit';
+  mode: 'ask' | 'agent' | 'plan';
   prompt: string;
   checks: CheckSpec[];
   maxTurns?: number; // default 12

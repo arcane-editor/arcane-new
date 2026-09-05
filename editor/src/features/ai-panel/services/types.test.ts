@@ -2,24 +2,25 @@ import { describe, it, expect } from 'bun:test';
 import { TIER_CONTEXT_WINDOWS, coerceAgentKind, coerceEffort, isExternalAgent } from './types';
 
 describe('TIER_CONTEXT_WINDOWS', () => {
-  // Offline fallback only — mirrors /v1/config's per-tier contextWindow
-  // (min across planner/executor/executorHard). glm-5.3-flash's 1,048,576
-  // replaced spark's conservative 131k executor seed on 2026-08-27, and
-  // glm-5.3 replaced grok's 500,000 mid planner on 2026-08-30 — leaving
-  // gpt-5.6-sol on the high tier as the only model still binding a window.
+  // Offline fallback only — mirrors /v1/config's per-tier contextWindow (min
+  // across planner/executor/executorHard). This has flipped twice: spark's
+  // conservative 131k executor seed bound every tier until 2026-08-27, when
+  // glm-5.3-flash lifted it; spark 1.3 took those slots back on 2026-09-03
+  // and the seed binds every tier again.
   it('encodes each tier usable window', () => {
-    expect(TIER_CONTEXT_WINDOWS.low).toBe(1_048_576);
-    expect(TIER_CONTEXT_WINDOWS.mid).toBe(1_048_576);
-    expect(TIER_CONTEXT_WINDOWS.high).toBe(400_000);
+    expect(TIER_CONTEXT_WINDOWS.low).toBe(131_072);
+    expect(TIER_CONTEXT_WINDOWS.mid).toBe(131_072);
+    expect(TIER_CONTEXT_WINDOWS.high).toBe(131_072);
   });
 
-  // Low and mid share the whole GLM-5.3 family window; only the high tier's
-  // gpt-5.6-sol planner narrows it. A routing change that silently drops a
-  // tier's usable context is worth failing on — under-compacting builds
-  // requests the provider rejects outright.
-  it('is bounded tightest at the top, where the planner is smallest', () => {
+  // Identical across tiers is a FACT about the current lineup, not a rule:
+  // one model (spark) serves an executor slot on all three tiers and has the
+  // smallest window in each, so its seed is what every tier reports. A
+  // routing change that silently drops a tier's usable context is worth
+  // failing on — under-compacting builds requests the provider rejects.
+  it('is pinned to the one model that serves every tier', () => {
     expect(TIER_CONTEXT_WINDOWS.low).toBe(TIER_CONTEXT_WINDOWS.mid);
-    expect(TIER_CONTEXT_WINDOWS.mid).toBeGreaterThan(TIER_CONTEXT_WINDOWS.high);
+    expect(TIER_CONTEXT_WINDOWS.mid).toBe(TIER_CONTEXT_WINDOWS.high);
   });
 
   it('has no super tier', () => {

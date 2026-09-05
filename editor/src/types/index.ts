@@ -52,6 +52,17 @@ export interface OpenFile {
   content: string;
   isDirty: boolean;
   diff?: DiffInfo;
+  /**
+   * The file's bytes are not UTF-8, so `content` is empty and stands for
+   * nothing. Unity ships binary `.asset` files in every project (TerrainData,
+   * XRSettings, lightmaps) and writes them as binary even under Force Text.
+   *
+   * Every write path MUST refuse this tab: saving the empty buffer would
+   * truncate the asset.
+   */
+  isBinary?: boolean;
+  /** Byte length on disk, shown in place of content for a binary file. */
+  byteSize?: number;
 }
 
 export interface GitLogEntry {
@@ -178,13 +189,17 @@ export interface SettingsSchema {
   'unity.analyzers.enabled': boolean;
   'unity.compileGate.enabled': boolean;
   'unity.lspGate.enabled': boolean;
+  'unity.assetGate.enabled': boolean;
   'unity.verifiedPass.enabled': boolean;
+  'unity.consoleCheck.enabled': boolean;
+  'unity.consoleCheck.autoRepair': boolean;
   'unity.nearMissDiagnostics.enabled': boolean;
   'unity.rename.formerlySerializedAs': boolean;
   'unity.serializationDiagnostics.enabled': boolean;
   'unity.projectSettingsDiagnostics.enabled': boolean;
   'unity.inputDiagnostics.enabled': boolean;
   'unity.uiDiagnostics.enabled': boolean;
+  'unity.uiToolkit.panel': boolean;
   'lsp.solutionWideAnalysis': boolean;
   'unity.asmdef.diagnostics': boolean;
   'unity.bridge.enabled': boolean;
@@ -193,6 +208,7 @@ export interface SettingsSchema {
   'unity.hierarchyPanel.enabled': boolean;
   'unity.assetViewer.structuredDefault': boolean;
   'unity.scriptableObjects.inspector': boolean;
+  'unity.scriptableObjects.browser': boolean;
   'unity.codeLens.scriptableObjectInstances': boolean;
   'unity.sceneDiff.enabled': boolean;
   'unity.codeLens.assetUsages': boolean;
@@ -282,4 +298,32 @@ export interface FileSearchResult {
    * (`maxMatchesPerFile`) — more matches exist but were not returned.
    */
   truncated?: boolean;
+}
+
+/**
+ * A suggestion pinned to a plan document. The behaviour is documented where
+ * the anchoring lives (`markdown-preview/services/note-anchor.ts`, which
+ * re-exports this); the SHAPE lives here because `stores/ai.ts` holds these
+ * notes and `markdown-preview`'s barrel exports components that read that
+ * store. Importing the type across that barrel would close a runtime cycle —
+ * store → barrel → PlanDocumentView → store — which is the failure mode
+ * CLAUDE.md records for `acp`/`ai-panel`. `types/` imports nothing, so it
+ * cannot participate in one.
+ */
+export interface PlanNote {
+  id: string;
+  /** The exact text the user selected. */
+  quotedText: string;
+  /** What they want changed. */
+  body: string;
+  /** Nearest preceding heading, or the document title. */
+  headingPath: string;
+  /** False once the quoted text no longer appears in the document. */
+  anchored: boolean;
+}
+
+/** A checkbox line in a plan's `## Todos` section. */
+export interface PlanStep {
+  title: string;
+  done: boolean;
 }

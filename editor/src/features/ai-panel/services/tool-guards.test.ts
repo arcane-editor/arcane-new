@@ -256,3 +256,71 @@ describe('withRepeatCallGuard — path spelling', () => {
     expect((seen as { path: string }).path).toBe('./Assets/Foo.cs');
   });
 });
+
+describe('withRepeatCallGuard — the design loop’s render step', () => {
+  const DOC = 'Assets/UI/MainMenu.uxml';
+
+  function toolNamed(name: string, text: string): AgentTool {
+    return {
+      name,
+      label: name,
+      description: '',
+      parameters: Type.Object({}),
+      async execute() {
+        return { content: [{ type: 'text', text }] };
+      },
+    } as unknown as AgentTool;
+  }
+
+  function textOf(res: AgentToolResult): string {
+    return res.content.map((c) => (c.type === 'text' ? c.text : '')).join('');
+  }
+
+  beforeEach(() => resetRepeatCallGuard());
+
+  it('suppresses a second identical layout call with no write between them', async () => {
+    const layout = withRepeatCallGuard(toolNamed('unity_ui_layout', 'boxes'), WS);
+    await layout.execute('1', { document: DOC });
+    expect(textOf(await layout.execute('2', { document: DOC }))).toContain('already called');
+  });
+
+  it('lets the layout repeat once after a unity_ui_write lands', async () => {
+    // The design prompt's own step 5: fix what the render reported, render
+    // again. Same tool, same arguments, genuinely different answer.
+    const layout = withRepeatCallGuard(toolNamed('unity_ui_layout', 'boxes'), WS);
+    const write = withRepeatCallGuard(
+      toolNamed('unity_ui_write', 'Wrote Assets/UI/MainMenu.uss (guid abc).'),
+      WS,
+    );
+
+    await layout.execute('1', { document: DOC });
+    await write.execute('2', { path: 'Assets/UI/MainMenu.uss', content: '.a{}' });
+    expect(textOf(await layout.execute('3', { document: DOC }))).toBe('boxes');
+  });
+
+  it('does not arm the exemption for a write that was refused', async () => {
+    const layout = withRepeatCallGuard(toolNamed('unity_ui_layout', 'boxes'), WS);
+    const write = withRepeatCallGuard(
+      toolNamed('unity_ui_write', 'Not writing Assets/UI/MainMenu.uss: box-shadow is not USS.'),
+      WS,
+    );
+
+    await layout.execute('1', { document: DOC });
+    await write.execute('2', { path: 'Assets/UI/MainMenu.uss', content: '.a{}' });
+    // Nothing reached disk, so the render really would be identical.
+    expect(textOf(await layout.execute('3', { document: DOC }))).toContain('already called');
+  });
+
+  it('spends the exemption on one repeat, not every repeat', async () => {
+    const layout = withRepeatCallGuard(toolNamed('unity_ui_layout', 'boxes'), WS);
+    const write = withRepeatCallGuard(
+      toolNamed('unity_ui_write', 'Wrote Assets/UI/MainMenu.uss (guid abc).'),
+      WS,
+    );
+
+    await layout.execute('1', { document: DOC });
+    await write.execute('2', { path: 'Assets/UI/MainMenu.uss', content: '.a{}' });
+    await layout.execute('3', { document: DOC });
+    expect(textOf(await layout.execute('4', { document: DOC }))).toContain('already called');
+  });
+});

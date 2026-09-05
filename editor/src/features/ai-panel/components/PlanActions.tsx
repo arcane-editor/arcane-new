@@ -1,9 +1,9 @@
 /**
  * PlanActions — buttons shown after the planning-phase assistant message.
- * Execute / Regenerate / Open Plan. Wired to planController.
+ * Execute/Resume / Regenerate / Open Plan. Wired to planController.
  *
- * Visibility: rendered by MessageList when planPhase === 'awaiting-execute'
- * and there's an activePlanPath.
+ * Visibility: rendered by MessageList when planPhase is 'awaiting-execute' or
+ * 'interrupted' and there's an activePlanPath.
  */
 
 import { Play, RotateCcw, FileText } from 'lucide-react';
@@ -12,12 +12,19 @@ import { planController } from '../services/plan-controller';
 
 function PlanActions() {
   const activePlanPath = useAiStore((s) => s.activePlanPath);
+  const planPhase = useAiStore((s) => s.planPhase);
   const isAgentRunning = useAiStore((s) => s.isAgentRunning);
 
   if (!activePlanPath) return null;
 
-  function handleExecute() {
+  const interrupted = planPhase === 'interrupted';
+
+  function handlePrimary() {
     if (!activePlanPath) return;
+    if (interrupted) {
+      planController.resumeExecution('Continue executing the remaining steps.');
+      return;
+    }
     planController.executePlan(activePlanPath);
   }
 
@@ -42,12 +49,12 @@ function PlanActions() {
         <button
           type="button"
           className="ai-panel-plan-action ai-panel-plan-action--primary"
-          onClick={handleExecute}
+          onClick={handlePrimary}
           disabled={isAgentRunning}
-          title="Execute the plan step by step"
+          title={interrupted ? 'Resume the plan from where it stopped' : 'Execute the plan step by step'}
         >
           <Play size={12} />
-          Execute
+          {interrupted ? 'Resume' : 'Execute'}
         </button>
         <button
           type="button"

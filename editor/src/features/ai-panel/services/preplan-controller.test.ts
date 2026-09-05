@@ -1,5 +1,9 @@
-import { describe, it, expect } from 'bun:test';
+import { describe, it, expect, beforeEach } from 'bun:test';
 import { runAgentModeSend, type AgentModeDeps, type PreplanAgentService } from './preplan-controller';
+import { withTurnGovernor, resetTurnGovernor, endSubmitBudget, getSubmitCallCount } from './turn-governor';
+import { getStreamExtras } from './stream-extras';
+import { AssistantMessageEventStream } from './vendor/event-stream';
+import type { Context, StreamFn, StreamOptions } from './vendor/types';
 import type { Attachment, ChatMode, Effort } from './types';
 import type { HostedPlanEntry } from '../../../stores/ai';
 import type { ServerConfig } from '../../../stores/server-config';
@@ -50,6 +54,7 @@ function makeHarness(opts: HarnessOpts) {
       opts.onSend?.(call, mutableState);
     },
     wasLastSendAborted: () => opts.aborted ?? false,
+    wasLastSendCapped: () => false,
   };
 
   const deps: AgentModeDeps = {
@@ -208,5 +213,155 @@ describe('runAgentModeSend — preplan path', () => {
 
     expect(calls).toHaveLength(2);
     expect(calls[1].opts).toEqual({ mode: 'agent', effort: 'high' });
+  });
+});
+
+// Task 3: the preplan branch's two chained sends must share ONE turn-governor
+// submit budget (beginSubmitBudget/endSubmitBudget), not a fresh cap per
+// send. These tests drive the REAL turn-governor module (not a fake) through
+// a `PreplanAgentService.sendMessage` that mimics what `agent-service.ts`'s
+// real `sendMessage` does on every call: `resetTurnGovernor()` first (which,
+// per `turn-governor.ts`'s SUBMIT SCOPE note, leaves the running count alone
+// while a submit is open), then some governed stream calls.
+describe('runAgentModeSend — turn-governor submit scope (Task 3)', () => {
+  const CTX: Context = {
+    systemPrompt: 'SYS',
+    messages: [{ role: 'user', content: 'hi', timestamp: 1 }],
+    tools: [{ name: 't', description: 'd', parameters: {} as never }],
+  };
+
+  function streamOpts(): StreamOptions {
+    return { model: { id: 'm', name: 'm', provider: 'x' }, reasoning: 'high' };
+  }
+
+  function isGoverned(c: Context): boolean {
+    return getStreamExtras(c)?.toolChoice === 'none';
+  }
+
+  /** Records every Context it was called with and returns an immediately-done text response. */
+  function recordingStreamFn(): { streamFn: StreamFn; calls: () => Context[] } {
+    const recorded: Context[] = [];
+    const streamFn: StreamFn = (context) => {
+      recorded.push(context);
+      const stream = new AssistantMessageEventStream();
+      stream.push({ type: 'start' });
+      stream.push({
+        type: 'done',
+        message: { role: 'assistant', content: [{ type: 'text', text: 'ok' }], stopReason: 'stop', timestamp: Date.now() },
+      });
+      return stream;
+    };
+    return { streamFn, calls: () => recorded };
+  }
+
+  /**
+   * `sendBehavior` runs after the two governed calls, with direct access to
+   * the harness's own mutable hostedPlan — so a test can seed the todo list
+   * (to drive the chain into send 2) and/or throw (to prove the `finally`
+   * still closes the submit scope), all from one place.
+   */
+  function makeGovernedHarness(
+    sendBehavior: (
+      sendOpts: Call['opts'],
+      mutableState: { hostedPlan: HostedPlanEntry[] | null },
+    ) => void,
+  ) {
+    const { streamFn, calls } = recordingStreamFn();
+    // Explicit no-op notice handlers: the cap (3) and soft-limit threshold
+    // are both crossed by these tests' call counts, and the module's
+    // DEFAULT handlers dynamically `import('../../../stores/ai')` for real —
+    // exactly the Bun-DOM-touching import this whole file's DI seam exists
+    // to avoid (see this file's own header). Supplying no-ops keeps the test
+    // on the real `withTurnGovernor`/`resetTurnGovernor` machinery without
+    // ever reaching that import.
+    const governed = withTurnGovernor(streamFn, () => ({
+      caps: { high: 3 },
+      onSoftLimit: () => {},
+      onCapReached: () => {},
+    }));
+    const sentCalls: Call[] = [];
+    const mutableState = {
+      hostedPlan: null as HostedPlanEntry[] | null,
+      messages: [] as Array<{ role: string }>,
+    };
+
+    const agentService: PreplanAgentService = {
+      async sendMessage(text, sendOpts) {
+        sentCalls.push({ text, opts: sendOpts });
+        resetTurnGovernor(); // the same call site agent-service.ts's runSend uses
+        governed(CTX, streamOpts());
+        governed(CTX, streamOpts());
+        sendBehavior(sendOpts, mutableState); // may throw — propagates like a real send failure
+      },
+      wasLastSendAborted: () => false,
+      wasLastSendCapped: () => false,
+    };
+
+    const deps: AgentModeDeps = {
+      getAiState: () => ({
+        mode: 'agent',
+        effort: 'high',
+        hostedPlan: mutableState.hostedPlan,
+        messages: mutableState.messages,
+        addSystemMessage: () => 'sys-1',
+      }),
+      getServerConfig: () => configWithPreplan(true),
+      getAgentService: () => agentService,
+    };
+
+    return { deps, sentCalls, calls };
+  }
+
+  // Module state persists across tests (same discipline turn-governor.test.ts
+  // uses): a leaked open submit or non-zero count from one test must not leak
+  // into the next.
+  beforeEach(() => {
+    endSubmitBudget();
+    resetTurnGovernor();
+  });
+
+  it('accumulates the call count across the chained preplan + execute sends: the 3rd call overall is governed', async () => {
+    const { deps, sentCalls, calls } = makeGovernedHarness((sendOpts, state) => {
+      if (sendOpts.promptMode === 'preplanning') {
+        state.hostedPlan = [{ text: 'Step', status: 'pending' }];
+      }
+    });
+
+    await runAgentModeSend(deps, 'add a coin pickup');
+
+    // send 1 (preplanning) + send 2 (chained execute) — 2 governed calls each.
+    expect(sentCalls).toHaveLength(2);
+    expect(calls()).toHaveLength(4);
+    expect(isGoverned(calls()[0])).toBe(false); // send 1, call 1
+    expect(isGoverned(calls()[1])).toBe(false); // send 1, call 2
+    expect(isGoverned(calls()[2])).toBe(true); // send 2, call 1 — 3rd overall, AT cap
+    expect(isGoverned(calls()[3])).toBe(true); // send 2, call 2 — beyond cap
+
+    // The submit scope closed when runAgentModeSend resolved: a fresh
+    // resetTurnGovernor() now actually zeroes the count (it wouldn't if
+    // `submitOpen` were still true — see turn-governor.ts's `resetTurnGovernor`).
+    resetTurnGovernor();
+    expect(getSubmitCallCount()).toBe(0);
+  });
+
+  it('closes the submit scope in `finally` even when the chained send throws mid-chain', async () => {
+    const { deps, sentCalls } = makeGovernedHarness((sendOpts, state) => {
+      if (sendOpts.promptMode === 'preplanning') {
+        // A remaining todo so the chain proceeds into send 2.
+        state.hostedPlan = [{ text: 'Step', status: 'pending' }];
+        return;
+      }
+      // Send 2 (the chained execute) throws — before `endSubmitBudget()`
+      // could run anywhere except the `finally`.
+      throw new Error('boom mid-chain');
+    });
+
+    await expect(runAgentModeSend(deps, 'add a coin pickup')).rejects.toThrow('boom mid-chain');
+    expect(sentCalls).toHaveLength(2); // preplanning ran, then the chained send threw
+
+    // Despite the throw, the `finally` ran `endSubmitBudget()` — proven the
+    // same way as above: a fresh reset now actually zeroes the count.
+    resetTurnGovernor();
+    expect(getSubmitCallCount()).toBe(0);
   });
 });

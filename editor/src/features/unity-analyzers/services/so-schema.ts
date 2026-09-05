@@ -191,7 +191,11 @@ function buildField(scan: CSharpScan, field: FieldDecl): SoField {
     !isArray &&
     !serializeReference &&
     widget !== 'unknown' &&
-    widget !== 'nested';
+    widget !== 'nested' &&
+    // An object reference is a guid pair. Editing it needs an asset picker,
+    // not a text box — and a text box over a guid looks editable, silently
+    // refuses the write, and shows machine noise where a name belongs.
+    widget !== 'objectRef';
 
   return {
     name: field.name,

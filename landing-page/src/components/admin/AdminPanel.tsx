@@ -3,11 +3,12 @@ import {
     getStoredToken, setStoredToken, clearStoredToken, decodeToken,
     adminLogin, adminGetUsers, adminCreateUser, adminDeleteUser,
     adminGetFeedback, adminGetModelConfig, adminPutModelConfig,
-    adminGetPricingConfig, adminPutPricingConfig, adminGrant,
-    type AdminUserRow, type ModelRoutingDoc, type ModelPricingDoc, type ModelInfo,
+    adminGetPricingConfig, adminPutPricingConfig,
+    adminGetHarnessConfig, adminPutHarnessConfig, adminGrant,
+    type AdminUserRow, type ModelRoutingDoc, type ModelPricingDoc, type ModelInfo, type HarnessLimitsDoc,
 } from "@/lib/auth";
 
-type Tab = "users" | "feedback" | "models" | "pricing" | "grants";
+type Tab = "users" | "feedback" | "models" | "pricing" | "harness" | "grants";
 
 interface FeedbackItem {
     id: number;
@@ -93,6 +94,29 @@ const EMPTY_NEW_MODEL: NewModelFormState = {
     inputCostPer1M: 0, outputCostPer1M: 0, cachedInputCostPer1M: 0, contextWindow: 0, maxOutput: 0,
 };
 
+// ─── Harness tab: form state ──────────────────────────────────
+// Three integers (one per tier), mirroring HarnessLimitsDoc.tiers[t].maxModelCalls.
+
+interface HarnessFormState {
+    low: number;
+    mid: number;
+    high: number;
+}
+
+function harnessDocToForm(doc: HarnessLimitsDoc): HarnessFormState {
+    return { low: doc.tiers.low.maxModelCalls, mid: doc.tiers.mid.maxModelCalls, high: doc.tiers.high.maxModelCalls };
+}
+
+function formToHarnessDoc(form: HarnessFormState): HarnessLimitsDoc {
+    return {
+        tiers: {
+            low: { maxModelCalls: form.low },
+            mid: { maxModelCalls: form.mid },
+            high: { maxModelCalls: form.high },
+        },
+    };
+}
+
 export default function AdminPanel() {
     const [state, setState] = useState<"loading" | "login" | "denied" | "ready">("loading");
     const [tab, setTab] = useState<Tab>("users");
@@ -125,6 +149,12 @@ export default function AdminPanel() {
     const [pricingLoading, setPricingLoading] = useState(false);
     const [pricingSaving, setPricingSaving] = useState(false);
     const [newModel, setNewModel] = useState<NewModelFormState>(EMPTY_NEW_MODEL);
+
+    // Harness tab
+    const [harnessForm, setHarnessForm] = useState<HarnessFormState | null>(null);
+    const [harnessIsDefault, setHarnessIsDefault] = useState(false);
+    const [harnessLoading, setHarnessLoading] = useState(false);
+    const [harnessSaving, setHarnessSaving] = useState(false);
 
     // Grants tab
     const [grantEmail, setGrantEmail] = useState("");
@@ -208,12 +238,26 @@ export default function AdminPanel() {
         setPricingLoading(false);
     }, [showToast]);
 
-    // Lazy per-tab fetch — models/pricing docs can be large and are rarely
-    // visited, so they load on first view rather than eagerly with users/feedback.
+    const loadHarness = useCallback(async (t: string) => {
+        setHarnessLoading(true);
+        try {
+            const { value, isDefault } = await adminGetHarnessConfig(t);
+            setHarnessForm(harnessDocToForm(value));
+            setHarnessIsDefault(isDefault);
+        } catch (err: any) {
+            showToast(err.message || "Failed to load harness config", "error");
+        }
+        setHarnessLoading(false);
+    }, [showToast]);
+
+    // Lazy per-tab fetch — models/pricing/harness docs can be large and are
+    // rarely visited, so they load on first view rather than eagerly with
+    // users/feedback.
     useEffect(() => {
         if (state !== "ready") return;
         if (tab === "models" && !modelsForm && !modelsLoading) void loadModels(token);
         if (tab === "pricing" && !pricingDoc && !pricingLoading) void loadPricing(token);
+        if (tab === "harness" && !harnessForm && !harnessLoading) void loadHarness(token);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [tab, state, token]);
 
@@ -312,6 +356,25 @@ export default function AdminPanel() {
             showToast(err.message || "Failed to save pricing config", "error");
         }
         setPricingSaving(false);
+    };
+
+    // ─── Harness tab actions ───
+
+    const updateHarnessField = (tierId: "low" | "mid" | "high", value: number) => {
+        setHarnessForm(f => f ? { ...f, [tierId]: value } : f);
+    };
+
+    const handleSaveHarness = async () => {
+        if (!harnessForm) return;
+        setHarnessSaving(true);
+        try {
+            await adminPutHarnessConfig(token, formToHarnessDoc(harnessForm));
+            showToast("Harness limits saved");
+            setHarnessIsDefault(false);
+        } catch (err: any) {
+            showToast(err.message || "Failed to save harness config", "error");
+        }
+        setHarnessSaving(false);
     };
 
     // ─── Grants tab actions ───
@@ -417,6 +480,7 @@ export default function AdminPanel() {
         { id: "feedback", label: "Feedback", count: feedback.length },
         { id: "models", label: "Models" },
         { id: "pricing", label: "Pricing" },
+        { id: "harness", label: "Harness" },
         { id: "grants", label: "Grants" },
     ];
 
@@ -731,6 +795,45 @@ export default function AdminPanel() {
 
                             <button className={btnPrimary} onClick={handleSavePricing} disabled={pricingSaving}>
                                 {pricingSaving ? "Saving…" : "Save"}
+                            </button>
+                        </>
+                    )}
+                </div>
+            )}
+
+            {/* Harness Tab */}
+            {tab === "harness" && (
+                <div>
+                    <h2 className="text-sm font-semibold text-foreground mb-4">
+                        Harness limits
+                        {harnessIsDefault && defaultsBadge}
+                    </h2>
+                    <p className="text-muted-foreground text-xs mb-4 max-w-lg">
+                        Per-tier cap on model calls within one composer submit (the editor's turn governor).
+                    </p>
+                    {harnessLoading || !harnessForm ? (
+                        <p className="text-muted-foreground text-sm py-8 text-center">Loading…</p>
+                    ) : (
+                        <>
+                            <div className="flex flex-col gap-3 max-w-sm mb-6">
+                                {(["low", "mid", "high"] as const).map(tierId => (
+                                    <label key={tierId} className="flex items-center gap-2 text-sm text-muted-foreground">
+                                        <span className="w-32 shrink-0">{TIER_LABELS[tierId]}</span>
+                                        <input
+                                            type="number"
+                                            min={1}
+                                            max={100_000}
+                                            step={1}
+                                            className={`${inputClass} w-32`}
+                                            value={harnessForm[tierId]}
+                                            onChange={e => updateHarnessField(tierId, Number(e.target.value))}
+                                        />
+                                    </label>
+                                ))}
+                            </div>
+
+                            <button className={btnPrimary} onClick={handleSaveHarness} disabled={harnessSaving}>
+                                {harnessSaving ? "Saving…" : "Save"}
                             </button>
                         </>
                     )}

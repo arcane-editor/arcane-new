@@ -3,7 +3,8 @@ import { env, SELF } from 'cloudflare:test';
 import { adminToken, authedGet, jsonPut, seedPasswordUser, tokenFor } from './helpers.ts';
 import { clearConfigCache, getEffectivePricing } from '../src/lib/app-config.ts';
 import type { ModelRoutingDoc, ModelPricingDoc } from '../src/lib/app-config.ts';
-import { DEFAULT_MODEL_ROUTING } from '../src/config/plans.ts';
+import { DEFAULT_MODEL_ROUTING, DEFAULT_HARNESS_LIMITS } from '../src/config/plans.ts';
+import type { HarnessLimitsDoc } from '../src/config/plans.ts';
 import { MODEL_CATALOG, type ModelInfo } from '../src/lib/costs.ts';
 import { GATEWAY_FEE, MARGIN } from '../src/config/tiers.ts';
 
@@ -213,12 +214,92 @@ describe('GET/PUT /v1/admin/config/pricing', () => {
     });
 });
 
-describe('auth on the four config routes', () => {
+describe('GET/PUT /v1/admin/config/harness', () => {
+    const VALID_HARNESS_DOC: HarnessLimitsDoc = {
+        tiers: { low: { maxModelCalls: 500 }, mid: { maxModelCalls: 900 }, high: { maxModelCalls: 1200 } },
+    };
+
+    it('fresh DB -> isDefault:true, value === DEFAULT_HARNESS_LIMITS, updatedAt null', async () => {
+        const token = await adminToken();
+        const res = await authedGet('/v1/admin/config/harness', token);
+        expect(res.status).toBe(200);
+        const body = await res.json<ConfigGetBody<HarnessLimitsDoc>>();
+        expect(body.isDefault).toBe(true);
+        expect(body.value).toEqual(DEFAULT_HARNESS_LIMITS);
+        expect(body.updatedAt).toBeNull();
+    });
+
+    it('PUT rejects a doc missing a tier -> 400 invalid_config, validator message names it; nothing persisted', async () => {
+        const token = await adminToken();
+        const bad = {
+            tiers: { low: VALID_HARNESS_DOC.tiers.low, mid: VALID_HARNESS_DOC.tiers.mid }, // high missing
+        };
+        const res = await jsonPut('/v1/admin/config/harness', bad, token);
+        expect(res.status).toBe(400);
+        const errBody = await res.json<{ error: string; code: string }>();
+        expect(errBody.code).toBe('invalid_config');
+        expect(errBody.error).toMatch(/high/);
+
+        const after = await authedGet('/v1/admin/config/harness', token);
+        const afterBody = await after.json<ConfigGetBody<HarnessLimitsDoc>>();
+        expect(afterBody.isDefault).toBe(true);
+        expect(afterBody.value).toEqual(DEFAULT_HARNESS_LIMITS);
+    });
+
+    it('PUT rejects a non-integer maxModelCalls -> 400 invalid_config; nothing persisted', async () => {
+        const token = await adminToken();
+        const bad = {
+            tiers: { ...VALID_HARNESS_DOC.tiers, low: { maxModelCalls: 1.5 } },
+        };
+        const res = await jsonPut('/v1/admin/config/harness', bad, token);
+        expect(res.status).toBe(400);
+        const errBody = await res.json<{ error: string; code: string }>();
+        expect(errBody.code).toBe('invalid_config');
+        expect(errBody.error).toMatch(/integer/);
+
+        const after = await authedGet('/v1/admin/config/harness', token);
+        expect((await after.json<ConfigGetBody<HarnessLimitsDoc>>()).isDefault).toBe(true);
+    });
+
+    it('PUT rejects maxModelCalls out of range (0 and 100_001) -> 400 invalid_config; nothing persisted', async () => {
+        const token = await adminToken();
+
+        const zero = { tiers: { ...VALID_HARNESS_DOC.tiers, mid: { maxModelCalls: 0 } } };
+        const resZero = await jsonPut('/v1/admin/config/harness', zero, token);
+        expect(resZero.status).toBe(400);
+        expect((await resZero.json<{ code: string }>()).code).toBe('invalid_config');
+
+        const tooHigh = { tiers: { ...VALID_HARNESS_DOC.tiers, high: { maxModelCalls: 100_001 } } };
+        const resHigh = await jsonPut('/v1/admin/config/harness', tooHigh, token);
+        expect(resHigh.status).toBe(400);
+        expect((await resHigh.json<{ code: string }>()).code).toBe('invalid_config');
+
+        const after = await authedGet('/v1/admin/config/harness', token);
+        expect((await after.json<ConfigGetBody<HarnessLimitsDoc>>()).isDefault).toBe(true);
+    });
+
+    it('PUT accepts a valid doc -> {ok:true}; subsequent GET: isDefault:false, round-trips, updatedAt non-null', async () => {
+        const token = await adminToken();
+        const put = await jsonPut('/v1/admin/config/harness', VALID_HARNESS_DOC, token);
+        expect(put.status).toBe(200);
+        expect(await put.json()).toEqual({ ok: true });
+
+        const res = await authedGet('/v1/admin/config/harness', token);
+        const body = await res.json<ConfigGetBody<HarnessLimitsDoc>>();
+        expect(body.isDefault).toBe(false);
+        expect(body.value).toEqual(VALID_HARNESS_DOC);
+        expect(body.updatedAt).not.toBeNull();
+    });
+});
+
+describe('auth on the six config routes', () => {
     const routes: Array<{ method: 'GET' | 'PUT'; path: string; body?: unknown }> = [
         { method: 'GET', path: '/v1/admin/config/models' },
         { method: 'PUT', path: '/v1/admin/config/models', body: VALID_ROUTING_DOC },
         { method: 'GET', path: '/v1/admin/config/pricing' },
         { method: 'PUT', path: '/v1/admin/config/pricing', body: { models: {}, gatewayFee: 1.05, margin: 1.0 } },
+        { method: 'GET', path: '/v1/admin/config/harness' },
+        { method: 'PUT', path: '/v1/admin/config/harness', body: { tiers: { low: { maxModelCalls: 500 }, mid: { maxModelCalls: 900 }, high: { maxModelCalls: 1200 } } } },
     ];
 
     it.each(routes)('401 without a token: $method $path', async ({ method, path, body }) => {

@@ -134,6 +134,29 @@ export async function resolveAttachments(
 }
 
 /** Encode an image File/Blob (from paste/drop) into a data URL. */
+/**
+ * What an image-only send says.
+ *
+ * An image attachment contributes NO text prefix — `resolveAttachments` puts it
+ * straight into `images` — so a send with pictures and no typed words produced
+ * `{ type: 'text', text: '' }` as its first content part. Providers reject an
+ * empty content part, deterministically, and the client retries a rejection
+ * that will never succeed: the turn sits on "Thinking…" through the backoff and
+ * then surfaces the server's generic `model_error` as a bare "Server error".
+ *
+ * The AI panel could never reach this — its composer requires text — so this is
+ * specifically the design dock's case, where sending a reference image on its
+ * own is a complete request.
+ */
+export function promptTextForImages(text: string, imageCount: number): string {
+  const trimmed = text.trim();
+  if (trimmed) return text;
+  if (imageCount === 0) return text;
+  return imageCount === 1
+    ? 'Use the attached image as the visual reference for this screen.'
+    : `Use the ${imageCount} attached images as the visual reference for this screen.`;
+}
+
 export function encodeImageFromBlob(
   blob: Blob,
 ): Promise<{ dataUrl: string; mimeType: string }> {

@@ -11,14 +11,23 @@ too much into a single number.
 
 ## What it is
 
-24 tasks across three families:
+28 tasks across four families:
 
-- **codegen** (8) — agent mode, asked to create/extend a script. Scored by
+- **codegen** (9) — agent mode, asked to create/extend a script. Scored by
   `file_exists` / `file_contains` / `file_not_contains` + `analyzer_clean`.
-  4 of the 8 are grounding-heavy "trap" tasks on `urp2022-legacyinput` (see
+  4 of the 9 are grounding-heavy "trap" tasks on `urp2022-legacyinput` (see
   below): the correct code still has to use *this project's* legacy input
   approach and URP/Lit shader property despite the render pipeline being URP.
-- **grounding** (12) — ask mode, asked a question with a version/pipeline-
+  One (`codegen-ui-hud`) is UI Toolkit codegen instead of C#: its own
+  isolated fixture, `urp-newinput-uitoolkit` (see "Fixtures" — NOT the
+  shared `urp-newinput`), ships a seeded HUD (`Assets/UI/HUD.uxml` +
+  `Theme.uss`) so the task is scored on the NEW screen the agent writes with
+  the generic `write` tool (`unity_ui_write`/`unity_ui_layout`/
+  `unity_ui_scaffold` aren't in the headless toolset — see `run-task.ts`'s
+  "Deliberately ABSENT" comment), and the seeded stylesheet's own
+  `box-shadow` (invalid USS) is the trap: `file_not_contains` fails a new
+  stylesheet that imitates it.
+- **grounding** (13) — ask mode, asked a question with a version/pipeline-
   dependent correct answer (URP vs Built-in color/texture property, new Input
   System vs legacy `Input.GetAxis`, deprecated-API awareness). Scored by
   `answer_matches` / `answer_not_matches` against the model's final text
@@ -29,7 +38,30 @@ too much into a single number.
   contrastive anti-default facts, the injected block *does* state the exact
   shader-property strings, so `grounding-urp-texture` and
   `grounding-trap-shader` no longer need this check — see the per-task
-  comments in `tasks.ts`.)
+  comments in `tasks.ts`.) `grounding-ui-stack` is the odd one out: it isn't
+  pipeline/input-dependent, it's UI-stack-dependent — `builtin-legacy-ugui`
+  (see "Fixtures") has a Canvas scene and no `.uxml` anywhere, so the facts
+  block states nothing about UI at all and the model has to read the project
+  to avoid recommending UI Toolkit's `UIDocument` for a uGUI project.
+- **plan** (2) — plan mode, asked for a change and graded on the DOCUMENT it
+  drafts. Read-only tools, exactly as production's planning phase runs
+  (`agent-service.ts`'s `plan-planning` tool map), with the same system prompt
+  (`buildPlanPlanningPrompt`) and the same task-class recipes prod puts on the
+  user message (`unity-recipes.ts`). Scored entirely by `answer_matches` /
+  `answer_not_matches`: the five required sections, at least five `- [ ] T<n>`
+  todos with a `### T5` entry behind them, the `STOP —` sentinel, and the Unity
+  specifics the request turns on (`stepOffset`, `slopeLimit`,
+  `CharacterController`) — plus the fixture's correct input API, the same trap
+  the grounding family exists for.
+
+  Added after a real report: asked for a character controller, the planner
+  answered with a preamble ("First, let me study the exact scene file
+  structure…") and that was written to disk and presented as the plan. Nothing
+  in the suite could have caught it, because nothing exercised plan mode.
+  `tasks.test.ts` runs these checks offline against a known-good plan and
+  against that exact preamble, so a check that has stopped discriminating fails
+  the JS suite rather than quietly passing every eval run.
+
 - **agentic** (4) — agent mode, multi-step tasks requiring investigation
   (find a bug, not just apply a patch) and Unity-safe editing (e.g. rename a
   serialized field without losing Inspector-set values). Scored by file
@@ -279,7 +311,7 @@ Add an entry to the `TASKS` array in `tasks.ts`:
 {
   id: 'family-short-slug',              // unique, kebab-case
   family: 'codegen' | 'grounding' | 'agentic',
-  fixture: 'builtin-legacy' | 'urp-newinput' | 'urp2022-legacyinput',
+  fixture: 'builtin-legacy' | 'urp-newinput' | 'urp2022-legacyinput' | 'builtin-legacy-ugui' | 'urp-newinput-uitoolkit',
   mode: 'agent' | 'ask',                // 'ask' gets no write/edit/bash tools
   prompt: 'What to ask the agent.',
   checks: [ /* one or more CheckSpec */ ],
@@ -317,7 +349,7 @@ codegen tasks always asserting at least one file check) — no LLM involved.
 
 ## Fixtures
 
-Three minimal Unity project skeletons live under `fixtures/`, each with a real
+Five minimal Unity project skeletons live under `fixtures/`, each with a real
 `ProjectSettings/ProjectVersion.txt` and `Packages/manifest.json` so
 `fixture-facts.ts` can derive version/pipeline/input facts the same way the
 real app's `unity-facts.ts` does — this is what lets the grounding tasks
@@ -343,6 +375,26 @@ but wrong ones.
 - **`urp-newinput`** — Universal Render Pipeline, new Input System.
   - `Assets/Scripts/Health.cs` — a minimal `MonoBehaviour` with `maxHealth`/
     `Current`, extended by `codegen-damage-event`.
+- **`urp-newinput-uitoolkit`** — a byte-identical copy of `urp-newinput` plus
+  `Assets/UI/HUD.uxml` + `Assets/UI/Theme.uss` (copied verbatim from
+  `editor/fixtures/uitoolkit/`), for `codegen-ui-hud`. Kept as its OWN
+  fixture rather than added to shared `urp-newinput` (review finding R15,
+  Task 18): seeding the shared fixture gave every one of the nine other
+  tasks that run on it a `Unity subsystems in use: UI Toolkit …` line they
+  never had before — breaking before/after comparability, and actively
+  mistelling the uGUI-flavored `codegen-canvas-fade` that the project uses
+  UI Toolkit. `Theme.uss` also carries a deliberate `box-shadow` (a CSS
+  property USS does not implement) — the trap `codegen-ui-hud` exists to
+  catch: an agent that copies the existing stylesheet's pattern into its own
+  new one fails `file_not_contains`.
+- **`builtin-legacy-ugui`** — `builtin-legacy` plus one added scene
+  (`Assets/Scenes/SampleScene.unity`) carrying a `--- !u!223` Canvas
+  GameObject, for `grounding-ui-stack`. Same Built-in/legacy-input facts as
+  `builtin-legacy`; the difference this task exercises is UI stack, not
+  pipeline/input — nothing in the injected facts block says "uGUI" or
+  "UIDocument" either way, so a correct answer has to come from reading the
+  project (the scene has a Canvas; there is no `.uxml` anywhere) rather than
+  reciting a fact already in the prompt.
 - **`urp2022-legacyinput`** — the trap fixture: Universal Render Pipeline
   (2022.3 LTS) with the project still pinned to the LEGACY Input Manager
   (`ProjectSettings/ProjectSettings.asset`'s `activeInputHandler: 0`), and no

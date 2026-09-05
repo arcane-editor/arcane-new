@@ -90,6 +90,10 @@ function VarRow({
                 setEditing(false);
               }
             }}
+            spellCheck={false}
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="off"
           />
         ) : (
           <span

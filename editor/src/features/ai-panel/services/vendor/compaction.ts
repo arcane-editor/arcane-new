@@ -28,7 +28,24 @@ const KEEP_RECENT_TURNS = 3;
 const CLEARED_MARKER = '[Tool result cleared to save context]';
 const STALE_READ_PREFIX = '[Stale read superseded by a newer read of ';
 /** Tool-result content carrying these is an open repair task — never elide it. */
-const REPAIR_SENTINELS = ['[Unity compile]', '[Unity analyzers]'];
+const REPAIR_SENTINELS = [
+  '[Unity compile]',
+  '[Unity analyzers]',
+  // The asset gate's four labels (`asset-checks.ts`'s `gateLabelFor`). A
+  // repair instruction elided under compaction is a repair that never
+  // happens, and these formats fail silently in Unity rather than loudly.
+  '[Unity UXML]',
+  '[Unity USS]',
+  '[Unity input actions]',
+  '[Unity asset]',
+  // The post-turn console check's repair prompt (Task 13). Defensive: the
+  // sentinels are only consulted on toolResult messages and that prompt is a
+  // USER message (which the last-resort truncation already spares while it is
+  // the newest one). Listed so that if the marker ever reaches a tool result —
+  // echoed back by a nested harness, or a future gate note — the one record of
+  // what Unity reported after the turn is not elided out from under the repair.
+  '[Console check]',
+];
 
 /**
  * Flat char-equivalent for an image block. Counting the base64 payload as
