@@ -48,6 +48,15 @@ globset = "0.4"
 notify = { version = "7", features = ["macos_fsevent"] }
 nucleo-matcher = "0.3"
 sha1 = "0.10"
+# Unpacking the bundled csharp-ls tool package. A nupkg is a plain zip, and
+# unzipping it ourselves is what removes NuGet — and NuGet's inability to read
+# the Windows `\\?\` resource path — from the C# provisioning path entirely.
+# Already resolved at this version transitively, so naming it adds nothing to
+# the build; same reasoning as the `png` and `url` entries.
+# `default-features = false` deliberately: the defaults drag in the AES /
+# zeroize stack for encrypted archives, which a nupkg never uses and which
+# does not even resolve here. Deflate is the only codec in play.
+zip = { version = "4", default-features = false, features = ["deflate-flate2"] }
 tauri-plugin-clipboard-manager = "2.3.2"
 # Terminal image paste. The clipboard hands back raw RGBA, not an encoded
 # image, and a terminal can only carry a file path — so the RGBA has to be

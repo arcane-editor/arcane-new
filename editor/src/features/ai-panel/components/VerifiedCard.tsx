@@ -64,12 +64,19 @@ function VerifiedCard({ message }: Props) {
   const {
     files,
     touchedFiles,
-    analyzers,
-    compile,
-    guids,
-    uiToolkit,
-    scriptableObjects,
-    input,
+    // Defaulted for the same reason `layout` is below: these cards are
+    // PERSISTED with the session and the shape has only ever grown, so which
+    // fields a saved card carries depends on the build that wrote it. A
+    // missing one is `undefined`, matches neither string variant, and throws
+    // on the object read (`uiToolkit.problems`) — which is exactly how this
+    // component took the whole AI panel down. `backfillVerifiedCards` repairs
+    // restored sessions; these are the last line of defence.
+    analyzers = 'skipped',
+    compile = 'skipped',
+    guids = 'skipped',
+    uiToolkit = 'skipped',
+    scriptableObjects = 'skipped',
+    input = 'skipped',
     // Absent on cards saved before the layout probe existed, so a restored
     // session shows no layout chip rather than a broken one.
     layout = 'skipped',

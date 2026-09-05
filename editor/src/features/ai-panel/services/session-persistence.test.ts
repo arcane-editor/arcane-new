@@ -5,6 +5,7 @@ import {
   buildSessionData,
   parseSessionData,
   settleDanglingRequests,
+  backfillVerifiedCards,
   STALE_PERMISSION_OPTION_ID,
 } from './session-persistence';
 import type { SaveSessionInput, SessionData } from './session-persistence';
@@ -341,5 +342,72 @@ describe('parseSessionData — pre-rename plan field', () => {
   it('leaves a session with no plan at all alone', () => {
     const data = parseSessionData(JSON.stringify({ messages: [] }));
     expect(data.hostedPlan ?? null).toBeNull();
+  });
+});
+
+// Regression: `Cannot read properties of undefined (reading 'problems')`.
+//
+// Verified cards are persisted with the session, and the card's fields have
+// been ADDED to over time — `uiToolkit`/`scriptableObjects`/`input` arrived
+// after sessions were already being written. `VerifiedCard` reads them as
+// `x === 'skipped' ? … : x === 'clean' ? … : x.problems`, so a card restored
+// from an older build hit `undefined.problems` and took the whole AI panel
+// down through its error boundary. `layout`/`console`/`tests` already had a
+// `= 'skipped'` default for exactly this reason; the older fields did not.
+describe('backfillVerifiedCards', () => {
+  function cardMessage(verifiedPass: Record<string, unknown>): AiMessage {
+    return {
+      id: 'v1',
+      role: 'verifiedPass',
+      text: '',
+      timestamp: 1,
+      verifiedPass,
+    } as unknown as AiMessage;
+  }
+
+  it("fills the three subsystem fields a pre-2026-09-03 card has never heard of", () => {
+    const [m] = backfillVerifiedCards([
+      cardMessage({ files: 1, touchedFiles: ['A.cs'], analyzers: 'skipped', compile: 'clean', guids: 'intact' }),
+    ]);
+    const card = (m as unknown as { verifiedPass: Record<string, unknown> }).verifiedPass;
+
+    expect(card.uiToolkit).toBe('skipped');
+    expect(card.scriptableObjects).toBe('skipped');
+    expect(card.input).toBe('skipped');
+  });
+
+  it('fills the original fields too, so an even older card cannot throw either', () => {
+    const [m] = backfillVerifiedCards([cardMessage({ files: 0, touchedFiles: [] })]);
+    const card = (m as unknown as { verifiedPass: Record<string, unknown> }).verifiedPass;
+
+    expect(card.analyzers).toBe('skipped');
+    expect(card.compile).toBe('skipped');
+    expect(card.guids).toBe('skipped');
+    expect(card.layout).toBe('skipped');
+  });
+
+  it('leaves a complete card exactly as it was', () => {
+    const complete = {
+      files: 2,
+      touchedFiles: ['A.uxml'],
+      analyzers: 'skipped',
+      compile: 'clean',
+      guids: 'intact',
+      uiToolkit: { queriesResolved: 3, queriesTotal: 3, problems: 0 },
+      scriptableObjects: 'clean',
+      input: { problems: 2 },
+      layout: { documents: 1, elements: 14, problems: 0 },
+      console: 'skipped',
+      tests: 'skipped',
+    };
+    const [m] = backfillVerifiedCards([cardMessage({ ...complete })]);
+    const card = (m as unknown as { verifiedPass: Record<string, unknown> }).verifiedPass;
+
+    expect(card).toEqual(complete);
+  });
+
+  it('leaves messages that carry no verified card untouched', () => {
+    const plain: AiMessage[] = [{ id: 'm1', role: 'user', text: 'hi', timestamp: 1 }];
+    expect(backfillVerifiedCards(plain)).toEqual(plain);
   });
 });

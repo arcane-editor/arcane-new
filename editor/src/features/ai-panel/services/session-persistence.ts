@@ -309,9 +309,62 @@ export function parseSessionData(json: string): SessionData {
   delete (data as { arcanePlan?: unknown }).arcanePlan;
 
   if (Array.isArray(data.messages)) {
-    data.messages = settleDanglingRequests(data.messages);
+    data.messages = backfillVerifiedCards(settleDanglingRequests(data.messages));
   }
   return data;
+}
+
+/**
+ * Every `VerifiedCardData` field `VerifiedCard` reads as a union, with the
+ * honest default for "this check did not run".
+ *
+ * The card's shape has only ever GROWN — `uiToolkit`/`scriptableObjects`/
+ * `input` arrived after sessions were already being persisted, and `layout`
+ * after those. So the set of fields a saved card carries depends on which
+ * build wrote it.
+ */
+const VERIFIED_CARD_DEFAULTS: Record<string, string> = {
+  analyzers: 'skipped',
+  compile: 'skipped',
+  guids: 'skipped',
+  uiToolkit: 'skipped',
+  scriptableObjects: 'skipped',
+  input: 'skipped',
+  layout: 'skipped',
+  console: 'skipped',
+  tests: 'skipped',
+};
+
+/**
+ * Backfill missing verified-card fields on restore.
+ *
+ * `VerifiedCard` tests each field against its string variants and then reads
+ * the object one (`uiToolkit.problems`, `input.problems`, …). An absent field
+ * is `undefined`, matches neither variant, and throws — taking the entire AI
+ * panel down through its error boundary with
+ * `Cannot read properties of undefined (reading 'problems')`.
+ *
+ * Applied on load rather than on save, for the same reason as
+ * `settleDanglingRequests`: sessions written before this fix must be repaired
+ * too, and they are exactly the sessions that trigger it.
+ *
+ * `'skipped'` rather than `'clean'` is load-bearing — a check that never ran
+ * must never render as one that passed. Same rule the card itself follows.
+ */
+export function backfillVerifiedCards(messages: AiMessage[]): AiMessage[] {
+  return messages.map((m) => {
+    const card = (m as { verifiedPass?: Record<string, unknown> }).verifiedPass;
+    if (!card || typeof card !== 'object') return m;
+
+    let patched: Record<string, unknown> | null = null;
+    for (const key of Object.keys(VERIFIED_CARD_DEFAULTS)) {
+      if (card[key] === undefined) {
+        patched ??= { ...card };
+        patched[key] = VERIFIED_CARD_DEFAULTS[key];
+      }
+    }
+    return patched ? ({ ...m, verifiedPass: patched } as unknown as AiMessage) : m;
+  });
 }
 
 /** Saves the session JSON. Returns true on success, false if the write failed. */

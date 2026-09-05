@@ -48,13 +48,20 @@ A few things worth knowing:
 - The `.dmg` wrapper itself doesn't need to be signed for the recipient flow above to work.
 - The bundled `unityide-graph` sidecar is signed by Tauri automatically as part of the main bundle, so recipients don't need to do anything for it.
 - **typescript-language-server is bundled** as a sidecar — TypeScript / JavaScript IntelliSense works out of the box without Node.js installed. The bundle ships with TypeScript 6 embedded.
-- **csharp-ls is bundled as a NuGet package and installed on first use.** The recipient does
-  *not* run `dotnet tool install`. `bun run prepare:csharp-ls` vendors the pinned, SHA-512
-  verified `csharp-ls.<version>.nupkg` into `src-tauri/resources/csharp-ls/` (CI passes
-  `--require`, so a release that lost it fails the build), and on the first C# start
-  `csharp_ls.rs` runs `dotnet tool install` against that file as the **only** NuGet source —
-  offline, version-pinned, into the app's data dir, never into the user's global tool store.
-  A csharp-ls the recipient already has always wins over ours.
+- **csharp-ls is bundled and unpacked on first use.** The recipient does *not* run
+  `dotnet tool install`. `bun run prepare:csharp-ls` vendors the pinned, SHA-512 verified
+  `csharp-ls.<version>.nupkg` into `src-tauri/resources/csharp-ls/` (CI passes `--require`,
+  so a release that lost it fails the build). On the first C# start, `csharp_ls.rs` unzips
+  the package's `tools/<tfm>/any/` payload into the app's data dir and runs it as
+  `dotnet <entry assembly>` — the package declares `Runner="dotnet"` and carries no native
+  code, so that is exactly what `dotnet tool install` would have produced. A csharp-ls the
+  recipient already has always wins over ours.
+- **Why it is unzipped rather than installed with `dotnet tool install`.** That was the first
+  approach and it failed on Windows: the only local NuGet source available is the app's own
+  resource directory, which Tauri reports as an extended-length `\\?\C:\Users\...` path.
+  NuGet cannot enumerate a local folder in that form and reports the package as "not found in
+  NuGet feeds <path>", which reads like a failed download. Unzipping removes NuGet, the
+  package source, the generated config, and the SDK requirement for installing, all at once.
 - **The .NET prerequisite is a major version, not just "dotnet".** The pinned csharp-ls targets
   `net10.0`, so the machine needs the .NET 10 runtime *and* an SDK (`dotnet tool` is an SDK
   command). Both are probed before installing: Unity projects get a modal naming the actual
