@@ -1,5 +1,5 @@
 import React from 'react';
-import { reportCrash } from '../utils/crash-report';
+import { reportCrash, crashSummary } from '../utils/crash-report';
 
 interface ErrorBoundaryState {
   hasError: boolean;
@@ -53,36 +53,35 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
 
   handleCopy = () => {
     const { error, componentStack } = this.state;
-    void navigator.clipboard.writeText(
-      [error?.message ?? '', error?.stack ?? '', componentStack ?? ''].join('\n\n'),
-    );
+    void navigator.clipboard.writeText(crashSummary(error, componentStack).copyText);
   };
 
   render() {
     if (this.state.hasError) {
       if (this.props.fallback !== undefined) {
-        // The caller's copy stays the headline, but the error itself must be
-        // reachable. A bare fallback discarded the message and the component
-        // stack outright, which left the person hitting the crash with nothing
-        // to report and no way to get it — the exact reason this class keeps
-        // `componentStack` in state.
+        // The caller's copy stays the headline, and the ERROR ITSELF is shown
+        // underneath it — not behind a disclosure triangle. A packaged build
+        // has no console, so if this message is not on screen unprompted it
+        // does not exist: the first version of this collapsed the message into
+        // a <details>, and it read as "the panel crashed and told me nothing".
+        const summary = crashSummary(this.state.error, this.state.componentStack);
         return (
           <div style={compactWrapStyle}>
             {this.props.fallback}
-            <details style={compactDetailsStyle}>
-              <summary style={compactSummaryStyle}>Error details</summary>
-              <pre style={compactPreStyle}>
-                {[this.state.error?.message ?? '', this.state.componentStack?.trim() ?? '']
-                  .filter(Boolean)
-                  .join('\n\n')}
-              </pre>
-              <button onClick={this.handleCopy} style={compactCopyStyle}>
-                Copy details
-              </button>
-            </details>
+            <div style={compactMessageStyle}>{summary.headline}</div>
+            {summary.detail && (
+              <details style={compactDetailsStyle}>
+                <summary style={compactSummaryStyle}>Component stack</summary>
+                <pre style={compactPreStyle}>{summary.detail}</pre>
+              </details>
+            )}
+            <button onClick={this.handleCopy} style={compactCopyStyle}>
+              Copy details
+            </button>
           </div>
         );
       }
+
       return (
         <div
           style={{
@@ -101,7 +100,7 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
         >
           <h2 style={{ margin: 0 }}>Something went wrong</h2>
           <p style={{ maxWidth: 600, color: 'var(--text-secondary, #999)' }}>
-            {this.state.error?.message ?? 'An unexpected error occurred.'}
+            {crashSummary(this.state.error, this.state.componentStack).headline}
           </p>
           {this.state.componentStack && (
             <details style={{ maxWidth: 720, width: '100%', textAlign: 'left' }}>
@@ -186,6 +185,23 @@ const compactWrapStyle: React.CSSProperties = {
   flexDirection: 'column',
   gap: 8,
   padding: 12,
+};
+
+const compactMessageStyle: React.CSSProperties = {
+  // Selectable: the user may want to read it out or copy part of it by hand.
+  userSelect: 'text',
+  fontFamily: 'var(--font-mono, monospace)',
+  fontSize: 11,
+  lineHeight: 1.5,
+  color: 'var(--text-primary, #d4d4d4)',
+  background: 'var(--bg-input, #252526)',
+  border: '1px solid var(--border, #444)',
+  borderRadius: 4,
+  padding: 8,
+  maxHeight: 160,
+  overflow: 'auto',
+  whiteSpace: 'pre-wrap',
+  wordBreak: 'break-word',
 };
 
 const compactDetailsStyle: React.CSSProperties = {
