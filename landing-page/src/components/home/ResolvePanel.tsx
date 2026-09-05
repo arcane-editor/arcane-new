@@ -60,7 +60,7 @@ function Node({
       {components?.map((c) => (
         <span
           key={c}
-          className="hidden shrink-0 rounded-chip border border-border bg-raised px-1.5 py-px font-mono text-[10px] text-muted-foreground sm:inline"
+          className="hidden shrink-0 rounded-chip border border-border bg-raised px-1.5 py-px font-mono text-micro text-muted-foreground sm:inline"
         >
           {c}
         </span>
@@ -159,7 +159,7 @@ MonoBehaviour:
         <div className="mb-2 flex items-center gap-2 text-micro text-muted-foreground">
           <span className="h-2 w-2 rounded-chip bg-primary" />
           <span className="font-mono">PlayerStats</span>
-          <span className="text-muted-foreground/60">ScriptableObject</span>
+          <span className="text-faint">ScriptableObject</span>
         </div>
         <Field label="Max Health" value="100" />
         <Field label="Move Speed" value="5.5" />
@@ -205,7 +205,7 @@ MonoBehaviour:
               {b}
             </div>
           ))}
-          <span className="absolute bottom-1.5 right-2 font-mono text-[9px] text-muted-foreground/50">
+          <span className="absolute bottom-1.5 right-2 font-mono text-[9px] text-faint">
             1920 × 1080
           </span>
         </div>
@@ -240,7 +240,7 @@ MonoBehaviour:
     render: () => (
       <div className="grid grid-cols-[92px_1fr] gap-3">
         <div className="border-r border-border/60 pr-2">
-          <p className="mb-2 text-[10px] text-muted-foreground/70">Maps</p>
+          <p className="mb-2 text-micro text-faint">Maps</p>
           {["Player", "UI", "Vehicle"].map((m, i) => (
             <div
               key={m}
@@ -253,7 +253,7 @@ MonoBehaviour:
           ))}
         </div>
         <div>
-          <p className="mb-2 text-[10px] text-muted-foreground/70">
+          <p className="mb-2 text-micro text-faint">
             Bindings
           </p>
           {[
@@ -306,7 +306,7 @@ MonoBehaviour:
         ].map((line, i) => (
           <div key={i} className="flex gap-2">
             <span
-              className={`w-3 shrink-0 select-none text-right text-[10px] ${
+              className={`w-3 shrink-0 select-none text-right text-micro ${
                 line.gutter === "!" ? "text-fail" : "text-primary-lit"
               }`}
               aria-hidden="true"
@@ -323,7 +323,7 @@ MonoBehaviour:
           </div>
         ))}
         <div className="mt-2 flex items-start gap-2 rounded-chip border border-fail/30 bg-fail/10 px-2 py-1.5">
-          <span className="mt-px shrink-0 font-mono text-[10px] text-fail">!</span>
+          <span className="mt-px shrink-0 font-mono text-micro text-fail">!</span>
           <span className="text-micro leading-snug text-fail-text">
             UNITY0405 — legacy input in a project on the Input System
           </span>
@@ -342,7 +342,7 @@ function RawBlock({ text }: { text: string }) {
         maskImage: "linear-gradient(to bottom, black 58%, transparent 100%)",
         WebkitMaskImage: "linear-gradient(to bottom, black 58%, transparent 100%)",
       }}
-      className="overflow-hidden whitespace-pre font-mono text-[10.5px] leading-[1.7] text-muted-foreground/35"
+      className="overflow-hidden whitespace-pre font-mono text-micro leading-[1.7] text-faint"
     >
       {text}
     </pre>
@@ -443,7 +443,7 @@ export default function ResolvePanel() {
         >
           {/* Left: what every other editor gives you. Deliberately unreadable. */}
           <div className="min-w-0 border-b border-border md:border-b-0 md:border-r">
-            <p className="border-b border-border/60 px-4 py-2 text-[11px] text-muted-foreground/60">
+            <p className="border-b border-border/60 px-4 py-2 text-micro text-muted-foreground">
               Every other editor
             </p>
             <div className="h-[104px] overflow-hidden px-4 py-3 md:h-[292px]">
@@ -453,11 +453,11 @@ export default function ResolvePanel() {
 
           {/* Right: the same bytes, resolved. */}
           <div className="relative min-w-0">
-            <p className="flex items-center gap-2 border-b border-border/60 px-4 py-2 text-[11px] text-muted-foreground/60">
+            <p className="flex items-center gap-2 border-b border-border/60 px-4 py-2 text-micro text-muted-foreground">
               UnityIDE
               <span
-                className={`ml-auto font-mono text-[10px] transition-colors duration-500 ${
-                  resolved ? "text-primary" : "text-muted-foreground/40"
+                className={`ml-auto font-mono text-micro transition-colors duration-500 ${
+                  resolved ? "text-primary" : "text-faint"
                 }`}
               >
                 {file.resolvedAs}

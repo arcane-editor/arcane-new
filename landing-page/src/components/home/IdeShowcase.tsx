@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactElement } from "react";
 import {
   AlertTriangle,
   BotMessageSquare,
@@ -125,7 +125,7 @@ const VIEWS: View[] = [
       <div className="flex h-full flex-col">
         <PanelTitle
           right={
-            <span className="ml-auto shrink-0 font-mono text-micro text-muted-foreground/60">
+            <span className="ml-auto shrink-0 font-mono text-micro text-faint">
               SampleScene
             </span>
           }
@@ -145,7 +145,7 @@ const VIEWS: View[] = [
                 {node.chips.map((chip) => (
                   <span
                     key={chip}
-                    className="hidden rounded-[3px] border border-border bg-raised px-1.5 py-px font-mono text-[10px] text-muted-foreground sm:inline"
+                    className="hidden rounded-[3px] border border-border bg-raised px-1.5 py-px font-mono text-micro text-muted-foreground sm:inline"
                   >
                     {chip}
                   </span>
@@ -169,10 +169,10 @@ const VIEWS: View[] = [
           right={
             <span className="ml-auto flex shrink-0 gap-4 text-mini">
               <span className="text-primary">Fields</span>
-              <span className="text-muted-foreground/50">Instances</span>
-              <span className="flex items-center gap-1.5 text-muted-foreground/50">
+              <span className="text-faint">Instances</span>
+              <span className="flex items-center gap-1.5 text-faint">
                 Drift
-                <span className="rounded-[3px] bg-warn/15 px-1.5 font-mono text-[10px] text-warn">3</span>
+                <span className="rounded-[3px] bg-warn/15 px-1.5 font-mono text-micro text-warn">3</span>
               </span>
             </span>
           }
@@ -203,7 +203,7 @@ const VIEWS: View[] = [
       <div className="flex h-full flex-col">
         <PanelTitle
           right={
-            <span className="ml-auto shrink-0 rounded-[3px] bg-primary/10 px-2 py-0.5 font-mono text-[10px] text-primary">
+            <span className="ml-auto shrink-0 rounded-[3px] bg-primary/10 px-2 py-0.5 font-mono text-micro text-primary">
               Design chat
             </span>
           }
@@ -246,7 +246,7 @@ const VIEWS: View[] = [
                 <span className="rounded-chip border border-white/10 py-2 text-mini text-foreground/50">Garage</span>
                 <span className="rounded-chip border border-white/10 py-2 text-mini text-foreground/50">Quit</span>
               </div>
-              <span className="absolute -bottom-6 right-0 font-mono text-[10px] text-muted-foreground/50">
+              <span className="absolute -bottom-6 right-0 font-mono text-micro text-faint">
                 1920 × 1080
               </span>
             </div>
@@ -265,7 +265,7 @@ const VIEWS: View[] = [
       <div className="flex h-full flex-col">
         <PanelTitle
           right={
-            <span className="ml-auto shrink-0 rounded-[3px] bg-warn/15 px-2 py-0.5 font-mono text-[10px] text-warn">
+            <span className="ml-auto shrink-0 rounded-[3px] bg-warn/15 px-2 py-0.5 font-mono text-micro text-warn">
               1 conflict
             </span>
           }
@@ -274,7 +274,7 @@ const VIEWS: View[] = [
         </PanelTitle>
         <div className="grid min-h-0 flex-1 grid-cols-[104px_1fr] sm:grid-cols-[132px_1fr]">
           <div className="border-r border-border p-2">
-            <p className="px-2 py-1 text-micro text-muted-foreground/60">Maps</p>
+            <p className="px-2 py-1 text-micro text-faint">Maps</p>
             {["Player", "UI", "Vehicle"].map((m, i) => (
               <div
                 key={m}
@@ -310,7 +310,7 @@ const VIEWS: View[] = [
                   {binding as string}
                 </span>
                 {clash && (
-                  <span className="ml-auto hidden shrink-0 font-mono text-[10px] text-fail-text sm:inline">
+                  <span className="ml-auto hidden shrink-0 font-mono text-micro text-fail-text sm:inline">
                     also UI / Submit
                   </span>
                 )}
@@ -331,8 +331,8 @@ const VIEWS: View[] = [
       <div className="flex h-full flex-col">
         <PanelTitle
           right={
-            <span className="ml-auto flex shrink-0 gap-3 font-mono text-[10px]">
-              <span className="text-muted-foreground/60">12 Log</span>
+            <span className="ml-auto flex shrink-0 gap-3 font-mono text-micro">
+              <span className="text-faint">12 Log</span>
               <span className="text-warn">2 Warning</span>
               <span className="text-fail-text">1 Error</span>
             </span>
@@ -350,7 +350,7 @@ const VIEWS: View[] = [
                 NullReferenceException: Object reference not set to an instance of an object
               </span>
             </p>
-            <p className="mt-1 pl-[58px] font-mono text-[10.5px] text-primary/80">
+            <p className="mt-1 pl-[58px] font-mono text-micro text-primary/80">
               EnemyAI.Update () at Assets/Scripts/EnemyAI.cs:42
             </p>
           </div>
@@ -363,7 +363,7 @@ const VIEWS: View[] = [
                 Camera.main called every frame — cache the reference
               </span>
             </p>
-            <p className="mt-1 pl-[58px] font-mono text-[10.5px] text-primary/80">
+            <p className="mt-1 pl-[58px] font-mono text-micro text-primary/80">
               PlayerController.cs:31
             </p>
           </div>
@@ -389,7 +389,7 @@ const VIEWS: View[] = [
       <div className="flex h-full flex-col">
         <PanelTitle
           right={
-            <span className="ml-auto shrink-0 font-mono text-[10px] text-muted-foreground/60">
+            <span className="ml-auto shrink-0 font-mono text-micro text-faint">
               4 warnings, 0 errors
             </span>
           }
@@ -407,9 +407,9 @@ const VIEWS: View[] = [
               key={code}
               className="flex items-baseline gap-3 border-b border-border/40 py-2.5 last:border-0"
             >
-              <span className="shrink-0 font-mono text-[10.5px] text-warn">{code}</span>
+              <span className="shrink-0 font-mono text-micro text-warn">{code}</span>
               <span className="truncate text-mini text-foreground/85">{message}</span>
-              <span className="ml-auto hidden shrink-0 font-mono text-[10.5px] text-muted-foreground/60 sm:inline">
+              <span className="ml-auto hidden shrink-0 font-mono text-micro text-faint sm:inline">
                 {where}
               </span>
             </div>
@@ -428,8 +428,8 @@ const VIEWS: View[] = [
       <div className="flex h-full flex-col">
         <PanelTitle
           right={
-            <span className="ml-auto flex shrink-0 items-center gap-3 font-mono text-[10px]">
-              <span className="text-muted-foreground/60">Edit Mode</span>
+            <span className="ml-auto flex shrink-0 items-center gap-3 font-mono text-micro">
+              <span className="text-faint">Edit Mode</span>
               <span className="text-pass">12 ✓</span>
               <span className="text-fail-text">1 ✗</span>
             </span>
@@ -446,16 +446,16 @@ const VIEWS: View[] = [
             <p key={name} className="flex items-baseline gap-2.5 py-1 pl-4">
               <span className="text-pass">✓</span>
               <span className="truncate text-muted-foreground">{name}</span>
-              <span className="ml-auto text-[10px] text-muted-foreground/50">{ms}</span>
+              <span className="ml-auto text-micro text-faint">{ms}</span>
             </p>
           ))}
           <p className="mt-2 py-1.5 text-foreground/85">WeaponTests</p>
           <p className="flex items-baseline gap-2.5 py-1 pl-4">
             <span className="text-fail">✗</span>
             <span className="truncate text-fail-text">Fire_RaisesEvent</span>
-            <span className="ml-auto text-[10px] text-muted-foreground/50">11ms</span>
+            <span className="ml-auto text-micro text-faint">11ms</span>
           </p>
-          <p className="ml-4 mt-1 rounded-chip border border-fail/25 bg-fail/10 px-3 py-2 text-[10.5px] leading-relaxed text-muted-foreground">
+          <p className="ml-4 mt-1 rounded-chip border border-fail/25 bg-fail/10 px-3 py-2 text-micro leading-relaxed text-muted-foreground">
             Expected 1 invocation, but was 0
           </p>
         </div>
@@ -472,7 +472,7 @@ const VIEWS: View[] = [
       <div className="flex h-full flex-col">
         <PanelTitle
           right={
-            <span className="ml-auto shrink-0 font-mono text-[10px] text-muted-foreground/60">
+            <span className="ml-auto shrink-0 font-mono text-micro text-faint">
               working tree vs HEAD
             </span>
           }
@@ -503,9 +503,9 @@ const VIEWS: View[] = [
                 key={name}
                 className="flex items-baseline gap-3 border-b border-border/40 py-2.5 last:border-0"
               >
-                <span className={`w-[62px] shrink-0 font-mono text-[10px] ${tone}`}>{kind}</span>
+                <span className={`w-[62px] shrink-0 font-mono text-micro ${tone}`}>{kind}</span>
                 <span className="shrink-0 text-mini text-foreground/85">{name}</span>
-                <span className="truncate font-mono text-[10.5px] text-muted-foreground">
+                <span className="truncate font-mono text-micro text-muted-foreground">
                   {detail}
                 </span>
               </div>
@@ -525,7 +525,7 @@ const VIEWS: View[] = [
       <div className="flex h-full flex-col">
         <PanelTitle
           right={
-            <span className="ml-auto shrink-0 rounded-[3px] bg-primary/10 px-2 py-0.5 font-mono text-[10px] text-primary">
+            <span className="ml-auto shrink-0 rounded-[3px] bg-primary/10 px-2 py-0.5 font-mono text-micro text-primary">
               agent
             </span>
           }
@@ -559,12 +559,12 @@ const VIEWS: View[] = [
               {["compile", "analyzers", "GUIDs", "layout", "input", "3/3 tests"].map((chip) => (
                 <span
                   key={chip}
-                  className="rounded-[3px] bg-pass/10 px-1.5 py-0.5 font-mono text-[10px] text-pass"
+                  className="rounded-[3px] bg-pass/10 px-1.5 py-0.5 font-mono text-micro text-pass"
                 >
                   ✓ {chip}
                 </span>
               ))}
-              <span className="rounded-[3px] bg-raised px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+              <span className="rounded-[3px] bg-raised px-1.5 py-0.5 font-mono text-micro text-muted-foreground">
                 – console
               </span>
             </div>
@@ -575,9 +575,88 @@ const VIEWS: View[] = [
   },
 ];
 
+/** How long each panel holds before the window advances itself. Long enough to
+ *  read the panel and its caption, short enough that a visitor who scrolled to
+ *  the shot sees it change before deciding it is a screenshot. */
+const DWELL_MS = 4200;
+
 export default function IdeShowcase() {
   const [active, setActive] = useState(0);
   const tabs = useRef<(HTMLButtonElement | null)[]>([]);
+  const figure = useRef<HTMLElement | null>(null);
+  const rail = useRef<HTMLDivElement | null>(null);
+
+  /**
+   * The window demonstrates itself, then gets out of the way.
+   *
+   * Nine panels sat behind this rail and nothing on screen said so: a visitor
+   * saw one panel, read it as a static screenshot and scrolled past the best
+   * asset on the page. The fix is not a carousel bolted on top — it is the
+   * product doing the thing the product does, which is swapping the panel when
+   * the activity bar changes.
+   *
+   * Three rules keep it from becoming an annoyance:
+   *   - it only runs while the shot is actually on screen,
+   *   - it stops FOR GOOD the moment the visitor takes the control, because
+   *     after that the rail is theirs and moving it under them is a bug,
+   *   - it never starts under `prefers-reduced-motion`, where the honest
+   *     reading is that the visitor does not want the page animating at all.
+   */
+  const [inView, setInView] = useState(false);
+  const [retired, setRetired] = useState(false);
+  const [paused, setPaused] = useState(false);
+
+  // Interaction retires the autoplay permanently. Every path that changes the
+  // tab on purpose goes through here — click and keyboard alike.
+  const take = useCallback((next: number) => {
+    setRetired(true);
+    setActive(next);
+  }, []);
+
+  useEffect(() => {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const el = figure.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => setInView(entry.isIntersecting),
+      { threshold: 0.35 },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  const running = inView && !retired && !paused;
+
+  useEffect(() => {
+    if (!running) return;
+    const id = window.setTimeout(
+      () => setActive((i) => (i + 1) % VIEWS.length),
+      DWELL_MS,
+    );
+    return () => window.clearTimeout(id);
+  }, [running, active]);
+
+  /**
+   * Keep the selected tab in frame on the phone.
+   *
+   * Below `md` the rail is a horizontal scroller showing about two and a half of
+   * its nine tabs, so once the shot advanced past the third panel the visitor
+   * watched the content change with no visible indication of what had been
+   * selected. Scrolls the RAIL only — never `scrollIntoView`, which would drag
+   * the whole page toward the hero as the autoplay cycled.
+   */
+  useEffect(() => {
+    const box = rail.current;
+    const tab = tabs.current[active];
+    if (!box || !tab || box.scrollWidth <= box.clientWidth) return;
+    const left = tab.offsetLeft - (box.clientWidth - tab.offsetWidth) / 2;
+    box.scrollTo({
+      left: Math.max(0, left),
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        ? "auto"
+        : "smooth",
+    });
+  }, [active]);
 
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -589,16 +668,28 @@ export default function IdeShowcase() {
       else if (e.key === "End") next = last;
       if (next === null) return;
       e.preventDefault();
-      setActive(next);
+      take(next);
       tabs.current[next]?.focus();
     },
-    [active],
+    [active, take],
   );
 
   const view = VIEWS[active];
 
   return (
-    <figure className="m-0">
+    <figure
+      ref={figure}
+      className="m-0"
+      // Hovering or tabbing into the shot is a reading signal, not a taking
+      // one: hold the current panel, but leave the autoplay armed so it
+      // resumes when they move on.
+      onPointerEnter={() => setPaused(true)}
+      onPointerLeave={() => setPaused(false)}
+      onFocusCapture={() => setPaused(true)}
+      onBlurCapture={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setPaused(false);
+      }}
+    >
       <div className="ide-shadow overflow-hidden rounded-plane border border-border bg-panel">
         {/* Title bar — the app name is the literal string in TitleBar.tsx, and
             the centre deck is its transport plus live bridge status. */}
@@ -614,8 +705,8 @@ export default function IdeShowcase() {
 
           <div className="mx-auto flex shrink-0 items-center gap-2 rounded-chip border border-border bg-raised px-2.5 py-1">
             <Play className="h-3 w-3 fill-current text-primary" strokeWidth={0} aria-hidden="true" />
-            <Pause className="h-3 w-3 fill-current text-muted-foreground/50" strokeWidth={0} aria-hidden="true" />
-            <Square className="h-[11px] w-[11px] fill-current text-muted-foreground/50" strokeWidth={0} aria-hidden="true" />
+            <Pause className="h-3 w-3 fill-current text-faint" strokeWidth={0} aria-hidden="true" />
+            <Square className="h-[11px] w-[11px] fill-current text-faint" strokeWidth={0} aria-hidden="true" />
             <span className="mx-1 h-3 w-px bg-border" />
             <span className="relative flex h-1.5 w-1.5">
               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-pass opacity-70 motion-reduce:hidden" />
@@ -624,7 +715,7 @@ export default function IdeShowcase() {
             <span className="whitespace-nowrap font-mono text-micro text-foreground/80">Connected</span>
           </div>
 
-          <div className="hidden shrink-0 items-center gap-2 text-muted-foreground/50 sm:flex">
+          <div className="hidden shrink-0 items-center gap-2 text-faint sm:flex">
             <Search className="h-3.5 w-3.5" strokeWidth={1.6} aria-hidden="true" />
             <Settings className="h-3.5 w-3.5" strokeWidth={1.6} aria-hidden="true" />
           </div>
@@ -635,11 +726,12 @@ export default function IdeShowcase() {
               switches panels. Horizontal above md so it stays reachable on a
               phone without stealing half the width. */}
           <div
+            ref={rail}
             role="tablist"
             aria-label="Unity panels"
             aria-orientation="vertical"
             onKeyDown={onKeyDown}
-            className="flex overflow-x-auto border-b border-border bg-void p-1.5 md:flex-col md:overflow-visible md:border-b-0 md:border-r"
+            className="rail-scroll flex overflow-x-auto border-b border-border bg-void p-1.5 md:flex-col md:overflow-visible md:border-b-0 md:border-r"
           >
             {VIEWS.map((v, i) => {
               const on = i === active;
@@ -652,8 +744,8 @@ export default function IdeShowcase() {
                   aria-selected={on}
                   aria-controls="ide-panel"
                   tabIndex={on ? 0 : -1}
-                  onClick={() => setActive(i)}
-                  className={`relative flex shrink-0 items-center gap-2.5 whitespace-nowrap rounded-chip px-3 py-2 text-left text-mini transition-colors ${
+                  onClick={() => take(i)}
+                  className={`relative flex shrink-0 items-center gap-2.5 overflow-hidden whitespace-nowrap rounded-chip px-3 py-2 text-left text-mini transition-colors ${
                     on
                       ? "bg-raised text-primary"
                       : "text-muted-foreground hover:bg-raised/60 hover:text-foreground"
@@ -664,6 +756,20 @@ export default function IdeShowcase() {
                   )}
                   <v.Icon className="h-4 w-4 shrink-0" strokeWidth={1.7} aria-hidden="true" />
                   {v.label}
+
+                  {/* The dwell, drawn. This is the whole affordance: a static
+                      product shot and a cycling one are indistinguishable until
+                      something on screen says the cycle exists. Keyed on
+                      `active` so the animation restarts per panel, and gone the
+                      moment the visitor takes the rail. */}
+                  {on && running && (
+                    <span
+                      key={active}
+                      className="pointer-events-none absolute inset-x-0 bottom-0 h-px origin-left bg-primary/70"
+                      style={{ animation: `dwell ${DWELL_MS}ms linear forwards` }}
+                      aria-hidden="true"
+                    />
+                  )}
                 </button>
               );
             })}
@@ -676,12 +782,17 @@ export default function IdeShowcase() {
             aria-labelledby={`ide-tab-${view.id}`}
             className="h-[392px] min-w-0 sm:h-[404px]"
           >
-            {view.render()}
+            {/* Keyed on the view so React remounts rather than diffs: a panel
+                that fades in reads as a panel that CHANGED, where a diffed one
+                just appears to have always said that. */}
+            <div key={view.id} className="h-full panel-swap">
+              {view.render()}
+            </div>
           </div>
         </div>
 
         {/* Status bar — the items StatusBar.tsx actually renders. */}
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-1 border-t border-border bg-void px-4 py-2 font-mono text-[10px] text-muted-foreground/70">
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-1 border-t border-border bg-void px-4 py-2 font-mono text-micro text-faint">
           <span className="flex items-center gap-1.5">
             <GitBranch className="h-2.5 w-2.5" strokeWidth={2} aria-hidden="true" />
             main
@@ -704,8 +815,11 @@ export default function IdeShowcase() {
 
       {/* The caption is where the selling happens: it names what the panel above
           is doing that another editor cannot. It changes with the tab. */}
-      <figcaption className="mx-auto mt-6 max-w-[62ch] text-center text-mini leading-relaxed text-muted-foreground">
-        {view.caption}
+      {/* Fixed height, because the caption is one or two lines depending on the
+          panel and letting it reflow bounced the proof strip below it on every
+          advance. */}
+      <figcaption className="mx-auto mt-6 flex min-h-[3.25rem] max-w-[62ch] items-start justify-center text-center text-mini leading-relaxed text-muted-foreground">
+        <span key={view.id} className="panel-swap">{view.caption}</span>
       </figcaption>
     </figure>
   );

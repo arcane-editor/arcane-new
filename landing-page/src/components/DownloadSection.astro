@@ -98,12 +98,16 @@ const platforms = [
 ];
 ---
 
-<section id="download" class="border-b border-border bg-void py-20 sm:py-28">
+<section id="download" class="border-b border-border bg-sunk py-16 sm:py-20">
   <div class="container mx-auto px-6">
-    <h2 class="font-display text-step2 font-semibold text-foreground sm:text-step3">
+    <h2 class="font-display text-step2 font-semibold text-foreground">
       Download
     </h2>
 
+    {/* No lede here. A draft of this section carried "We wanted a better IDE for
+        Unity. So we built one." as its opening line, which only worked while the
+        hero had a different headline. The hero owns that sentence again, and
+        saying it twice on one page spends it. */}
     <div class="mt-10 max-w-3xl overflow-hidden rounded-plane border border-border bg-panel">
       {platforms.map((p) => (
         <div class="flex flex-wrap items-center gap-x-4 gap-y-3 border-b border-border px-5 py-4 last:border-b-0 sm:flex-nowrap">
@@ -120,7 +124,7 @@ const platforms = [
             {p.version}
           </span>
 
-          <span class="min-w-0 flex-1 truncate text-mini text-muted-foreground/70">
+          <span class="min-w-0 flex-1 truncate text-mini text-muted-foreground">
             {p.subtitle}
           </span>
 
@@ -146,7 +150,7 @@ const platforms = [
     {/* Linux was a full card whose only content was the words "Coming Soon".
         A line states the same fact and stops competing with the builds that
         actually exist. */}
-    <p class="mt-2 max-w-3xl text-mini text-muted-foreground/60">
+    <p class="mt-2 max-w-3xl text-mini text-muted-foreground">
       Linux is not built yet.
     </p>
   </div>

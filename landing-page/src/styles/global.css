@@ -45,7 +45,28 @@
     --secondary: 250 19% 13%;
     --secondary-foreground: 45 12% 87%;
     --muted: 250 19% 13%;
-    --muted-foreground: 256 4% 50%; /* #7E7B86                               */
+    /* 52%, not the app's 50%. The two-point lift is the smallest change that
+     * clears 4.5:1 on EVERY surface this site paints, including `--panel` —
+     * the brightest one, where 50% landed at 4.31:1 and put the pricing cards'
+     * taglines and every "/mo" just under the line. 4.67:1 on panel, 5.10:1 on
+     * sunk, 5.19:1 on void. This is the one place the site deliberately parts
+     * from the desktop theme's value, because the app never paints body copy on
+     * its brightest plane and this page does. */
+    --muted-foreground: 256 4% 52%; /* #83808B                               */
+
+    /* The quiet tier, as a colour rather than as alpha.
+     *
+     * The page used to reach for `text-muted-foreground/70`, `/60`, `/50`,
+     * `/45` and `/40` whenever something needed to recede. Composited over
+     * `--sunk` those land at 2.87:1, 2.5:1, 2.2:1, 1.84:1 and 1.7:1 — the
+     * footer's trademark line and the hero's "Free plan. Windows and macOS."
+     * were both effectively invisible, and neither was optional text.
+     *
+     * One token replaces the whole ladder at 3.44:1: still clearly a step
+     * below `--muted-foreground`, still readable. Anything that wants to be
+     * quieter than this wants to be deleted instead.
+     */
+    --faint: 256 4% 40%;            /* #64626A  3.44:1 on --sunk             */
     --selected: 255 24% 16%;        /* #252034                               */
     --bright: 251 17% 20%;          /* #2E2B3C                               */
 
@@ -187,9 +208,14 @@
   }
 
   /* The app's two-layer contact + ambient shadow. The only shadow on the site,
-     and it belongs to the floating product plane alone. */
+     and it belongs to the floating product plane alone.
+     The inset hairline is the lit top edge every real desktop window has: it is
+     what separates "a plane above the page" from "a rectangle drawn on it", and
+     it costs one shadow layer rather than a border that would round-trip
+     through the palette. */
   .ide-shadow {
     box-shadow:
+      inset 0 1px 0 hsl(0 0% 100% / 0.07),
       0 1px 2px hsl(252 26% 2% / 0.7),
       0 24px 60px -20px hsl(252 26% 2% / 0.85);
   }
@@ -206,6 +232,90 @@
     font-size: 12px;
     letter-spacing: -0.01em;
     color: hsl(var(--muted-foreground));
+  }
+
+  /**
+   * The hero window's two moving parts, and the only motion on this page that
+   * a visitor did not ask for.
+   *
+   * `dwell` draws the hold before the shot advances itself; `panel-swap` makes
+   * the advance legible as a change rather than as a redraw. Both are short and
+   * both stop for good once the visitor takes the activity rail — see the note
+   * in `IdeShowcase.tsx`.
+   */
+  @keyframes dwell {
+    from { transform: scaleX(0); }
+    to   { transform: scaleX(1); }
+  }
+
+  /**
+   * The free-forever claim, marked.
+   *
+   * This line carries the one thing the tool it is measured against cannot say,
+   * and it was set at 13px in muted grey under a gold button — the quietest
+   * element in the fold holding the loudest fact. The rule drawn beneath it is
+   * an annotation, not decoration: it appears once, marks a specific claim, and
+   * then stops, which is the only kind of unrequested motion this page allows.
+   *
+   * The delay is what makes it work. Drawn on the first frame it would be part
+   * of the layout and read as a border; arriving 700ms in, after the reader has
+   * taken the headline, it is a movement in the periphery that pulls the eye
+   * back down to the sentence.
+   */
+  @keyframes mark-draw {
+    from { transform: scaleX(0); }
+    to   { transform: scaleX(1); }
+  }
+  .claim-mark {
+    position: relative;
+    display: inline-block;
+  }
+  .claim-mark::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: -5px;
+    height: 2px;
+    border-radius: 1px;
+    background: hsl(var(--primary));
+    transform: scaleX(0);
+    transform-origin: left center;
+    animation: mark-draw 0.65s cubic-bezier(0.16, 1, 0.3, 1) 0.7s forwards;
+  }
+  /* Explicit rather than relying on the global reduced-motion override, which
+     collapses the DURATION but not the 700ms delay — leaving the mark absent
+     for most of a second and then popping in, which is worse than either. */
+  @media (prefers-reduced-motion: reduce) {
+    .claim-mark::after {
+      animation: none;
+      transform: scaleX(1);
+    }
+  }
+
+  @keyframes panel-swap {
+    from { opacity: 0; transform: translateY(3px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .panel-swap {
+    animation: panel-swap 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  /* The activity rail is a horizontal overflow scroller below `md`, where it
+     shows about two and a half of its nine tabs and nothing said the rest were
+     there. The mask is the hint: content fades out at the edge it scrolls
+     toward, so the cut reads as "more" rather than as the end. */
+  .rail-scroll {
+    scrollbar-width: none;
+  }
+  .rail-scroll::-webkit-scrollbar {
+    display: none;
+  }
+  @media (max-width: 767px) {
+    .rail-scroll {
+      -webkit-mask-image: linear-gradient(to right, #000 90%, transparent 100%);
+      mask-image: linear-gradient(to right, #000 90%, transparent 100%);
+    }
   }
 
   .scroll-reveal {

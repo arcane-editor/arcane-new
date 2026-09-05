@@ -28,7 +28,7 @@ const checks = [
 ];
 ---
 
-<section id="verified" class="border-b border-border bg-void py-20 sm:py-28">
+<section id="verified" class="border-b border-border bg-sunk py-20 sm:py-28">
   <div class="container mx-auto grid items-start gap-12 px-6 lg:grid-cols-[1fr_1.1fr] lg:gap-16">
     <div>
       <h2 class="max-w-[18ch] font-display text-step2 font-semibold text-foreground sm:text-step3">
@@ -68,7 +68,7 @@ const checks = [
           <path d="m9 12 2 2 4-4"/>
         </svg>
         <span class="text-mini font-semibold text-foreground">Verified</span>
-        <span class="ml-auto truncate font-mono text-[10px] text-muted-foreground">
+        <span class="ml-auto truncate font-mono text-micro text-muted-foreground">
           PlayerController.cs +2
         </span>
       </div>
@@ -84,7 +84,7 @@ const checks = [
               </svg>
             ) : (
               <span class="flex h-3.5 w-3.5 shrink-0 items-center justify-center" aria-hidden="true">
-                <span class="h-px w-2.5 bg-muted-foreground/60"></span>
+                <span class="h-px w-2.5 bg-muted-foreground"></span>
               </span>
             )}
             <span
@@ -95,7 +95,7 @@ const checks = [
             >
               {check.label}
             </span>
-            <span class="truncate font-mono text-[10.5px] text-muted-foreground/70">
+            <span class="truncate font-mono text-micro text-muted-foreground">
               {check.detail}
             </span>
             <span class="sr-only">{check.state === 'pass' ? 'passed' : 'not verified'}</span>
@@ -103,7 +103,7 @@ const checks = [
         ))}
       </ul>
 
-      <p class="border-t border-border bg-sunk px-4 py-2.5 font-mono text-[10px] text-muted-foreground/70">
+      <p class="border-t border-border bg-sunk px-4 py-2.5 font-mono text-micro text-muted-foreground">
         A console error is never reported as fixed — only as not seen again.
       </p>
     </div>

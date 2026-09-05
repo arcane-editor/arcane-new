@@ -43,6 +43,9 @@ export default {
           DEFAULT: 'hsl(var(--muted))',
           foreground: 'hsl(var(--muted-foreground))',
         },
+        // The quiet tier. Use this instead of an alpha on muted-foreground —
+        // see the note in global.css for what those composited to.
+        faint: 'hsl(var(--faint))',
         accent: {
           DEFAULT: 'hsl(var(--accent))',
           foreground: 'hsl(var(--accent-foreground))',
