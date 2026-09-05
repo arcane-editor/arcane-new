@@ -99,19 +99,28 @@ export default function PricingTable({ variant = 'page' }: PricingTableProps) {
                 isSection ? 'py-16 sm:py-28' : 'pt-32 pb-24'
             }`}
         >
-            <div className={`text-center ${isSection ? 'mb-12 sm:mb-16' : 'mb-4'}`}>
+            {/*  The sub-headline used to explain the credit system in detail —
+                 "a monthly pool of AI credits… bigger models cost more… top up
+                 anytime" — directly under a heading, while every card below it
+                 obeys the OWNER DIRECTIVE a few lines down in this same file:
+                 user-facing surfaces never show raw credit numbers. It also
+                 argued for the metering model that STANDOUT-FEATURES.md names
+                 as the thing the market is in revolt against. One line replaces
+                 it, and the cards carry the detail they were already carrying. */}
+            <div className={isSection ? 'mb-12 sm:mb-16' : 'mb-4'}>
                 {isSection ? (
-                    <h2 className="mb-4 font-display text-3xl font-bold tracking-tight sm:text-4xl md:text-5xl">
-                        Simple, <span className="text-gradient-orange">usage-based</span> pricing
+                    <h2 className="font-display text-step2 font-semibold tracking-tight text-foreground sm:text-step3">
+                        Pricing
                     </h2>
                 ) : (
-                    <h1 className="font-display text-3xl md:text-4xl font-bold">Simple, usage-based pricing</h1>
+                    <h1 className="font-display text-step2 font-semibold tracking-tight text-foreground sm:text-step3">
+                        Pricing
+                    </h1>
                 )}
-                <p className={`text-muted-foreground mx-auto max-w-xl ${
-                    isSection ? 'text-base sm:text-lg' : 'text-sm mt-3'
+                <p className={`max-w-[54ch] text-muted-foreground ${
+                    isSection ? 'mt-4 text-step1 leading-relaxed' : 'mt-3 text-mini'
                 }`}>
-                    Every plan includes a monthly pool of AI credits. Each request spends credits based on the
-                    model it uses — bigger models cost more. Run out? Top up anytime.
+                    The IDE is free. Paid plans add AI usage and the bigger reasoning modes.
                 </p>
             </div>
 

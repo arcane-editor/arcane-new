@@ -1,0 +1,113 @@
+---
+/**
+ * The capability sheet.
+ *
+ * Keyed by file extension, because that is how a Unity project is actually
+ * organised — the key column carries information rather than decorating the
+ * row, and it continues the argument the hero panel makes. Kept from the
+ * previous revision; what changed is the density. Nine rows of 25–65 words each
+ * put half the home page's copy in one un-illustrated band. Every row here is
+ * capped at fourteen.
+ *
+ * The colour rule applies to the key column too: gold means a file type the IDE
+ * resolves into a real editor, muted means the row is about the app rather than
+ * a format. Nothing is coloured for rhythm.
+ *
+ * Claims are traceable, and three that once sat on this page are still absent
+ * because nothing implements them: Git LFS setup, Plastic SCM, and animator /
+ * blend-tree parsing. Two more are scoped carefully rather than dropped —
+ * "refused" is true of `.uxml` / `.uss` written through `unity_ui_write`, and
+ * the tool count is the 25 Unity-specific ones rather than the whole registry.
+ */
+
+const rows = [
+  {
+    keys: ['.cs'],
+    title: 'C# that knows it is Unity',
+    body: 'Unity analyzers, lifecycle markers in the gutter, and a debugger that attaches to the Editor.',
+  },
+  {
+    keys: ['.unity', '.prefab', '.mat'],
+    title: 'Scenes and prefabs as structure',
+    body: 'Open as a navigable tree. Diffs read as GameObjects and components, not as text.',
+  },
+  {
+    keys: ['.asset'],
+    title: 'ScriptableObjects as typed forms',
+    body: 'The real fields, edited in place. Bytes are spliced, never re-serialized.',
+  },
+  {
+    keys: ['.uxml', '.uss'],
+    title: 'UI Toolkit with a live canvas',
+    body: 'Markup renders beside its source. Invalid UXML is refused, not warned about.',
+  },
+  {
+    keys: ['.inputactions'],
+    title: 'Input actions, not JSON',
+    body: 'Action maps, bindings and control schemes as a table you can read.',
+  },
+  {
+    keys: ['.asmdef', '.shader', '.hlsl'],
+    title: 'The rest of the project',
+    body: 'Assembly definitions, ShaderLab and HLSL are first-class. Meta files stay paired.',
+  },
+  {
+    keys: ['Unity'],
+    word: true,
+    title: 'A live link to the Editor',
+    body: 'Play, pause, console logs with click-to-source, and tests that report back.',
+  },
+  {
+    keys: ['AI'],
+    word: true,
+    title: 'An agent with Unity in its hands',
+    body: 'Twenty-five Unity tools, reviewable diffs, checkpoints you can roll back.',
+  },
+  {
+    keys: ['IDE'],
+    word: true,
+    title: 'The IDE around all of it',
+    body: 'Terminal, git with UnityYAMLMerge, multi-window, tab completion, six themes.',
+  },
+];
+---
+
+<section id="features" class="border-b border-border bg-sunk py-20 sm:py-28">
+  <div class="container mx-auto px-6">
+    <h2 class="max-w-[24ch] font-display text-step2 font-semibold text-foreground sm:text-step3">
+      Everything else we needed it to do.
+    </h2>
+
+    <dl class="mt-12 max-w-4xl border-t border-border">
+      {rows.map((row) => (
+        <div class="grid gap-x-8 gap-y-2 border-b border-border py-6 sm:grid-cols-[150px_1fr] sm:py-7">
+          <dt class="flex flex-wrap items-start gap-x-2 gap-y-1 pt-0.5">
+            {row.keys.map((key) => (
+              <span
+                class:list={[
+                  'font-mono text-mini',
+                  row.word ? 'text-muted-foreground/70' : 'text-primary',
+                ]}
+              >
+                {key}
+              </span>
+            ))}
+          </dt>
+          <dd class="min-w-0">
+            <h3 class="text-base font-semibold text-foreground">{row.title}</h3>
+            <p class="mt-1.5 max-w-[62ch] text-mini leading-relaxed text-muted-foreground">
+              {row.body}
+            </p>
+          </dd>
+        </div>
+      ))}
+    </dl>
+
+    <a
+      href="/features"
+      class="mt-8 inline-block text-mini font-medium text-primary underline decoration-primary/30 underline-offset-[6px] transition-colors hover:decoration-primary"
+    >
+      Every feature in detail
+    </a>
+  </div>
+</section>

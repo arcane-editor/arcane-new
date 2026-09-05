@@ -1,0 +1,111 @@
+---
+/**
+ * The receipt.
+ *
+ * `STANDOUT-FEATURES.md` argues the durable moat is trust — "Unity-grounded,
+ * analyzer-gated, verified, serialization-safe" — and prescribes the demo:
+ * lead with the unsafe-thing-prevented moment. None of that was anywhere on
+ * the site, which sold breadth instead.
+ *
+ * The card is `VerifiedCard.tsx` / `verified-pass.ts`: after a turn finishes, a
+ * budgeted sweep re-checks every file the agent touched and renders one row of
+ * pass / fail / skipped chips.
+ *
+ * The last row is deliberately NOT a pass. `verified-verdict.ts` used to render
+ * a green "Verified" when the bridge was down and the budget ran out; it now
+ * renders `unverified`. Showing an all-green card here would sell the feature
+ * and misrepresent it at the same time — the skipped row IS the claim.
+ */
+
+const checks = [
+  { label: 'compile', detail: 'Unity 6000.3 — 0 errors', state: 'pass' },
+  { label: 'analyzers', detail: '31 Unity rules — 0 findings', state: 'pass' },
+  { label: 'GUID integrity', detail: '14 references intact', state: 'pass' },
+  { label: 'ScriptableObjects', detail: 'no drift against the class', state: 'pass' },
+  { label: 'input', detail: 'every action name resolves', state: 'pass' },
+  { label: 'tests', detail: '3 / 3 passed', state: 'pass' },
+  { label: 'Unity console', detail: 'unverified — Editor not running', state: 'skip' },
+];
+---
+
+<section id="verified" class="border-b border-border bg-void py-20 sm:py-28">
+  <div class="container mx-auto grid items-start gap-12 px-6 lg:grid-cols-[1fr_1.1fr] lg:gap-16">
+    <div>
+      <h2 class="max-w-[18ch] font-display text-step2 font-semibold text-foreground sm:text-step3">
+        It doesn't tell you it worked. It shows you what it checked.
+      </h2>
+
+      <p class="mt-6 max-w-[54ch] text-step1 leading-relaxed text-muted-foreground">
+        After every turn, the agent recompiles in your running Unity Editor and
+        re-checks each file it touched.
+      </p>
+
+      <dl class="mt-9 space-y-6 border-l border-border pl-6">
+        <div>
+          <dt class="text-mini font-semibold text-foreground">Even while Unity is behind you</dt>
+          <dd class="mt-1.5 max-w-[52ch] text-mini leading-relaxed text-muted-foreground">
+            Unity parks its main thread when its window loses focus, so an AI-written
+            script would not compile until someone tabbed over. UnityIDE wakes it
+            through the OS, without stealing focus.
+          </dd>
+        </div>
+        <div>
+          <dt class="text-mini font-semibold text-foreground">A skipped check is not a passing one</dt>
+          <dd class="mt-1.5 max-w-[52ch] text-mini leading-relaxed text-muted-foreground">
+            When a check cannot run, it says so. Nothing turns green because the
+            answer was unavailable.
+          </dd>
+        </div>
+      </dl>
+    </div>
+
+    {/* The card. Sits on the brightest plane, like everything the product owns. */}
+    <div class="overflow-hidden rounded-plane border border-border bg-panel ide-shadow">
+      <div class="flex items-center gap-2.5 border-b border-border bg-sunk px-4 py-3">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"
+             stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4 text-primary" aria-hidden="true">
+          <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/>
+          <path d="m9 12 2 2 4-4"/>
+        </svg>
+        <span class="text-mini font-semibold text-foreground">Verified</span>
+        <span class="ml-auto truncate font-mono text-[10px] text-muted-foreground">
+          PlayerController.cs +2
+        </span>
+      </div>
+
+      <ul class="divide-y divide-border/60">
+        {checks.map((check) => (
+          <li class="flex items-center gap-3 px-4 py-[11px]">
+            {check.state === 'pass' ? (
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+                   stroke-linecap="round" stroke-linejoin="round"
+                   class="h-3.5 w-3.5 shrink-0 text-pass" aria-hidden="true">
+                <path d="M20 6 9 17l-5-5"/>
+              </svg>
+            ) : (
+              <span class="flex h-3.5 w-3.5 shrink-0 items-center justify-center" aria-hidden="true">
+                <span class="h-px w-2.5 bg-muted-foreground/60"></span>
+              </span>
+            )}
+            <span
+              class:list={[
+                'w-[132px] shrink-0 truncate text-mini',
+                check.state === 'pass' ? 'text-foreground/90' : 'text-muted-foreground',
+              ]}
+            >
+              {check.label}
+            </span>
+            <span class="truncate font-mono text-[10.5px] text-muted-foreground/70">
+              {check.detail}
+            </span>
+            <span class="sr-only">{check.state === 'pass' ? 'passed' : 'not verified'}</span>
+          </li>
+        ))}
+      </ul>
+
+      <p class="border-t border-border bg-sunk px-4 py-2.5 font-mono text-[10px] text-muted-foreground/70">
+        A console error is never reported as fixed — only as not seen again.
+      </p>
+    </div>
+  </div>
+</section>

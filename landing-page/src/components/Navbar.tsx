@@ -42,14 +42,14 @@ const Navbar = () => {
     <nav
       className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${
         scrolled
-          ? "border-b border-border/50 bg-background/80 backdrop-blur-xl"
+          ? "border-b border-border bg-void/90 backdrop-blur-md"
           : "bg-transparent"
       }`}
     >
       <div className="container mx-auto flex h-16 items-center justify-between px-4">
         <a href="/" className="flex items-center gap-3">
-          <img src="/icon.png" alt="UnityIDE" className="h-9 w-9 rounded-lg" />
-          <span className="font-display text-lg font-bold tracking-tight text-foreground">
+          <img src="/icon.png" alt="" className="h-8 w-8" />
+          <span className="font-display text-base font-semibold tracking-tight text-foreground">
             Unity<span className="text-primary">IDE</span>
           </span>
         </a>
@@ -72,7 +72,7 @@ const Navbar = () => {
                     from the centre (default transform-origin) on hover, and
                     stays put while the section is active. */}
                 <span
-                  className={`pointer-events-none absolute bottom-0 left-1/2 h-0.5 w-6 -translate-x-1/2 rounded-full bg-primary glow-orange-sm transition-transform duration-200 ease-out ${
+                  className={`pointer-events-none absolute bottom-0 left-1/2 h-0.5 w-6 -translate-x-1/2 rounded-full bg-primary transition-transform duration-200 ease-out ${
                     isActive ? "scale-x-100" : "scale-x-0 group-hover:scale-x-100"
                   }`}
                 />
@@ -88,7 +88,7 @@ const Navbar = () => {
               className="group relative rounded-lg px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-primary"
             >
               Log in
-              <span className="pointer-events-none absolute bottom-0 left-1/2 h-0.5 w-6 -translate-x-1/2 scale-x-0 rounded-full bg-primary glow-orange-sm transition-transform duration-200 ease-out group-hover:scale-x-100" />
+              <span className="pointer-events-none absolute bottom-0 left-1/2 h-0.5 w-6 -translate-x-1/2 scale-x-0 rounded-full bg-primary transition-transform duration-200 ease-out group-hover:scale-x-100" />
             </a>
           )}
 
@@ -129,7 +129,7 @@ const Navbar = () => {
       </div>
 
       {open && (
-        <div className="border-t border-border/50 bg-background/95 backdrop-blur-xl md:hidden">
+        <div className="border-t border-border bg-void/95 backdrop-blur-md md:hidden">
           <div className="flex flex-col gap-2 p-4">
             {links.map((l) => (
               <a
