@@ -27,6 +27,7 @@ import {
   type SubsystemInventory,
   type ScriptableObjectFacts,
   type UiToolkitFacts,
+  type Subsystem,
 } from './subsystem-facts';
 import {
   detectInputSystem,
@@ -510,11 +511,20 @@ export async function getUnityUiDesign(workspacePath: string): Promise<UiDesignF
   return cache?.workspacePath === workspacePath ? cache.uiDesign : null;
 }
 
+export interface FactsBlockOpts {
+  /**
+   * Skip the `activeFilePath` heuristic and carry detail for exactly these
+   * subsystems (still filtered by what the project actually has). Design mode
+   * sets `['uiToolkit']`; see the comment at the selection site below.
+   */
+  forceSubsystems?: readonly Subsystem[];
+}
+
 /**
  * Build the Unity facts markdown block synchronously. Returns null for
  * non-Unity projects. Triggers a background prime when the cache is cold.
  */
-export function getUnityFactsBlock(): string | null {
+export function getUnityFactsBlock(opts?: FactsBlockOpts): string | null {
   const ctx = useProjectContextStore.getState();
   if (!ctx.isUnityProject) return null;
 
@@ -536,11 +546,22 @@ export function getUnityFactsBlock(): string | null {
     // choice is made HERE, once, because this whole block is then frozen for
     // the conversation — nothing may vary the system prompt mid-conversation
     // (frozen-context.ts), so "adaptive" has to mean "chosen at freeze time".
-    const selected = selectSubsystems({
-      activeFilePath: useWorkspaceStore.getState().activeFilePath,
-      activeFileText: activeFileTextSync(),
-      present: presenceOf(facts.inventory),
-    });
+    const present = presenceOf(facts.inventory);
+    // `forceSubsystems` exists for design mode, where the answer is known
+    // without inspecting anything: the session IS a `.uxml`. Without it the
+    // choice comes from `activeFilePath` at FREEZE time, so a design
+    // conversation whose decoration happened to be captured while a `.cs` tab
+    // was focused silently lost its USS variables, its PanelSettings
+    // resolution and its design rules — for the life of that conversation.
+    // Presence still gates it: forcing detail for a subsystem the project does
+    // not use would invent facts.
+    const selected = opts?.forceSubsystems
+      ? opts.forceSubsystems.filter((s) => present[s])
+      : selectSubsystems({
+          activeFilePath: useWorkspaceStore.getState().activeFilePath,
+          activeFileText: activeFileTextSync(),
+          present,
+        });
     const inventory = subsystemInventoryLine(facts.inventory);
     if (inventory) lines.push(inventory);
 

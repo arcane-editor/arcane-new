@@ -7,6 +7,7 @@
 import { describe, it, expect } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import { attributesFor } from '../../../../utils/uxml-controls';
 import {
   checkUxml,
   checkUss,
@@ -15,6 +16,7 @@ import {
   formatFindings,
   gateLabelFor,
   isCheckableAsset,
+  isBlockingFinding,
   type UxmlCheckContext,
 } from './asset-checks';
 
@@ -113,7 +115,7 @@ describe('checkUss', () => {
   it('reports a CSS property USS does not implement, with the remedy', () => {
     const findings = checkUss('.a { box-shadow: 0 0 4px black; }', 'a.uss');
     expect(findings).toHaveLength(1);
-    expect(findings[0].code).toBe('uss-unknown-property');
+    expect(findings[0].code).toBe('uss-css-only-property');
     expect(findings[0].message).toContain('box-shadow');
     expect(findings[0].message).toContain('ignores it silently');
   });
@@ -254,5 +256,165 @@ describe('against a realistic document/stylesheet pair', () => {
   it('accepts every -unity-* property, which is USS-only and not CSS', () => {
     const findings = checkUss(uss, 'Assets/UI/Theme.uss');
     expect(findings.some((f) => f.message.includes('-unity-'))).toBe(false);
+  });
+});
+
+// ── Elements, attributes, templates, units and selectors ─────────────────────
+
+/** A minimal document with the `ui:` prefix bound the way every real one binds it. */
+function doc(body: string, extraNs = ''): string {
+  return `<ui:UXML xmlns:ui="UnityEngine.UIElements"${extraNs}>${body}</ui:UXML>`;
+}
+
+describe('checkUxml — element names', () => {
+  it('refuses a near-miss on a real control, and names the control it meant', () => {
+    const findings = checkUxml(doc('<ui:Buton text="Play" />'), ctx());
+    const hit = findings.find((f) => f.code === 'uxml-misspelled-element');
+    expect(hit).toBeDefined();
+    expect(hit!.message).toContain('Button');
+  });
+
+  it('treats a correctly spelled but wrongly cased tag as the typo it is', () => {
+    // Unity's tag matching is case-sensitive, so this fails to load.
+    const findings = checkUxml(doc('<ui:button text="Play" />'), ctx());
+    expect(findings.map((f) => f.code)).toContain('uxml-misspelled-element');
+  });
+
+  it('only warns when a UI Toolkit tag resembles nothing — the table can be behind', () => {
+    const findings = checkUxml(doc('<ui:Kaleidoscope />'), ctx());
+    const codes = findings.map((f) => f.code);
+    expect(codes).toContain('uxml-unknown-element');
+    expect(codes).not.toContain('uxml-misspelled-element');
+  });
+
+  it('says nothing about a custom control in its own namespace', () => {
+    // The whole false-positive floor: this is C# we cannot see, so any verdict
+    // on it would be a guess.
+    const uxml = doc('<local:HealthBar name="hp" />', ' xmlns:local="MyGame.UI"');
+    expect(checkUxml(uxml, ctx()).filter((f) => f.code.startsWith('uxml-'))).toEqual([]);
+  });
+
+  it('says nothing about elements in a document that declares no namespace at all', () => {
+    const findings = checkUxml('<UXML><Buton /></UXML>', ctx());
+    expect(findings.some((f) => f.code.includes('element'))).toBe(false);
+  });
+
+  it('accepts <Style> and <Template>, which are tags but not controls', () => {
+    const uxml = doc('<ui:Template name="row" src="Row.uxml" /><ui:Instance template="row" />');
+    expect(checkUxml(uxml, ctx()).some((f) => f.code.includes('element'))).toBe(false);
+  });
+});
+
+describe('checkUxml — attributes', () => {
+  it('reports an attribute the control does not have', () => {
+    const findings = checkUxml(doc('<ui:Label text="hi" onclick="Go()" />'), ctx());
+    const hit = findings.find((f) => f.code === 'uxml-unknown-attribute');
+    expect(hit).toBeDefined();
+    expect(hit!.message).toContain('onclick');
+  });
+
+  it('never blocks on one — the attribute table is allowed to be incomplete', () => {
+    const findings = checkUxml(doc('<ui:Label onclick="Go()" />'), ctx());
+    expect(findings.filter(isBlockingFinding)).toEqual([]);
+  });
+
+  it('leaves prefixed XML attributes alone', () => {
+    const uxml =
+      '<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"' +
+      ' xsi:noNamespaceSchemaLocation="../../UIElementsSchema/UIElements.xsd"><ui:Label text="a" /></ui:UXML>';
+    expect(checkUxml(uxml, ctx()).some((f) => f.code === 'uxml-unknown-attribute')).toBe(false);
+  });
+
+  it('accepts a control-specific attribute that is not on VisualElement', () => {
+    const uxml = doc('<ui:ScrollView mode="Vertical" /><ui:Slider low-value="0" high-value="1" />');
+    expect(checkUxml(uxml, ctx()).some((f) => f.code === 'uxml-unknown-attribute')).toBe(false);
+  });
+
+  it('reports nothing at all for a type the table has no data for', () => {
+    // `null` means "no data", and a caller must never read it as "no attributes".
+    expect(attributesFor('SomeControlWeHaveNotHeardOf')).toBeNull();
+    expect(attributesFor('VisualElement')).not.toBeNull();
+  });
+});
+
+describe('checkUxml — templates and names', () => {
+  it('refuses an <Instance> whose template is never declared', () => {
+    const findings = checkUxml(doc('<ui:Instance template="row" />'), ctx());
+    const hit = findings.find((f) => f.code === 'uxml-template-missing');
+    expect(hit).toBeDefined();
+    expect(isBlockingFinding(hit!)).toBe(true);
+  });
+
+  it('reports two elements sharing a name, which halves the C# wiring in silence', () => {
+    const findings = checkUxml(doc('<ui:Button name="go" /><ui:Button name="go" />'), ctx());
+    const hit = findings.find((f) => f.code === 'uxml-duplicate-name');
+    expect(hit).toBeDefined();
+    expect(isBlockingFinding(hit!)).toBe(false);
+  });
+
+  it('resolves a relative <Style src> against the document that carries it', () => {
+    const uxml = doc('<ui:Style src="../Theme.uss" />');
+    const base = { ...ctx(), documentPath: 'Assets/UI/Menu/Main.uxml' };
+    expect(checkUxml(uxml, { ...base, ussPaths: ['Assets/UI/Theme.uss'] })).toEqual([]);
+    expect(
+      checkUxml(uxml, { ...base, ussPaths: ['Assets/Theme.uss'] }).map((f) => f.code),
+    ).toContain('uxml-style-missing');
+  });
+
+  it('stays silent on a relative <Style src> when no document path was given', () => {
+    // It is relative to a document we were not told the identity of; a verdict
+    // would be a guess about the base directory.
+    const findings = checkUxml(doc('<ui:Style src="Theme.uss" />'), ctx());
+    expect(findings.some((f) => f.code === 'uxml-style-missing')).toBe(false);
+  });
+});
+
+describe('checkUss — units, pseudo-classes and selectors', () => {
+  it('refuses a length unit USS cannot express', () => {
+    const findings = checkUss('.a { font-size: 1.2rem; }', 'a.uss');
+    const hit = findings.find((f) => f.code === 'uss-bad-unit');
+    expect(hit).toBeDefined();
+    expect(hit!.message).toContain('rem');
+    expect(isBlockingFinding(hit!)).toBe(true);
+  });
+
+  it('accepts px, %, and the time and angle units USS really has', () => {
+    const uss = '.a { width: 50%; height: 24px; transition-duration: 0.2s; rotate: 45deg; }';
+    expect(checkUss(uss, 'a.uss')).toEqual([]);
+  });
+
+  it('does not read a filename inside url() as a length', () => {
+    const uss = '.a { background-image: url("project://database/Assets/UI/bg2em.png"); }';
+    expect(checkUss(uss, 'a.uss')).toEqual([]);
+  });
+
+  it('reports a pseudo-class USS does not have, because the rule is dropped whole', () => {
+    const findings = checkUss('.a:nth-child(2) { color: red; }', 'a.uss');
+    expect(findings.map((f) => f.code)).toContain('uss-unknown-pseudo');
+  });
+
+  it('reports selector syntax USS cannot parse', () => {
+    for (const selector of ['.a + .b', '.a~.b', '.a[disabled]', '.a::before']) {
+      const findings = checkUss(`${selector} { color: red; }`, 'a.uss');
+      expect(findings.map((f) => f.code)).toContain('uss-unsupported-selector');
+    }
+  });
+
+  it('accepts the combinators USS does have', () => {
+    expect(checkUss('.menu > .btn:hover .icon { color: red; }', 'a.uss')).toEqual([]);
+  });
+
+  it('suggests the real property behind a typo, and blocks on it', () => {
+    const findings = checkUss('.a { fex-direction: row; }', 'a.uss');
+    const hit = findings.find((f) => f.code === 'uss-misspelled-property');
+    expect(hit).toBeDefined();
+    expect(hit!.message).toContain('flex-direction');
+    expect(isBlockingFinding(hit!)).toBe(true);
+  });
+
+  it('only warns on a property that resembles nothing in the registry', () => {
+    const findings = checkUss('.a { -unity-future-thing: 4px; }', 'a.uss');
+    expect(findings.map((f) => f.code)).toEqual(['uss-unknown-property']);
+    expect(findings.filter(isBlockingFinding)).toEqual([]);
   });
 });

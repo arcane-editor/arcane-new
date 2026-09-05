@@ -26,6 +26,16 @@ interface Props {
   name: string;
   /** Raw UXML, from the live Monaco buffer rather than disk. */
   content: string;
+  /**
+   * Floating chrome laid over the canvas — today, the design dock.
+   *
+   * A SLOT rather than an import, so this feature stays unaware of the AI
+   * panel. `ai-panel` already reaches this module's barrel by dynamic import
+   * (`ui-layout-tool.ts`), and a static import back the other way would close
+   * the mutual barrel cycle that broke app startup once before. `EditorPanel`
+   * imports both and is what puts them together.
+   */
+  overlay?: React.ReactNode;
 }
 
 /**
@@ -39,7 +49,7 @@ interface Props {
  * The reference resolution the panel and the analyzers do is deliberately NOT
  * repeated here. This answers one question: what does it look like.
  */
-export function UxmlPreviewEditor({ path, name, content }: Props) {
+export function UxmlPreviewEditor({ path, name, content, overlay }: Props) {
   const workspacePath = useWorkspaceStore((s) => s.workspacePath);
   const [sheets, setSheets] = useState<UssStyleSheet[]>([]);
   const [unresolved, setUnresolved] = useState<string[]>([]);
@@ -182,7 +192,19 @@ export function UxmlPreviewEditor({ path, name, content }: Props) {
       </div>
 
       <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
-      <PreviewCanvas
+      {/* `overlay` is anchored to the CANVAS, not to the row and not to the
+          shell, and it is a SIBLING of the canvas rather than a child of it.
+          Both halves of that matter:
+
+          - Spanning the row would float it over the inspector as well, and
+            spanning the shell would put it on top of the "Not rendered" strip.
+          - Living INSIDE the canvas would route its pointer and wheel events
+            through the camera's own handlers on the way up — clicking the
+            composer would start a pan, and scrolling the transcript would be
+            `preventDefault`ed into a zoom, because that listener is native and
+            fires before any React handler could stop it. */}
+      <div style={{ position: 'relative', display: 'flex', flex: 1, minWidth: 0, minHeight: 0 }}>
+        <PreviewCanvas
         camera={camera}
         layout={layout}
         css={plan.css}
@@ -191,8 +213,10 @@ export function UxmlPreviewEditor({ path, name, content }: Props) {
         onSelect={setSelectedId}
         showBoxes={showBoxes}
         background={background}
-        label={stageLabel(panel, layout)}
-      />
+          label={stageLabel(panel, layout)}
+        />
+        {overlay}
+      </div>
       <ElementInspector
         node={selectedNode}
         usages={selectedNode?.name ? usages.byElement.get(selectedNode.name) ?? [] : []}

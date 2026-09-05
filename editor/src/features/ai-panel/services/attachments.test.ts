@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { formatUnityAssetBlock, type UnityAssetModel } from './attachments';
+import { formatUnityAssetBlock, type UnityAssetModel, promptTextForImages } from './attachments';
 
 // NOTE: only the pure formatter is unit-tested here (per the brief). Full
 // `resolveAttachments` / `resolveUnityAsset` resolution touches Tauri's
@@ -145,5 +145,35 @@ describe('formatUnityAssetBlock', () => {
     };
     const args = { relPath: 'Assets/A.prefab', model, refCount: 2 };
     expect(formatUnityAssetBlock(args)).toBe(formatUnityAssetBlock(args));
+  });
+});
+
+describe('promptTextForImages', () => {
+  // The defect this exists for: an image attachment contributes no text prefix,
+  // so an image-only send produced `{ type: 'text', text: '' }`. Providers
+  // reject an empty content part every time, and the client retries it — the
+  // turn sits on "Thinking…" through the backoff and ends in a bare
+  // "Server error" with nothing naming the cause.
+  it('never returns an empty string when there are images to send', () => {
+    for (const text of ['', '   ', '\n']) {
+      expect(promptTextForImages(text, 1).trim().length).toBeGreaterThan(0);
+    }
+  });
+
+  it('leaves a real prompt exactly as written, whitespace and all', () => {
+    expect(promptTextForImages('make it warmer', 2)).toBe('make it warmer');
+    expect(promptTextForImages('  padded  ', 1)).toBe('  padded  ');
+  });
+
+  it('counts the images, so the sentence matches what was attached', () => {
+    expect(promptTextForImages('', 1)).toContain('the attached image');
+    expect(promptTextForImages('', 3)).toContain('3 attached images');
+  });
+
+  it('changes nothing when there are no images — an empty send stays empty', () => {
+    // With no images the caller is on the plain `prompt()` path, which has its
+    // own guards; inventing words there would put a sentence nobody typed into
+    // the transcript.
+    expect(promptTextForImages('', 0)).toBe('');
   });
 });

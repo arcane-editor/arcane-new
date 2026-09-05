@@ -68,6 +68,15 @@ function ChatInput() {
       return;
     }
 
+    // Sending from the SIDEBAR leaves the design chat's mode behind. The mode
+    // pill here shows Agent for a design thread (`modeOptionFor`), and this is
+    // what makes that true rather than a label the next send contradicts — the
+    // design chat belongs to the canvas dock, which sets the mode back when you
+    // send from there.
+    if (useAiStore.getState().mode === 'design') {
+      useAiStore.getState().setMode('agent');
+    }
+
     dispatchComposerSend(text, useAiStore.getState().attachments);
   }
 

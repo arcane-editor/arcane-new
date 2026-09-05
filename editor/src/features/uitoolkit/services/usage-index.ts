@@ -27,6 +27,33 @@ export const EMPTY_USAGE_INDEX: UsageIndex = {
 const SCAN_EXCLUDES = ['Library/**', 'Temp/**', 'obj/**', 'Logs/**', 'Build/**', 'Builds/**'];
 const CHUNK = 300;
 
+/**
+ * One-entry memo, keyed by workspace + the exact name set.
+ *
+ * The scan reads EVERY `.cs` in the project. That was affordable when the only
+ * caller was the inspector, which runs once when you open a document and is
+ * keyed on the name set so retyping a label does not re-scan. It is not
+ * affordable per tool call: `unity_ui_toolkit {element, usages:true}` resolves
+ * ONE element and pays the whole project walk for it, so asking about six
+ * elements walked the project six times. The design brief asks about all of a
+ * document's names at once, and it asks on every send.
+ *
+ * One entry rather than a map, because the access pattern is one document at a
+ * time and an unbounded cache of whole-project scans is a memory leak with
+ * extra steps. `invalidateUsageIndex()` is what a `.cs` write calls; without it
+ * a rename would be invisible to the very map that exists to catch renames.
+ */
+let memo: { key: string; index: UsageIndex } | null = null;
+
+function memoKey(workspacePath: string, names: readonly string[]): string {
+  return `${workspacePath}\u0000${[...names].sort().join('\u0000')}`;
+}
+
+/** Drop the memo. Call after anything that could change what the C# does. */
+export function invalidateUsageIndex(): void {
+  memo = null;
+}
+
 interface RawFile {
   path: string;
   content: string;
@@ -65,6 +92,9 @@ export async function loadUsageIndex(
 ): Promise<UsageIndex> {
   if (!workspacePath || names.length === 0) return EMPTY_USAGE_INDEX;
 
+  const key = memoKey(workspacePath, names);
+  if (memo?.key === key) return memo.index;
+
   let paths: string[];
   try {
     paths = await invoke<string[]>('scan_all_files_v2', {
@@ -97,5 +127,9 @@ export async function loadUsageIndex(
     await new Promise((resolve) => setTimeout(resolve, 0));
   }
 
-  return { byElement, scannedFiles, loaded: true };
+  const index: UsageIndex = { byElement, scannedFiles, loaded: true };
+  // Only a scan that actually read something is worth remembering; caching a
+  // zero-file result would pin a transient failure for the rest of the session.
+  if (scannedFiles > 0) memo = { key, index };
+  return index;
 }

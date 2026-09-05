@@ -30,6 +30,13 @@ import { initUnityCompilerDiagnostics } from '../../unity-compiler';
 import { AssetViewer, isUnityAssetFile, SceneDiffViewer } from '../../unity-asset-viewer';
 import { InputActionsEditor, isInputActionsFile } from '../../unity-input';
 import { UxmlPreviewEditor, isUxmlFile } from '../../uitoolkit';
+// The composition point for the design dock. `uitoolkit` takes it as a slot and
+// imports nothing from `ai-panel`/`design-chat`; this file already imports both
+// sides, so it is where they meet. See `design-chat/index.ts` for why the
+// dependency has to run one way.
+import { DesignChatDock } from '../../design-chat';
+import { useDesignChatStore } from '../../../stores/design-chat';
+import { toRelativePath } from '../../../utils/relative-path';
 import { ScriptableObjectEditor, initSoInstanceCodeLens } from '../../unity-scriptable-objects';
 import { attachUnityDecorations } from '../../csharp';
 import { initTestCodeLens } from '../../unity-test-runner';
@@ -61,6 +68,8 @@ function EditorPanel() {
   const editorCursorBlinking = useSettingsStore((s) => s.settings['editor.cursorBlinking']);
   const editorBracketPairColorization = useSettingsStore((s) => s.settings['editor.bracketPairColorization']);
   const editorRenderWhitespace = useSettingsStore((s) => s.settings['editor.renderWhitespace']);
+  const workspacePath = useWorkspaceStore((s) => s.workspacePath);
+  const designDockOpen = useDesignChatStore((s) => s.open);
   const isUnityProject = useProjectContextStore((s) => s.isUnityProject);
   const structuredDefault = useSettingsStore((s) => s.settings['unity.assetViewer.structuredDefault']);
   const assetViewerModeMap = useUiStore((s) => s.assetViewerMode);
@@ -243,6 +252,16 @@ function EditorPanel() {
         path={activeFile.path}
         name={activeFile.name}
         content={activeFile.content}
+        overlay={
+          designDockOpen ? (
+            <DesignChatDock
+              // Workspace-relative, because that is the form the agent's tools,
+              // the session record and the scope guard all speak.
+              documentPath={toRelativePath(activeFile.path, workspacePath)}
+              documentName={activeFile.name}
+            />
+          ) : null
+        }
       />
     );
   }

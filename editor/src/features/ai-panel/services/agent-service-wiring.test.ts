@@ -167,11 +167,35 @@ describe('agent-service.ts — Unity subsystem tools', () => {
   });
 
   it('keeps the asset-mutate tools out of the read-only modes', () => {
-    // They appear exactly once, in the final (agent / plan-execution) return.
+    // Twice: once in the design branch (filtered down to unity_ui_write) and
+    // once in the final agent / plan-execution return. Both sit after every
+    // read-only early return, which is what this actually pins.
     const occurrences = SRC.split('createUnityAssetMutateTools(').length - 1;
-    expect(occurrences).toBe(1);
-    const ask = SRC.indexOf("if (mode === 'ask')");
-    expect(SRC.indexOf('createUnityAssetMutateTools(')).toBeGreaterThan(ask);
+    expect(occurrences).toBe(2);
+    const lastReadOnly = Math.max(
+      SRC.indexOf("if (mode === 'ask')"),
+      SRC.indexOf("if (mode === 'plan-planning')"),
+      SRC.indexOf("if (mode === 'preplanning')"),
+    );
+    expect(SRC.indexOf('createUnityAssetMutateTools(')).toBeGreaterThan(lastReadOnly);
+  });
+
+  it('gives design mode only the UI writer out of the asset-mutate set', () => {
+    // The other three mutate subsystems the design dock never shows you.
+    expect(SRC).toContain(".filter((t) => t.name === 'unity_ui_write')");
+  });
+
+  it('scopes design-mode writes to the session document, outside every other gate', () => {
+    // Outside, so a refusal costs no approval prompt and no checkpoint —
+    // the same placement, and the same reason, as guardRealPath.
+    expect(SRC).toMatch(/withDesignScope\(\s*guardRealPath\(/);
+  });
+
+  it('leaves bash out of design mode', () => {
+    // bash bypasses the checkpoint, the approval gate and every asset check.
+    const design = SRC.slice(SRC.indexOf("if (mode === 'ui-design')"));
+    const branch = design.slice(0, design.indexOf('withRepeatCallGuard'));
+    expect(branch).not.toContain('createBashTool');
   });
 
   it('gives the asset-mutate tools a checkpoint and the write-approval policy', () => {
@@ -249,12 +273,16 @@ describe('agent-service.ts — abort wins in detectTurnOutcome (Task 4)', () => 
     expect(SRC).toContain('const outcome = detectTurnOutcome(this.agent.getMessages().slice(before), this.abortRequested);');
   });
 
-  it('restoreAgentMessages does not emit a stopped role — it stays a UI-only marker', () => {
-    const match = SRC.match(/function restoreAgentMessages[\s\S]*?\n}\n/);
-    expect(match).not.toBeNull();
-    const body = match![0];
-    expect(body).not.toContain("role: 'stopped'");
-    expect(body).toContain('stopped');
+  it('rebuilds resumed history through the pairing restorer, not inline', () => {
+    // `restoreAgentMessages` moved to `restore-history.ts` so its rules could be
+    // tested for real rather than grepped for — an unpaired tool call in a
+    // resumed transcript is rejected by the provider on every attempt, and the
+    // retry loop turns that into a hang ending in a bare "Server error". What
+    // it actually does now lives in `restore-history.test.ts`, including that a
+    // `stopped` marker never reaches the model.
+    expect(SRC).toContain("import { restoreAgentMessages } from './restore-history';");
+    expect(SRC).toContain('this.agent.setMessages(restoreAgentMessages(messages));');
+    expect(SRC).not.toContain('function restoreAgentMessages');
   });
 });
 
@@ -416,5 +444,43 @@ describe('agent-service.ts — post-turn console check (Task 13)', () => {
   it('de-duplicates the repair prompt\'s code regions, unlike the byte-pinned fix prompt', () => {
     expect(SRC).toContain('buildRegions(repairPromptFrames(before), tauriRegionDeps(), {');
     expect(SRC).toContain('dedupe: true,');
+  });
+});
+
+
+// The three wirings that make a design turn see the screen it is changing.
+// All source-greps, for the reason this file exists: `agent-service.ts` pulls
+// Monaco and the stores, so it cannot be imported under Bun.
+describe('agent-service.ts — design-mode context and closing checks', () => {
+  it('prefixes every design send with the screen brief', () => {
+    // On the message tail, not the system prompt: that decoration is frozen per
+    // conversation so the provider's prefix cache holds, and a brief that
+    // changes with the document would re-bill the whole conversation each turn.
+    expect(SRC).toContain("import { buildDesignBrief } from './design-brief';");
+    expect(SRC).toMatch(/promptMode === 'ui-design' && opts\.uiDesign/);
+    expect(SRC).toMatch(/const brief = await buildDesignBrief\(/);
+  });
+
+  it('runs the closing checks for a design turn', () => {
+    // It was the one kind of turn that could finish with no closing check at
+    // all — it could write an unstyled screen, say it was done, and nothing
+    // anywhere disagreed.
+    expect(SRC).toContain("const isDesign = promptMode === 'ui-design';");
+    expect(SRC).toMatch(/promptMode !== 'agent' && promptMode !== 'plan-execution' && !isDesign/);
+  });
+
+  it('does not trigger a Unity recompile for a turn that touched no C#', () => {
+    // `computeCompile` waits on a real recompile rather than reading a cached
+    // verdict, and a `.uxml`/`.uss` turn cannot have introduced a compile error.
+    expect(SRC).toMatch(/runVerifiedPass\(workspacePath, undefined, \{ skipCompile: isDesign \}\)/);
+  });
+
+  it('drops the cached C# usage map when a script is written or edited', () => {
+    // The brief reads that map fresh every send. Without invalidation, an agent
+    // that renames a handler in one turn is shown the pre-rename map in the
+    // next — by the index whose whole purpose is catching renames.
+    expect(SRC).toContain('function dropUsageIndexIfCs(path: string): void');
+    expect(SRC).toContain('m.invalidateUsageIndex()');
+    expect(SRC.match(/dropUsageIndexIfCs\(path\);/g)?.length).toBe(2);
   });
 });

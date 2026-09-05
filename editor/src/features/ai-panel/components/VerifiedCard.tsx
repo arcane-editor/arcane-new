@@ -70,6 +70,9 @@ function VerifiedCard({ message }: Props) {
     uiToolkit,
     scriptableObjects,
     input,
+    // Absent on cards saved before the layout probe existed, so a restored
+    // session shows no layout chip rather than a broken one.
+    layout = 'skipped',
     // Task 13: `'skipped'` on both means the closing check never ran (not a
     // Unity send, the setting is off, nothing was touched) — same rule the
     // three subsystem chips follow, so the card does not grow two permanent
@@ -123,6 +126,29 @@ function VerifiedCard({ message }: Props) {
       ? 'no ScriptableObject drift'
       : `${plural(scriptableObjects.drift, 'ScriptableObject drift')}`;
 
+  // The one row that reports a MEASUREMENT rather than a re-read: what the
+  // documents this send wrote actually laid out to.
+  //
+  // Two readings of one render, and the row is only good when both are. A
+  // document can lay out perfectly — every box the right size, zero geometry
+  // problems — and render as flat default grey; that screen used to come back
+  // from this card as "14 elements laid out", which is true and reads as
+  // success. `unstyled` is absent on cards saved before it existed, so an old
+  // restored session reports geometry alone rather than claiming zero.
+  const unstyled = layout === 'skipped' ? 0 : (layout.unstyled ?? 0);
+  const layoutMarker: Marker =
+    layout === 'skipped' ? 'skip' : layout.problems > 0 || unstyled > 0 ? 'bad' : 'ok';
+  const layoutLabel =
+    layout === 'skipped'
+      ? 'layout not measured'
+      : layout.problems > 0 && unstyled > 0
+        ? `layout: ${plural(layout.problems, 'problem')} · ${unstyled} unstyled`
+        : layout.problems > 0
+          ? `layout: ${plural(layout.problems, 'problem')}`
+          : unstyled > 0
+            ? `${unstyled} of ${layout.elements} elements unstyled`
+            : `${plural(layout.elements, 'element')} laid out`;
+
   const inputMarker: Marker = input === 'skipped' ? 'skip' : input === 'clean' ? 'ok' : 'bad';
   const inputLabel =
     input === 'skipped' || input === 'clean'
@@ -142,6 +168,7 @@ function VerifiedCard({ message }: Props) {
     analyzersMarker,
     guidsMarker,
     uiMarker,
+    layoutMarker,
     soMarker,
     inputMarker,
     consoleCheckMarker,
@@ -208,6 +235,15 @@ function VerifiedCard({ message }: Props) {
               <span className="ai-verified-item">
                 <MarkerIcon marker={uiMarker} />
                 {uiLabel}
+              </span>
+            </>
+          )}
+          {layout !== 'skipped' && (
+            <>
+              <span className="ai-verified-sep">·</span>
+              <span className="ai-verified-item">
+                <MarkerIcon marker={layoutMarker} />
+                {layoutLabel}
               </span>
             </>
           )}

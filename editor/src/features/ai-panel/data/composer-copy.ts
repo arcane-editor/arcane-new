@@ -60,5 +60,9 @@ export function composerPlaceholder(input: PlaceholderInput): string {
     return 'Describe what you want to build. @ for context, ⏎ to plan.';
   }
 
+  if (input.mode === 'design') {
+    return 'Describe the screen — or what to change about it. ⏎ to send.';
+  }
+
   return 'Plan, build, edit. @ for context, ⏎ to send.';
 }

@@ -52,6 +52,7 @@ import {
   checkUxml,
   checkUss,
   formatFindings,
+  isBlockingFinding,
   type AssetFinding,
   type UxmlCheckContext,
 } from './asset-checks';
@@ -142,8 +143,13 @@ const UGUI_REFUSAL =
   'This project uses uGUI (Canvas) and has no UI Toolkit documents. Not writing UXML into it. ' +
   'If the user wants to adopt UI Toolkit, say so and call unity_ui_write with adoptUiToolkit:true.';
 
-/** `checkUxml`'s two non-blocking codes; every other code it can emit is a parse diagnostic. */
-const NON_BLOCKING_UXML_CODES = new Set(['uxml-style-missing', 'uxml-class-undeclared']);
+/** The blocking codes that really are "this document is malformed", for the refusal wording. */
+const PARSE_CODES = new Set([
+  'uxml-unclosed-tag',
+  'uxml-unexpected-close',
+  'uxml-bad-attr',
+  'uxml-no-root',
+]);
 
 /** Pull the path a `uxml-style-missing` finding named, out of its prose message. `null` if the shape ever changes. */
 function styleMissingTarget(finding: AssetFinding): string | null {
@@ -163,6 +169,39 @@ function declaredElementNames(content: string): string[] {
     if (node.name) out.push(node.name);
   }
   return out;
+}
+
+/**
+ * What to do next, after a `.uxml` landed.
+ *
+ * This used to be one unconditional sentence naming `unity_ui_layout` and
+ * `unity_attach_ui_document` — two tools, neither of which writes a stylesheet.
+ * A document carrying a dozen carefully chosen class names and referencing no
+ * sheet is the commonest way a generated screen comes out unstyled, and this
+ * line was the last moment anything could say so before the model moved on to
+ * scene wiring. In design mode `layout-gate.ts` reports the same thing from the
+ * render; in agent mode, where that gate is not applied, this is the only cue
+ * there is.
+ */
+export function nextStepAfterUxml(content: string): string {
+  const doc = parseUxml(content);
+  if (doc.styleRefs.length > 0) {
+    return 'Next: unity_ui_layout to see how it lays out; unity_attach_ui_document to put it on a GameObject.';
+  }
+
+  const classes = new Set<string>();
+  for (const node of doc.byId.values()) {
+    for (const cls of node.classes) classes.add(cls);
+  }
+  const consequence =
+    classes.size > 0
+      ? `so its ${classes.size} class${classes.size === 1 ? '' : 'es'} style nothing and it renders with Unity default styling`
+      : 'so it renders with Unity default styling';
+  return (
+    `This document references no stylesheet, ${consequence}. ` +
+    'Next: unity_ui_write the .uss, add the <Style src> line it hands back, then unity_ui_layout ' +
+    'to see the result.'
+  );
 }
 
 /**
@@ -235,17 +274,32 @@ export function createUnityUiWriteTool(
         const ctx = await deps.snapshot(workspacePath).catch(
           (): UxmlCheckContext => ({ declaredClasses: new Set(), csReferencedClasses: null, ussPaths: [] }),
         );
-        const findings = checkUxml(content, ctx);
+        const findings = checkUxml(content, { ...ctx, documentPath: relPath });
 
-        const parseFindings = findings.filter((f) => !NON_BLOCKING_UXML_CODES.has(f.code));
+        // `isBlockingFinding` is the single classification both this pre-write
+        // refusal and `asset-gate.ts`'s post-write note read, so the two can
+        // never disagree about which findings are fatal. Everything it does not
+        // name is reported and written: an element this table has not caught up
+        // with, or a class only C# adds, must not strand the agent.
+        const blocking = findings.filter(isBlockingFinding);
+        const parseFindings = blocking.filter((f) => f.code !== 'uxml-style-missing');
         if (parseFindings.length > 0) {
+          // Name the actual problem: a malformed document and one naming an
+          // element that does not exist both refuse here, and "does not parse"
+          // would be a wrong diagnosis for the second.
+          const reason = parseFindings.every((f) => PARSE_CODES.has(f.code))
+            ? 'it does not parse as UXML, so Unity would fail to load it too'
+            : 'Unity would fail to load it';
           return txt(
-            `Not writing ${relPath}: it does not parse as UXML, so Unity would fail to load it too.\n\n` +
+            `Not writing ${relPath}: ${reason}.\n\n` +
               `${findingsList(parseFindings)}\n\nFix the markup and try again.`,
           );
         }
 
-        const styleMissing = findings.filter((f) => f.code === 'uxml-style-missing');
+        // A stylesheet the project INDEX has not seen may still be on disk —
+        // most often because this same send just wrote it — so this one
+        // blocking code gets a second look before it refuses anything.
+        const styleMissing = blocking.filter((f) => f.code === 'uxml-style-missing');
         const unresolved: AssetFinding[] = [];
         for (const f of styleMissing) {
           const target = styleMissingTarget(f);
@@ -260,11 +314,19 @@ export function createUnityUiWriteTool(
           );
         }
 
-        const warnFindings = findings.filter((f) => f.code === 'uxml-class-undeclared');
+        const warnFindings = findings.filter((f) => !isBlockingFinding(f));
         if (warnFindings.length > 0) warnNote = formatFindings(relPath, warnFindings);
       } else {
         const findings = checkUss(content, relPath);
-        if (findings.length > 0) warnNote = formatFindings(relPath, findings);
+        const blocking = findings.filter(isBlockingFinding);
+        if (blocking.length > 0) {
+          return txt(
+            `Not writing ${relPath}: Unity would import it and then apply none of this.\n\n` +
+              `${findingsList(blocking)}\n\nFix the stylesheet and try again.`,
+          );
+        }
+        const warnFindings = findings.filter((f) => !isBlockingFinding(f));
+        if (warnFindings.length > 0) warnNote = formatFindings(relPath, warnFindings);
       }
 
       // Before the write, not after: once `deps.write` lands, `deps.exists(abs)`
@@ -356,9 +418,7 @@ export function createUnityUiWriteTool(
             ? `Declared element names: ${names.join(', ')}.`
             : 'No element in it declares a name yet, so nothing is reachable from C# by name.',
         );
-        lines.push(
-          'Next: unity_ui_layout to see how it lays out; unity_attach_ui_document to put it on a GameObject.',
-        );
+        lines.push(nextStepAfterUxml(content));
       }
 
       if (guidMapUnavailable && metaCreated) {

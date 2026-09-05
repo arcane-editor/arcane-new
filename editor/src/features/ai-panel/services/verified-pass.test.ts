@@ -29,9 +29,10 @@ function fakeDeps(overrides: Partial<VerifiedPassDeps> = {}): VerifiedPassDeps {
     bridgeConnected: () => false,
     triggerRecompile: async () => ({ status: 'unknown', reason: 'timeout' } as const),
     readGuid: async () => 'abc123',
-    // The three subsystem steps default to `'skipped'` here so the existing
-    // cases keep asserting exactly what they always did; the cases that care
-    // override them.
+    // The subsystem and layout steps default to `'skipped'` here so the
+    // existing cases keep asserting exactly what they always did; the cases
+    // that care override them.
+    checkLayout: async () => 'skipped',
     checkUiToolkit: async () => 'skipped',
     checkScriptableObjects: async () => 'skipped',
     checkInput: async () => 'skipped',
@@ -356,5 +357,104 @@ describe('runVerifiedPass — the console/tests rows are the caller\'s to fill',
     expect(data.compile).toBe('clean');
     expect(data.console).toBe('skipped');
     expect(data.tests).toBe('skipped');
+  });
+});
+
+describe('skipCompile — a design turn must not trigger a Unity recompile', () => {
+  it('reports the compile as skipped without calling the bridge', async () => {
+    beginVerifiedPass();
+    recordTouchedFile('/proj/Assets/UI/Main.uxml');
+    let recompiles = 0;
+    const card = await runVerifiedPass(
+      WORKSPACE,
+      fakeDeps({
+        bridgeConnected: async () => true,
+        triggerRecompile: async () => {
+          recompiles++;
+          return { status: 'report', report: { messages: [] } } as never;
+        },
+      }),
+      { skipCompile: true },
+    );
+    // A turn that wrote only .uxml/.uss cannot have introduced a compile error,
+    // and this step waits on a real Unity round trip rather than reading a
+    // cached verdict.
+    expect(recompiles).toBe(0);
+    expect(card.compile).toBe('skipped');
+  });
+
+  it('still compiles by default, so agent mode is untouched', async () => {
+    beginVerifiedPass();
+    recordTouchedFile('/proj/Assets/Scripts/A.cs');
+    let recompiles = 0;
+    await runVerifiedPass(
+      WORKSPACE,
+      fakeDeps({
+        bridgeConnected: async () => true,
+        triggerRecompile: async () => {
+          recompiles++;
+          return { status: 'report', report: { messages: [] } } as never;
+        },
+      }),
+    );
+    expect(recompiles).toBe(1);
+  });
+});
+
+describe('the layout row — the only check that renders anything', () => {
+  it('reports what was measured, so the count is evidence rather than a claim', async () => {
+    beginVerifiedPass();
+    recordTouchedFile('/proj/Assets/UI/Main.uxml');
+    const card = await runVerifiedPass(
+      WORKSPACE,
+      fakeDeps({ checkLayout: async () => ({ documents: 1, elements: 14, problems: 0, unstyled: 0 }) }),
+    );
+    expect(card.layout).toEqual({ documents: 1, elements: 14, problems: 0, unstyled: 0 });
+  });
+
+  it('carries the unstyled count, which a clean geometry pass hides completely', async () => {
+    // The failure this row could not previously see: every box the right size,
+    // zero geometry problems, and the screen renders as flat default grey.
+    beginVerifiedPass();
+    recordTouchedFile('/proj/Assets/UI/Main.uxml');
+    const card = await runVerifiedPass(
+      WORKSPACE,
+      fakeDeps({
+        checkLayout: async () => ({ documents: 1, elements: 14, problems: 0, unstyled: 9 }),
+      }),
+    );
+    expect(card.layout).toEqual({ documents: 1, elements: 14, problems: 0, unstyled: 9 });
+  });
+
+  it('carries geometry problems through, which no string check in this pass can see', async () => {
+    beginVerifiedPass();
+    recordTouchedFile('/proj/Assets/UI/Main.uxml');
+    const card = await runVerifiedPass(
+      WORKSPACE,
+      fakeDeps({ checkLayout: async () => ({ documents: 1, elements: 14, problems: 2, unstyled: 0 }) }),
+    );
+    expect(card.layout).toMatchObject({ problems: 2 });
+  });
+
+  it('is skipped, never clean, when the probe could not run', async () => {
+    // Global Constraint 2 — an unmeasured layout must not read as a good one.
+    beginVerifiedPass();
+    recordTouchedFile('/proj/Assets/UI/Main.uxml');
+    const card = await runVerifiedPass(WORKSPACE, fakeDeps({ checkLayout: async () => 'skipped' }));
+    expect(card.layout).toBe('skipped');
+  });
+
+  it('degrades to skipped rather than failing the pass when it throws', async () => {
+    beginVerifiedPass();
+    recordTouchedFile('/proj/Assets/UI/Main.uxml');
+    const card = await runVerifiedPass(
+      WORKSPACE,
+      fakeDeps({
+        checkLayout: async () => {
+          throw new Error('no DOM');
+        },
+      }),
+    );
+    expect(card.layout).toBe('skipped');
   });
 });

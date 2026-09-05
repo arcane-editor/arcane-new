@@ -48,6 +48,9 @@ const CONTROLS: readonly UxmlControl[] = [
   { typeName: 'ScrollView', typeChain: ['ScrollView', VE], ussClasses: ['unity-scroll-view'] },
   { typeName: 'ListView', typeChain: ['ListView', 'BaseVerticalCollectionView', ...BINDABLE], ussClasses: ['unity-list-view', 'unity-collection-view'] },
   { typeName: 'TreeView', typeChain: ['TreeView', 'BaseVerticalCollectionView', ...BINDABLE], ussClasses: ['unity-tree-view', 'unity-collection-view'] },
+  { typeName: 'MultiColumnListView', typeChain: ['MultiColumnListView', 'BaseVerticalCollectionView', ...BINDABLE], ussClasses: ['unity-multi-column-list-view', 'unity-collection-view'] },
+  { typeName: 'MultiColumnTreeView', typeChain: ['MultiColumnTreeView', 'BaseVerticalCollectionView', ...BINDABLE], ussClasses: ['unity-multi-column-tree-view', 'unity-collection-view'] },
+  { typeName: 'TwoPaneSplitView', typeChain: ['TwoPaneSplitView', VE], ussClasses: ['unity-two-pane-split-view'] },
   { typeName: 'GroupBox', typeChain: ['GroupBox', ...BINDABLE], ussClasses: ['unity-group-box'] },
   { typeName: 'Foldout', typeChain: ['Foldout', ...BINDABLE], ussClasses: ['unity-foldout'] },
   { typeName: 'TabView', typeChain: ['TabView', ...BINDABLE], ussClasses: ['unity-tab-view'] },
@@ -63,12 +66,19 @@ const CONTROLS: readonly UxmlControl[] = [
   { typeName: 'FloatField', typeChain: ['FloatField', 'TextValueField', 'TextInputBaseField', ...FIELD], ussClasses: ['unity-float-field', 'unity-base-text-field', 'unity-base-field'] },
   { typeName: 'DoubleField', typeChain: ['DoubleField', 'TextValueField', 'TextInputBaseField', ...FIELD], ussClasses: ['unity-double-field', 'unity-base-text-field', 'unity-base-field'] },
   { typeName: 'LongField', typeChain: ['LongField', 'TextValueField', 'TextInputBaseField', ...FIELD], ussClasses: ['unity-long-field', 'unity-base-text-field', 'unity-base-field'] },
+  { typeName: 'UnsignedIntegerField', typeChain: ['UnsignedIntegerField', 'TextValueField', 'TextInputBaseField', ...FIELD], ussClasses: ['unity-unsigned-integer-field', 'unity-base-text-field', 'unity-base-field'] },
+  { typeName: 'UnsignedLongField', typeChain: ['UnsignedLongField', 'TextValueField', 'TextInputBaseField', ...FIELD], ussClasses: ['unity-unsigned-long-field', 'unity-base-text-field', 'unity-base-field'] },
+  { typeName: 'Hash128Field', typeChain: ['Hash128Field', 'TextValueField', 'TextInputBaseField', ...FIELD], ussClasses: ['unity-hash128-field', 'unity-base-text-field', 'unity-base-field'] },
 
   { typeName: 'Vector2Field', typeChain: ['Vector2Field', 'BaseCompositeField', ...FIELD], ussClasses: ['unity-vector2-field', 'unity-composite-field', 'unity-base-field'] },
   { typeName: 'Vector3Field', typeChain: ['Vector3Field', 'BaseCompositeField', ...FIELD], ussClasses: ['unity-vector3-field', 'unity-composite-field', 'unity-base-field'] },
   { typeName: 'Vector4Field', typeChain: ['Vector4Field', 'BaseCompositeField', ...FIELD], ussClasses: ['unity-vector4-field', 'unity-composite-field', 'unity-base-field'] },
+  { typeName: 'Vector2IntField', typeChain: ['Vector2IntField', 'BaseCompositeField', ...FIELD], ussClasses: ['unity-vector2-int-field', 'unity-composite-field', 'unity-base-field'] },
+  { typeName: 'Vector3IntField', typeChain: ['Vector3IntField', 'BaseCompositeField', ...FIELD], ussClasses: ['unity-vector3-int-field', 'unity-composite-field', 'unity-base-field'] },
   { typeName: 'RectField', typeChain: ['RectField', 'BaseCompositeField', ...FIELD], ussClasses: ['unity-rect-field', 'unity-composite-field', 'unity-base-field'] },
+  { typeName: 'RectIntField', typeChain: ['RectIntField', 'BaseCompositeField', ...FIELD], ussClasses: ['unity-rect-int-field', 'unity-composite-field', 'unity-base-field'] },
   { typeName: 'BoundsField', typeChain: ['BoundsField', 'BaseCompositeField', ...FIELD], ussClasses: ['unity-bounds-field', 'unity-composite-field', 'unity-base-field'] },
+  { typeName: 'BoundsIntField', typeChain: ['BoundsIntField', 'BaseCompositeField', ...FIELD], ussClasses: ['unity-bounds-int-field', 'unity-composite-field', 'unity-base-field'] },
 
   { typeName: 'Slider', typeChain: ['Slider', 'BaseSlider', ...FIELD], ussClasses: ['unity-slider', 'unity-base-slider', 'unity-base-field'] },
   { typeName: 'SliderInt', typeChain: ['SliderInt', 'BaseSlider', ...FIELD], ussClasses: ['unity-slider-int', 'unity-base-slider', 'unity-base-field'] },
@@ -77,6 +87,7 @@ const CONTROLS: readonly UxmlControl[] = [
   { typeName: 'DropdownField', typeChain: ['DropdownField', 'PopupField', 'BasePopupField', ...FIELD], ussClasses: ['unity-dropdown-field', 'unity-base-popup-field', 'unity-base-field'] },
   { typeName: 'PopupField', typeChain: ['PopupField', 'BasePopupField', ...FIELD], ussClasses: ['unity-popup-field', 'unity-base-popup-field', 'unity-base-field'] },
   { typeName: 'EnumField', typeChain: ['EnumField', 'BasePopupField', ...FIELD], ussClasses: ['unity-enum-field', 'unity-base-popup-field', 'unity-base-field'] },
+  { typeName: 'EnumFlagsField', typeChain: ['EnumFlagsField', 'BaseMaskField', 'BasePopupField', ...FIELD], ussClasses: ['unity-enum-flags-field', 'unity-base-popup-field', 'unity-base-field'] },
 
   // Document-level elements. `UXML` is the file root and is not a real
   // VisualElement, but treating it as one keeps the tree uniform.
@@ -175,4 +186,204 @@ export const BUILTIN_PART_NAMES: ReadonlySet<string> = new Set([
  */
 export function isBuiltinPartName(name: string): boolean {
   return name.startsWith('unity-') || BUILTIN_PART_NAMES.has(name);
+}
+
+// ── Attributes ───────────────────────────────────────────────────────────────
+
+/**
+ * Attributes every VisualElement accepts, so no control has to restate them.
+ *
+ * `binding-path` and the `data-source*` trio are inherited too: runtime binding
+ * is declared on `BindableElement`, and authored UXML puts it on anything.
+ */
+export const COMMON_ATTRIBUTES: ReadonlySet<string> = new Set([
+  'name',
+  'class',
+  'style',
+  'tooltip',
+  'picking-mode',
+  'focusable',
+  'enabled',
+  'tabindex',
+  'view-data-key',
+  'usage-hints',
+  'language-direction',
+  'binding-path',
+  'data-source',
+  'data-source-path',
+  'data-source-type',
+]);
+
+/**
+ * Attributes a control adds on top of `COMMON_ATTRIBUTES`, keyed by type name.
+ *
+ * **This table is deliberately allowed to be incomplete**, which is why the
+ * check that reads it is a WARNING and never blocks a write: UI Toolkit adds
+ * attributes across Unity versions, and a control absent from this map is
+ * skipped entirely rather than reported. Getting that backwards — refusing a
+ * write over an attribute this file has not heard of yet — is precisely the
+ * false positive `asset-checks.ts` warns teaches the agent to ignore the gate.
+ *
+ * Entries are the authored kebab-case names, not the C# property names.
+ */
+const EXTRA_ATTRIBUTES: Record<string, readonly string[]> = {
+  // The bases add nothing of their own, but they need an entry: without one
+  // `attributesFor` reports "no data" and the commonest element in every
+  // document goes unchecked.
+  VisualElement: [],
+  BindableElement: [],
+
+  // Text
+  TextElement: ['text', 'enable-rich-text', 'display-tooltip-when-elided', 'parse-escape-sequences', 'emoji-fallback-support', 'selectable'],
+  Label: ['text', 'enable-rich-text', 'display-tooltip-when-elided', 'parse-escape-sequences', 'emoji-fallback-support', 'selectable'],
+  Button: ['text', 'enable-rich-text', 'display-tooltip-when-elided', 'parse-escape-sequences', 'emoji-fallback-support', 'icon-image'],
+
+  // Containers
+  Box: [],
+  GroupBox: ['text'],
+  HelpBox: ['text', 'message-type'],
+  Foldout: ['text', 'value', 'toggle-on-label-click'],
+  TabView: ['reorderable'],
+  Tab: ['label', 'icon-image', 'closeable'],
+  TwoPaneSplitView: ['fixed-pane-index', 'fixed-pane-initial-dimension', 'orientation'],
+  ScrollView: [
+    'mode', 'horizontal-scroller-visibility', 'vertical-scroller-visibility',
+    'nested-interaction-kind', 'scroll-deceleration-rate', 'elasticity',
+    'touch-scroll-type', 'mouse-wheel-scroll-size', 'horizontal-page-size',
+    'vertical-page-size', 'elastic-animation-interval-ms',
+  ],
+
+  // Graphics
+  Image: ['image', 'sprite', 'vector-image', 'scale-mode', 'tint-color', 'source-rect', 'uv'],
+
+  // Collections
+  ListView: COLLECTION_ATTRIBUTES(),
+  TreeView: [...COLLECTION_ATTRIBUTES(), 'auto-expand'],
+  MultiColumnListView: [...COLLECTION_ATTRIBUTES(), 'sorting-mode'],
+  MultiColumnTreeView: [...COLLECTION_ATTRIBUTES(), 'auto-expand', 'sorting-mode'],
+
+  // Booleans
+  Toggle: ['label', 'value', 'text', 'toggle-on-label-click'],
+  RadioButton: ['label', 'value', 'text'],
+  RadioButtonGroup: ['label', 'value', 'choices'],
+
+  // Text-entry fields
+  TextField: [
+    'label', 'value', 'password', 'mask-char', 'readonly', 'is-delayed',
+    'max-length', 'multiline', 'auto-correction', 'hide-mobile-input',
+    'keyboard-type', 'select-all-on-mouse-up', 'select-all-on-focus',
+    'vertical-scroller-visibility', 'select-word-by-double-click',
+    'placeholder-text', 'hide-placeholder-on-focus',
+  ],
+  IntegerField: NUMERIC_FIELD_ATTRIBUTES(),
+  FloatField: NUMERIC_FIELD_ATTRIBUTES(),
+  DoubleField: NUMERIC_FIELD_ATTRIBUTES(),
+  LongField: NUMERIC_FIELD_ATTRIBUTES(),
+  UnsignedIntegerField: NUMERIC_FIELD_ATTRIBUTES(),
+  UnsignedLongField: NUMERIC_FIELD_ATTRIBUTES(),
+  Hash128Field: NUMERIC_FIELD_ATTRIBUTES(),
+
+  // Composite fields carry one attribute per component, not a `value`.
+  Vector2Field: ['label', 'x', 'y'],
+  Vector2IntField: ['label', 'x', 'y'],
+  Vector3Field: ['label', 'x', 'y', 'z'],
+  Vector3IntField: ['label', 'x', 'y', 'z'],
+  Vector4Field: ['label', 'x', 'y', 'z', 'w'],
+  RectField: ['label', 'x', 'y', 'w', 'h'],
+  RectIntField: ['label', 'x', 'y', 'w', 'h'],
+  BoundsField: ['label', 'cx', 'cy', 'cz', 'ex', 'ey', 'ez'],
+  BoundsIntField: ['label', 'px', 'py', 'pz', 'sx', 'sy', 'sz'],
+
+  // Ranges
+  Slider: ['label', 'value', 'low-value', 'high-value', 'direction', 'page-size', 'show-input-field', 'inverted', 'fill'],
+  SliderInt: ['label', 'value', 'low-value', 'high-value', 'direction', 'page-size', 'show-input-field', 'inverted', 'fill'],
+  MinMaxSlider: ['label', 'min-value', 'max-value', 'low-limit', 'high-limit'],
+  Scroller: ['value', 'low-value', 'high-value', 'direction'],
+  ProgressBar: ['value', 'title', 'low-value', 'high-value'],
+
+  // Choice fields
+  DropdownField: ['label', 'index', 'choices', 'value'],
+  PopupField: ['label', 'index', 'choices', 'value'],
+  EnumField: ['label', 'type', 'value', 'include-obsolete-values'],
+  EnumFlagsField: ['label', 'type', 'value', 'include-obsolete-values'],
+
+  // Document-level
+  UXML: ['editor-extension-mode', 'editor-uxml-path'],
+  Instance: ['template'],
+};
+
+/** Shared by every `BaseVerticalCollectionView`. Written as a function so the map above stays flat. */
+function COLLECTION_ATTRIBUTES(): string[] {
+  return [
+    'virtualization-method', 'fixed-item-height', 'show-border', 'selection-type',
+    'show-alternating-row-backgrounds', 'reorderable', 'horizontal-scrolling',
+    'show-foldout-header', 'header-title', 'show-add-remove-footer', 'reorder-mode',
+    'show-bound-collection-size', 'binding-source-selection-mode', 'allow-add', 'allow-remove',
+  ];
+}
+
+/** Shared by every `TextValueField`. */
+function NUMERIC_FIELD_ATTRIBUTES(): string[] {
+  return ['label', 'value', 'is-delayed', 'readonly', 'max-length'];
+}
+
+/**
+ * The metadata tags' attributes, stated exactly rather than on top of
+ * `COMMON_ATTRIBUTES`: `<Style>` and `<Template>` are not VisualElements, so
+ * they take none of the element attributes.
+ */
+const METADATA_ATTRIBUTES: Record<string, readonly string[]> = {
+  Style: ['src', 'path'],
+  Template: ['name', 'src', 'path'],
+};
+
+/**
+ * The attributes this element accepts, or `null` when the table has no entry
+ * for it — which a caller must treat as "do not check", never as "none".
+ */
+export function attributesFor(typeName: string): ReadonlySet<string> | null {
+  const metadata = METADATA_ATTRIBUTES[typeName];
+  if (metadata) return new Set(metadata);
+  const extra = EXTRA_ATTRIBUTES[typeName];
+  if (!extra) return null;
+  return new Set([...COMMON_ATTRIBUTES, ...extra]);
+}
+
+/**
+ * Document-level tags that are not VisualElements at all.
+ *
+ * `<Style>` and `<Template>` carry stylesheet and template references and are
+ * stripped by the parser (`uxml-model.ts`'s `isMetadataElement`); they are still
+ * legal tags, so an element check has to know them or it reports every document
+ * that uses a stylesheet.
+ */
+export const UXML_METADATA_ELEMENTS: ReadonlySet<string> = new Set(['Style', 'Template']);
+
+/** True when `localName` is a tag UI Toolkit itself defines — control or metadata. */
+export function isKnownUxmlElement(localName: string): boolean {
+  return isBuiltinControl(localName) || UXML_METADATA_ELEMENTS.has(localName);
+}
+
+/** Every tag name a `ui:`-namespaced document may legally use, sorted. */
+export function knownUxmlElementNames(): string[] {
+  return [...CONTROLS.map((c) => c.typeName), ...UXML_METADATA_ELEMENTS].sort((a, b) =>
+    a.localeCompare(b),
+  );
+}
+
+/**
+ * Every attribute name any known control accepts, deduped and sorted.
+ *
+ * Completion data only. A per-element subset is what `attributesFor` is for —
+ * offering the union everywhere is right for a completion list and would be
+ * wrong for a check.
+ */
+export function allKnownAttributeNames(): string[] {
+  const out = new Set<string>(COMMON_ATTRIBUTES);
+  for (const table of [EXTRA_ATTRIBUTES, METADATA_ATTRIBUTES]) {
+    for (const names of Object.values(table)) {
+      for (const name of names) out.add(name);
+    }
+  }
+  return [...out].sort((a, b) => a.localeCompare(b));
 }

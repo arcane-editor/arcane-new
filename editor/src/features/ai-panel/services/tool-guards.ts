@@ -9,7 +9,20 @@
  * Exemption: a `read` of a path is allowed to repeat once more if that path
  * was WRITTEN (via `write`/`edit`) since the previous identical read — a
  * post-write re-read is a legitimate way to confirm the change landed, not a
- * wasted repeat. This decorator wraps EVERY tool (see `agent-service.ts`'s
+ * wasted repeat.
+ *
+ * Second exemption, same principle: `unity_ui_layout` may repeat once after a
+ * successful `unity_ui_write`. Design mode's whole loop is *write → render →
+ * read the real boxes → fix → render again*, and the second render is by
+ * definition the same call with the same arguments — the document did not
+ * change name, its content did. Without this, the design prompt's own step 5
+ * ("fix what it reports, then render again") was answered with "Try different
+ * arguments, a different tool, **or finish**", which is the guard telling the
+ * model to stop iterating on a screen it had just been told was broken. This
+ * one cannot key on the path the way the read exemption does: a `.uss` write
+ * changes the layout of a `.uxml` with a different path entirely.
+ *
+ * This decorator wraps EVERY tool (see `agent-service.ts`'s
  * `createToolsForPromptMode` / `run-task.ts`'s `buildTools`), so it can
  * observe write/edit calls directly and mark their path as "written since"
  * in the same shared per-send registry the read side consults — no
@@ -51,10 +64,33 @@ const callCounts = new Map<string, number>();
 /** Per-send set of paths written (via write/edit) since their last identical read — the read-exemption registry. */
 const writtenSincePaths = new Set<string>();
 
+/**
+ * True when a `unity_ui_write` has landed since the last `unity_ui_layout` —
+ * the render-exemption flag. Not a path set: the write and the render name
+ * different files whenever a stylesheet is what changed.
+ */
+let uiWrittenSinceLayout = false;
+
+/** The write whose result arms the render exemption, and the tool the exemption is for. */
+const UI_WRITE_TOOL = 'unity_ui_write';
+const UI_LAYOUT_TOOL = 'unity_ui_layout';
+
+/**
+ * `unity_ui_write` announces its own successes as `Wrote <path> (guid …)` and
+ * every refusal as `Not writing <path>: …`. The shared `isSuccessfulWrite`
+ * tests for the vendor tools' `Successfully wrote …` and is therefore false for
+ * all of them — the same trap `layout-gate.ts` documents at length.
+ */
+function uiWriteLanded(result: AgentToolResult): boolean {
+  const text = result.content.find((c) => c.type === 'text')?.text ?? '';
+  return /^Wrote\b/.test(text);
+}
+
 /** Reset all per-send guard state. Call once per user send (mirrors `resetCompileGate`/`resetTurnGovernor`). */
 export function resetRepeatCallGuard(): void {
   callCounts.clear();
   writtenSincePaths.clear();
+  uiWrittenSinceLayout = false;
 }
 
 /** Argument keys whose string values name a filesystem location. */
@@ -127,11 +163,14 @@ export function withRepeatCallGuard(tool: AgentTool, cwd: string): AgentTool {
       const seenCount = callCounts.get(key) ?? 0;
 
       if (seenCount > 0) {
-        const exempt = tool.name === 'read' && path !== undefined && writtenSincePaths.has(path);
-        if (exempt) {
-          // Consume the exemption: a THIRD identical read without another
+        const reReadExempt =
+          tool.name === 'read' && path !== undefined && writtenSincePaths.has(path);
+        const reRenderExempt = tool.name === UI_LAYOUT_TOOL && uiWrittenSinceLayout;
+        if (reReadExempt || reRenderExempt) {
+          // Consume the exemption: a THIRD identical call without another
           // intervening write is a genuine repeat again.
-          writtenSincePaths.delete(path!);
+          if (reReadExempt) writtenSincePaths.delete(path!);
+          if (reRenderExempt) uiWrittenSinceLayout = false;
         } else {
           recordLoopGuardHit();
           return synthesizeRepeatResult(tool.name);
@@ -140,6 +179,17 @@ export function withRepeatCallGuard(tool: AgentTool, cwd: string): AgentTool {
 
       callCounts.set(key, seenCount + 1);
       const result = await tool.execute(id, params, signal, onUpdate);
+
+      if (tool.name === UI_LAYOUT_TOOL) {
+        // Whatever the outcome, the render just happened: the next repeat needs
+        // a fresh write to earn its exemption.
+        uiWrittenSinceLayout = false;
+      } else if (tool.name === UI_WRITE_TOOL) {
+        // Only a write that actually landed. A validation refusal changed
+        // nothing, so re-rendering would produce the identical result the guard
+        // exists to suppress.
+        if (uiWriteLanded(result)) uiWrittenSinceLayout = true;
+      }
 
       if (tool.name === 'write' || tool.name === 'edit') {
         if (isRejectedWrite(result)) {

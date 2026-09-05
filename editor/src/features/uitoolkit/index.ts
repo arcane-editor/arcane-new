@@ -12,7 +12,12 @@ export type { UiToolkitSummary } from './services/uxml-assets';
 // of what the C# does with each named element. It is the expensive half of the
 // join (it reads every `.cs`), so the tool only runs it when explicitly asked
 // for usages -- the same bargain `unity_input_actions` strikes with `refs:true`.
-export { loadUsageIndex, buildUsageIndex, EMPTY_USAGE_INDEX } from './services/usage-index';
+export {
+  loadUsageIndex,
+  buildUsageIndex,
+  invalidateUsageIndex,
+  EMPTY_USAGE_INDEX,
+} from './services/usage-index';
 export type { UsageIndex } from './services/usage-index';
 
 // Exported for the AI harness's `unity_ui_layout` tool (Task 15): the same
@@ -28,6 +33,33 @@ export { loadPanelSettings, NO_PANEL } from './services/panel-resolve';
 export type { PanelResolution, PanelConfidence } from './services/panel-resolve';
 export { probeLayout } from './services/layout-probe';
 export type { ProbeLayoutOptions, ProbeLayoutOutput } from './services/layout-probe';
+
+// The styling half of the same question the layout probe answers about geometry.
+// `buildRenderPlan` + `cascade.ts` + `style-coverage.ts` are all PURE and
+// DOM-free -- unlike `probeLayout` above -- but they still leave through this
+// barrel because the module-boundary rule (`editor/CLAUDE.md`) forbids a deep
+// import, and the harness already reaches this barrel by dynamic `import()`.
+export { buildRenderPlan } from './services/render-plan';
+export type { RenderNode, RenderPlan } from './services/render-plan';
+export { targetFor, cascadeFor, propertyEntries } from './services/cascade';
+export type {
+  MatchTarget,
+  CascadeRule,
+  CascadeDecl,
+  PropertyEntry,
+  PropertySource,
+} from './services/cascade';
+export {
+  styleCoverage,
+  formatStyleCoverage,
+  coverageLabel,
+  EMPTY_STYLE_COVERAGE,
+} from './services/style-coverage';
+export type { StyleCoverage, NodeCoverage } from './services/style-coverage';
+
+// Browser-only, like `probeLayout`: it rasterises through a canvas. Same
+// dynamic-import-only contract.
+export { renderToPng, MAX_RENDER_EDGE, STAGE_BACKGROUND } from './services/render-image';
 
 // UI Toolkit support (F-3.2 T7.3). Highlighting is delegated to Monaco's mature
 // built-in `css` (USS) and `xml` (UXML) languages — `.uss`/`.uxml` are mapped to

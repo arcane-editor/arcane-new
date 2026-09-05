@@ -78,7 +78,11 @@ async function findingsFor(
   cwd: string,
 ): Promise<AssetFinding[]> {
   const lower = relPath.toLowerCase();
-  if (lower.endsWith('.uxml')) return checkUxml(content, await uxmlContext(cwd));
+  if (lower.endsWith('.uxml')) {
+    // `documentPath` is what lets a RELATIVE `<Style src>` be resolved at all —
+    // it is relative to this document, not to the workspace.
+    return checkUxml(content, { ...(await uxmlContext(cwd)), documentPath: relPath });
+  }
   if (lower.endsWith('.uss')) return checkUss(content, relPath);
   if (lower.endsWith('.inputactions')) return checkInputActions(content);
   if (lower.endsWith('.asset')) {

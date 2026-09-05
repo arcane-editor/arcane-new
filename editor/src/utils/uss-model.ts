@@ -110,6 +110,21 @@ const STATE_PSEUDO: Record<string, string> = {
 /** Pseudo-classes the browser already implements identically. */
 const NATIVE_PSEUDO = new Set(['hover', 'active', 'focus']);
 
+/**
+ * Every pseudo-class USS implements, without the leading colon.
+ *
+ * Exported because `compoundToCss` DROPS anything outside this set — an
+ * unrecognised pseudo-class makes the whole selector invalid in CSS, so passing
+ * it through would silently discard the rule. Unity does exactly the same thing
+ * with exactly as little noise, which is why a checker has to be able to name
+ * the set rather than infer it.
+ */
+export const USS_PSEUDO_CLASSES: ReadonlySet<string> = new Set([
+  'root',
+  ...NATIVE_PSEUDO,
+  ...Object.keys(STATE_PSEUDO),
+]);
+
 /** Prefix for a materialised UXML type name. See `compileSelector`. */
 export const TYPE_CLASS_PREFIX = 'u-t-';
 

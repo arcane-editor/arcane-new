@@ -84,6 +84,16 @@ export interface SessionData {
    * `session/load` failing is a soft-resume, not an error.
    */
   acpSessionId?: string | null;
+  /**
+   * The `.uxml` a DESIGN session is scoped to, workspace-relative.
+   *
+   * This is what makes the design dock's thread findable: the dock asks
+   * `listSessions` which saved session belongs to the document on the canvas,
+   * rather than keeping a second index file that could disagree with the
+   * session directory. Absent on every non-design session, which is all of
+   * them before this existed.
+   */
+  designDocument?: string | null;
 }
 
 /** Lightweight header used by the history list (no full message bodies). */
@@ -97,6 +107,8 @@ export interface SessionSummary {
   messageCount: number;
   /** How many plans this session produced; 0 for sessions that made none. */
   planCount: number;
+  /** See `SessionData.designDocument`. `null` for every ordinary chat. */
+  designDocument: string | null;
 }
 
 export interface SaveSessionInput {
@@ -118,6 +130,8 @@ export interface SaveSessionInput {
   planNotes?: Record<string, PlanNote[]>;
   /** See `SessionData.acpSessionId`. */
   acpSessionId?: string | null;
+  /** See `SessionData.designDocument`. */
+  designDocument?: string | null;
 }
 
 let sessionsDir: string | null = null;
@@ -203,6 +217,8 @@ export function buildSessionData(input: SaveSessionInput): SessionData {
       : {}),
     // Same omission rule again: a UnityIDE session never carries an agent id.
     ...(input.acpSessionId ? { acpSessionId: input.acpSessionId } : {}),
+    // And again: only a design session names a document.
+    ...(input.designDocument ? { designDocument: input.designDocument } : {}),
   };
 }
 
@@ -418,6 +434,7 @@ export async function listSessions(workspacePath?: string | null): Promise<Sessi
         messageCount: data.messages?.length ?? 0,
         // Absent on sessions written before plans were linked.
         planCount: data.plans?.length ?? 0,
+        designDocument: data.designDocument ?? null,
       });
     } catch {
       // skip malformed files

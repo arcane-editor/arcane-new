@@ -32,7 +32,8 @@ const UXML_WITH_UNDECLARED_CLASS =
   '<ui:UXML xmlns:ui="UnityEngine.UIElements"><ui:VisualElement name="root" class="ghost" /></ui:UXML>';
 
 const SIMPLE_USS = '.hud { color: red; }';
-const USS_WITH_UNKNOWN_PROP = '.hud { box-shadow: 1px 1px 1px black; }';
+const USS_WITH_CSS_ONLY_PROP = '.hud { box-shadow: 1px 1px 1px black; }';
+const USS_WITH_UNKNOWN_PROP = '.hud { -unity-future-thing: 4px; }';
 
 const NEUTRAL_CTX: UxmlCheckContext = {
   declaredClasses: new Set(),
@@ -149,21 +150,62 @@ describe('unity_ui_write — UXML validation', () => {
     expect(out).toContain('ghost');
   });
 
-  it('reports the declared element names and the next-step tools', async () => {
+  it('reports the declared element names', async () => {
     const { deps } = harness();
     const out = await run({ path: 'Assets/UI/HUD.uxml', content: SIMPLE_UXML }, deps);
     expect(out).toContain('Declared element names: root.');
-    expect(out).toContain('Next: unity_ui_layout to see how it lays out; unity_attach_ui_document to put it on a GameObject.');
+  });
+
+  it('says the document styles nothing when it references no stylesheet', async () => {
+    // The commonest way a generated screen comes out unstyled, and this line is
+    // the last moment anything says so before the model moves on to wiring.
+    const { deps } = harness();
+    const out = await run({ path: 'Assets/UI/HUD.uxml', content: SIMPLE_UXML }, deps);
+    expect(out).toContain('references no stylesheet');
+    expect(out).toContain('unity_ui_write the .uss');
+  });
+
+  it('counts the classes that style nothing, so the cost is concrete', async () => {
+    const { deps } = harness();
+    const styled =
+      '<ui:UXML xmlns:ui="UnityEngine.UIElements">' +
+      '<ui:VisualElement name="root" class="menu"><ui:Button class="btn btn--primary" /></ui:VisualElement>' +
+      '</ui:UXML>';
+    const out = await run({ path: 'Assets/UI/HUD.uxml', content: styled }, deps);
+    expect(out).toContain('3 classes style nothing');
+  });
+
+  it('names the layout and wiring tools once a stylesheet IS referenced', async () => {
+    const { deps, existsSet } = harness();
+    existsSet.add(`${WS}/Assets/UI/HUD.uss`);
+    const withSheet =
+      '<ui:UXML xmlns:ui="UnityEngine.UIElements">' +
+      '<Style src="HUD.uss" />' +
+      '<ui:VisualElement name="root" class="menu" />' +
+      '</ui:UXML>';
+    const out = await run({ path: 'Assets/UI/HUD.uxml', content: withSheet }, deps);
+    expect(out).toContain('Next: unity_ui_layout');
+    expect(out).toContain('unity_attach_ui_document');
   });
 });
 
 describe('unity_ui_write — USS validation', () => {
-  it('writes a file with an unknown property and appends the finding rather than refusing', async () => {
+  it('refuses a property USS does not implement — it would import clean and apply nothing', async () => {
+    const { deps, written } = harness();
+    const out = await run({ path: 'Assets/UI/HUD.uss', content: USS_WITH_CSS_ONLY_PROP }, deps);
+    expect(written).toHaveLength(0);
+    expect(out).toContain('box-shadow');
+    expect(out).toContain('9-slice');
+  });
+
+  it('writes a merely-unknown property and appends the finding rather than refusing', async () => {
+    // The registry can be behind Unity; refusing here would strand the agent on
+    // a stylesheet it has no way to correct.
     const { deps, written } = harness();
     const out = await run({ path: 'Assets/UI/HUD.uss', content: USS_WITH_UNKNOWN_PROP }, deps);
     expect(written.map((w) => w.path)).toContain(`${WS}/Assets/UI/HUD.uss`);
     expect(out).toContain('[Unity USS]');
-    expect(out).toContain('box-shadow');
+    expect(out).toContain('-unity-future-thing');
   });
 
   it('emits a project:// <Style src> using the guid it allocated', async () => {

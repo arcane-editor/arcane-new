@@ -67,6 +67,28 @@ export const TASKS: EvalTask[] = [
       { type: 'file_exists', path: 'Assets/UI/PauseMenu.uxml' },
       { type: 'file_exists', path: 'Assets/UI/PauseMenu.uss' },
       { type: 'file_not_contains', path: 'Assets/UI/PauseMenu.uss', pattern: 'box-shadow|grid-template', flags: 'i' },
+      // The reported failure, made measurable: a stylesheet the document never
+      // references styles nothing, however good it is. Both files existing was
+      // the whole bar before, and an unreferenced .uss clears it.
+      { type: 'file_contains', path: 'Assets/UI/PauseMenu.uxml', pattern: '<Style\\s+src=' },
+      // And something in it has to PAINT. A sheet of nothing but flex-direction
+      // and padding is a laid-out screen, not a designed one — the distinction
+      // `style-coverage.ts` draws, applied here as a pass/fail.
+      {
+        type: 'file_contains',
+        path: 'Assets/UI/PauseMenu.uss',
+        pattern: 'background-color|border-[a-z-]*color|-unity-font|(^|[\\s;{])color\\s*:',
+        flags: 'im',
+      },
+      // Units `unity_ui_write` refuses. A first draft that trips these costs a
+      // whole-file re-emission, which is what made writing a real stylesheet
+      // expensive enough to skip.
+      {
+        type: 'file_not_contains',
+        path: 'Assets/UI/PauseMenu.uss',
+        pattern: '\\d(rem|em|vh|vw|pt)\\b',
+        flags: 'i',
+      },
     ],
   },
 

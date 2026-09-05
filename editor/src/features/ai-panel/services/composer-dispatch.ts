@@ -21,8 +21,9 @@ import type { Attachment } from './types';
  * Adds the user bubble, clears staged attachments, then routes the send by
  * selected agent / mode: non-hosted agents go through `sendChatMessage`; plan
  * mode through `planController.sendPlanModeMessage`; agent mode through
- * `agentModeController.sendAgentModeMessage`; everything else (ask mode)
- * through `getAgentService().sendMessage`.
+ * `agentModeController.sendAgentModeMessage`; design mode straight to
+ * `sendMessage` with the `ui-design` prompt mode and the document it is scoped
+ * to; everything else (ask mode) through `getAgentService().sendMessage`.
  *
  * No-ops if there is no open workspace, same as the composer being disabled
  * with none open.
@@ -59,6 +60,29 @@ export function dispatchComposerSend(text: string, attachments: Attachment[]): v
     // point would otherwise become an unhandled rejection.
     void planController
       .sendPlanModeMessage(text, attachments)
+      .catch((e) => useAiStore.getState().setError(String(e)));
+  } else if (mode === 'design') {
+    // Straight to the service: design mode has no preplanning pass (the
+    // context that matters is one document, already open) and no plan file.
+    // `designDocument` was set by `adoptDesignSession` before this send —
+    // without it `syncForPromptMode` throws, which is the right failure: a
+    // design prompt with no document is not a prompt.
+    const documentPath = useAiStore.getState().designDocument;
+    if (!documentPath) {
+      useAiStore.getState().setError('No document is open for this design session.');
+      return;
+    }
+    void getAgentService()
+      .sendMessage(text, {
+        mode,
+        effort,
+        attachments,
+        promptMode: 'ui-design',
+        uiDesign: {
+          documentPath,
+          documentName: documentPath.split('/').pop() ?? documentPath,
+        },
+      })
       .catch((e) => useAiStore.getState().setError(String(e)));
   } else if (mode === 'agent') {
     // Preplanning flow (Task 11): on tiers with it enabled and no live todo

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'bun:test';
 import { EXTERNAL_STARTERS, STARTERS, groundingLabel, startersFor, type GroundingInput, externalAgentBrief } from './empty-state';
-import { MODES, MODE_LADDER } from './modes';
+import { MODES, MODE_LADDER, DESIGN_MODE } from './modes';
 
 const base: GroundingInput = {
   workspaceName: 'UnityIDE Demo',
@@ -53,7 +53,10 @@ describe('groundingLabel', () => {
 
 describe('STARTERS', () => {
   it('covers every mode the composer can be in', () => {
-    expect(Object.keys(STARTERS).sort()).toEqual(MODES.map((m) => m.value).sort());
+    // Design is a real composer mode that is deliberately absent from the
+    // pickable menu, so the empty state still owes it starters.
+    const every = [...MODES.map((m) => m.value), DESIGN_MODE.value];
+    expect(Object.keys(STARTERS).sort()).toEqual(every.sort());
   });
 
   it('gives every mode usable, distinct prompts', () => {

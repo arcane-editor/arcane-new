@@ -273,6 +273,19 @@ describe('grounding-ui-stack checks discriminate uGUI from UI Toolkit answers', 
  * actual temp dir rather than reimplementing the check logic — the same
  * approach `checks.test.ts` uses for its own fixtures.
  */
+/**
+ * A screen that is actually finished: markup that REFERENCES its stylesheet,
+ * and a stylesheet that paints. Both halves matter — the original fixture here
+ * had no `<Style src>` at all, which is the exact shape of the "hardly any css
+ * applied" complaint and used to pass this task.
+ */
+const GOOD_UXML =
+  '<ui:UXML xmlns:ui="UnityEngine.UIElements">' +
+  '<Style src="PauseMenu.uss" />' +
+  '<ui:VisualElement name="pause-root" class="pause" /></ui:UXML>';
+const GOOD_USS =
+  '.pause {\n  flex-grow: 1;\n  background-color: rgba(0, 0, 0, 0.6);\n  border-radius: 4px;\n}\n';
+
 describe('codegen-ui-hud checks discriminate valid USS from the seeded box-shadow trap', () => {
   const task = TASKS.find((t) => t.id === 'codegen-ui-hud')!;
 
@@ -284,14 +297,8 @@ describe('codegen-ui-hud checks discriminate valid USS from the seeded box-shado
     const dir = await mkdtemp(join(tmpdir(), 'eval-tasks-ui-hud-good-'));
     try {
       await mkdir(join(dir, 'Assets/UI'), { recursive: true });
-      await writeFile(
-        join(dir, 'Assets/UI/PauseMenu.uxml'),
-        '<ui:UXML xmlns:ui="UnityEngine.UIElements"><ui:VisualElement name="pause-root" class="pause" /></ui:UXML>',
-      );
-      await writeFile(
-        join(dir, 'Assets/UI/PauseMenu.uss'),
-        '.pause {\n  flex-grow: 1;\n  background-color: rgba(0, 0, 0, 0.6);\n  border-radius: 4px;\n}\n',
-      );
+      await writeFile(join(dir, 'Assets/UI/PauseMenu.uxml'), GOOD_UXML);
+      await writeFile(join(dir, 'Assets/UI/PauseMenu.uss'), GOOD_USS);
       const results = await runChecks(task.checks, { workDir: dir, finalAnswer: '' });
       expect(results.every((r) => r.pass)).toBe(true);
     } finally {
@@ -313,6 +320,55 @@ describe('codegen-ui-hud checks discriminate valid USS from the seeded box-shado
       );
       const results = await runChecks(task.checks, { workDir: dir, finalAnswer: '' });
       expect(results.every((r) => r.pass)).toBe(false);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('fails a stylesheet the document never references — it styles nothing', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'eval-tasks-ui-hud-unref-'));
+    try {
+      await mkdir(join(dir, 'Assets/UI'), { recursive: true });
+      // Both files exist and the USS is perfectly valid. It reaches nothing.
+      await writeFile(
+        join(dir, 'Assets/UI/PauseMenu.uxml'),
+        '<ui:UXML xmlns:ui="UnityEngine.UIElements"><ui:VisualElement name="pause-root" class="pause" /></ui:UXML>',
+      );
+      await writeFile(join(dir, 'Assets/UI/PauseMenu.uss'), GOOD_USS);
+      const results = await runChecks(task.checks, { workDir: dir, finalAnswer: '' });
+      expect(results.some((r) => !r.pass)).toBe(true);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('fails a stylesheet that lays out but never paints', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'eval-tasks-ui-hud-flat-'));
+    try {
+      await mkdir(join(dir, 'Assets/UI'), { recursive: true });
+      await writeFile(join(dir, 'Assets/UI/PauseMenu.uxml'), GOOD_UXML);
+      await writeFile(
+        join(dir, 'Assets/UI/PauseMenu.uss'),
+        '.pause {\n  flex-grow: 1;\n  flex-direction: column;\n  padding: 16px;\n}\n',
+      );
+      const results = await runChecks(task.checks, { workDir: dir, finalAnswer: '' });
+      expect(results.some((r) => !r.pass)).toBe(true);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('fails a stylesheet using a unit unity_ui_write refuses', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'eval-tasks-ui-hud-units-'));
+    try {
+      await mkdir(join(dir, 'Assets/UI'), { recursive: true });
+      await writeFile(join(dir, 'Assets/UI/PauseMenu.uxml'), GOOD_UXML);
+      await writeFile(
+        join(dir, 'Assets/UI/PauseMenu.uss'),
+        '.pause {\n  background-color: black;\n  font-size: 1.5rem;\n}\n',
+      );
+      const results = await runChecks(task.checks, { workDir: dir, finalAnswer: '' });
+      expect(results.some((r) => !r.pass)).toBe(true);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

@@ -381,6 +381,17 @@ interface AiState {
   loadSessionIntoStore: (session: SessionData) => void;
   /** Cancel any pending debounced save and persist the session immediately. */
   flushSessionNow: () => Promise<void>;
+  /**
+   * The `.uxml` this conversation is a DESIGN session for, workspace-relative,
+   * or `null` for every ordinary chat.
+   *
+   * Persisted with the session, which is how the design dock finds the thread
+   * belonging to the document on the canvas. It is set when the dock adopts a
+   * session and cleared by `resetConversation` like everything else, so a New
+   * Chat started from the AI panel is never mistaken for a design thread.
+   */
+  designDocument: string | null;
+  setDesignDocument: (path: string | null) => void;
   setMode: (mode: ChatMode) => void;
   setEffort: (effort: Effort) => void;
   setSelectedAgent: (agent: AgentKind) => void;
@@ -542,6 +553,7 @@ function buildSaveInput(): SaveSessionInput | null {
     planPhase: state.planPhase,
     activePlanPath: state.activePlanPath,
     planNotes: state.planNotes,
+    designDocument: state.designDocument,
   };
 }
 
@@ -659,6 +671,9 @@ export const useAiStore = create<AiState>((set, get) => ({
   lastAttachments: [],
   sessionUsage: { input: 0, output: 0, requests: 0 },
   modelCallBudget: null,
+  designDocument: null,
+
+  setDesignDocument: (path: string | null) => set({ designDocument: path }),
 
   handleAgentEvent: (event: AgentEvent) => {
     switch (event.type) {
@@ -940,6 +955,8 @@ export const useAiStore = create<AiState>((set, get) => ({
       lastAttachments: [],
       sessionUsage: { input: 0, output: 0, requests: 0 },
       modelCallBudget: null,
+      // A New Chat is never a design thread, whatever the last one was.
+      designDocument: null,
       ...externalAgentReset(),
     });
     useCheckpointsStore.getState().reset();
@@ -989,6 +1006,9 @@ export const useAiStore = create<AiState>((set, get) => ({
       // they come back exactly as saved — unlike planPhase, none of this is
       // process state that a reload could invalidate.
       planNotes: session.planNotes ?? {},
+      // Absent on every session written before the design dock existed, and on
+      // every ordinary chat since.
+      designDocument: session.designDocument ?? null,
       pendingPrompt: null,
       lastAttachments: [],
       sessionUsage: { input: 0, output: 0, requests: 0 },

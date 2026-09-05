@@ -2,7 +2,7 @@
  * Shared AI panel types: chat mode, effort level, attachment kinds.
  */
 
-export type ChatMode = 'ask' | 'agent' | 'plan';
+export type ChatMode = 'ask' | 'agent' | 'plan' | 'design';
 
 // Maps 1:1 to the server's `reasoningLevel` (low|mid|high). The backend
 // alone decides which concrete model each level uses — the editor never sends a

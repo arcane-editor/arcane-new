@@ -137,42 +137,18 @@ import { buildSystemPrompt, captureDecoration, defaultPromptModeFor, type Prompt
 import { graphChangedSinceFreeze, resetFrozenDecoration } from './prompts/frozen-context';
 import { buildPlanSendPrefix } from './prompts/plan-execution';
 import { setSendPromptMode } from './send-context';
+import { withDesignScope, setDesignTarget, getDesignTarget } from './design-scope';
+import { buildDesignBrief } from './design-brief';
+import { withLayoutGate } from './unity-tools/layout-gate';
 import { includesTodoTool, nudgeEligible } from './todo-gates';
 import { getUnityGroundingContext } from './prompts/unity-facts';
 import type { ContrastFacts } from './prompts/unity-contrast';
 import { lintAnswer, buildReviseMessage } from './grounding-lint';
-import { resolveAttachments } from './attachments';
+import { resolveAttachments, promptTextForImages } from './attachments';
 import { classifyTurnError, detectTurnOutcome, loopCrashError } from './turn-errors';
-import type { Model, AgentTool, AgentMessage, TextContent } from './vendor/types';
+import { restoreAgentMessages } from './restore-history';
+import type { Model, AgentTool, TextContent } from './vendor/types';
 import type { Attachment, ChatMode, Effort } from './types';
-
-/** Convert saved UI messages back into vendor AgentMessages for resume. */
-function restoreAgentMessages(messages: AiMessage[]): AgentMessage[] {
-  const out: AgentMessage[] = [];
-  for (const m of messages) {
-    if (m.role === 'user') {
-      out.push({ role: 'user', content: m.text ?? '', timestamp: m.timestamp });
-    } else if (m.role === 'assistant') {
-      out.push({ role: 'assistant', content: m.content ?? [], timestamp: m.timestamp });
-    } else if (m.role === 'toolResult') {
-      out.push({
-        role: 'toolResult',
-        toolCallId: m.toolCallId ?? '',
-        toolName: m.toolName ?? '',
-        content: m.toolResult?.content ?? '',
-        isError: m.toolResult?.isError ?? false,
-        timestamp: m.timestamp,
-      });
-    }
-    // system / permissionRequest / questionRequest / verifiedPass / error /
-    // stopped are not part of LLM history — skip. (`ask_user`'s answer is
-    // already the tool call's own `toolResult`, which the branch above
-    // restores; the questionRequest message is UI-only, same as
-    // permissionRequest. `stopped` (T4) is a UI-only marker for a user Stop —
-    // resuming re-sends fresh text, it never replays as if the model said it.)
-  }
-  return out;
-}
 
 const PLACEHOLDER_MODEL: Model = { id: 'auto', name: 'auto', provider: 'hosted' };
 
@@ -186,6 +162,27 @@ const TODO_NUDGE_TEXT = '[Reminder: maintain your todo list with todo_update for
 
 function getCurrentWorkspacePath(): string {
   return useWorkspaceStore.getState().workspacePath ?? '/';
+}
+
+/**
+ * Forget the cached element → C# usage map after a script changes.
+ *
+ * `loadUsageIndex` memoises a whole-project `.cs` walk (that scan is what made
+ * the map too expensive to hand the model in the first place), and the design
+ * brief reads it fresh on every send. Without this, an agent that renames a
+ * handler in one turn is shown the pre-rename map in the next — by the very
+ * index that exists to catch renames.
+ *
+ * Fire-and-forget and dynamically imported: the `uitoolkit` barrel pulls React,
+ * and this runs inside a tool callback that must not wait on anything.
+ */
+function dropUsageIndexIfCs(path: string): void {
+  if (!path.toLowerCase().endsWith('.cs')) return;
+  void import('../../uitoolkit')
+    .then((m) => m.invalidateUsageIndex())
+    .catch(() => {
+      // A stale map is a wrong answer; a crashed write is a worse one.
+    });
 }
 
 /**
@@ -213,6 +210,24 @@ function getCurrentWorkspacePath(): string {
  * excludes `todo_update` at 'low' (Standard has no todo machinery,
  * guaranteed) and includes it at every other tier/mode combo.
  */
+/**
+ * The engine actions design mode keeps.
+ *
+ * Wiring the finished document onto a GameObject and setting the serialized
+ * fields around it is part of building a screen; entering Play Mode, running
+ * the test suite and driving arbitrary menu items are not, and each of them
+ * takes the user's attention away from the canvas they are looking at.
+ *
+ * Matched by name because `createUnityMutateTools()` composes its list from
+ * settings; a rename there drops the tool from this mode rather than smuggling
+ * an unintended one in, which is the safe direction for the mistake to go.
+ */
+const DESIGN_ENGINE_TOOLS: ReadonlySet<string> = new Set([
+  'unity_refresh',
+  'unity_attach_ui_document',
+  'unity_set_property',
+]);
+
 function createToolsForPromptMode(mode: PromptMode, workspacePath: string, effort: Effort): AgentTool[] {
   const isUnity = useProjectContextStore.getState().isUnityProject;
   // Sandbox roots per workspace shape — see sandbox-roots.ts. Unity confines
@@ -304,6 +319,7 @@ function createToolsForPromptMode(mode: PromptMode, workspacePath: string, effor
       operations: tauriWriteOperations,
       onFileWritten: (path) => {
         recordTouchedFile(path);
+        dropUsageIndexIfCs(path);
         onFileWritten(path);
       },
       allowedRoot,
@@ -315,6 +331,7 @@ function createToolsForPromptMode(mode: PromptMode, workspacePath: string, effor
       operations: tauriEditOperations,
       onFileEdited: (path) => {
         recordTouchedFile(path);
+        dropUsageIndexIfCs(path);
         onFileEdited(path);
       },
       allowedRoot,
@@ -374,6 +391,85 @@ function createToolsForPromptMode(mode: PromptMode, workspacePath: string, effor
   // no approval prompt, no checkpoint pre-image and no compile round.
   const guardRealPath = (t: AgentTool): AgentTool =>
     withRealPathGuard(t, workspacePath, { allowedRoot, ops: tauriRealPathOperations });
+
+  /**
+   * Design mode: reshape the ONE document open on the canvas.
+   *
+   * Narrower than agent mode on purpose, and narrow in a specific direction —
+   * it keeps every READ (a screen that belongs to its project is a screen whose
+   * author read the project) and cuts the writes down to the ones the design
+   * loop uses. No `bash`, which bypasses every checkpoint and gate; no
+   * `unity_asset_edit`/`unity_input_edit`/`unity_fix_so_drift`, which mutate
+   * subsystems this dock never shows you.
+   *
+   * `withDesignScope` sits OUTSIDE the whole stack, so a `.uxml` outside the
+   * session's document is refused before it costs an approval prompt, a
+   * checkpoint pre-image or a gate round — the same reasoning that puts
+   * `guardRealPath` where it is.
+   */
+  if (mode === 'ui-design') {
+    const uiWrite = isUnity
+      ? createUnityAssetMutateTools(workspacePath, {
+          onWrite: (path) => {
+            const abs = resolveToCwd(path, workspacePath);
+            recordTouchedFile(abs);
+            onFileWritten(abs);
+          },
+        }).filter((t) => t.name === 'unity_ui_write')
+      : [];
+    const engine = isUnity
+      ? createUnityMutateTools().filter((t) => DESIGN_ENGINE_TOOLS.has(t.name))
+      : [];
+
+    // Two wrappers, split exactly the way agent mode splits them.
+    //
+    // `unity_ui_write` does NOT get `wrapCs`: it never touches `.cs`, and it
+    // already validated the content through the same checks the asset gate
+    // would re-run afterwards. What it gets instead, in the same slot, is the
+    // layout gate — the geometry feedback loop, which is what turns "call
+    // unity_ui_layout afterwards" from an instruction the model may skip into a
+    // property of the turn.
+    //
+    // `withDesignScope` stays outermost in both, so a `.uxml` outside the
+    // session's document is refused before it costs an approval prompt, a
+    // checkpoint pre-image or a probe.
+    const wrap = (t: AgentTool, gate: (inner: AgentTool) => AgentTool): AgentTool =>
+      withDesignScope(
+        guardRealPath(
+          withEditReview(
+            withResultDiffs(
+              gate(
+                withWriteApproval(withCheckpoint(t, workspacePath, { allowedRoot }), workspacePath, {
+                  allowedRoot,
+                }),
+              ),
+              workspacePath,
+              { allowedRoot },
+            ),
+          ),
+        ),
+      );
+
+    const scopedUi = (t: AgentTool): AgentTool =>
+      wrap(t, (inner) => withLayoutGate(inner, workspacePath, getDesignTarget));
+    const scopedCode = (t: AgentTool): AgentTool => wrap(t, wrapCs);
+
+    return [
+      ...readOnly.map(guardRealPath),
+      ...graphTools,
+      ...memoryTools,
+      ...unityRead,
+      ...engine,
+      ...uiWrite.map(scopedUi),
+      // `write`/`edit` stay for the C# that drives the screen — the binding is
+      // half of "the element is named `play-button`" and there is no other way
+      // to keep the two in step. They carry the full cs-gate stack.
+      scopedCode(writeTool),
+      scopedCode(editTool),
+      ...(includesTodoTool(mode, effort) ? [createTodoTool()] : []),
+      createAskUserTool(),
+    ].map((t) => withRepeatCallGuard(t, workspacePath));
+  }
 
   return [
     ...readOnly.map(guardRealPath),
@@ -481,6 +577,12 @@ export interface SendMessageOptions {
   promptMode?: PromptMode;
   /** Required when promptMode === 'plan-execution'. */
   planExecution?: { planPath: string; planContent: string };
+  /**
+   * Required when promptMode === 'ui-design': the one document that design
+   * session is scoped to. It reaches both the prompt (which is written around
+   * it) and `design-scope.ts` (which refuses writes outside it).
+   */
+  uiDesign?: { documentPath: string; documentName: string };
 }
 
 export class AgentService {
@@ -562,17 +664,26 @@ export class AgentService {
     promptMode: PromptMode,
     effort: Effort,
     planExecutionArgs?: { planPath: string; planContent: string },
+    uiDesignArgs?: { documentPath: string; documentName: string },
   ): void {
     const workspacePath = getCurrentWorkspacePath();
 
     if (promptMode === 'plan-execution' && !planExecutionArgs) {
       throw new Error('plan-execution requires planPath and planContent');
     }
+    if (promptMode === 'ui-design' && !uiDesignArgs) {
+      throw new Error('ui-design requires the document the session is scoped to');
+    }
+
+    // Set BEFORE the tools are built, and cleared for every other mode, so a
+    // stale target from a design send can never survive into an agent one.
+    setDesignTarget(promptMode === 'ui-design' ? (uiDesignArgs?.documentPath ?? null) : null);
 
     this.agent.setSystemPrompt(
       buildSystemPrompt(promptMode, workspacePath, {
         effort,
         planExecution: planExecutionArgs,
+        uiDesign: uiDesignArgs,
         // Freeze the volatile decoration blocks per conversation so the
         // system prompt stays byte-identical across sends (prefix caching).
         conversationId: useAiStore.getState().sessionId,
@@ -703,7 +814,7 @@ export class AgentService {
     // Report the plan-mode phase FACT to the stream layer (metadata.planPhase);
     // the server's routing layer owns every model decision.
     setSendPromptMode(promptMode);
-    this.syncForPromptMode(promptMode, effectiveEffort, opts.planExecution);
+    this.syncForPromptMode(promptMode, effectiveEffort, opts.planExecution, opts.uiDesign);
     this.agent.setReasoning(effectiveEffort);
     // Compaction budget: the server-published per-tier minimum window
     // (config-first; TIER_CONTEXT_WINDOWS is only the offline fallback).
@@ -771,6 +882,28 @@ export class AgentService {
         '\n\n[Note: the codebase graph changed since this conversation started — graphify_query reflects the current structure.]';
     }
 
+    // Design mode: the screen the request is about, on the message tail.
+    //
+    // The system prompt cannot carry it. That decoration is frozen per
+    // conversation so the provider's prefix cache holds (frozen-context.ts),
+    // and a brief that changes every time the document changes would re-bill
+    // the whole conversation on every turn — the same reasoning that already
+    // puts graph drift down here rather than up there.
+    //
+    // Sent on EVERY design turn rather than only the first: the agent rewrites
+    // this document as it works, so a brief from three turns ago describes a
+    // screen that no longer exists, and de-duplicating it would mean the model
+    // silently loses the brief the first time compaction sheds an older copy.
+    // The cost is bounded by the document, and it buys back the tool calls the
+    // model was spending to discover the same three things.
+    if (promptMode === 'ui-design' && opts.uiDesign) {
+      const brief = await buildDesignBrief(
+        getCurrentWorkspacePath(),
+        opts.uiDesign.documentPath,
+      ).catch(() => null);
+      if (brief) promptText = `${brief}\n\n---\n\n${promptText}`;
+    }
+
     // Cache activation §1: the plan body moved OUT of the system prompt (see
     // prompts/plan-execution.ts) — inject it into the first plan-execution
     // user message of the conversation; later sends carry a one-line pointer.
@@ -800,7 +933,10 @@ export class AgentService {
     try {
       if (imageBlocks.length > 0) {
         await this.agent.promptStructured([
-          { type: 'text', text: promptText },
+          // Never an EMPTY text part: providers reject one deterministically,
+          // and the retry loop turns that into a long wait ending in a bare
+          // "Server error". See `promptTextForImages`.
+          { type: 'text', text: promptTextForImages(promptText, imageBlocks.length) },
           ...imageBlocks,
         ]);
       } else {
@@ -937,7 +1073,21 @@ export class AgentService {
    * `runGroundingLint` uses — nothing was "finished" to verify).
    */
   private async runClosingChecks(promptMode: PromptMode): Promise<void> {
-    if (promptMode !== 'agent' && promptMode !== 'plan-execution') return;
+    // `ui-design` joined the list after the first real use of the design chat.
+    // It had been excluded on the reasonable-sounding grounds that the existing
+    // card is C#-shaped — five of its nine rows are gated on `.cs` — but the
+    // consequence was that a design turn was the ONE kind of turn that could
+    // finish with no closing check at all. It could write an unstyled screen,
+    // say it was done, and nothing anywhere disagreed.
+    //
+    // The card shapes itself: every `.cs`-gated row returns `'skipped'` when the
+    // turn touched no scripts, which for a design turn is the normal case, so
+    // what remains is the UI Toolkit row and the layout row (which now carries
+    // the unstyled count). The one row that does NOT self-skip is the compile,
+    // because it triggers a real Unity recompile rather than reading a cached
+    // verdict — hence `skipCompile` below.
+    const isDesign = promptMode === 'ui-design';
+    if (promptMode !== 'agent' && promptMode !== 'plan-execution' && !isDesign) return;
     // Same Stop guard as runGroundingLint: a cancelled send must not trigger
     // a live Unity recompile and a "Verified" card.
     if (this.abortRequested) return;
@@ -966,7 +1116,7 @@ export class AgentService {
 
     try {
       const workspacePath = getCurrentWorkspacePath();
-      const data = await runVerifiedPass(workspacePath);
+      const data = await runVerifiedPass(workspacePath, undefined, { skipCompile: isDesign });
 
       const baseline = consoleCheckBaseline();
       const consoleEnabled =

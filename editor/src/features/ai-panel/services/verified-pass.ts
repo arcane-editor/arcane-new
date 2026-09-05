@@ -52,6 +52,44 @@ export interface VerifiedCardData {
    * verified something it did not look at.
    */
   uiToolkit: { queriesResolved: number; queriesTotal: number; problems: number } | 'clean' | 'skipped';
+  /**
+   * Did the documents this send wrote actually LAY OUT?
+   *
+   * Distinct from `uiToolkit`, which re-parses and re-resolves strings. A
+   * `.uxml` that parses, references every stylesheet it names and satisfies
+   * every `Q<T>()` in the project can still put every element at zero height,
+   * push the primary button off the panel, or clip its own text — and no
+   * string check ever written can see any of it. This renders the document
+   * offscreen through the same pipeline the canvas uses and reports the boxes
+   * elements really landed in, plus `lintLayout`'s geometry findings.
+   *
+   * `'skipped'` when the send touched no `.uxml`, or when the probe could not
+   * run at all — never a stand-in for "nothing wrong".
+   */
+  layout:
+    | {
+        documents: number;
+        elements: number;
+        problems: number;
+        /**
+         * Elements no rule in the document's own stylesheets reaches.
+         *
+         * On the same row as the geometry rather than on one of its own,
+         * because they are two readings of a single render and a screen is only
+         * finished when both are good. It is here at all because a document can
+         * lay out perfectly — every box the right size, `problems: 0` — and
+         * render as flat default grey, which is the failure this card could not
+         * previously see. See `style-coverage.ts`.
+         *
+         * Optional because cards are PERSISTED with the session: one saved
+         * before this existed has no such field, and a restored card must
+         * report geometry alone rather than claiming zero unstyled elements it
+         * never counted. Same reasoning as `layout`'s own `= 'skipped'` default
+         * in `VerifiedCard.tsx`.
+         */
+        unstyled?: number;
+      }
+    | 'skipped';
   scriptableObjects: { drift: number } | 'clean' | 'skipped';
   input: { problems: number } | 'clean' | 'skipped';
   /**
@@ -93,6 +131,8 @@ export interface VerifiedPassDeps {
     workspacePath: string,
   ) => Promise<VerifiedCardData['scriptableObjects']>;
   checkInput: (files: string[], workspacePath: string) => Promise<VerifiedCardData['input']>;
+  /** See `VerifiedCardData.layout`. Injected as a whole step for the same reason the three above are. */
+  checkLayout: (files: string[], workspacePath: string) => Promise<VerifiedCardData['layout']>;
 }
 
 async function defaultReadFile(absPath: string): Promise<string> {
@@ -167,6 +207,9 @@ async function defaultCheckUiToolkit(
         // for a `project://` ref. Handing it absolute paths would report every
         // stylesheet in every document as missing.
         ussPaths: [...(uss?.docs.keys() ?? [])].map((p) => toRelative(p, workspacePath)),
+        // Same form as `ussPaths`, so a relative `<Style src>` resolves against
+        // a comparable path rather than an absolute one.
+        documentPath: toRelative(file, workspacePath),
       }).length;
     } else if (lower.endsWith('.uss')) {
       problems += checkUss(text, file).length;
@@ -261,6 +304,76 @@ async function defaultCheckInput(files: string[]): Promise<VerifiedCardData['inp
   return problems === 0 ? 'clean' : { problems };
 }
 
+/**
+ * Lay every `.uxml` this send wrote out offscreen, and measure it.
+ *
+ * The whole point of the row: this is the only check in the pass that renders
+ * anything. It reaches `uitoolkit`'s barrel by dynamic `import()` for the
+ * reason the DI note at the top of this file gives — `layout-probe.ts` touches
+ * `document`, `attachShadow` and `getComputedStyle`, none of which exist under
+ * Bun — and it is the same probe, at the same panel size, that
+ * `unity_ui_layout` and the human preview both use, so the three can never
+ * disagree about what the document looks like.
+ *
+ * A document whose probe throws is COUNTED but contributes no elements, rather
+ * than dropping the whole row: one unmeasurable document must not make the
+ * other three read as unmeasured.
+ */
+async function defaultCheckLayout(
+  files: string[],
+  workspacePath: string,
+): Promise<VerifiedCardData['layout']> {
+  const documents = files.filter((f) => f.toLowerCase().endsWith('.uxml'));
+  if (documents.length === 0) return 'skipped';
+
+  const [uitoolkit, { parseUxml }, { lintLayout }, { panelLayoutSize }] = await Promise.all([
+    import('../../uitoolkit'),
+    import('../../../utils/uxml-model'),
+    import('../../../utils/layout-lint'),
+    import('../../../utils/panel-settings'),
+  ]);
+
+  const guidMap = await invoke<Record<string, string>>('unity_index_guid_map', { workspacePath })
+    .catch(() => ({}) as Record<string, string>);
+  const resolveGuid = async (guid: string) => guidMap[guid] ?? null;
+
+  let measured = 0;
+  let elements = 0;
+  let problems = 0;
+  let unstyled = 0;
+
+  for (const file of documents) {
+    const text = await defaultReadFile(file).catch(() => null);
+    if (text === null) continue;
+    const relPath = toRelative(file, workspacePath);
+    try {
+      const doc = parseUxml(text);
+      const { sheets } = await uitoolkit.loadStyleSheets(doc, relPath, workspacePath, resolveGuid);
+      const panel = await uitoolkit.loadPanelSettings(relPath, workspacePath);
+      // The panel decides the coordinate space every `px` in the document is
+      // measured against; guessing it wrong is a 38%-off bug, not a rounding
+      // one (see `utils/panel-settings.ts`).
+      const size = panel.settings ? panelLayoutSize(panel.settings, LAYOUT_SCREEN) : LAYOUT_SCREEN;
+      const probe = uitoolkit.probeLayout({ uxmlText: text, sheets, size });
+      measured++;
+      elements += probe.nodes.length;
+      problems += lintLayout(probe, size).filter((f) => f.severity === 'error').length;
+      // Free: the plan is already built and the sheets are already parsed.
+      const coverage = uitoolkit.styleCoverage(uitoolkit.buildRenderPlan(doc, sheets).root, sheets);
+      unstyled += coverage.unstyled.length;
+    } catch {
+      // Unmeasurable, not clean. It stays out of `measured`, so the row
+      // reports what was actually laid out rather than implying all of it was.
+    }
+  }
+
+  if (measured === 0) return 'skipped';
+  return { documents: measured, elements, problems, unstyled };
+}
+
+/** The screen a `ScaleWithScreenSize` panel scales against — the same assumption `UxmlPreviewEditor` and `unity_ui_layout` make. */
+const LAYOUT_SCREEN = { width: 1920, height: 1080 };
+
 const DEFAULT_DEPS: VerifiedPassDeps = {
   readFile: defaultReadFile,
   runAnalyzers: defaultRunAnalyzers,
@@ -270,6 +383,7 @@ const DEFAULT_DEPS: VerifiedPassDeps = {
   checkUiToolkit: defaultCheckUiToolkit,
   checkScriptableObjects: defaultCheckScriptableObjects,
   checkInput: defaultCheckInput,
+  checkLayout: defaultCheckLayout,
 };
 
 // ---- Per-send registry ----
@@ -421,9 +535,24 @@ async function computeGuids(
  * is independently budgeted and defensive: a throw or a timeout degrades that
  * step to `'skipped'` without blocking the others.
  */
+export interface RunVerifiedPassOptions {
+  /**
+   * Skip the compile step.
+   *
+   * Design mode sets it. A turn that wrote only `.uxml`/`.uss` cannot have
+   * introduced a compile error, and `computeCompile` does not merely read a
+   * cached verdict — it triggers a real Unity recompile and waits for it, which
+   * on a backgrounded editor is the slowest thing in this pass by an order of
+   * magnitude. Reporting `'skipped'` is the honest answer: nothing about C# was
+   * checked, because nothing about C# changed.
+   */
+  skipCompile?: boolean;
+}
+
 export async function runVerifiedPass(
   workspacePath: string,
   deps: VerifiedPassDeps = DEFAULT_DEPS,
+  options: RunVerifiedPassOptions = {},
 ): Promise<VerifiedCardData> {
   const files = Array.from(touched);
   const startedAt = Date.now();
@@ -454,12 +583,22 @@ export async function runVerifiedPass(
     remaining(),
     'skipped',
   );
-
-  const compile = await withBudget<VerifiedCardData['compile']>(
-    () => computeCompile(deps, remaining()),
+  // With the other snapshot reads, before the compile: it is the check that
+  // catches the failure nothing else in this pass can see, so it must not be
+  // the one dropped when a recompile eats the budget.
+  const layout = await withBudget<VerifiedCardData['layout']>(
+    () => deps.checkLayout(files, workspacePath),
     remaining(),
     'skipped',
   );
+
+  const compile = options.skipCompile
+    ? ('skipped' as const)
+    : await withBudget<VerifiedCardData['compile']>(
+        () => computeCompile(deps, remaining()),
+        remaining(),
+        'skipped',
+      );
   const guidsRaw = await withBudget<'intact' | { missing: string[] } | 'skipped'>(
     () => computeGuids(files, deps),
     remaining(),
@@ -480,6 +619,7 @@ export async function runVerifiedPass(
     uiToolkit,
     scriptableObjects,
     input,
+    layout,
     // Owned by the caller (see `VerifiedCardData.console`): this pass has no
     // way to tell a first sweep from a post-repair one, and guessing would
     // put a console verdict on a card that never read the console.

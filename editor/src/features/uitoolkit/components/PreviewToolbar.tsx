@@ -1,4 +1,5 @@
-import { Frame, Maximize, Minus, Moon, Plus, Sun, Grid2x2 } from 'lucide-react';
+import { Frame, Maximize, Minus, Moon, PenLine, Plus, Sun, Grid2x2 } from 'lucide-react';
+import { useDesignChatStore } from '../../../stores/design-chat';
 import type { PreviewCamera, StageBackground } from '../hooks/usePreviewCamera';
 
 /**
@@ -22,6 +23,12 @@ export function PreviewToolbar({
   showBoxes: boolean;
   onShowBoxes: (next: boolean) => void;
 }) {
+  // A store, not a prop: the dock's open state belongs to the dock, and
+  // threading it through the preview would make `UxmlPreviewEditor` aware of a
+  // feature it deliberately knows nothing about (see `design-chat/index.ts`).
+  const designOpen = useDesignChatStore((s) => s.open);
+  const toggleDesign = useDesignChatStore((s) => s.toggleOpen);
+
   const { viewport, fitted, zoomIn, zoomOut, fit, actualSize } = camera;
   const percent = Math.round(viewport.zoom * 100);
   const next = BACKGROUNDS[(BACKGROUNDS.indexOf(background) + 1) % BACKGROUNDS.length];
@@ -78,6 +85,17 @@ export function PreviewToolbar({
       >
         <Frame size={11} />
         Boxes
+      </button>
+
+      <button
+        type="button"
+        className={`uxml-preview-toggle${designOpen ? ' active' : ''}`}
+        aria-pressed={designOpen}
+        onClick={toggleDesign}
+        title="Describe what this screen should be and have it built — writes land on this canvas"
+      >
+        <PenLine size={11} />
+        Design
       </button>
     </div>
   );
