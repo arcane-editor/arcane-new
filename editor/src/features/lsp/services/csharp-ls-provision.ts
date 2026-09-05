@@ -102,7 +102,7 @@ export function describeDotnetBlock(status: CsharpLsStatus): DotnetBlock | null 
     return {
       reason: 'sdk-missing',
       detail:
-        'Only the .NET runtime is installed. The SDK is needed to set up the C# language server.',
+        'Only the .NET runtime is installed. The C# language server needs the SDK to load your project.',
     };
   }
   if (dotnet.runtime_major === null || dotnet.runtime_major < required) {

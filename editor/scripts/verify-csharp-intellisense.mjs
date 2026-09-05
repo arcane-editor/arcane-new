@@ -87,11 +87,26 @@ function fail(msg, extra) {
 const project = CANDIDATE_PROJECTS.find((p) => fs.existsSync(path.join(p, 'Assets')));
 if (!project) skip('no Unity project found (set UNITYIDE_SMOKE_UNITY_PROJECT)');
 
-const csharpLs = [
-  path.join(process.env.HOME ?? '', '.dotnet/tools/csharp-ls'),
-  '/usr/local/bin/csharp-ls',
-].find((p) => fs.existsSync(p));
-if (!csharpLs) skip('csharp-ls not installed (dotnet tool install --global csharp-ls)');
+// How to start the server, as [program, ...leadingArgs].
+//
+// The editor no longer assumes an executable: the copy it provisions itself is
+// a bare tool assembly run as `dotnet <assembly>` (see `csharp_ls.rs`). Both
+// shapes have to be checkable here, or the managed one — the shape most users
+// will actually run — would never be exercised end to end.
+const managedDll = process.env.UNITYIDE_CSHARP_LS_DLL;
+const csharpLsCommand = managedDll
+  ? ['dotnet', [managedDll]]
+  : (() => {
+      const exe = [
+        process.env.UNITYIDE_CSHARP_LS_PATH,
+        path.join(process.env.HOME ?? '', '.dotnet/tools/csharp-ls'),
+        '/usr/local/bin/csharp-ls',
+      ].find((p) => p && fs.existsSync(p));
+      return exe ? [exe, []] : null;
+    })();
+if (!csharpLsCommand) skip('csharp-ls not installed (dotnet tool install --global csharp-ls)');
+const [csharpLsProgram, csharpLsLeadingArgs] = csharpLsCommand;
+const csharpLs = managedDll ? `dotnet ${managedDll}` : csharpLsProgram;
 
 const probeFile = (function findCs(dir) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -133,10 +148,14 @@ if (!fs.existsSync(solution)) {
 
 // ── drive the real server ──────────────────────────────────────────────────
 
-const server = spawn(csharpLs, ['--loglevel', 'info', '--solution', solution], {
-  cwd: project,
-  env: { ...process.env, DOTNET_ROOT: process.env.DOTNET_ROOT ?? '/usr/local/share/dotnet' },
-});
+const server = spawn(
+  csharpLsProgram,
+  [...csharpLsLeadingArgs, '--loglevel', 'info', '--solution', solution],
+  {
+    cwd: project,
+    env: { ...process.env, DOTNET_ROOT: process.env.DOTNET_ROOT ?? '/usr/local/share/dotnet' },
+  },
+);
 
 let buf = Buffer.alloc(0);
 const pending = new Map();

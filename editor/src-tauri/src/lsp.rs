@@ -143,10 +143,9 @@ fn resolve_bundled_sidecar(name: &str) -> Option<PathBuf> {
 /// Resolve the path to the LSP server binary for a given language.
 ///
 /// Resolution order per language:
-/// - **csharp**: delegated to `csharp_ls::resolve_existing`, which checks the
-///   user's own install first and the editor-managed one last. The bare name
-///   is returned only when nothing was found, so the spawn produces the
-///   "not installed" error the frontend already knows how to surface.
+/// - **csharp**: not handled here — see [`resolve_server_command`], because a
+///   managed csharp-ls is an assembly run by `dotnet` rather than an
+///   executable, so program and args have to be decided together.
 /// - **typescript**: bundled sidecar (Tauri externalBin) → fall back to PATH
 ///   if the user sets `EDITOR_USE_SYSTEM_LSP=1` or the sidecar is missing.
 /// - **python**: PATH only. Pyright bundling is a known follow-up — pkg has
@@ -155,9 +154,7 @@ fn resolve_bundled_sidecar(name: &str) -> Option<PathBuf> {
 ///   matches what the editor did before bundling was introduced.
 fn resolve_server_binary(language: &str) -> String {
     match language {
-        "csharp" => crate::csharp_ls::resolve_existing()
-            .map(|(path, _)| path.to_string_lossy().to_string())
-            .unwrap_or_else(|| crate::csharp_ls::exe_name("csharp-ls")),
+        "csharp" => crate::csharp_ls::exe_name("csharp-ls"),
         "python" => {
             if cfg!(target_os = "windows") {
                 "pyright-langserver.cmd".to_string()
@@ -305,6 +302,42 @@ fn resolve_server_args(language: &str, solution_path: Option<&str>) -> Vec<Strin
     }
 }
 
+/// Program and argv for a language's server.
+///
+/// Exists because C# has two shapes. A csharp-ls the user installed themselves
+/// is an executable shim; the copy this editor provisions is a bare tool
+/// assembly (the package declares `Runner="dotnet"` and ships no native host),
+/// so it runs as `dotnet <assembly> <server args>`. Choosing the program and
+/// the argv in one place is what keeps those two from drifting apart.
+fn resolve_server_command(
+    language: &str,
+    solution_path: Option<&str>,
+    dotnet_dir: Option<&Path>,
+) -> (String, Vec<String>) {
+    let mut args = resolve_server_args(language, solution_path);
+
+    if language == "csharp" {
+        match crate::csharp_ls::resolve_existing() {
+            Some((crate::csharp_ls::ServerLaunch::Executable(exe), _)) => {
+                return (exe.to_string_lossy().to_string(), args);
+            }
+            Some((crate::csharp_ls::ServerLaunch::DotnetDll(dll), _)) => {
+                // Absolute `dotnet` where we have it: a GUI app on macOS does
+                // not inherit the shell PATH, so the bare name may not resolve.
+                let dotnet = dotnet_dir
+                    .map(|dir| dir.join(crate::csharp_ls::exe_name("dotnet")))
+                    .map(|p| p.to_string_lossy().to_string())
+                    .unwrap_or_else(|| crate::csharp_ls::exe_name("dotnet"));
+                args.insert(0, dll.to_string_lossy().to_string());
+                return (dotnet, args);
+            }
+            None => {}
+        }
+    }
+
+    (resolve_server_binary(language), args)
+}
+
 /// Kill a single language server's child process and clear its handles.
 async fn kill_and_clear(server: &mut LspServer) {
     server.stdin.take();
@@ -342,12 +375,11 @@ pub async fn lsp_start(
     // Truncate the trace only when no servers are active across any window.
     let truncate_trace = map.values().all(|s| s.is_empty());
 
-    let bin = resolve_server_binary(&language);
-    let args = resolve_server_args(&language, solution_path.as_deref());
-
     // csharp-ls (via MSBuildLocator) needs to find `dotnet`. GUI Tauri apps
     // on macOS don't inherit the shell PATH, so probe known install
     // locations and inject DOTNET_ROOT + an augmented PATH for the child.
+    // Resolved before the command because a managed csharp-ls *is* run by
+    // `dotnet`, so the program itself depends on this.
     let dotnet_dir = if language == "csharp" {
         find_dotnet_dir()
     } else {
@@ -360,6 +392,9 @@ pub async fn lsp_start(
             .to_string();
         return Err(msg);
     }
+
+    let (bin, args) =
+        resolve_server_command(&language, solution_path.as_deref(), dotnet_dir.as_deref());
 
     let header = format!(
         "=== LSP session ts={} lang={} label={} bin={} cwd={} sln={} dotnet={} ===",
