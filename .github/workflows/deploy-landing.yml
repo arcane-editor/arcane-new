@@ -3,6 +3,11 @@ name: Deploy Landing
 # landing-page (Astro, Cloudflare Pages) deploys.
 #  - push to dev touching landing-page/ -> arcane-landing-dev (dev.unityide.app)
 #  - manual dispatch with environment=production -> arcane-landing (unityide.app)
+#  - called by Dev Build / Release once their installers are in R2, so the
+#    site is rebuilt against the release it just shipped. It has to be a
+#    rebuild: DownloadSection reads the update manifests during `astro build`,
+#    so the version on the cards is frozen at build time and a release with no
+#    landing deploy after it leaves the site advertising the previous one.
 # Both Pages projects use production branch "main" — always pass --branch main.
 # The load-bearing landing-page/.npmrc (entities hoist exclusion) is picked up
 # automatically because pnpm runs inside landing-page/.
@@ -20,17 +25,28 @@ on:
         type: choice
         options: [dev, production]
         default: dev
+  workflow_call:
+    inputs:
+      environment:
+        description: 'Target environment'
+        type: string
+        default: dev
 
 # Serialize deploys per ref WITHOUT cancelling in-flight runs: a mid-flight
 # kill during D1 migrations/deploy is worse than waiting, and GitHub keeps
 # only the newest pending run in the group, so the final state is newest-wins.
 concurrency:
-  group: deploy-landing-${{ github.ref }}
+  group: deploy-landing-${{ github.ref }}-${{ inputs.environment || 'dev' }}
   cancel-in-progress: false
 
 jobs:
   deploy-dev:
-    if: github.event_name == 'push' || inputs.environment == 'dev'
+    # Keyed on the input alone, never on github.event_name: inside a called
+    # workflow that reports the CALLER's event, so the old `event_name == 'push'`
+    # clause matched a tag-push Release and would have deployed the dev site in
+    # the middle of a production release. A plain push to dev carries no inputs,
+    # so `!= 'production'` still covers it.
+    if: inputs.environment != 'production'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -66,7 +82,11 @@ jobs:
         run: npx wrangler@4 pages deploy dist --project-name arcane-landing-dev --branch main
 
   deploy-prod:
-    if: github.event_name == 'workflow_dispatch' && inputs.environment == 'production' && github.ref == 'refs/heads/master'
+    # master for a manual dispatch, a version tag when Release calls us — those
+    # are the only two refs production is ever cut from. Anything else (a
+    # Release dispatched off a side branch) skips rather than publishing an
+    # unreviewed ref to unityide.app.
+    if: inputs.environment == 'production' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v'))
     runs-on: ubuntu-latest
     defaults:
       run:

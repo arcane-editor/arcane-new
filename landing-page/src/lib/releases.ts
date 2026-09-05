@@ -78,3 +78,37 @@ export function versionFromManifest(body: unknown, platform: UpdatePlatform): st
     if (!(platform in (m.platforms as Record<string, unknown>))) return null;
     return m.version;
 }
+
+/**
+ * The Unity UPM package for this channel.
+ *
+ * Two packages ship, and they are not interchangeable: `com.unityide.editor`
+ * opens UnityIDE, `com.unityide.editor.dev` opens UnityIDE Dev. Routed through
+ * `isDevChannel` for the same reason the installer links are — the dev site
+ * handing out the release package is silently wrong in exactly the way that
+ * only shows up once the plugin launches the wrong app.
+ */
+export function unityExtensionUrl(apiUrl: string): string {
+    const base = `${RELEASES_ORIGIN}/unity-extension-releases`;
+    return isDevChannel(apiUrl)
+        ? `${base}/dev/latest/com.unityide.editor.dev.tgz`
+        : `${base}/latest/com.unityide.editor.tgz`;
+}
+
+/**
+ * A manifest URL that cannot be served from cache. Build-time reads only.
+ *
+ * The release workflow PUTs `latest/<platform>.json` with `max-age=300` and the
+ * landing deploy now follows it within a couple of minutes — well inside that
+ * window, so the edge can still be holding the PREVIOUS release's manifest and
+ * the site would bake the very version it just replaced. A unique query string
+ * is a distinct cache key, so this read reaches R2 itself.
+ *
+ * Deliberately NOT folded into `manifestUrls`: those are the same URLs the
+ * app's updater polls, and that poll wants the cache.
+ */
+export function uncachedManifestUrl(url: string, token: string = String(Date.now())): string {
+    const u = new URL(url);
+    u.searchParams.set('t', token);
+    return u.toString();
+}
