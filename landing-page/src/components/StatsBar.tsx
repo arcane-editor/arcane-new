@@ -1,10 +1,10 @@
 import { motion } from "framer-motion";
 
 const stats = [
-  { value: "30+", label: "AI Tools Built-In" },
-  { value: "10+", label: "Unity Parsers" },
-  { value: "3", label: "Operating Modes" },
-  { value: "2", label: "Platforms Supported" },
+  { value: "30+", label: "Unity-aware AI tools" },
+  { value: "6", label: "Unity file types, natively edited" },
+  { value: "5", label: "AI modes" },
+  { value: "2", label: "Platforms supported" },
 ];
 
 const StatsBar = () => {

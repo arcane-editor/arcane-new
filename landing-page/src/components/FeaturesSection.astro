@@ -1,109 +1,114 @@
 ---
-const features = [
+/**
+ * The capability sheet.
+ *
+ * Keyed by file extension wherever a row is about a file type, because that is
+ * how a Unity project is actually organised — the key column carries
+ * information rather than decorating the row, and it continues the argument the
+ * hero panel makes. The last three rows are about the app rather than a file
+ * type, so they are keyed by a word instead.
+ *
+ * Every claim here is meant to be traceable to something in the repo. Three
+ * that used to sit on this page were not: Git LFS setup, Plastic SCM
+ * integration, and animator/blend-tree parsing have no implementation, so they
+ * are gone rather than reworded.
+ */
+const rows = [
   {
-    title: "AI Context Engine",
-    desc: "Your AI understands your entire Unity project — scenes, prefabs, scripts, animators, and their relationships. Multi-phase indexing builds a knowledge graph so every suggestion is project-aware.",
-    span: "lg:col-span-2",
-    preview: true,
-    icon: `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/><path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"/><path d="M17.599 6.5a3 3 0 0 0 .399-1.375"/><path d="M6.003 5.125A3 3 0 0 0 6.401 6.5"/><path d="M3.477 10.896a4 4 0 0 1 .585-.396"/><path d="M19.938 10.5a4 4 0 0 1 .585.396"/><path d="M6 18a4 4 0 0 1-1.967-.516"/><path d="M19.967 17.484A4 4 0 0 1 18 18"/></svg>`,
+    key: [".cs"],
+    title: "C# that knows it is Unity",
+    body:
+      "Completions, go-to-definition and rename through a C# language server, plus analyzers written for this engine: allocations in Update, GetComponent in hot paths, legacy input APIs in a project already on the Input System, fields that will silently fail to serialize. Lifecycle methods are marked in the gutter, and a debugger with call stack, variables and watches attaches to the Editor.",
   },
   {
-    title: "Unity Editor Integration",
-    desc: "Control Play/Pause/Stop, stream console logs, trigger builds, and run tests — all without leaving your code editor.",
-    span: "",
-    preview: false,
-    icon: `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></svg>`,
+    key: [".unity", ".prefab", ".mat"],
+    title: "Scenes and prefabs as structure",
+    body:
+      "Serialized assets open as a navigable tree instead of a few thousand lines of YAML, and changes diff as GameObjects and components rather than as text. GUIDs resolve to asset paths in both directions, so a script reference can be traced across every scene and prefab that uses it.",
   },
   {
-    title: "C# Code Intelligence",
-    desc: "Lifecycle method decorations, serialization analysis, 23+ attribute completions, and safe refactoring tools built for Unity.",
-    span: "",
-    preview: false,
-    icon: `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 16 4-4-4-4"/><path d="m6 8-4 4 4 4"/><path d="m14.5 4-5 16"/></svg>`,
+    key: [".asset"],
+    title: "ScriptableObjects as typed forms",
+    body:
+      "An asset resolves its script GUID, finds the class behind it and renders the real fields — the Inspector, in your editor. When a class and the instances saved against it drift apart, the agent can reconcile them.",
   },
   {
-    title: "Git & LFS for Unity",
-    desc: "One-click Git setup with Unity-optimized .gitignore, .gitattributes, LFS tracking for binary assets, and .meta file validation.",
-    span: "lg:col-span-2",
-    preview: false,
-    icon: `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><path d="M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9"/><path d="M12 12v3"/></svg>`,
+    key: [".uxml", ".uss"],
+    title: "UI Toolkit with a live canvas",
+    body:
+      "Markup renders on a preview canvas beside its source, with an inspector for the element under the cursor. A design chat docks over the canvas so the AI can build the screen with you, and every write is validated before it lands: invalid UXML or USS is refused, not warned about.",
   },
   {
-    title: "Smart File Management",
-    desc: "Automatic .meta co-management, special folder badges for Editor/Resources/Plugins, and incremental file watching.",
-    span: "",
-    preview: false,
-    icon: `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/></svg>`,
+    key: [".inputactions"],
+    title: "Input actions, not JSON",
+    body:
+      "Action maps, bindings and control schemes open as a table you can read. The agent sees your real action names, so it writes a handler for Jump instead of inventing one.",
   },
   {
-    title: "AI Agent Tools",
-    desc: "Query your project graph, inspect entities, resolve GUIDs, and get instant project overviews — all via natural language.",
-    span: "",
-    preview: false,
-    icon: `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/></svg>`,
+    key: [".asmdef", ".shader", ".hlsl"],
+    title: "And the rest of the project",
+    body:
+      "Assembly definitions, ShaderLab, HLSL and compute shaders are first-class too, package-cache sources open read-only, and .meta files stay paired with the assets they belong to.",
+  },
+  {
+    key: ["Unity"],
+    title: "A live link to the running Unity",
+    body:
+      "Play, pause and stop from the toolbar. Console logs stream in with click-to-source stack traces, tests run from the IDE and report their results back, and compile status arrives the moment scripts rebuild — including while Unity is sitting in the background.",
+  },
+  {
+    key: ["AI"],
+    title: "An agent with Unity in its hands",
+    body:
+      "More than thirty tools, most of them Unity-specific: read the scene hierarchy, set a property with Undo intact, run the tests, search the Unity API, scaffold a UI screen. Edits arrive as reviewable diffs behind checkpoints you can roll back, and after each turn it reads the Unity console and repairs what it broke. Bring Claude Code or another external agent instead if you prefer.",
+  },
+  {
+    key: ["IDE"],
+    title: "The IDE around all of it",
+    body:
+      "An integrated terminal, Git with worktrees and UnityYAMLMerge wired up for scene merges, project-wide search, a command palette, six themes, and inline completions as you type.",
   },
 ];
 ---
 
 <section id="features" class="relative py-16 sm:py-28">
   <div class="container mx-auto px-4">
-    <div class="mb-12 sm:mb-16 text-center scroll-reveal">
+    <div class="mb-12 max-w-2xl scroll-reveal sm:mb-16">
       <h2 class="mb-4 font-display text-3xl font-bold tracking-tight sm:text-4xl md:text-5xl">
-        Built for <span class="text-gradient-orange">Unity Developers</span>
+        Unity-native, <span class="text-gradient-orange">all the way down</span>
       </h2>
-      <p class="mx-auto max-w-xl text-muted-foreground text-base sm:text-lg">
-        Every feature is designed to streamline your Unity workflow and make game development joyful.
+      <p class="max-w-[58ch] text-base leading-relaxed text-muted-foreground sm:text-lg">
+        Not a general-purpose editor with a Unity plugin bolted to the side.
+        Every file type the engine writes has a real editor here, and the AI
+        reads all of them.
       </p>
     </div>
 
-    <div class="mx-auto max-w-5xl grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-      {features.map((f, i) => (
-        <div
-          class={`scroll-reveal group relative overflow-hidden rounded-2xl glass p-5 sm:p-6 transition-all duration-300 hover:glow-orange-sm hover:border-primary/30 ${f.span}`}
-          style={`transition-delay: ${i * 80}ms;`}
-        >
-          {/* Hover gradient */}
-          <div class="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100"></div>
-
-          <div class="relative z-10">
-            <div class="mb-4 inline-flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 text-primary transition-all duration-300 group-hover:bg-primary/20 group-hover:scale-110">
-              <Fragment set:html={f.icon} />
-            </div>
-            <h3 class="mb-2 font-display text-lg font-semibold">{f.title}</h3>
-            <p class="text-sm leading-relaxed text-muted-foreground">{f.desc}</p>
-
-            {/* Code preview for AI card */}
-            {f.preview && (
-              <div class="mt-4 rounded-lg bg-background/60 border border-border/40 p-3 font-mono text-xs">
-                <div class="text-muted-foreground">
-                  <span class="text-muted-foreground/50">1 </span>
-                  <span>void Start() {"{"}</span>
-                </div>
-                <div class="text-muted-foreground">
-                  <span class="text-muted-foreground/50">2 </span>
-                  <span>  rb = GetComponent&lt;</span>
-                </div>
-                <div class="flex items-center gap-2">
-                  <span class="text-primary/70">
-                    <span class="text-muted-foreground/50">  </span>
-                    Rigidbody&gt;();
-                  </span>
-                  <span class="inline-flex items-center gap-1 rounded bg-primary/15 px-1.5 py-0.5 text-[10px] text-primary">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/></svg>
-                    AI
-                  </span>
-                </div>
-              </div>
-            )}
+    {/* A spec sheet, not a card grid: the key column is the file type, the
+        hairline is the separator, and nothing hovers or lifts. */}
+    <div class="max-w-5xl">
+      {rows.map((r) => (
+        <div class="grid gap-x-10 gap-y-3 border-t border-border/40 py-7 sm:grid-cols-[150px_1fr] sm:py-8">
+          <div class="flex flex-wrap gap-x-3 gap-y-1 pt-0.5">
+            {r.key.map((k) => (
+              <span class="font-mono text-xs text-primary/80">{k}</span>
+            ))}
+          </div>
+          <div>
+            <h3 class="mb-2 font-display text-lg font-semibold sm:text-xl">{r.title}</h3>
+            <p class="max-w-[64ch] text-sm leading-relaxed text-muted-foreground">{r.body}</p>
           </div>
         </div>
       ))}
+      <div class="border-t border-border/40"></div>
     </div>
 
-    {/* CTA to full features page */}
-    <div class="mt-10 text-center scroll-reveal">
-      <a href="/features" class="inline-flex items-center gap-2 text-primary hover:text-primary/80 font-semibold transition-colors group">
-        Explore all features
+    <div class="mt-10 scroll-reveal">
+      <a
+        href="/features"
+        class="group inline-flex items-center gap-2 font-semibold text-primary transition-colors hover:text-primary/80"
+      >
+        Every feature in detail
         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-5 w-5 transition-transform group-hover:translate-x-1"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
       </a>
     </div>

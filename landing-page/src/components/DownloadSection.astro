@@ -60,6 +60,10 @@ const osCards = [
   {
     id: "macos-arm",
     name: "macOS",
+    // The only Beta marker left on the site. Windows is the primary target and
+    // the tested one; the macOS build is ad-hoc signed and gets less coverage,
+    // so the label belongs on this card and nowhere else.
+    badge: "Beta",
     version: macVersion,
     ext: ".dmg",
     subtitle: "Apple Silicon (M1+)",
@@ -116,7 +120,14 @@ const osCards = [
             <div class="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-primary transition-all group-hover:bg-primary/20 group-hover:scale-110">
               <Fragment set:html={os.icon} />
             </div>
-            <h3 class="mb-1 font-display text-xl font-semibold">{os.name}</h3>
+            <h3 class="mb-1 flex items-center justify-center gap-2 font-display text-xl font-semibold">
+              {os.name}
+              {os.badge && (
+                <span class="rounded-md border border-primary/30 bg-primary/15 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-primary">
+                  {os.badge}
+                </span>
+              )}
+            </h3>
             <p class="mb-1 font-mono text-xs text-primary/70">{os.version}</p>
             <p class="mb-5 text-xs text-muted-foreground">{os.subtitle}</p>
             {os.href ? (

@@ -1,5 +1,5 @@
 ---
-import HeroIDEMockup from './HeroIDEMockup.tsx';
+import UnityNativePanel from './UnityNativePanel.tsx';
 
 // Comment style in this file: use JSX-expression comments in the template, not
 // HTML comments — Astro passes HTML comments straight through to the page,
@@ -52,8 +52,9 @@ import HeroIDEMockup from './HeroIDEMockup.tsx';
         </h1>
 
         <p class="mb-8 max-w-lg text-lg leading-relaxed text-muted-foreground animate-fade-in-up" style="animation-delay: 0.4s;">
-          UnityIDE is a desktop IDE built exclusively for Unity — with AI that
-          reads your scenes, prefabs and C#, wired straight into the running Editor.
+          A desktop IDE built only for Unity. Scenes, prefabs, ScriptableObjects,
+          UI Toolkit and input actions each open as a real editor — and the AI
+          reads every one of them, wired straight into the running Unity Editor.
         </p>
 
         <div class="flex flex-col gap-4 sm:flex-row animate-fade-in-up" style="animation-delay: 0.5s;">
@@ -70,13 +71,13 @@ import HeroIDEMockup from './HeroIDEMockup.tsx';
         </div>
 
         <p class="mt-6 text-sm text-muted-foreground/60 animate-fade-in-up" style="animation-delay: 0.7s;">
-          Currently in Beta · Free During Beta · Windows & macOS
+          Free plan · Windows &amp; macOS
         </p>
       </div>
 
       {/* Right: Mock IDE (React island) */}
-      <div class="relative hidden lg:block animate-fade-in-right" style="animation-delay: 0.3s;">
-        <HeroIDEMockup client:load />
+      <div class="relative animate-fade-in-right" style="animation-delay: 0.3s;">
+        <UnityNativePanel client:load />
       </div>
     </div>
   </div>

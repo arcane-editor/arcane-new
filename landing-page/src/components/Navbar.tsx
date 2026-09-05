@@ -50,10 +50,7 @@ const Navbar = () => {
         <a href="/" className="flex items-center gap-3">
           <img src="/icon.png" alt="UnityIDE" className="h-9 w-9 rounded-lg" />
           <span className="font-display text-lg font-bold tracking-tight text-foreground">
-            UnityIDE<span className="text-primary">IDE</span>
-          </span>
-          <span className="ml-1.5 rounded-md bg-primary/15 border border-primary/30 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-primary">
-            Beta
+            Unity<span className="text-primary">IDE</span>
           </span>
         </a>
 
