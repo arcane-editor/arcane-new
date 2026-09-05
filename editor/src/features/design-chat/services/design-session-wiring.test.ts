@@ -1,13 +1,18 @@
 import { describe, expect, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 // Source-greps, for the reason `agent-service-wiring.test.ts` gives about
 // itself: `design-session.ts` reaches `stores/ai.ts` and the `ai-panel` barrel,
 // and `DesignChatDock.tsx` is React — either takes Bun's DOM-less runtime down
 // on import alone. The DECISIONS are pure and tested in
 // `design-session-policy.test.ts`; these pin the wiring around them.
-const HERE = new URL('.', import.meta.url).pathname;
+
+// `fileURLToPath`, never `new URL(...).pathname`: on Windows the latter yields
+// "/D:/a/…", and `join` turns that leading slash into "\D:\a\…", which no fs call
+// can open. Reproduces only on windows-latest.
+const HERE = fileURLToPath(new URL('.', import.meta.url));
 const SERVICE = readFileSync(join(HERE, 'design-session.ts'), 'utf8');
 const DOCK = readFileSync(join(HERE, '../components/DesignChatDock.tsx'), 'utf8');
 

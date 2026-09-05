@@ -2,9 +2,10 @@ import { describe, it, expect } from 'bun:test';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { buildFixtureFacts, buildFixtureGroundingContext } from './fixture-facts';
 
-const FIXTURES = new URL('./fixtures/', import.meta.url).pathname;
+const FIXTURES = fileURLToPath(new URL('./fixtures/', import.meta.url));
 
 describe('buildFixtureFacts', () => {
   // Regression: builtin-legacy and urp-newinput ship no ProjectSettings.asset,

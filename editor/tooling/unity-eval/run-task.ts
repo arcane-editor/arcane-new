@@ -6,6 +6,7 @@
 import { cp, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { Agent } from '../../src/features/ai-panel/services/vendor/agent';
 import { convertToLlm } from '../../src/features/ai-panel/services/vendor/messages';
 import { createReadTool } from '../../src/features/ai-panel/services/vendor/tools/read';
@@ -39,12 +40,14 @@ import { withEvalAnalyzerGate } from './eval-gates';
 import type { EvalTask, TaskResult } from './eval-types';
 import type { UsageTotals, EvalRequestState } from './eval-stream';
 
-const FIXTURES_DIR = new URL('./fixtures/', import.meta.url).pathname;
+const FIXTURES_DIR = fileURLToPath(new URL('./fixtures/', import.meta.url));
 const DEFAULT_MAX_TURNS = 12;
 
 // Committed replay recordings live here by default; `--record` may point
 // elsewhere via `--recordings-dir` (see `run-eval.ts`).
-export const DEFAULT_RECORDINGS_DIR = new URL('./fixtures/api-recordings/', import.meta.url).pathname;
+export const DEFAULT_RECORDINGS_DIR = fileURLToPath(
+  new URL('./fixtures/api-recordings/', import.meta.url),
+);
 
 /**
  * Grounding client wiring for a task run. Defaults to replay (the offline,
