@@ -80,6 +80,32 @@ function fingerprint(input: CrashInput): string {
   return `${input.kind}|${input.message}|${firstFrame}`;
 }
 
+/** What the crash UI shows and copies.
+ *
+ *  `headline` is never empty. A thrown string, or `throw new Error()`, arrives
+ *  with `message === ''`, and rendering that produced an empty box — which
+ *  reads as "we know nothing" at the exact moment the user needs something to
+ *  report. */
+export interface CrashSummary {
+  /** The one line that must always be visible on screen. */
+  headline: string;
+  /** Component stack, trimmed. Long, so the UI may collapse it. */
+  detail: string;
+  /** Everything, for the clipboard. */
+  copyText: string;
+}
+
+export function crashSummary(
+  error: Error | null,
+  componentStack: string | null,
+): CrashSummary {
+  const message = error?.message?.trim() ?? '';
+  const headline = message || 'Unknown error (no message)';
+  const detail = componentStack?.trim() ?? '';
+  const copyText = [headline, error?.stack ?? '', detail].filter(Boolean).join('\n\n');
+  return { headline, detail, copyText };
+}
+
 export function createCrashReporter(config: CrashReporterConfig = {}) {
   const fetchImpl = config.fetchImpl ?? fetch;
   const baseUrl = config.baseUrl ?? API_URL;

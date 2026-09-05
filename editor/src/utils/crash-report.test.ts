@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { createCrashReporter, scrubHomePaths, type CrashMeta } from './crash-report';
+import { createCrashReporter, crashSummary, scrubHomePaths, type CrashMeta } from './crash-report';
 
 const META: CrashMeta = {
   appVersion: '0.3.3',
@@ -129,5 +129,38 @@ describe('scrubHomePaths', () => {
 
   it('leaves a path with no home prefix alone', () => {
     expect(scrubHomePaths('at AgentPicker (index.js:1:2)')).toBe('at AgentPicker (index.js:1:2)');
+  });
+});
+
+describe('crashSummary', () => {
+  it('uses the error message as the headline', () => {
+    const s = crashSummary(new Error("Cannot read properties of undefined (reading 'acp')"), null);
+    expect(s.headline).toBe("Cannot read properties of undefined (reading 'acp')");
+  });
+
+  it('falls back to a readable headline when the error carries no message', () => {
+    // A thrown string, or `throw new Error()`, both reach here with ''. The
+    // fallback used to render an empty box, which reads as "no information
+    // available" when in fact the crash is right there.
+    expect(crashSummary(new Error(''), null).headline).toBe('Unknown error (no message)');
+    expect(crashSummary(null, null).headline).toBe('Unknown error (no message)');
+  });
+
+  it('returns the trimmed component stack as the detail', () => {
+    const s = crashSummary(new Error('boom'), '\n    at AgentPicker\n    at AiChatPanel\n');
+    expect(s.detail).toBe('at AgentPicker\n    at AiChatPanel');
+  });
+
+  it('has no detail when there is no component stack', () => {
+    expect(crashSummary(new Error('boom'), null).detail).toBe('');
+  });
+
+  it('puts the message, the stack and the component stack in the copy text', () => {
+    const err = new Error('boom');
+    err.stack = 'Error: boom\n  at Foo (a.js:1:1)';
+    const s = crashSummary(err, '\n    at AiChatPanel');
+    expect(s.copyText).toContain('boom');
+    expect(s.copyText).toContain('at Foo (a.js:1:1)');
+    expect(s.copyText).toContain('at AiChatPanel');
   });
 });
