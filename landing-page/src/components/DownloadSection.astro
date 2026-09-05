@@ -56,113 +56,102 @@ async function shippedVersion(url: string, platform: UpdatePlatform): Promise<st
 const macVersion = isDev ? "dev build" : `v${await shippedVersion(manifests.macArm, "darwin-aarch64")}`;
 const winVersion = isDev ? "dev build" : `v${await shippedVersion(manifests.windows, "windows-x86_64")}`;
 const unityExtLabel = isDev ? "dev build" : `v${unityExtVersion}`;
-const osCards = [
+/**
+ * Windows leads. It is the primary and better-tested target — the macOS build
+ * is ad-hoc signed and gets less coverage, which is why Beta appears on that
+ * card and nowhere else on the site. The previous order put the beta build
+ * first purely because "macOS" sorted first in the array.
+ *
+ * The Unity package sits in the same table rather than in a separate block
+ * below, because it is not optional: without it there is no bridge to the
+ * running Editor.
+ *
+ * Icons are gone. They were six hand-inlined SVGs in which macOS and Linux
+ * shared the same terminal chevron and Windows used a monitor — decoration
+ * that also happened to be wrong.
+ */
+const platforms = [
   {
-    id: "macos-arm",
-    name: "macOS",
-    version: macVersion,
-    ext: ".dmg",
-    subtitle: "Apple Silicon (M1+)",
-    href: urls.macArm,
-    icon: `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/></svg>`,
-  },
-  {
-    id: "windows",
     name: "Windows",
     version: winVersion,
     ext: ".exe",
     subtitle: "Windows 10+ (64-bit)",
     href: urls.windows,
-    icon: `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></svg>`,
   },
   {
-    id: "linux",
-    name: "Linux",
-    version: "Coming Soon",
-    ext: ".AppImage",
-    subtitle: "Ubuntu 20.04+, Fedora 36+",
-    href: null,
-    icon: `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/></svg>`,
+    name: "macOS",
+    // The only Beta marker left on the site.
+    badge: "Beta",
+    version: macVersion,
+    ext: ".dmg",
+    subtitle: "Apple Silicon (M1+)",
+    href: urls.macArm,
+  },
+  {
+    name: "Unity package",
+    version: unityExtLabel,
+    ext: ".tgz",
+    subtitle: "Unity 2021.3+ (UPM)",
+    href: unityExtHref,
+    note: true,
   },
 ];
 ---
 
-<section id="download" class="relative py-16 sm:py-28">
-  <div class="absolute inset-0 gradient-mesh"></div>
-  <div class="container relative z-10 mx-auto px-4">
-    <div class="mb-12 sm:mb-16 text-center scroll-reveal">
-      <h2 class="mb-4 font-display text-3xl font-bold tracking-tight sm:text-4xl md:text-5xl">
-        Download <span class="text-gradient-orange">UnityIDE</span>
-      </h2>
-      <p class="mx-auto max-w-xl text-muted-foreground text-base sm:text-lg">
-        Get started in minutes. Choose your platform below.
-      </p>
-    </div>
+<section id="download" class="border-b border-border bg-sunk py-16 sm:py-20">
+  <div class="container mx-auto px-6">
+    <h2 class="font-display text-step2 font-semibold text-foreground">
+      Download
+    </h2>
 
-    {/* OS Cards */}
-    <div class="mx-auto max-w-4xl grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-      {osCards.map((os, i) => (
-        <div
-          class="scroll-reveal group relative flex flex-col rounded-2xl glass p-6 text-center transition-all duration-300 hover:glow-orange hover:border-primary/40 hover:-translate-y-1"
-          style={`transition-delay: ${i * 100}ms;`}
-        >
-          <div class="absolute inset-0 rounded-2xl bg-gradient-to-b from-primary/5 to-transparent opacity-0 transition-opacity group-hover:opacity-100"></div>
-          {/* flex-1 + flex-col so the CTA below can mt-auto to the card floor.
-              The grid stretches all three cards to the tallest, and the
-              subtitles differ in length ("Apple Silicon (M1+)" vs "Ubuntu
-              20.04+, Fedora 36+"), so without this the buttons sit at
-              different heights the moment one wraps. */}
-          <div class="relative z-10 flex flex-1 flex-col">
-            <div class="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-primary transition-all group-hover:bg-primary/20 group-hover:scale-110">
-              <Fragment set:html={os.icon} />
-            </div>
-            <h3 class="mb-1 font-display text-xl font-semibold">{os.name}</h3>
-            <p class="mb-1 font-mono text-xs text-primary/70">{os.version}</p>
-            <p class="mb-5 text-xs text-muted-foreground">{os.subtitle}</p>
-            {os.href ? (
-              <a href={os.href} class="mt-auto inline-flex items-center justify-center gap-2 w-full whitespace-nowrap rounded-md font-semibold text-base bg-primary text-primary-foreground hover:bg-primary/90 glow-orange-sm h-9 px-3 transition-colors text-sm">
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-1 h-4 w-4"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
-                Download {os.ext}
-              </a>
-            ) : (
-              <span class="mt-auto inline-flex items-center justify-center gap-2 w-full whitespace-nowrap rounded-md font-semibold text-base bg-muted text-muted-foreground h-9 px-3 text-sm cursor-not-allowed">
-                Coming Soon
+    {/* No lede here. A draft of this section carried "We wanted a better IDE for
+        Unity. So we built one." as its opening line, which only worked while the
+        hero had a different headline. The hero owns that sentence again, and
+        saying it twice on one page spends it. */}
+    <div class="mt-10 max-w-3xl overflow-hidden rounded-plane border border-border bg-panel">
+      {platforms.map((p) => (
+        <div class="flex flex-wrap items-center gap-x-4 gap-y-3 border-b border-border px-5 py-4 last:border-b-0 sm:flex-nowrap">
+          <div class="flex min-w-0 shrink-0 items-center gap-2.5 sm:w-[176px]">
+            <span class="truncate text-base font-semibold text-foreground">{p.name}</span>
+            {p.badge && (
+              <span class="shrink-0 rounded-chip border border-primary/30 bg-primary/10 px-1.5 py-0.5 font-mono text-[10px] text-primary">
+                {p.badge}
               </span>
             )}
           </div>
+
+          <span class="shrink-0 font-mono text-mini text-muted-foreground sm:w-[92px]">
+            {p.version}
+          </span>
+
+          <span class="min-w-0 flex-1 truncate text-mini text-muted-foreground">
+            {p.subtitle}
+          </span>
+
+          <a
+            href={p.href}
+            class="inline-flex h-9 shrink-0 items-center justify-center rounded-panel border border-border bg-raised px-4 font-mono text-mini text-foreground transition-colors hover:border-primary/40 hover:bg-selected hover:text-primary"
+          >
+            {p.ext}
+          </a>
         </div>
       ))}
     </div>
 
-    {/* Unity Extension */}
-    <div class="mx-auto mt-16 max-w-4xl scroll-reveal" style="transition-delay: 400ms;">
-      <h3 class="mb-6 text-center font-display text-2xl font-semibold tracking-tight">
-        Unity <span class="text-gradient-orange">Plugin</span>
-      </h3>
-      <div class="mx-auto max-w-sm group relative rounded-2xl glass p-6 text-center transition-all duration-300 hover:glow-orange hover:border-primary/40 hover:-translate-y-1">
-        <div class="absolute inset-0 rounded-2xl bg-gradient-to-b from-primary/5 to-transparent opacity-0 transition-opacity group-hover:opacity-100"></div>
-        <div class="relative z-10">
-          <div class="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-primary transition-all group-hover:bg-primary/20 group-hover:scale-110">
-            <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" x2="12" y1="22.08" y2="12"/></svg>
-          </div>
-          <h3 class="mb-1 font-display text-xl font-semibold">Unity Extension</h3>
-          <p class="mb-1 font-mono text-xs text-primary/70">{unityExtLabel}</p>
-          <p class="mb-5 text-xs text-muted-foreground">Unity 2021.3+ (UPM Package)</p>
-          <a href={unityExtHref} class="inline-flex items-center justify-center gap-2 w-full whitespace-nowrap rounded-md font-semibold text-base bg-primary text-primary-foreground hover:bg-primary/90 glow-orange-sm h-9 px-3 transition-colors text-sm">
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-1 h-4 w-4"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
-            Download .tgz
-          </a>
-          <p class="mt-3 text-xs text-muted-foreground">
-            Import via Unity Package Manager &middot;
-            <a href="/docs/getting-started/unity-extension/" class="text-primary/70 hover:text-primary transition-colors">Setup guide &rarr;</a>
-          </p>
-        </div>
-      </div>
-    </div>
+    <p class="mt-5 max-w-3xl text-mini text-muted-foreground">
+      Install the Unity package through Package Manager &rarr; Add package from tarball.
+      <a
+        href="/docs/getting-started/unity-extension/"
+        class="text-primary underline decoration-primary/30 underline-offset-4 transition-colors hover:decoration-primary"
+        >Setup guide</a
+      >.
+    </p>
 
-    {/* Was an empty div wrapping a commented-out "View all releases on GitHub"
-        link. Astro emits html comments, so that dead markup — including the
-        repo URL — was being served to every visitor. Removed rather than
-        converted: the div rendered nothing either way. */}
+    {/* Linux was a full card whose only content was the words "Coming Soon".
+        A line states the same fact and stops competing with the builds that
+        actually exist. */}
+    <p class="mt-2 max-w-3xl text-mini text-muted-foreground">
+      Linux is not built yet.
+    </p>
   </div>
 </section>

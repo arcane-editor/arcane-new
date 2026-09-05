@@ -16,9 +16,12 @@ interface Props {
 }
 
 const SITE_NAME = 'UnityIDE';
-const DEFAULT_TITLE = 'UnityIDE — The AI-Powered IDE for Unity Developers';
+const DEFAULT_TITLE = 'UnityIDE — The First IDE Built Only for Unity Developers';
+// "GUID-safe refactors" was removed: there is no project-wide reference-rewriting
+// rename engine in the app. `STANDOUT-FEATURES.md` lists it under a recommended
+// build order, not as shipped. What replaces it is claimable line by line.
 const DEFAULT_DESCRIPTION =
-  'UnityIDE is the IDE built for Unity. AI that reads your scenes, prefabs and C#, live Editor integration, and GUID-safe refactors. Free during beta on macOS and Windows.';
+  'The first IDE built only for Unity developers. Prefabs, ScriptableObjects, UI Toolkit and input actions open as real editors, with an AI checked against your running Editor.';
 
 const {
   analytics = true,
@@ -63,9 +66,12 @@ const structuredData = {
         it here lets the preconnects open both connections during HTML parse. */}
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    {/* Two families, not three: Instrument Sans and Geist Mono are the desktop
+        app's own UI and editor faces, so the site now reads in the product's
+        voice instead of Inter + Space Grotesk + JetBrains Mono. */}
     <link
       rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700;800&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap"
     />
 
     <title>{title}</title>
@@ -109,20 +115,9 @@ const structuredData = {
   <body class="min-h-screen bg-background text-foreground antialiased">
     <slot />
 
-    {/* Cursor glow (vanilla JS, no React needed) */}
-    <div id="cursor-glow" class="cursor-glow hidden lg:block"></div>
-    <script>
-      const glow = document.getElementById('cursor-glow');
-      if (glow) {
-        document.addEventListener('mousemove', (e) => {
-          glow.style.left = e.clientX + 'px';
-          glow.style.top = e.clientY + 'px';
-        });
-      }
-    </script>
-
     {/* Scroll reveal observer */}
     <script>
+      const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
       const observer = new IntersectionObserver(
         (entries) => {
           entries.forEach((entry) => {
@@ -133,9 +128,11 @@ const structuredData = {
         },
         { threshold: 0.1 }
       );
-      document.querySelectorAll(
-        '.scroll-reveal, .scroll-reveal-scale, .scroll-reveal-line-x, .scroll-reveal-line-y'
-      ).forEach((el) => observer.observe(el));
+      if (!reduced) {
+        document.querySelectorAll(
+          '.scroll-reveal, .scroll-reveal-scale, .scroll-reveal-line-x, .scroll-reveal-line-y'
+        ).forEach((el) => observer.observe(el));
+      }
     </script>
   </body>
 </html>

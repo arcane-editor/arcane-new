@@ -1,0 +1,142 @@
+---
+import IdeShowcase from './IdeShowcase.tsx';
+
+// Comment style in this file: JSX-expression comments, not HTML comments —
+// Astro passes HTML comments straight through to the page, where visitors read
+// them in view-source.
+//
+// Every figure below is checked against the code, because a credibility strip
+// that inflates its own numbers is worse than no strip: 25 is the count of
+// Unity-specific agent tools in `unity-tools/index.ts`, 31 is the analyzer rule
+// count in `unity-analyzers/rules/`, and 2021.3 is what the Unity package
+// declares it supports.
+const proof = [
+  ['25', 'Unity-specific AI tools'],
+  ['31', 'Unity analyzers'],
+  ['6', 'formats edited natively'],
+  ['2021.3+', 'through Unity 6'],
+];
+---
+
+{/* Padding is the hero's real subject.
+
+    Measured at a 1440x900 viewport, the previous values put the top of the
+    product shot at y=543 and the shot is 482px tall — so the thing the whole
+    page is built around was clipped at 74%, its status bar never seen, and
+    roughly 60% of the first screen went to five stacked lines of text. The
+    window did not need to be redesigned. It needed to be ON SCREEN.
+
+    The saving comes from the gaps BETWEEN things, not from the space above the
+    headline. A first pass cut this to pt-12 and put the h1's cap line at y=64 —
+    exactly where the 64px fixed navbar ends, so the headline had no air at all
+    and the page opened feeling cramped. 96px is the floor here: it clears the
+    navbar by a comfortable 32px at every breakpoint. */}
+<section class="relative overflow-hidden border-b border-border bg-void pb-16 pt-24 sm:pb-20">
+  {/* Luminance only, no hue: the ground falls away from the product plane,
+      which is the app's own recessed-chrome rule rather than a gradient wash.
+      Re-aimed at the window rather than at the headline, and reaching further
+      down the section, so the light is on the product instead of on the copy. */}
+  <div
+    class="pointer-events-none absolute inset-x-0 top-0 h-[1000px]"
+    style="background:radial-gradient(ellipse 68% 52% at 50% 56%, hsl(250 19% 13% / 0.95) 0%, transparent 74%)"
+  >
+  </div>
+
+  <div class="container relative mx-auto px-6">
+    {/* Centered, deliberately. The copy's job here is to frame a product shot,
+        and symmetry is what gives the window the stage. Earlier revisions ran
+        this block left-aligned against a narrow two-pane panel, which read
+        editorial when it needed to read like a launch. */}
+    <div class="mx-auto max-w-[54rem] text-center">
+      {/* By Unity devs, for Unity devs — and the copy has to SOUND like that
+          rather than announce it. "We wanted" and "cost us a day" are the whole
+          device: first person, a specific grievance, no marketing verb. A line
+          that claimed the credential outright ("built by Unity developers") is
+          the one thing that would break it, because anyone can write that
+          sentence and only someone who shipped in this engine writes these.
+
+          "The IDE Unity never built" was an earlier draft and read as a swipe at
+          the engine. This is the same claim from the inside. */}
+      <h1 class="font-display text-step3 font-semibold leading-[1.04] text-foreground sm:text-step4">
+        We wanted a better IDE for Unity. So we built one.
+      </h1>
+
+      {/* Still a list, because completeness is the pitch — but the sentence
+          before it says WHY the list is that long, which is the part that only
+          someone who has shipped in this engine would write. */}
+      <p class="mx-auto mt-5 max-w-[72ch] text-step1 leading-relaxed text-muted-foreground">
+        Every panel here exists because something in Unity cost us a day. Hierarchy,
+        ScriptableObjects, UI canvas, input maps, console, tests and a debugger —
+        with an AI wired into the running Editor.
+      </p>
+
+      <div class="mt-8 flex flex-wrap items-center justify-center gap-x-8 gap-y-4">
+        <a
+          href="#download"
+          class="inline-flex h-12 items-center justify-center rounded-panel bg-primary px-8 text-base font-semibold text-primary-foreground transition-colors duration-150 hover:bg-primary-lit"
+        >
+          Download for free
+        </a>
+        <a
+          href="/docs/"
+          class="text-base font-medium text-foreground/80 underline decoration-border decoration-1 underline-offset-[7px] transition-colors duration-150 hover:text-foreground hover:decoration-primary"
+        >
+          Read the docs
+        </a>
+      </div>
+
+      {/* This line is doing competitive work, so it has to be exact.
+
+          "Free plan." said nothing a reader could act on — every tool has a free
+          plan, and the one this product is measured against has one too. What
+          that one does NOT have is commercial use: Rider's free tier is
+          non-commercial only, which `STANDOUT-FEATURES.md` names as the gap that
+          excludes the entire studio audience.
+
+          The line answers the FEAR rather than stating the terms. What a Unity
+          dev evaluating an editor actually worries about is not today's price —
+          it is the invoice that arrives the day the project starts earning.
+          "Not now, not when you ship" names that moment and closes it, which no
+          restatement of the licence ("commercial projects included", an earlier
+          draft) manages, because a reader who has been caught once reads terms
+          looking for the clause that will catch them again.
+
+          Two sentences, deliberately. The second is the one doing the work, and
+          a comma would have let the eye run past it.
+
+          Platforms are deliberately not here. They were the second half of this
+          line and they are trivia at this height — the download table names all
+          three targets with their versions, and the meta description carries
+          them for search. Cutting them lets the sentence be one claim.
+
+          Verified before writing: the free tier carries no use restriction
+          anywhere in the repo, and the Unity package ships MIT. */}
+      {/* Promoted from 13px muted to 16px foreground. The mark is drawn by
+          `.claim-mark` in global.css; the size and colour are what make it hold
+          attention once the motion has finished, since an animation nobody is
+          looking at when it fires has to leave something behind. */}
+      <p class="mt-5 text-base font-medium text-foreground">
+        <span class="claim-mark">No licence to buy. Not now, not when you ship.</span>
+      </p>
+    </div>
+  </div>
+
+  {/* The window is the hero. Everything above is its caption. */}
+  <div class="relative mx-auto mt-9 w-full max-w-[1560px] px-6 sm:mt-11">
+    <IdeShowcase client:load />
+
+    {/* The proof strip sits under the window rather than above it, so it reads
+        as a caption on something you have just seen rather than as a claim you
+        are asked to take on faith. */}
+    <dl
+      class="mx-auto mt-10 grid max-w-4xl grid-cols-2 gap-x-6 gap-y-6 border-t border-border pt-8 sm:grid-cols-4"
+    >
+      {proof.map(([figure, label]) => (
+        <div class="text-center">
+          <dt class="font-mono text-step1 font-medium tabular-nums text-primary">{figure}</dt>
+          <dd class="mt-1 text-micro leading-snug text-muted-foreground">{label}</dd>
+        </div>
+      ))}
+    </dl>
+  </div>
+</section>

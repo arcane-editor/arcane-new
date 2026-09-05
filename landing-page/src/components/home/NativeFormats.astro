@@ -1,0 +1,31 @@
+---
+import ResolvePanel from './ResolvePanel.tsx';
+
+/**
+ * The resolve, demoted from hero to section — which is what it always was.
+ *
+ * As a hero it asked a stranger to decode an argument before the page had said
+ * what the product was. As the section directly under a full product shot it
+ * works exactly as intended: you have just seen the IDE, and this is the proof
+ * of the one claim that shot cannot make on its own — that these panels are
+ * reading your real serialized assets, not mock data.
+ */
+---
+
+<section id="formats" class="border-b border-border bg-sunk py-20 sm:py-28">
+  <div class="container mx-auto px-6">
+    <header class="max-w-[52rem]">
+      <h2 class="font-display text-step2 font-semibold text-foreground sm:text-step3">
+        Every Unity file opens as itself.
+      </h2>
+      <p class="mt-5 max-w-[60ch] text-step1 leading-relaxed text-muted-foreground">
+        The same bytes, side by side. Left is what every other editor hands you.
+        Right is what this one does with them.
+      </p>
+    </header>
+
+    <div class="mt-12">
+      <ResolvePanel client:visible />
+    </div>
+  </div>
+</section>

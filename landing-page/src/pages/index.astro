@@ -1,30 +1,51 @@
 ---
 import LandingLayout from '../layouts/LandingLayout.astro';
 import Navbar from '../components/Navbar.tsx';
-import HeroSection from '../components/HeroSection.astro';
-import StatsBar from '../components/StatsBar.tsx';
-import FeaturesSection from '../components/FeaturesSection.astro';
-import HowItWorksSection from '../components/HowItWorksSection.astro';
+import Hero from '../components/home/Hero.astro';
+import NativeFormats from '../components/home/NativeFormats.astro';
+import SilentFailures from '../components/home/SilentFailures.astro';
+import VerifiedReceipt from '../components/home/VerifiedReceipt.astro';
+import SpecSheet from '../components/home/SpecSheet.astro';
 import DownloadSection from '../components/DownloadSection.astro';
 import PricingTable from '../components/billing/PricingTable.tsx';
-import FeedbackSection from '../components/FeedbackSection.astro';
-import DocsSection from '../components/DocsSection.astro';
 import Footer from '../components/Footer.astro';
+
+/**
+ * Six sections, in the order the argument has to be made:
+ *
+ *   Hero            — the whole IDE, at once. Scope is the argument.
+ *   NativeFormats   — proof those panels read real serialized assets.
+ *   SilentFailures  — the three string-joined subsystems, failing.
+ *   VerifiedReceipt — and here is why you can let an agent near any of it.
+ *   SpecSheet       — everything else, at fourteen words a row.
+ *   Download / Pricing.
+ *
+ * Four sections were removed rather than restyled. StatsBar counted things
+ * nobody is impressed by ("2 Platforms Supported"). HowItWorksSection was
+ * generic, and its "install in under a minute on any platform" contradicted the
+ * Linux "Coming Soon" card two sections below it. FeedbackSection put a full
+ * five-field form in the middle of a sales page and now lives at /feedback.
+ * DocsSection spent 136 words describing doc pages that have since been
+ * retitled, and the footer already links the docs.
+ *
+ * That is ~350 words and three sections gone before a single new one was added.
+ */
 ---
 
 <LandingLayout>
   <Navbar client:load />
-  <HeroSection />
-  <StatsBar client:visible />
-  <FeaturesSection />
-  <HowItWorksSection />
+  <Hero />
+  <NativeFormats />
+  <SilentFailures />
+  <VerifiedReceipt />
+  <SpecSheet />
   <DownloadSection />
   {/* Same component as /pricing, in `section` form. Sharing it keeps prices
       sourced from the server's config/tiers.ts instead of a hardcoded copy
       that would silently drift. `client:visible` defers the
       /v1/billing/plans fetch until the band is actually scrolled to. */}
-  <PricingTable client:visible variant="section" />
-  <FeedbackSection />
-  <DocsSection />
+  <div class="border-b border-border bg-sunk">
+    <PricingTable client:visible variant="section" />
+  </div>
   <Footer />
 </LandingLayout>

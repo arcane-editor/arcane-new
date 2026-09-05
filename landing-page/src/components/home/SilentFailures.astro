@@ -1,0 +1,188 @@
+---
+/**
+ * The three string-joined subsystems, shown failing.
+ *
+ * This band exists because the site never made the case for its own hardest-to-
+ * copy work. `unity-tools/index.ts` in the app states the thesis better than any
+ * marketing line could: ScriptableObject fields, `Q<T>("name")` and input action
+ * names each couple an asset to code THROUGH A STRING, each fails SILENTLY when
+ * the string is wrong, and NONE of them produces a compiler error. An agent
+ * cannot discover any of the three by writing code and reading the result.
+ *
+ * So the panels show the failure, not the feature. A feature list invites a
+ * reader to compare checkboxes; a bug they have personally shipped does not.
+ *
+ * Every claim here is traceable: the drift repair is `unity_fix_so_drift` and
+ * the Drift tab, where a rename is one atomic insert-plus-remove so the tuned
+ * value MOVES rather than reverting to default. The Q<T>() case is UNITY0501 /
+ * UNITY0504. The binding conflict is UNITY0403, and the Input Hub panel exists
+ * precisely because Unity reports nothing for it.
+ *
+ * TYPE: everything here is on the shared scale — `micro` (11px) for tabular
+ * data, `mini` (13px) for anything that is a sentence. The revision before this
+ * one set the whole band in arbitrary 8px, 9px, 10px and 10.5px, which made the
+ * strongest argument on the page its least readable content and put two sizes
+ * below any reasonable floor. Nothing in a panel is smaller than 11px now.
+ *
+ * Static Astro, not a React island: nothing here is interactive, and the home
+ * page already ships one island for the hero.
+ */
+
+// No `.astro` component here so the three panels can vary internally; the shape
+// they share is the header row, so only that is factored out.
+const columns = [
+  { key: '.asset', title: 'ScriptableObjects', status: 'Drift · 3', tone: 'warn' },
+  { key: '.uxml', title: 'UI Toolkit', status: 'UNITY0501', tone: 'fail' },
+  { key: '.inputactions', title: 'Input System', status: 'Conflict · 1', tone: 'warn' },
+];
+
+const drift = [
+  ['Sword.asset', '45'],
+  ['Bow.asset', '30'],
+  ['Staff.asset', '60'],
+];
+
+const bindings = [
+  { map: 'Player', action: 'Jump', binding: '<Keyboard>/space', loses: true },
+  { map: 'UI', action: 'Submit', binding: '<Keyboard>/space', loses: false },
+];
+
+const consequences = [
+  'Rename the field anywhere else and all three reset to zero.',
+  'Compiles clean. Returns null at runtime.',
+  'Unity reports nothing for this.',
+];
+---
+
+{/* `void`, not `sunk`. The band above this one is also `sunk`, so the two sat
+    adjacent on the same surface with a hairline between them — which reads as a
+    missed separator rather than as a rhythm. The whole page's surface sequence
+    now alternates, with one deliberate pairing at the download/pricing block. */}
+<section id="silent" class="border-b border-border bg-void py-20 sm:py-28">
+  <div class="container mx-auto px-6">
+    <header class="max-w-[52rem]">
+      <h2 class="font-display text-step2 font-semibold text-foreground sm:text-step3">
+        Every one of these has cost us a day.
+      </h2>
+      <p class="mt-5 max-w-[60ch] text-step1 leading-relaxed text-muted-foreground">
+        Each one joins an asset to code through a string. Each one fails silently.
+        None of them produces a compiler error.
+      </p>
+    </header>
+
+    <div class="mt-12 grid gap-5 lg:grid-cols-3">
+      {columns.map((col, i) => (
+        <article class="flex flex-col overflow-hidden rounded-plane border border-border bg-panel">
+          {/* Header row — the file key carries the information, so it leads. */}
+          <div class="flex items-center gap-3 border-b border-border bg-void px-4 py-2.5">
+            <span class="font-mono text-micro text-primary">{col.key}</span>
+            <span class="text-micro text-muted-foreground">{col.title}</span>
+            <span
+              class:list={[
+                'ml-auto shrink-0 rounded-chip px-1.5 py-0.5 font-mono text-micro',
+                col.tone === 'fail' ? 'bg-fail/10 text-fail-text' : 'bg-warn/10 text-warn',
+              ]}
+            >
+              {col.status}
+            </span>
+          </div>
+
+          <div class="flex flex-1 flex-col p-4">
+            {i === 0 && (
+              <div class="flex-1">
+                <div class="flex flex-wrap items-baseline gap-x-2 gap-y-1 font-mono text-micro">
+                  <span class="text-muted-foreground line-through decoration-fail/70">damage</span>
+                  <span class="text-muted-foreground">renamed to</span>
+                  <span class="text-primary">baseDamage</span>
+                </div>
+
+                <div class="mt-3.5 space-y-px">
+                  {drift.map(([asset, value]) => (
+                    <div class="flex items-center gap-2.5 rounded-chip bg-raised/60 px-2.5 py-2 font-mono text-micro">
+                      <span class="w-[84px] shrink-0 truncate text-muted-foreground">{asset}</span>
+                      <span class="text-muted-foreground">{value}</span>
+                      <span class="text-muted-foreground" aria-hidden="true">&rarr;</span>
+                      <span class="text-pass">{value}</span>
+                      <span class="ml-auto text-muted-foreground">kept</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {i === 1 && (
+              <div class="flex flex-1 gap-4">
+                {/* The canvas the preview actually renders, at a size where its
+                    own labels are legible — it was 104px wide with 8px type. */}
+                <div class="w-[122px] shrink-0 self-start rounded-chip border border-border bg-void px-2.5 py-3 text-center">
+                  <p class="mb-2.5 font-mono text-micro tracking-[0.14em] text-primary">NEON DRIFT</p>
+                  {['Play', 'Garage', 'Quit'].map((b) => (
+                    <div class="mb-1.5 rounded-[2px] border border-border px-1.5 py-1 text-micro text-muted-foreground last:mb-0">
+                      {b}
+                    </div>
+                  ))}
+                </div>
+
+                <div class="min-w-0 flex-1">
+                  <div class="truncate font-mono text-micro leading-relaxed">
+                    <span class="text-foreground/80">root.</span>
+                    <span class="text-syn-func">Q</span>
+                    <span class="text-foreground/80">&lt;</span>
+                    <span class="text-syn-type">Button</span>
+                    <span class="text-foreground/80">&gt;(</span>
+                    <span class="text-fail underline decoration-fail decoration-wavy underline-offset-2">"play-btn"</span>
+                    <span class="text-foreground/80">)</span>
+                  </div>
+                  <p class="mt-3 text-micro leading-snug text-fail-text">
+                    No element named <span class="font-mono text-fail">play-btn</span>.
+                  </p>
+                  <p class="mt-1.5 text-micro leading-snug text-muted-foreground">
+                    The element in this document is named
+                    <span class="font-mono text-pass">play</span>.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {i === 2 && (
+              <div class="flex-1">
+                <div class="space-y-px">
+                  {bindings.map((b) => (
+                    <div
+                      class:list={[
+                        'flex items-center gap-2.5 rounded-chip px-2.5 py-2 font-mono text-micro',
+                        b.loses ? 'bg-fail/10' : 'bg-raised/60',
+                      ]}
+                    >
+                      <span class="w-[46px] shrink-0 text-muted-foreground">{b.map}</span>
+                      <span class:list={['w-[52px] shrink-0', b.loses ? 'text-fail-text' : 'text-foreground/85']}>
+                        {b.action}
+                      </span>
+                      <span class="truncate text-muted-foreground">{b.binding}</span>
+                    </div>
+                  ))}
+                </div>
+                <p class="mt-3.5 text-micro leading-snug text-muted-foreground">
+                  <span class="font-mono text-fail-text">Jump</span> loses. It never fires
+                  while the UI map is enabled.
+                </p>
+              </div>
+            )}
+
+            {/* The line that makes each panel land: what happens without this.
+                Full `muted-foreground` — it is the payload of the panel, not a
+                footnote to it. */}
+            <p class="mt-5 border-t border-border/60 pt-3.5 text-mini leading-snug text-muted-foreground">
+              {consequences[i]}
+            </p>
+          </div>
+        </article>
+      ))}
+    </div>
+
+    <p class="mt-10 max-w-[62ch] text-base leading-relaxed text-muted-foreground">
+      Nothing can catch these without holding your assets and your code index at the
+      same time. So that is what we built.
+    </p>
+  </div>
+</section>

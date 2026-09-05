@@ -1,64 +1,64 @@
 ---
-const footerLinks = {
-  Product: [
-    { label: "Features", href: "/features" },
-    { label: "Download", href: "/#download" },
-    { label: "Changelog (Coming Soon)", href: "#" },
-    { label: "Roadmap (Coming Soon)", href: "#" },
-  ],
-  Resources: [
-    { label: "Documentation", href: "/docs/" },
-    { label: "API Reference", href: "/docs/api-reference/extensions/" },
-    { label: "Give Feedback", href: "/#feedback" },
-    { label: "Report a Bug", href: "/#feedback" },
-  ],
-  Company: [
-    { label: "About (Coming Soon)", href: "#" },
-    { label: "Careers (Coming Soon)", href: "#" },
-    { label: "Privacy", href: "#" },
-    { label: "Terms", href: "#" },
-  ],
-};
+/**
+ * Seven of the twelve links here used to point at `href="#"` — Changelog,
+ * Roadmap, About and Careers all labelled "(Coming Soon)", plus Privacy, Terms
+ * and two social icons that went nowhere. A link that does nothing is worse
+ * than an absent one: it costs a click to discover it is a dead end.
+ *
+ * They are removed rather than relabelled. Privacy and Terms are the two that
+ * should come back, and they need real pages behind them — this site takes
+ * live payments.
+ */
+const columns = [
+  {
+    title: 'Product',
+    links: [
+      { label: 'Features', href: '/features' },
+      { label: 'Download', href: '/#download' },
+      { label: 'Pricing', href: '/pricing' },
+    ],
+  },
+  {
+    title: 'Documentation',
+    links: [
+      { label: 'Getting started', href: '/docs/getting-started/installation/' },
+      { label: 'Unity package setup', href: '/docs/getting-started/unity-extension/' },
+      { label: 'All docs', href: '/docs/' },
+    ],
+  },
+  {
+    title: 'Contact',
+    links: [{ label: 'Send feedback', href: '/feedback' }],
+  },
+];
 
 const year = new Date().getFullYear();
 ---
 
-<footer class="border-t border-border/30 bg-secondary/20">
-  <div class="container mx-auto px-4 py-16">
-    <div class="grid gap-8 sm:gap-12 md:grid-cols-2 lg:grid-cols-5">
-      {/* Brand */}
-      <div class="lg:col-span-2">
-        <div class="flex items-center gap-3 mb-4">
-          <img src="/icon.png" alt="UnityIDE" class="h-9 w-9 rounded-lg" />
-          <span class="font-display text-lg font-bold text-foreground">
-            UnityIDE<span class="text-primary">IDE</span>
+<footer class="bg-void">
+  <div class="container mx-auto px-6 py-16">
+    <div class="grid gap-10 sm:grid-cols-2 lg:grid-cols-[2fr_1fr_1fr_1fr]">
+      <div>
+        <div class="flex items-center gap-2.5">
+          <img src="/icon.png" alt="" class="h-8 w-8" />
+          <span class="font-display text-base font-semibold text-foreground">
+            Unity<span class="text-primary">IDE</span>
           </span>
         </div>
-        <p class="mb-6 max-w-sm text-sm leading-relaxed text-muted-foreground">
-          The AI-powered code editor built exclusively for Unity game developers. Write better code, faster.
+        <p class="mt-4 max-w-[34ch] text-mini leading-relaxed text-muted-foreground">
+          An IDE for Unity, made by people who work in it every day.
         </p>
-        <div class="flex items-center gap-3">
-          <a href="#" class="rounded-lg p-2 text-muted-foreground transition-colors hover:text-primary hover:bg-primary/10">
-            {/* Twitter icon */}
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4"><path d="M22 4s-.7 2.1-2 3.4c1.6 10-9.4 17.3-18 11.6 2.2.1 4.4-.6 6-2C3 15.5.5 9.6 3 5c2.2 2.6 5.6 4.1 9 4-.9-4.2 4-6.6 7-3.8 1.1 0 3-1.2 3-1.2z"/></svg>
-          </a>
-          <a href="#" class="rounded-lg p-2 text-muted-foreground transition-colors hover:text-primary hover:bg-primary/10">
-            {/* Discord/MessageSquare icon */}
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-          </a>
-        </div>
       </div>
 
-      {/* Link columns */}
-      {Object.entries(footerLinks).map(([title, links]) => (
+      {columns.map((column) => (
         <div>
-          <h4 class="mb-4 font-display text-sm font-semibold text-foreground">{title}</h4>
-          <ul class="space-y-2.5">
-            {links.map((link) => (
+          <h2 class="text-mini font-semibold text-foreground">{column.title}</h2>
+          <ul class="mt-4 space-y-2.5">
+            {column.links.map((link) => (
               <li>
                 <a
                   href={link.href}
-                  class="text-sm text-muted-foreground transition-colors hover:text-primary"
+                  class="text-mini text-muted-foreground transition-colors hover:text-primary"
                 >
                   {link.label}
                 </a>
@@ -69,14 +69,13 @@ const year = new Date().getFullYear();
       ))}
     </div>
 
-    <div class="mt-12 border-t border-border/30 pt-6 text-center">
-      <p class="text-xs text-muted-foreground/60">
-        &copy; {year} UnityIDE. AI-powered Unity development.
+    <div class="mt-14 border-t border-border pt-6">
+      <p class="text-micro text-muted-foreground">
+        &copy; {year} UnityIDE
       </p>
-      {/* Unity is a registered trademark of Unity Technologies. A plain
-          non-affiliation line is the standard way to use an engine's name
-          descriptively, and it costs nothing in search. */}
-      <p class="mt-2 text-xs text-muted-foreground/40">
+      {/* Unity is a trademark of Unity Technologies. A plain non-affiliation
+          line is the standard way to use an engine's name descriptively. */}
+      <p class="mt-2 max-w-[72ch] text-micro leading-relaxed text-muted-foreground">
         UnityIDE is an independent product and is not affiliated with, endorsed by,
         or sponsored by Unity Technologies. Unity is a trademark of Unity Technologies.
       </p>

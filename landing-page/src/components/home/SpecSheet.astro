@@ -1,0 +1,147 @@
+---
+/**
+ * The capability sheet.
+ *
+ * Keyed by file extension, because that is how a Unity project is actually
+ * organised — the key carries information rather than decorating the row.
+ *
+ * WHY THIS IS A PLATE AND NOT A LIST. The previous revision ran nine rows of
+ * `[150px key][title + body]` down a `max-w-4xl` column. Measured, that was
+ * 1284px tall — the tallest band on the page — spent on the section that
+ * explicitly holds everything the page did NOT consider important enough to
+ * argue. It also used 62% of the available width, left most of the 150px key
+ * column empty, and gave the eye nine identical rows with nothing to scan by.
+ *
+ * The extension is now the anchor, set at `step1` in mono. That is not a new
+ * idea: `tailwind.config.mjs` states it as the system's intent — "this
+ * product's personality is carried by setting real Unity identifiers in `mono`
+ * at display size, not by a second sans shipped for headlines." This is the one
+ * section on the page that is made of real Unity identifiers, and it was
+ * setting them at 13px.
+ *
+ * WHY TWO GROUPS. The nine rows were never one kind of thing. Six are file
+ * formats; three are the application around them. The previous revision encoded
+ * that difference by grAYING OUT the second kind — which meant "an agent with
+ * Unity in its hands", the product's headline differentiator, rendered as the
+ * dimmest row on the page. The colour rule it was following is right (gold
+ * means a file type this IDE resolves) but demotion was the wrong way to spend
+ * it. The two kinds are now separated structurally, and the app-level keys sit
+ * in `foreground`: distinct from the formats, not lesser than them.
+ *
+ * Claims are traceable, and three that once sat on this page are still absent
+ * because nothing implements them: Git LFS setup, Plastic SCM, and animator /
+ * blend-tree parsing. Two more are scoped carefully rather than dropped —
+ * "refused" is true of `.uxml` / `.uss` written through `unity_ui_write`, and
+ * the tool count is the 25 Unity-specific ones rather than the whole registry.
+ */
+
+/** What a Unity project is made of, and what this editor does with each. */
+const formats = [
+  {
+    keys: ['.cs'],
+    title: 'C# that knows it is Unity',
+    body: 'Unity analyzers, lifecycle markers in the gutter, and a debugger that attaches to the Editor.',
+  },
+  {
+    keys: ['.unity', '.prefab', '.mat'],
+    title: 'Scenes and prefabs as structure',
+    body: 'Open as a navigable tree. Diffs read as GameObjects and components, not as text.',
+  },
+  {
+    keys: ['.asset'],
+    title: 'ScriptableObjects as typed forms',
+    body: 'The real fields, edited in place. Bytes are spliced, never re-serialized.',
+  },
+  {
+    keys: ['.uxml', '.uss'],
+    title: 'UI Toolkit with a live canvas',
+    body: 'Markup renders beside its source. Invalid UXML is refused, not warned about.',
+  },
+  {
+    keys: ['.inputactions'],
+    title: 'Input actions, not JSON',
+    body: 'Action maps, bindings and control schemes as a table you can read.',
+  },
+  {
+    keys: ['.asmdef', '.shader', '.hlsl'],
+    title: 'The rest of the project',
+    body: 'Assembly definitions, ShaderLab and HLSL are first-class. Meta files stay paired.',
+  },
+];
+
+/** And the application wrapped around those six. Not a file type — which is
+ *  exactly why these are separated rather than tinted differently in place. */
+const capabilities = [
+  {
+    key: 'Unity',
+    title: 'A live link to the Editor',
+    body: 'Play, pause, console logs with click-to-source, and tests that report back.',
+  },
+  {
+    key: 'AI',
+    title: 'An agent with Unity in its hands',
+    body: 'Twenty-five Unity tools, reviewable diffs, checkpoints you can roll back.',
+  },
+  {
+    key: 'IDE',
+    title: 'The IDE around all of it',
+    body: 'Terminal, git with UnityYAMLMerge, multi-window, tab completion, six themes.',
+  },
+];
+---
+
+<section id="features" class="border-b border-border bg-void py-16 sm:py-20">
+  <div class="container mx-auto px-6">
+    <h2 class="max-w-[24ch] font-display text-step2 font-semibold text-foreground">
+      Everything else we needed it to do.
+    </h2>
+
+    {/* Three across, so the six formats read as a SET — the question this band
+        answers is "is my project covered", and a set answers it at a glance
+        where a column of nine rows makes you read to find out. No cell has a
+        border, a card, an icon or a shadow: the identifier is the whole
+        treatment, which is also what keeps this from becoming the rounded-card
+        kit the rest of the page avoids. */}
+    <dl class="mt-10 grid gap-x-10 gap-y-9 border-t border-border pt-9 sm:grid-cols-2 lg:grid-cols-3">
+      {formats.map((row) => (
+        <div class="min-w-0">
+          <dt class="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
+            {row.keys.map((key) => (
+              <span class="font-mono text-step1 leading-none text-primary">{key}</span>
+            ))}
+          </dt>
+          <dd class="mt-3.5">
+            <h3 class="text-base font-semibold text-foreground">{row.title}</h3>
+            <p class="mt-1.5 max-w-[46ch] text-mini leading-relaxed text-muted-foreground">
+              {row.body}
+            </p>
+          </dd>
+        </div>
+      ))}
+    </dl>
+
+    {/* The application, not the file types. Same shape so the section still
+        reads as one plate, a rule and a wider gap so the change of subject is
+        legible without a label announcing it. */}
+    <dl class="mt-12 grid gap-x-10 gap-y-9 border-t border-border pt-9 sm:grid-cols-2 lg:grid-cols-3">
+      {capabilities.map((row) => (
+        <div class="min-w-0">
+          <dt class="font-mono text-step1 leading-none text-foreground">{row.key}</dt>
+          <dd class="mt-3.5">
+            <h3 class="text-base font-semibold text-foreground">{row.title}</h3>
+            <p class="mt-1.5 max-w-[46ch] text-mini leading-relaxed text-muted-foreground">
+              {row.body}
+            </p>
+          </dd>
+        </div>
+      ))}
+    </dl>
+
+    <a
+      href="/features"
+      class="mt-12 inline-block text-mini font-medium text-primary underline decoration-primary/30 underline-offset-[6px] transition-colors hover:decoration-primary"
+    >
+      Every feature in detail
+    </a>
+  </div>
+</section>

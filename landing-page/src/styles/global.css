@@ -3,143 +3,325 @@
 @tailwind components;
 @tailwind utilities;
 
+/**
+ * Palette: "Midnight Cathedral & Candle Gold".
+ *
+ * These are not new colours. They are the desktop app's own theme tokens
+ * (`editor/src/features/theme/definitions/unityide-dark.ts`) converted to HSL,
+ * so the site a visitor reads and the IDE they download are finally the same
+ * product. The site used to run navy + orange + glassmorphism, which shared
+ * nothing with the app but the word "dark".
+ *
+ * Two rules govern every surface on this site, both inherited from the app:
+ *
+ *   1. COLOUR MEANS RESOLVED. Grey is what every other editor hands you for a
+ *      Unity file; colour is what this one understands about it. Nothing is
+ *      tinted for decoration — no gradient text, no mesh washes, no glow.
+ *
+ *   2. RECESSED CHROME. Page furniture sinks and the product plane is the
+ *      brightest thing on screen. The luminance step IS the separator, which
+ *      is why `--border` is a 5% white hairline doing almost nothing.
+ *
+ * The shadcn token NAMES are kept because /features, /pricing, /auth, /admin
+ * and the Starlight docs all read them. Only the values changed, so those
+ * pages inherit this palette without being touched.
+ */
 @layer base {
   :root {
-    --background: 220 26% 14%;
-    --foreground: 40 10% 92%;
+    /* Surface ramp — darkest chrome to brightest content. */
+    --void: 252 26% 4%;             /* #08070C  activity bar / page ground   */
+    --sunk: 250 23% 5%;             /* #0B0A10  title bar / alternating band */
+    --background: 250 23% 5%;
+    --foreground: 45 12% 87%;       /* #E2E0DA                               */
 
-    --card: 220 24% 18%;
-    --card-foreground: 40 10% 92%;
+    /* The product plane. Brighter than the page, on purpose. */
+    --panel: 246 19% 10%;           /* #16151F  the editor surface           */
+    --card: 246 19% 10%;
+    --card-foreground: 45 12% 87%;
+    --popover: 246 19% 10%;
+    --popover-foreground: 45 12% 87%;
 
-    --popover: 220 24% 18%;
-    --popover-foreground: 40 10% 92%;
+    --raised: 250 19% 13%;          /* #1C1A26  inputs, chips, hovered rows  */
+    --secondary: 250 19% 13%;
+    --secondary-foreground: 45 12% 87%;
+    --muted: 250 19% 13%;
+    /* 52%, not the app's 50%. The two-point lift is the smallest change that
+     * clears 4.5:1 on EVERY surface this site paints, including `--panel` —
+     * the brightest one, where 50% landed at 4.31:1 and put the pricing cards'
+     * taglines and every "/mo" just under the line. 4.67:1 on panel, 5.10:1 on
+     * sunk, 5.19:1 on void. This is the one place the site deliberately parts
+     * from the desktop theme's value, because the app never paints body copy on
+     * its brightest plane and this page does. */
+    --muted-foreground: 256 4% 52%; /* #83808B                               */
 
-    --primary: 35 95% 55%;
-    --primary-foreground: 220 26% 10%;
+    /* The quiet tier, as a colour rather than as alpha.
+     *
+     * The page used to reach for `text-muted-foreground/70`, `/60`, `/50`,
+     * `/45` and `/40` whenever something needed to recede. Composited over
+     * `--sunk` those land at 2.87:1, 2.5:1, 2.2:1, 1.84:1 and 1.7:1 — the
+     * footer's trademark line and the hero's "Free plan. Windows and macOS."
+     * were both effectively invisible, and neither was optional text.
+     *
+     * One token replaces the whole ladder at 3.44:1: still clearly a step
+     * below `--muted-foreground`, still readable. Anything that wants to be
+     * quieter than this wants to be deleted instead.
+     */
+    --faint: 256 4% 40%;            /* #64626A  3.44:1 on --sunk             */
+    --selected: 255 24% 16%;        /* #252034                               */
+    --bright: 251 17% 20%;          /* #2E2B3C                               */
 
-    --secondary: 220 20% 22%;
-    --secondary-foreground: 40 10% 85%;
+    /* Candle gold. The one accent, reserved for resolved / active / verified. */
+    --primary: 41 57% 61%;          /* #D4B062                               */
+    --primary-foreground: 255 13% 6%;
+    --accent: 41 57% 61%;
+    --accent-foreground: 255 13% 6%;
+    --gold-lit: 43 70% 70%;         /* #E8C97D                               */
+    --ring: 41 57% 61%;
 
-    --muted: 220 18% 20%;
-    --muted-foreground: 220 10% 55%;
+    /* Semantic. Used only where the colour carries the meaning. */
+    --pass: 102 25% 54%;            /* #7DA66B  verified, added              */
+    --warn: 41 71% 58%;             /* #E0B048  modified                     */
+    --fail: 348 42% 63%;            /* #C97A8A  error border                 */
+    --fail-text: 349 44% 73%;       /* #D89AA5                               */
+    --info: 206 28% 60%;            /* #7B9CB5  engine types, ask mode       */
+    --destructive: 348 42% 63%;
+    --destructive-foreground: 45 27% 94%;
 
-    --accent: 35 95% 55%;
-    --accent-foreground: 220 26% 10%;
+    /* Syntax. Only ever inside a code surface. */
+    --syn-keyword: 280 55% 74%;     /* #C79BE0 */
+    --syn-string: 100 34% 61%;      /* #8FBE7A */
+    --syn-number: 28 66% 65%;       /* #E0A76B */
+    --syn-type: 200 45% 71%;        /* #8FBEDA */
+    --syn-func: 172 48% 66%;        /* #7FD1C4 */
+    --syn-comment: 253 8% 54%;      /* #827E94 */
 
-    --destructive: 0 84% 60%;
-    --destructive-foreground: 210 40% 98%;
+    /* The app's only border is rgba(255,255,255,0.05). Expressed here as the
+       triplet it composites to over `--panel`, because 39 places in this repo
+       write `border-border/40` — and an alpha baked into the variable makes
+       every one of those emit `hsl(... / 0.05 / 0.4)`, which is invalid. */
+    --border: 246 13% 15%;
+    --input: 250 19% 13%;
 
-    --border: 220 15% 25%;
-    --input: 220 15% 25%;
-    --ring: 35 95% 55%;
+    /* Radii, differential — the app uses 3px and 6px for almost everything
+       and reserves 10px for large planes. One radius on every element is the
+       template look this page is getting away from. */
+    --radius: 0.375rem;
+    --radius-chip: 3px;
+    --radius-panel: 6px;
+    --radius-plane: 10px;
 
-    --radius: 0.75rem;
-
-    --glow-orange: 35 95% 55%;
-    --navy-deep: 220 30% 10%;
-    --navy-mid: 220 26% 14%;
-    --surface-elevated: 220 22% 20%;
-    --glass-bg: 220 24% 18% / 0.6;
-    --glass-border: 220 15% 35% / 0.4;
+    /* Kept so untouched pages that still reference them keep resolving. */
+    --navy-deep: 252 26% 4%;
+    --navy-mid: 250 23% 5%;
+    --surface-elevated: 250 19% 13%;
+    --glass-bg: 246 19% 10% / 0.86;
+    --glass-border: 0 0% 100% / 0.06;
+    --glow-orange: 41 57% 61%;
   }
 }
 
 @layer base {
   * {
-    @apply border-border;
+    border-color: hsl(var(--border));
   }
 
   body {
     @apply bg-background text-foreground antialiased;
-    font-family: 'Inter', sans-serif;
+    font-family: 'Instrument Sans', ui-sans-serif, -apple-system, BlinkMacSystemFont,
+      'Segoe UI', sans-serif;
+    /* Unity identifiers are full of `->`, `<T>` and `!=`; the default ligature
+       set welds them into glyphs nobody types. */
+    font-variant-ligatures: none;
   }
 
   h1, h2, h3, h4, h5, h6 {
-    font-family: 'Space Grotesk', 'Inter', sans-serif;
+    font-family: 'Instrument Sans', ui-sans-serif, -apple-system, BlinkMacSystemFont,
+      'Segoe UI', sans-serif;
+    text-wrap: balance;
   }
 
   code, pre, .font-mono {
-    font-family: 'JetBrains Mono', monospace;
+    font-family: 'Geist Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  }
+
+  /* The site had no focus styling of its own, so keyboard users got whatever
+     the UA drew on a dark ground — frequently nothing. */
+  :focus-visible {
+    outline: 2px solid hsl(var(--primary));
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+
+  ::selection {
+    background: hsl(var(--primary) / 0.28);
+    color: hsl(45 27% 94%);
   }
 }
 
 @layer utilities {
+  /**
+   * Retuned, not removed. /features, /auth, /admin and the billing panels all
+   * reference these; deleting them would leave those pages unstyled, and this
+   * redesign is scoped to the home page. Each one is flattened to its
+   * recessed-chrome equivalent so the pages inherit the palette instead.
+   */
+
+  /* Was a 135° orange gradient. The page's colour rule does not allow colour
+     as decoration, so it resolves to flat gold. */
   .text-gradient-orange {
-    @apply bg-clip-text text-transparent;
-    background-image: linear-gradient(135deg, hsl(35 95% 55%), hsl(25 100% 65%));
+    color: hsl(var(--primary));
   }
 
-  .glow-orange {
-    box-shadow: 0 0 40px -10px hsl(35 95% 55% / 0.4),
-                0 0 80px -20px hsl(35 95% 55% / 0.2);
-  }
-
-  .glow-orange-sm {
-    box-shadow: 0 0 20px -5px hsl(35 95% 55% / 0.3);
-  }
-
+  /* Was three stacked amber blooms. Now a hairline of the accent — it still
+     marks the same elements, without lighting the page. */
+  .glow-orange,
   .glow-orange-lg {
-    box-shadow: 0 0 60px -10px hsl(35 95% 55% / 0.5),
-                0 0 120px -30px hsl(35 95% 55% / 0.25),
-                0 0 200px -60px hsl(35 95% 55% / 0.1);
+    box-shadow: 0 0 0 1px hsl(var(--primary) / 0.28);
+  }
+  .glow-orange-sm {
+    box-shadow: 0 0 0 1px hsl(var(--primary) / 0.18);
+  }
+
+  /* Was backdrop-blur over a translucent navy. Chrome does not float here, so
+     this is now simply the product plane: opaque, hairline, no blur. */
+  .glass,
+  .glass-strong {
+    background: hsl(var(--panel));
+    border: 1px solid hsl(var(--border));
   }
 
   .bg-grid-pattern {
     background-image:
-      linear-gradient(hsl(220 15% 25% / 0.3) 1px, transparent 1px),
-      linear-gradient(90deg, hsl(220 15% 25% / 0.3) 1px, transparent 1px);
-    background-size: 60px 60px;
+      linear-gradient(hsl(0 0% 100% / 0.022) 1px, transparent 1px),
+      linear-gradient(90deg, hsl(0 0% 100% / 0.022) 1px, transparent 1px);
+    background-size: 64px 64px;
   }
 
-  .bg-gradient-radial-hero {
-    background: radial-gradient(ellipse 80% 60% at 50% 0%, hsl(35 95% 55% / 0.08) 0%, transparent 70%);
-  }
-
-  .glass {
-    background: hsl(var(--glass-bg));
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    border: 1px solid hsl(var(--glass-border));
-  }
-
-  .glass-strong {
-    background: hsl(220 24% 16% / 0.85);
-    backdrop-filter: blur(24px);
-    -webkit-backdrop-filter: blur(24px);
-    border: 1px solid hsl(220 15% 30% / 0.5);
-  }
-
+  /* Was three coloured radial washes. Kept as a token so /features still
+     resolves it, reduced to a single near-black vignette. */
   .gradient-mesh {
-    background:
-      radial-gradient(ellipse 50% 40% at 20% 30%, hsl(35 95% 55% / 0.06) 0%, transparent 70%),
-      radial-gradient(ellipse 40% 50% at 80% 60%, hsl(25 100% 65% / 0.04) 0%, transparent 70%),
-      radial-gradient(ellipse 60% 40% at 50% 80%, hsl(220 60% 50% / 0.03) 0%, transparent 70%);
+    background: radial-gradient(
+      ellipse 70% 50% at 50% 0%,
+      hsl(var(--panel) / 0.5) 0%,
+      transparent 70%
+    );
   }
 
+  /* The app's two-layer contact + ambient shadow. The only shadow on the site,
+     and it belongs to the floating product plane alone.
+     The inset hairline is the lit top edge every real desktop window has: it is
+     what separates "a plane above the page" from "a rectangle drawn on it", and
+     it costs one shadow layer rather than a border that would round-trip
+     through the palette. */
   .ide-shadow {
     box-shadow:
-      0 25px 60px -15px hsl(220 30% 5% / 0.6),
-      0 0 40px -10px hsl(35 95% 55% / 0.15),
-      inset 0 1px 0 hsl(220 15% 30% / 0.3);
+      inset 0 1px 0 hsl(0 0% 100% / 0.07),
+      0 1px 2px hsl(252 26% 2% / 0.7),
+      0 24px 60px -20px hsl(252 26% 2% / 0.85);
   }
 
-  .cursor-glow {
-    pointer-events: none;
-    position: fixed;
-    width: 400px;
-    height: 400px;
-    border-radius: 50%;
-    background: radial-gradient(circle, hsl(35 95% 55% / 0.06) 0%, transparent 70%);
-    transform: translate(-50%, -50%);
-    z-index: 0;
-    transition: opacity 0.3s;
+  .panel-plane {
+    background: hsl(var(--panel));
+    border: 1px solid hsl(var(--border));
+    border-radius: var(--radius-plane);
   }
 
-  /* Scroll reveal animation utility */
+  /* Reads as a Unity file key: mono, tight, dim until it resolves. */
+  .ext-key {
+    font-family: 'Geist Mono', ui-monospace, monospace;
+    font-size: 12px;
+    letter-spacing: -0.01em;
+    color: hsl(var(--muted-foreground));
+  }
+
+  /**
+   * The hero window's two moving parts, and the only motion on this page that
+   * a visitor did not ask for.
+   *
+   * `dwell` draws the hold before the shot advances itself; `panel-swap` makes
+   * the advance legible as a change rather than as a redraw. Both are short and
+   * both stop for good once the visitor takes the activity rail — see the note
+   * in `IdeShowcase.tsx`.
+   */
+  @keyframes dwell {
+    from { transform: scaleX(0); }
+    to   { transform: scaleX(1); }
+  }
+
+  /**
+   * The free-forever claim, marked.
+   *
+   * This line carries the one thing the tool it is measured against cannot say,
+   * and it was set at 13px in muted grey under a gold button — the quietest
+   * element in the fold holding the loudest fact. The rule drawn beneath it is
+   * an annotation, not decoration: it appears once, marks a specific claim, and
+   * then stops, which is the only kind of unrequested motion this page allows.
+   *
+   * The delay is what makes it work. Drawn on the first frame it would be part
+   * of the layout and read as a border; arriving 700ms in, after the reader has
+   * taken the headline, it is a movement in the periphery that pulls the eye
+   * back down to the sentence.
+   */
+  @keyframes mark-draw {
+    from { transform: scaleX(0); }
+    to   { transform: scaleX(1); }
+  }
+  .claim-mark {
+    position: relative;
+    display: inline-block;
+  }
+  .claim-mark::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: -5px;
+    height: 2px;
+    border-radius: 1px;
+    background: hsl(var(--primary));
+    transform: scaleX(0);
+    transform-origin: left center;
+    animation: mark-draw 0.65s cubic-bezier(0.16, 1, 0.3, 1) 0.7s forwards;
+  }
+  /* Explicit rather than relying on the global reduced-motion override, which
+     collapses the DURATION but not the 700ms delay — leaving the mark absent
+     for most of a second and then popping in, which is worse than either. */
+  @media (prefers-reduced-motion: reduce) {
+    .claim-mark::after {
+      animation: none;
+      transform: scaleX(1);
+    }
+  }
+
+  @keyframes panel-swap {
+    from { opacity: 0; transform: translateY(3px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .panel-swap {
+    animation: panel-swap 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  /* The activity rail is a horizontal overflow scroller below `md`, where it
+     shows about two and a half of its nine tabs and nothing said the rest were
+     there. The mask is the hint: content fades out at the edge it scrolls
+     toward, so the cut reads as "more" rather than as the end. */
+  .rail-scroll {
+    scrollbar-width: none;
+  }
+  .rail-scroll::-webkit-scrollbar {
+    display: none;
+  }
+  @media (max-width: 767px) {
+    .rail-scroll {
+      -webkit-mask-image: linear-gradient(to right, #000 90%, transparent 100%);
+      mask-image: linear-gradient(to right, #000 90%, transparent 100%);
+    }
+  }
+
   .scroll-reveal {
     opacity: 0;
-    transform: translateY(20px);
-    transition: opacity 0.6s ease, transform 0.6s ease;
+    transform: translateY(12px);
+    transition: opacity 0.5s ease, transform 0.5s ease;
   }
   .scroll-reveal.visible {
     opacity: 1;
@@ -147,8 +329,8 @@
   }
   .scroll-reveal-scale {
     opacity: 0;
-    transform: scale(0.8);
-    transition: opacity 0.6s ease, transform 0.6s ease;
+    transform: scale(0.94);
+    transition: opacity 0.5s ease, transform 0.5s ease;
   }
   .scroll-reveal-scale.visible {
     opacity: 1;
@@ -167,5 +349,30 @@
   }
   .scroll-reveal-line-y.visible {
     transform: scaleY(1);
+  }
+}
+
+/**
+ * The site had no reduced-motion handling at all: the drifting hero glyphs,
+ * the cursor follower and every section entrance ran regardless of the OS
+ * setting. Everything here is decorative or an entrance, so the honest
+ * response is to present the end state immediately rather than to slow it.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .scroll-reveal,
+  .scroll-reveal-scale,
+  .scroll-reveal-line-x,
+  .scroll-reveal-line-y {
+    opacity: 1;
+    transform: none;
   }
 }

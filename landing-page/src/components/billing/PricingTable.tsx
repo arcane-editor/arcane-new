@@ -31,6 +31,25 @@ const EFFORT_ACCESS_COPY: Record<string, string> = {
     max: "Standard, Deep Think & Max",
 };
 
+/**
+ * What the band renders when /v1/billing/plans does not answer.
+ *
+ * The API stays the source of truth — this is never merged with a live response
+ * and never used to start a checkout. It exists so an unreachable worker costs
+ * the page its live prices instead of its entire pricing section, which is what
+ * "Couldn't load plans. Please refresh." did at the bottom of the home page.
+ *
+ * Transcribed from `arcane-server/src/config/tiers.ts`, the same file the API
+ * serves from. `monthlyCredits` is carried to satisfy PlanTier and is never
+ * rendered — user-facing surfaces do not show raw credit numbers.
+ */
+const FALLBACK_TIERS: PlanTier[] = [
+    { id: "free", name: "Free", priceUsd: 0, monthlyCredits: 150, order: 0 },
+    { id: "starter", name: "Starter", priceUsd: 5, monthlyCredits: 387, order: 1 },
+    { id: "pro", name: "Pro", priceUsd: 25, monthlyCredits: 2097, order: 2 },
+    { id: "max", name: "Max", priceUsd: 50, monthlyCredits: 4235, order: 3 },
+];
+
 /** `$0`, not "Free" — the tier is ALREADY named Free, so returning "Free"
  *  here rendered the card as "Free / Free / 150 credits/mo". Every price row
  *  now has the same shape ($N + /mo), which is what lets the row scan. */
@@ -56,7 +75,6 @@ export default function PricingTable({ variant = 'page' }: PricingTableProps) {
     const isSection = variant === 'section';
     const [tiers, setTiers] = useState<PlanTier[] | null>(null);
     const [authed, setAuthed] = useState(false);
-    const [loadError, setLoadError] = useState("");
     const [busy, setBusy] = useState<string | null>(null);
     const [notice, setNotice] = useState("");
 
@@ -64,8 +82,25 @@ export default function PricingTable({ variant = 'page' }: PricingTableProps) {
         setAuthed(!!getStoredToken());
         apiGetPlans()
             .then(p => setTiers([...p.tiers].sort((a, b) => a.order - b.order)))
-            .catch(() => setLoadError("Couldn't load plans. Please refresh."));
+            // Leaving `tiers` null is the whole error path now: it puts the band
+            // in its `stale` state, which renders FALLBACK_TIERS and disarms the
+            // checkout CTAs. Logged rather than swallowed so a broken worker is
+            // still visible in the console.
+            .catch((err) => console.warn("[pricing] /v1/billing/plans unavailable", err));
     }, []);
+
+    // `stale` means these are the transcribed prices, not the served ones —
+    // true while the fetch is in flight AND after it fails, because the two are
+    // indistinguishable to a visitor and both call for the same caution. It is
+    // the flag that keeps the fallback honest: the footnote says the live
+    // figures are still coming, and every paid CTA becomes a link to /pricing
+    // instead of a checkout button. Starting a purchase from a price this
+    // component is not certain of is the one thing it must never do.
+    //
+    // Rendering the fallback from the first paint (rather than a "Loading
+    // plans…" line) also means the band never changes height under the reader.
+    const stale = !tiers;
+    const shown = tiers ?? FALLBACK_TIERS;
 
     const subscribe = async (tierId: string) => {
         setNotice("");
@@ -96,22 +131,31 @@ export default function PricingTable({ variant = 'page' }: PricingTableProps) {
         <section
             id={isSection ? 'pricing' : undefined}
             className={`container mx-auto px-4 max-w-6xl ${
-                isSection ? 'py-16 sm:py-28' : 'pt-32 pb-24'
+                isSection ? 'py-16 sm:py-20' : 'pt-32 pb-24'
             }`}
         >
-            <div className={`text-center ${isSection ? 'mb-12 sm:mb-16' : 'mb-4'}`}>
+            {/*  The sub-headline used to explain the credit system in detail —
+                 "a monthly pool of AI credits… bigger models cost more… top up
+                 anytime" — directly under a heading, while every card below it
+                 obeys the OWNER DIRECTIVE a few lines down in this same file:
+                 user-facing surfaces never show raw credit numbers. It also
+                 argued for the metering model that STANDOUT-FEATURES.md names
+                 as the thing the market is in revolt against. One line replaces
+                 it, and the cards carry the detail they were already carrying. */}
+            <div className={isSection ? 'mb-12 sm:mb-16' : 'mb-4'}>
                 {isSection ? (
-                    <h2 className="mb-4 font-display text-3xl font-bold tracking-tight sm:text-4xl md:text-5xl">
-                        Simple, <span className="text-gradient-orange">usage-based</span> pricing
+                    <h2 className="font-display text-step2 font-semibold tracking-tight text-foreground">
+                        Pricing
                     </h2>
                 ) : (
-                    <h1 className="font-display text-3xl md:text-4xl font-bold">Simple, usage-based pricing</h1>
+                    <h1 className="font-display text-step2 font-semibold tracking-tight text-foreground sm:text-step3">
+                        Pricing
+                    </h1>
                 )}
-                <p className={`text-muted-foreground mx-auto max-w-xl ${
-                    isSection ? 'text-base sm:text-lg' : 'text-sm mt-3'
+                <p className={`max-w-[54ch] text-muted-foreground ${
+                    isSection ? 'mt-4 text-step1 leading-relaxed' : 'mt-3 text-mini'
                 }`}>
-                    Every plan includes a monthly pool of AI credits. Each request spends credits based on the
-                    model it uses — bigger models cost more. Run out? Top up anytime.
+                    The IDE is free. Paid plans add AI usage and the bigger reasoning modes.
                 </p>
             </div>
 
@@ -121,20 +165,22 @@ export default function PricingTable({ variant = 'page' }: PricingTableProps) {
                 </div>
             )}
 
-            {loadError ? (
-                <p className="text-center text-muted-foreground text-sm py-16">{loadError}</p>
-            ) : !tiers ? (
-                <p className="text-center text-muted-foreground text-sm py-16">Loading plans…</p>
-            ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5 mt-10">
-                    {tiers.map(t => {
+            {/* `shown` is the ladder to render. When /v1/billing/plans cannot be
+                reached this used to be a single grey sentence — "Couldn't load
+                plans. Please refresh." — sitting alone in a 16rem-tall band at
+                the bottom of the home page, which is the last thing a visitor
+                who is ready to pay should meet. FALLBACK_TIERS keeps the section
+                whole; `stale` is what stops it lying about the prices, and it is
+                also why the paid CTAs go to /pricing rather than to checkout. */}
+            <div className="grid grid-cols-1 gap-5 mt-10 md:grid-cols-2 lg:grid-cols-4">
+                    {shown.map(t => {
                         const highlight = t.id === "pro";
                         const isFree = t.id === "free";
                         return (
                             <div
                                 key={t.id}
-                                className={`glass rounded-2xl p-6 flex flex-col transition-all duration-300 hover:-translate-y-1 hover:border-primary/40 ${
-                                    highlight ? "border-primary/40 ring-1 ring-primary/30" : ""
+                                className={`flex flex-col rounded-plane border bg-panel p-6 ${
+                                    highlight ? "border-primary/40" : "border-border"
                                 }`}
                             >
                                 {/* Rendered in EVERY card, hidden where it doesn't apply.
@@ -143,31 +189,31 @@ export default function PricingTable({ variant = 'page' }: PricingTableProps) {
                                     its neighbours, so nothing in the row lined up. */}
                                 <span
                                     aria-hidden={!highlight}
-                                    className={`self-start mb-3 rounded-full border px-2 py-0.5 text-[11px] font-bold uppercase tracking-wider ${
-                                        highlight
-                                            ? "bg-primary/15 border-primary/30 text-primary"
-                                            : "invisible border-transparent"
+                                    className={`self-start mb-3 rounded-chip px-2 py-0.5 font-mono text-micro ${
+                                        highlight ? "bg-primary/10 text-primary" : "invisible"
                                     }`}
                                 >
                                     Most popular
                                 </span>
-                                <h3 className="font-display text-lg font-bold">{t.name}</h3>
-                                <div className="mt-2 mb-1 flex items-baseline gap-1">
-                                    <span className="font-display text-3xl font-bold">{fmtPrice(t.priceUsd)}</span>
-                                    <span className="text-muted-foreground text-sm">/mo</span>
+                                <h3 className="text-base font-semibold text-foreground">{t.name}</h3>
+                                <div className="mt-2 mb-1 flex items-baseline gap-1.5">
+                                    <span className="font-display text-step2 font-semibold tabular-nums text-foreground">
+                                        {fmtPrice(t.priceUsd)}
+                                    </span>
+                                    <span className="text-mini text-muted-foreground">/mo</span>
                                 </div>
                                 {/* Credit-free per the owner directive — no raw credit numbers
                                     on user-facing surfaces (admin panel is exempt). */}
-                                <p className="text-sm text-foreground/80 font-mono">
+                                <p className="font-mono text-mini text-primary">
                                     {AI_USAGE_COPY[t.id] ?? ""}
                                 </p>
-                                <p className="text-muted-foreground text-xs mt-3 min-h-[2.5rem]">
+                                <p className="mt-3 min-h-[2.75rem] text-mini leading-relaxed text-muted-foreground">
                                     {TAGLINES[t.id] ?? ""}
                                 </p>
                                 {/* Effort-tier access isn't in the API's PlanTier shape (it's a
                                     routing concept, not a billing one) — this mirrors the server's
                                     ALLOWED_TIERS. */}
-                                <p className="text-foreground/70 text-xs font-mono mb-6">
+                                <p className="mb-6 font-mono text-micro text-muted-foreground">
                                     {EFFORT_ACCESS_COPY[t.id] ?? ""}
                                 </p>
 
@@ -176,22 +222,35 @@ export default function PricingTable({ variant = 'page' }: PricingTableProps) {
                                     button — leaving each CTA (and its divider) at a
                                     different height. Bottom-anchoring puts the slack
                                     above the rule instead, so all four line up. */}
-                                <div className="mt-auto pt-5 border-t border-border/30">
+                                <div className="mt-auto border-t border-border pt-5">
                                     {isFree ? (
                                         <a
                                             href="/#download"
-                                            className="block text-center h-10 leading-10 rounded-md px-4 bg-secondary text-secondary-foreground text-sm font-semibold hover:bg-secondary/80 transition-all"
+                                            className="block h-10 rounded-panel bg-raised px-4 text-center text-mini font-semibold leading-10 text-foreground transition-colors hover:bg-selected"
                                         >
                                             Download UnityIDE
                                         </a>
+                                    ) : stale ? (
+                                        // Not a link. The earlier version sent
+                                        // people to /pricing, which is a dead
+                                        // round-trip from the /pricing page
+                                        // itself — and checkout cannot work
+                                        // anyway while the billing service is
+                                        // the thing that is unreachable.
+                                        <button
+                                            disabled
+                                            className="h-10 w-full cursor-not-allowed rounded-panel bg-raised px-4 text-mini font-semibold text-muted-foreground"
+                                        >
+                                            Temporarily unavailable
+                                        </button>
                                     ) : (
                                         <button
                                             onClick={() => subscribe(t.id)}
                                             disabled={busy === t.id}
-                                            className={`w-full h-10 rounded-md px-4 text-sm font-semibold transition-all disabled:opacity-50 ${
+                                            className={`h-10 w-full rounded-panel px-4 text-mini font-semibold transition-colors disabled:opacity-50 ${
                                                 highlight
-                                                    ? "bg-primary text-primary-foreground hover:bg-primary/90"
-                                                    : "bg-secondary text-secondary-foreground hover:bg-secondary/80"
+                                                    ? "bg-primary text-primary-foreground hover:bg-primary-lit"
+                                                    : "bg-raised text-foreground hover:bg-selected"
                                             }`}
                                         >
                                             {busy === t.id ? "Starting…" : authed ? "Choose plan" : "Sign in to subscribe"}
@@ -201,12 +260,18 @@ export default function PricingTable({ variant = 'page' }: PricingTableProps) {
                             </div>
                         );
                     })}
-                </div>
-            )}
+            </div>
 
-            <p className="text-center text-muted-foreground text-xs mt-10">
-                Prices in USD. Billing is handled securely by Dodo Payments. Manage or cancel anytime from your{" "}
-                <a href="/account" className="text-primary hover:underline">account</a>.
+            <p className="mt-10 text-center text-mini text-muted-foreground">
+                {stale
+                    ? "These are our standard plan prices, shown while we reach the billing service. Refresh to load the live figures and subscribe."
+                    : "Prices in USD. Billing is handled securely by Dodo Payments."}{" "}
+                {!stale && (
+                    <>
+                        Manage or cancel anytime from your{" "}
+                        <a href="/account" className="text-primary underline decoration-primary/30 underline-offset-4 hover:decoration-primary">account</a>.
+                    </>
+                )}
             </p>
         </section>
     );

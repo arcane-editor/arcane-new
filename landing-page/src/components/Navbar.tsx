@@ -3,10 +3,15 @@ import { Button } from "@/components/ui/button";
 import { CreditCard, LogOut, Menu, Settings, X } from "lucide-react";
 import AccountMenu, { AccountSummaryBlock, useAuthSummary } from "@/components/AccountMenu";
 
-// Order mirrors the landing page itself: features → download → pricing → docs.
+// Order mirrors the landing page itself: features → pricing → docs.
+//
+// "Download" is not in this list any more. It pointed at `#download`, which is
+// exactly where the gold button two elements to the right already goes — so the
+// row asked for the same click twice, in two different visual weights, about
+// 200px apart. The button is the one that stays, because it is the page's
+// primary action and a text link cannot outrank it.
 const links = [
   { label: "Features", href: "/features" },
-  { label: "Download", href: "#download" },
   { label: "Pricing", href: "/pricing" },
   { label: "Docs", href: "/docs/" },
 ];
@@ -16,24 +21,18 @@ const mobileItemClass =
 
 const Navbar = () => {
   const [open, setOpen] = useState(false);
-  const [active, setActive] = useState("");
   const [scrolled, setScrolled] = useState(false);
   const auth = useAuthSummary();
 
+  // The scroll-spy that used to live here went with the Download nav link.
+  // It matched a section id against `href.replace("#", "")`, so the only link it
+  // could ever light was the one anchored in-page; every remaining link is a
+  // route ("/features", "/pricing", "/docs/") and would never match. Keeping it
+  // would have left a listener running on every scroll frame to compute a value
+  // nothing rendered. `scrolled` is real and stays.
   useEffect(() => {
-    const onScroll = () => {
-      setScrolled(window.scrollY > 20);
-
-      const sections = ["features", "download"];
-      for (let i = sections.length - 1; i >= 0; i--) {
-        const el = document.getElementById(sections[i]);
-        if (el && el.getBoundingClientRect().top <= 120) {
-          setActive(sections[i]);
-          return;
-        }
-      }
-      setActive("");
-    };
+    const onScroll = () => setScrolled(window.scrollY > 20);
+    onScroll();
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
@@ -42,42 +41,32 @@ const Navbar = () => {
     <nav
       className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${
         scrolled
-          ? "border-b border-border/50 bg-background/80 backdrop-blur-xl"
+          ? "border-b border-border bg-void/90 backdrop-blur-md"
           : "bg-transparent"
       }`}
     >
       <div className="container mx-auto flex h-16 items-center justify-between px-4">
         <a href="/" className="flex items-center gap-3">
-          <img src="/icon.png" alt="UnityIDE" className="h-9 w-9 rounded-lg" />
-          <span className="font-display text-lg font-bold tracking-tight text-foreground">
-            UnityIDE<span className="text-primary">IDE</span>
-          </span>
-          <span className="ml-1.5 rounded-md bg-primary/15 border border-primary/30 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-primary">
-            Beta
+          <img src="/icon.png" alt="" className="h-8 w-8" />
+          <span className="font-display text-base font-semibold tracking-tight text-foreground">
+            Unity<span className="text-primary">IDE</span>
           </span>
         </a>
 
         <div className="hidden items-center gap-1 md:flex">
           {links.map((l) => {
-            const id = l.href.replace("#", "");
-            const isActive = active === id;
             return (
               <a
                 key={l.label}
                 href={l.href}
-                className={`group relative rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
-                  isActive ? "text-primary" : "text-muted-foreground hover:text-primary"
-                }`}
+                className="group relative rounded-lg px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-primary"
               >
                 {l.label}
                 {/* Always rendered, so the bar can TRANSITION rather than pop
-                    in — mounting it only when active gave no animation. Grows
-                    from the centre (default transform-origin) on hover, and
-                    stays put while the section is active. */}
+                    in — mounting it only on hover gave no animation. Grows from
+                    the centre (default transform-origin). */}
                 <span
-                  className={`pointer-events-none absolute bottom-0 left-1/2 h-0.5 w-6 -translate-x-1/2 rounded-full bg-primary glow-orange-sm transition-transform duration-200 ease-out ${
-                    isActive ? "scale-x-100" : "scale-x-0 group-hover:scale-x-100"
-                  }`}
+                  className="pointer-events-none absolute bottom-0 left-1/2 h-0.5 w-6 -translate-x-1/2 scale-x-0 rounded-full bg-primary transition-transform duration-200 ease-out group-hover:scale-x-100"
                 />
               </a>
             );
@@ -91,7 +80,7 @@ const Navbar = () => {
               className="group relative rounded-lg px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-primary"
             >
               Log in
-              <span className="pointer-events-none absolute bottom-0 left-1/2 h-0.5 w-6 -translate-x-1/2 scale-x-0 rounded-full bg-primary glow-orange-sm transition-transform duration-200 ease-out group-hover:scale-x-100" />
+              <span className="pointer-events-none absolute bottom-0 left-1/2 h-0.5 w-6 -translate-x-1/2 scale-x-0 rounded-full bg-primary transition-transform duration-200 ease-out group-hover:scale-x-100" />
             </a>
           )}
 
@@ -132,7 +121,7 @@ const Navbar = () => {
       </div>
 
       {open && (
-        <div className="border-t border-border/50 bg-background/95 backdrop-blur-xl md:hidden">
+        <div className="border-t border-border bg-void/95 backdrop-blur-md md:hidden">
           <div className="flex flex-col gap-2 p-4">
             {links.map((l) => (
               <a
