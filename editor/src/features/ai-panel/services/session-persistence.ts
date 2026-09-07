@@ -227,7 +227,8 @@ export function buildSessionData(input: SaveSessionInput): SessionData {
  * 'executing' ⇒ 'interrupted' (the run died with the old process; the plan
  * file's [x] ticks carry the progress, and 'interrupted' — unlike
  * 'awaiting-execute' — is what tells `routePlanSend` this plan resumes
- * rather than starts fresh), 'interrupted' ⇒ 'interrupted' (already honest),
+ * rather than starts fresh), 'interrupted' ⇒ 'interrupted' and 'completed'
+ * ⇒ 'completed' (already honest),
  * 'planning' ⇒ 'idle' (nothing to resume — the plan was never written), and
  * a pending phase without a plan path degrades to 'idle'.
  */
@@ -239,6 +240,12 @@ export function normalizePlanRestore(
   if (!path) return { planPhase: 'idle', activePlanPath: null };
   if (phase === 'awaiting-execute') {
     return { planPhase: 'awaiting-execute', activePlanPath: path };
+  }
+  // Kept as-is for the same reason 'awaiting-execute' is, and for one more:
+  // degrading it to 'awaiting-execute' would make a reload re-offer Execute
+  // for a plan that already ran to the end.
+  if (phase === 'completed') {
+    return { planPhase: 'completed', activePlanPath: path };
   }
   if (phase === 'executing' || phase === 'interrupted') {
     return { planPhase: 'interrupted', activePlanPath: path };

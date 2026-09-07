@@ -8,6 +8,7 @@ export interface CommandsState {
   unregisterCommand: (id: string) => void;
   executeCommand: (id: string) => boolean;
   getCommands: () => Command[];
+  getAllCommands: () => Command[];
   getCommandsByCategory: (category: string) => Command[];
   getKeybindings: () => Array<{ id: string; keybinding: string; handler: () => void }>;
 }
@@ -52,6 +53,12 @@ export const useCommandsStore = create<CommandsState>((set, get) => ({
   getCommands: () => {
     return Array.from(get().commands.values()).filter((cmd) => !cmd.when || cmd.when());
   },
+
+  // Unfiltered, unlike getCommands. The keyboard-shortcuts sheet documents
+  // the keymap, not the current state of the window: filtering by `when`
+  // would hide every Unity and workspace-gated chord from the one screen
+  // someone opens specifically to find out which chords exist.
+  getAllCommands: () => Array.from(get().commands.values()),
 
   getCommandsByCategory: (category) => {
     return get().getCommands().filter((cmd) => cmd.category === category);

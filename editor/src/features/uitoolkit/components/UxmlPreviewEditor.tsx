@@ -51,6 +51,17 @@ interface Props {
  */
 export function UxmlPreviewEditor({ path, name, content, overlay }: Props) {
   const workspacePath = useWorkspaceStore((s) => s.workspacePath);
+  /**
+   * The "a `.uss` on disk changed" signal.
+   *
+   * Subscribed, not read through `getState()`: this is the only thing that can
+   * tell this view a stylesheet it already read is now different, or that one
+   * it could not find has since been written. `stores/unity-index` bumps it
+   * ~1s after any `.uxml`/`.uss` write lands, having invalidated the guid map
+   * first, so a re-run here also gets a guid map that knows about a file
+   * created moments ago.
+   */
+  const uiToolkitRevision = useUnityIndexStore((s) => s.uiToolkitRevision);
   const [sheets, setSheets] = useState<UssStyleSheet[]>([]);
   const [unresolved, setUnresolved] = useState<string[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -122,8 +133,19 @@ export function UxmlPreviewEditor({ path, name, content, overlay }: Props) {
     };
     // `doc` is intentionally absent: it changes on every keystroke, and the
     // stylesheets it names are what actually matter here.
+    //
+    // `uiToolkitRevision` IS present, and it is what makes this view agree with
+    // the picture the design dock shows. Those two renders disagreed for every
+    // freshly generated screen, and the reason was here: the dock's render is
+    // produced by `layout-gate.ts`, which re-reads every file from disk on
+    // every probe, while this effect fired once per (styleKey, path, workspace)
+    // and never again. A `.uss` written AFTER that one shot -- which is every
+    // AI generation, and every edit made in Unity -- was never read, so the
+    // markup updated and the styling did not. Keying on the revision costs one
+    // reload per write and is the same treatment `unity-analyzers/index.ts`
+    // gives the same staleness for the same reason.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [styleKey, path, workspacePath]);
+  }, [styleKey, path, workspacePath, uiToolkitRevision]);
 
   const plan = useMemo(() => buildRenderPlan(doc, sheets), [doc, sheets]);
 

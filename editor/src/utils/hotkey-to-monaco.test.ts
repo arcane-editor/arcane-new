@@ -38,6 +38,9 @@ function createMockMonaco(): Monaco {
       Digit0: 200,
       Digit1: 201,
       F1: 300,
+      F5: 304,
+      F6: 305,
+      F7: 306,
       F12: 311,
     },
     KeyMod: {
@@ -194,6 +197,33 @@ describe('parseHotkeyToMonaco', () => {
     it('returns null when multiple keys are provided', () => {
       const result = parseHotkeyToMonaco('a+b', monaco);
       expect(result).toBeNull();
+    });
+  });
+
+  // The chords this keymap moved onto. Shift is part of the bitfield, not a
+  // separate binding, so 'f5' and 'shift+f5' must not collide — unity.play
+  // and unity.stop sit on exactly that pair.
+  describe('chords introduced by the two-key keymap', () => {
+    it('parses a bare function key', () => {
+      expect(parseHotkeyToMonaco('f5', monaco)).toBe(304);
+    });
+
+    it('distinguishes shift+f5 from f5', () => {
+      const plain = parseHotkeyToMonaco('f5', monaco);
+      const shifted = parseHotkeyToMonaco('shift+f5', monaco);
+      expect(shifted).toBe(1024 | 304);
+      expect(shifted).not.toBe(plain);
+    });
+
+    it('parses the tab-cycling paging chords', () => {
+      expect(parseHotkeyToMonaco('mod+pagedown', monaco)).toBe(2048 | 11);
+      expect(parseHotkeyToMonaco('mod+pageup', monaco)).toBe(2048 | 12);
+    });
+
+    it('parses the punctuation tokens the registry now spells out', () => {
+      expect(parseHotkeyToMonaco('mod+comma', monaco)).toBe(2048 | 20);
+      expect(parseHotkeyToMonaco('mod+shift+backquote', monaco)).toBe(2048 | 1024 | 26);
+      expect(parseHotkeyToMonaco('mod+shift+slash', monaco)).toBe(2048 | 1024 | 22);
     });
   });
 });

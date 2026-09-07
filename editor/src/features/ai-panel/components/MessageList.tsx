@@ -55,8 +55,9 @@ interface MessageRowProps {
   turnUserMessageId: string | null;
   /**
    * Whether to render `PlanActions` immediately after this row — true for
-   * exactly the last assistant message while `planPhase === 'awaiting-execute'`
-   * (computed by the parent; see `MessageList`'s `lastAssistantIdx`).
+   * exactly the last assistant message while the plan phase is one the card
+   * belongs under (computed by the parent; see `MessageList`'s
+   * `showPlanActions` / `lastAssistantIdx`).
    */
   withPlanActions: boolean;
   /** Passed through to `AssistantMessage` to gate its streaming dots. */
@@ -230,8 +231,15 @@ function MessageList() {
   // means the phase alone is no longer proof the user is looking at plan
   // mode. Without this, a parked plan's card would render under the ask/agent
   // composer it was just parked out of.
+  // `completed` is in the list so the finished plan stays reachable (Open /
+  // Run again) rather than vanishing the moment the last step ticks —
+  // `PlanActions` is what makes it read as finished instead of re-offering
+  // Execute, which is what a finished run used to get when it landed back on
+  // `awaiting-execute`.
   const showPlanActions =
-    (planPhase === 'awaiting-execute' || planPhase === 'interrupted') &&
+    (planPhase === 'awaiting-execute' ||
+      planPhase === 'interrupted' ||
+      planPhase === 'completed') &&
     selectedAgent === 'hosted' &&
     mode === 'plan';
 

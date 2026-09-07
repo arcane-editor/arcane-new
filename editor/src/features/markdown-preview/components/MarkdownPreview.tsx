@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { MessageSquarePlus, X } from 'lucide-react';
-import { createNote, reanchorNotes, type PlanNote } from '../services/note-anchor';
+import SuggestPopover from './SuggestPopover';
+import { reanchorNotes, type PlanNote } from '../services/note-anchor';
 
 // Hoisted: react-markdown treats a fresh array as a plugin change and re-parses
 // the whole document on every render.
@@ -14,206 +15,40 @@ interface MarkdownPreviewProps {
   onNotesChange: (notes: PlanNote[]) => void;
   /** Read-only preview (a non-plan .md) hides the suggest affordance. */
   allowNotes?: boolean;
-  /**
-   * Notion-style in-place block editing: click a paragraph/heading/list item
-   * to edit its raw markdown, click a checkbox to toggle it. Commits go
-   * through the callbacks below (offsets are AST source offsets on `content`).
-   */
-  editable?: boolean;
-  onCommitBlockEdit?: (start: number, end: number, newText: string) => void;
-  onToggleTask?: (offset: number) => void;
-  /**
-   * This preview is rendering a SLICE of a bigger document — the plan view
-   * shows a plan as several of these (lead prose, each step's guide, the tail)
-   * so the steps can be UI instead of headings.
-   *
-   * `base` is where `content` starts inside `document`. Everything that leaves
-   * this component is reported against `document`, not the slice: edit offsets
-   * are shifted by `base`, and notes anchor against the whole file so a quote
-   * still resolves after the model rewrites the plan.
-   *
-   * Slice mode also hands the notes CHROME to the parent — the notes list and
-   * the hint render once for the document, not once per slice — and with it
-   * the re-anchoring pass, which only the parent can do correctly because only
-   * the parent sees every slice.
-   */
-  slice?: { base: number; document: string };
-}
-
-interface PendingSelection {
-  text: string;
-  x: number;
-  y: number;
-}
-
-interface EditingBlock {
-  start: number;
-  end: number;
-  /** The slice at edit-start — commit is dropped if the document moved under us. */
-  original: string;
-}
-
-/** The subset of the hast node shape the block components need. */
-interface PositionedNode {
-  position?: {
-    start?: { offset?: number };
-    end?: { offset?: number };
-  };
-}
-
-function offsetsOf(node: PositionedNode | undefined): { start: number; end: number } | null {
-  const start = node?.position?.start?.offset;
-  const end = node?.position?.end?.offset;
-  if (typeof start !== 'number' || typeof end !== 'number' || end <= start) return null;
-  return { start, end };
 }
 
 /**
- * Rendered markdown with select-to-suggest and (for plans) click-to-edit.
+ * Rendered markdown with select-to-suggest.
  *
  * Select any text and a "Suggest change" affordance appears; the note is
  * pinned to that text rather than to an offset, so it survives the model
- * rewriting the document. A plain CLICK (collapsed selection) on a block
- * enters edit mode for that block when `editable` — selection always wins
- * over editing, so suggest keeps working. Raw HTML stays disabled (no
- * rehype-raw) — this renders model output.
+ * rewriting the document. Raw HTML stays disabled (no rehype-raw) — this
+ * renders model output.
  *
- * Can render a slice of a larger document rather than a whole one; see the
- * `slice` prop.
+ * This used to carry a second job: click-to-edit, which swapped the clicked
+ * block for a textarea of its raw markdown and committed on blur. That is gone
+ * — a plan is now edited in place through `PlanRegionEditor`, where the
+ * rendered text IS the editor and never turns back into source. What is left
+ * here is the read-only renderer, which is all a plain `.md` file needs.
  */
 function MarkdownPreview({
   content,
   notes,
   onNotesChange,
   allowNotes = true,
-  editable = false,
-  onCommitBlockEdit,
-  onToggleTask,
-  slice,
 }: MarkdownPreviewProps) {
-  // A slice reports positions in the whole document; a standalone preview IS
-  // the whole document, so both collapse to the identity case when unsliced.
-  const offsetBase = slice?.base ?? 0;
-  const anchorDoc = slice?.document ?? content;
-
-  const [pending, setPending] = useState<PendingSelection | null>(null);
-  const [draft, setDraft] = useState('');
-  const [editing, setEditing] = useState<EditingBlock | null>(null);
-  const [editDraft, setEditDraft] = useState('');
   const bodyRef = useRef<HTMLDivElement>(null);
-  const draftRef = useRef<HTMLTextAreaElement>(null);
-  const editRef = useRef<HTMLTextAreaElement>(null);
 
   // Re-locate notes whenever the document changes — a revise rewrites it all.
-  // Skipped in slice mode: re-anchoring against one slice would orphan every
-  // note pinned to any of the others. The parent owns it there.
   useEffect(() => {
-    if (slice) return;
     const next = reanchorNotes(notes, content);
-    const changed = next.some((n, i) => n.anchored !== notes[i]?.anchored || n.headingPath !== notes[i]?.headingPath);
+    const changed = next.some(
+      (n, i) => n.anchored !== notes[i]?.anchored || n.headingPath !== notes[i]?.headingPath,
+    );
     if (changed) onNotesChange(next);
     // Intentionally keyed on `content` alone: re-running on `notes` would loop.
-    // `slice` is fixed for a given preview's lifetime, so it needs no key.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [content]);
-
-  // Losing editability mid-edit (execution started) discards the in-progress edit.
-  useEffect(() => {
-    if (!editable) setEditing(null);
-  }, [editable]);
-
-  useEffect(() => {
-    if (editing) editRef.current?.focus();
-  }, [editing]);
-
-  const onMouseUp = useCallback(() => {
-    if (!allowNotes) return;
-    const sel = window.getSelection();
-    const text = sel?.toString().trim() ?? '';
-    // A stray click clears the selection; only a real range opens the popover.
-    if (!sel || sel.isCollapsed || text.length < 2) {
-      setPending(null);
-      return;
-    }
-    if (!bodyRef.current?.contains(sel.anchorNode)) return;
-
-    const rect = sel.getRangeAt(0).getBoundingClientRect();
-    setPending({ text, x: rect.left + rect.width / 2, y: rect.bottom + 6 });
-  }, [allowNotes]);
-
-  useEffect(() => {
-    if (!pending) return;
-    draftRef.current?.focus();
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setPending(null);
-        setDraft('');
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [pending]);
-
-  function addNote() {
-    if (!pending || !draft.trim()) return;
-    onNotesChange([...notes, createNote(anchorDoc, pending.text, draft.trim())]);
-    setPending(null);
-    setDraft('');
-    window.getSelection()?.removeAllRanges();
-  }
-
-  function beginBlockEdit(node: PositionedNode | undefined, e: React.MouseEvent) {
-    if (!editable || !onCommitBlockEdit) return;
-    // A real selection means the user is suggesting, not editing.
-    const sel = window.getSelection();
-    if (sel && !sel.isCollapsed) return;
-    // Interactive elements keep their own behavior (checkbox toggle, links).
-    const target = e.target as HTMLElement;
-    if (target.closest('input, a, textarea')) return;
-    const range = offsetsOf(node);
-    if (!range) return;
-    e.stopPropagation(); // a p inside an li must not also start the li's edit
-    setEditing({ ...range, original: content.slice(range.start, range.end) });
-    setEditDraft(content.slice(range.start, range.end));
-  }
-
-  function commitBlockEdit() {
-    if (!editing) return;
-    const { start, end, original } = editing;
-    setEditing(null);
-    // Stale guard: the agent (or a reload) rewrote the file under the editor —
-    // drop the edit rather than splice at offsets that no longer mean anything.
-    if (content.slice(start, end) !== original) return;
-    if (editDraft === original) return;
-    onCommitBlockEdit?.(start + offsetBase, end + offsetBase, editDraft);
-  }
-
-  function editorFor(editingBlock: EditingBlock): React.ReactNode {
-    return (
-      <textarea
-        ref={editRef}
-        className="md-block-editing"
-        value={editDraft}
-        rows={Math.max(1, editDraft.split('\n').length)}
-        onChange={(e) => setEditDraft(e.target.value)}
-        onBlur={commitBlockEdit}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
-            commitBlockEdit();
-          } else if (e.key === 'Escape') {
-            setEditing(null);
-          }
-        }}
-        aria-label="Edit block markdown"
-        data-editing-start={editingBlock.start}
-        spellCheck={false}
-        autoComplete="off"
-        autoCorrect="off"
-        autoCapitalize="off"
-      />
-    );
-  }
 
   // Every note's quoted text, so the renderer can highlight them.
   const highlighted = useMemo(
@@ -222,124 +57,39 @@ function MarkdownPreview({
   );
 
   const markdownComponents = useMemo(() => {
-    type BlockProps = { node?: PositionedNode; children?: React.ReactNode };
+    type BlockProps = { children?: React.ReactNode };
 
-    const isEditingNode = (node?: PositionedNode) => {
-      const range = offsetsOf(node);
-      return !!editing && !!range && range.start === editing.start && range.end === editing.end;
-    };
-
-    /** Clickable-to-edit block that also carries the note highlight. */
+    /** A block that carries the note highlight. */
     const block =
-      (Tag: 'p' | 'li' | 'h1' | 'h2' | 'h3' | 'h4', highlight: boolean) =>
-      ({ node, children }: BlockProps) => {
-        if (editable && isEditingNode(node) && editing) {
-          // The textarea replaces the block's CONTENT, keeping the tag so list
-          // markers/semantics stay stable while editing an li.
-          return <Tag className="md-block-editing-host">{editorFor(editing)}</Tag>;
-        }
-        return (
-          <Tag
-            onClick={editable ? (e: React.MouseEvent) => beginBlockEdit(node, e) : undefined}
-            className={editable ? 'md-block-editable' : undefined}
-          >
-            {highlight ? highlightRun(children, highlighted) : children}
-          </Tag>
-        );
-      };
+      (Tag: 'p' | 'li') =>
+      ({ children }: BlockProps) => <Tag>{highlightRun(children, highlighted)}</Tag>;
 
     return {
       // Mark up text that a note is pinned to. Only exact runs are wrapped —
       // partial highlighting would need range surgery the renderer cannot do
       // safely, and a missed highlight is far better than mangled prose.
-      p: block('p', true),
-      li: block('li', true),
-      h1: block('h1', false),
-      h2: block('h2', false),
-      h3: block('h3', false),
-      h4: block('h4', false),
-      // Task-list checkboxes: live when editable (remark-gfm renders them
-      // disabled), toggling `- [ ]`/`- [x]` in the source via the li's line.
-      input: ({ node, ...props }: BlockProps & { type?: string; checked?: boolean; disabled?: boolean }) => {
-        const rest = props as React.InputHTMLAttributes<HTMLInputElement>;
-        if (!editable || !onToggleTask || rest.type !== 'checkbox') {
-          return <input {...rest} />;
-        }
-        const start = node?.position?.start?.offset;
-        return (
-          <input
-            {...rest}
-            disabled={false}
-            onChange={() => {
-              if (typeof start === 'number') onToggleTask(start + offsetBase);
-            }}
-        spellCheck={false}
-        autoComplete="off"
-        autoCorrect="off"
-        autoCapitalize="off"
-          />
-        );
-      },
+      p: block('p'),
+      li: block('li'),
     };
-    // beginBlockEdit/commitBlockEdit/editorFor close over content/editing/editDraft;
-    // memo keys cover everything that changes their behavior.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [highlighted, editable, editing, editDraft, content, offsetBase, onCommitBlockEdit, onToggleTask]);
+  }, [highlighted]);
 
   return (
-    <div className="md-preview" onMouseUp={onMouseUp}>
+    <div className="md-preview">
       <div className="md-preview-body" ref={bodyRef}>
         <Markdown remarkPlugins={REMARK_PLUGINS} components={markdownComponents}>
           {content}
         </Markdown>
       </div>
 
-      {pending && (
-        <div className="md-suggest-popover" style={{ left: pending.x, top: pending.y }}>
-          <div className="md-suggest-quote">“{truncate(pending.text, 80)}”</div>
-          <textarea
-            ref={draftRef}
-            className="md-suggest-input"
-            placeholder="What should change?"
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              // Enter submits; Shift+Enter is a newline. Matches the composer.
-              // ⌘/Ctrl+Enter submits too, so the habit carries over from the
-              // roomier per-step composer without having to think about which
-              // box you are in. Escape closes: without it the only way out of
-              // a popover you opened by accident was to aim at Cancel.
-              if (e.key === 'Enter' && (!e.shiftKey || e.metaKey || e.ctrlKey)) {
-                e.preventDefault();
-                addNote();
-              } else if (e.key === 'Escape') {
-                e.preventDefault();
-                setPending(null);
-                setDraft('');
-              }
-            }}
-            spellCheck={false}
-            autoComplete="off"
-            autoCorrect="off"
-            autoCapitalize="off"
-          />
-          <div className="md-suggest-actions">
-            <button type="button" className="md-suggest-btn" onClick={() => { setPending(null); setDraft(''); }}>
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="md-suggest-btn md-suggest-btn--primary"
-              onClick={addNote}
-              disabled={!draft.trim()}
-            >
-              Add
-            </button>
-          </div>
-        </div>
-      )}
+      <SuggestPopover
+        containerRef={bodyRef}
+        anchorDoc={content}
+        notes={notes}
+        onNotesChange={onNotesChange}
+        enabled={allowNotes}
+      />
 
-      {!slice && notes.length > 0 && (
+      {notes.length > 0 && (
         <div className="md-notes">
           <div className="md-notes-title">
             {notes.length} suggestion{notes.length === 1 ? '' : 's'}
@@ -372,10 +122,10 @@ function MarkdownPreview({
         </div>
       )}
 
-      {!slice && allowNotes && notes.length === 0 && (
+      {allowNotes && notes.length === 0 && (
         <div className="md-preview-hint">
           <MessageSquarePlus size={12} />
-          {editable ? 'Click a block to edit it, or select text to suggest a change.' : 'Select any text to suggest a change.'}
+          Select any text to suggest a change.
         </div>
       )}
     </div>

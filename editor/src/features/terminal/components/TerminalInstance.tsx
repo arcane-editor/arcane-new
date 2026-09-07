@@ -182,6 +182,17 @@ function TerminalInstance({ id }: Props) {
           ) {
             return false;
           }
+          // terminal.new (mod+shift+`). It is in COMMANDS_TO_SKIP_SHELL, so
+          // the app command fires from inside a pane — but xterm would also
+          // forward the keystroke to the PTY. This never showed up before
+          // because the chord was spelled with a literal backtick and so
+          // never matched anything at all.
+          if (
+            e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey &&
+            e.code === 'Backquote'
+          ) {
+            return false;
+          }
           // terminal.toggle owns mod+j (= Ctrl+J here) everywhere, including
           // from inside a focused terminal — the human ruled the panel toggle
           // wins, the same call VS Code makes. Swallow it here so xterm's

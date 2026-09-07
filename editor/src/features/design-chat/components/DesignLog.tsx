@@ -1,19 +1,12 @@
-import { useEffect, useRef, useState } from 'react';
-import { Check, CircleAlert, ImageOff, Loader, MessageCircleQuestion, Shield } from 'lucide-react';
+import { useEffect, useRef } from 'react';
+import { Check, CircleAlert, Loader, MessageCircleQuestion, Shield } from 'lucide-react';
 import type { DesignRow } from '../services/design-rows';
-import type { DesignRender } from '../../../stores/design-chat';
 
 interface Props {
   rows: DesignRow[];
   /** Rendered under the last row while a turn is live. */
   status: string | null;
   emptyHint: string;
-  /**
-   * The picture of the screen this turn produced, if there is one. Already
-   * filtered to the session's document by the dock — a render of the tab you
-   * just left is worse than none.
-   */
-  render: DesignRender | null;
   /** Answer a blocked `ask_user`. The turn stays open until this fires. */
   onAnswer: (toolCallId: string, answer: string) => void;
   /** Resolve a blocked approval. Same — the turn is waiting on it. */
@@ -31,7 +24,7 @@ interface Props {
  * right-aligned column, which is what lets the rows line up without a divider
  * between them.
  */
-export function DesignLog({ rows, status, emptyHint, render, onAnswer, onPermission }: Props) {
+export function DesignLog({ rows, status, emptyHint, onAnswer, onPermission }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
 
@@ -41,7 +34,7 @@ export function DesignLog({ rows, status, emptyHint, render, onAnswer, onPermiss
     const node = ref.current;
     if (!node || !pinned.current) return;
     node.scrollTop = node.scrollHeight;
-  }, [rows, status, render]);
+  }, [rows, status]);
 
   function handleScroll() {
     const node = ref.current;
@@ -62,7 +55,6 @@ export function DesignLog({ rows, status, emptyHint, render, onAnswer, onPermiss
       {rows.map((row) => (
         <Row key={row.id} row={row} onAnswer={onAnswer} onPermission={onPermission} />
       ))}
-      {render && <RenderTile render={render} />}
       {status && (
         <p className="design-log-status" aria-live="polite">
           <Loader size={11} className="design-log-spin" strokeWidth={2} />
@@ -70,45 +62,6 @@ export function DesignLog({ rows, status, emptyHint, render, onAnswer, onPermiss
         </p>
       )}
     </div>
-  );
-}
-
-/**
- * What the screen looks like now.
- *
- * The log's other rows are counts and file names, which is the right register
- * for "what happened" and the wrong one for "does this look right". A picture
- * settles in half a second things no number in this panel can: that the title
- * collides with the panel edge, that the accent landed on the least important
- * control, that the whole screen came out grey.
- *
- * A failed capture is stated, not hidden. `renderToPng` returns null rather
- * than a blank frame for every failure, and rendering nothing here would let a
- * screen that could not be drawn read exactly like a screen with nothing on it.
- */
-function RenderTile({ render }: { render: DesignRender }) {
-  const [open, setOpen] = useState(false);
-
-  if (!render.dataUrl) {
-    return (
-      <p className="design-log-render is-missing">
-        <ImageOff size={11} strokeWidth={2} />
-        The render could not be captured — the layout numbers above still hold.
-      </p>
-    );
-  }
-
-  return (
-    <figure className={`design-log-render${open ? ' is-open' : ''}`}>
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        title={open ? 'Smaller' : 'See it larger'}
-        aria-expanded={open}
-      >
-        <img src={render.dataUrl} alt={`Rendered preview of ${render.documentPath}`} />
-      </button>
-    </figure>
   );
 }
 

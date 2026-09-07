@@ -27,6 +27,13 @@ describe('routePlanSend', () => {
     expect(routePlanSend('interrupted', '/ws/.unityide/plans/p.md')).toBe('resume');
   });
 
+  // The third bug: a run that finished every step used to land back on
+  // 'awaiting-execute', so typing "now also do X" REVISED the plan that had
+  // just been built instead of planning the next thing.
+  it('plans fresh after a completed run rather than revising the finished document', () => {
+    expect(routePlanSend('completed', '/ws/.unityide/plans/p.md')).toBe('plan');
+  });
+
   it('never revises without a plan file to revise', () => {
     expect(routePlanSend('awaiting-execute', null)).toBe('plan');
   });

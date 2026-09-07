@@ -11,6 +11,7 @@
 // `document` at module scope and takes the Bun suite down on import alone.
 
 import { invoke } from '@tauri-apps/api/core';
+import { toAbsolutePath } from '../../../utils/relative-path';
 import {
   parsePanelSettings,
   findPanelSettingsRef,
@@ -126,7 +127,7 @@ export async function loadPanelSettings(
     return out;
   };
 
-  const absolute = (p: string) => (p.startsWith('/') ? p : `${workspacePath}/${p}`);
+  const absolute = (p: string) => toAbsolutePath(p, workspacePath);
   const assetPaths = paths.filter((p) => p.endsWith('.asset'));
 
   // Assets first, and nothing else until they say something. A project with no

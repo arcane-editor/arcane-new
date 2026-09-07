@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { openExcerptAt } from '../../search';
 import { useWorkspaceStore } from '../../../stores/workspace';
+import { toAbsolutePath } from '../../../utils/relative-path';
 import { describeUsage, type ElementUsage } from '../../../utils/uxml-usage';
 import { propertyEntries, type CascadeRule, type PropertyEntry, type PropertySource }
   from '../services/cascade';
@@ -69,7 +70,7 @@ export function ElementInspector({
    */
   const open = (path: string, line: number, column = 1) => {
     const workspace = useWorkspaceStore.getState().workspacePath;
-    const full = path.startsWith('/') || !workspace ? path : `${workspace}/${path}`;
+    const full = toAbsolutePath(path, workspace);
     void openExcerptAt(full, line, column, { highlight: true });
   };
 

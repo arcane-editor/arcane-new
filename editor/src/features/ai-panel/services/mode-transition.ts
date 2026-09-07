@@ -31,10 +31,13 @@ export type ModeTransition =
   | { kind: 'switch'; mode: ChatMode; planPhase: PlanPhase; activePlanPath: string | null; notice?: string };
 
 /**
- * Shown when a plan with a live phase (`awaiting-execute` or `interrupted`)
- * is left behind by a switch away from plan mode. The phase and path are kept
- * (not reset to idle) so switching back to plan mode finds the card exactly
- * where it was.
+ * Shown when a plan with a PENDING phase (`awaiting-execute` or
+ * `interrupted`) is left behind by a switch away from plan mode. The phase and
+ * path are kept (not reset to idle) so switching back to plan mode finds the
+ * card exactly where it was.
+ *
+ * A `completed` plan is parked the same way but WITHOUT this notice: it owes
+ * the user nothing, so announcing it would be noise.
  */
 export const PLAN_PARKED_NOTICE = 'Plan parked. Switch back to Plan mode to execute or resume it.';
 
@@ -80,7 +83,9 @@ export function normalizeLivePlanState(
  *   A normalized `awaiting-execute`/`interrupted` WITH a path is parked:
  *   switching to `plan` keeps it with no notice (the card is right there);
  *   switching to `ask`/`agent` keeps it too, but with `PLAN_PARKED_NOTICE` so
- *   the user knows where it went.
+ *   the user knows where it went. `completed` is kept for every destination
+ *   with no notice — a finished plan is not something the user is owed a
+ *   reminder about.
  */
 export function planModeTransition(input: ModeTransitionInput): ModeTransition {
   const { from, to, isAgentRunning } = input;
@@ -93,8 +98,16 @@ export function planModeTransition(input: ModeTransitionInput): ModeTransition {
     return { kind: 'switch', mode: to, planPhase: 'idle', activePlanPath: null };
   }
 
-  // Only `awaiting-execute` and `interrupted` survive normalization with a
-  // path intact — both are a plan the user can still act on.
+  // A finished plan is kept the same way, but silently: the notice exists to
+  // explain where a plan the user still owed an answer to went, and a
+  // `completed` plan owes nothing — switching back to plan mode still finds
+  // its card ("Run again" / Open).
+  if (live.planPhase === 'completed') {
+    return { kind: 'switch', mode: to, planPhase: 'completed', activePlanPath: live.activePlanPath };
+  }
+
+  // Only `awaiting-execute` and `interrupted` reach here with a path intact —
+  // both are a plan the user can still act on.
   if (to === 'plan') {
     return { kind: 'switch', mode: to, planPhase: live.planPhase, activePlanPath: live.activePlanPath };
   }

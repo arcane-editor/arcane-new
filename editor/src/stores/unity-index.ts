@@ -315,12 +315,59 @@ function initDeltaListener(): void {
   });
 }
 
+// ── file-content-changed → uiToolkitRevision ────────────────────────────
+//
+// The OTHER half of "a `.uxml`/`.uss` changed on disk", and the half that was
+// missing.
+//
+// `file-index-changed` carries only what `file_scanner.rs` puts in its
+// `added`/`removed` lists, and those are populated from `Create` and
+// `Modify(Name)` — creations and renames. A plain in-place rewrite of an
+// existing file arrives as `Modify(Data)`, which the scanner reports on a
+// SEPARATE event, `file-content-changed`. So the delta listener above sees a
+// stylesheet the first time it is written and never again.
+//
+// That gap is the whole difference between the design dock's render and the
+// `.uxml` preview: `layout-gate.ts` re-reads every file from disk on every
+// probe, while every consumer of `uiToolkitRevision` waits for a signal that
+// only fired on creation. Iterating on a screen — the AI rewriting a `.uss` it
+// already wrote, or a human editing one in Unity — changed the file and
+// notified nobody.
+//
+// Gated the same way as the delta listener so the two signals cannot disagree
+// about whether this project is being indexed at all.
+
+let contentListenerInitialized = false;
+
+function initUiContentListener(): void {
+  if (contentListenerInitialized) return;
+  contentListenerInitialized = true;
+  listenScoped<string[]>('file-content-changed', (event) => {
+    if (!indexEnabled()) return;
+    // Rust already dedups and settles each burst before emitting, so one bump
+    // per event is one bump per burst — no debounce needed here.
+    const uiTouched = (event.payload ?? []).some((p) => {
+      const lower = p.toLowerCase();
+      return lower.endsWith('.uxml') || lower.endsWith('.uss');
+    });
+    if (!uiTouched) return;
+    // Only `uiToolkitRevision`: an in-place edit changes a document's CONTENT,
+    // never its guid, so neither the guid map nor the reverse-reference index
+    // has gone stale. (This is the same reasoning that keeps `.uxml`/`.uss` out
+    // of the Rust reingest — see `INDEX_RELEVANT`.)
+    useUnityIndexStore.setState((s) => ({ uiToolkitRevision: s.uiToolkitRevision + 1 }));
+  }).catch(() => {
+    contentListenerInitialized = false;
+  });
+}
+
 /**
- * Install the unity-index listeners (progress + incremental delta). Idempotent
- * and inert for non-Unity projects (the delta listener self-gates). Call once
- * on app mount.
+ * Install the unity-index listeners (progress + incremental delta + UI
+ * document content). Idempotent and inert for non-Unity projects (the delta
+ * and content listeners self-gate). Call once on app mount.
  */
 export function initUnityIndexListeners(): void {
   initProgressListener();
   initDeltaListener();
+  initUiContentListener();
 }

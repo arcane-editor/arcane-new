@@ -100,6 +100,28 @@ describe('planModeTransition — awaiting-execute, path set', () => {
   });
 });
 
+describe('planModeTransition — completed, path set', () => {
+  it('parks a finished plan with the finished notice when leaving plan mode', () => {
+    for (const to of ['ask', 'agent'] as const) {
+      expect(t({ from: 'plan', to, planPhase: 'completed', activePlanPath: '/ws/.unityide/plans/p.md' })).toEqual({
+        kind: 'switch',
+        mode: to,
+        planPhase: 'completed',
+        activePlanPath: '/ws/.unityide/plans/p.md',
+      });
+    }
+  });
+
+  it('switches to plan mode with the finished card visible and no notice', () => {
+    expect(t({ from: 'agent', to: 'plan', planPhase: 'completed', activePlanPath: '/ws/.unityide/plans/p.md' })).toEqual({
+      kind: 'switch',
+      mode: 'plan',
+      planPhase: 'completed',
+      activePlanPath: '/ws/.unityide/plans/p.md',
+    });
+  });
+});
+
 describe('planModeTransition — awaiting-execute, no path', () => {
   it('resets to idle for every destination — nothing to park', () => {
     for (const to of ['ask', 'agent', 'plan'] as const) {
@@ -195,6 +217,13 @@ describe('normalizeLivePlanState', () => {
 
   it('leaves a live execution run alone', () => {
     expect(normalizeLivePlanState('executing', '/p.md', true)).toEqual({ planPhase: 'executing', activePlanPath: '/p.md' });
+  });
+
+  it('leaves a completed plan alone — nothing died, it finished', () => {
+    expect(normalizeLivePlanState('completed', '/p.md', false)).toEqual({
+      planPhase: 'completed',
+      activePlanPath: '/p.md',
+    });
   });
 
   it('leaves awaiting-execute and interrupted alone regardless of isAgentRunning', () => {
