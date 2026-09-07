@@ -141,9 +141,12 @@ describe('native menu vs command registry', () => {
   /**
    * Two commands on one chord is the bug `view.toggleBottomPanel` was left
    * unbound to avoid. It matters more now that chords are focus-routed:
-   * `window.minimize` answers mod+m and decides between minimizing and cycling
-   * the AI mode by where the caret is, so a second mod+m command would not
-   * merely double-fire, it would make the routing unreachable.
+   * `ai.cycleMode` owns mod+m but only fires while the caret is in the AI
+   * composer, so a second mod+m command would not merely double-fire — it
+   * would answer everywhere the first one deliberately does not.
+   *
+   * (`window.minimize` used to be described here as the mod+m owner. It has
+   * had no chord since menu.rs dropped the accelerator; see App.tsx.)
    */
   it('gives every chord exactly one owning command', () => {
     const ids = [...APP.matchAll(/\bid:\s*'([^']+)'/g)].map((m) => ({

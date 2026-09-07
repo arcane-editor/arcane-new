@@ -194,6 +194,15 @@ describe('normalizePlanRestore', () => {
     });
   });
 
+  // Reloading must not re-offer Execute for a plan that already ran to the
+  // end — the phase survives the restart exactly as it was written.
+  it('restores completed as-is', () => {
+    expect(normalizePlanRestore('completed', '/p.md')).toEqual({
+      planPhase: 'completed',
+      activePlanPath: '/p.md',
+    });
+  });
+
   it('normalizes a saved executing phase to interrupted (the run died with the old process, resumable from the file)', () => {
     expect(normalizePlanRestore('executing', '/p.md')).toEqual({
       planPhase: 'interrupted',

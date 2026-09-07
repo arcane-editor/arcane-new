@@ -17,6 +17,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { parseStyleRef, type UxmlDocument } from '../../../utils/uxml-model';
 import { parseUss, type UssStyleSheet } from '../../../utils/uss-model';
+import { toAbsolutePath } from '../../../utils/relative-path';
 
 // NO store imports. `stores/unity-index` transitively reaches `stores/theme`,
 // which touches `document.documentElement` at module scope and takes the whole
@@ -134,7 +135,7 @@ export async function loadStyleSheets(
       unresolved.push(reason ?? ref.raw);
       continue;
     }
-    const absolute = path.startsWith('/') ? path : `${workspacePath}/${path}`;
+    const absolute = sheetFilePath(path, workspacePath);
     try {
       const content = await invoke<string>('read_file', { path: absolute });
       sheets.push(parseUss(content, path));
@@ -148,4 +149,17 @@ export async function loadStyleSheets(
   }
 
   return { sheets, unresolved };
+}
+
+/**
+ * Where to actually read a resolved stylesheet from.
+ *
+ * `resolveStyleHref` returns EITHER a workspace-relative path (the
+ * `project://` and relative forms) OR an absolute one (`resolveGuid`, whose
+ * values come straight from `unity_index_guid_map`, which hands the frontend
+ * absolute `to_ui_path` spellings). Joining an absolute path onto the
+ * workspace again produces a path that cannot be read.
+ */
+export function sheetFilePath(path: string, workspacePath: string): string {
+  return toAbsolutePath(path, workspacePath);
 }

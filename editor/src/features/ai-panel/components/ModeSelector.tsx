@@ -10,6 +10,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
+import { useAriaKeyshortcuts } from '../../../hooks/useAriaKeyshortcuts';
 import { createPortal } from 'react-dom';
 import { ChevronDown, Check } from 'lucide-react';
 import { useAiStore } from '../../../stores/ai';
@@ -29,6 +30,7 @@ function ModeSelector() {
   const popoverRef = useRef<HTMLDivElement>(null);
   const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
 
+  const modeChord = useAriaKeyshortcuts('ai.cycleMode');
   const active = modeOptionFor(mode);
   const ActiveIcon = active.Icon;
 
@@ -102,7 +104,7 @@ function ModeSelector() {
         aria-expanded={open}
         // Permanent, non-visual counterpart to the ChordHint keycap beside
         // this pill — see EffortSelector for the same pairing.
-        aria-keyshortcuts="Meta+M"
+        aria-keyshortcuts={modeChord}
       >
         <ActiveIcon size={12} className="ai-panel-mode-pill-icon" strokeWidth={2.25} />
         <span className="ai-panel-mode-pill-label">{active.label}</span>

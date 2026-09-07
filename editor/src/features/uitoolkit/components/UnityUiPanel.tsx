@@ -118,12 +118,6 @@ export function UnityUiPanel() {
               )}
             </button>
           ))}
-
-          {summary.problemCount === 0 && (
-            <div style={{ ...NOTE, paddingTop: 10 }}>
-              Every class resolves and every property is valid USS.
-            </div>
-          )}
         </div>
       )}
     </div>

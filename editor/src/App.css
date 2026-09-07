@@ -5042,6 +5042,20 @@ html, body, #root {
   color: var(--text-primary);
 }
 
+/* A finished plan: the accent rail and the ✓ line are the whole difference
+   — same card, no primary-filled button, since nothing is pending on it. */
+.ai-panel-plan-actions.is-completed {
+  border-left-color: var(--success);
+}
+
+.ai-panel-plan-actions-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--success);
+}
+
 .ai-panel-plan-actions-buttons {
   display: flex;
   align-items: center;
@@ -8450,8 +8464,6 @@ html, body, #root {
   letter-spacing: -0.005em;
   color: var(--text-primary);
 }
-.plan-step-title.is-editable { cursor: text; border-radius: var(--radius-sm); }
-.plan-step-title.is-editable:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); }
 .plan-step-title code {
   padding: 1px 4px;
   border-radius: var(--radius-sm);
@@ -8461,22 +8473,6 @@ html, body, #root {
   font-weight: 400;
 }
 .plan-step--running .plan-step-title { color: var(--text-active); }
-
-.plan-step-title-input {
-  flex: 1;
-  min-width: 0;
-  box-sizing: border-box;
-  resize: none;
-  padding: 2px 5px;
-  border: 1px solid var(--accent);
-  border-radius: var(--radius-sm);
-  background: var(--bg-sidebar);
-  color: var(--text-primary);
-  font-family: var(--font-mono);
-  font-size: var(--text-sm);
-  line-height: 1.5;
-  outline: none;
-}
 
 .plan-step-disclose {
   flex-shrink: 0;
@@ -8569,27 +8565,109 @@ html, body, #root {
 .plan-step-guide .md-preview-body { font-size: var(--text-sm); line-height: 1.65; }
 .plan-step-guide .md-preview-body h3,
 .plan-step-guide .md-preview-body h4 { font-size: 1em; margin: var(--space-3) 0 var(--space-1); }
-/* Notion-style in-place block editing (plan preview) */
-.md-block-editable { cursor: text; border-radius: 4px; }
-.md-block-editable:hover { background: color-mix(in srgb, var(--accent) 6%, transparent); }
-.md-block-editing-host { list-style: none; }
-.md-block-editing {
-  display: block;
-  width: 100%;
-  box-sizing: border-box;
-  resize: none;
-  min-height: 1.6em;
-  padding: 4px 6px;
-  font-family: var(--font-mono);
-  font-size: var(--text-sm);
-  line-height: 1.5;
-  color: var(--text-primary);
-  background: var(--bg-sidebar);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  outline: none;
+/* ---- Plan document: editable regions -------------------------------------
+   A region is a Lexical editor rendered where its text is read, so it borrows
+   the rendered-markdown typography wholesale (`md-preview-body`) and then
+   undoes the parts of it that belong to a PAGE: a region sits inside a step
+   card, not on a sheet of its own. */
+.plan-region.md-preview-body {
+  position: relative;
+  max-width: none;
+  margin: 0;
+  padding: 0;
 }
-.md-block-editing:focus { border-color: var(--accent); }
+
+/* A step title is one line of the card's own heading, so it keeps the h3's
+   type rather than the body's. */
+.plan-region--title.md-preview-body {
+  font-size: inherit;
+  line-height: inherit;
+}
+.plan-region--title p { margin: 0; }
+
+.plan-region-content {
+  outline: none;
+  caret-color: var(--accent);
+  /* The caret has to be reachable in an empty region, and a bare contenteditable
+     collapses to zero height. */
+  min-height: 1.2em;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Last block in a region: the trailing margin is the gap between blocks, and
+   at the end of a region it doubles the card's own spacing. */
+.plan-region-content > *:last-child { margin-bottom: 0; }
+
+.plan-region-placeholder {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  user-select: none;
+  color: var(--text-secondary);
+  opacity: 0.6;
+}
+
+/* Lexical ships no styles: a code block is a <code> element (not pre > code),
+   and check-list items are <li role="checkbox"> with no marker of their own. */
+.md-lex-codeblock {
+  display: block;
+  margin: 0 0 var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-input);
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  white-space: pre-wrap;
+  overflow-x: auto;
+}
+
+.md-lex-li-checked,
+.md-lex-li-unchecked {
+  position: relative;
+  list-style: none;
+  margin-left: -1.35em;
+  padding-left: 1.6em;
+  cursor: pointer;
+}
+
+.md-lex-li-checked::before,
+.md-lex-li-unchecked::before {
+  content: '';
+  position: absolute;
+  top: 0.3em;
+  left: 0;
+  width: 0.95em;
+  height: 0.95em;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+}
+
+.md-lex-li-checked::before {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+/* The tick, drawn rather than shipped as an asset — two borders rotated. */
+.md-lex-li-checked::after {
+  content: '';
+  position: absolute;
+  top: 0.45em;
+  left: 0.33em;
+  width: 0.25em;
+  height: 0.5em;
+  border: solid var(--button-primary-text);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+.md-lex-li-checked {
+  color: var(--text-secondary);
+  text-decoration: line-through;
+}
 
 .plan-doc-btn {
   display: inline-flex;
@@ -10277,103 +10355,6 @@ html, body, #root {
   overflow-y: auto;
 }
 
-/* ── The render ─────────────────────────────────────────────────────────────
-   The only picture in a panel made entirely of counts and file names, so it is
-   allowed to be the thing your eye lands on. It sits at the tail of the log
-   because that is where "and this is what it looks like now" belongs — after
-   the writes, not beside them.
-
-   Sized as a contact sheet by default: wide enough to judge composition and
-   colour, small enough that the transcript above it is still readable. Click
-   swaps to full width, which at a 16:9 panel is the largest the dock will ever
-   usefully show. No shadow and no rounded frame beyond the hairline — the
-   picture already has edges, and giving it a card would make it the second
-   floating panel inside the first. */
-
-.design-log-render {
-  margin: 8px 0 2px;
-  padding: 0;
-}
-
-.design-log-render button {
-  display: block;
-  width: 62%;
-  min-width: 180px;
-  padding: 0;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: none;
-  cursor: zoom-in;
-  overflow: hidden;
-  transition: width 120ms ease, border-color 120ms ease;
-}
-
-.design-log-render.is-open button {
-  width: 100%;
-  cursor: zoom-out;
-}
-
-.design-log-render button:hover {
-  border-color: var(--accent);
-}
-
-.design-log-render button:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
-.design-log-render img {
-  display: block;
-  width: 100%;
-  height: auto;
-}
-
-/* A capture that failed says so. Rendering nothing would let a screen that
-   could not be drawn read exactly like a screen with nothing on it. */
-.design-log-render.is-missing {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 10.5px;
-  line-height: 1.5;
-  color: var(--text-secondary);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .design-log-render button {
-    transition: none;
-  }
-}
-
-/* Said before it happens: the render is about to be part of the message. The
-   opt-out is a word rather than a switch — it is a rare click, and a toggle
-   here would imply a setting worth tending. */
-.design-dock-render-note {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
-  margin: 0;
-  padding: 4px 14px 0;
-  font-size: 10.5px;
-  color: var(--text-secondary);
-}
-
-.design-dock-render-note button {
-  padding: 0;
-  border: none;
-  background: none;
-  color: var(--text-secondary);
-  font-size: 10.5px;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-  cursor: pointer;
-}
-
-.design-dock-render-note button:hover {
-  color: var(--text-primary);
-}
-
 /* The one state the rows cannot show: running, with nothing in flight. */
 .design-log-status {
   display: flex;
@@ -10665,4 +10646,68 @@ html, body, #root {
   background: var(--search-match-bg, rgba(255, 200, 0, 0.32));
   color: inherit;
   border-radius: 2px;
+}
+
+/* Keyboard shortcuts sheet (help.keyboardShortcuts). Reuses the palette's
+   overlay, input and chip styling so the two read as one family; only the
+   frame and the two-column rows are its own. */
+.shortcuts-sheet {
+  position: fixed;
+  top: 8vh;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 720px;
+  max-width: 92vw;
+  max-height: 78vh;
+  background: color-mix(in srgb, var(--bg-sidebar) 94%, transparent);
+  backdrop-filter: blur(28px) saturate(140%);
+  -webkit-backdrop-filter: blur(28px) saturate(140%);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--modal-shadow);
+  z-index: 1001;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.shortcuts-sheet-count {
+  font-size: 11px;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.shortcuts-sheet-body {
+  overflow-y: auto;
+  padding: 4px 0 8px;
+}
+
+.shortcuts-sheet-group {
+  margin-bottom: 4px;
+}
+
+.shortcuts-sheet-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 5px 12px;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.shortcuts-sheet-row:hover {
+  background: var(--hover);
+}
+
+.shortcuts-sheet-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shortcuts-sheet-chords {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
 }

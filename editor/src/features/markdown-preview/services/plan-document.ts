@@ -102,7 +102,16 @@ function linesOf(doc: string): Line[] {
   while (start <= doc.length) {
     const nl = doc.indexOf('\n', start);
     const end = nl === -1 ? doc.length : nl;
-    out.push({ start, end, text: doc.slice(start, end) });
+    // Strip the CR of a CRLF pair from the MATCHED text while leaving
+    // offsets against the original document. Every regex in this parser is
+    // anchored with `$`, and `.` in JavaScript never matches a carriage
+    // return — so a plan saved with CRLF line endings matched no checkbox
+    // and no `## Todos` heading, and the whole file degraded to one
+    // unstructured block: no steps, no spine, nothing to execute. Offsets
+    // must NOT shift, or every range this parser hands out (`block-edit.ts`,
+    // `region-model.ts`) would splice a byte off.
+    const raw = doc.slice(start, end);
+    out.push({ start, end, text: raw.endsWith('\r') ? raw.slice(0, -1) : raw });
     if (nl === -1) break;
     start = nl + 1;
   }
@@ -202,7 +211,11 @@ function buildSteps(lines: Line[], checkboxIdx: number[]): PlanStepBlock[] {
       title: title.trim(),
       done: state.toLowerCase() === 'x',
       checkboxOffset: line.start,
-      titleRange: { start: line.start + offset, end: line.end },
+      // Ends at the last real character of the line, not at the line
+      // terminator: `line.text` has the CR of a CRLF pair stripped (see
+      // `linesOf`), and a title splice that swallowed the CR would join the
+      // checkbox line to the next one. Identical to `line.end` on LF files.
+      titleRange: { start: line.start + offset, end: line.start + line.text.length },
       // The `T<n>` id is re-read off the line in attachGuides rather than
       // stored here: keeping it out of the public shape keeps it out of the UI.
       guide: null,

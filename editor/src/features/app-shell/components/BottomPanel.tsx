@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import Tooltip from '../../../components/Tooltip';
 import { ChevronDown, ChevronUp, X } from 'lucide-react';
 import { useUiStore, type BottomPanelTab } from '../../../stores/ui';
 import { useProjectContextStore } from '../../../stores/project-context';
@@ -67,13 +68,15 @@ function BottomPanel() {
           ))}
         </div>
         <div className="bottom-panel-actions">
-          <button
-            className="bottom-panel-maximize"
-            title={maximized ? 'Restore Panel (Cmd+Shift+J)' : 'Maximize Panel (Cmd+Shift+J)'}
-            onClick={() => toggleMaximized()}
+          <Tooltip
+            label={maximized ? 'Restore Panel' : 'Maximize Panel'}
+            commandId="view.toggleMaximizedPanel"
+            side="top"
           >
-            {maximized ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
-          </button>
+            <button className="bottom-panel-maximize" onClick={() => toggleMaximized()}>
+              {maximized ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
+            </button>
+          </Tooltip>
           <button
             className="bottom-panel-close"
             title="Close Panel"

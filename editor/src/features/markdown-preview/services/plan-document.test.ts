@@ -35,6 +35,29 @@ function textOf(doc: string, block: PlanBlock): string {
 }
 
 describe('parsePlanDocument', () => {
+  // `.` never matches `\r` in JavaScript, so every `$`-anchored line regex in
+  // this parser missed on a CRLF file: a plan saved with Windows line endings
+  // had no steps, no spine and nothing to execute — it rendered as one
+  // undifferentiated block, and under the in-place editor that block would be
+  // a single region covering the whole file.
+  it('parses a plan saved with CRLF line endings, offsets intact', () => {
+    const crlf = PLAN.replace(/\n/g, '\r\n');
+    const parsed = parsePlanDocument(crlf);
+
+    expect(parsed.structured).toBe(true);
+    expect(parsed.steps).toHaveLength(2);
+    const [t1, t2] = parsed.steps;
+    expect(t1.title).toBe('Fix GET /homePage/domain/:domainName');
+    expect(t1.done).toBe(true);
+    // Offsets still address the ORIGINAL bytes, CR included.
+    expect(crlf.slice(t1.titleRange.start, t1.titleRange.end)).toBe(
+      'Fix GET /homePage/domain/:domainName',
+    );
+    expect(crlf.slice(t2.guide!.start, t2.guide!.end).trim()).toBe(
+      'Apply the same conditional guard.',
+    );
+  });
+
   it('pairs each todo with its guide entry', () => {
     const parsed = parsePlanDocument(PLAN);
     expect(parsed.structured).toBe(true);

@@ -11,6 +11,7 @@ import {
   MIN_EDITOR_WIDTH,
   RightActivityBar,
   RightSidebarPanel,
+  ShortcutsHelpModal,
   SidebarPanel,
   StatusBar,
   TabBar,
@@ -145,6 +146,21 @@ function isTextEditorFocused(): boolean {
   return (monaco?.editor.getEditors() ?? []).some((e) => e.hasTextFocus());
 }
 
+/**
+ * True while a Search tab is the active editor tab.
+ *
+ * The three find toggles are bare `alt+<letter>` chords, and
+ * KeyboardShortcutManager runs with enableOnFormTags/enableOnContentEditable,
+ * so without a gate they would fire — and preventDefault — inside every text
+ * field in the app. Asking the search store instead would not work: its
+ * default session always exists (search.ts seeds one), so it can never
+ * answer "no". The `search://` scheme is how `search.openTab` identifies
+ * its own tab, so it is the honest signal here too.
+ */
+function searchTabIsActive(): boolean {
+  return !!useWorkspaceStore.getState().activeFilePath?.startsWith('search://');
+}
+
 /** The editor selection, when the seed setting allows it. Returns '' when
  *  there is nothing to seed with, so callers can treat it as falsy. */
 function selectionSeedQuery(): string {
@@ -259,6 +275,7 @@ function App() {
   const setDotnetMissingModal = useUiStore((s) => s.setDotnetMissingModal);
   const restoredRef = useRef(false);
   const [showThemePicker, setShowThemePicker] = useState(false);
+  const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
   const [paletteMode, setPaletteMode] = useState<'commands' | 'files' | 'symbols' | 'recent' | null>(null);
   const [branchPickerMode, setBranchPickerMode] = useState<'switch' | 'create' | null>(null);
   const [unityPicker, setUnityPicker] = useState<UnityPickerMode | null>(null);
@@ -876,6 +893,11 @@ function App() {
       // handler fires while a terminal has focus, not whether xterm hands
       // the shell a byte first.
       keybinding: 'mod+j',
+      // mod+` is what every other editor uses for this and what our own
+      // published docs have always claimed, so it answers here too. Not a
+      // legacy alias — it was never bound before — and only `keybinding` is
+      // advertised or mirrored into menu.rs.
+      extraKeybindings: ['mod+backquote'],
       handler: () => {
         const ui = useUiStore.getState();
         const wasVisible = ui.bottomPanelVisible;
@@ -891,7 +913,12 @@ function App() {
       id: 'terminal.new',
       label: 'New Terminal',
       category: 'Terminal',
-      keybinding: 'mod+shift+`',
+      // Named physical-key token, not the literal character, for the same
+      // reason terminal.split spells its chord `backslash` below:
+      // react-hotkeys-hook v5 matches on `event.code`, and 'Backquote'
+      // normalizes to "backquote" — a literal ` can never equal it, so this
+      // chord never fired at all until it was spelled this way.
+      keybinding: 'mod+shift+backquote',
       handler: () => {
         const wp = useWorkspaceStore.getState().workspacePath;
         if (wp) {
@@ -1088,7 +1115,9 @@ function App() {
       id: 'settings.open',
       label: 'Open Settings',
       category: 'Preferences',
-      keybinding: 'mod+,',
+      // `comma`, not ',' — see terminal.new: the registry is matched
+      // against `event.code`, which reports 'Comma'.
+      keybinding: 'mod+comma',
       handler: () => {
         useUiStore.getState().toggleSettings();
       },
@@ -1098,6 +1127,9 @@ function App() {
       label: 'Command Palette',
       category: 'View',
       keybinding: 'mod+shift+p',
+      // F1 is the palette everywhere; a single key is the cheapest possible
+      // chord and nothing else claims it.
+      extraKeybindings: ['f1'],
       handler: () => setPaletteMode('commands'),
     },
     {
@@ -1106,6 +1138,17 @@ function App() {
       category: 'View',
       keybinding: 'mod+p',
       handler: () => setPaletteMode('files'),
+    },
+    {
+      id: 'help.keyboardShortcuts',
+      label: 'Keyboard Shortcuts',
+      category: 'Help',
+      // mod+shift+/ is Ctrl+? — what almost everything uses for "show me the
+      // shortcuts". Three keys, which the rest of this keymap avoids, but a
+      // two-key slot is worth more to an action you run daily than to the one
+      // you run when you have forgotten the others.
+      keybinding: 'mod+shift+slash',
+      handler: () => setShowShortcutsHelp((prev) => !prev),
     },
     {
       // `mod+t` matches Rider's and VS Code's Go-to-Symbol-in-project. Verified
@@ -1188,12 +1231,21 @@ function App() {
       id: 'search.toggleCase',
       label: 'Toggle Match Case',
       category: 'Search',
-      keybinding: 'mod+alt+c',
+      // Alt+C, not mod+alt+C. On Windows `mod` is Ctrl, and Ctrl+Alt IS
+      // AltGr on every non-US layout — so the old chord fired (and
+      // preventDefault'd) whenever someone typed @ \ { } ~ |, swallowing the
+      // character. Alt+C is what VS Code binds on every platform.
+      keybinding: 'alt+c',
       // Monaco's own `toggleFindCaseSensitive` is bound to Cmd+Alt+C on mac
       // with `precondition: undefined` — active whenever the editor has
       // focus, not just while the find widget is open. Same shadowing risk
       // as search.useSelection above: skip the Monaco bridge.
       skipMonacoBridge: true,
+      // A bare alt+<letter> with no gate would fire — and preventDefault — in
+      // every text field in the app, since KeyboardShortcutManager sets
+      // enableOnFormTags/enableOnContentEditable. These three toggles only
+      // mean anything with a search session open, so that is when they exist.
+      when: searchTabIsActive,
       handler: () => {
         const { activeSessionId, sessions, update } = useSearchStore.getState();
         update(activeSessionId, { caseSensitive: !sessions[activeSessionId]?.caseSensitive });
@@ -1203,10 +1255,12 @@ function App() {
       id: 'search.toggleWholeWord',
       label: 'Toggle Match Whole Word',
       category: 'Search',
-      keybinding: 'mod+alt+w',
+      // See search.toggleCase for why this is not mod+alt+W.
+      keybinding: 'alt+w',
       // Same as search.toggleCase: Monaco's `toggleFindWholeWord` owns
       // Cmd+Alt+W on mac whenever the editor has focus.
       skipMonacoBridge: true,
+      when: searchTabIsActive,
       handler: () => {
         const { activeSessionId, sessions, update } = useSearchStore.getState();
         update(activeSessionId, { wholeWord: !sessions[activeSessionId]?.wholeWord });
@@ -1216,7 +1270,12 @@ function App() {
       id: 'search.toggleRegex',
       label: 'Toggle Regular Expression',
       category: 'Search',
-      keybinding: 'mod+alt+x',
+      // alt+R is VS Code's regex toggle on every platform, and mod+alt+X was
+      // an AltGr collision like its two siblings. `skipMonacoBridge` matches
+      // them too — Monaco's own toggleFindRegex would otherwise be shadowed.
+      keybinding: 'alt+r',
+      skipMonacoBridge: true,
+      when: searchTabIsActive,
       handler: () => {
         const { activeSessionId, sessions, update } = useSearchStore.getState();
         update(activeSessionId, { isRegex: !sessions[activeSessionId]?.isRegex });
@@ -1316,7 +1375,16 @@ function App() {
       id: 'view.aiPanel',
       label: 'AI Assistant',
       category: 'View',
-      keybinding: 'mod+shift+a',
+      // Two keys, because this is the single most-used action in the app.
+      // mod+L is what every AI editor binds it to. A bare Ctrl+<letter> also
+      // means skip-shell.ts hands it back to the shell while a terminal has
+      // focus, which is right: Ctrl+L must stay clear-screen there.
+      //
+      // Inside the editor this takes a Monaco default: 'expandLineSelection'
+      // (Ctrl+I in monaco-editor, which VS Code remaps to Ctrl+L). Deliberate
+      // — the bridge in bind-shortcuts.ts wins there, and the same trade is
+      // what every AI editor makes for this chord.
+      keybinding: 'mod+l',
       handler: () => {
         useUiStore.getState().setActiveRightSidebarView('ai-panel');
         useUiStore.getState().setRightSidebarVisible(true);
@@ -1343,7 +1411,10 @@ function App() {
       id: 'ai.toggleInlineSuggestions',
       label: 'Toggle AI Inline Suggestions',
       category: 'AI',
-      keybinding: 'mod+alt+i',
+      // No chord. mod+alt+I was an AltGr collision (see search.toggleCase),
+      // and this is a set-once preference rather than something worth a slot
+      // in a two-key keymap — the status-bar item (InlineSuggestStatusItem)
+      // and the palette are the ways in.
       handler: () => {
         const s = useSettingsStore.getState();
         s.setSetting('ai.inlineSuggestions.enabled', !s.settings['ai.inlineSuggestions.enabled']);
@@ -1493,7 +1564,10 @@ function App() {
       id: 'ai.newChat',
       label: 'New Chat',
       category: 'AI',
-      keybinding: 'mod+shift+l',
+      // Two keys; the second most-used AI action. Like mod+l it yields to
+      // the shell in a terminal, where Ctrl+I is Tab, and like it takes
+      // Monaco's 'expandLineSelection' inside the editor.
+      keybinding: 'mod+i',
       handler: () => {
         useUiStore.getState().setActiveRightSidebarView('ai-panel');
         useUiStore.getState().setRightSidebarVisible(true);
@@ -1525,7 +1599,10 @@ function App() {
       id: 'tab.next',
       label: 'Next Tab',
       category: 'View',
-      keybinding: 'mod+alt+right',
+      // mod+alt+arrows were the worst of the AltGr chords: on top of eating
+      // typed characters, Ctrl+Alt+Arrow rotates the screen under Intel's
+      // display driver. mod+PgDn/PgUp is what VS Code uses and is two keys.
+      keybinding: 'mod+pagedown',
       handler: () => {
         const ws = useWorkspaceStore.getState();
         const files = ws.openFiles;
@@ -1539,7 +1616,8 @@ function App() {
       id: 'tab.prev',
       label: 'Previous Tab',
       category: 'View',
-      keybinding: 'mod+alt+left',
+      // See tab.next.
+      keybinding: 'mod+pageup',
       handler: () => {
         const ws = useWorkspaceStore.getState();
         const files = ws.openFiles;
@@ -1701,16 +1779,16 @@ function App() {
       when: () => !!useWorkspaceStore.getState().activeFilePath,
     },
     {
-      // NOT on mod+shift+r, which Monaco itself uses for this action: that
-      // chord is already `view.revealInExplorer`, and because app commands are
-      // bridged into Monaco via addCommand they shadow the built-in whenever
-      // the editor has focus. The refactorings are real (csharp-ls serves
-      // Extract Method, Introduce constant/parameter — see verify:intellisense)
-      // so they need a chord that is actually free.
+      // mod+shift+r, which is what Monaco itself uses for this action. It
+      // used to belong to `view.revealInExplorer`, whose Monaco bridge
+      // shadowed the built-in whenever the editor had focus; that command has
+      // moved to shift+alt+r (VS Code's actual Reveal chord) so this one can
+      // sit where the editor already expects it. The old mod+alt+R was an
+      // AltGr collision — see search.toggleCase.
       id: 'editor.refactor',
       label: 'Refactor This...',
       category: 'Editor',
-      keybinding: 'mod+alt+r',
+      keybinding: 'mod+shift+r',
       handler: () => window.dispatchEvent(new CustomEvent('refactor-this')),
       when: () => !!useWorkspaceStore.getState().activeFilePath,
     },
@@ -1718,7 +1796,9 @@ function App() {
       id: 'view.revealInExplorer',
       label: 'Reveal Active File in Explorer',
       category: 'View',
-      keybinding: 'mod+shift+r',
+      // shift+alt+r is VS Code's own Reveal chord, and vacating mod+shift+r
+      // hands that one back to editor.refactor / Monaco.
+      keybinding: 'shift+alt+r',
       handler: () => {
         const path = useWorkspaceStore.getState().activeFilePath;
         if (!path) return;
@@ -1753,7 +1833,13 @@ function App() {
       id: 'unity.play',
       label: 'Play',
       category: 'Unity',
-      keybinding: 'ctrl+shift+F5',
+      // The play family is bare F-keys: one keystroke for the action a Unity
+      // developer runs more than any other, and it clears the two chords that
+      // did not work on Windows at all (Shift+F10 is the context-menu key,
+      // F11 is the webview's fullscreen key). KeyboardShortcutManager swallows
+      // F5 unconditionally so this staying `when`-gated cannot leave a bare
+      // F5 falling through to the webview and reloading the app.
+      keybinding: 'f5',
       handler: () => useUnityStore.getState().sendPlay(),
       when: () => useProjectContextStore.getState().isUnityProject,
     },
@@ -1761,7 +1847,7 @@ function App() {
       id: 'unity.pause',
       label: 'Pause',
       category: 'Unity',
-      keybinding: 'ctrl+shift+F6',
+      keybinding: 'f6',
       handler: () => useUnityStore.getState().sendPause(),
       when: () => useProjectContextStore.getState().isUnityProject,
     },
@@ -1769,7 +1855,7 @@ function App() {
       id: 'unity.stop',
       label: 'Stop',
       category: 'Unity',
-      keybinding: 'ctrl+shift+F10',
+      keybinding: 'shift+f5',
       handler: () => useUnityStore.getState().sendStop(),
       when: () => useProjectContextStore.getState().isUnityProject,
     },
@@ -1777,7 +1863,7 @@ function App() {
       id: 'unity.step',
       label: 'Step',
       category: 'Unity',
-      keybinding: 'ctrl+shift+F11',
+      keybinding: 'f7',
       handler: () => useUnityStore.getState().sendStep(),
       when: () => useProjectContextStore.getState().isUnityProject,
     },
@@ -2061,6 +2147,9 @@ function App() {
       {/* Mounted at the app root, not inside the editor pane: it overlays the
           workspace instead of displacing it. Gates itself on `settingsOpen`. */}
       <SettingsModal />
+      {showShortcutsHelp && (
+        <ShortcutsHelpModal onClose={() => setShowShortcutsHelp(false)} />
+      )}
       {showThemePicker && (
         <ThemePicker onClose={() => setShowThemePicker(false)} />
       )}

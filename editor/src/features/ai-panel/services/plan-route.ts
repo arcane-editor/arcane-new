@@ -28,6 +28,13 @@
 // it anywhere but 'resume' would make that promise false — the composer
 // would silently re-plan (stripping the write tools) instead of continuing
 // the plan the model just told the user it stopped mid-way through.
+//
+// 'completed' plans FRESH. A plan whose every step came back ticked
+// (`plan-run.ts`'s `resolvePostExecutionPhase`) is finished, not a draft
+// awaiting notes — so "now also do X" typed after it is the next piece of
+// work, not an edit to the document the run just built. Before the terminal
+// phase existed a finished run landed back on 'awaiting-execute' and this
+// function revised it.
 
 import type { PlanPhase } from '../../../stores/ai';
 
@@ -37,5 +44,6 @@ export function routePlanSend(
 ): 'revise' | 'resume' | 'plan' {
   if (!activePlanPath) return 'plan';
   if (phase === 'awaiting-execute') return 'revise';
+  if (phase === 'completed') return 'plan';
   return phase === 'executing' || phase === 'interrupted' ? 'resume' : 'plan';
 }
