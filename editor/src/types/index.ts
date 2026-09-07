@@ -171,6 +171,7 @@ export interface SettingsSchema {
   'editor.renderWhitespace': 'none' | 'boundary' | 'selection' | 'all';
   'editor.autoSave': 'off' | 'afterDelay' | 'onFocusChange';
   'editor.autoSaveDelay': number;
+  'editor.formatOnSave': boolean;
   'editor.betterComments': boolean;
   'terminal.fontSize': number;
   'terminal.fontFamily': string;

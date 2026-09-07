@@ -214,8 +214,23 @@ export interface HostedPlanEntry {
  * resumable, unlike `awaiting-execute` which has never been started: the
  * plan file's `[x]` ticks carry the progress, and `routePlanSend` maps it to
  * `'resume'` the same way it maps `executing`.
+ *
+ * `completed` is the terminal phase: a run whose plan file came back with
+ * every step ticked. It exists because there was previously nowhere for a
+ * finished run to LAND — `plan-run.ts` sent it back to `awaiting-execute`,
+ * the same value a never-run draft holds, so the card re-offered "Execute"
+ * for work already done and the next typed message revised the plan that had
+ * just been built (`routePlanSend`) instead of planning the next thing.
+ * Nothing is pending here: the card shows "Run again", and typed text starts
+ * a fresh planning run.
  */
-export type PlanPhase = 'idle' | 'planning' | 'awaiting-execute' | 'executing' | 'interrupted';
+export type PlanPhase =
+  | 'idle'
+  | 'planning'
+  | 'awaiting-execute'
+  | 'executing'
+  | 'interrupted'
+  | 'completed';
 
 /**
  * Session-cumulative token usage (P4) — accumulated from the UnityIDE server's

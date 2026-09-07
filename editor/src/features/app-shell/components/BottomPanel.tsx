@@ -1,10 +1,12 @@
 import { useEffect } from 'react';
+import Tooltip from '../../../components/Tooltip';
 import { ChevronDown, ChevronUp, X } from 'lucide-react';
 import { useUiStore, type BottomPanelTab } from '../../../stores/ui';
 import { useProjectContextStore } from '../../../stores/project-context';
 import { RichTerminalPanel } from '../../terminal';
 import { UnityConsolePanel } from '../../unity-console';
 import ProblemsPanel from './ProblemsPanel';
+import { ReferencesPanel } from '../../references';
 
 function BottomPanel() {
   const activeTab = useUiStore((s) => s.activeBottomTab);
@@ -41,6 +43,7 @@ function BottomPanel() {
     { id: 'terminal', label: 'Terminal' },
     ...(isUnityProject ? [{ id: 'unity-console' as BottomPanelTab, label: 'Unity Console' }] : []),
     { id: 'problems', label: 'Problems' },
+    { id: 'references', label: 'Usages' },
   ];
 
   // The stored active tab may be one that isn't available in the current
@@ -65,13 +68,15 @@ function BottomPanel() {
           ))}
         </div>
         <div className="bottom-panel-actions">
-          <button
-            className="bottom-panel-maximize"
-            title={maximized ? 'Restore Panel (Cmd+Shift+J)' : 'Maximize Panel (Cmd+Shift+J)'}
-            onClick={() => toggleMaximized()}
+          <Tooltip
+            label={maximized ? 'Restore Panel' : 'Maximize Panel'}
+            commandId="view.toggleMaximizedPanel"
+            side="top"
           >
-            {maximized ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
-          </button>
+            <button className="bottom-panel-maximize" onClick={() => toggleMaximized()}>
+              {maximized ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
+            </button>
+          </Tooltip>
           <button
             className="bottom-panel-close"
             title="Close Panel"
@@ -101,6 +106,7 @@ function BottomPanel() {
         </div>
         {effectiveTab === 'unity-console' && <UnityConsolePanel />}
         {effectiveTab === 'problems' && <ProblemsPanel />}
+        {effectiveTab === 'references' && <ReferencesPanel />}
       </div>
     </div>
   );

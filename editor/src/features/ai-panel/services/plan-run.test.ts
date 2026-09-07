@@ -191,7 +191,7 @@ describe('runPlanExecution — happy path', () => {
 });
 
 describe('runPlanExecution — post-run phase', () => {
-  it('all steps ticked after the send resolves awaiting-execute and marks the ref done', async () => {
+  it('all steps ticked after the send resolves completed and marks the ref done', async () => {
     const { deps, planPath, phases, refStatusCalls } = makeHarness({
       before: '- [ ] T1 Step one\n',
       after: '- [x] T1 Step one\n',
@@ -200,7 +200,7 @@ describe('runPlanExecution — post-run phase', () => {
 
     await runPlanExecution(deps, planPath, 'Execute the plan.');
 
-    expect(phases).toEqual(['executing', 'awaiting-execute']);
+    expect(phases).toEqual(['executing', 'completed']);
     expect(refStatusCalls).toEqual([
       { path: planPath, status: 'executing' },
       { path: planPath, status: 'done' },
@@ -313,10 +313,14 @@ describe('resolvePostExecutionPhase', () => {
     { aborted: false, capped: false, errored: true },
   ];
 
-  it('non-empty steps, all done ⇒ awaiting-execute/done, whatever aborted/capped/errored say', () => {
+  // A finished plan lands on its OWN phase, not back on the one a never-run
+  // draft sits in — that is what stops the card re-offering "Execute" for work
+  // already done (`PlanActions.tsx`) and what stops the next typed message
+  // revising the document the run just completed (`plan-route.ts`).
+  it('non-empty steps, all done ⇒ completed/done, whatever aborted/capped/errored say', () => {
     for (const flags of FLAG_COMBOS) {
       expect(resolvePostExecutionPhase({ ...flags, steps: DONE_STEPS })).toEqual({
-        planPhase: 'awaiting-execute',
+        planPhase: 'completed',
         refStatus: 'done',
       });
     }

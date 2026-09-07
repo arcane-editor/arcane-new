@@ -16,8 +16,13 @@
  * something this editor knows: the server picks the model per tier, and there
  * is no published vision capability to check. Attaching one to every design
  * send would turn an unknown into a hard failure on every turn if the answer is
- * no. So the composer says the render is going, and one click stops it — the
- * user finds out in one turn instead of losing the feature.
+ * no, so `attachRender` remains as the escape hatch.
+ *
+ * **The render is no longer shown to the USER**, only sent to the model. The
+ * dock used to display it and carry the opt-out next to it; the `.uxml`
+ * preview behind the dock shows the same screen, live, so a second copy in the
+ * transcript was showing the user what they were already looking at. The model
+ * has no such view, which is why the attachment stayed.
  */
 
 import type { Attachment } from '../../ai-panel';
@@ -58,15 +63,4 @@ export function renderAttachment(input: RenderAttachInput): Attachment | null {
 
 function basename(path: string): string {
   return path.split('/').pop() ?? path;
-}
-
-/**
- * The line under the composer, or null when nothing will be attached.
- *
- * Says what is going to happen before it happens. A picture silently added to
- * a message is a surprise on the bill and a surprise in the transcript.
- */
-export function renderAttachNote(input: RenderAttachInput): string | null {
-  if (!renderAttachment(input)) return null;
-  return 'The current render goes with this message';
 }

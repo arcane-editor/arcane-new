@@ -24,7 +24,7 @@ import {
   startDesignThread,
 } from '../services/design-session';
 import { sameDocument } from '../services/design-session-policy';
-import { renderAttachment, renderAttachNote } from '../services/render-attach';
+import { renderAttachment } from '../services/render-attach';
 import { DesignHistory } from './DesignHistory';
 import { DesignLog } from './DesignLog';
 import { DesignComposer } from './DesignComposer';
@@ -68,11 +68,8 @@ export function DesignChatDock({ documentPath, documentName }: Props) {
   // Survives the unmount a tab switch causes — see `stores/design-chat.ts`.
   const draft = useDesignChatStore((s) => s.draft);
   const setDraft = useDesignChatStore((s) => s.setDraft);
-  const storedRender = useDesignChatStore((s) => s.render);
   const sessionId = useAiStore((s) => s.sessionId);
   const [historyOpen, setHistoryOpen] = useState(false);
-  const attachRender = useDesignChatStore((s) => s.attachRender);
-  const setAttachRender = useDesignChatStore((s) => s.setAttachRender);
   const markRenderSent = useDesignChatStore((s) => s.markRenderSent);
 
   const messages = useAiStore((s) => s.messages);
@@ -151,17 +148,6 @@ export function DesignChatDock({ documentPath, documentName }: Props) {
    * saying so is the difference between a second window and a lie.
    */
   const live = sameDocument(designDocument, documentPath) && mode === 'design';
-
-  // A render belongs to the document it was taken of. The dock outlives a tab
-  // switch (the store does not), so without this the log would show the last
-  // screen you were designing under the name of the one you are looking at.
-  const render = storedRender && sameDocument(storedRender.documentPath, documentPath)
-    ? storedRender
-    : null;
-
-  // Said before it happens: a picture silently added to a message is a surprise
-  // on the bill and a surprise in the transcript.
-  const attachNote = renderAttachNote({ render, staged: attachments, enabled: attachRender });
 
   const rows = useMemo(
     () =>
@@ -438,26 +424,12 @@ export function DesignChatDock({ documentPath, documentName }: Props) {
           rows={rows}
           status={status}
           emptyHint={`Say what ${documentName} should be, or show it a reference image. Every write lands on the canvas above.`}
-          render={render}
           onAnswer={answer}
           onPermission={permit}
         />
       )}
 
       {blockedReason && <p className="design-dock-blocked">{blockedReason}</p>}
-
-      {attachNote && (
-        <p className="design-dock-render-note">
-          {attachNote}
-          <button
-            type="button"
-            onClick={() => setAttachRender(false)}
-            title="Stop sending the render. Turn this off if the model cannot read images."
-          >
-            don’t
-          </button>
-        </p>
-      )}
 
       <DesignComposer
         value={draft}

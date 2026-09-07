@@ -5,6 +5,7 @@ export { default as ProblemsPanel } from './components/ProblemsPanel';
 export { default as RightActivityBar } from './components/RightActivityBar';
 export { default as RightSidebarPanel } from './components/RightSidebarPanel';
 export { default as SidebarPanel } from './components/SidebarPanel';
+export { default as ShortcutsHelpModal } from './components/ShortcutsHelpModal';
 export { default as StatusBar } from './components/StatusBar';
 export { default as TabBar } from './components/TabBar';
 export { default as TitleBar } from './components/TitleBar';

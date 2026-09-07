@@ -156,6 +156,37 @@ pub fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         .item(&PredefinedMenuItem::fullscreen(&app_handle, None)?)
         .build()?;
 
+    // Go menu
+    //
+    // `[` and `]` are muda's own accelerator tokens (accelerator.rs accepts
+    // "BRACKETLEFT" | "[" and "BRACKETRIGHT" | "]"). `keybinding-parity.test.ts`
+    // folds them onto the registry's `bracketleft`/`bracketright` spelling, so
+    // these two ids MUST stay in step with `nav.back` / `nav.forward` in
+    // App.tsx or the suite fails.
+    //
+    // Registering them natively is what makes the chords beat Monaco's
+    // `outdentLines`/`indentLines` on macOS, where the OS menu wins — the same
+    // shadowing the JS side does deliberately via the Monaco bridge.
+    let nav_back = MenuItemBuilder::with_id("nav.back", "Back")
+        .accelerator("CmdOrCtrl+[")
+        .build(&app_handle)?;
+    let nav_forward = MenuItemBuilder::with_id("nav.forward", "Forward")
+        .accelerator("CmdOrCtrl+]")
+        .build(&app_handle)?;
+    let goto_line = MenuItemBuilder::with_id("editor.gotoLine", "Go to Line…")
+        .accelerator("CmdOrCtrl+G")
+        .build(&app_handle)?;
+    let find_usages = MenuItemBuilder::with_id("editor.findUsages", "Find Usages")
+        .accelerator("Alt+F7")
+        .build(&app_handle)?;
+    let go_submenu = SubmenuBuilder::new(&app_handle, "Go")
+        .item(&nav_back)
+        .item(&nav_forward)
+        .separator()
+        .item(&goto_line)
+        .item(&find_usages)
+        .build()?;
+
     // Window menu
     //
     // Minimize is a custom item rather than `PredefinedMenuItem::minimize`,
@@ -179,6 +210,7 @@ pub fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         .item(&file_submenu)
         .item(&edit_submenu)
         .item(&view_submenu)
+        .item(&go_submenu)
         .item(&window_submenu)
         .build()?;
 

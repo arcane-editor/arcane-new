@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import Tooltip from '../../../components/Tooltip';
 import { Plus, X, Eraser, Trash2, SquareSplitHorizontal } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { Allotment } from 'allotment';
@@ -139,14 +140,15 @@ function RichTerminalPanel({ isVisible }: RichTerminalPanelProps) {
         </div>
 
         <div className="vsterm__actions">
-          <button
-            className="vsterm__action"
-            onClick={handleSplit}
-            title="Split Terminal (⌘\\)"
-            disabled={activeTerminalId === null}
-          >
-            <SquareSplitHorizontal size={13} aria-hidden="true" />
-          </button>
+          <Tooltip label="Split Terminal" commandId="terminal.split" side="top">
+            <button
+              className="vsterm__action"
+              onClick={handleSplit}
+              disabled={activeTerminalId === null}
+            >
+              <SquareSplitHorizontal size={13} aria-hidden="true" />
+            </button>
+          </Tooltip>
           <button
             className="vsterm__action"
             onClick={handleClear}

@@ -21,6 +21,7 @@
  */
 
 import { useAiStore } from '../../../stores/ai';
+import { useAriaKeyshortcuts } from '../../../hooks/useAriaKeyshortcuts';
 import { useAuthStore } from '../../../stores/auth';
 import { useServerConfigStore, allowedEfforts } from '../../../stores/server-config';
 import Tooltip from '../../../components/Tooltip';
@@ -48,6 +49,7 @@ function EffortSelector() {
   // GUARD doc in stores/server-config.ts.
   const config = useServerConfigStore((s) => s.config);
   const plan = useAuthStore((s) => s.plan);
+  const effortChord = useAriaKeyshortcuts('ai.effortCycle');
   const allowed = allowedEfforts(config, plan);
 
   const active = LEVELS.find((l) => l.value === effort) ?? LEVELS[0];
@@ -69,8 +71,10 @@ function EffortSelector() {
         onClick={locked ? undefined : () => setEffort(cycleEffort(effort, allowed))}
         disabled={isAgentRunning || locked}
         // Permanent, non-visual counterpart to the chord in the tooltip —
-        // the same pairing ModeSelector uses.
-        aria-keyshortcuts="Meta+D"
+        // the same pairing ModeSelector uses. Read from the registry, not
+        // written here: hardcoded, it announced a Cmd key to Windows users
+        // and would have gone stale the moment the chord moved.
+        aria-keyshortcuts={effortChord}
         aria-label={`Reasoning effort: ${active.label}${locked ? '' : '. Activate to cycle.'}`}
       >
         <span className="ai-panel-effort-dot" aria-hidden="true" />

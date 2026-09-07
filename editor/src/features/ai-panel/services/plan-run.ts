@@ -95,11 +95,14 @@ export type PostExecutionInput = {
  *
  * In order:
  *   1. Steps known, non-empty, and every one done ⇒ the plan finished ⇒
- *      `awaiting-execute` (ready to re-run) / `done`.
+ *      `completed` / `done`. NOT `awaiting-execute`: that is where a plan
+ *      that has never been run sits, and landing a finished run back on it
+ *      re-offered an "Execute" button for work already done (and routed the
+ *      next typed message to `revise` — see `plan-route.ts`).
  *   2. Steps known and some remain ⇒ regardless of why the send stopped, work
  *      is left ⇒ `interrupted` / `executing` (not finished — the ref status
  *      most recently set at the top of the run stands: nothing here revises
- *      it to `done`, only the `awaiting-execute`/`done` case below does).
+ *      it to `done`, only the `completed`/`done` case above does).
  *   3. Steps unknown (file unreadable) or empty (no checkboxes in the plan at
  *      all) ⇒ trust the send's own outcome: `interrupted` if it aborted,
  *      capped, or ended on an error tail, else a clean finish reads as
@@ -107,10 +110,10 @@ export type PostExecutionInput = {
  */
 export function resolvePostExecutionPhase(
   i: PostExecutionInput,
-): { planPhase: 'awaiting-execute' | 'interrupted'; refStatus: 'done' | 'executing' } {
+): { planPhase: 'awaiting-execute' | 'interrupted' | 'completed'; refStatus: 'done' | 'executing' } {
   if (i.steps && i.steps.length > 0) {
     return i.steps.every((s) => s.done)
-      ? { planPhase: 'awaiting-execute', refStatus: 'done' }
+      ? { planPhase: 'completed', refStatus: 'done' }
       : { planPhase: 'interrupted', refStatus: 'executing' };
   }
   const stopped = i.aborted || i.capped || i.errored;

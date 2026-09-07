@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { renderAttachment, renderAttachNote } from './render-attach';
+import { renderAttachment } from './render-attach';
 import type { DesignRender } from '../../../stores/design-chat';
 import type { Attachment } from '../../ai-panel';
 
@@ -72,16 +72,3 @@ describe('renderAttachment', () => {
   });
 });
 
-describe('renderAttachNote', () => {
-  it('says it before it happens', () => {
-    expect(renderAttachNote({ render: render(), staged: [], enabled: true })).toContain(
-      'goes with this message',
-    );
-  });
-
-  it('stays quiet in every case where nothing is attached', () => {
-    expect(renderAttachNote({ render: render(), staged: [], enabled: false })).toBeNull();
-    expect(renderAttachNote({ render: null, staged: [], enabled: true })).toBeNull();
-    expect(renderAttachNote({ render: render({ sent: true }), staged: [], enabled: true })).toBeNull();
-  });
-});

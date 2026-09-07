@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { resolveStyleHref, normalisePath } from './style-resolve';
+import { resolveStyleHref, normalisePath, sheetFilePath } from './style-resolve';
 
 const UXML = 'Assets/UI/MainMenu.uxml';
 const GUIDS: Record<string, string> = {
@@ -57,5 +57,27 @@ describe('resolveStyleHref', () => {
     const got = resolveStyleHref('', 'src', UXML, none);
     expect(got.path).toBe(null);
     expect(got.reason).toBeTruthy();
+  });
+});
+
+// The guid branch of `resolveStyleHref` returns whatever `unity_index_guid_map`
+// holds, and that command hands the frontend ABSOLUTE `to_ui_path` spellings —
+// `D:/Proj/Assets/UI/Theme.uss` on Windows, `/Users/me/Proj/...` on macOS. The
+// fixtures above quietly assumed workspace-relative values, which is why a
+// Unix-only absolute test survived a green suite for the whole feature's life.
+describe('sheetFilePath', () => {
+  it('leaves a POSIX absolute path alone', () => {
+    expect(sheetFilePath('/Users/me/Proj/Assets/UI/Theme.uss', '/Users/me/Proj'))
+      .toBe('/Users/me/Proj/Assets/UI/Theme.uss');
+  });
+
+  it('leaves a Windows absolute path alone', () => {
+    expect(sheetFilePath('D:/Proj/Assets/UI/Theme.uss', 'D:/Proj'))
+      .toBe('D:/Proj/Assets/UI/Theme.uss');
+  });
+
+  it('joins a workspace-relative path onto the workspace', () => {
+    expect(sheetFilePath('Assets/UI/Theme.uss', 'D:/Proj'))
+      .toBe('D:/Proj/Assets/UI/Theme.uss');
   });
 });
