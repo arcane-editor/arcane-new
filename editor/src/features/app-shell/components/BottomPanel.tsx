@@ -5,6 +5,7 @@ import { useProjectContextStore } from '../../../stores/project-context';
 import { RichTerminalPanel } from '../../terminal';
 import { UnityConsolePanel } from '../../unity-console';
 import ProblemsPanel from './ProblemsPanel';
+import { ReferencesPanel } from '../../references';
 
 function BottomPanel() {
   const activeTab = useUiStore((s) => s.activeBottomTab);
@@ -41,6 +42,7 @@ function BottomPanel() {
     { id: 'terminal', label: 'Terminal' },
     ...(isUnityProject ? [{ id: 'unity-console' as BottomPanelTab, label: 'Unity Console' }] : []),
     { id: 'problems', label: 'Problems' },
+    { id: 'references', label: 'Usages' },
   ];
 
   // The stored active tab may be one that isn't available in the current
@@ -101,6 +103,7 @@ function BottomPanel() {
         </div>
         {effectiveTab === 'unity-console' && <UnityConsolePanel />}
         {effectiveTab === 'problems' && <ProblemsPanel />}
+        {effectiveTab === 'references' && <ReferencesPanel />}
       </div>
     </div>
   );

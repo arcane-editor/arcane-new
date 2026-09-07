@@ -146,17 +146,25 @@ function EditorPanel() {
     const refactorHandler = () => {
       editorRef.current?.getAction('editor.action.refactor')?.run();
     };
+    // Alt+Enter, the JetBrains "show intentions" reflex. Same widget Monaco
+    // already opens on Cmd+. — the code actions were always there, they just
+    // had one chord instead of two.
+    const quickFixHandler = () => {
+      editorRef.current?.getAction('editor.action.quickFix')?.run();
+    };
     window.addEventListener('navigate-to-line', navHandler);
     window.addEventListener('format-document', formatHandler);
     window.addEventListener('goto-line', gotoHandler);
     window.addEventListener('goto-symbol', symbolHandler);
     window.addEventListener('refactor-this', refactorHandler);
+    window.addEventListener('quick-fix', quickFixHandler);
     return () => {
       window.removeEventListener('navigate-to-line', navHandler);
       window.removeEventListener('format-document', formatHandler);
       window.removeEventListener('goto-line', gotoHandler);
       window.removeEventListener('goto-symbol', symbolHandler);
       window.removeEventListener('refactor-this', refactorHandler);
+      window.removeEventListener('quick-fix', quickFixHandler);
     };
   }, []);
 

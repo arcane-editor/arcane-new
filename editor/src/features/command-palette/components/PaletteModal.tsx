@@ -22,7 +22,7 @@ import { setPendingNavigation } from '../../../utils/editor-navigation';
 const LOADING_BAR_DELAY_MS = 100;
 
 interface PaletteModalProps {
-  initialMode: 'commands' | 'files' | 'symbols';
+  initialMode: 'commands' | 'files' | 'symbols' | 'recent';
   onClose: () => void;
 }
 
@@ -71,8 +71,16 @@ function PaletteModal({ initialMode, onClose }: PaletteModalProps) {
 
   // Determine current mode from input value. `#` follows the VS Code
   // convention for project-wide symbols; `>` is commands; bare text is files.
-  const isCommandMode = inputValue.startsWith('>');
-  const isSymbolMode = inputValue.startsWith('#');
+  //
+  // Recent Files is the exception: it is NOT a fourth sigil. The sigils exist
+  // so one textbox can serve three searches the user types their way into, and
+  // "the files I was just in" is a fixed list you arrive at by chord, not a
+  // query you compose. So it is sticky for the life of the modal (which App
+  // remounts on every open) and suppresses the sigils, leaving the typed text
+  // free to filter the list.
+  const isRecentMode = initialMode === 'recent';
+  const isCommandMode = !isRecentMode && inputValue.startsWith('>');
+  const isSymbolMode = !isRecentMode && inputValue.startsWith('#');
   const query = isCommandMode || isSymbolMode
     ? inputValue.slice(1).trimStart()
     : inputValue.trim();
@@ -111,10 +119,39 @@ function PaletteModal({ initialMode, onClose }: PaletteModalProps) {
       return;
     }
 
+    const prefix = workspacePath ? workspacePath + '/' : '';
+
+    if (isRecentMode) {
+      // The real MRU: paths the user has VISITED, newest first, surviving the
+      // tab being closed. The `openFiles` list below is tab-bar order and
+      // cannot answer this.
+      const { recentFiles } = useWorkspaceStore.getState();
+      const rows: FuzzyFileResult[] = recentFiles.map((path) => ({
+        path,
+        relative_path: prefix ? path.replace(prefix, '') : path,
+        file_name: path.split('/').pop() || path,
+        score: 0,
+        match_indices: [],
+      }));
+      // Filter locally: the list is capped at RECENT_FILES_LIMIT, so there is
+      // nothing to gain from a round trip to the Rust index.
+      const filtered = debouncedFileQuery
+        ? rows
+            .map((row) => {
+              const m = fuzzyMatch(debouncedFileQuery, row.relative_path);
+              return m ? { ...row, score: m.score, match_indices: m.matches } : null;
+            })
+            .filter((r): r is FuzzyFileResult => r !== null)
+            .sort((a, b) => b.score - a.score)
+        : rows;
+      setFileResults(filtered);
+      setIsSearching(false);
+      return;
+    }
+
     if (debouncedFileQuery) return; // handled by the search effect below
 
     const { openFiles } = useWorkspaceStore.getState();
-    const prefix = workspacePath ? workspacePath + '/' : '';
     const seen = new Set<string>();
     const recentFiles: FuzzyFileResult[] = openFiles
       .filter((f) => {
@@ -134,7 +171,7 @@ function PaletteModal({ initialMode, onClose }: PaletteModalProps) {
       }));
     setFileResults(recentFiles);
     setIsSearching(false);
-  }, [isCommandMode, isSymbolMode, debouncedFileQuery, workspacePath, isUnityProject]);
+  }, [isCommandMode, isSymbolMode, isRecentMode, debouncedFileQuery, workspacePath, isUnityProject]);
 
   // File search: async, Rust-backed; debounce comes from useDebouncedValue
   // above. Stale results are intentionally kept on the screen while a new
@@ -143,6 +180,7 @@ function PaletteModal({ initialMode, onClose }: PaletteModalProps) {
   // the list flickering to a loading/empty state on every keystroke.
   useEffect(() => {
     if (isCommandMode || isSymbolMode) return;
+    if (isRecentMode) return; // recent files are filtered locally, above
     if (!debouncedFileQuery) return; // handled by the recent-files effect above
 
     setIsSearching(true);
@@ -176,7 +214,7 @@ function PaletteModal({ initialMode, onClose }: PaletteModalProps) {
         }
       }
     })();
-  }, [isCommandMode, isSymbolMode, debouncedFileQuery, workspacePath, isUnityProject]);
+  }, [isCommandMode, isSymbolMode, isRecentMode, debouncedFileQuery, workspacePath, isUnityProject]);
 
   // Symbol search. Mirrors the file-search effect's generation guard so a
   // slow server cannot land results for a query the user has moved past.
@@ -329,7 +367,9 @@ function PaletteModal({ initialMode, onClose }: PaletteModalProps) {
     ? 'Type a command name...'
     : isSymbolMode
       ? `Search symbols — type at least ${MIN_SYMBOL_QUERY_LENGTH} characters`
-      : 'Search files by name...';
+      : isRecentMode
+        ? 'Recently visited files — type to filter'
+        : 'Search files by name...';
 
   return (
     <div
@@ -603,7 +643,7 @@ function PaletteModal({ initialMode, onClose }: PaletteModalProps) {
                   No matching commands
                 </div>
               )
-            : !isSearching && query && fileResults.length === 0 && (
+            : !isSearching && (query || isRecentMode) && fileResults.length === 0 && (
                 <div
                   style={{
                     padding: '12px 14px',
@@ -612,7 +652,11 @@ function PaletteModal({ initialMode, onClose }: PaletteModalProps) {
                     textAlign: 'center',
                   }}
                 >
-                  No matching files
+                  {isRecentMode
+                    ? query
+                      ? 'No matching recent files'
+                      : 'No files visited yet'
+                    : 'No matching files'}
                 </div>
               )}
         </div>

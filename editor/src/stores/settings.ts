@@ -13,6 +13,7 @@ const DEFAULT_SETTINGS: SettingsSchema = {
   'editor.renderWhitespace': 'none',
   'editor.autoSave': 'off',
   'editor.autoSaveDelay': 1000,
+  'editor.formatOnSave': false,
   'editor.betterComments': true,
   'terminal.fontSize': 13,
   'terminal.fontFamily': "ui-monospace, SFMono-Regular, Menlo, Monaco, 'Cascadia Mono', 'Courier New', monospace",

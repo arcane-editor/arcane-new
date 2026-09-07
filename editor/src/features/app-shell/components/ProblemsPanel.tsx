@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react';
 import { File, CircleX, TriangleAlert, Info, Lightbulb } from 'lucide-react';
 import { useUiStore, getFlatAllDiagnostics } from '../../../stores/ui';
 import { useWorkspaceStore } from '../../../stores/workspace';
+import { recordJumpOrigin } from '../../../utils/jump-history';
 import type { DiagnosticItem } from '../../../types';
 
 type Severity = DiagnosticItem['severity'];
@@ -60,6 +61,9 @@ function ProblemsPanel() {
 
   async function handleItemClick(item: DiagnosticItem) {
     const fileName = item.file.split('/').pop() || '';
+    // Record where we are BEFORE opening: this path awaits `openFile` and only
+    // then dispatches, so by the time the event fires the origin is gone.
+    recordJumpOrigin();
     await useWorkspaceStore.getState().openFile(item.file, fileName);
     window.dispatchEvent(
       new CustomEvent('navigate-to-line', {
