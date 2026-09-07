@@ -98,6 +98,12 @@ const structuredData = {
 
     <script type="application/ld+json" set:html={JSON.stringify(structuredData)} />
 
+    {/* Page-specific head content. The landing page uses this to pull in its
+        own two faces (Bricolage Grotesque + IBM Plex Mono) without loading
+        them on /features, /pricing, /auth or the docs, which keep the app's
+        Instrument Sans and Geist Mono. */}
+    <slot name="head" />
+
     {/* Mixpanel Analytics (marketing pages only — see `analytics` prop) */}
     {analytics && (
       <script type="text/javascript">

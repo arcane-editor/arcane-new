@@ -1,13 +1,27 @@
 ---
+import {
+  downloadUrls,
+  manifestUrls,
+  uncachedManifestUrl,
+  unityExtensionUrl,
+  versionFromManifest,
+  type UpdatePlatform,
+} from "../lib/releases";
 import { readFileSync } from "node:fs";
-import { downloadUrls, manifestUrls, uncachedManifestUrl, unityExtensionUrl, versionFromManifest, type UpdatePlatform } from "../lib/releases";
 
-// Stable "latest" links — the Release workflow uploads each installer to both
-// arcane-releases/<tag>/ and arcane-releases/latest/, so these never need editing
-// per release.
-//
-// The channel follows the environment this site was built for: the dev site
-// links to the "UnityIDE Dev" installers, never the production ones.
+/**
+ * Download, as the two steps it actually is.
+ *
+ * The IDE on its own does about as much as any other editor: everything this
+ * page spent six chapters on needs the bridge package in the project too. The
+ * old single table listed the .tgz as a third platform card, which read as
+ * optional. Numbering the two steps is not decoration here — the second one
+ * genuinely does not work before the first.
+ *
+ * Channel and version handling is unchanged: the dev site must never hand out
+ * production installers, and a card must never advertise a release that was
+ * never published.
+ */
 const apiUrl = import.meta.env.PUBLIC_API_URL ?? "";
 const isDev = apiUrl.includes("api-dev");
 const urls = downloadUrls(apiUrl);
@@ -20,27 +34,16 @@ function pkgVersion(workspace: string): string {
   return JSON.parse(readFileSync(url, "utf8")).version;
 }
 
-/** The version in the repo — used when the manifest cannot be reached, so a
- *  network blip during CI degrades to a slightly stale number instead of
- *  failing the site build. */
+/** Used when a manifest cannot be reached, so a network blip during CI
+ *  degrades to a slightly stale number instead of failing the site build. */
 const fallbackVersion: string = pkgVersion("editor");
 
-/** The Unity plugin has no update manifest to read — it is a UPM tarball, not
- *  a Tauri target — so its own package.json is the only source of truth. It
- *  sat on a hardcoded "v0.0.1" while the package shipped 0.2.0. */
+/** The Unity plugin is a UPM tarball, not a Tauri target — it has no update
+ *  manifest, so its own package.json is the only source of truth. */
 const unityExtVersion: string = pkgVersion("arcane-extension");
 
-/**
- * The version this platform can actually download, read at build time.
- *
- * Reads the same manifest the app's updater polls, so a card cannot advertise
- * a release that was never published — which is exactly how this section sat
- * on a hardcoded "v0.2.0" through two releases. Per-platform rather than one
- * shared number because it is strictly more honest: if a Windows build fails
- * during a release, its card keeps showing what Windows can actually get.
- *
- * Every failure falls back rather than throwing: this runs inside `astro build`.
- */
+/** Reads the same manifest the app's updater polls. Every failure falls back
+ *  rather than throwing: this runs inside `astro build`. */
 async function shippedVersion(url: string, platform: UpdatePlatform): Promise<string> {
   try {
     const res = await fetch(uncachedManifestUrl(url));
@@ -51,107 +54,156 @@ async function shippedVersion(url: string, platform: UpdatePlatform): Promise<st
   }
 }
 
-// The dev channel rebuilds several times a day; a version string there is
-// noise, so it keeps the existing "dev build" label.
+// The dev channel rebuilds several times a day; a version string there is noise.
 const macVersion = isDev ? "dev build" : `v${await shippedVersion(manifests.macArm, "darwin-aarch64")}`;
 const winVersion = isDev ? "dev build" : `v${await shippedVersion(manifests.windows, "windows-x86_64")}`;
 const unityExtLabel = isDev ? "dev build" : `v${unityExtVersion}`;
+
 /**
  * Windows leads. It is the primary and better-tested target — the macOS build
  * is ad-hoc signed and gets less coverage, which is why Beta appears on that
- * card and nowhere else on the site. The previous order put the beta build
- * first purely because "macOS" sorted first in the array.
- *
- * The Unity package sits in the same table rather than in a separate block
- * below, because it is not optional: without it there is no bridge to the
- * running Editor.
- *
- * Icons are gone. They were six hand-inlined SVGs in which macOS and Linux
- * shared the same terminal chevron and Windows used a monitor — decoration
- * that also happened to be wrong.
+ * card and nowhere else on the page.
  */
 const platforms = [
   {
     name: "Windows",
-    version: winVersion,
-    ext: ".exe",
+    badge: null as string | null,
     subtitle: "Windows 10+ (64-bit)",
+    version: winVersion,
+    action: "Download .exe",
     href: urls.windows,
   },
   {
     name: "macOS",
-    // The only Beta marker left on the site.
     badge: "Beta",
-    version: macVersion,
-    ext: ".dmg",
     subtitle: "Apple Silicon (M1+)",
+    version: macVersion,
+    action: "Download .dmg",
     href: urls.macArm,
-  },
-  {
-    name: "Unity package",
-    version: unityExtLabel,
-    ext: ".tgz",
-    subtitle: "Unity 2021.3+ (UPM)",
-    href: unityExtHref,
-    note: true,
   },
 ];
 ---
 
-<section id="download" class="border-b border-border bg-sunk py-16 sm:py-20">
-  <div class="container mx-auto px-6">
-    <h2 class="font-display text-step2 font-semibold text-foreground">
-      Download
-    </h2>
-
-    {/* No lede here. A draft of this section carried "We wanted a better IDE for
-        Unity. So we built one." as its opening line, which only worked while the
-        hero had a different headline. The hero owns that sentence again, and
-        saying it twice on one page spends it. */}
-    <div class="mt-10 max-w-3xl overflow-hidden rounded-plane border border-border bg-panel">
-      {platforms.map((p) => (
-        <div class="flex flex-wrap items-center gap-x-4 gap-y-3 border-b border-border px-5 py-4 last:border-b-0 sm:flex-nowrap">
-          <div class="flex min-w-0 shrink-0 items-center gap-2.5 sm:w-[176px]">
-            <span class="truncate text-base font-semibold text-foreground">{p.name}</span>
-            {p.badge && (
-              <span class="shrink-0 rounded-chip border border-primary/30 bg-primary/10 px-1.5 py-0.5 font-mono text-[10px] text-primary">
-                {p.badge}
-              </span>
-            )}
-          </div>
-
-          <span class="shrink-0 font-mono text-mini text-muted-foreground sm:w-[92px]">
-            {p.version}
-          </span>
-
-          <span class="min-w-0 flex-1 truncate text-mini text-muted-foreground">
-            {p.subtitle}
-          </span>
-
-          <a
-            href={p.href}
-            class="inline-flex h-9 shrink-0 items-center justify-center rounded-panel border border-border bg-raised px-4 font-mono text-mini text-foreground transition-colors hover:border-primary/40 hover:bg-selected hover:text-primary"
-          >
-            {p.ext}
-          </a>
-        </div>
-      ))}
+<section id="download" class="lp-shell" style="padding-block:20px 120px">
+  <div class="lp-dl">
+    <div style="position:relative">
+      <h2 class="lp-h2">Try it on the project that cost you a day.</h2>
+      <p style="margin:16px 0 0;font-size:16px;color:#8a8f98;max-width:52ch;text-wrap:pretty">
+        The IDE is free. Paid plans add AI usage and the bigger reasoning modes —
+        <a href="/pricing" style="color:#b4b8c0;border-bottom:1px solid #2a2f37">see pricing</a>.
+      </p>
     </div>
 
-    <p class="mt-5 max-w-3xl text-mini text-muted-foreground">
-      Install the Unity package through Package Manager &rarr; Add package from tarball.
-      <a
-        href="/docs/getting-started/unity-extension/"
-        class="text-primary underline decoration-primary/30 underline-offset-4 transition-colors hover:decoration-primary"
-        >Setup guide</a
-      >.
-    </p>
+    <div
+      style="position:relative;display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:20px;align-items:stretch"
+    >
+      <div style="display:grid;gap:14px;align-content:start">
+        <div style="display:flex;align-items:center;gap:12px">
+          <span
+            style="width:28px;height:28px;flex:none;border-radius:50%;border:1px solid #2a2f37;background:#151821;display:grid;place-items:center;font-family:var(--mono);font-size:12px;color:#e8e6e1"
+            >1</span
+          >
+          <div>
+            <div style="font-size:17px;font-weight:500">Install the IDE on your machine</div>
+            <div style="font-size:13px;color:#8a8f98">The desktop app. Pick your OS.</div>
+          </div>
+        </div>
 
-    {/* Linux was a full card whose only content was the words "Coming Soon".
-        A line states the same fact and stops competing with the builds that
-        actually exist. */}
-    <p class="mt-2 max-w-3xl text-mini text-muted-foreground">
-      Linux is not built yet.
-    </p>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px">
+          {
+            platforms.map((p) => (
+              <a href={p.href} class="lp-dl-card">
+                <span style="font-size:17px;font-weight:500">
+                  {p.name}
+                  {p.badge && (
+                    <span
+                      style="font-family:var(--mono);font-size:11px;color:#f5c26b;border:1px solid #3a3320;border-radius:4px;padding:1px 6px;vertical-align:middle;margin-left:6px"
+                    >
+                      {p.badge}
+                    </span>
+                  )}
+                </span>
+                <span style="font-family:var(--mono);font-size:12px;color:#8a8f98">{p.subtitle}</span>
+                <span style="font-family:var(--mono);font-size:12px;color:#6f747d">{p.version}</span>
+                <span style="font-family:var(--mono);font-size:13px;color:#e8e6e1;margin-top:6px">
+                  {p.action} &rarr;
+                </span>
+              </a>
+            ))
+          }
+        </div>
+        <p style="margin:0;font-size:12.5px;color:#6f747d">
+          {isDev ? "Dev builds. Linux is not built yet." : "Linux is not built yet."}
+        </p>
+      </div>
+
+      <div class="lp-dl-step2" style="display:grid;gap:14px;align-content:start">
+        <div style="display:flex;align-items:center;gap:12px">
+          <span
+            style="width:28px;height:28px;flex:none;border-radius:50%;border:1px solid #2a2f37;background:#151821;display:grid;place-items:center;font-family:var(--mono);font-size:12px;color:#e8e6e1"
+            >2</span
+          >
+          <div>
+            <div style="font-size:17px;font-weight:500">Then add the bridge to your Unity project</div>
+            <div style="font-size:13px;color:#8a8f98">
+              A small Editor package. This is what connects the IDE to the running Editor.
+            </div>
+          </div>
+        </div>
+
+        <div
+          style="display:grid;gap:12px;padding:18px;border:1px solid #1f2329;border-radius:14px;background:#0a0b0d"
+        >
+          <div style="display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px;align-items:baseline">
+            <span style="font-family:var(--mono);font-size:13px;color:#e8e6e1">
+              {isDev ? "com.unityide.editor.dev" : "com.unityide.editor"}
+            </span>
+            <span style="font-family:var(--mono);font-size:12px;color:#8a8f98">
+              {unityExtLabel} · Unity 2021.3 &rarr; Unity 6
+            </span>
+          </div>
+
+          <div style="display:grid;gap:8px;font-size:13px;color:#b4b8c0">
+            <div style="display:grid;grid-template-columns:16px minmax(0,1fr);gap:8px">
+              <span style="color:#6f747d;font-family:var(--mono);font-size:12px">a</span>
+              <span>Download the <span style="color:#e8e6e1">.tgz</span> below</span>
+            </div>
+            <div style="display:grid;grid-template-columns:16px minmax(0,1fr);gap:8px">
+              <span style="color:#6f747d;font-family:var(--mono);font-size:12px">b</span>
+              <span>
+                In Unity:
+                <span style="font-family:var(--mono);font-size:12px;color:#e8e6e1"
+                  >Window &rarr; Package Manager &rarr; + &rarr; Add package from tarball…</span
+                >
+              </span>
+            </div>
+            <div style="display:grid;grid-template-columns:16px minmax(0,1fr);gap:8px">
+              <span style="color:#6f747d;font-family:var(--mono);font-size:12px">c</span>
+              <span>
+                Open the project in UnityIDE — it shows
+                <span style="color:#6fe3a5">Connected</span>
+              </span>
+            </div>
+          </div>
+
+          <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:4px">
+            <a
+              href={unityExtHref}
+              class="lp-pill"
+              style="color:#0a0b0d;background:#e8e6e1;font-weight:500"
+            >
+              Download package .tgz &rarr;
+            </a>
+            <a
+              href="/docs/getting-started/unity-extension/"
+              class="lp-pill"
+              style="color:#b4b8c0;border:1px solid #2a2f37"
+            >
+              Setup guide
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </section>
