@@ -38,7 +38,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { fileUri } from '../src/features/lsp/services/document-sync';
 import { lspDocumentUri } from '../src/features/lsp/services/model-context';
-import { isLoadFinishedMessage } from '../src/features/lsp/services/csharp-ls-log-markers';
+import {
+  isLoadFinishedMessage,
+  isLoadStartedMessage,
+} from '../src/features/lsp/services/csharp-ls-log-markers';
 import { configurationForItem } from '../src/features/lsp/services/csharp-configuration';
 import {
   UNT_FIXES,
@@ -338,6 +341,16 @@ let buf = Buffer.alloc(0);
 const pending = new Map<number, (m: JsonRpcMessage) => void>();
 let nextId = 1;
 let solutionLoaded = false;
+/**
+ * Did the server announce that a load BEGAN?
+ *
+ * The readiness gate closes on this marker and re-arms its failsafe from
+ * it — that is what makes on-demand solution loading (csharp-ls 0.23+)
+ * safe, because a load can now start minutes into a session. If the
+ * server reworded this line the gate would stop closing, diagnostics
+ * would be answered mid-load, and nothing else here would notice.
+ */
+let solutionLoadStarted = false;
 const logs: string[] = [];
 // Capabilities can arrive AFTER initialize, via client/registerCapability.
 // Answering that request with `null` and dropping the payload — which this
@@ -377,6 +390,7 @@ server.stdout.on('data', (chunk: Buffer) => {
         // Same predicate the app uses, imported rather than re-spelled: a probe
       // with its own copy of this regex would keep passing through a rename
       // that had silently degraded the editor to its failsafe timer.
+      if (isLoadStartedMessage(msg.params.message)) solutionLoadStarted = true;
       if (isLoadFinishedMessage(msg.params.message)) solutionLoaded = true;
     } else if (msg.id !== undefined && msg.method) {
       if (msg.method === 'client/registerCapability') {
@@ -562,7 +576,18 @@ try {
         '  If the server renamed it, diagnostics fall back to a 20s failsafe timer.',
     );
   }
-  pass('solution', `loaded in ${Date.now() - loadStart}ms`);
+  if (!solutionLoadStarted) {
+    fail(
+      'csharp-ls never announced that it STARTED loading the solution',
+      logs.slice(-10).join('\n') +
+        '\n  `isLoadStartedMessage` no longer recognises the line the server logs.\n' +
+        '  The readiness gate closes on that marker, so without it a load that\n' +
+        '  begins mid-session (which is every load, since 0.23 made them\n' +
+        '  on-demand) leaves the gate open and diagnostics are answered against\n' +
+        '  a workspace that has not loaded yet.',
+    );
+  }
+  pass('solution', `load announced and finished in ${Date.now() - loadStart}ms`);
 
   // Roslyn re-attaches the open document to the freshly loaded project; that
   // is not instantaneous, and asking too early answers out of the

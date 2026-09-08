@@ -1381,12 +1381,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     }
 
     // Diagnostics are keyed by document URI and nothing cleared them on close,
-    // so the Problems panel and the status-bar error count kept reporting files
-    // that are closed — or deleted — with no way to make them go away.
-    // Cleared under both keys: providers store some diagnostics by document
-    // URI and some by raw path (TabBar reads both), so clearing one alone
-    // leaves the other reporting a file that is no longer open.
-    useUiStore.getState().clearFileDiagnostics(fileUri(path));
+    // so the Problems panel and the status-bar error count kept reporting
+    // files that are closed — or deleted — with no way to make them go away.
+    // One call now: the store normalises every spelling of a file to a single
+    // key (`diagnosticsKey`), which is what the two-key dance here used to
+    // approximate and got wrong on Windows.
     useUiStore.getState().clearFileDiagnostics(path);
 
     // Free the Monaco model — AFTER didClose, so the server is told about a

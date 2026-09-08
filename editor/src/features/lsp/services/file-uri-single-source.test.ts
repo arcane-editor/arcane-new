@@ -3,8 +3,11 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 
 const SRC = path.resolve(import.meta.dir, '../../..');
-// document-sync.ts owns the canonical implementation; its own tests cover it.
-const CANONICAL = path.join(SRC, 'features/lsp/services/document-sync.ts');
+// utils/file-uri.ts owns the canonical implementation; its own tests cover it.
+// (It used to live in `features/lsp/services/document-sync.ts`, which
+// re-exports it — a store needs these helpers too, and a store importing a
+// feature is a cycle.)
+const CANONICAL = path.join(SRC, 'utils/file-uri.ts');
 
 function walk(dir: string): string[] {
   const out: string[] = [];

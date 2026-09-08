@@ -476,14 +476,32 @@ export class LspClient {
    */
   notify(method: string, params: unknown): void {
     const msg: JsonRpcNotification = { jsonrpc: '2.0', method, params };
-    const sent = invoke('lsp_send', {
-      language: this.languageId,
-      message: JSON.stringify(msg),
-    });
+
+    // Notifications are CHAINED, not fired in parallel.
+    //
+    // LSP is an ordered stream, and `syncDocumentChange` sends full document
+    // text — so if two `didChange`s race and v3 reaches the server before v2,
+    // the server's copy of the buffer ends up as the OLDER text and stays
+    // wrong until the next edit. Every completion, hover and diagnostic after
+    // that is computed against a file the user is not looking at.
+    //
+    // They could race because each `invoke` is its own Tauri command task and
+    // `lsp_send` awaits a shared mutex, so the order tasks acquire it is not
+    // the order they were spawned in. Chaining costs one IPC round trip per
+    // notification and removes the question.
+    const sent = this.lastNotifySent
+      .catch(() => {})
+      .then(() =>
+        invoke('lsp_send', {
+          language: this.languageId,
+          message: JSON.stringify(msg),
+        }),
+      );
+
     // Requests issued after this notification wait on it — see
-    // `lastNotifySent`. Kept as the raw promise (rejection handled by the
-    // separate `.catch` below, and again by the awaiting request) so a failed
-    // send cannot leave an unhandled rejection or block the chain.
+    // `lastNotifySent`. The rejection is handled here and again by the
+    // awaiting request, so a failed send cannot leave an unhandled rejection
+    // or wedge the chain.
     this.lastNotifySent = sent;
     sent.catch((err) => {
       console.error(`[LSP ${this.languageId}] Failed to send notification '${method}':`, err);

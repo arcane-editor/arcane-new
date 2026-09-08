@@ -252,7 +252,15 @@ export function toMonacoCompletionItem(
     tags,
     range,
     additionalTextEdits,
-    _lsp: item,
+    // The item as the server sent it, plus any `data` it hoisted into the
+    // list defaults. `data` is what a server looks the item up by on resolve,
+    // so handing back a copy that lost it makes resolve answer nothing —
+    // which, for csharp-ls, is every C# completion losing its signature and
+    // documentation.
+    _lsp:
+      item.data === undefined && defaults?.data !== undefined
+        ? { ...item, data: defaults.data }
+        : item,
   };
 }
 

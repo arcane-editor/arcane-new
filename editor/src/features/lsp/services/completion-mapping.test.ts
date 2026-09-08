@@ -259,6 +259,23 @@ describe('toMonacoCompletionItem', () => {
     expect(toMonacoCompletionItem(raw, WORD_RANGE, ENUMS)._lsp).toBe(raw);
   });
 
+  it('folds a hoisted data field back into the item resolve receives', () => {
+    // A server that puts `data` in `itemDefaults` — which the client
+    // advertises support for — would otherwise get back an item with no
+    // `data` at all and be unable to resolve it.
+    const mapped = toMonacoCompletionItem(item(), WORD_RANGE, ENUMS, {
+      data: { cacheId: 7 },
+    });
+    expect(mapped._lsp?.data).toEqual({ cacheId: 7 });
+  });
+
+  it('lets an item keep its own data over the default', () => {
+    const mapped = toMonacoCompletionItem(item({ data: 'mine' }), WORD_RANGE, ENUMS, {
+      data: 'default',
+    });
+    expect(mapped._lsp?.data).toBe('mine');
+  });
+
   describe('itemDefaults', () => {
     // The client advertises support for these, and advertising is a promise: a
     // server may then hoist the fields out of every item and send them once.
