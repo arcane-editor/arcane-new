@@ -1,6 +1,6 @@
 import type { Monaco } from '@monaco-editor/react';
 import type { editor, Position } from 'monaco-editor';
-import type { LspClient } from './client';
+import { LspRequestCanceledError, type LspClient } from './client';
 import {
   getLspContextForModel,
   toMonacoRange,
@@ -9,6 +9,21 @@ import {
   modelFilePath,
   type LspRange,
 } from './model-context';
+import {
+  filterStaticSuggestions,
+  isAfterDot,
+  labelText,
+  mapCompletionList,
+  mergeResolvedItem,
+  shouldOfferLifecycleSnippets,
+  toLspCompletionTriggerKind,
+  type LspCompletionItem,
+  type LspCompletionList,
+  type MonacoCompletionEnums,
+  type MonacoRange,
+  type MonacoSuggestion,
+} from './completion-mapping';
+import { serverProfile } from './server-profiles';
 import { registerApplyEditHandler } from './workspace-edit';
 import { registerLspCodeActionProviders } from './code-actions';
 import { registerLspRenameProviders } from './rename-provider';
@@ -58,24 +73,31 @@ function isLocationLink(loc: LspLocation | LspLocationLink): loc is LspLocationL
   return (loc as LspLocationLink).targetUri !== undefined;
 }
 
-interface LspCompletionItem {
-  label: string | { label: string; detail?: string; description?: string };
-  kind?: number;
-  detail?: string;
-  documentation?: string | { kind: string; value: string };
-  sortText?: string;
-  filterText?: string;
-  insertText?: string;
-  insertTextFormat?: number; // 1 = PlainText, 2 = Snippet
-  textEdit?:
-    | { range: LspRange; newText: string }
-    | { insert: LspRange; replace: LspRange; newText: string };
+/**
+ * Monaco's cancellation token, structurally. Typed here rather than imported
+ * so the providers below can take it without widening their signatures to
+ * Monaco's full provider interfaces.
+ */
+interface MonacoCancellationToken {
+  isCancellationRequested: boolean;
+  onCancellationRequested(listener: () => void): { dispose(): void };
 }
 
-interface LspCompletionList {
-  isIncomplete: boolean;
-  items: LspCompletionItem[];
+/**
+ * Bridge Monaco's cancellation token onto the `AbortSignal` the LSP client
+ * speaks. Monaco cancels the previous completion, hover or signature-help
+ * request as soon as the next keystroke arrives; without this the request runs
+ * to completion server-side and the answer nobody wants is still queued ahead
+ * of the one they do.
+ */
+function abortSignalFor(token: MonacoCancellationToken | undefined): AbortSignal | undefined {
+  if (!token) return undefined;
+  const controller = new AbortController();
+  if (token.isCancellationRequested) controller.abort();
+  else token.onCancellationRequested(() => controller.abort());
+  return controller.signal;
 }
+
 
 interface LspHover {
   contents:
@@ -118,24 +140,8 @@ interface LspPublishDiagnosticsParams {
 // rename-provider.ts). The rename provider + its post-processor
 // registry live in ./rename-provider.
 
-// ── CompletionItemKind mapping ──────────────────────────────────
-
-function mapCompletionItemKind(
-  lspKind: number | undefined,
-  monacoLanguages: Monaco['languages'],
-): number {
-  const K = monacoLanguages.CompletionItemKind;
-
-  const map: Record<number, number> = {
-    1: K.Text, 2: K.Method, 3: K.Function, 4: K.Constructor, 5: K.Field,
-    6: K.Variable, 7: K.Class, 8: K.Interface, 9: K.Module, 10: K.Property,
-    11: K.Unit, 12: K.Value, 13: K.Enum, 14: K.Keyword, 15: K.Snippet,
-    16: K.Color, 17: K.File, 18: K.Reference, 19: K.Folder, 20: K.EnumMember,
-    21: K.Constant, 22: K.Struct, 23: K.Event, 24: K.Operator, 25: K.TypeParameter,
-  };
-
-  return lspKind != null && map[lspKind] != null ? map[lspKind] : K.Text;
-}
+// Completion item/kind/trigger mapping lives in ./completion-mapping (pure,
+// tested). It used to sit here, untested, beside the registration it feeds.
 
 // ── Provider registration ───────────────────────────────────────
 
@@ -152,19 +158,6 @@ const TARGET_LANGUAGES: readonly string[] = LSP_BACKED_MONACO_LANGUAGES;
  * never appear inside `.py`/`.ts` files.
  */
 const UNITY_ONLY_LANGUAGES: readonly string[] = ['csharp'];
-
-function toLspCompletionTriggerKind(monacoTriggerKind: number): 1 | 2 | 3 {
-  // Monaco: 0=Invoke, 1=TriggerCharacter, 2=TriggerForIncompleteCompletions
-  // LSP:    1=Invoked, 2=TriggerCharacter, 3=TriggerForIncompleteCompletions
-  switch (monacoTriggerKind) {
-    case 1:
-      return 2;
-    case 2:
-      return 3;
-    default:
-      return 1;
-  }
-}
 
 /**
  * Register Monaco language providers (completion, hover, …) for every
@@ -205,16 +198,64 @@ export function registerLspProviders(monaco: Monaco): () => void {
   }
 
   // ── a) CompletionItemProvider ─────────────────────────────────
+  //
+  // Mapping lives in `completion-mapping.ts` (pure, tested); this is the
+  // registration shell plus the plumbing Monaco owns — cancellation, the word
+  // range, and the labels the static providers below need in order to stay out
+  // of Roslyn's way.
+
+  const completionEnums: MonacoCompletionEnums = {
+    kinds: monaco.languages.CompletionItemKind as unknown as Record<string, number>,
+    insertAsSnippet: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+    deprecatedTag: monaco.languages.CompletionItemTag.Deprecated,
+  };
+
+  /**
+   * Labels the server returned for the most recent C# completion.
+   *
+   * The static Unity providers are separate Monaco providers, so they cannot
+   * see the LSP result directly — but Monaco queries every provider for the
+   * same position, so the latest answer is the right thing to deduplicate
+   * against. Cleared whenever the server answers nothing, so a stale set can
+   * never suppress a fallback that is genuinely needed.
+   */
+  let lastCsharpLspLabels: ReadonlySet<string> = new Set();
+
+  function wordRangeAt(model: editor.ITextModel, position: Position): MonacoRange {
+    const word = model.getWordUntilPosition(position);
+    return {
+      startLineNumber: position.lineNumber,
+      startColumn: word.startColumn,
+      endLineNumber: position.lineNumber,
+      endColumn: word.endColumn,
+    };
+  }
+
+  function lineUntil(model: editor.ITextModel, position: Position): string {
+    return model.getValueInRange({
+      startLineNumber: position.lineNumber,
+      startColumn: 1,
+      endLineNumber: position.lineNumber,
+      endColumn: position.column,
+    });
+  }
+
   registerForLanguages(
     TARGET_LANGUAGES,
     (lang, p) => monaco.languages.registerCompletionItemProvider(lang, p),
     {
+      // Monaco fixes trigger characters at registration time, so these are
+      // the union we want across every LSP-backed language rather than
+      // whatever each server registers dynamically. csharp-ls also registers
+      // `'`; it is deliberately not here, because widening the set costs a
+      // provider re-registration dance and buys a Unity developer nothing.
       triggerCharacters: ['.', '<'],
 
       async provideCompletionItems(
         model: editor.ITextModel,
         position: Position,
-        completionContext?: { triggerKind: number; triggerCharacter?: string },
+        completionContext: { triggerKind: number; triggerCharacter?: string } | undefined,
+        token: MonacoCancellationToken | undefined,
       ) {
         const ctx = getLspContextForModel(model);
         if (!ctx) return { suggestions: [] };
@@ -229,6 +270,9 @@ export function registerLspProviders(monaco: Monaco): () => void {
         // reached. `buildTextDocumentPositionParams` now names the document
         // exactly as `didOpen` did (see `lspDocumentUri`), which is what
         // actually guarantees the server knows it.
+
+        const isCsharp = model.getLanguageId() === 'csharp';
+        const profile = serverProfile(client.languageId);
 
         try {
           const params = {
@@ -248,83 +292,88 @@ export function registerLspProviders(monaco: Monaco): () => void {
           const result = await client.request<LspCompletionList | LspCompletionItem[] | null>(
             'textDocument/completion',
             params,
+            { signal: abortSignalFor(token), timeoutMs: profile.timeouts.completion },
           );
 
-          if (!result) return { suggestions: [] };
+          const { suggestions, incomplete } = mapCompletionList(
+            result,
+            wordRangeAt(model, position),
+            completionEnums,
+            profile,
+          );
 
-          const items: LspCompletionItem[] = Array.isArray(result) ? result : result.items;
-
-          // Monaco requires a range on every suggestion — it decides what the
-          // item replaces. Servers routinely omit textEdit, so fall back to the
-          // word being typed, which is what VS Code's LSP client does too.
-          const word = model.getWordUntilPosition(position);
-          const wordRange = {
-            startLineNumber: position.lineNumber,
-            startColumn: word.startColumn,
-            endLineNumber: position.lineNumber,
-            endColumn: word.endColumn,
-          };
-
-          const suggestions = items.map((item) => {
-            const label =
-              typeof item.label === 'string' ? item.label : item.label.label;
-
-            let documentation: { value: string } | undefined;
-            if (item.documentation) {
-              documentation =
-                typeof item.documentation === 'string'
-                  ? { value: item.documentation }
-                  : { value: item.documentation.value };
-            }
-
-            const range = item.textEdit
-              ? ('range' in item.textEdit
-                  ? toMonacoRange(item.textEdit.range)
-                  : {
-                      insert: toMonacoRange(item.textEdit.insert),
-                      replace: toMonacoRange(item.textEdit.replace),
-                    })
-              : undefined;
-
-            return {
-              label,
-              kind: mapCompletionItemKind(item.kind, monaco.languages),
-              insertText: item.textEdit?.newText ?? item.insertText ?? label,
-              insertTextRules: item.insertTextFormat === 2
-                ? monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet
-                : undefined,
-              detail: item.detail,
-              documentation,
-              sortText: item.sortText,
-              filterText: item.filterText,
-              range: range ?? wordRange,
-            };
-          });
+          if (isCsharp) {
+            lastCsharpLspLabels = new Set(suggestions.map((s) => labelText(s.label)));
+          }
 
           markLspReadyFromActivity();
-          return { suggestions };
+          return { suggestions, incomplete };
         } catch (err) {
-          console.error('[LSP] Completion error:', err);
+          // A superseded request is the normal case while typing, not a fault.
+          if (!(err instanceof LspRequestCanceledError)) {
+            console.error('[LSP] Completion error:', err);
+          }
           return { suggestions: [] };
+        }
+      },
+
+      /**
+       * Fill in documentation and detail for the one item the user is looking
+       * at.
+       *
+       * csharp-ls advertises `resolveProvider: true` and deliberately sends
+       * items without documentation, computing it on demand. Without this the
+       * details pane is empty for every C# member, which reads as "this editor
+       * has no docs" rather than as a request the client never made.
+       */
+      async resolveCompletionItem(
+        item: MonacoSuggestion,
+        token: MonacoCancellationToken | undefined,
+      ) {
+        const lsp = item._lsp;
+        if (!lsp) return item;
+        // Nothing resolve could add.
+        if (item.documentation && item.detail) return item;
+
+        const client = lspManager.client('csharp');
+        if (!client.isRunning()) return item;
+
+        try {
+          const resolved = await client.request<LspCompletionItem | null>(
+            'completionItem/resolve',
+            lsp,
+            {
+              signal: abortSignalFor(token),
+              timeoutMs: serverProfile('csharp').timeouts.completionResolve,
+            },
+          );
+          return mergeResolvedItem(item, resolved);
+        } catch {
+          // Details are an enhancement; a failed resolve must never blank an
+          // item that is already on screen.
+          return item;
         }
       },
     },
   );
 
   // ── a2) Unity Lifecycle Snippet CompletionItemProvider — C# only ─
+  //
+  // Offered only where a member declaration is legal. These expand to a whole
+  // method and sort above everything (`sortText: '0'…`), so the previous
+  // ungated version put 31 snippets on top of every completion list in the
+  // file — including immediately after a member-access dot, where a lifecycle
+  // method cannot go.
   registerForLanguages(
     UNITY_ONLY_LANGUAGES,
     (lang, p) => monaco.languages.registerCompletionItemProvider(lang, p),
     {
       provideCompletionItems(model: editor.ITextModel, position: Position) {
-        const word = model.getWordUntilPosition(position);
-        const range = {
-          startLineNumber: position.lineNumber,
-          startColumn: word.startColumn,
-          endLineNumber: position.lineNumber,
-          endColumn: word.endColumn,
-        };
+        if (!shouldOfferLifecycleSnippets(lineUntil(model, position))) {
+          return { suggestions: [] };
+        }
 
+        const range = wordRangeAt(model, position);
         const suggestions = UNITY_LIFECYCLE_METHODS.map((method) => ({
           label: method.name,
           kind: monaco.languages.CompletionItemKind.Snippet,
@@ -342,23 +391,24 @@ export function registerLspProviders(monaco: Monaco): () => void {
   );
 
   // ── a3) Fallback completions: Unity API names + C# keywords — C# only ─
-  // These are plain identifier suggestions so users see SOMETHING while
-  // Roslyn is indexing or if csharp-ls fails. They're suppressed after
-  // a `.` so member-access completions stay LSP-driven.
-
-  function isAfterDot(model: editor.ITextModel, position: Position): boolean {
-    const lineUntil = model.getValueInRange({
-      startLineNumber: position.lineNumber,
-      startColumn: 1,
-      endLineNumber: position.lineNumber,
-      endColumn: position.column,
-    });
-    return /\.\s*$/.test(lineUntil);
+  //
+  // These exist so the user sees SOMETHING in the seconds before Roslyn has a
+  // project graph, and if csharp-ls never starts at all. Once it answers they
+  // are strictly worse than what it returns — 173 hardcoded names against the
+  // real, scoped, typed API — so they stand down at that point instead of
+  // shipping a second row for every name Roslyn already offered.
+  //
+  // Not deleted: they are the only completions a user gets while the solution
+  // loads, and the difference between "indexing" and "broken" is exactly what
+  // this app has been bad at communicating.
+  function fallbacksActive(): boolean {
+    return !isCsharpProjectLoaded();
   }
 
   // ── a4) Unity live templates (sfield / sprop / …) ─────────────
   // Rider ships these as its Unity live templates; they are the abbreviations
-  // a Unity developer types dozens of times a day.
+  // a Unity developer types dozens of times a day. Roslyn has no equivalent,
+  // so unlike the two lists below these stay on once the project loads.
   registerForLanguages(
     UNITY_ONLY_LANGUAGES,
     (lang, p) => monaco.languages.registerCompletionItemProvider(lang, p),
@@ -366,16 +416,9 @@ export function registerLspProviders(monaco: Monaco): () => void {
       provideCompletionItems(model: editor.ITextModel, position: Position) {
         // A template expands to a declaration, so it is never valid directly
         // after a `.` — offering it there would push real members down.
-        if (isAfterDot(model, position)) return { suggestions: [] };
+        if (isAfterDot(lineUntil(model, position))) return { suggestions: [] };
 
-        const word = model.getWordUntilPosition(position);
-        const range = {
-          startLineNumber: position.lineNumber,
-          startColumn: word.startColumn,
-          endLineNumber: position.lineNumber,
-          endColumn: word.endColumn,
-        };
-
+        const range = wordRangeAt(model, position);
         return {
           suggestions: UNITY_LIVE_TEMPLATES.map((tpl) => ({
             label: tpl.name,
@@ -400,30 +443,27 @@ export function registerLspProviders(monaco: Monaco): () => void {
     (lang, p) => monaco.languages.registerCompletionItemProvider(lang, p),
     {
       provideCompletionItems(model: editor.ITextModel, position: Position) {
-        if (isAfterDot(model, position)) return { suggestions: [] };
+        if (!fallbacksActive()) return { suggestions: [] };
+        if (isAfterDot(lineUntil(model, position))) return { suggestions: [] };
 
-        const word = model.getWordUntilPosition(position);
-        const range = {
-          startLineNumber: position.lineNumber,
-          startColumn: word.startColumn,
-          endLineNumber: position.lineNumber,
-          endColumn: word.endColumn,
-        };
-
+        const range = wordRangeAt(model, position);
         const kindMap = {
           type: monaco.languages.CompletionItemKind.Class,
           method: monaco.languages.CompletionItemKind.Method,
           property: monaco.languages.CompletionItemKind.Property,
         } as const;
 
-        const suggestions = UNITY_API_NAMES.map((api) => ({
-          label: api.name,
-          kind: kindMap[api.kind],
-          insertText: api.name,
-          detail: api.detail,
-          sortText: '8_' + api.name,
-          range,
-        }));
+        const suggestions = filterStaticSuggestions(
+          UNITY_API_NAMES.map((api) => ({
+            label: api.name,
+            kind: kindMap[api.kind],
+            insertText: api.name,
+            detail: api.detail,
+            sortText: '8_' + api.name,
+            range,
+          })),
+          lastCsharpLspLabels,
+        );
 
         return { suggestions };
       },
@@ -435,23 +475,20 @@ export function registerLspProviders(monaco: Monaco): () => void {
     (lang, p) => monaco.languages.registerCompletionItemProvider(lang, p),
     {
       provideCompletionItems(model: editor.ITextModel, position: Position) {
-        if (isAfterDot(model, position)) return { suggestions: [] };
+        if (!fallbacksActive()) return { suggestions: [] };
+        if (isAfterDot(lineUntil(model, position))) return { suggestions: [] };
 
-        const word = model.getWordUntilPosition(position);
-        const range = {
-          startLineNumber: position.lineNumber,
-          startColumn: word.startColumn,
-          endLineNumber: position.lineNumber,
-          endColumn: word.endColumn,
-        };
-
-        const suggestions = CSHARP_KEYWORDS.map((kw) => ({
-          label: kw,
-          kind: monaco.languages.CompletionItemKind.Keyword,
-          insertText: kw,
-          sortText: '9_' + kw,
-          range,
-        }));
+        const range = wordRangeAt(model, position);
+        const suggestions = filterStaticSuggestions(
+          CSHARP_KEYWORDS.map((kw) => ({
+            label: kw,
+            kind: monaco.languages.CompletionItemKind.Keyword,
+            insertText: kw,
+            sortText: '9_' + kw,
+            range,
+          })),
+          lastCsharpLspLabels,
+        );
 
         return { suggestions };
       },
@@ -463,7 +500,11 @@ export function registerLspProviders(monaco: Monaco): () => void {
     TARGET_LANGUAGES,
     (lang, p) => monaco.languages.registerHoverProvider(lang, p),
     {
-      async provideHover(model: editor.ITextModel, position: Position) {
+      async provideHover(
+        model: editor.ITextModel,
+        position: Position,
+        token: MonacoCancellationToken | undefined,
+      ) {
         const ctx = getLspContextForModel(model);
         if (!ctx) return null;
 
@@ -472,6 +513,10 @@ export function registerLspProviders(monaco: Monaco): () => void {
           const result = await ctx.client.request<LspHover | null>(
             'textDocument/hover',
             params,
+            {
+              signal: abortSignalFor(token),
+              timeoutMs: serverProfile(ctx.client.languageId).timeouts.hover,
+            },
           );
 
           if (!result) return null;
@@ -556,7 +601,11 @@ export function registerLspProviders(monaco: Monaco): () => void {
     {
       signatureHelpTriggerCharacters: ['(', ','],
 
-      async provideSignatureHelp(model: editor.ITextModel, position: Position) {
+      async provideSignatureHelp(
+        model: editor.ITextModel,
+        position: Position,
+        token: MonacoCancellationToken | undefined,
+      ) {
         const ctx = getLspContextForModel(model);
         if (!ctx) return null;
 
@@ -565,6 +614,10 @@ export function registerLspProviders(monaco: Monaco): () => void {
           const result = await ctx.client.request<LspSignatureHelp | null>(
             'textDocument/signatureHelp',
             params,
+            {
+              signal: abortSignalFor(token),
+              timeoutMs: serverProfile(ctx.client.languageId).timeouts.signatureHelp,
+            },
           );
 
           if (!result) return null;

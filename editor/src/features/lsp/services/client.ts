@@ -56,6 +56,17 @@ interface LspEventPayload {
 }
 
 const REQUEST_TIMEOUT_MS = 180_000;
+
+/**
+ * Per-request overrides. Interactive requests (completion, hover, signature
+ * help) set both: a short deadline, because an answer the user has already
+ * typed past is worthless, and the `AbortSignal` Monaco's cancellation token
+ * is bridged onto.
+ */
+export interface RequestOptions {
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}
 const STDERR_RING_SIZE = 50;
 
 // ── workspace/applyEdit handler injection ───────────────────────
@@ -362,7 +373,11 @@ export class LspClient {
   /**
    * Send a JSON-RPC request and wait for the response.
    */
-  async request<T = unknown>(method: string, params: unknown): Promise<T> {
+  async request<T = unknown>(
+    method: string,
+    params: unknown,
+    options?: RequestOptions,
+  ): Promise<T> {
     if (!this.running && method !== 'initialize') {
       throw new Error(
         `LSP client (${this.languageId}) is not running (attempted '${method}')`,
@@ -370,6 +385,7 @@ export class LspClient {
     }
 
     const id = this.nextId++;
+    const timeoutMs = options?.timeoutMs ?? REQUEST_TIMEOUT_MS;
 
     const promise = new Promise<T>((resolve, reject) => {
       this.pendingRequests.set(id, {
@@ -378,17 +394,37 @@ export class LspClient {
         method,
       });
 
+      // Abandon a superseded interactive request. Monaco cancels the previous
+      // completion the moment the next keystroke arrives, and without this the
+      // server keeps computing an answer nobody will read while the reply this
+      // client IS waiting for queues behind it.
+      if (options?.signal) {
+        const onAbort = () => {
+          const pending = this.pendingRequests.get(id);
+          if (!pending) return;
+          this.pendingRequests.delete(id);
+          this.clearPendingTimeout(id, pending);
+          this.notify('$/cancelRequest', { id });
+          pending.reject(new LspRequestCanceledError(method, this.languageId, -32800));
+        };
+        if (options.signal.aborted) queueMicrotask(onAbort);
+        else options.signal.addEventListener('abort', onAbort, { once: true });
+      }
+
       const timeoutId = setTimeout(() => {
         const pending = this.pendingRequests.get(id);
         if (pending) {
           this.pendingRequests.delete(id);
+          // Tell the server to stop too — a timeout that leaves the work
+          // running just moves the cost, it does not remove it.
+          this.notify('$/cancelRequest', { id });
           pending.reject(
             new Error(
-              `LSP request '${method}' (id=${id}, lang=${this.languageId}) timed out after ${REQUEST_TIMEOUT_MS}ms`,
+              `LSP request '${method}' (id=${id}, lang=${this.languageId}) timed out after ${timeoutMs}ms`,
             ),
           );
         }
-      }, REQUEST_TIMEOUT_MS);
+      }, timeoutMs);
 
       (
         this.pendingRequests.get(id) as PendingRequest & {
