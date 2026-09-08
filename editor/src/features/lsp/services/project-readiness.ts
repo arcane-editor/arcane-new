@@ -68,6 +68,34 @@ export function isCsharpProjectLoaded(): boolean {
 }
 
 /**
+ * A load has STARTED — close the gate and re-arm the failsafe.
+ *
+ * csharp-ls 0.23 made solution loading on-demand: nothing loads at
+ * `initialize`, and the load begins with the first `didOpen`. Readiness is
+ * therefore no longer a one-time startup event. Without this, a session that
+ * sits for 20s before its first C# file is opened has already had the failsafe
+ * open the gate, so the pull scheduled 300ms after that file appears is
+ * answered out of an empty workspace — a CS0518 cascade over every line, whose
+ * `resultId` is then cached and repeated as `unchanged`. That is the exact
+ * failure this module was written to prevent, reintroduced by a server
+ * upgrade rather than by a diff.
+ *
+ * Idempotent per load: csharp-ls logs one line per project, and re-closing an
+ * already-closed gate is a no-op.
+ */
+export function markCsharpProjectLoading(
+  failsafeMs: number = CSHARP_READINESS_FAILSAFE_MS,
+): void {
+  if (!loaded) return;
+  loaded = false;
+  clearFailsafe();
+  failsafeTimer = setTimeout(() => {
+    failsafeTimer = null;
+    markCsharpProjectLoaded();
+  }, failsafeMs);
+}
+
+/**
  * Open the gate and notify listeners. Idempotent: repeated load-finished
  * markers (csharp-ls logs one per project) notify only on the first.
  */

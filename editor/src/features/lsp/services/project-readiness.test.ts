@@ -7,6 +7,7 @@ import { describe, it, expect, afterEach } from 'bun:test';
 import {
   isCsharpProjectLoaded,
   markCsharpProjectLoaded,
+  markCsharpProjectLoading,
   resetCsharpProjectLoaded,
   onCsharpProjectLoaded,
   whenCsharpProjectLoaded,
@@ -189,5 +190,66 @@ describe('the failsafe', () => {
 
   it('defaults to a window far longer than a real solution load', () => {
     expect(CSHARP_READINESS_FAILSAFE_MS).toBeGreaterThanOrEqual(10_000);
+  });
+});
+
+/**
+ * On-demand solution loading (csharp-ls 0.23+).
+ *
+ * Nothing loads at `initialize`; the load begins with the first `didOpen`. So
+ * readiness stopped being a one-time startup event the moment the server was
+ * upgraded — it can go back to false minutes into a session. Without the
+ * re-close below, a project whose first C# file is opened after the failsafe
+ * has already fired gets its diagnostics answered out of an empty workspace: a
+ * CS0518 cascade over every line, whose resultId is then cached and repeated
+ * as `unchanged` until the app restarts.
+ */
+describe('a load that starts after the gate has opened', () => {
+  it('closes the gate again', () => {
+    resetCsharpProjectLoaded(10_000);
+    markCsharpProjectLoaded();
+    expect(isCsharpProjectLoaded()).toBe(true);
+
+    markCsharpProjectLoading(10_000);
+    expect(isCsharpProjectLoaded()).toBe(false);
+  });
+
+  it('re-opens the gate and notifies again when that load finishes', () => {
+    resetCsharpProjectLoaded(10_000);
+    let opens = 0;
+    const unsub = onCsharpProjectLoaded(() => opens++);
+
+    markCsharpProjectLoaded();
+    expect(opens).toBe(1);
+
+    markCsharpProjectLoading(10_000);
+    markCsharpProjectLoaded();
+    // The re-pull after the second load is the whole point: open C# models are
+    // showing results computed against the previous, emptier graph.
+    expect(opens).toBe(2);
+
+    unsub();
+  });
+
+  it('is a no-op while a load is already in flight', () => {
+    // csharp-ls logs one marker per project; the first close is enough.
+    resetCsharpProjectLoaded(10_000);
+    markCsharpProjectLoaded();
+    markCsharpProjectLoading(10_000);
+    markCsharpProjectLoading(10_000);
+    markCsharpProjectLoaded();
+    expect(isCsharpProjectLoaded()).toBe(true);
+  });
+
+  it('arms a failsafe, so a load that never reports finishing still opens', async () => {
+    resetCsharpProjectLoaded(10_000);
+    markCsharpProjectLoaded();
+    markCsharpProjectLoading(20);
+    expect(isCsharpProjectLoaded()).toBe(false);
+
+    await tick(50);
+    // A gate that can wedge shut trades wrong diagnostics for none at all,
+    // which is worse: it fails silently.
+    expect(isCsharpProjectLoaded()).toBe(true);
   });
 });

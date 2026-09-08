@@ -38,6 +38,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { fileUri } from '../src/features/lsp/services/document-sync';
 import { lspDocumentUri } from '../src/features/lsp/services/model-context';
+import { isLoadFinishedMessage } from '../src/features/lsp/services/csharp-ls-log-markers';
 import { URI } from 'monaco-editor/esm/vs/base/common/uri.js';
 import {
   compareVersions,
@@ -81,9 +82,11 @@ const BUDGET = {
 // or swapped — which removes an editor feature silently, with no error on
 // either side, exactly like the ACP capability switches in CLAUDE.md.
 //
-// `foldingRangeProvider` and `selectionRangeProvider` are deliberately absent:
-// csharp-ls 0.22 does not implement them, and Monaco falls back to
-// indentation-based folding. Do not add them here without re-probing.
+// `foldingRangeProvider` and `selectionRangeProvider` are deliberately absent.
+// 0.23 added folding ranges and 0.27 advertises them, but the editor registers
+// no folding provider — Monaco still folds by indentation — so requiring it
+// here would assert a capability nothing depends on. Wire the provider first,
+// then add it. `selectionRangeProvider` is still unimplemented upstream.
 const REQUIRED_CAPABILITIES = [
   'definitionProvider',
   'diagnosticProvider',
@@ -164,16 +167,43 @@ const pinnedVersion = readPinnedCsharpLsVersion(
 );
 if (!pinnedVersion) fail('could not read CSHARP_LS_VERSION from src-tauri/src/csharp_ls.rs');
 
-const server0 = discoverCsharpLs({
-  env: process.env,
-  platform: process.platform,
-  home,
-  pinnedVersion,
-});
+const lookup = { env: process.env, platform: process.platform, home, pinnedVersion };
+let server0 = discoverCsharpLs(lookup);
+if (!server0) {
+  // Provision it, rather than skipping. The app installs the pinned server on
+  // its next C# start, but that is AFTER this gate runs — so on the first run
+  // following a version bump the check would print SKIPPED at exactly the
+  // moment an upgrade most needs verifying. This drives the same
+  // `install_into` the app calls, so what gets probed is what users get.
+  console.log(`  provisioning csharp-ls ${pinnedVersion} from the bundled package…`);
+  const provision = spawnSync(
+    'cargo',
+    [
+      'test',
+      '--lib',
+      'csharp_ls::tests::provisions_the_pinned_server_into_the_managed_directory',
+      '--',
+      '--exact',
+      '--nocapture',
+    ],
+    {
+      cwd: path.join(EDITOR_DIR, 'src-tauri'),
+      env: { ...process.env, UNITYIDE_PROVISION_MANAGED: '1', UNITYIDE_CSHARP_LS_E2E: 'required' },
+      encoding: 'utf8',
+    },
+  );
+  if (provision.status !== 0) {
+    fail(
+      `could not provision csharp-ls ${pinnedVersion}`,
+      (provision.stderr || provision.stdout || '').slice(-2000),
+    );
+  }
+  server0 = discoverCsharpLs(lookup);
+}
 if (!server0) {
   skip(
-    `csharp-ls ${pinnedVersion} is not installed (start the app once to provision it, ` +
-      'or set UNITYIDE_CSHARP_LS_DLL)',
+    `csharp-ls ${pinnedVersion} is not installed and could not be provisioned ` +
+      '(set UNITYIDE_CSHARP_LS_DLL to point at one)',
   );
 }
 
@@ -306,7 +336,10 @@ server.stdout.on('data', (chunk: Buffer) => {
       pending.delete(msg.id);
     } else if (msg.method === 'window/logMessage') {
       logs.push(msg.params.message);
-      if (/Finished loading/i.test(msg.params.message)) solutionLoaded = true;
+        // Same predicate the app uses, imported rather than re-spelled: a probe
+      // with its own copy of this regex would keep passing through a rename
+      // that had silently degraded the editor to its failsafe timer.
+      if (isLoadFinishedMessage(msg.params.message)) solutionLoaded = true;
     } else if (msg.id !== undefined && msg.method) {
       if (msg.method === 'client/registerCapability') {
         for (const reg of msg.params?.registrations ?? []) dynamicRegistrations.push(reg.method);
@@ -459,12 +492,18 @@ try {
   notify('initialized', {});
   const serverCaps: Record<string, unknown> = init.result?.capabilities ?? {};
 
-  // Wait for the solution BEFORE opening the document. A didOpen that lands
-  // mid-load gets attached to Roslyn's miscellaneous-files workspace, which has
-  // no Unity references and answers every request with nothing — the exact
-  // symptom this script exists to detect, so getting the order wrong here would
-  // make the check fail for a reason that has nothing to do with the product.
+  // Open the document, THEN wait for the load.
+  //
+  // Since csharp-ls 0.23 the solution loads on demand: nothing happens at
+  // `initialize`, and the load begins with the first `didOpen`. Waiting first
+  // and opening second — which is what this script used to do, correctly, for
+  // 0.22 — now deadlocks until the timeout. The app is not affected because it
+  // opens tabs as the user does, but its readiness gate had to learn the same
+  // lesson (see `markCsharpProjectLoading`).
   const loadStart = Date.now();
+  notify('textDocument/didOpen', {
+    textDocument: { uri, languageId: 'csharp', version: 1, text: PROBE },
+  });
   while (!solutionLoaded && Date.now() - loadStart < BUDGET.solutionLoad * BUDGET_SCALE) {
     await sleep(250);
   }
@@ -478,10 +517,10 @@ try {
   }
   pass('solution', `loaded in ${Date.now() - loadStart}ms`);
 
-  notify('textDocument/didOpen', {
-    textDocument: { uri, languageId: 'csharp', version: 1, text: PROBE },
-  });
-  await sleep(2500); // let Roslyn bind the just-opened document
+  // Roslyn re-attaches the open document to the freshly loaded project; that
+  // is not instantaneous, and asking too early answers out of the
+  // miscellaneous-files workspace, which has no Unity references at all.
+  await sleep(3000);
 
   const failures = logs.filter((l) => /\[Failure\]|Project file not found/i.test(l));
   if (failures.length) {

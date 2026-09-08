@@ -17,6 +17,9 @@ import {
   forgetDocument,
   fileUri,
   markCsharpProjectLoaded,
+  markCsharpProjectLoading,
+  isLoadStartedMessage,
+  isLoadFinishedMessage,
   resetCsharpProjectLoaded,
   ensureCsharpLs,
   resetCsharpLsProvisioning,
@@ -448,23 +451,27 @@ async function runLspStart(
       else if (v.title) useUiStore.getState().setLspProgress(v.title);
     });
 
-    // csharp-ls 0.22 reports solution load progress via window/logMessage,
-    // not $/progress, and uses pull diagnostics so publishDiagnostics never
-    // arrives. Watch the log stream for the load-finished marker and flip
-    // to 'ready' so the StatusBar isn't a permanent "Loading".
+    // csharp-ls reports solution load progress via window/logMessage, not
+    // $/progress, and uses pull diagnostics so publishDiagnostics never
+    // arrives. Watch the log stream for the load markers and flip the status
+    // bar so it isn't a permanent "Loading".
+    //
+    // Both markers matter, not just the finish. Since csharp-ls 0.23 the
+    // solution loads ON DEMAND — nothing at `initialize`, the load starts with
+    // the first `didOpen` — so a load can begin long after startup and the
+    // graph goes back to being unusable while it runs.
     let solutionLoadFinished = false;
     unsubscribeCsharpLogMessage = client.onNotification('window/logMessage', (params: unknown) => {
-      const p = params as { message?: string };
-      const raw = p?.message ?? '';
-      const msg = raw.replace(/^csharp-ls:\s*/, '');
+      const msg = ((params as { message?: string })?.message ?? '').trim();
       if (!msg) return;
 
-      if (msg.startsWith('Loading solution') || msg.startsWith('Loading project')) {
-        useUiStore.getState().setLspProgress(msg);
-      } else if (
-        msg.startsWith('Finished loading solution') ||
-        msg.startsWith('Finished loading project')
-      ) {
+      if (isLoadStartedMessage(msg)) {
+        useUiStore.getState().setLspProgress(msg.replace(/^csharp-ls:\s*/i, ''));
+        // Hold diagnostics for the duration. A report answered mid-load is a
+        // CS0518 cascade over every line, indistinguishable at the wire level
+        // from a real one — see project-readiness.ts.
+        markCsharpProjectLoading();
+      } else if (isLoadFinishedMessage(msg)) {
         solutionLoadFinished = true;
         useUiStore.getState().setLspProgress(null);
         useUiStore.getState().setLspStatus('ready');

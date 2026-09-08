@@ -3,20 +3,23 @@
  * Vendor the pinned `csharp-ls` NuGet package (MIT) into the app bundle.
  *
  * **Why the package and not a binary.** csharp-ls is a .NET *global tool*, so
- * the shippable artifact is a nupkg. At first C# start the app runs
- * `dotnet tool install` against this file as the only NuGet source, which
- * makes provisioning offline and version-pinned — see `csharp_ls.rs`.
+ * the shippable artifact is a nupkg. At first C# start the app unzips this
+ * file's `tools/<tfm>/any/` payload into its own data directory and runs it as
+ * `dotnet CSharpLanguageServer.dll` — see `csharp_ls.rs`, which explains why
+ * NuGet is not involved (it cannot enumerate the extended-length `\?\C:\...`
+ * path Tauri reports for a resource directory).
  *
- * **Why it is not committed.** It is 22 MB of binary that changes only when
+ * **Why it is not committed.** It is ~21 MB of binary that changes only when
  * the pin moves; git is the wrong place for it. It is fetched instead, and
  * verified against a SHA-512 recorded here so a corrupted or substituted
  * download cannot reach a user's machine.
  *
  * **Failure behaviour is deliberately asymmetric.** A developer building
- * offline gets a warning and a working build (the app falls back to
- * installing from nuget.org at runtime). CI passes `--require`, where a
- * missing package is a build failure — shipping an installer that silently
- * lost its offline package is exactly the regression this guards.
+ * offline gets a warning and a build that completes, but the app it produces
+ * cannot provision the server — there is no runtime fallback. CI passes
+ * `--require`, where a missing package is a build failure; shipping an
+ * installer that silently lost its offline package is exactly the regression
+ * this guards.
  *
  *   bun run scripts/fetch-csharp-ls-package.ts [--require]
  */
@@ -26,15 +29,15 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync 
 import { join } from 'node:path';
 
 /** Pinned release. Must match `CSHARP_LS_VERSION` in `src-tauri/src/csharp_ls.rs`. */
-export const CSHARP_LS_VERSION = '0.22.0';
+export const CSHARP_LS_VERSION = '0.27.0';
 
 /**
- * SHA-512 of `csharp-ls.0.22.0.nupkg` as served by nuget.org, hex-encoded.
+ * SHA-512 of `csharp-ls.0.27.0.nupkg` as served by nuget.org, hex-encoded.
  * Captured from the published package and cross-checked against a copy
  * installed by `dotnet tool install` — the two are byte-identical.
  */
 export const NUPKG_SHA512 =
-  '12b303bccc29e6f9de98b6e81ffd3e33b8a61b3adfd3ce1095d5e22d2e8c2b6ecd777edbede7848f707cd0d445363a0ec9b4d97ef37d3b21825cadb25a42acd1';
+  '5322dc87a6c01641dc1dc993f8a797b0e7b301ba447338a6894c69b065ef6285347568695fe80d34a96a34d5579d42bc399f951e261d3cfc70ed4be0407b0903';
 
 export function packageFileName(version = CSHARP_LS_VERSION): string {
   return `csharp-ls.${version}.nupkg`;
@@ -127,7 +130,7 @@ async function main(): Promise<void> {
     }
     console.warn(`${TAG} could not vendor the package: ${detail}`);
     console.warn(
-      `${TAG} continuing without it — the app will install csharp-ls from nuget.org at runtime.`,
+      `${TAG} continuing without it — but the app this build produces cannot provision csharp-ls.`,
     );
   }
 }
