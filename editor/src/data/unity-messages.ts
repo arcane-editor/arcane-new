@@ -1,4 +1,17 @@
-// Unity lifecycle methods database — ported from unity-lifecycle-db.ts
+/**
+ * The Unity message (lifecycle) table.
+ *
+ * Lives in `src/data/` rather than inside a feature because three separate
+ * places need it and none of them should have to import another feature's
+ * barrel to get it: the analyzer rules that decide whether a method is a Unity
+ * message at all, the C# decoration layer that highlights them, and the
+ * completion snippets that offer them.
+ *
+ * The move was forced by a concrete problem. The rules used to reach it
+ * through `features/csharp`, whose barrel imports a stylesheet and React
+ * components — so importing one rule in a test loaded Monaco and Tauri and
+ * failed. Shared data belongs in a shared place.
+ */
 
 export interface LifecycleMethod {
   name: string;

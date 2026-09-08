@@ -59,6 +59,7 @@ export const inputLegacyApiRule: AnalyzerRule = {
   id: RULE_ID,
   defaultSeverity: 'error',
   settingKey: 'unity.inputDiagnostics.enabled',
+  codes: ['UNITY0405'],
 
   run(scan): Finding[] {
     const index = getInputActionsIndex();

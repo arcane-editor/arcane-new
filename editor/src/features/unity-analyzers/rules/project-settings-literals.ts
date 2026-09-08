@@ -67,6 +67,7 @@ export const projectSettingsLiteralsRule: AnalyzerRule = {
   id: 'unity/project-settings-literals',
   defaultSeverity: 'warning',
   settingKey: 'unity.projectSettingsDiagnostics.enabled',
+  codes: ['UNITY0301', 'UNITY0302', 'UNITY0303', 'UNITY0304', 'UNITY0305', 'UNITY0306'],
 
   run(scan): Finding[] {
     const settings = getProjectSettings();

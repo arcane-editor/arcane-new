@@ -2282,23 +2282,13 @@ mod tests {
         assert!(decode_base64("!!!!").is_none());
     }
 
-    /// The skip helper must actually fail when skipping is forbidden — this is
-    /// the guard on the guard. `UNITYIDE_SMOKE_E2E` is read per call, so a
-    /// scoped set/unset is enough; the smoke lock keeps it away from the tests
-    /// that read the same variable.
-    #[test]
-    fn a_forbidden_skip_is_a_failure() {
-        let _guard = crate::sync_util::lock_recover(&SMOKE_WORKSPACE);
-        let had = env::var("UNITYIDE_SMOKE_E2E").ok();
-        // Safety: single-threaded within the smoke lock; restored below.
-        unsafe { env::set_var("UNITYIDE_SMOKE_E2E", "required") };
-        assert!(smoke_required());
-        unsafe { env::remove_var("UNITYIDE_SMOKE_E2E") };
-        assert!(!smoke_required());
-        if let Some(v) = had {
-            unsafe { env::set_var("UNITYIDE_SMOKE_E2E", v) };
-        }
-    }
+    // There is deliberately no unit test for `smoke_required` itself. It reads
+    // one environment variable, and a test for it has to mutate the
+    // environment of a process running tests in parallel — which is exactly
+    // the kind of cross-test interference that produces a failure nobody can
+    // reproduce. The behaviour it guards is checked from outside instead:
+    // `verify:intellisense` runs the generator with UNITYIDE_SMOKE_E2E=required
+    // on every invocation, so a silently-skipping smoke test fails the gate.
 
     // ─── smoke tests (skipped when real workspace absent) ──────────────────────
 

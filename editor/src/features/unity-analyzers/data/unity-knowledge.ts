@@ -69,11 +69,42 @@ export const ZERO_PARAM_MESSAGES = new Set<string>([
 ]);
 
 /** The Update-family messages performance rules scope themselves to. */
+/**
+ * Unity messages that run on a per-frame or per-physics-step cadence.
+ *
+ * This is the scope of every "expensive in a hot path" rule, and the reason
+ * those rules exist at all: `Microsoft.Unity.Analyzers` has nothing in this
+ * family. It reports what is semantically wrong for Unity; it does not report
+ * what is merely ruinous to call sixty times a second. That gap is what a
+ * Unity developer actually notices in a profiler, and it is the one Rider
+ * fills with its "expensive method invocation" inspections.
+ *
+ * Beyond the four obvious ones: OnGUI runs several times per frame in the
+ * editor; the render callbacks run per camera per frame; OnTriggerStay and
+ * OnCollisionStay run per contact per physics step; OnAudioFilterRead runs on
+ * the audio thread at buffer rate, where an allocation is worse than
+ * anywhere else in the engine.
+ */
 export const UPDATE_FAMILY = new Set<string>([
   'Update',
   'FixedUpdate',
   'LateUpdate',
   'OnGUI',
+  'OnRenderObject',
+  'OnWillRenderObject',
+  'OnPreCull',
+  'OnPreRender',
+  'OnPostRender',
+  'OnRenderImage',
+  'OnAnimatorMove',
+  'OnAnimatorIK',
+  'OnTriggerStay',
+  'OnTriggerStay2D',
+  'OnCollisionStay',
+  'OnCollisionStay2D',
+  'OnMouseOver',
+  'OnMouseDrag',
+  'OnAudioFilterRead',
 ]);
 
 /**

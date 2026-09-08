@@ -13,6 +13,7 @@ const DESTROY_THIS_RE = /\bDestroy\s*\(\s*this\s*(?:,|\))/g;
 export const destroyThisRule: AnalyzerRule = {
   id: 'unity/destroy-this',
   defaultSeverity: 'info',
+  codes: ['UNITY0310'],
 
   run(scan, _ctx): Finding[] {
     const findings: Finding[] = [];
@@ -36,7 +37,7 @@ export const destroyThisRule: AnalyzerRule = {
         severity: this.defaultSeverity,
         start: thisStart,
         end: thisStart + 'this'.length,
-        code: 'UNITY0302',
+        code: 'UNITY0310',
         message: `'Destroy(this)' destroys only this component, not its GameObject. If you meant to remove the whole object, use 'Destroy(gameObject)'.`,
       });
     }

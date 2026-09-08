@@ -10,11 +10,11 @@ const LINQ_RE = /\.\s*(Where|Select|SelectMany|ToList|ToArray|ToDictionary|Order
 const NEW_RE = /\bnew\s+([A-Za-z_][\w.]*)\s*(?:<[^>;]*>)?\s*[([{]/g;
 
 // foreach loops — non-array enumeration may allocate an enumerator.
-const FOREACH_RE = /\bforeach\s*\(/g;
 
 export const allocInUpdateRule: AnalyzerRule = {
   id: 'unity/alloc-in-update',
   defaultSeverity: 'info',
+  codes: ['UNITY0205', 'UNITY0206', 'UNITY0207'],
 
   run(scan, _ctx): Finding[] {
     const findings: Finding[] = [];
@@ -45,20 +45,11 @@ export const allocInUpdateRule: AnalyzerRule = {
           `String concatenation with '+' inside a loop in ${method.name}() allocates a new string each iteration. Use a StringBuilder or build the string once.`,
           'UNITY0207'));
       }
-
-      // foreach over a non-array (heuristic) → potential enumerator allocation.
-      for (const m of matchesInBody(scan, body, FOREACH_RE)) {
-        // Heuristic: flag foreach only when the collection token is not an
-        // obvious array access. We look at the `in <expr>)` tail.
-        const tail = scan.code.slice(m.index, Math.min(scan.code.length, m.index + 160));
-        const inMatch = /\bin\s+([^)]*)\)/.exec(tail);
-        if (!inMatch) continue;
-        const collection = inMatch[1].trim();
-        if (collection.endsWith(']')) continue; // array element / indexer — skip
-        findings.push(info(this.id, m.index, m.index + 'foreach'.length,
-          `'foreach' inside ${method.name}() can allocate an enumerator each frame for non-array/List collections. Prefer a for-loop over an array/List in hot paths.`,
-          'UNITY0208'));
-      }
+      // No `foreach` check. There was one (UNITY0208), and it was wrong:
+      // List<T>, arrays and Dictionary<K,V> all return STRUCT enumerators,
+      // so iterating them allocates nothing. It fired on nearly every
+      // foreach a Unity developer writes, which is how a performance
+      // analyzer teaches people to ignore it.
     }
 
     return findings;
