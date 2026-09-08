@@ -126,6 +126,12 @@ interface LspDiagnostic {
   range: LspRange;
   severity?: number;
   code?: number | string;
+  /**
+   * Where the rule is documented. The Unity analyzers fill this in for every
+   * UNT diagnostic, which is the difference between a four-character code and
+   * an explanation of why the pattern is wrong.
+   */
+  codeDescription?: { href?: string };
   source?: string;
   message: string;
 }
@@ -790,7 +796,18 @@ export function registerLspProviders(monaco: Monaco): () => void {
         endColumn: diag.range.end.character + 1,
         message: diag.message,
         source: diag.source,
-        code: diag.code != null ? String(diag.code) : undefined,
+        // A plain string when there is nowhere to send the reader, and a
+        // linked code when there is. Every UNT diagnostic carries a doc URL,
+        // and `UNT0022` on its own explains nothing.
+        code:
+          diag.code == null
+            ? undefined
+            : diag.codeDescription?.href
+              ? {
+                  value: String(diag.code),
+                  target: monaco.Uri.parse(diag.codeDescription.href),
+                }
+              : String(diag.code),
       };
     });
 
