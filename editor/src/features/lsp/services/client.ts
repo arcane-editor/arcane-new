@@ -101,6 +101,19 @@ export class LspClient {
   private running = false;
   private stderrRing: string[] = [];
   private serverCapabilities: Record<string, unknown> | null = null;
+  /**
+   * The most recent `notify` send, so `request` can wait for it.
+   *
+   * `notify` and `request` each cross to Rust as their own `invoke('lsp_send')`
+   * call, and `lsp_send` awaits a per-window mutex before writing to the
+   * server's stdin. Two concurrently-spawned Tauri command tasks have no
+   * guaranteed lock order, so a `didChange` and the completion that depends on
+   * it could reach the server in either order — and a completion evaluated
+   * against the previous revision of the buffer is indistinguishable from a
+   * server that simply has nothing to offer. Chaining request sends behind the
+   * last notification costs one IPC round trip and removes the race.
+   */
+  private lastNotifySent: Promise<unknown> = Promise.resolve();
 
   constructor(public readonly languageId: string) {}
 
@@ -387,6 +400,9 @@ export class LspClient {
     const msg: JsonRpcRequest = { jsonrpc: '2.0', id, method, params };
 
     try {
+      // Ordering, not error handling: a failed notification is reported by
+      // `notify` itself, and must not fail the request that follows it.
+      await this.lastNotifySent.catch(() => {});
       await invoke('lsp_send', {
         language: this.languageId,
         message: JSON.stringify(msg),
@@ -410,10 +426,16 @@ export class LspClient {
    */
   notify(method: string, params: unknown): void {
     const msg: JsonRpcNotification = { jsonrpc: '2.0', method, params };
-    invoke('lsp_send', {
+    const sent = invoke('lsp_send', {
       language: this.languageId,
       message: JSON.stringify(msg),
-    }).catch((err) => {
+    });
+    // Requests issued after this notification wait on it — see
+    // `lastNotifySent`. Kept as the raw promise (rejection handled by the
+    // separate `.catch` below, and again by the awaiting request) so a failed
+    // send cannot leave an unhandled rejection or block the chain.
+    this.lastNotifySent = sent;
+    sent.catch((err) => {
       console.error(`[LSP ${this.languageId}] Failed to send notification '${method}':`, err);
     });
   }

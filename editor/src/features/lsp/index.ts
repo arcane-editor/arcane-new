@@ -34,6 +34,8 @@ export {
   toMonacoRange,
   toLspPosition,
   toLspRange,
+  lspDocumentUri,
+  modelFilePath,
   type LspRange,
   type LspPosition,
 } from './services/model-context';

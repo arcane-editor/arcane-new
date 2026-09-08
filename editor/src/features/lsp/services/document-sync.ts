@@ -82,10 +82,15 @@ export function pathFromFileUri(uri: string): string {
 
   // Empty authority (`file:///…`) — a POSIX or Windows-drive path.
   if (rest.startsWith('/')) {
-    const body = rest.slice(1);
+    // Decode BEFORE testing for a drive. Monaco renders the drive colon as
+    // `%3A` (`file:///c%3A/x/A.cs` — see `lspDocumentUri` in model-context.ts),
+    // and testing the still-encoded body misses that shape and returns
+    // `/c:/x/A.cs`, which Win32 rejects with os error 123. Decoding is still
+    // per segment, so a `%2F` inside a file name cannot become a separator.
+    const body = decodeSegments(rest.slice(1));
     // The drive letter belongs to the path, so it must NOT keep that slash.
-    if (/^[A-Za-z]:(\/|$)/.test(body)) return decodeSegments(body);
-    return '/' + decodeSegments(body);
+    if (/^[A-Za-z]:(\/|$)/.test(body)) return body;
+    return '/' + body;
   }
 
   // Non-empty authority = a UNC host, which `fileUri` collapsed from

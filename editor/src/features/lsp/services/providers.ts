@@ -5,6 +5,8 @@ import {
   getLspContextForModel,
   toMonacoRange,
   buildTextDocumentPositionParams,
+  lspDocumentUri,
+  modelFilePath,
   type LspRange,
 } from './model-context';
 import { registerApplyEditHandler } from './workspace-edit';
@@ -23,7 +25,7 @@ import { UNITY_LIFECYCLE_METHODS } from '../data/unity-lifecycle-snippets';
 import { UNITY_LIVE_TEMPLATES } from '../data/unity-live-templates';
 import { CSHARP_KEYWORDS } from '../data/csharp-keywords';
 import { UNITY_API_NAMES } from '../data/unity-api-names';
-import { getOpenDocumentUris, pathFromFileUri, syncDocumentOpen } from './document-sync';
+import { pathFromFileUri } from './document-sync';
 import { lspManager } from './manager';
 import { isCsharpProjectLoaded, onCsharpProjectLoaded } from './project-readiness';
 import { LSP_BACKED_MONACO_LANGUAGES } from '../../../utils/language-detect';
@@ -216,36 +218,17 @@ export function registerLspProviders(monaco: Monaco): () => void {
       ) {
         const ctx = getLspContextForModel(model);
         if (!ctx) return { suggestions: [] };
-        const { client, lspLanguageId } = ctx;
+        const { client } = ctx;
 
-        const modelUri = model.uri.toString();
-        const openSet = getOpenDocumentUris();
-        const inOpenSet = openSet.has(modelUri);
-
-        console.info('[LSP] completion model URI', {
-          modelUri,
-          modelPath: model.uri.path,
-          inOpenSet,
-          languageId: lspLanguageId,
-          openSetSample: [...openSet].slice(0, 3),
-        });
-
-        // Defensive recovery: if Monaco's URI isn't in our didOpen set
-        // (race condition or URI normalization mismatch), open it now so
-        // the LSP server knows about the document before the request.
-        if (!inOpenSet && modelUri.startsWith('file://')) {
-          try {
-            const filePath = decodeURIComponent(modelUri.replace(/^file:\/\//, ''));
-            console.warn('[LSP] Defensive didOpen — model URI not in open set', {
-              modelUri,
-              filePath,
-              languageId: lspLanguageId,
-            });
-            syncDocumentOpen(client, filePath, model.getValue(), lspLanguageId);
-          } catch (err) {
-            console.warn('[LSP] Defensive didOpen failed:', err);
-          }
-        }
+        // No "defensive didOpen" here. There used to be one, on the theory
+        // that a model missing from the open set meant a lost notification —
+        // but the set is keyed by `fileUri(path)` and the check compared
+        // `model.uri.toString()`, so on Windows it NEVER matched. Every
+        // completion re-opened the file under Monaco's `c%3A` spelling,
+        // registering a second, phantom document that no `didChange` ever
+        // reached. `buildTextDocumentPositionParams` now names the document
+        // exactly as `didOpen` did (see `lspDocumentUri`), which is what
+        // actually guarantees the server knows it.
 
         try {
           const params = {
@@ -262,30 +245,12 @@ export function registerLspProviders(monaco: Monaco): () => void {
               : {}),
           };
 
-          console.info('[LSP] Completion request', {
-            uri: modelUri,
-            line: position.lineNumber,
-            column: position.column,
-            triggerKind: completionContext?.triggerKind,
-            triggerCharacter: completionContext?.triggerCharacter,
-            lspTriggerKind: completionContext
-              ? toLspCompletionTriggerKind(completionContext.triggerKind)
-              : undefined,
-          });
-
           const result = await client.request<LspCompletionList | LspCompletionItem[] | null>(
             'textDocument/completion',
             params,
           );
 
-          if (!result) {
-            console.warn('[LSP] Completion response: null/empty result', {
-              uri: model.uri.toString(),
-              line: position.lineNumber,
-              column: position.column,
-            });
-            return { suggestions: [] };
-          }
+          if (!result) return { suggestions: [] };
 
           const items: LspCompletionItem[] = Array.isArray(result) ? result : result.items;
 
@@ -336,24 +301,10 @@ export function registerLspProviders(monaco: Monaco): () => void {
             };
           });
 
-          console.info('[LSP] Completion response mapped', {
-            uri: model.uri.toString(),
-            line: position.lineNumber,
-            column: position.column,
-            suggestionCount: suggestions.length,
-          });
-
           markLspReadyFromActivity();
           return { suggestions };
         } catch (err) {
-          console.error('[LSP] Completion error:', {
-            error: err,
-            uri: model.uri.toString(),
-            line: position.lineNumber,
-            column: position.column,
-            triggerKind: completionContext?.triggerKind,
-            triggerCharacter: completionContext?.triggerCharacter,
-          });
+          console.error('[LSP] Completion error:', err);
           return { suggestions: [] };
         }
       },
@@ -751,6 +702,14 @@ export function registerLspProviders(monaco: Monaco): () => void {
   function applyDiagnostics(uri: string, diagnostics: LspDiagnostic[]): void {
     const model = monaco.editor.getModel(monaco.Uri.parse(uri));
     if (!model) return;
+    // Key everything that follows off the MODEL, not off the incoming uri.
+    // This function is reached from two directions — the pull path, which
+    // names documents the way `didOpen` does (`file:///C:/…`), and push
+    // notifications, which echo whatever spelling the server prefers — and
+    // both must land on the same entry as the Unity analyzer engine, which
+    // keys by `model.uri.toString()`. `Uri.parse` collapses the spellings, so
+    // the model is the one identity all three agree on.
+    const modelKey = model.uri.toString();
 
     // Filter Unity-used "unused symbol" diagnostics (no-op outside Unity).
     if (model.getLanguageId() === 'csharp' && unityAnalyzersActive()) {
@@ -784,7 +743,7 @@ export function registerLspProviders(monaco: Monaco): () => void {
     monaco.editor.setModelMarkers(model, 'lsp', markers);
     markLspReadyFromActivity();
 
-    const filePath = pathFromFileUri(uri);
+    const filePath = modelFilePath(model);
     const fileName = filePath.split('/').pop() || '';
     const severityMap: Record<number, 'error' | 'warning' | 'info' | 'hint'> = {
       1: 'error',
@@ -801,7 +760,7 @@ export function registerLspProviders(monaco: Monaco): () => void {
       severity: severityMap[diag.severity ?? 3] ?? 'info',
       source: 'lsp',
     }));
-    useUiStore.getState().setFileDiagnostics(uri, 'lsp', diagItems);
+    useUiStore.getState().setFileDiagnostics(modelKey, 'lsp', diagItems);
   }
 
   // Pull path — csharp-ls 0.22+ requires us to ask. Only csharp models
@@ -809,7 +768,14 @@ export function registerLspProviders(monaco: Monaco): () => void {
   const pullTimers = new Map<string, ReturnType<typeof setTimeout>>();
   const lastResultIds = new Map<string, string>();
 
-  async function pullDiagnostics(uri: string): Promise<void> {
+  /**
+   * `modelKey` is the Monaco `model.uri.toString()` spelling — the key the
+   * timer and resultId maps use. The REQUEST is named with
+   * `lspDocumentUri(model)`, the same URI `didOpen` used; asking under
+   * Monaco's spelling is what made every pull answer about a document
+   * csharp-ls had never heard of.
+   */
+  async function pullDiagnostics(modelKey: string): Promise<void> {
     const csharpClient = lspManager.client('csharp');
     if (!csharpClient.isRunning()) return;
 
@@ -819,8 +785,12 @@ export function registerLspProviders(monaco: Monaco): () => void {
     // the gate-opened handler below re-pulls every open C# model.
     if (!isCsharpProjectLoaded()) return;
 
+    const model = monaco.editor.getModel(monaco.Uri.parse(modelKey));
+    if (!model) return;
+    const uri = lspDocumentUri(model);
+
     try {
-      const previousResultId = lastResultIds.get(uri);
+      const previousResultId = lastResultIds.get(modelKey);
       const params: { textDocument: { uri: string }; previousResultId?: string } = {
         textDocument: { uri },
       };
@@ -833,7 +803,7 @@ export function registerLspProviders(monaco: Monaco): () => void {
       } | null>('textDocument/diagnostic', params);
 
       if (!result) return;
-      if (result.resultId) lastResultIds.set(uri, result.resultId);
+      if (result.resultId) lastResultIds.set(modelKey, result.resultId);
       if (result.kind === 'unchanged') return;
       applyDiagnostics(uri, result.items ?? []);
     } catch (err) {

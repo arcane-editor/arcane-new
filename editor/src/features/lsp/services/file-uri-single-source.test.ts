@@ -81,3 +81,41 @@ describe('file URL -> path conversion', () => {
     expect(offenders).toEqual([]);
   });
 });
+
+/**
+ * The read side of the same rule, and the one that actually shipped broken.
+ *
+ * `fileUri()` was already the single builder — but only for NOTIFICATIONS.
+ * Every request named its document with `model.uri.toString()`, and Monaco's
+ * renderer lower-cases a Windows drive letter and percent-encodes its colon:
+ * the model opened as `file:///C:/x/A.cs` renders as `file:///c%3A/x/A.cs`.
+ * csharp-ls matched neither to the other, so on Windows every completion,
+ * hover, definition, code action, inlay hint and diagnostic pull answered
+ * `null` — for months, while the suite stayed green because the checks above
+ * only look for hand-rolled *builders* and the e2e probe built both sides with
+ * one function of its own.
+ *
+ * `lspDocumentUri(model)` (model-context.ts) is the one way to name a model on
+ * the wire. `model.uri.toString()` remains correct as a Monaco-internal key —
+ * marker owners, pull timers, the ui-store — which is why this rule is scoped
+ * to `textDocument:` payloads rather than banning the call outright.
+ */
+describe('LSP document identifiers', () => {
+  const LSP_SERVICES = path.join(SRC, 'features/lsp/services');
+
+  it('never names a textDocument with model.uri.toString()', () => {
+    const offenders: string[] = [];
+    for (const file of SHIPPING_SOURCES) {
+      if (!file.startsWith(LSP_SERVICES)) continue;
+      const text = readFileSync(file, 'utf8');
+      text.split('\n').forEach((line, i) => {
+        // `textDocument: { uri: <anything>.uri.toString() }`, on one line —
+        // the shape all thirteen original call sites used.
+        if (/textDocument:\s*\{[^}]*\.uri\.toString\(\)/.test(line)) {
+          offenders.push(`${path.relative(SRC, file)}:${i + 1}`);
+        }
+      });
+    }
+    expect(offenders).toEqual([]);
+  });
+});
