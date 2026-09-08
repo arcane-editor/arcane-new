@@ -16,7 +16,7 @@ export type RightSidebarView = 'ai-panel' | 'unity-inspector';
 // codebase could ever write to it — it rendered a permanent "No output".
 export type MarkdownViewMode = 'preview' | 'source';
 
-export type BottomPanelTab = 'terminal' | 'problems' | 'unity-console';
+export type BottomPanelTab = 'terminal' | 'problems' | 'unity-console' | 'references';
 export type LspStatus = 'idle' | 'starting' | 'indexing' | 'ready' | 'error';
 
 // DiagnosticSource is defined in ../types and re-exported here for consumers

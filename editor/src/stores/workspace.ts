@@ -5,6 +5,7 @@ import type { FileEntry, TreeNode, OpenFile, DiffInfo } from '../types';
 import { initMonaco, disposeModelForPath } from '../features/editor';
 import { applySaveResult } from '../utils/save-outcome';
 import { isVirtualPath } from '../utils/virtual-path';
+import { pushRecentFile } from './recent-files';
 import {
   lspManager,
   registerLspProviders,
@@ -25,6 +26,7 @@ import {
   ensureCsharpLs,
   resetCsharpLsProvisioning,
   describeDotnetBlock,
+  formatDocumentBeforeSave,
   type CsharpLsStatus,
   type DotnetBlock,
   type LspClient,
@@ -865,6 +867,14 @@ interface WorkspaceState {
   isLoadingTree: boolean;
   /** Most recently closed tab paths, newest first; capped at 20 */
   recentlyClosed: string[];
+  /**
+   * Paths the user has VISITED, most recent first — the Recent Files switcher.
+   *
+   * Not the same list as `openFiles` (that is tab-bar order) and not
+   * `recentlyClosed` (that is a LIFO undo stack for Reopen Closed Tab). An
+   * entry here survives its tab being closed, which is the whole point.
+   */
+  recentFiles: string[];
 
   setWorkspace: (path: string) => Promise<void>;
   setExcludePatterns: (patterns: string[]) => void;
@@ -923,6 +933,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   extraExcludePatterns: [],
   isLoadingTree: false,
   recentlyClosed: [],
+  recentFiles: [],
 
   setWorkspace: async (path: string) => {
     useUiStore.getState().setLspStatus('idle');
@@ -1061,6 +1072,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       activeFilePath: null,
       isLoadingTree: false,
       recentlyClosed: [],
+      recentFiles: [],
     });
 
     addRecentProject(path);
@@ -1480,10 +1492,37 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       notify.error(`${file.name} is a binary file and cannot be saved from the editor.`);
       return;
     }
+    // Format on save, before the snapshot below, so `written` IS the formatted
+    // text and the buffer-clean comparison after the write still lines up.
+    //
+    // This is the one choke point that covers every user-initiated save:
+    // Cmd+S, both auto-save modes (hooks/useAutoSave.ts) and the search panel's
+    // Save All all route through here. LSP write-backs to closed files and the
+    // agent's own file writes deliberately do NOT — they are not user saves.
+    if (useSettingsStore.getState().getSetting('editor.formatOnSave') === true) {
+      const fmtCtx = getRunningClientForFile(file.name);
+      if (fmtCtx) {
+        // Belt and braces: `formatDocumentBeforeSave` already swallows a failed
+        // request, but a formatter must not be able to turn Cmd+S into a no-op
+        // under ANY failure, including ones inside Monaco. Saving unformatted
+        // is always better than not saving.
+        try {
+          const formatted = await formatDocumentBeforeSave(fmtCtx.client, path);
+          if (formatted !== null && formatted !== file.content) {
+            get().updateFileContent(path, formatted);
+          }
+        } catch (err) {
+          console.warn('[save] Format on save failed; saving unformatted:', err);
+        }
+      }
+    }
+
     // Snapshot what actually goes to disk. The user can keep typing during the
     // write — easily hundreds of ms on a large file — and those keystrokes are
-    // NOT in this payload.
-    const written = file.content;
+    // NOT in this payload. Re-read from the store rather than reusing `file`:
+    // formatting above may have replaced the content since that closure value
+    // was taken.
+    const written = get().openFiles.find((f) => f.path === path)?.content ?? file.content;
     try {
       await invoke('write_file', { path, contents: written });
     } catch (err) {
@@ -1878,3 +1917,18 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     await attemptLspStartFor('csharp', path, csharpSolutionPath);
   },
 }));
+
+// Recent-files MRU.
+//
+// Driven off `activeFilePath` rather than patched into each action, because
+// openFile, setActiveFile, the close fallback, session restore and the rename
+// remap ALL move the active tab and every one of them counts as a visit.
+// Re-entrancy is safe: the write below leaves `activeFilePath` alone, so the
+// resulting notification exits at the first guard.
+useWorkspaceStore.subscribe((state, prev) => {
+  if (state.activeFilePath === prev.activeFilePath) return;
+  const path = state.activeFilePath;
+  if (!path) return;
+  const next = pushRecentFile(state.recentFiles, path);
+  if (next !== state.recentFiles) useWorkspaceStore.setState({ recentFiles: next });
+});

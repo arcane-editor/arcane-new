@@ -12,6 +12,7 @@ import {
   LoaderCircle,
 } from 'lucide-react';
 import { useWorkspaceStore } from '../../../stores/workspace';
+import { recordJumpOrigin } from '../../../utils/jump-history';
 import { useUnityStore } from '../../../stores/unity';
 import {
   useTestStore,
@@ -23,6 +24,8 @@ import {
 
 function openAt(filePath: string, line: number) {
   const name = filePath.split('/').pop() || filePath;
+  // Before `openFile`, while `activeFilePath` still names the origin.
+  recordJumpOrigin();
   void useWorkspaceStore
     .getState()
     .openFile(filePath, name)

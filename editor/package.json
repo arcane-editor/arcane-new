@@ -20,7 +20,7 @@
     "tauri:dev-app": "bun run tauri dev",
     "tauri:build:dev-app": "bun run build:lsp-sidecars && bun run prepare:csharp-ls && bun run prepare:unity-analyzers && tauri build --config src-tauri/tauri.dev.conf.json",
     "test": "bun test src",
-    "test:isolated": "bun test ./src/stores/search-tab-lifecycle.exec.ts && bun test ./src/stores/search-invalidation.exec.ts && bun test ./src/stores/search-editing.exec.ts && bun test ./src/features/lsp/services/client-send-order.exec.ts",
+    "test:isolated": "bun test ./src/stores/search-tab-lifecycle.exec.ts && bun test ./src/stores/search-invalidation.exec.ts && bun test ./src/stores/search-editing.exec.ts && bun test ./src/stores/save-format.exec.ts && bun test ./src/features/lsp/services/client-send-order.exec.ts",
     "verify:intellisense": "bun run scripts/verify-csharp-intellisense.ts",
     "verify:acp": "node scripts/verify-acp.mjs",
     "verify": "tsc --noEmit && bun run check:modules && bun run check:invoke && bun run check:version && bun test src && bun test scripts && bun run test:isolated && (cd src-tauri && cargo test --lib) && bun run verify:intellisense && bun run verify:acp",

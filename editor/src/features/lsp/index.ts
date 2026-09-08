@@ -35,6 +35,17 @@ export {
   type FileDiag,
   type FileDiagSeverity,
 } from './services/diagnostics';
+// Find Usages. The provider in providers.ts feeds Monaco's peek widget and
+// keeps nothing, so the panel has to be able to ask for itself.
+export {
+  queryReferences,
+  NoLanguageServerError,
+  type ReferenceHit,
+} from './services/references';
+
+// Format-on-save. Goes to the server for a NAMED path rather than running
+// Monaco's format action on whatever editor happens to be focused.
+export { formatDocumentBeforeSave } from './services/format-on-save';
 export {
   registerRenamePostProcessor,
   type RenamePostProcessor,

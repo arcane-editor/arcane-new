@@ -1,5 +1,6 @@
 import { useDebugStore } from '../../../stores/debug';
 import { useWorkspaceStore } from '../../../stores/workspace';
+import { recordJumpOrigin } from '../../../utils/jump-history';
 
 /** Call stack of the paused thread. Clicking a frame opens its source + selects it. */
 export function CallStackPanel() {
@@ -18,6 +19,8 @@ export function CallStackPanel() {
     await useDebugStore.getState().selectFrame(frame.id);
     if (frame.path) {
       const name = frame.path.split('/').pop() ?? frame.path;
+      // Before `openFile`, while `activeFilePath` still names the origin.
+      recordJumpOrigin();
       await useWorkspaceStore.getState().openFile(frame.path, name);
       window.dispatchEvent(
         new CustomEvent('navigate-to-line', { detail: { line: frame.line, column: frame.column } }),

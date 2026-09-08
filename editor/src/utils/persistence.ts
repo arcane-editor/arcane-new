@@ -17,6 +17,13 @@ export interface PersistedState {
   openFilePaths: PersistedOpenFile[];
   activeFilePath: string | null;
   layoutSizes?: LayoutSizes;
+  /**
+   * Recent-files MRU, most recent first. Optional so state written before this
+   * field existed still loads. Unlike `openFilePaths` these are paths the user
+   * has *visited*, so an entry outlives the tab being closed — which is the
+   * whole point of the list.
+   */
+  recentFiles?: string[];
 }
 
 /**
@@ -57,6 +64,7 @@ export interface WindowState {
   openFilePaths: PersistedOpenFile[];
   activeFilePath: string | null;
   layoutSizes?: LayoutSizes;
+  recentFiles?: string[];
 }
 
 let recentsStore: Store | null = null;
@@ -294,6 +302,7 @@ export function saveState(state: PersistedState): void {
     openFilePaths: state.openFilePaths,
     activeFilePath: state.activeFilePath,
     layoutSizes: state.layoutSizes ?? existing.layoutSizes,
+    recentFiles: state.recentFiles ?? existing.recentFiles,
   };
   cachedWindows[label] = next;
   void writeWindowState(label, next);

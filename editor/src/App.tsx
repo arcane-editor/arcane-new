@@ -123,7 +123,28 @@ import { useRecentsStore } from './stores/recents';
 import { confirmCloseDirty } from './utils/dirty-guard';
 import { safeUnlisten } from './utils/tauri-listener';
 import { getMonacoInstance } from './utils/monaco-instance';
+import {
+  installJumpHistory,
+  navigateBack,
+  navigateForward,
+  canNavigateBack,
+  canNavigateForward,
+} from './utils/jump-history';
+import { findUsagesAtCursor, canFindUsages } from './features/references';
 import type { Command } from './types';
+
+/**
+ * True only while a Monaco text editor actually holds the caret.
+ *
+ * `commandBeatsShell` (app-shell/skip-shell.ts) lets any chord that is not a
+ * bare Ctrl+letter fire on Windows/Linux even with the terminal focused, so a
+ * command whose chord is plain text elsewhere — `alt+enter` — needs this guard
+ * rather than the usual `!!activeFilePath`.
+ */
+function isTextEditorFocused(): boolean {
+  const monaco = getMonacoInstance();
+  return (monaco?.editor.getEditors() ?? []).some((e) => e.hasTextFocus());
+}
 
 /**
  * True while a Search tab is the active editor tab.
@@ -255,7 +276,7 @@ function App() {
   const restoredRef = useRef(false);
   const [showThemePicker, setShowThemePicker] = useState(false);
   const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
-  const [paletteMode, setPaletteMode] = useState<'commands' | 'files' | 'symbols' | null>(null);
+  const [paletteMode, setPaletteMode] = useState<'commands' | 'files' | 'symbols' | 'recent' | null>(null);
   const [branchPickerMode, setBranchPickerMode] = useState<'switch' | 'create' | null>(null);
   const [unityPicker, setUnityPicker] = useState<UnityPickerMode | null>(null);
   const [newScriptDir, setNewScriptDir] = useState<string | null>(null);
@@ -482,6 +503,12 @@ function App() {
       const store = useWorkspaceStore.getState();
       store.setWorkspace(workspacePath).then(async () => {
         if (urlPath || workspacePath === persisted?.workspacePath) {
+          // Seed the MRU BEFORE the tabs reopen. `setWorkspace` clears it, and
+          // reopening tabs below re-visits each one — without the seed the
+          // list would come back as tab order, which is what it is not.
+          if (persisted?.recentFiles?.length) {
+            useWorkspaceStore.setState({ recentFiles: persisted.recentFiles });
+          }
           const restoredPaths: string[] = [];
           for (const file of persisted?.openFilePaths ?? []) {
             try {
@@ -567,6 +594,12 @@ function App() {
         .getState()
         .addNotification({ type: 'error', message: problem, persistent: true });
     });
+  }, []);
+
+  // Jump history: hook `setPendingNavigation` so every cross-file jump records
+  // where it came from. Idempotent — it installs a single module-level listener.
+  useEffect(() => {
+    installJumpHistory();
   }, []);
 
   // Auto-save hook
@@ -831,6 +864,9 @@ function App() {
               ...(f.diff ? { diff: { filePath: f.diff.filePath, staged: f.diff.staged } } : {}),
             })),
           activeFilePath: state.activeFilePath?.startsWith('auth://') ? null : state.activeFilePath,
+          // Recent Files is worth nothing if it empties on restart, so it
+          // rides along with the tab list rather than being session-only.
+          recentFiles: state.recentFiles,
         });
       }, 1000);
     });
@@ -1123,6 +1159,22 @@ function App() {
       category: 'View',
       keybinding: 'mod+t',
       handler: () => setPaletteMode('symbols'),
+      when: () => !!useWorkspaceStore.getState().workspacePath,
+    },
+    {
+      // JetBrains' Switcher chord on both platforms, and VS Code's
+      // recent-editor chord — one binding covers both muscle memories.
+      //
+      // NOT Cmd+E, which Rider also uses for this: on macOS that is Monaco's
+      // own `actions.findWithSelection`, and `search.useSelection` below
+      // already carries `skipMonacoBridge` to keep it reachable. Taking it
+      // here would put two handlers on one keystroke. Ctrl+Tab has no Monaco
+      // default at all, so it bridges normally.
+      id: 'palette.recent',
+      label: 'Recent Files',
+      category: 'View',
+      keybinding: 'ctrl+tab',
+      handler: () => setPaletteMode('recent'),
       when: () => !!useWorkspaceStore.getState().workspacePath,
     },
     {
@@ -1663,6 +1715,60 @@ function App() {
       keybinding: 'mod+g',
       handler: () => window.dispatchEvent(new CustomEvent('goto-line')),
       when: () => !!useWorkspaceStore.getState().activeFilePath,
+    },
+    {
+      // Monaco's own alt+enter bindings (SelectAllMatches, ReplaceAll) are
+      // gated on CONTEXT_FIND_WIDGET_VISIBLE, so the bridge's standard
+      // `!findWidgetVisible` precondition already keeps them reachable — this
+      // one bridges normally, no `skipMonacoBridge` needed. Cmd+. still works;
+      // this is an alias, not a move.
+      // Rider's Find Usages chord, free in both registries. Monaco's own
+      // Shift+F12 peek keeps working — this is the walkable list, not a
+      // replacement for the inline glance.
+      id: 'editor.findUsages',
+      label: 'Find Usages',
+      category: 'Editor',
+      keybinding: 'alt+f7',
+      handler: () => void findUsagesAtCursor(),
+      when: () => canFindUsages(),
+    },
+    {
+      id: 'editor.quickFix',
+      label: 'Quick Fix / Show Intentions',
+      category: 'Editor',
+      keybinding: 'alt+enter',
+      handler: () => window.dispatchEvent(new CustomEvent('quick-fix')),
+      when: () => isTextEditorFocused(),
+    },
+    {
+      // Rider's own Back/Forward chords, and free in both the command registry
+      // and menu.rs.
+      //
+      // They ARE Monaco's `editor.action.outdentLines` / `indentLines`, which
+      // are gated on plain editor focus rather than the find widget — so the
+      // usual `!findWidgetVisible` precondition in bind-shortcuts.ts does not
+      // protect them and the bridge shadows both. That is deliberate here:
+      // indent/outdent stays fully reachable on Tab / Shift+Tab, which is how
+      // it is actually used, and navigation has to be live INSIDE the editor.
+      //
+      // `skipMonacoBridge` would be the wrong tool. It works for the terminal
+      // pane commands (App.tsx above) only because their `when()` is false
+      // wherever Monaco's default should win; there is no such guard for a
+      // command whose whole job is to fire while you are editing.
+      id: 'nav.back',
+      label: 'Back',
+      category: 'Go',
+      keybinding: 'mod+bracketleft',
+      handler: () => void navigateBack(),
+      when: () => canNavigateBack(),
+    },
+    {
+      id: 'nav.forward',
+      label: 'Forward',
+      category: 'Go',
+      keybinding: 'mod+bracketright',
+      handler: () => void navigateForward(),
+      when: () => canNavigateForward(),
     },
     {
       id: 'editor.gotoSymbol',
