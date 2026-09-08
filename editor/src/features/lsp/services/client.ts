@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { configurationForItem } from './csharp-configuration';
 import { safeUnlisten, listenScoped } from '../../../utils/tauri-listener';
 import { fileUri } from './document-sync';
 
@@ -633,8 +634,13 @@ export class LspClient {
           break;
 
         case 'workspace/configuration': {
-          const items = (msg.params as { items?: unknown[] })?.items ?? [];
-          result = items.map(() => ({}));
+          // One result per item, in order. Answering `{}` for everything —
+          // which this did — leaves every server option at its default, and
+          // csharp-ls defaults `analyzersEnabled` to OFF. The Unity analyzers
+          // would then be referenced by the project, loaded by Roslyn, and
+          // never run, with only a log line to say so.
+          const items = (msg.params as { items?: { section?: string }[] })?.items ?? [];
+          result = items.map((item) => configurationForItem(this.languageId, item?.section));
           break;
         }
 

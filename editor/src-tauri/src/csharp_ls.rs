@@ -359,7 +359,7 @@ pub struct InstallError {
 }
 
 impl InstallError {
-    fn new(code: &str, message: impl Into<String>) -> Self {
+    pub(crate) fn new(code: &str, message: impl Into<String>) -> Self {
         Self { code: code.to_string(), message: message.into() }
     }
 }

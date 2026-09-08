@@ -46,7 +46,8 @@ import { isCsharpProjectLoaded, onCsharpProjectLoaded } from './project-readines
 import { LSP_BACKED_MONACO_LANGUAGES } from '../../../utils/language-detect';
 import { setPendingNavigation } from '../../../utils/editor-navigation';
 import { getMonacoInstance } from '../../../utils/monaco-instance';
-import { runWorkspaceDiagnostics } from './workspace-diagnostics';
+import { resetWorkspaceDiagnostics, runWorkspaceDiagnostics } from './workspace-diagnostics';
+import { csharpConfigurationChange } from './csharp-configuration';
 
 // ── LSP type aliases (structural, not imported) ─────────────────
 // LspPosition/LspRange come from ./model-context (canonical home).
@@ -870,12 +871,66 @@ export function registerLspProviders(monaco: Monaco): () => void {
     }
   }
 
+  /**
+   * Serialise diagnostic pulls, and pace them off what the last one cost.
+   *
+   * With the Unity analyzers on, one `textDocument/diagnostic` runs every
+   * analyzer over the whole compilation — csharp-ls's
+   * `getDocumentDiagnosticsWithAnalyzers` asks Roslyn for
+   * `GetAllDiagnosticsAsync` and then filters by file. It is fast on a small
+   * project (~90ms measured on a real one) and it will not stay that way as a
+   * project grows.
+   *
+   * So: at most one pull in flight, and if edits arrive while it runs, exactly
+   * one more afterwards rather than one per keystroke. Without this, typing in
+   * a large project queues a sweep per debounce window and each one competes
+   * with the completion request the user is actually waiting on.
+   */
+  /**
+   * How long to wait after the last per-document pull before sweeping the
+   * whole solution. Long enough that a burst of re-pulls has landed, short
+   * enough that the Problems panel fills while the user is still looking at
+   * the file they opened.
+   */
+  const WORKSPACE_SWEEP_IDLE_MS = 1500;
+  let workspaceSweepTimer: ReturnType<typeof setTimeout> | null = null;
+
+  let pullInFlight = false;
+  const pullAgainWhenIdle = new Set<string>();
+  /** How long the last pull took, used to pace the next debounce. */
+  let lastPullMs = 0;
+
+  /**
+   * Debounce for an edit-triggered pull. Long enough to outlast a burst of
+   * typing, and scaled up when the server is answering slowly so a project
+   * where each pull costs a second does not spend every second pulling.
+   */
+  function editPullDelay(): number {
+    const MIN = 500;
+    const MAX = 3000;
+    return Math.min(MAX, Math.max(MIN, Math.round(lastPullMs * 1.5)));
+  }
+
   function schedulePull(uri: string, delayMs: number): void {
     const existing = pullTimers.get(uri);
     if (existing) clearTimeout(existing);
     const t = setTimeout(() => {
       pullTimers.delete(uri);
-      pullDiagnostics(uri);
+      if (pullInFlight) {
+        // Coalesce rather than pile up: one catch-up pull once the current
+        // sweep lands, however many edits arrived in the meantime.
+        pullAgainWhenIdle.add(uri);
+        return;
+      }
+      pullInFlight = true;
+      const started = Date.now();
+      void pullDiagnostics(uri).finally(() => {
+        lastPullMs = Date.now() - started;
+        pullInFlight = false;
+        const pending = [...pullAgainWhenIdle];
+        pullAgainWhenIdle.clear();
+        for (const next of pending) schedulePull(next, 0);
+      });
     }, delayMs);
     pullTimers.set(uri, t);
   }
@@ -887,6 +942,7 @@ export function registerLspProviders(monaco: Monaco): () => void {
       clearTimeout(t);
       pullTimers.delete(uri);
     }
+    pullAgainWhenIdle.delete(uri);
     lastResultIds.delete(uri);
   }
 
@@ -900,7 +956,7 @@ export function registerLspProviders(monaco: Monaco): () => void {
     schedulePull(uri, 300);
 
     const sub = model.onDidChangeContent(() => {
-      schedulePull(uri, 500);
+      schedulePull(uri, editPullDelay());
     });
     disposables.push(sub);
 
@@ -942,21 +998,77 @@ export function registerLspProviders(monaco: Monaco): () => void {
   // issued by the old graph, and sending one back invites `kind: "unchanged"`,
   // which is exactly how a wrong report used to become permanent. Forcing a
   // full report costs one round trip per open file, once per server lifetime.
-  const readyUnsub = onCsharpProjectLoaded(() => {
-    // Solution-wide analysis: one pass once the project graph exists, so the
-    // Problems panel reflects the whole solution rather than only the files
-    // that happen to be open. Failures are swallowed — this is an enrichment
-    // of the panel, and a server that cannot answer must not break the
-    // per-document path below.
-    if (useSettingsStore.getState().getSetting('lsp.solutionWideAnalysis') !== false) {
-      void runWorkspaceDiagnostics().catch(() => {});
-    }
+  /**
+   * Re-pull every open C# file, then sweep the solution.
+   *
+   * Order matters, and it is the opposite of what it used to be. The
+   * solution-wide pass is another whole-compilation analysis; running it at
+   * the same instant as the per-document re-pulls put both in flight while
+   * the user was looking at a file whose squiggles had just been cleared. The
+   * files on screen go first; the panel-filling sweep follows once they are
+   * done.
+   */
+  function repullAllCsharpDiagnostics(): void {
+    // The cached ids were issued by the previous graph, and sending one back
+    // invites `kind: "unchanged"` — which is exactly how a wrong report used
+    // to become permanent.
     lastResultIds.clear();
     for (const m of monaco.editor.getModels()) {
       if (m.getLanguageId() === 'csharp') schedulePull(m.uri.toString(), 300);
     }
-  });
+
+    if (useSettingsStore.getState().getSetting('lsp.solutionWideAnalysis') === false) return;
+    if (workspaceSweepTimer) clearTimeout(workspaceSweepTimer);
+    workspaceSweepTimer = setTimeout(() => {
+      workspaceSweepTimer = null;
+      if (pullInFlight || pullTimers.size > 0) {
+        // Still settling; try again rather than competing.
+        repullWorkspaceWhenIdle();
+        return;
+      }
+      // Failures are swallowed — this enriches the Problems panel, and a
+      // server that cannot answer must not break the per-document path.
+      void runWorkspaceDiagnostics().catch(() => {});
+    }, WORKSPACE_SWEEP_IDLE_MS);
+  }
+
+  function repullWorkspaceWhenIdle(): void {
+    if (workspaceSweepTimer) clearTimeout(workspaceSweepTimer);
+    workspaceSweepTimer = setTimeout(() => {
+      workspaceSweepTimer = null;
+      if (pullInFlight || pullTimers.size > 0) {
+        repullWorkspaceWhenIdle();
+        return;
+      }
+      void runWorkspaceDiagnostics().catch(() => {});
+    }, WORKSPACE_SWEEP_IDLE_MS);
+  }
+
+  const readyUnsub = onCsharpProjectLoaded(repullAllCsharpDiagnostics);
   disposables.push({ dispose: readyUnsub });
+  disposables.push({
+    dispose: () => {
+      if (workspaceSweepTimer) clearTimeout(workspaceSweepTimer);
+      workspaceSweepTimer = null;
+    },
+  });
+
+  /**
+   * Toggling the Unity analyzers changes what every diagnostic report
+   * contains, so the reports already on screen are stale the moment it flips.
+   *
+   * csharp-ls folds the flag into its `resultId`, so a cached id from before
+   * the change answers `unchanged` — which is why the re-pull clears them.
+   */
+  const analyzerSettingUnsub = useSettingsStore.subscribe((state, prev) => {
+    if (state.settings['lsp.csharp.analyzers'] === prev.settings['lsp.csharp.analyzers']) return;
+    const client = lspManager.client('csharp');
+    if (!client.isRunning()) return;
+    client.notify('workspace/didChangeConfiguration', csharpConfigurationChange());
+    resetWorkspaceDiagnostics();
+    repullAllCsharpDiagnostics();
+  });
+  disposables.push({ dispose: analyzerSettingUnsub });
 
   // Stash the diagnostic-application handle on the disposer closure so
   // `attachClientToProviders` (a sibling export, called per-client by the

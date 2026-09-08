@@ -26,6 +26,10 @@ export {
   isLoadFinishedMessage,
 } from './services/csharp-ls-log-markers';
 export {
+  setRoslynAnalyzersInjected,
+  roslynAnalyzersInjected,
+} from './services/roslyn-analyzers-state';
+export {
   requestFileDiagnostics,
   type FileDiag,
   type FileDiagSeverity,

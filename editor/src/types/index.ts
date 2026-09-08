@@ -201,6 +201,7 @@ export interface SettingsSchema {
   'unity.uiDiagnostics.enabled': boolean;
   'unity.uiToolkit.panel': boolean;
   'lsp.solutionWideAnalysis': boolean;
+  'lsp.csharp.analyzers': boolean;
   'unity.asmdef.diagnostics': boolean;
   'unity.bridge.enabled': boolean;
   'unity.bridge.refreshOnSave': boolean;

@@ -39,6 +39,7 @@ import { fileURLToPath } from 'node:url';
 import { fileUri } from '../src/features/lsp/services/document-sync';
 import { lspDocumentUri } from '../src/features/lsp/services/model-context';
 import { isLoadFinishedMessage } from '../src/features/lsp/services/csharp-ls-log-markers';
+import { configurationForItem } from '../src/features/lsp/services/csharp-configuration';
 import { URI } from 'monaco-editor/esm/vs/base/common/uri.js';
 import {
   compareVersions,
@@ -74,6 +75,10 @@ const BUDGET = {
   hover: 2000,
   resolve: 1500,
   diagnosticsAfterEdit: 5000,
+  // With analyzers on, every pull runs every analyzer over the whole
+  // compilation (csharp-ls `getDocumentDiagnosticsWithAnalyzers`), so this is
+  // deliberately looser than the compiler-only budget above.
+  analyzerDiagnostics: 8000,
   solutionLoad: 90_000,
 };
 
@@ -344,10 +349,19 @@ server.stdout.on('data', (chunk: Buffer) => {
       if (msg.method === 'client/registerCapability') {
         for (const reg of msg.params?.registrations ?? []) dynamicRegistrations.push(reg.method);
       }
+      // Answer `workspace/configuration` with what the EDITOR answers, not
+      // with `{}`. csharp-ls defaults `analyzersEnabled` to off, so a probe
+      // that under-reports its configuration would see no Unity diagnostics
+      // and conclude the analyzers are broken — or, worse, be adjusted to
+      // stop asking for them.
+      const items = (msg.params as { items?: { section?: string }[] })?.items ?? [];
       send({
         jsonrpc: '2.0',
         id: msg.id,
-        result: msg.method === 'workspace/configuration' ? [{}] : null,
+        result:
+          msg.method === 'workspace/configuration'
+            ? items.map((item) => configurationForItem('csharp', item?.section))
+            : null,
       });
     }
   }
@@ -740,6 +754,127 @@ try {
     }
     pass('diagnostics', `CS0029 reported, no CS0518/CS0433 (${items.length} total)`);
     budget('diagnostics', diagMs, BUDGET.diagnosticsAfterEdit);
+  }
+
+  // ── Unity analyzers ──────────────────────────────────────────────────────
+  //
+  // The chain from a vendored NuGet package to a squiggle in the editor has
+  // five links, and four of them fail silently:
+  //
+  //   1. the package unpacks                  (unity_analyzers.rs)
+  //   2. the csproj names it in <Analyzer>    (unity.rs)
+  //   3. WarningLevel is not 0                (unity.rs — Roslyn discards
+  //                                            analyzer diagnostics above the
+  //                                            project's warning level)
+  //   4. analyzersEnabled reaches the server  (csharp-configuration.ts —
+  //                                            csharp-ls defaults it OFF)
+  //   5. the server is new enough to run them (0.24+)
+  //
+  // Break any one and the editor reports nothing, which is indistinguishable
+  // from clean code. So this asserts specific diagnostics arrive, by code.
+  if (wantSection('analyzers')) {
+    const analyzersSupported = compareVersions(pinnedVersion, '0.24.0') >= 0;
+    const csprojText = fs.readFileSync(path.join(project, '.unityide.csproj'), 'utf8');
+    const analyzerInProject = csprojText.includes('<Analyzer Include=');
+
+    if (!analyzersSupported || !analyzerInProject) {
+      const reason = !analyzersSupported
+        ? `csharp-ls ${pinnedVersion} predates analyzer support (0.24.0)`
+        : 'the generated csproj references no analyzer — run `bun run prepare:unity-analyzers`';
+      console.log(`  --  analyzers      SKIPPED: ${reason}`);
+      if (REQUIRED || process.env.UNITYIDE_ANALYZERS_E2E === 'required') {
+        fail(`Unity analyzers could not be checked: ${reason}`);
+      }
+    } else {
+      // Every line below triggers one specific UNT rule, chosen because each
+      // is unambiguous and something a Unity developer actually writes.
+      const ANALYZER_PROBE = [
+        'using UnityEngine;',
+        '',
+        'public class UnityIDEAnalyzerProbe : MonoBehaviour',
+        '{',
+        '    [SerializeField] private int health;',
+        '',
+        '    private void Update()',
+        '    {',
+        '        float step = Time.fixedDeltaTime;',
+        '        if (tag == "Player") { Debug.Log(step + health); }',
+        '    }',
+        '',
+        '    private void LateUpdate()',
+        '    {',
+        '    }',
+        '}',
+        '',
+      ].join('\n');
+      didChange(ANALYZER_PROBE);
+      await sleep(2500);
+
+      const [report, analyzerMs] = await timed(() =>
+        request('textDocument/diagnostic', { textDocument: { uri } }),
+      );
+      const items = report.result?.items ?? [];
+      const codes = items.map((d: any) => String(d.code ?? ''));
+
+      // UNT0004: Time.fixedDeltaTime in Update (it belongs in FixedUpdate).
+      // UNT0002: string tag comparison instead of CompareTag.
+      // UNT0001: an empty Unity message, which Unity still calls every frame.
+      for (const [code, why] of [
+        ['UNT0004', 'Time.fixedDeltaTime used in Update()'],
+        ['UNT0002', 'tag == "Player" instead of CompareTag'],
+        ['UNT0001', 'an empty LateUpdate()'],
+      ] as const) {
+        if (!codes.includes(code)) {
+          fail(
+            `the Unity analyzers reported no ${code} for ${why}`,
+            `    codes seen: ${codes.join(', ') || '(none)'}\n` +
+              '  Check, in order: the <Analyzer Include> item in .unityide.csproj,\n' +
+              '  <WarningLevel> (0 discards every analyzer diagnostic), and that\n' +
+              '  workspace/configuration answers analyzersEnabled: true.',
+          );
+        }
+      }
+
+      // The suppressors matter as much as the diagnostics: without USP0007
+      // every [SerializeField] field is reported as never assigned, on
+      // essentially every MonoBehaviour anyone writes.
+      if (codes.includes('CS0649')) {
+        fail(
+          'CS0649 was reported for a [SerializeField] field',
+          '  The analyzer suppressors are not being applied. Roslyn cannot know\n' +
+            '  that Unity assigns serialized fields, so without them the editor\n' +
+            '  warns about almost every MonoBehaviour field a user writes.',
+        );
+      }
+
+      pass('analyzers', `UNT0001, UNT0002, UNT0004 reported; no CS0649 (${items.length} total)`);
+      budget('analyzer pull', analyzerMs, BUDGET.analyzerDiagnostics);
+
+      // Turning them off must actually turn them off — and must invalidate the
+      // cached report, which csharp-ls does by folding the flag into resultId.
+      notify('workspace/didChangeConfiguration', {
+        settings: { csharp: { analyzersEnabled: false } },
+      });
+      await sleep(1500);
+      const off = await request('textDocument/diagnostic', {
+        textDocument: { uri },
+        previousResultId: report.result?.resultId,
+      });
+      const offCodes = (off.result?.items ?? []).map((d: any) => String(d.code ?? ''));
+      if (off.result?.kind === 'unchanged' || offCodes.some((c: string) => c.startsWith('UNT'))) {
+        fail(
+          'disabling the analyzers left UNT diagnostics in place',
+          `    kind=${off.result?.kind} codes=${offCodes.join(', ')}\n` +
+            '  The setting is a user-facing switch for a real cost; if it does not\n' +
+            '  take effect, turning it off cannot relieve that cost.',
+        );
+      }
+      pass('analyzer toggle', 'disabling clears UNT diagnostics');
+
+      notify('workspace/didChangeConfiguration', {
+        settings: { csharp: { analyzersEnabled: true } },
+      });
+    }
   }
 
   // ── server capabilities ──────────────────────────────────────────────────

@@ -8,6 +8,7 @@ mod search;
 mod file_scanner;
 mod file_index;
 mod unity;
+mod unity_analyzers;
 mod asmdef;
 mod unity_asset_edit;
 mod unity_yaml;

@@ -20,6 +20,7 @@ import {
   markCsharpProjectLoading,
   isLoadStartedMessage,
   isLoadFinishedMessage,
+  setRoslynAnalyzersInjected,
   resetCsharpProjectLoaded,
   ensureCsharpLs,
   resetCsharpLsProvisioning,
@@ -176,7 +177,9 @@ async function runUnityCsprojReload(
   // Returns the solution path (or null if it couldn't be generated).
   let solutionPath: string | null;
   try {
-    solutionPath = await invoke<string | null>('unity_setup_lsp', { workspacePath });
+    const setup = await invoke<UnityLspSetup>('unity_setup_lsp', { workspacePath });
+    solutionPath = setup.solution;
+    setRoslynAnalyzersInjected(setup.analyzersInjected);
   } catch (err) {
     console.warn('[Workspace] unity_setup_lsp regen failed during hot-reload:', err);
     return;
@@ -268,6 +271,17 @@ async function proactivelyOpenCSharpFiles(workspacePath: string): Promise<void> 
 
 // Track the C# solution path for restart purposes (csharp-only).
 let csharpSolutionPath: string | null = null;
+
+/**
+ * What `unity_setup_lsp` reports back.
+ *
+ * `analyzersInjected` is the difference between "the Unity analyzers found
+ * nothing" and "the Unity analyzers never ran" — see `unity_analyzers.rs`.
+ */
+interface UnityLspSetup {
+  solution: string | null;
+  analyzersInjected: boolean;
+}
 
 // Per-language restart budget: if a server crashes more than N times within
 // the window, we stop auto-restarting and surface an error so the user can
@@ -1079,7 +1093,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       } else {
         let solutionPath: string | null = null;
         try {
-          solutionPath = await invoke<string | null>('unity_setup_lsp', { workspacePath: path });
+          const setup = await invoke<UnityLspSetup>('unity_setup_lsp', {
+            workspacePath: path,
+          });
+          solutionPath = setup.solution;
+          setRoslynAnalyzersInjected(setup.analyzersInjected);
           if (solutionPath) {
             console.log('[Workspace] Unity project setup complete, solution:', solutionPath);
           }
