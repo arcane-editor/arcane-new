@@ -128,7 +128,12 @@ pub(crate) fn extract_dll(nupkg: &Path, dest: &Path) -> Result<(), InstallError>
         })?;
     }
 
-    let staging = dest.with_extension(format!("tmp-{}", std::process::id()));
+    // Unique per ATTEMPT, not per process: every window shares one PID here,
+    // so a PID-suffixed staging name is shared by concurrent callers rather
+    // than isolating them.
+    static ATTEMPT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let attempt = ATTEMPT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let staging = dest.with_extension(format!("tmp-{}-{attempt}", std::process::id()));
     let mut out = std::fs::File::create(&staging).map_err(|e| {
         InstallError::new(
             "install-failed",
@@ -174,15 +179,56 @@ fn sweep(root: &Path) {
     }
 }
 
+/// Serialises extraction across windows.
+///
+/// The app runs every window in ONE process (`tauri_plugin_single_instance`),
+/// so two Unity projects opened at once reach this code concurrently.
+/// `csharp_ls.rs` carries the same guard for the same reason: without it both
+/// callers extract into the same place and one of them renames a file the
+/// other was still writing.
+static EXTRACT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Does `dll` look like an assembly this code could have finished writing?
+///
+/// Cheap and structural: a PE image begins `MZ`, and the analyzer is ~295 KB,
+/// so a truncated write is nowhere near it. The point is the difference
+/// between "extraction succeeded once" and "a file exists at that path" —
+/// `is_file()` answers only the second, which is what would make a
+/// half-written DLL permanent, since every later call short-circuits on it.
+fn looks_like_assembly(dll: &Path) -> bool {
+    let Ok(meta) = std::fs::metadata(dll) else {
+        return false;
+    };
+    if meta.len() < 100_000 {
+        return false;
+    }
+    let Ok(mut file) = std::fs::File::open(dll) else {
+        return false;
+    };
+    let mut magic = [0u8; 2];
+    use std::io::Read;
+    file.read_exact(&mut magic).is_ok() && &magic == b"MZ"
+}
+
 /// Unpack the analyzer from `nupkg` into `root`, returning its path.
 ///
-/// Idempotent: an already-unpacked assembly is returned as is. Separated from
-/// [`ensure_installed`] so tests can drive it without a Tauri app.
+/// Idempotent: an already-unpacked, plausible assembly is returned as is; one
+/// that is present but truncated is re-extracted rather than trusted.
+/// Separated from [`ensure_installed`] so tests can drive it without a Tauri
+/// app.
 pub fn ensure_installed_from(nupkg: &Path, root: &Path) -> Result<PathBuf, InstallError> {
     let dll = root.join(UNITY_ANALYZERS_VERSION).join(DLL_NAME);
-    if dll.is_file() {
+    if looks_like_assembly(&dll) {
         return Ok(dll);
     }
+
+    let _guard = crate::sync_util::lock_recover(&EXTRACT_LOCK);
+    // Re-check under the lock: whoever was extracting while we waited has
+    // finished, and their work is ours too.
+    if looks_like_assembly(&dll) {
+        return Ok(dll);
+    }
+
     extract_dll(nupkg, &dll)?;
     sweep(root);
     Ok(dll)
@@ -236,6 +282,15 @@ mod tests {
     use std::io::Write;
     use zip::write::SimpleFileOptions;
 
+    /// Bytes that pass `looks_like_assembly`: a PE magic and a realistic size.
+    /// The real analyzer is ~295 KB, and the point of the check is that a
+    /// truncated write does not look like a finished one.
+    fn plausible_assembly(marker: u8) -> Vec<u8> {
+        let mut bytes = b"MZ".to_vec();
+        bytes.resize(200_000, marker);
+        bytes
+    }
+
     /// Build a nupkg-shaped archive containing `entries`.
     fn make_package(dir: &Path, entries: &[(&str, &[u8])]) -> PathBuf {
         let path = dir.join(nupkg_file_name());
@@ -253,10 +308,11 @@ mod tests {
     #[test]
     fn extracts_only_the_analyzer_assembly() {
         let dir = tempfile::tempdir().expect("tempdir");
+        let analyzer = plausible_assembly(b'a');
         let nupkg = make_package(
             dir.path(),
             &[
-                (DLL_ENTRY, b"MZ-analyzer"),
+                (DLL_ENTRY, &analyzer),
                 ("analyzers/dotnet/vb/Other.dll", b"vb"),
                 ("_rels/.rels", b"<rels/>"),
                 ("Microsoft.Unity.Analyzers.nuspec", b"<package/>"),
@@ -267,7 +323,7 @@ mod tests {
         let dll = ensure_installed_from(&nupkg, &root).expect("unpack");
 
         assert_eq!(dll.file_name().unwrap(), DLL_NAME);
-        assert_eq!(std::fs::read(&dll).unwrap(), b"MZ-analyzer");
+        assert_eq!(std::fs::read(&dll).unwrap(), analyzer);
         // Packaging metadata and the VB analyzer are not part of a working
         // install; unpacking the whole archive would put a second analyzer
         // assembly next to the one the csproj names.
@@ -282,15 +338,38 @@ mod tests {
     #[test]
     fn is_idempotent_and_does_not_re_extract() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let nupkg = make_package(dir.path(), &[(DLL_ENTRY, b"first")]);
+        let nupkg = make_package(dir.path(), &[(DLL_ENTRY, &plausible_assembly(b'1'))]);
         let root = dir.path().join("managed");
 
         let first = ensure_installed_from(&nupkg, &root).expect("unpack");
-        std::fs::write(&first, b"edited-in-place").expect("write");
+        // A different, still-plausible assembly at the same path: a second
+        // call must return it untouched rather than unpacking again.
+        std::fs::write(&first, plausible_assembly(b'2')).expect("write");
         let second = ensure_installed_from(&nupkg, &root).expect("second call");
 
         assert_eq!(first, second);
-        assert_eq!(std::fs::read(&second).unwrap(), b"edited-in-place");
+        assert_eq!(std::fs::read(&second).unwrap(), plausible_assembly(b'2'));
+    }
+
+    /// A file exists at the path but is not a finished assembly.
+    ///
+    /// This is the state a killed or out-of-disk extraction can leave, and the
+    /// one an `is_file()` check makes PERMANENT: every later call short-circuits
+    /// on it, Roslyn fails to load it, and the editor reports "the analyzers are
+    /// broken" forever. Re-extracting is the only self-healing answer.
+    #[test]
+    fn a_truncated_assembly_is_replaced_rather_than_trusted() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let good = plausible_assembly(b'g');
+        let nupkg = make_package(dir.path(), &[(DLL_ENTRY, &good)]);
+        let root = dir.path().join("managed");
+
+        let dll = root.join(UNITY_ANALYZERS_VERSION).join(DLL_NAME);
+        std::fs::create_dir_all(dll.parent().unwrap()).expect("dirs");
+        std::fs::write(&dll, b"MZ").expect("truncated write");
+
+        let resolved = ensure_installed_from(&nupkg, &root).expect("unpack");
+        assert_eq!(std::fs::read(&resolved).unwrap(), good);
     }
 
     #[test]
@@ -335,7 +414,7 @@ mod tests {
     #[test]
     fn superseded_versions_are_swept_and_the_pinned_one_kept() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let nupkg = make_package(dir.path(), &[(DLL_ENTRY, b"analyzer")]);
+        let nupkg = make_package(dir.path(), &[(DLL_ENTRY, &plausible_assembly(b'x'))]);
         let root = dir.path().join("managed");
         std::fs::create_dir_all(root.join("1.0.0")).expect("old version");
         std::fs::write(root.join("1.0.0").join(DLL_NAME), b"old").expect("old dll");

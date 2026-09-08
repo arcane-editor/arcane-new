@@ -42,8 +42,10 @@ export const ALL_RULES: readonly AnalyzerRule[] = [
   getComponentInUpdateRule,
   cameraMainRule,
   allocInUpdateRule,
-  emptyMessagesRule,
   waitForSecondsInLoopRule,
+
+  // Superseded by a UNT diagnostic, kept as a fallback (see `supersededBy`).
+  emptyMessagesRule,
 
   nullPropagationUnityObjectRule,
   destroyThisRule,

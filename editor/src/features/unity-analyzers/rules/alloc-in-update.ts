@@ -68,7 +68,6 @@ function info(ruleId: string, start: number, end: number, message: string, code:
 function stringConcatInLoops(scan: CSharpScan, body: SourceSpan): number[] {
   const offsets: number[] = [];
   const code = scan.code;
-  const text = scan.text;
   const slice = code.slice(body.start, body.end);
 
   const loopRe = /\b(for|foreach|while)\s*\(/g;
@@ -92,9 +91,16 @@ function stringConcatInLoops(scan: CSharpScan, body: SourceSpan): number[] {
       }
     }
     if (close < 0) continue;
-    const loopBody = text.slice(braceIdx, close + 1);
+    // The BLANKED view, not the original text.
+    //
+    // `scan.code` keeps the quotes and replaces a literal's contents with
+    // spaces, and blanks comments entirely — so matching here cannot fire on
+    // `// replace s + "suffix"`, which the raw text did. The `\n` exclusion
+    // fixes the other half: `[^"]*` spans newlines, so a match could start at
+    // one literal and end at a different one further down the file.
+    const loopBody = code.slice(braceIdx, close + 1);
     // String concat heuristics: `x += "..."`, `"..." + var`, `var + "..."`.
-    const concatRe = /(\+=\s*"[^"]*")|("[^"]*"\s*\+)|(\+\s*"[^"]*")/g;
+    const concatRe = /(\+=\s*"[^"\n]*")|("[^"\n]*"\s*\+)|(\+\s*"[^"\n]*")/g;
     let cm: RegExpExecArray | null;
     while ((cm = concatRe.exec(loopBody)) !== null) {
       offsets.push(braceIdx + cm.index);

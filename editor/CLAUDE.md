@@ -100,7 +100,7 @@ A source scan in `file-uri-single-source.test.ts` forbids the shape returning.
 that have nothing to do with C#, LSP, or Unity.** It runs tsc, the module-boundary
 check, the JS and Rust suites, and `verify:intellisense`.
 
-`bun run verify:intellisense` alone (~30s) regenerates the project files through
+`bun run verify:intellisense` alone (~40s, including a cargo build) regenerates the project files through
 the real Rust generator, starts the real `csharp-ls`, and asserts:
 
 - the request URI equals the `didOpen` URI, before anything is sent;
@@ -114,8 +114,9 @@ the real Rust generator, starts the real `csharp-ls`, and asserts:
 - a deliberate type error produces CS0029, and no CS0518/CS0433;
 - the Unity analyzers report UNT0001, UNT0002 and UNT0004, and do NOT report
   CS0649 on a `[SerializeField]` field;
-- every capability the editor's providers depend on;
-- a latency budget on each of those, printed every run.
+- the capabilities listed in `REQUIRED_CAPABILITIES` — the providers the
+  editor registers, not every capability it consumes;
+- latency budgets on the timed steps, printed every run.
 
 It finds the Unity project itself (from the Unity Editor's own recent-projects
 list) and provisions the pinned csharp-ls from the bundled package when it is
@@ -170,11 +171,13 @@ probe:
 | `WarningLevel` is not 0 | `unity.rs` | Roslyn **discards every analyzer diagnostic** above the project's warning level |
 | `analyzersEnabled` is sent | `csharp-configuration.ts` | csharp-ls defaults it **off** |
 
-Rules stand down only when the analyzers are *confirmed* live —
-`analyzersInjected`, read back from the csproj that was actually written — never
-on an assumption. A machine where the package failed to unpack would otherwise
-lose those inspections from both engines at once, with nothing reported
-anywhere.
+Rules stand down only when the analyzers are *confirmed* live. That is three
+conditions, not one — the csproj names the assembly (read back from the file
+that was actually written), the user has not switched them off, and the server
+is running — because each can stop holding without the others noticing. See
+`roslynAnalyzersReporting`. A machine where the package failed to unpack, or a
+user who unticks the setting, would otherwise lose those inspections from both
+engines at once with nothing reported anywhere.
 
 Two more rules of the same kind:
 
@@ -183,9 +186,16 @@ Two more rules of the same kind:
   Declare every code a rule emits in its `codes` field; never reuse a retired
   one (`RETIRED_CODES` in `rules/index.ts`). Five codes were once claimed by two
   rules each, so one suppression silenced two unrelated inspections.
-- **A rule must not import a store.** A Zustand store here reaches
-  `@tauri-apps/api`, which does not load in a test — that is why thirteen rules
-  had no coverage at all. Project knowledge arrives through `RuleContext`.
+- **A rule must not import a store, or another feature's barrel.** A Zustand
+  store here reaches `@tauri-apps/api` and a feature barrel reaches Monaco and
+  CSS, neither of which loads in a test — that is why thirteen rules had no
+  coverage at all. Project knowledge arrives through `RuleContext`; shared
+  tables live in `src/data/`.
+- **A quick fix is derived from the diagnostic's range, so it is only correct
+  while that range keeps its shape.** Check a new builder against the running
+  analyzer, never against what looks natural: two shipped unreachable because
+  their unit tests built the same wrong ranges by hand. The probe now feeds
+  real diagnostics through the real builders.
 
 csharp-ls does not surface the code fixes those analyzers ship (its code-action
 handler reflects over three Roslyn assemblies and ignores the project's analyzer

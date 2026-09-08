@@ -223,8 +223,13 @@ export function registerLspProviders(monaco: Monaco): () => void {
    * The static Unity providers are separate Monaco providers, so they cannot
    * see the LSP result directly — but Monaco queries every provider for the
    * same position, so the latest answer is the right thing to deduplicate
-   * against. Cleared whenever the server answers nothing, so a stale set can
-   * never suppress a fallback that is genuinely needed.
+   * against.
+   *
+   * Only ever set from a successful response. A cancelled request — the common
+   * outcome while typing — leaves the previous set in place rather than
+   * clearing it, which is the safer stale state: the fallbacks are already
+   * gated on the project graph not being loaded, so at worst one keystroke
+   * hides a duplicate that Roslyn was about to offer anyway.
    */
   let lastCsharpLspLabels: ReadonlySet<string> = new Set();
 
@@ -309,6 +314,11 @@ export function registerLspProviders(monaco: Monaco): () => void {
             profile,
           );
 
+          // Which server answered, recorded per item: `resolveCompletionItem`
+          // is handed the item and nothing else, and this provider serves
+          // every LSP-backed language.
+          for (const suggestion of suggestions) suggestion._server = client.languageId;
+
           if (isCsharp) {
             lastCsharpLspLabels = new Set(suggestions.map((s) => labelText(s.label)));
           }
@@ -338,11 +348,22 @@ export function registerLspProviders(monaco: Monaco): () => void {
         token: MonacoCancellationToken | undefined,
       ) {
         const lsp = item._lsp;
-        if (!lsp) return item;
-        // Nothing resolve could add.
-        if (item.documentation && item.detail) return item;
+        // No `_server` means this item did not come from a language server —
+        // one of the static Unity providers made it, and there is nothing to
+        // resolve it against.
+        if (!lsp || !item._server) return item;
+        // Nothing resolve could add. `additionalTextEdits` is deliberately not
+        // in this check: a server may send docs eagerly and the import edit
+        // only on resolve, and skipping it there would insert a name with no
+        // `using` for it.
+        if (item.documentation && item.detail && item.additionalTextEdits) return item;
 
-        const client = lspManager.client('csharp');
+        // The item's OWN server. This provider is registered for every
+        // LSP-backed language, so resolving against a hardcoded `csharp`
+        // client would hand typescript-language-server's opaque `data` to
+        // csharp-ls — the `languageId === 'csharp'` scattering that
+        // `server-profiles.ts` exists to prevent.
+        const client = lspManager.client(item._server);
         if (!client.isRunning()) return item;
 
         try {
@@ -351,7 +372,7 @@ export function registerLspProviders(monaco: Monaco): () => void {
             lsp,
             {
               signal: abortSignalFor(token),
-              timeoutMs: serverProfile('csharp').timeouts.completionResolve,
+              timeoutMs: serverProfile(item._server).timeouts.completionResolve,
             },
           );
           return mergeResolvedItem(item, resolved);
@@ -872,7 +893,13 @@ export function registerLspProviders(monaco: Monaco): () => void {
         kind: 'full' | 'unchanged';
         resultId?: string;
         items?: LspDiagnostic[];
-      } | null>('textDocument/diagnostic', params);
+      } | null>('textDocument/diagnostic', params, {
+        // Bounded on purpose. Pulls are serialised (see `schedulePull`), so a
+        // request that hangs holds every other document's diagnostics behind
+        // it — at the client's 180s default that is three minutes with no
+        // squiggles anywhere and nothing to explain it.
+        timeoutMs: serverProfile('csharp').timeouts.diagnostics,
+      });
 
       if (!result) return;
       if (result.resultId) lastResultIds.set(modelKey, result.resultId);
@@ -889,21 +916,20 @@ export function registerLspProviders(monaco: Monaco): () => void {
     }
   }
 
-  /**
-   * Serialise diagnostic pulls, and pace them off what the last one cost.
-   *
-   * With the Unity analyzers on, one `textDocument/diagnostic` runs every
-   * analyzer over the whole compilation — csharp-ls's
-   * `getDocumentDiagnosticsWithAnalyzers` asks Roslyn for
-   * `GetAllDiagnosticsAsync` and then filters by file. It is fast on a small
-   * project (~90ms measured on a real one) and it will not stay that way as a
-   * project grows.
-   *
-   * So: at most one pull in flight, and if edits arrive while it runs, exactly
-   * one more afterwards rather than one per keystroke. Without this, typing in
-   * a large project queues a sweep per debounce window and each one competes
-   * with the completion request the user is actually waiting on.
-   */
+  // Diagnostic pulls are SERIALISED, and paced off what the last one cost.
+  //
+  // With the Unity analyzers on, one `textDocument/diagnostic` runs every
+  // analyzer over the whole compilation — csharp-ls's
+  // `getDocumentDiagnosticsWithAnalyzers` asks Roslyn for
+  // `GetAllDiagnosticsAsync` and then filters by file. That is fast on a small
+  // project (~80ms measured on a real one) and will not stay that way as one
+  // grows.
+  //
+  // So: at most one pull in flight, and if edits arrive while it runs, exactly
+  // one more afterwards rather than one per keystroke. Without this, typing in
+  // a large project queues a sweep per debounce window and each one competes
+  // with the completion the user is actually waiting on.
+
   /**
    * How long to wait after the last per-document pull before sweeping the
    * whole solution. Long enough that a burst of re-pulls has landed, short
@@ -914,6 +940,8 @@ export function registerLspProviders(monaco: Monaco): () => void {
   let workspaceSweepTimer: ReturnType<typeof setTimeout> | null = null;
 
   let pullInFlight = false;
+  /** Set by the disposer, so a settling pull cannot reschedule after teardown. */
+  let pullsDisposed = false;
   const pullAgainWhenIdle = new Set<string>();
   /** How long the last pull took, used to pace the next debounce. */
   let lastPullMs = 0;
@@ -947,6 +975,11 @@ export function registerLspProviders(monaco: Monaco): () => void {
         pullInFlight = false;
         const pending = [...pullAgainWhenIdle];
         pullAgainWhenIdle.clear();
+        // Not after teardown: this runs when the request settles, which can be
+        // long after the providers were disposed, and rescheduling then
+        // creates timers that nothing will ever clear and that write markers
+        // onto a provider set that is gone.
+        if (pullsDisposed) return;
         for (const next of pending) schedulePull(next, 0);
       });
     }, delayMs);
@@ -1199,8 +1232,10 @@ export function registerLspProviders(monaco: Monaco): () => void {
   return () => {
     console.info('[LSP] Disposing Monaco LSP providers', { count: disposables.length });
     for (const d of disposables) d.dispose();
+    pullsDisposed = true;
     for (const t of pullTimers.values()) clearTimeout(t);
     pullTimers.clear();
+    pullAgainWhenIdle.clear();
     lastResultIds.clear();
     pushDiagnosticsApplier = null;
   };

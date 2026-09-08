@@ -4,7 +4,7 @@
 #
 # Gated on `git status` so it costs nothing on turns that changed nothing —
 # asking a question, reading code, planning. When the working tree under
-# editor/ IS dirty, the full end-to-end check runs (~8s) regardless of WHICH
+# editor/ IS dirty, the full end-to-end check runs (~30s) regardless of WHICH
 # files changed, because the break this guards against was environmental: it
 # was not introduced by any diff, so "the diff looks unrelated" is not evidence
 # that IntelliSense survived.
@@ -42,8 +42,19 @@ fi
 
 # A skip is not a pass. Surface it so "IntelliSense works" is never claimed on
 # the strength of a check that never ran — the exact trap that hid this outage.
-if printf '%s' "$output" | grep -q 'SKIPPED'; then
-  printf '%s\n' '{"systemMessage":"C# IntelliSense check SKIPPED (prerequisites missing) — it did not run and is not evidence IntelliSense works."}'
-fi
+#
+# Read the RESULT line, which is the script's output contract, rather than
+# grepping the whole transcript: a run that passed everything can still mention
+# SKIPPED in the middle (a section that could not run), and those two cases
+# deserve different words.
+result="$(printf '%s' "$output" | grep -E '^RESULT ' | tail -1)"
+case "$result" in
+  'RESULT SKIPPED'*)
+    printf '%s\n' '{"systemMessage":"C# IntelliSense check SKIPPED (prerequisites missing) — it did not run and is not evidence IntelliSense works."}'
+    ;;
+  'RESULT PARTIAL'*)
+    printf '%s\n' '{"systemMessage":"C# IntelliSense passed, but some sections did not run — see the SKIPPED note on the RESULT line. Those parts are unverified."}'
+    ;;
+esac
 
 exit 0

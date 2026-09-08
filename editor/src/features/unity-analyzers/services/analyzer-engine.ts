@@ -14,7 +14,7 @@ import {
 import { runRules } from './rule-runner';
 import { untCodeActionsForModel } from './unt-quick-fixes';
 import { useAsmdefStore } from '../../../stores/asmdef';
-import { roslynAnalyzersInjected } from '../../lsp';
+import { lspManager, roslynAnalyzersReporting } from '../../lsp';
 
 // ── Public rule contract ─────────────────────────────────────────────────────
 
@@ -176,7 +176,14 @@ function projectContext(monaco: Monaco | null): Partial<RuleContext> {
     requestRefresh: () => {
       if (monaco) refreshAll(monaco);
     },
-    roslynAnalyzersActive: roslynAnalyzersInjected(),
+    // Not `roslynAnalyzersInjected()` alone. The csproj naming the analyzer
+    // is one of three conditions; the user switching the feature off and the
+    // server dying are the other two, and neither touches the csproj.
+    roslynAnalyzersActive: roslynAnalyzersReporting({
+      analyzersEnabled:
+        useSettingsStore.getState().getSetting('lsp.csharp.analyzers') !== false,
+      serverRunning: lspManager.client('csharp').isRunning(),
+    }),
   };
 }
 

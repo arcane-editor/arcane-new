@@ -1275,19 +1275,30 @@ fn generate_ide_csproj_from(
     // discarded before it reached the client — a silent, total loss with no
     // error on either side. 4 is also what Unity's own generated csprojs use.
     //
-    // The `NoWarn` list stays: those are Unity's own defaults for generated
-    // projects. CS0649 is deliberately NOT added — the analyzers' USP0007
-    // suppressor is what keeps `[SerializeField]` fields from being reported
-    // as unused, and adding it here would hide the compiler warning for
-    // genuinely unused private fields too.
-    xml.push_str(
-        r#"    <NoWarn>0169;0436;CS0436;CS0162;CS0168</NoWarn>
-    <ErrorReport>none</ErrorReport>
-    <WarningLevel>4</WarningLevel>
-  </PropertyGroup>
-  <ItemGroup>
-"#,
-    );
+    // CS0649 rides on the same switch, and it is why `NoWarn` is conditional.
+    // "Field is never assigned to" is a level-4 warning, so WarningLevel 0 was
+    // suppressing it — and Roslyn cannot know that Unity assigns serialized
+    // fields from the inspector, so raising the level without a suppressor
+    // puts a warning on essentially every `[SerializeField]` field anyone
+    // writes.
+    //
+    // The analyzers' USP0007 suppressor handles that properly: it exempts
+    // serialized fields while leaving genuinely unused private fields
+    // reported. But it ships INSIDE the analyzer assembly, so it exists only
+    // when the `<Analyzer>` item does. Without the analyzer the blunt
+    // instrument is the right one — a user with no Unity inspections must not
+    // be punished with a warning per serialized field in exchange.
+    //
+    // The other codes are Unity's own defaults for generated projects.
+    let mut no_warn = String::from("0169;0436;CS0436;CS0162;CS0168");
+    if analyzer_dll.is_none() {
+        no_warn.push_str(";CS0649");
+    }
+    xml.push_str(&format!(
+        "    <NoWarn>{no_warn}</NoWarn>\n    \
+         <ErrorReport>none</ErrorReport>\n    \
+         <WarningLevel>4</WarningLevel>\n  </PropertyGroup>\n  <ItemGroup>\n"
+    ));
 
     let mut sorted: Vec<(&String, &String)> = refs.iter().collect();
     sorted.sort_by(|a, b| a.0.cmp(b.0));
@@ -1464,10 +1475,21 @@ pub fn setup_lsp_files(
 
     let solution = generate_solution(root, analyzer_dll)?;
 
-    Ok(UnityLspSetup {
-        analyzers_injected: analyzer_dll.is_some() && solution.is_some(),
-        solution,
-    })
+    // Read back from the file that was actually written, rather than assuming
+    // the inputs produced it.
+    //
+    // The frontend uses this to decide whether local rules may stand down for
+    // the inspections Roslyn covers, so a value that merely describes what was
+    // ASKED for turns any future divergence — a generator that skips the item,
+    // a write that half-succeeded — into both engines going quiet at once with
+    // nothing reported anywhere. Reading the csproj costs one file read per
+    // workspace open.
+    let analyzers_injected = solution.is_some()
+        && fs::read_to_string(root.join(".unityide.csproj"))
+            .map(|xml| xml.contains("<Analyzer Include="))
+            .unwrap_or(false);
+
+    Ok(UnityLspSetup { analyzers_injected, solution })
 }
 
 #[cfg(test)]
@@ -2483,7 +2505,6 @@ mod tests {
         }
     }
 
-    #[test]
     // ─── Unity analyzers in the generated project ─────────────────────────
 
     /// The `<Analyzer>` item is the entire delivery mechanism for Unity
@@ -2519,6 +2540,13 @@ mod tests {
         assert!(
             content.contains("Unity &amp; Co"),
             "the analyzer path is not XML-escaped, which makes the project unparseable"
+        );
+        // With the analyzer present, CS0649 must NOT be blanket-suppressed:
+        // USP0007 exempts serialized fields precisely, leaving genuinely
+        // unused private fields reported.
+        assert!(
+            !content.contains("CS0649"),
+            "CS0649 should be left to the analyzers' suppressor when one is present"
         );
 
         fs::remove_dir_all(&dir).ok();
@@ -2571,10 +2599,14 @@ mod tests {
             "WarningLevel 0 silently discards every analyzer diagnostic"
         );
         assert!(content.contains("<WarningLevel>4</WarningLevel>"));
-        // CS0649 must NOT be suppressed here: the analyzers' USP0007
-        // suppressor is what exempts [SerializeField] fields, and a blanket
-        // NoWarn would hide genuinely unused private fields too.
-        assert!(!content.contains("0649"));
+        // With NO analyzer, CS0649 must be suppressed. Raising the warning
+        // level without the USP0007 suppressor — which ships inside the
+        // analyzer assembly — puts "field is never assigned to" on every
+        // [SerializeField] field in the project.
+        assert!(
+            content.contains("CS0649"),
+            "without the analyzer, CS0649 must be suppressed or every serialized field warns"
+        );
 
         fs::remove_dir_all(&dir).ok();
     }

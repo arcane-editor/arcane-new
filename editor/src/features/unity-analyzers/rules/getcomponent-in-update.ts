@@ -23,11 +23,17 @@ const TRANSFORM_FIND_RE = /\b(?:transform|\w+\.transform)\s*\.\s*(Find)\s*\(/g;
 // Resources.Load hits the filesystem and the asset database.
 const RESOURCES_LOAD_RE = /\bResources\s*\.\s*(Load|LoadAll|LoadAsync)\s*(?:<[^>]*>)?\s*\(/g;
 
-// String-addressed messaging: a reflective lookup per call, and silent when
-// the target method is renamed. UNT0016 covers Invoke/StartCoroutine; nothing
-// upstream covers these.
+// String-addressed Unity messaging: a reflective lookup per call, and silent
+// when the target method is renamed. UNT0016 covers Invoke/StartCoroutine;
+// nothing upstream covers these.
+//
+// The receiver is constrained and the first argument must be a string
+// literal, because `SendMessage` is an ordinary method name: a chat wrapper,
+// a socket, a message bus. Without both conditions every project with one of
+// those gets a per-frame performance warning on correct code — and a rule that
+// cries wolf is a rule people learn to ignore.
 const SEND_MESSAGE_RE =
-  /\b(SendMessage|SendMessageUpwards|BroadcastMessage)\s*\(/g;
+  /(?:^|[^\w.])(?:(?:this|gameObject|transform|\w+\.gameObject|\w+\.transform)\s*\.\s*)?(SendMessage|SendMessageUpwards|BroadcastMessage)\s*\(\s*"/g;
 
 // Logging from a per-frame message. Each call formats a string and captures a
 // stack trace even when the console is closed.
@@ -53,10 +59,21 @@ export const getComponentInUpdateRule: AnalyzerRule = {
         const start = m.index;
         const end = m.index + m[0].length - 1; // exclude the '('
 
-        // Offer the hoist quick-fix only for the simple GetComponent<T>() case
-        // where we can synthesise a typed cache field + Awake assignment.
+        // Offer the hoist quick-fix only for a call on THIS component, where a
+        // field assigned in Awake means the same thing.
+        //
+        // `other.GetComponent<Rigidbody>()` matches the pattern above but the
+        // fix does not apply to it: the generated `Awake` would assign this
+        // object's Rigidbody, and the result compiles while referring to the
+        // wrong object. Anything with a receiver other than `this` is left
+        // with the diagnostic and no fix.
+        const precededBy = scan.code.slice(Math.max(0, m.index - 24), m.index);
+        const hasForeignReceiver = /[\w\])]\s*\.\s*$/.test(precededBy)
+          && !/\bthis\s*\.\s*$/.test(precededBy);
+
         const fixes =
-          owner && typeArg && /^GetComponent(InChildren|InParent)?$/.test(api)
+          owner && typeArg && !hasForeignReceiver
+            && /^GetComponent(InChildren|InParent)?$/.test(api)
             ? buildHoistFix(scan, ctx.model, owner, api, typeArg)
             : undefined;
 

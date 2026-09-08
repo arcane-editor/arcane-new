@@ -1067,6 +1067,14 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
     useProjectContextStore.getState().applyDetection(path, unityInfo);
 
+    // Nothing is known about this workspace's analyzers until `unity_setup_lsp`
+    // reports back, and the local rules that defer to them must not carry the
+    // previous project's answer across. Cleared here rather than in each of the
+    // paths below that return early — a non-Unity workspace, a dotnet block, a
+    // setup that threw — because forgetting one of those is exactly how a rule
+    // ends up switched off with nothing switched on in its place.
+    setRoslynAnalyzersInjected(false);
+
     // C# LSP eager startup is Unity-only. Non-Unity projects can still get
     // C# completions if the user opens a .cs file — ensureLspForFile (below)
     // handles lazy startup the same way it does for Python and TypeScript.

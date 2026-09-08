@@ -23,7 +23,7 @@ import { getProjectSettings } from '../services/project-settings-cache';
  * inside a comment or another string is never matched. The literal's real
  * value therefore has to be read back out of `scan.text` at the same offset;
  * reading it from `code` yields the blanked placeholder, which is what
- * `string-apis.ts` already does for the same reason.
+ * `getcomponent-in-update.ts` already does for the same reason.
  */
 function literalCalls(
   code: string,

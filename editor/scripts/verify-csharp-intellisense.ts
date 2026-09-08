@@ -40,6 +40,10 @@ import { fileUri } from '../src/features/lsp/services/document-sync';
 import { lspDocumentUri } from '../src/features/lsp/services/model-context';
 import { isLoadFinishedMessage } from '../src/features/lsp/services/csharp-ls-log-markers';
 import { configurationForItem } from '../src/features/lsp/services/csharp-configuration';
+import {
+  UNT_FIXES,
+  untFixesFor,
+} from '../src/features/unity-analyzers/services/unt-quick-fixes';
 import { URI } from 'monaco-editor/esm/vs/base/common/uri.js';
 import {
   compareVersions,
@@ -52,9 +56,21 @@ import {
 
 const EDITOR_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const REQUIRED = process.env.UNITYIDE_INTELLISENSE_E2E === 'required';
+/** Every section name `--section` accepts. */
+const SECTIONS = ['completion', 'hover', 'incremental', 'diagnostics', 'analyzers'] as const;
+
 const ONLY_SECTION = (() => {
   const i = process.argv.indexOf('--section');
-  return i >= 0 ? process.argv[i + 1] : null;
+  if (i < 0) return null;
+  const name = process.argv[i + 1];
+  // A typo used to disable every section and still print PASS — the most
+  // misleading output this script can produce.
+  if (!name || !(SECTIONS as readonly string[]).includes(name)) {
+    console.error(`  FAIL  --section needs one of: ${SECTIONS.join(', ')}`);
+    console.error(`RESULT FAIL  unknown --section ${JSON.stringify(name ?? '')}`);
+    process.exit(1);
+  }
+  return name;
 })();
 const BUDGET_SCALE = Number(process.env.UNITYIDE_INTELLISENSE_BUDGET_SCALE ?? '1') || 1;
 
@@ -109,6 +125,8 @@ const REQUIRED_CAPABILITIES = [
 // ── result reporting ───────────────────────────────────────────────────────
 
 const timings: string[] = [];
+/** Sections that could not run. Reported on the final line. */
+const skippedSections: string[] = [];
 
 function skip(reason: string): never {
   if (REQUIRED) {
@@ -158,6 +176,42 @@ function wantSection(name: string): boolean {
   return ONLY_SECTION === null || ONLY_SECTION === name;
 }
 
+/**
+ * Run one Rust test and insist it actually ran.
+ *
+ * `cargo test --lib some::test::that::does::not::exist -- --exact` prints
+ * "running 0 tests" and exits **0**. So a rename or a move turns a step that
+ * shells out to cargo into a no-op — and the `.unityide.sln` left behind by a
+ * previous run then satisfies the existence check that follows, so the probe
+ * reports PASS while verifying against a stale csproj that may have lost its
+ * `<Analyzer>` item or gone back to `WarningLevel 0`.
+ *
+ * That is verbatim the "a skipped test looked identical to a passing one"
+ * failure this whole script exists to prevent, so it is checked rather than
+ * assumed.
+ */
+function runRustTest(testPath: string, extraEnv: Record<string, string>): void {
+  const result = spawnSync('cargo', ['test', '--lib', testPath, '--', '--exact', '--nocapture'], {
+    cwd: path.join(EDITOR_DIR, 'src-tauri'),
+    env: { ...process.env, ...extraEnv },
+    encoding: 'utf8',
+  });
+  const output = `${result.stdout ?? ''}${result.stderr ?? ''}`;
+  if (result.status !== 0) fail(`\`${testPath}\` failed`, output.slice(-2000));
+
+  const ran = /test result: ok\. (\d+) passed/.exec(output);
+  if (!ran || Number(ran[1]) === 0) {
+    fail(
+      `\`${testPath}\` matched no test — it did not run`,
+      '  cargo exits 0 when a filter matches nothing, so this step verified\n' +
+        '  nothing at all. The test was probably renamed or moved.',
+    );
+  }
+  if (/SKIPPED/.test(output)) {
+    fail(`\`${testPath}\` skipped itself`, output.slice(-1000));
+  }
+}
+
 // ── prerequisites ──────────────────────────────────────────────────────────
 
 const home = os.homedir();
@@ -181,28 +235,10 @@ if (!server0) {
   // moment an upgrade most needs verifying. This drives the same
   // `install_into` the app calls, so what gets probed is what users get.
   console.log(`  provisioning csharp-ls ${pinnedVersion} from the bundled package…`);
-  const provision = spawnSync(
-    'cargo',
-    [
-      'test',
-      '--lib',
-      'csharp_ls::tests::provisions_the_pinned_server_into_the_managed_directory',
-      '--',
-      '--exact',
-      '--nocapture',
-    ],
-    {
-      cwd: path.join(EDITOR_DIR, 'src-tauri'),
-      env: { ...process.env, UNITYIDE_PROVISION_MANAGED: '1', UNITYIDE_CSHARP_LS_E2E: 'required' },
-      encoding: 'utf8',
-    },
-  );
-  if (provision.status !== 0) {
-    fail(
-      `could not provision csharp-ls ${pinnedVersion}`,
-      (provision.stderr || provision.stdout || '').slice(-2000),
-    );
-  }
+  runRustTest('csharp_ls::tests::provisions_the_pinned_server_into_the_managed_directory', {
+    UNITYIDE_PROVISION_MANAGED: '1',
+    UNITYIDE_CSHARP_LS_E2E: 'required',
+  });
   server0 = discoverCsharpLs(lookup);
 }
 if (!server0) {
@@ -275,16 +311,10 @@ const uri = openUri;
 
 // ── regenerate through the real Rust generator ─────────────────────────────
 
-const gen = spawnSync(
-  'cargo',
-  ['test', '--lib', 'unity::tests::smoke_generate_full_setup', '--', '--exact'],
-  {
-    cwd: path.join(EDITOR_DIR, 'src-tauri'),
-    env: { ...process.env, UNITYIDE_SMOKE_UNITY_PROJECT: project, UNITYIDE_SMOKE_E2E: 'required' },
-    encoding: 'utf8',
-  },
-);
-if (gen.status !== 0) fail('project-file generation failed', gen.stderr || gen.stdout);
+runRustTest('unity::tests::smoke_generate_full_setup', {
+  UNITYIDE_SMOKE_UNITY_PROJECT: project,
+  UNITYIDE_SMOKE_E2E: 'required',
+});
 
 const solution = path.join(project, '.unityide.sln');
 if (!fs.existsSync(solution)) {
@@ -336,7 +366,10 @@ server.stdout.on('data', (chunk: Buffer) => {
     const msg: JsonRpcMessage = JSON.parse(buf.subarray(start, start + len).toString());
     buf = buf.subarray(start + len);
 
-    if (msg.id !== undefined && pending.has(msg.id)) {
+    if (msg.id !== undefined && msg.method === undefined && pending.has(msg.id)) {
+      // A response has an id and NO method. Checking `pending.has(id)` first
+      // would resolve one of our promises with a server REQUEST that reused
+      // the number — csharp-ls numbers its own from 1, exactly as we do.
       pending.get(msg.id)!(msg);
       pending.delete(msg.id);
     } else if (msg.method === 'window/logMessage') {
@@ -785,6 +818,7 @@ try {
       if (REQUIRED || process.env.UNITYIDE_ANALYZERS_E2E === 'required') {
         fail(`Unity analyzers could not be checked: ${reason}`);
       }
+      skippedSections.push(`analyzers (${reason})`);
     } else {
       // Every line below triggers one specific UNT rule, chosen because each
       // is unambiguous and something a Unity developer actually writes.
@@ -799,7 +833,12 @@ try {
         '    {',
         '        float step = Time.fixedDeltaTime;',
         '        if (tag == "Player") { Debug.Log(step + health); }',
+        '        Invoke("Respawn", 1f);',
+        '        var rb = GetComponent(typeof(Rigidbody));',
+        '        Debug.Log(rb);',
         '    }',
+        '',
+        '    private void Respawn() { }',
         '',
         '    private void LateUpdate()',
         '    {',
@@ -850,6 +889,56 @@ try {
       pass('analyzers', `UNT0001, UNT0002, UNT0004 reported; no CS0649 (${items.length} total)`);
       budget('analyzer pull', analyzerMs, BUDGET.analyzerDiagnostics);
 
+      // ── the quick fixes, against the ranges the analyzer really emits ────
+      //
+      // The editor supplies these itself, because csharp-ls does not surface
+      // the fixes the analyzers ship. They are derived from the diagnostic's
+      // range, so they are correct only for as long as that range keeps its
+      // shape — and a builder that guesses wrong is not a broken fix, it is an
+      // absent one, with nothing anywhere to say so.
+      //
+      // Two of them shipped in exactly that state: written for the literal
+      // `"Respawn"` and for `Time.fixedDeltaTime`, while the analyzer ranges
+      // the whole invocation and the bare member name. Their unit tests passed
+      // because those tests built the same wrong ranges by hand. This closes
+      // the loop by feeding real diagnostics through the real builders.
+      const fixable = items.filter((d: any) => UNT_FIXES[String(d.code ?? '')]);
+      const unfixed = fixable
+        .filter(
+          (d: any) =>
+            untFixesFor(ANALYZER_PROBE, [
+              {
+                code: String(d.code),
+                range: {
+                  startLineNumber: d.range.start.line + 1,
+                  startColumn: d.range.start.character + 1,
+                  endLineNumber: d.range.end.line + 1,
+                  endColumn: d.range.end.character + 1,
+                },
+              },
+            ]).length === 0,
+        )
+        .map((d: any) => String(d.code));
+
+      if (unfixed.length > 0) {
+        fail(
+          `a quick fix is registered for ${[...new Set(unfixed)].join(', ')} but does not match ` +
+            'the range the analyzer emits',
+          '  Print the covered text for each diagnostic and rewrite the builder in\n' +
+            '  `unity-analyzers/services/unt-quick-fixes.ts` against it. A registered\n' +
+            '  builder that never fires is indistinguishable from having no fix.',
+        );
+      }
+      const fixedCodes = [...new Set(fixable.map((d: any) => String(d.code)))].sort();
+      if (fixedCodes.length === 0) {
+        fail(
+          'the analyzer probe triggered none of the diagnostics the editor can fix',
+          `  Expected some of ${Object.keys(UNT_FIXES).join(', ')} — the probe text no\n` +
+            '  longer exercises them, so the builders are unverified.',
+        );
+      }
+      pass('quick fixes', `${fixedCodes.join(', ')} fixable at the emitted range`);
+
       // Turning them off must actually turn them off — and must invalidate the
       // cached report, which csharp-ls does by folding the flag into resultId.
       notify('workspace/didChangeConfiguration', {
@@ -898,9 +987,23 @@ try {
 
   const serverVersion = (logs.join('\n').match(/version ([\d.]+)/) ?? [])[1] ?? pinnedVersion;
   console.log('');
-  console.log('  PASS  C# IntelliSense is working end to end\n');
+  if (skippedSections.length > 0) {
+    console.log(
+      `  PARTIAL  C# IntelliSense works, but ${skippedSections.length} section(s) did not run`,
+    );
+    for (const section of skippedSections) console.log(`           ${section}`);
+    console.log('');
+  } else {
+    console.log('  PASS  C# IntelliSense is working end to end\n');
+  }
+  // A section that did not run is not evidence, so it must not be swallowed by
+  // a line that reads PASS — the whole point of this contract is that nobody
+  // has to read the middle of the output.
+  const partial =
+    skippedSections.length > 0 ? `  SKIPPED: ${skippedSections.join('; ')}` : '';
   console.log(
-    `RESULT PASS  project=${project} csharp-ls=${serverVersion} ${timings.join(' ')}`,
+    `RESULT ${skippedSections.length > 0 ? 'PARTIAL' : 'PASS'}  project=${project} ` +
+      `csharp-ls=${serverVersion} ${timings.join(' ')}${partial}`,
   );
   server.kill();
   process.exit(0);

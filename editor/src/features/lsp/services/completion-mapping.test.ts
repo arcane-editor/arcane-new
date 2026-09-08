@@ -228,6 +228,30 @@ describe('toMonacoCompletionItem', () => {
     expect(toMonacoCompletionItem(item(), WORD_RANGE, ENUMS).tags).toBeUndefined();
   });
 
+  it('carries additionalTextEdits, which is where the using directive lives', () => {
+    // A Roslyn server completes a type from a namespace the file has not
+    // imported and sends the `using` as an additional edit. Dropping it
+    // inserts the identifier alone — code that does not compile.
+    const mapped = toMonacoCompletionItem(
+      item({
+        additionalTextEdits: [
+          {
+            range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } },
+            newText: 'using UnityEngine;\n',
+          },
+        ],
+      }),
+      WORD_RANGE,
+      ENUMS,
+    );
+    expect(mapped.additionalTextEdits).toEqual([
+      {
+        range: { startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 1 },
+        text: 'using UnityEngine;\n',
+      },
+    ]);
+  });
+
   it('keeps the raw item so resolve can hand it back', () => {
     // `data` is opaque; a server given a rebuilt item cannot look up what it
     // cached against it, and resolve silently returns nothing.
@@ -366,6 +390,28 @@ describe('mergeResolvedItem', () => {
     expect(mergeResolvedItem(base, item()).detail).toBe('original');
     expect(mergeResolvedItem(base, null).detail).toBe('original');
     expect(mergeResolvedItem(base, undefined)).toBe(base);
+  });
+
+  it('takes additionalTextEdits computed lazily on resolve', () => {
+    // The case that makes this worth doing: a server that sends docs eagerly
+    // and the import edit only when asked.
+    const merged = mergeResolvedItem(
+      base,
+      item({
+        additionalTextEdits: [
+          {
+            range: { start: { line: 2, character: 0 }, end: { line: 2, character: 0 } },
+            newText: 'using System.Collections;\n',
+          },
+        ],
+      }),
+    );
+    expect(merged.additionalTextEdits).toEqual([
+      {
+        range: { startLineNumber: 3, startColumn: 1, endLineNumber: 3, endColumn: 1 },
+        text: 'using System.Collections;\n',
+      },
+    ]);
   });
 
   it('does not disturb the fields resolve has no say over', () => {

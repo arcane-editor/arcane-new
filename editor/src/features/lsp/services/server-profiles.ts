@@ -42,6 +42,13 @@ export interface ServerProfile {
     completionResolve: number;
     hover: number;
     signatureHelp: number;
+    /**
+     * A diagnostics pull. Not interactive, but bounded for a different
+     * reason: pulls are serialised, so one that hangs stops every open
+     * document's diagnostics until it gives up. At the client's global
+     * ceiling that is three minutes of nothing.
+     */
+    diagnostics: number;
   };
 }
 
@@ -52,6 +59,9 @@ const DEFAULT_PROFILE: ServerProfile = {
     completionResolve: 1_500,
     hover: 3_000,
     signatureHelp: 3_000,
+    // Generous, because with the Unity analyzers on this runs every analyzer
+    // over the whole compilation — but finite, because it holds the queue.
+    diagnostics: 30_000,
   },
 };
 

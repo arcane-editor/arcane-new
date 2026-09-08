@@ -22,14 +22,22 @@
 
 let injected = false;
 
-/** Record what `unity_setup_lsp` reported. */
+/**
+ * Record what `unity_setup_lsp` reported: whether the generated csproj names
+ * the analyzer assembly. Reset to false whenever that becomes unknown —
+ * a different workspace, a failed setup, a dead server.
+ */
 export function setRoslynAnalyzersInjected(value: boolean): void {
   injected = value;
 }
 
 /**
- * True when the generated project references the Unity analyzer assembly, so
- * Roslyn is reporting UNT diagnostics.
+ * True when the generated project references the Unity analyzer assembly.
+ *
+ * This is ONE of the conditions for the analyzers actually reporting, not all
+ * of them — the user can switch them off and the server can die, neither of
+ * which touches the csproj. Callers deciding whether a local rule may stand
+ * down must use `roslynAnalyzersReporting()` instead.
  *
  * Deliberately conservative: it starts false and only becomes true on a
  * positive report, so the fallback rules run until the Roslyn ones are known
@@ -37,4 +45,32 @@ export function setRoslynAnalyzersInjected(value: boolean): void {
  */
 export function roslynAnalyzersInjected(): boolean {
   return injected;
+}
+
+/**
+ * Is Roslyn actually reporting UNT diagnostics right now?
+ *
+ * Three independent things have to hold, and each of them can stop holding
+ * without the others noticing:
+ *
+ *   1. the csproj names the analyzer (`injected`);
+ *   2. the user has not switched the analyzers off — the setting is pushed to
+ *      the server as `analyzersEnabled`, and with it false csharp-ls runs no
+ *      analyzer pipeline at all;
+ *   3. the C# server is running — it can exhaust its restart budget.
+ *
+ * Only (1) used to be checked, and the consequence was specific and silent:
+ * unticking "Roslyn Analyzers (Unity)" made every UNT marker disappear while
+ * the local rules those markers had superseded stayed switched off. Three
+ * inspections vanished from both engines at once, with nothing reported
+ * anywhere.
+ *
+ * The dependency is injected because this module is imported by rule code that
+ * must stay loadable without Zustand or Tauri.
+ */
+export function roslynAnalyzersReporting(deps: {
+  analyzersEnabled: boolean;
+  serverRunning: boolean;
+}): boolean {
+  return injected && deps.analyzersEnabled && deps.serverRunning;
 }

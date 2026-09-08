@@ -32,6 +32,13 @@ export interface LspCompletionItem {
   /** 1 = PlainText, 2 = Snippet. */
   insertTextFormat?: number;
   textEdit?: LspTextEditLike;
+  /**
+   * Edits elsewhere in the file that must be applied WITH the completion —
+   * for a Roslyn server this is the `using` directive an unimported type
+   * needs. Dropping them inserts the identifier and nothing else, which does
+   * not compile.
+   */
+  additionalTextEdits?: Array<{ range: LspRange; newText: string }>;
   /** Opaque server payload, echoed back on `completionItem/resolve`. */
   data?: unknown;
   commitCharacters?: string[];
@@ -88,12 +95,23 @@ export interface MonacoSuggestion {
   preselect?: boolean;
   tags?: number[];
   range: MonacoInsertRange;
+  /** Monaco's `ISingleEditOperation` shape. */
+  additionalTextEdits?: Array<{ range: MonacoRange; text: string }>;
   /**
    * The item exactly as the server sent it, kept so `resolveCompletionItem`
    * can hand it back — `data` is opaque, and a server given a rebuilt item
    * cannot look up whatever it cached against it.
    */
   _lsp?: LspCompletionItem;
+  /**
+   * Which language server produced this item.
+   *
+   * `resolveCompletionItem` receives only the item and a token — no model, no
+   * language — and the provider is registered for every LSP-backed language.
+   * Without this, resolving a TypeScript completion would send that server's
+   * opaque `data` to csharp-ls.
+   */
+  _server?: string;
 }
 
 /**
@@ -212,6 +230,11 @@ export function toMonacoCompletionItem(
   const tags =
     item.tags?.includes(1) || item.deprecated ? [enums.deprecatedTag] : undefined;
 
+  const additionalTextEdits = item.additionalTextEdits?.map((edit) => ({
+    range: toMonacoRange(edit.range),
+    text: edit.newText,
+  }));
+
   return {
     // Keep the rich label shape when the server sends one — Monaco renders
     // `detail`/`description` beside the name, which is where a C# member's
@@ -228,6 +251,7 @@ export function toMonacoCompletionItem(
     preselect: item.preselect,
     tags,
     range,
+    additionalTextEdits,
     _lsp: item,
   };
 }
@@ -271,10 +295,23 @@ export function mergeResolvedItem(
 ): MonacoSuggestion {
   if (!resolved) return current;
   const documentation = documentationOf(resolved.documentation);
+  // `additionalTextEdits` is the field this matters most for: a server that
+  // computes imports lazily sends the `using` directive only on resolve, and
+  // accepting the item without it inserts a name nothing declares.
+  const additionalTextEdits = resolved.additionalTextEdits?.map((edit) => ({
+    range: {
+      startLineNumber: edit.range.start.line + 1,
+      startColumn: edit.range.start.character + 1,
+      endLineNumber: edit.range.end.line + 1,
+      endColumn: edit.range.end.character + 1,
+    },
+    text: edit.newText,
+  }));
   return {
     ...current,
     detail: resolved.detail ?? current.detail,
     documentation: documentation ?? current.documentation,
+    additionalTextEdits: additionalTextEdits ?? current.additionalTextEdits,
   };
 }
 

@@ -28,6 +28,7 @@ import {
   dropAllListenerSnapshots,
   onListenersChanged,
 } from './services/unity-events-cache';
+import { useSettingsStore } from '../../stores/settings';
 import { useUnityIndexStore } from '../../stores/unity-index';
 import { blankStringsAndComments } from './services/csharp-scan';
 export { blankStringsAndComments } from './services/csharp-scan';
@@ -43,6 +44,7 @@ let unsubWorkspace: (() => void) | null = null;
 let unsubUiToolkit: (() => void) | null = null;
 let unsubListeners: (() => void) | null = null;
 let unsubIndex: (() => void) | null = null;
+let unsubSettings: (() => void) | null = null;
 
 /**
  * Initialise the Unity analyzers: register all rules, start the debounced
@@ -90,6 +92,30 @@ export function initUnityAnalyzers(monaco: Monaco): void {
   // BOTH triggers, not one. A delta leaves `status` untouched while changing
   // what the prefabs wire — the bug `usage-codelens.ts` documents at its own
   // subscription, for exactly this store.
+  // Two settings change what these rules report, and neither did anything
+  // until the next keystroke in each open file — `refreshUnityAnalyzers` was
+  // exported and never called.
+  //
+  // `lsp.csharp.analyzers` is the one that matters. Turning the Roslyn
+  // analyzers off makes every UNT marker disappear, and the local rules those
+  // markers supersede have to come back in the same moment. Without this
+  // refresh they come back only for files the user edits afterwards, so the
+  // file already on screen shows nothing from either engine.
+  unsubSettings = useSettingsStore.subscribe((state, prev) => {
+    const WATCHED = [
+      'lsp.csharp.analyzers',
+      'unity.analyzers.enabled',
+      'unity.nearMissDiagnostics.enabled',
+      'unity.serializationDiagnostics.enabled',
+      'unity.projectSettingsDiagnostics.enabled',
+      'unity.inputDiagnostics.enabled',
+      'unity.uiDiagnostics.enabled',
+    ] as const;
+    if (WATCHED.some((key) => state.settings[key] !== prev.settings[key])) {
+      refreshAll(monaco);
+    }
+  });
+
   unsubIndex = useUnityIndexStore.subscribe((state, prev) => {
     if (state.status !== prev.status || state.indexRevision !== prev.indexRevision) {
       dropAllListenerSnapshots();
@@ -138,6 +164,8 @@ export function stopUnityAnalyzers(): void {
   unsubListeners = null;
   unsubIndex?.();
   unsubIndex = null;
+  unsubSettings?.();
+  unsubSettings = null;
   initialized = false;
 }
 

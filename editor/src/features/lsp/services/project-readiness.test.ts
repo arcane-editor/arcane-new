@@ -231,12 +231,30 @@ describe('a load that starts after the gate has opened', () => {
     unsub();
   });
 
-  it('is a no-op while a load is already in flight', () => {
-    // csharp-ls logs one marker per project; the first close is enough.
+  it('keeps the gate closed across the several markers one load emits', () => {
+    // csharp-ls logs one per project; repeated closes must not confuse it.
     resetCsharpProjectLoaded(10_000);
     markCsharpProjectLoaded();
     markCsharpProjectLoading(10_000);
     markCsharpProjectLoading(10_000);
+    expect(isCsharpProjectLoaded()).toBe(false);
+    markCsharpProjectLoaded();
+    expect(isCsharpProjectLoaded()).toBe(true);
+  });
+
+  it('re-arms the failsafe from the start of THIS load', async () => {
+    // The window this closes: a failsafe armed when the server started is
+    // about to fire, and only now does the first `.cs` file open — which is
+    // when an on-demand solution load begins. Leaving the old timer to expire
+    // mid-load opens the gate onto an empty workspace, and the real
+    // load-finished marker that follows notifies nobody.
+    resetCsharpProjectLoaded(30);
+    await tick(20); // most of the original window has elapsed
+    markCsharpProjectLoading(10_000);
+
+    await tick(40); // past when the original failsafe would have fired
+    expect(isCsharpProjectLoaded()).toBe(false);
+
     markCsharpProjectLoaded();
     expect(isCsharpProjectLoaded()).toBe(true);
   });

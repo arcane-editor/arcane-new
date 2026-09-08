@@ -387,6 +387,8 @@ export class LspClient {
 
     const id = this.nextId++;
     const timeoutMs = options?.timeoutMs ?? REQUEST_TIMEOUT_MS;
+    /** Has this request reached the server? Gates `$/cancelRequest`. */
+    let sent = false;
 
     const promise = new Promise<T>((resolve, reject) => {
       this.pendingRequests.set(id, {
@@ -405,9 +407,15 @@ export class LspClient {
           if (!pending) return;
           this.pendingRequests.delete(id);
           this.clearPendingTimeout(id, pending);
-          this.notify('$/cancelRequest', { id });
+          // Only worth telling the server about a request it has actually
+          // been sent. Cancelling an id that never left would arrive first
+          // and be discarded as unknown, and the request would then run to
+          // completion anyway — the opposite of the intent.
+          if (sent) this.notify('$/cancelRequest', { id });
           pending.reject(new LspRequestCanceledError(method, this.languageId, -32800));
         };
+        // Already cancelled before we even got here: reject without sending
+        // anything at all.
         if (options.signal.aborted) queueMicrotask(onAbort);
         else options.signal.addEventListener('abort', onAbort, { once: true });
       }
@@ -418,7 +426,7 @@ export class LspClient {
           this.pendingRequests.delete(id);
           // Tell the server to stop too — a timeout that leaves the work
           // running just moves the cost, it does not remove it.
-          this.notify('$/cancelRequest', { id });
+          if (sent) this.notify('$/cancelRequest', { id });
           pending.reject(
             new Error(
               `LSP request '${method}' (id=${id}, lang=${this.languageId}) timed out after ${timeoutMs}ms`,
@@ -440,10 +448,15 @@ export class LspClient {
       // Ordering, not error handling: a failed notification is reported by
       // `notify` itself, and must not fail the request that follows it.
       await this.lastNotifySent.catch(() => {});
+      // Aborted while waiting for the notification to land: the rejection has
+      // already been delivered, so sending the request now would leave the
+      // server computing an answer nobody is waiting for.
+      if (options?.signal?.aborted) return promise;
       await invoke('lsp_send', {
         language: this.languageId,
         message: JSON.stringify(msg),
       });
+      sent = true;
     } catch (err) {
       const pending = this.pendingRequests.get(id);
       if (pending) {
@@ -735,6 +748,11 @@ export class LspClient {
   }
 
   private cleanup(): void {
+    // Drop the previous session's send chain. Without this the next
+    // `initialize` waits on the `exit` notification of the server that just
+    // died — a promise belonging to a process that no longer exists.
+    this.lastNotifySent = Promise.resolve();
+
     if (this.unlisten) {
       safeUnlisten(this.unlisten);
       this.unlisten = null;

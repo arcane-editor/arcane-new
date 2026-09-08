@@ -73,14 +73,20 @@ const fixCompareTag: UntFixBuilder = (text, range) => {
   };
 };
 
-/** `Invoke("Foo")` → `Invoke(nameof(Foo))` (UNT0016). */
+/** `Invoke("Foo", 1f)` → `Invoke(nameof(Foo), 1f)` (UNT0016). */
 const fixNameof: UntFixBuilder = (text, range) => {
-  // The analyzer ranges the string literal itself.
-  const literal = /^"([A-Za-z_]\w*)"$/.exec(text.trim());
-  if (!literal) return null;
+  // The analyzer ranges the WHOLE invocation, not the literal:
+  // `Invoke("Respawn", 1f)`. Captured from csharp-ls 0.27 running the real
+  // analyzer — see the header of `unt-quick-fixes.test.ts`. An earlier version
+  // of this builder expected just the literal and therefore never fired.
+  const call = /^([\w.]*\b(?:Invoke|InvokeRepeating|CancelInvoke|StartCoroutine|StopCoroutine)\s*\(\s*)"([A-Za-z_]\w*)"(.*)$/s.exec(
+    text.trim(),
+  );
+  if (!call) return null;
+  const [, head, name, tail] = call;
   return {
-    title: `Use nameof(${literal[1]})`,
-    edits: [{ range, newText: `nameof(${literal[1]})` }],
+    title: `Use nameof(${name})`,
+    edits: [{ range, newText: `${head}nameof(${name})${tail}` }],
   };
 };
 
@@ -97,13 +103,21 @@ const fixGenericGetComponent: UntFixBuilder = (text, range) => {
   };
 };
 
-/** `Time.fixedDeltaTime` in Update → `Time.deltaTime` (UNT0004). */
+/** `Time.fixedDeltaTime` read from Update → `Time.deltaTime` (UNT0004). */
 const fixDeltaTime: UntFixBuilder = (text, range) => {
-  if (!/^Time\s*\.\s*fixedDeltaTime$/.test(text.trim())) return null;
-  return {
-    title: "Use 'Time.deltaTime'",
-    edits: [{ range, newText: 'Time.deltaTime' }],
-  };
+  const trimmed = text.trim();
+  // The analyzer ranges the member NAME alone (`fixedDeltaTime`), not the whole
+  // member access. Replacing that range with `Time.deltaTime` would produce
+  // `Time.Time.deltaTime`; the replacement has to match what the range covers.
+  // The qualified form is accepted too, so a future analyzer that widens its
+  // range does not silently drop the fix.
+  if (/^fixedDeltaTime$/.test(trimmed)) {
+    return { title: "Use 'Time.deltaTime'", edits: [{ range, newText: 'deltaTime' }] };
+  }
+  if (/^Time\s*\.\s*fixedDeltaTime$/.test(trimmed)) {
+    return { title: "Use 'Time.deltaTime'", edits: [{ range, newText: 'Time.deltaTime' }] };
+  }
+  return null;
 };
 
 /**

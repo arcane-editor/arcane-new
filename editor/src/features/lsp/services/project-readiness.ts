@@ -86,7 +86,18 @@ export function isCsharpProjectLoaded(): boolean {
 export function markCsharpProjectLoading(
   failsafeMs: number = CSHARP_READINESS_FAILSAFE_MS,
 ): void {
-  if (!loaded) return;
+  // Re-arm the failsafe from the START OF THIS LOAD, whether or not the gate
+  // was already closed.
+  //
+  // The window it closes: the app arms a 20s failsafe when the server starts,
+  // the user spends 18s reading something that is not C#, and only then opens
+  // their first `.cs` file. With on-demand loading that is when the solution
+  // load begins — and an early-return here would leave the original timer to
+  // fire two seconds later, mid-load. The 300ms pull that follows is answered
+  // from an empty workspace, its CS0518 cascade is cached under a resultId,
+  // and the real "Finished loading" marker then hits `markCsharpProjectLoaded`'s
+  // `if (loaded) return` and notifies nobody. No corrective re-pull, wrong
+  // diagnostics until restart — exactly what this module exists to prevent.
   loaded = false;
   clearFailsafe();
   failsafeTimer = setTimeout(() => {

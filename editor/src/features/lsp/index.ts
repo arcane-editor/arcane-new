@@ -28,6 +28,7 @@ export {
 export {
   setRoslynAnalyzersInjected,
   roslynAnalyzersInjected,
+  roslynAnalyzersReporting,
 } from './services/roslyn-analyzers-state';
 export {
   requestFileDiagnostics,

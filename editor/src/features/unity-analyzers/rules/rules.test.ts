@@ -35,6 +35,23 @@ function run(rule: AnalyzerRule, code: string, overrides: Partial<RuleContext> =
   return rule.run(scanCSharp(code), ctx(overrides));
 }
 
+/**
+ * The slice of `editor.ITextModel` the fix builders touch.
+ *
+ * `buildEdit` needs a model to key its workspace edit and to offer a fix at
+ * all — without one the builders return undefined, which is why the hoist fix
+ * went untested while its generated text was wrong.
+ */
+function fakeModel(text: string) {
+  const lines = text.split('\n');
+  return {
+    uri: { toString: () => 'file:///probe.cs' },
+    getValue: () => text,
+    getLineCount: () => lines.length,
+    getLineContent: (n: number) => lines[n - 1] ?? '',
+  } as unknown as NonNullable<RuleContext['model']>;
+}
+
 function codes(findings: Finding[]): string[] {
   return findings.map((f) => f.code ?? '');
 }
@@ -88,10 +105,31 @@ describe('hot-path lookups (UNITY0201)', () => {
     }
   });
 
-  it('flags reflective messaging as UNITY0211', () => {
+  it('flags reflective Unity messaging as UNITY0211', () => {
     // UNT0016 covers Invoke and StartCoroutine; nothing upstream covers these.
-    const found = run(getComponentInUpdateRule, behaviour('Update', '        SendMessage("TakeDamage");'));
-    expect(codes(found)).toContain('UNITY0211');
+    for (const call of [
+      'SendMessage("TakeDamage")',
+      'gameObject.SendMessage("TakeDamage")',
+      'other.gameObject.BroadcastMessage("Reset")',
+      'transform.SendMessageUpwards("Hit")',
+    ]) {
+      const found = run(getComponentInUpdateRule, behaviour('Update', `        ${call};`));
+      expect(codes(found), call).toContain('UNITY0211');
+    }
+  });
+
+  it('does not flag someone else\'s method that happens to be called SendMessage', () => {
+    // A chat wrapper, a socket, a message bus. `SendMessage` is an ordinary
+    // name, and a per-frame performance warning on correct code is how an
+    // analyzer teaches people to ignore it.
+    for (const line of [
+      '        socket.SendMessage(buffer);',
+      '        chat.SendMessage("hello");',
+      '        _bus.BroadcastMessage(payload);',
+    ]) {
+      const found = run(getComponentInUpdateRule, behaviour('Update', line));
+      expect(codes(found), line).not.toContain('UNITY0211');
+    }
   });
 
   it('flags per-frame logging as a hint, not a warning', () => {
@@ -141,12 +179,26 @@ describe('hot-path lookups (UNITY0201)', () => {
     expect(found).toEqual([]);
   });
 
-  it('offers a fix that caches the component and assigns it in Awake', () => {
-    const found = run(getComponentInUpdateRule, behaviour('Update', '        var r = GetComponent<Rigidbody>();'));
-    const fix = found[0]?.fixes?.[0];
-    // The model is null here, so `buildEdit` cannot produce a workspace edit —
-    // the fix is offered only where it can actually be applied.
-    expect(fix).toBeUndefined();
+  it('offers a hoist fix that produces the code it describes', () => {
+    // The fix's TEXT is what matters — it is applied verbatim. Asserting only
+    // that a fix exists would pass for a fix that generates wrong code.
+    const src = behaviour('Update', '        var r = GetComponent<Rigidbody>();');
+    const found = run(getComponentInUpdateRule, src, { model: fakeModel(src) });
+    const edits = found[0]?.fixes?.[0]?.edit?.changes?.['file:///probe.cs'] ?? [];
+    const text = edits.map((e) => e.newText).join('\n');
+    expect(text).toContain('private Rigidbody _rigidbody;');
+    expect(text).toContain('_rigidbody = GetComponent<Rigidbody>();');
+    expect(text).toContain('private void Awake()');
+  });
+
+  it('does not offer the hoist fix for a call on another object', () => {
+    // `other.GetComponent<Rigidbody>()` is still worth warning about, but the
+    // generated `Awake` would cache THIS object's Rigidbody — code that
+    // compiles and refers to the wrong thing, which is worse than no fix.
+    const src = behaviour('Update', '        var r = other.GetComponent<Rigidbody>();');
+    const found = run(getComponentInUpdateRule, src, { model: fakeModel(src) });
+    expect(codes(found)).toContain('UNITY0201');
+    expect(found[0]?.fixes ?? []).toEqual([]);
   });
 });
 
@@ -193,6 +245,21 @@ describe('allocation in a hot path (UNITY0205-0207)', () => {
       .toContain('UNITY0206');
     expect(run(allocInUpdateRule, behaviour('Update', '        var v = new Vector3(1, 2, 3);')))
       .toEqual([]);
+  });
+
+  it('does not read string concatenation out of a comment', () => {
+    // It used to scan the raw text, so a comment mentioning the pattern the
+    // rule warns about triggered the rule.
+    const src = behaviour(
+      'Update',
+      '        for (int i = 0; i < 3; i++) { /* replace s + "suffix" here */ }',
+    );
+    expect(codes(run(allocInUpdateRule, src))).not.toContain('UNITY0207');
+  });
+
+  it('still flags real concatenation in a loop', () => {
+    const src = behaviour('Update', '        for (int i = 0; i < 3; i++) { s += "x"; }');
+    expect(codes(run(allocInUpdateRule, src))).toContain('UNITY0207');
   });
 
   it('no longer flags foreach', () => {
