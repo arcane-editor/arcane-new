@@ -85,6 +85,7 @@ export function toDiagnosticItems(
     message: d.message,
     severity: SEVERITY[d.severity ?? 3] ?? 'info',
     source: 'lsp' as const,
+    code: d.code != null ? String(d.code) : undefined,
   }));
 }
 

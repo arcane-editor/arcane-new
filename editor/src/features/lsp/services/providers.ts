@@ -813,6 +813,7 @@ export function registerLspProviders(monaco: Monaco): () => void {
       message: diag.message,
       severity: severityMap[diag.severity ?? 3] ?? 'info',
       source: 'lsp',
+      code: diag.code != null ? String(diag.code) : undefined,
     }));
     useUiStore.getState().setFileDiagnostics(modelKey, 'lsp', diagItems);
   }

@@ -271,6 +271,15 @@ export interface DiagnosticItem {
   message: string;
   severity: 'error' | 'warning' | 'info' | 'hint';
   source?: DiagnosticSource;
+  /**
+   * The diagnostic's own code — `CS0029`, `UNT0002`, `UNITY0201`.
+   *
+   * Four engines now write into this one panel (the C# compiler, Roslyn's
+   * Unity analyzers, this app's rules, and the asmdef checks), and the code is
+   * what tells a reader which of them produced a finding and what to search
+   * for. It is also what a suppression comment names.
+   */
+  code?: string;
 }
 
 export interface SearchMatch {

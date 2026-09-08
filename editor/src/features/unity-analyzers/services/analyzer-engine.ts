@@ -12,6 +12,7 @@ import {
   type CSharpScan,
 } from './csharp-scan';
 import { runRules } from './rule-runner';
+import { untCodeActionsForModel } from './unt-quick-fixes';
 import { useAsmdefStore } from '../../../stores/asmdef';
 import { roslynAnalyzersInjected } from '../../lsp';
 
@@ -313,6 +314,7 @@ function publishForModel(monaco: Monaco, model: editor.ITextModel): void {
       message: f.message,
       severity: f.severity,
       source: DIAGNOSTIC_SOURCE,
+      code: f.code,
     });
     for (const fix of f.fixes ?? []) {
       fixes.push({ range, fix });
@@ -332,6 +334,7 @@ const perUriDebounce = new Map<string, ReturnType<typeof setTimeout>>();
 let createModelSub: IDisposable | null = null;
 const contentSubs = new Map<string, IDisposable>();
 let unregisterCodeActions: (() => void) | null = null;
+let unregisterUntFixes: (() => void) | null = null;
 let started = false;
 let monacoRef: Monaco | null = null;
 
@@ -396,6 +399,14 @@ export function startEngine(monaco: Monaco): () => void {
     watchModel(monaco, m),
   );
 
+  // Quick fixes for the ROSLYN Unity analyzers' diagnostics. Separate source,
+  // because these are keyed by marker code rather than by a finding this
+  // engine produced — csharp-ls does not surface the fixes those analyzers
+  // ship, so the editor has to supply them (see `unt-quick-fixes.ts`).
+  unregisterUntFixes = registerLocalCodeActionSource('csharp', (model, _range, ctx) =>
+    untCodeActionsForModel(model, ctx.markers),
+  );
+
   unregisterCodeActions = registerLocalCodeActionSource('csharp', (model, range) => {
     const list = pendingFixes.get(model.uri.toString());
     if (!list || list.length === 0) return [];
@@ -435,6 +446,10 @@ export function stopEngine(): void {
   if (unregisterCodeActions) {
     unregisterCodeActions();
     unregisterCodeActions = null;
+  }
+  if (unregisterUntFixes) {
+    unregisterUntFixes();
+    unregisterUntFixes = null;
   }
   // Clear all published markers + diagnostics we own (every C# model, so we
   // also clear any whose pending-fix entry was already evicted).
