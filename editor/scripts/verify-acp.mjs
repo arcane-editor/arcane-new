@@ -12,7 +12,7 @@
  * in the field is environmental — Node too old, the adapter half-installed, a
  * renamed package, an expired login, a protocol bump. None of those show up in
  * a diff, and none of them break a mocked test. Same reasoning as
- * `verify-csharp-intellisense.mjs`, and for the same reason a SKIP here is NOT
+ * `verify-csharp-intellisense.ts`, and for the same reason a SKIP here is NOT
  * a pass: it means the check did not run.
  *
  *   node scripts/verify-acp.mjs

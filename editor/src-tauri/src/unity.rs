@@ -2160,18 +2160,202 @@ mod tests {
         );
     }
 
+    // ─── recent-project discovery (hermetic) ──────────────────────────────
+    //
+    // The parsers behind `smoke_workspace`. They are what let the smoke tests
+    // and `verify:intellisense` find a project without being told where one
+    // is — the difference between a check that runs and a check that prints
+    // SKIPPED on the machine whose IntelliSense is broken.
+
+    #[test]
+    fn registry_recent_projects_decode_in_recency_order() {
+        // Verbatim `reg query` output, hex included.
+        let out = "\r\nHKEY_CURRENT_USER\\Software\\Unity Technologies\\Unity Editor 5.x\r\n    \
+                   RecentlyUsedProjectPaths-1_h2222222222    REG_BINARY    443A2F776F726B2F5365636F6E6400\r\n    \
+                   RecentlyUsedProjectPaths-0_h1085040554    REG_BINARY    433A2F55736572732F73643132302F46697273742050726F6A65637420706D2057696E646F777300\r\n";
+        assert_eq!(
+            parse_registry_recent_projects(out),
+            vec![
+                "C:/Users/sd120/First Project pm Windows".to_string(),
+                "D:/work/Second".to_string(),
+            ],
+        );
+    }
+
+    #[test]
+    fn registry_parsing_ignores_unrelated_values_and_empty_output() {
+        assert!(parse_registry_recent_projects("").is_empty());
+        assert!(parse_registry_recent_projects("    Other_h1    REG_SZ    hello").is_empty());
+    }
+
+    #[test]
+    fn plist_recent_projects_decode_in_recency_order() {
+        let xml = "<dict>\
+                   <key>RecentlyUsedProjectPaths-1</key><data>L1VzZXJzL21lL1NlY29uZA==</data>\
+                   <key>RecentlyUsedProjectPaths-0</key><data>\n  L1VzZXJzL21lL0ZpcnN0\n  </data>\
+                   </dict>";
+        assert_eq!(
+            parse_plist_recent_projects(xml),
+            vec!["/Users/me/First".to_string(), "/Users/me/Second".to_string()],
+        );
+    }
+
+    #[test]
+    fn base64_decoder_handles_padding_and_rejects_garbage() {
+        assert_eq!(decode_base64("L1VzZXJz").unwrap(), b"/Users".to_vec());
+        assert_eq!(decode_base64("YQ==").unwrap(), b"a".to_vec());
+        assert!(decode_base64("!!!!").is_none());
+    }
+
+    /// The skip helper must actually fail when skipping is forbidden — this is
+    /// the guard on the guard. `UNITYIDE_SMOKE_E2E` is read per call, so a
+    /// scoped set/unset is enough; the smoke lock keeps it away from the tests
+    /// that read the same variable.
+    #[test]
+    fn a_forbidden_skip_is_a_failure() {
+        let _guard = crate::sync_util::lock_recover(&SMOKE_WORKSPACE);
+        let had = env::var("UNITYIDE_SMOKE_E2E").ok();
+        // Safety: single-threaded within the smoke lock; restored below.
+        unsafe { env::set_var("UNITYIDE_SMOKE_E2E", "required") };
+        assert!(smoke_required());
+        unsafe { env::remove_var("UNITYIDE_SMOKE_E2E") };
+        assert!(!smoke_required());
+        if let Some(v) = had {
+            unsafe { env::set_var("UNITYIDE_SMOKE_E2E", v) };
+        }
+    }
+
     // ─── smoke tests (skipped when real workspace absent) ──────────────────────
+
+    /// Recent Unity projects, most recent first.
+    ///
+    /// The Unity Editor records what it opened under
+    /// `HKCU\Software\Unity Technologies\Unity Editor 5.x` on Windows and in
+    /// `com.unity3d.UnityEditor5.x` preferences on macOS, as
+    /// `RecentlyUsedProjectPaths-<rank>` — a NUL-terminated UTF-8 path. Reading
+    /// it is what lets these tests run on a developer's machine without being
+    /// told where anything is.
+    ///
+    /// (Unity Hub 3 keeps its own list in a database rather than the
+    /// `projects-v1.json` it used to write, so the Hub is not consulted here.)
+    fn recent_unity_projects() -> Vec<PathBuf> {
+        #[cfg(target_os = "windows")]
+        let parsed = {
+            let raw = crate::process_util::command("reg")
+                .args(["query", r"HKCU\Software\Unity Technologies\Unity Editor 5.x"])
+                .output()
+                .ok()
+                .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+                .unwrap_or_default();
+            parse_registry_recent_projects(&raw)
+        };
+
+        #[cfg(target_os = "macos")]
+        let parsed = {
+            let raw = crate::process_util::command("defaults")
+                .args(["export", "com.unity3d.UnityEditor5.x", "-"])
+                .output()
+                .ok()
+                .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+                .unwrap_or_default();
+            parse_plist_recent_projects(&raw)
+        };
+
+        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+        let parsed: Vec<String> = Vec::new();
+
+        parsed.into_iter().map(PathBuf::from).collect()
+    }
+
+    /// Decode `RecentlyUsedProjectPaths-<rank>_h<hash>  REG_BINARY  <hex>`
+    /// lines from `reg query` output, ordered by rank.
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    fn parse_registry_recent_projects(reg_output: &str) -> Vec<String> {
+        let re =
+            Regex::new(r"RecentlyUsedProjectPaths-(\d+)(?:_h\d+)?\s+REG_BINARY\s+([0-9A-Fa-f]+)")
+                .unwrap();
+        let mut found: Vec<(u32, String)> = Vec::new();
+        for caps in re.captures_iter(reg_output) {
+            let rank: u32 = caps[1].parse().unwrap_or(u32::MAX);
+            let hex = &caps[2];
+            let bytes: Vec<u8> = (0..hex.len() / 2)
+                .filter_map(|i| u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).ok())
+                .collect();
+            let decoded = String::from_utf8_lossy(&bytes)
+                .trim_end_matches('\0')
+                .replace('\\', "/");
+            if !decoded.is_empty() {
+                found.push((rank, decoded));
+            }
+        }
+        found.sort_by_key(|(rank, _)| *rank);
+        found.into_iter().map(|(_, p)| p).collect()
+    }
+
+    /// The macOS counterpart: the same keys, base64 rather than hex.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    fn parse_plist_recent_projects(plist_xml: &str) -> Vec<String> {
+        let re = Regex::new(
+            r"(?s)<key>RecentlyUsedProjectPaths-(\d+)(?:_h\d+)?</key>\s*<data>(.*?)</data>",
+        )
+        .unwrap();
+        let mut found: Vec<(u32, String)> = Vec::new();
+        for caps in re.captures_iter(plist_xml) {
+            let rank: u32 = caps[1].parse().unwrap_or(u32::MAX);
+            let b64: String = caps[2].chars().filter(|c| !c.is_whitespace()).collect();
+            if let Some(bytes) = decode_base64(&b64) {
+                let decoded = String::from_utf8_lossy(&bytes)
+                    .trim_end_matches('\0')
+                    .to_string();
+                if !decoded.is_empty() {
+                    found.push((rank, decoded));
+                }
+            }
+        }
+        found.sort_by_key(|(rank, _)| *rank);
+        found.into_iter().map(|(_, p)| p).collect()
+    }
+
+    /// Minimal standard-alphabet base64, so this needs no new dependency.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    fn decode_base64(input: &str) -> Option<Vec<u8>> {
+        const TABLE: &[u8; 64] =
+            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let mut out = Vec::new();
+        let mut acc: u32 = 0;
+        let mut bits = 0;
+        for ch in input.bytes() {
+            if ch == b'=' {
+                break;
+            }
+            let value = TABLE.iter().position(|&c| c == ch)? as u32;
+            acc = (acc << 6) | value;
+            bits += 6;
+            if bits >= 8 {
+                bits -= 8;
+                out.push((acc >> bits) as u8);
+            }
+        }
+        Some(out)
+    }
 
     /// Locate a real Unity project to smoke-test against.
     ///
-    /// `UNITYIDE_SMOKE_UNITY_PROJECT` overrides; otherwise we try a couple of
-    /// known local projects. These tests are opt-in by nature — but a hardcoded
-    /// path that has since been deleted makes them *silently* vacuous, which is
-    /// how a total IntelliSense outage stayed green through a full suite.
+    /// `UNITYIDE_SMOKE_UNITY_PROJECT` overrides; then whatever the developer
+    /// most recently opened in Unity; then a couple of known local projects.
+    /// These tests are opt-in by nature — but a hardcoded path that has since
+    /// been deleted makes them *silently* vacuous, which is how a total
+    /// IntelliSense outage stayed green through a full suite.
     fn smoke_workspace() -> Option<PathBuf> {
         if let Ok(p) = env::var("UNITYIDE_SMOKE_UNITY_PROJECT") {
             let path = PathBuf::from(p);
             return path.join("Assets").is_dir().then_some(path);
+        }
+        if let Some(recent) = recent_unity_projects()
+            .into_iter()
+            .find(|p| p.join("Assets").is_dir())
+        {
+            return Some(recent);
         }
         // Real directories on a developer's disk, not brand strings. The rename
         // sweep rewrote "Arcane Demo" here and the smoke test silently went back
@@ -2187,12 +2371,39 @@ mod tests {
         .find(|p| p.join("Assets").is_dir())
     }
 
+    /// `UNITYIDE_SMOKE_E2E=required` turns a skip into a failure.
+    fn smoke_required() -> bool {
+        env::var("UNITYIDE_SMOKE_E2E").as_deref() == Ok("required")
+    }
+
+    /// The workspace for `test`, or `None` after saying so out loud.
+    ///
+    /// The three tests below used to `return` on `None` with no output at all.
+    /// That is the precise failure this module's own comments warn about: a
+    /// skipped test and a passing test looked identical, and a total
+    /// IntelliSense outage rode through a full green suite because of it.
+    fn smoke_workspace_or_skip(test: &str) -> Option<PathBuf> {
+        match smoke_workspace() {
+            Some(w) => Some(w),
+            None => {
+                eprintln!(
+                    "SKIPPED {test}: no Unity project found. \
+                     Open one in Unity or set UNITYIDE_SMOKE_UNITY_PROJECT."
+                );
+                assert!(
+                    !smoke_required(),
+                    "{test} skipped, but UNITYIDE_SMOKE_E2E=required forbids skipping"
+                );
+                None
+            }
+        }
+    }
+
     #[test]
     fn smoke_generate_ide_csproj() {
         let _guard = crate::sync_util::lock_recover(&SMOKE_WORKSPACE);
-        let workspace = match smoke_workspace() {
-            Some(w) => w,
-            None => return,
+        let Some(workspace) = smoke_workspace_or_skip("smoke_generate_ide_csproj") else {
+            return;
         };
         let result = generate_ide_csproj(&workspace).expect("generate ok");
         assert!(result, "csproj should have been generated");
@@ -2223,9 +2434,8 @@ mod tests {
     #[test]
     fn smoke_generated_hint_paths_all_exist() {
         let _guard = crate::sync_util::lock_recover(&SMOKE_WORKSPACE);
-        let workspace = match smoke_workspace() {
-            Some(w) => w,
-            None => return,
+        let Some(workspace) = smoke_workspace_or_skip("smoke_generated_hint_paths_all_exist") else {
+            return;
         };
         generate_ide_csproj(&workspace).expect("generate ok");
         let content = fs::read_to_string(workspace.join(".unityide.csproj")).expect("read csproj");
@@ -2243,9 +2453,8 @@ mod tests {
     #[test]
     fn smoke_generate_full_setup() {
         let _guard = crate::sync_util::lock_recover(&SMOKE_WORKSPACE);
-        let workspace = match smoke_workspace() {
-            Some(w) => w,
-            None => return,
+        let Some(workspace) = smoke_workspace_or_skip("smoke_generate_full_setup") else {
+            return;
         };
         let sln = unity_setup_lsp(workspace.to_string_lossy().to_string()).expect("setup ok");
         assert_eq!(sln.as_deref(), Some(".unityide.sln"));

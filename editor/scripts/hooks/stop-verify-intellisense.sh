@@ -17,12 +17,17 @@ editor_dir="$repo_root/editor"
 
 # Never let hook plumbing wedge a session: any unexpected condition exits 0.
 [ -d "$editor_dir" ] || exit 0
-command -v node >/dev/null 2>&1 || exit 0
+# The probe imports the editor's own `fileUri`/`lspDocumentUri` (that is the
+# point of it — see the script header), so it runs under bun, not node.
+if ! command -v bun >/dev/null 2>&1; then
+  printf '%s\n' '{"systemMessage":"C# IntelliSense check SKIPPED (bun not on PATH) — it did not run and is not evidence IntelliSense works."}'
+  exit 0
+fi
 
 changes="$(git -C "$repo_root" status --porcelain -- editor arcane-extension 2>/dev/null)"
 [ -n "$changes" ] || exit 0
 
-output="$(cd "$editor_dir" && node scripts/verify-csharp-intellisense.mjs 2>&1)"
+output="$(cd "$editor_dir" && bun run scripts/verify-csharp-intellisense.ts 2>&1)"
 status=$?
 
 if [ "$status" -ne 0 ]; then
