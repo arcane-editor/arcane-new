@@ -31,11 +31,13 @@ The left sidebar shows your project's `Assets/` directory. You can:
 - Right-click a `.unity` or `.prefab` file to **Reveal in Unity** or **Ping in Unity** (requires Unity connection)
 - Right-click any asset to **Copy GUID** for use in scripts or YAML
 
-## Configuring AI
+## Using the AI
 
-Before using the chat, you need an API key. Open the **Settings panel** via the Command Palette (`Cmd+Shift+P` → "UnityIDE: Settings") and enter your **OpenAI** or **Anthropic** API key.
+There is no API key to set up. Open **Settings** (`Cmd+,` / `Ctrl+,`), go to the
+**Account** pane and sign in — your plan's AI usage is applied automatically. The
+free plan includes a one-time trial to try it out.
 
-Once configured, click the chat icon in the left sidebar to start talking to the AI.
+Then click the chat icon in the left sidebar, or press `Cmd+L` / `Ctrl+L`.
 
 ## Next Steps
 

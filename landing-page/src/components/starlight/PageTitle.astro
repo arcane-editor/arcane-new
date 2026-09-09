@@ -1,0 +1,86 @@
+---
+/**
+ * The page header, as the IDE's own breadcrumb bar.
+ *
+ * This is the one loud element in the docs. Everything else on the page is
+ * deliberately quiet, so the title block is where the docs get to say what they
+ * are: a file, open, in a tool that reads Unity projects. The path is set in
+ * the mono face reserved across this site for machine output — paths,
+ * identifiers, versions — and the title carries the display weight.
+ *
+ * `_top` is Starlight's `PAGE_TITLE_ID`. It is hardcoded because `constants.ts`
+ * is not in the package's exports map; the skip-link and the "back to top"
+ * anchor both target it, so it has to stay exactly this.
+ */
+const { entry, id } = Astro.locals.starlightRoute;
+
+const filePath: string | undefined = (entry as { filePath?: string }).filePath;
+const ext = filePath?.match(/\.(?:mdx?|markdown)$/)?.[0] ?? '.md';
+
+const segments = id.split('/').filter(Boolean);
+const dirs = segments.slice(0, -1);
+const file = segments.at(-1);
+// The splash index has nothing to spell out — one segment is not a path.
+const showCrumb = Boolean(file) && dirs.length > 0;
+---
+
+{
+  showCrumb && (
+    <div class="page-crumb" aria-hidden="true">
+      {dirs.map((dir) => (
+        <>
+          <span class="crumb-dir">{dir}</span>
+          <span class="crumb-sep">/</span>
+        </>
+      ))}
+      <span class="crumb-file">{file}{ext}</span>
+    </div>
+  )
+}
+
+<h1 id="_top">{entry.data.title}</h1>
+
+<style>
+  .page-crumb {
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    line-height: 1.5;
+    letter-spacing: -0.01em;
+    margin-top: 1rem;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0 0.35em;
+  }
+
+  .crumb-dir {
+    color: var(--mute);
+  }
+
+  .crumb-sep {
+    color: var(--gutter);
+  }
+
+  .crumb-file {
+    color: var(--dim);
+  }
+
+  h1 {
+    font-family: var(--sans);
+    /* Matches `.lp-h2` on the landing page rather than Starlight's h1 ramp, so
+       a docs title and a section title on the home page are the same object. */
+    font-size: clamp(30px, 3.6vw, 44px);
+    line-height: 1.1;
+    letter-spacing: -0.03em;
+    font-weight: 500;
+    color: var(--text);
+    margin-top: 0.5rem;
+    padding-bottom: 1.25rem;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  /* No crumb (the splash page) means no path line to hang the title under. */
+  .page-crumb + h1 {
+    margin-top: 0.5rem;
+  }
+</style>

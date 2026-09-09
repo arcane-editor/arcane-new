@@ -2,19 +2,14 @@ import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { CreditCard, LogOut, Menu, Settings, X } from "lucide-react";
 import AccountMenu, { AccountSummaryBlock, useAuthSummary } from "@/components/AccountMenu";
+import { DOWNLOAD_HREF, navLinks as links } from "@/lib/site-nav";
 
-// Order mirrors the landing page itself: features → pricing → docs.
+// The link row and the download target both come from `site-nav.ts` now.
 //
-// "Download" is not in this list any more. It pointed at `#download`, which is
-// exactly where the gold button two elements to the right already goes — so the
-// row asked for the same click twice, in two different visual weights, about
-// 200px apart. The button is the one that stays, because it is the page's
-// primary action and a text link cannot outrank it.
-const links = [
-  { label: "Features", href: "/features" },
-  { label: "Pricing", href: "/pricing" },
-  { label: "Docs", href: "/docs/" },
-];
+// "Download" is not among the text links: it points where the gold button two
+// elements to the right already goes, so the row would ask for the same click
+// twice, in two different visual weights, about 200px apart. The button is the
+// one that stays, because it is the page's primary action.
 
 const mobileItemClass =
   "flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary";
@@ -93,7 +88,7 @@ const Navbar = () => {
           )}
 
           <Button variant="hero" size="sm" className="ml-4" asChild>
-            <a href="#download">Download</a>
+            <a href={DOWNLOAD_HREF}>Download</a>
           </Button>
 
           {/* Avatar is last, the one position every product puts it in.
@@ -134,7 +129,7 @@ const Navbar = () => {
               </a>
             ))}
             <Button variant="hero" size="sm" className="mt-2" asChild>
-              <a href="#download">Download</a>
+              <a href={DOWNLOAD_HREF}>Download</a>
             </Button>
 
             {/* A popover inside a sheet is a trap on touch, so the same content

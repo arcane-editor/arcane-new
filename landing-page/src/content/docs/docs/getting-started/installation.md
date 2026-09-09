@@ -1,22 +1,47 @@
 ---
 title: Installation
-description: Download and install UnityIDE on macOS.
+description: Download and install UnityIDE on Windows or macOS.
 ---
 
-UnityIDE is currently available for **macOS** (Apple Silicon). Windows and Linux builds are planned.
+UnityIDE runs on **Windows** and **macOS** (Apple Silicon). Windows is the primary,
+better-tested target; the macOS build is ad-hoc signed and marked Beta. Linux is not
+built yet.
 
 ## System Requirements
 
-- **macOS 12 Monterey or later**
-- Apple Silicon (M1/M2/M3/M4)
-- Unity 2021.3 LTS or later (for Unity integration features)
-- An OpenAI or Anthropic API key for AI features
+**Windows**
+
+- Windows 10 or later, 64-bit
+
+**macOS**
+
+- macOS 12 Monterey or later
+- Apple Silicon (M1 or newer). There is no Intel build.
+
+**Both**
+
+- Unity 2021.3 LTS or later, for the Unity integration features
+- [.NET 10](https://dotnet.microsoft.com/download) — the runtime *and* an SDK — for
+  C# IntelliSense. UnityIDE ships its own C# language server and unpacks it for you,
+  but that server targets `net10.0` and loads projects through the SDK, so .NET 8
+  alone is not enough.
+
+AI features need a UnityIDE account, not an API key of your own. The free plan
+includes AI usage; see [pricing](/pricing) for the paid tiers.
 
 ## Download
 
-Head to the [download section](/#download) of the homepage and grab the latest `.dmg` for your Mac.
+Head to the [download section](/#download) on the homepage and take the build for
+your platform — `UnityIDESetup.exe` on Windows, or the Apple Silicon `.dmg` on macOS.
 
-## Installing the App
+## Installing on Windows
+
+1. Run the downloaded `UnityIDESetup.exe`
+2. If SmartScreen warns that the publisher is unknown, choose **More info**, then
+   **Run anyway** — the installer is not code-signed yet
+3. Follow the installer and launch UnityIDE
+
+## Installing on macOS
 
 1. Open the downloaded `.dmg` file
 2. Drag **UnityIDE** into your Applications folder
@@ -24,7 +49,8 @@ Head to the [download section](/#download) of the homepage and grab the latest `
 
 ## macOS Gatekeeper — Unsigned App Warning
 
-UnityIDE is not yet signed with an Apple Developer certificate, so macOS Gatekeeper will block it on the first launch. There are two ways to get past this:
+This section is macOS only. UnityIDE is not yet signed with an Apple Developer
+certificate, so Gatekeeper blocks it on the first launch. There are two ways past it:
 
 ### Option A — Right-click to Open (easiest)
 

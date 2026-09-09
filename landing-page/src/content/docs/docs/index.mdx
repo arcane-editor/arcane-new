@@ -13,25 +13,41 @@ hero:
       variant: minimal
 ---
 
-import { Card, CardGrid } from '@astrojs/starlight/components';
+import { CardGrid, LinkCard } from '@astrojs/starlight/components';
+
+{/* These were six <Card>s, and not one of them was a link — the entry point to
+    the documentation was a grid you could not click. LinkCard is the same tile
+    with a destination. */}
 
 <CardGrid>
-  <Card title="Installation" icon="rocket">
-    Download UnityIDE and get past macOS Gatekeeper — including instructions for unsigned builds.
-  </Card>
-  <Card title="Opening a Unity Project" icon="open-book">
-    Open your Unity project folder and let UnityIDE automatically index your scripts, scenes, and assets.
-  </Card>
-  <Card title="Unity Integration" icon="setting">
-    Play/pause the Unity Editor, stream console logs, and navigate your scene hierarchy — all from UnityIDE.
-  </Card>
-  <Card title="AI Chat & Modes" icon="star">
-    Use Agent, Ask, or Plan mode with configurable reasoning levels to get exactly the help you need.
-  </Card>
-  <Card title="Project Knowledge Graph" icon="puzzle">
-    UnityIDE indexes every C# class, Unity scene, prefab, and animator so the AI always has full context.
-  </Card>
-  <Card title="Troubleshooting" icon="warning">
-    Common issues: indexing, Unity connection, API keys, and Gatekeeper errors.
-  </Card>
+  <LinkCard
+    title="Installation"
+    href="/docs/getting-started/installation/"
+    description="Install on Windows or macOS, get past Gatekeeper and SmartScreen, and set up C# IntelliSense."
+  />
+  <LinkCard
+    title="Opening a Unity Project"
+    href="/docs/getting-started/first-project/"
+    description="Open your project folder and let UnityIDE index your scripts, scenes, and assets."
+  />
+  <LinkCard
+    title="Unity Editor Connection"
+    href="/docs/unity-integration/scene-inspector/"
+    description="Play and pause the Unity Editor, stream console logs, and navigate the scene hierarchy from UnityIDE."
+  />
+  <LinkCard
+    title="AI Chat & Modes"
+    href="/docs/ai-features/autocompletion/"
+    description="Agent, Ask, and Plan modes, with configurable reasoning levels."
+  />
+  <LinkCard
+    title="Project Knowledge Graph"
+    href="/docs/unity-integration/gameobject-browser/"
+    description="Every C# class, scene, prefab, and animator indexed, so the AI always has your project as context."
+  />
+  <LinkCard
+    title="Troubleshooting"
+    href="/docs/api-reference/extensions/"
+    description="Indexing, Unity connection, and Gatekeeper problems, and what to do about them."
+  />
 </CardGrid>

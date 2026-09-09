@@ -8,29 +8,14 @@
  * They are removed rather than relabelled. Privacy and Terms are the two that
  * should come back, and they need real pages behind them — this site takes
  * live payments.
+ *
+ * The link data itself moved to `src/lib/site-nav.ts`, which the Navbar and the
+ * docs chrome read too. It lived here and in the Navbar separately before, and
+ * the two drifted: this file wrote the download target `/#download` and the
+ * Navbar wrote `#download`, which is why the nav CTA was dead everywhere but
+ * the home page.
  */
-const columns = [
-  {
-    title: 'Product',
-    links: [
-      { label: 'Features', href: '/features' },
-      { label: 'Download', href: '/#download' },
-      { label: 'Pricing', href: '/pricing' },
-    ],
-  },
-  {
-    title: 'Documentation',
-    links: [
-      { label: 'Getting started', href: '/docs/getting-started/installation/' },
-      { label: 'Unity package setup', href: '/docs/getting-started/unity-extension/' },
-      { label: 'All docs', href: '/docs/' },
-    ],
-  },
-  {
-    title: 'Contact',
-    links: [{ label: 'Send feedback', href: '/feedback' }],
-  },
-];
+import { footerColumns, TRADEMARK_NOTICE } from '../lib/site-nav';
 
 const year = new Date().getFullYear();
 ---
@@ -39,18 +24,18 @@ const year = new Date().getFullYear();
   <div class="container mx-auto px-6 py-16">
     <div class="grid gap-10 sm:grid-cols-2 lg:grid-cols-[2fr_1fr_1fr_1fr]">
       <div>
-        <div class="flex items-center gap-2.5">
+        <a href="/" class="flex items-center gap-2.5">
           <img src="/icon.png" alt="" class="h-8 w-8" />
           <span class="font-display text-base font-semibold text-foreground">
             Unity<span class="text-primary">IDE</span>
           </span>
-        </div>
+        </a>
         <p class="mt-4 max-w-[34ch] text-mini leading-relaxed text-muted-foreground">
           An IDE for Unity, made by people who work in it every day.
         </p>
       </div>
 
-      {columns.map((column) => (
+      {footerColumns.map((column) => (
         <div>
           <h2 class="text-mini font-semibold text-foreground">{column.title}</h2>
           <ul class="mt-4 space-y-2.5">
@@ -73,11 +58,8 @@ const year = new Date().getFullYear();
       <p class="text-micro text-muted-foreground">
         &copy; {year} UnityIDE
       </p>
-      {/* Unity is a trademark of Unity Technologies. A plain non-affiliation
-          line is the standard way to use an engine's name descriptively. */}
       <p class="mt-2 max-w-[72ch] text-micro leading-relaxed text-muted-foreground">
-        UnityIDE is an independent product and is not affiliated with, endorsed by,
-        or sponsored by Unity Technologies. Unity is a trademark of Unity Technologies.
+        {TRADEMARK_NOTICE}
       </p>
     </div>
   </div>

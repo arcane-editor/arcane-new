@@ -1,56 +1,383 @@
+@import './lp-tokens.css';
 
-/* ----------------------------------------------------------------
-   Core dark palette — applied in both light and dark data-theme
-   because we force defaultTheme: 'dark' and want consistency.
----------------------------------------------------------------- */
+/**
+ * The docs, on the landing page's palette.
+ *
+ * These sixteen pages were the last part of the site running the abandoned
+ * navy + orange brand: they never load `global.css` or Tailwind, so the palette
+ * rewrite that unified everything else passed them by entirely. They also ran
+ * three typefaces — Inter, Space Grotesk, JetBrains Mono — that appear nowhere
+ * else, so crossing from `/` to `/docs/` re-downloaded a whole font stack to
+ * arrive somewhere that looked like a different product.
+ *
+ * Two rules, both taken from `lp-tokens.css` and both load-bearing here:
+ *
+ *   1. RECESSED CHROME, BRIGHT PLANE. The sidebar and header sink; the code
+ *      block is the brightest surface on the page. In developer documentation
+ *      the code IS the product, so it gets the plane.
+ *
+ *   2. COLOUR MEANS RESOLVED. The five hues keep their editor meanings. Links
+ *      and the current page are `--blue` — "a reference the tool resolved",
+ *      which is what a hyperlink is. Gold is NOT used for chrome: it means
+ *      "modified, or a warning", and it is spent on the caution aside alone.
+ *
+ * Starlight's own rules live in `@layer starlight.*`. Everything in a `customCss`
+ * file is unlayered, and unlayered CSS beats layered CSS at any specificity —
+ * which is why nothing below needs `!important`, and why the four `!important`
+ * declarations this file used to carry are gone.
+ */
+
+/* ── Tokens ──────────────────────────────────────────────────────────────── */
+
+/* Declared for all three states because the site is dark-only: the theme
+   toggle is hidden below and `defaultTheme: 'dark'` is set in the config, but a
+   visitor arriving with a stored `light` preference must not get a half-painted
+   page. */
 :root,
-:root[data-theme="light"],
-:root[data-theme="dark"] {
-  --sl-color-accent-low: hsl(35 95% 15%);
-  --sl-color-accent: hsl(35 95% 55%);
-  --sl-color-accent-high: hsl(35 95% 80%);
-  --sl-color-white: hsl(40 10% 92%);
-  --sl-color-gray-1: hsl(220 10% 80%);
-  --sl-color-gray-2: hsl(220 10% 55%);
-  --sl-color-gray-3: hsl(220 15% 35%);
-  --sl-color-gray-4: hsl(220 15% 25%);
-  --sl-color-gray-5: hsl(220 22% 20%);
-  --sl-color-gray-6: hsl(220 26% 14%);
-  --sl-color-black: hsl(220 30% 10%);
-  --sl-font: 'Inter', sans-serif;
-  --sl-font-mono: 'JetBrains Mono', monospace;
+:root[data-theme='light'],
+:root[data-theme='dark'] {
+  /* Greys run light (1) to dark (7), matching Starlight's own ordering.
+     `--sl-color-gray-7` is the one the previous file stopped short of, which
+     left Expressive Code's `--ec-frm-edBg` falling through to Starlight's
+     LIGHT-mode default — a near-white bar above every code block. */
+  --sl-color-white: var(--text);
+  --sl-color-gray-1: var(--dim);
+  --sl-color-gray-2: var(--mute);
+  --sl-color-gray-3: var(--faint);
+  --sl-color-gray-4: var(--edge-hi);
+  --sl-color-gray-5: var(--edge);
+  --sl-color-gray-6: var(--rule);
+  --sl-color-gray-7: var(--rise);
+  --sl-color-black: var(--ink);
+
+  --sl-color-accent-low: #1a232f;
+  --sl-color-accent: var(--blue);
+  --sl-color-accent-high: var(--blue);
+
+  /* The surface ramp. Three steps, chrome to content. */
+  --sl-color-bg: var(--ink);
+  --sl-color-bg-nav: var(--ink-2);
+  --sl-color-bg-sidebar: var(--plate-2);
+  --sl-color-bg-inline-code: var(--rise);
+  --sl-color-bg-accent: var(--blue);
+
+  --sl-color-hairline: var(--rule-soft);
+  --sl-color-hairline-light: var(--rule);
+  --sl-color-hairline-shade: var(--rule);
+
+  --sl-color-text: var(--dim);
+  --sl-color-text-accent: var(--blue);
+  --sl-color-text-invert: var(--ink);
+
+  /* The five meanings, handed to Starlight's aside colours. */
+  --sl-color-blue: var(--blue);
+  --sl-color-blue-high: var(--blue);
+  --sl-color-blue-low: var(--plate);
+  --sl-color-green: var(--green);
+  --sl-color-green-high: var(--green);
+  --sl-color-green-low: var(--plate);
+  --sl-color-orange: var(--gold);
+  --sl-color-orange-high: var(--gold);
+  --sl-color-orange-low: var(--plate);
+  --sl-color-red: var(--red);
+  --sl-color-red-high: var(--red);
+  --sl-color-red-low: var(--plate);
+  --sl-color-purple: var(--violet);
+  --sl-color-purple-high: var(--violet);
+  --sl-color-purple-low: var(--plate);
+
+  --sl-font: var(--sans);
+  --sl-font-mono: var(--mono);
+
+  /* 44rem lands body copy at roughly 75 characters in Bricolage at 16px.
+     Starlight's 45rem default overshot 80. */
+  --sl-content-width: 44rem;
 }
 
-/* Force the header/navbar to always use the dark navy background */
-header.header,
-.header {
-  background-color: hsl(220 26% 14%) !important;
-  border-bottom-color: hsl(220 15% 25%) !important;
+/* ── Ground ──────────────────────────────────────────────────────────────── */
+
+/* The landing page paints five fixed layers; the docs take one. The two radial
+   tints there track the scroll story's chapters, and a docs page has no
+   chapters — they would be colour with nothing to mean. The grain and vignette
+   go with them. Docs get the ground, not the weather. */
+body {
+  background:
+    linear-gradient(180deg, #0b0d11 0%, var(--ink) 40%, #0c0e13 100%) fixed;
+  font-family: var(--sans);
+  /* Bricolage is a variable face with an `opsz 12..96` axis. Letting it track
+     the rendered size is what makes it readable at 16px body and still sharp at
+     the page title. */
+  font-optical-sizing: auto;
+  -webkit-font-smoothing: antialiased;
 }
 
-/* Sidebar background */
+/* ── Header ──────────────────────────────────────────────────────────────── */
+
+header.header {
+  border-bottom: 1px solid var(--rule);
+}
+
+/* Starlight draws a divider after the social-icons slot to separate it from the
+   theme and language pickers. Both are absent here — the site is dark-only and
+   single-language — so the divider would end the row with a rule against
+   nothing. */
+.social-icons::after {
+  display: none;
+}
+
+/* ── Sidebar ─────────────────────────────────────────────────────────────── */
+
 .sidebar-pane {
-  background-color: hsl(220 30% 10%) !important;
+  border-inline-end: 1px solid var(--rule-soft);
 }
 
-/* Page background */
-:root,
-:root[data-theme="light"],
-:root[data-theme="dark"] {
-  --sl-color-bg: hsl(220 26% 14%);
-  --sl-color-bg-sidebar: hsl(220 30% 10%);
-  --sl-color-bg-nav: hsl(220 26% 14%);
-  --sl-color-hairline: hsl(220 15% 25%);
-  --sl-color-text: hsl(40 10% 92%);
-  --sl-color-text-accent: hsl(35 95% 55%);
+.sidebar-content a {
+  font-size: 0.875rem;
+  color: var(--mute);
+  transition: color 0.15s ease;
 }
 
-/* Hide the light/dark mode toggle — site is dark-only */
+.sidebar-content a:hover,
+.sidebar-content a:focus-visible {
+  color: var(--text);
+}
+
+/* The current page is a reference the tool resolved. */
+.sidebar-content a[aria-current='page'],
+.sidebar-content a[aria-current='page']:hover {
+  color: var(--blue);
+  background-color: transparent;
+  font-weight: 500;
+}
+
+/* Group headings: sentence case at a quiet weight. Starlight's default is a
+   heavier, larger label; an ALL-CAPS tracked-out treatment would be louder
+   still, and a category name does not need to shout. */
+.sidebar-content .large,
+.sidebar-content summary .group-label span {
+  font-family: var(--sans);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--mute);
+}
+
+/* ── Table of contents ───────────────────────────────────────────────────── */
+
+starlight-toc a {
+  font-size: 0.8125rem;
+  color: var(--mute);
+  border-inline-start: 1px solid transparent;
+}
+
+starlight-toc a[aria-current='true'],
+starlight-toc a[aria-current='true']:hover {
+  color: var(--blue);
+  border-inline-start-color: var(--blue);
+  font-weight: 400;
+}
+
+/* ── Content ─────────────────────────────────────────────────────────────── */
+
+.sl-markdown-content {
+  font-size: 1rem;
+  line-height: 1.65;
+  color: var(--dim);
+}
+
+.sl-markdown-content :is(h2, h3, h4, h5, h6) {
+  font-family: var(--sans);
+  color: var(--text);
+  letter-spacing: -0.02em;
+  font-weight: 500;
+  text-wrap: balance;
+}
+
+.sl-markdown-content h2 {
+  font-size: 1.5rem;
+}
+
+/* The rule that opens each section goes on the WRAPPER, not on the h2.
+   Starlight sets `.sl-heading-wrapper > :first-child { display: inline }` so the
+   anchor link can sit on the last line of a wrapped heading — and an inline box
+   takes no vertical margin and draws its border around the TEXT rather than
+   across the column, which is why the rule came out the width of the words. */
+.sl-markdown-content .sl-heading-wrapper.level-h2 {
+  margin-top: 2.75rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--rule-soft);
+}
+
+.sl-markdown-content h3 {
+  font-size: 1.125rem;
+}
+
+.sl-markdown-content strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.sl-markdown-content a:not(:where(.not-content *)) {
+  color: var(--blue);
+  text-underline-offset: 0.2em;
+  text-decoration-color: var(--edge-hi);
+}
+
+.sl-markdown-content a:not(:where(.not-content *)):hover {
+  text-decoration-color: var(--blue);
+}
+
+/* Inline code as the editor's own chip: mono, tight, one step above the page.
+   This is what makes `keybindings.md` — eight tables of chords, every cell a
+   `<code>` — read as keys rather than as run-on prose. */
+.sl-markdown-content code:not(:where(.not-content *)) {
+  font-family: var(--mono);
+  font-size: 0.875em;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  background: var(--rise);
+  border: 1px solid var(--edge-mid);
+  border-radius: 3px;
+  padding: 0.1em 0.35em;
+}
+
+/* Inside a code block the chip treatment has to come back off. */
+.sl-markdown-content :is(pre, .expressive-code) code:not(:where(.not-content *)) {
+  background: none;
+  border: 0;
+  padding: 0;
+  font-size: inherit;
+}
+
+.sl-markdown-content :is(h2, h3, h4) code:not(:where(.not-content *)) {
+  font-size: 0.9em;
+}
+
+/* ── Tables ──────────────────────────────────────────────────────────────── */
+
+/* Starlight makes tables `display: block; overflow: auto` so a wide one scrolls
+   instead of bursting the column. That leaves the block box full-width while the
+   table inside it stays shrink-to-fit — so a border on the block drew a rectangle
+   round empty space to the right of the last column. `fit-content` capped at 100%
+   makes the box track the table, and still scrolls once the table outgrows it. */
+.sl-markdown-content table:not(:where(.not-content *)) {
+  display: block;
+  overflow-x: auto;
+  width: fit-content;
+  max-width: 100%;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.sl-markdown-content :is(th, td):not(:where(.not-content *)) {
+  border: 0;
+  border-bottom: 1px solid var(--rule-soft);
+  padding: 0.625rem 0.875rem;
+  text-align: start;
+}
+
+.sl-markdown-content th:not(:where(.not-content *)) {
+  background: var(--plate-2);
+  color: var(--text);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.sl-markdown-content tr:last-child :is(th, td):not(:where(.not-content *)) {
+  border-bottom: 0;
+}
+
+/* ── Asides ──────────────────────────────────────────────────────────────── */
+
+/* Flat, on the product plane, with the meaning carried entirely by the rule at
+   the start. Starlight's default fills the box with a tinted wash of the same
+   hue — which is colour used as decoration, the one thing this palette does not
+   do. Two classes beats Starlight's one, so the tint is overridden rather than
+   fought with `!important`. */
+.sl-markdown-content .starlight-aside {
+  background: var(--plate);
+  border-inline-start-width: 2px;
+  border-radius: 0 6px 6px 0;
+  padding: 1rem 1.25rem;
+  color: var(--dim);
+}
+
+.sl-markdown-content .starlight-aside__title {
+  font-family: var(--sans);
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--sl-color-asides-text-accent);
+}
+
+/* ── Code blocks ─────────────────────────────────────────────────────────── */
+
+/* The brightest plane on the page, deliberately. Colours come from the
+   Expressive Code theme in `astro.config.mjs`, which is wired to the same five
+   hues the editor paints — so a C# snippet here and the same snippet open in
+   UnityIDE are coloured identically. */
+.expressive-code .frame pre {
+  border-radius: 10px;
+  border: 1px solid var(--rule);
+}
+
+.expressive-code figcaption {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+}
+
+/* ── Primary actions ─────────────────────────────────────────────────────── */
+
+/* The splash page's "Get Started" pill. Starlight paints it with
+   `--sl-color-text-accent`, which is blue here because links are blue — and an
+   electric-blue pill sat two inches under a gold Download button in the header.
+   Same rule as the header CTA: chrome speaks gold, content speaks the five hues.
+   The pill shape is Starlight's and is kept, because `.lp-btn` on the home page
+   is a pill too. */
+.sl-link-button.primary {
+  background: #d4b062;
+  border-color: #d4b062;
+  color: #100e14;
+}
+
+.sl-link-button.primary:hover {
+  background: #e8c97d;
+  border-color: #e8c97d;
+  color: #100e14;
+}
+
+/* ── Chrome the site does not have ───────────────────────────────────────── */
+
+/* Dark-only. `defaultTheme: 'dark'` in the config is what actually forces it —
+   the comment this file used to carry claimed that was already set, and it
+   was not. */
 starlight-theme-select {
-  display: none !important;
+  display: none;
 }
 
-/* Use Space Grotesk for headings in docs */
-h1, h2, h3, h4 {
-  font-family: 'Space Grotesk', 'Inter', sans-serif;
+/* ── Focus ───────────────────────────────────────────────────────────────── */
+
+/* Matches `global.css`, so a keyboard user crossing from /pricing into /docs
+   keeps the same focus ring. */
+:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+::selection {
+  background: rgba(124, 183, 255, 0.26);
+  color: #fff;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms;
+    animation-iteration-count: 1;
+    transition-duration: 0.01ms;
+    scroll-behavior: auto;
+  }
 }

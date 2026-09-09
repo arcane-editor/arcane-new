@@ -1,5 +1,6 @@
 ---
 import HeroEditor from './HeroEditor.tsx';
+import { DOWNLOAD_HREF } from '../../lib/site-nav';
 
 /**
  * The hero opens on the product, not on a promise.
@@ -28,7 +29,7 @@ import HeroEditor from './HeroEditor.tsx';
     </p>
 
     <div class="lp-hero-actions lp-in" style="animation-delay:0.4s">
-      <a href="#download" class="lp-btn lp-btn-solid">Download for free</a>
+      <a href={DOWNLOAD_HREF} class="lp-btn lp-btn-solid">Download for free</a>
       <a href="/docs/" class="lp-btn lp-btn-ghost">Read the docs</a>
     </div>
 

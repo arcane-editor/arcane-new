@@ -22,9 +22,13 @@
  *      brightest thing on screen. The luminance step IS the separator, which
  *      is why `--border` is a 5% white hairline doing almost nothing.
  *
- * The shadcn token NAMES are kept because /features, /pricing, /auth, /admin
- * and the Starlight docs all read them. Only the values changed, so those
- * pages inherit this palette without being touched.
+ * The shadcn token NAMES are kept because /features, /pricing, /auth and
+ * /admin all read them. Only the values changed, so those pages inherit this
+ * palette without being touched.
+ *
+ * The Starlight docs are NOT among them, despite what this comment used to
+ * claim: they never load this file or Tailwind at all. They run the landing
+ * page's palette instead, from `lp-tokens.css`.
  */
 @layer base {
   :root {

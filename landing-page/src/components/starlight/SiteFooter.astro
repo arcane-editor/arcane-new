@@ -1,0 +1,143 @@
+---
+/**
+ * The site footer, added to the docs.
+ *
+ * All sixteen docs pages shipped without one. That cost them the product links,
+ * the feedback link — and the Unity non-affiliation line, which `Footer.astro`
+ * carries on the other five pages precisely because using an engine's name
+ * descriptively is what makes it lawful. Sixteen pages were missing it.
+ *
+ * The columns come from `site-nav.ts`, the same array `Footer.astro` renders,
+ * so the two footers cannot drift. The markup is hand-rolled instead of reusing
+ * `Footer.astro` because Tailwind is not loaded on docs routes — that component
+ * is entirely utility classes and would arrive here unstyled.
+ */
+import Default from '@astrojs/starlight/components/Footer.astro';
+import { footerColumns, TRADEMARK_NOTICE } from '../../lib/site-nav';
+
+const year = new Date().getFullYear();
+---
+
+<Default />
+
+<div class="docs-footer">
+  <div class="docs-footer-cols">
+    <div class="docs-footer-brand">
+      <a href="/">
+        <img src="/icon.png" alt="" width="28" height="28" />
+        <span>Unity<b>IDE</b></span>
+      </a>
+      <p>An IDE for Unity, made by people who work in it every day.</p>
+    </div>
+
+    {
+      footerColumns.map((column) => (
+        <div>
+          <h2>{column.title}</h2>
+          <ul>
+            {column.links.map((link) => (
+              <li>
+                <a href={link.href}>{link.label}</a>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))
+    }
+  </div>
+
+  <div class="docs-footer-legal">
+    <p>&copy; {year} UnityIDE</p>
+    <p>{TRADEMARK_NOTICE}</p>
+  </div>
+</div>
+
+<style>
+  .docs-footer {
+    margin-top: 4rem;
+    padding-top: 2.5rem;
+    border-top: 1px solid var(--rule);
+    font-family: var(--sans);
+  }
+
+  .docs-footer-cols {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+    gap: 2rem 1.5rem;
+  }
+
+  .docs-footer-brand {
+    grid-column: 1 / -1;
+    margin-bottom: 0.5rem;
+  }
+
+  .docs-footer-brand a {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: var(--text);
+    text-decoration: none;
+    font-size: 0.9375rem;
+    font-weight: 600;
+  }
+
+  .docs-footer-brand b {
+    font-weight: 600;
+    color: var(--blue);
+  }
+
+  .docs-footer-brand p {
+    margin: 0.75rem 0 0;
+    max-width: 34ch;
+    font-size: 0.8125rem;
+    line-height: 1.6;
+    color: var(--mute);
+  }
+
+  .docs-footer h2 {
+    margin: 0;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--text);
+    /* Sentence case, no tracking: a sidebar heading is a category, not a label
+       that needs shouting. */
+    letter-spacing: 0;
+  }
+
+  .docs-footer ul {
+    list-style: none;
+    margin: 0.875rem 0 0;
+    padding: 0;
+    display: grid;
+    gap: 0.625rem;
+  }
+
+  .docs-footer li a {
+    font-size: 0.8125rem;
+    color: var(--mute);
+    text-decoration: none;
+    transition: color 0.15s ease;
+  }
+
+  .docs-footer li a:hover {
+    color: var(--blue);
+  }
+
+  .docs-footer-legal {
+    margin-top: 3rem;
+    padding: 1.5rem 0 2.5rem;
+    border-top: 1px solid var(--rule-soft);
+  }
+
+  .docs-footer-legal p {
+    margin: 0;
+    font-size: 0.75rem;
+    line-height: 1.6;
+    color: var(--faint);
+    max-width: 72ch;
+  }
+
+  .docs-footer-legal p + p {
+    margin-top: 0.5rem;
+  }
+</style>

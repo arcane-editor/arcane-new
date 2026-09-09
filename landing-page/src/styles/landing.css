@@ -1,10 +1,11 @@
 /**
  * The landing page, and only the landing page.
  *
- * Every rule here is scoped under `.lp`. The rest of the site — /features,
- * /pricing, /auth, /admin and the Starlight docs — keeps reading the shadcn
- * tokens in global.css, untouched. Two palettes coexisting is deliberate and
- * temporary: this page is the one being rebuilt.
+ * Every rule here is scoped under `.lp`. The palette itself lives in
+ * `lp-tokens.css`, which the Starlight docs import too — so this page and
+ * /docs/** are one visual system now. /features, /pricing, /auth and /admin
+ * still read the shadcn tokens in global.css; those are the remaining
+ * holdouts.
  *
  * The palette is neutral, not tinted. Colour on this page is never decoration;
  * each of the five hues below means exactly one thing, and they are the same
@@ -19,52 +20,12 @@
  * Anything grey is something the tool has not been asked to understand yet.
  */
 
+@import './lp-tokens.css';
+
 .lp {
-  /* Surfaces, dark to light. */
-  --ink: #0a0b0d;
-  --ink-2: #0b0d10;
-  --plate: #0f1114;
-  --plate-2: #0c0e12;
-  --plate-hi: #0e1013;
-  --rise: #151821;
-
-  /* Hairlines. `--rule-soft` separates rows inside one panel; `--rule`
-     separates panels from the page. */
-  --rule-soft: #16191e;
-  --rule: #1f2329;
-  --edge: #262b33;
-  --edge-hi: #4a515c;
-  --edge-mid: #2a2f37;
-
-  /* Text, brightest to quietest. Four steps, no alpha ladder. */
-  --text: #e8e6e1;
-  --dim: #b4b8c0;
-  --mute: #8a8f98;
-  --faint: #6f747d;
-  --ghost: #4a515c;
-  --gutter: #3a4150;
-
-  /* The five meanings. */
-  --blue: #7cb7ff;
-  --green: #6fe3a5;
-  --gold: #f5c26b;
-  --red: #ff6f6f;
-  --violet: #c792ea;
-
-  --sans: 'Bricolage Grotesque', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
-
-  --gut: 32px;
-  --measure: 1120px;
-
-  /* Ambient wash. The story island rewrites these four as you move between
-     chapters; these are the values the page holds when no chapter is in
-     flight, and the ones a no-JS reader keeps. */
-  --lp-glow-a: 0.6;
-  --lp-glow-b: 0.35;
-  --lp-tint-a: rgba(124, 183, 255, 0.16);
-  --lp-tint-b: rgba(111, 227, 165, 0.13);
-
+  /* Tokens come from `lp-tokens.css` above, shared with the Starlight docs.
+     What is left here is what makes an element THE landing surface rather
+     than merely a consumer of the palette. */
   position: relative;
   min-height: 100vh;
   overflow-x: clip;
