@@ -16,7 +16,6 @@ import {
 } from '../../../utils/pointer-drag';
 import { useClampedMenuPosition } from '../../../hooks/useClampedMenuPosition';
 import type { OpenFile } from '../../../types';
-import { fileUri } from '../../lsp';
 
 
 interface TabContextMenu {
@@ -88,13 +87,11 @@ function TabBar() {
     <>
       <div className="tab-bar">
         {openFiles.map((file) => {
-          // `fileUri`, not a raw template: unencoded and drive-unaware, this
-          // key never matched the URI diagnostics are actually stored under,
-          // so tab error/warning badges silently fell through to the
-          // path-keyed fallback below — and showed nothing on Windows.
-          const uri = fileUri(file.path);
-          const byUri = getFlatDiagnosticsForUri(diagnosticsMap, uri);
-          const fileDiags = byUri.length > 0 ? byUri : getFlatDiagnosticsForUri(diagnosticsMap, file.path);
+          // The path, and only the path. The store normalises every spelling
+          // to one key (`diagnosticsKey`), so the two-lookup fallback this
+          // used to need is gone — and with it the Windows case where neither
+          // spelling matched and a file full of errors showed no badge.
+          const fileDiags = getFlatDiagnosticsForUri(diagnosticsMap, file.path);
           const errorCount = fileDiags.filter((d) => d.severity === 'error').length;
           const diagCount = fileDiags.length;
           const badgeClass = errorCount > 0 ? 'tab-badge tab-badge--error' : 'tab-badge tab-badge--warning';

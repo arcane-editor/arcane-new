@@ -60,10 +60,39 @@ src/
 
 ## Key Patterns
 
-- The LSP server (`csharp-ls`) is the sole source of diagnostics, completions, hover, and other IntelliSense features for C#.
-- Unity lifecycle method snippets are provided as a separate CompletionItemProvider alongside LSP completions.
-- The LSP client has crash detection (`lsp-exited` Tauri event) and auto-restart with document re-sync.
-- Files opened before LSP starts get retroactive `didOpen` notifications when the LSP becomes ready.
+- `csharp-ls` is the sole source of **semantic** C# intelligence: completions,
+  hover, definitions, compiler diagnostics. The static Unity providers (API
+  names, C# keywords) stand down once it has a project graph.
+- Unity lifecycle snippets are a separate CompletionItemProvider, offered only
+  at a bare member position — they expand to a whole declaration.
+- Unity *inspections* come from two engines: the Roslyn analyzers running inside
+  csharp-ls (`UNT` codes) and this app's own rules (`UNITY` codes). See below.
+- The LSP client has crash detection (`lsp-exited` Tauri event) and auto-restart
+  with document re-sync.
+- Files opened before LSP starts get retroactive `didOpen` notifications when
+  the LSP becomes ready.
+
+## One URI, in both directions
+
+**Never send `model.uri.toString()` to a language server.** Notifications
+(`didOpen`/`didChange`) name a document with `fileUri(path)`; requests must name
+it with `lspDocumentUri(model)` (`features/lsp/services/model-context.ts`),
+which produces the identical string. `model.uri.toString()` stays the right key
+for Monaco-internal maps — marker owners, pull timers, the ui-store — and never
+crosses the wire.
+
+This is not style. Monaco's renderer lower-cases a Windows drive letter and
+percent-encodes its colon, so a model opened as `file:///C:/x/A.cs` renders as
+`file:///c%3A/x/A.cs`. csharp-ls matched neither spelling to the other and
+answered `null` to every completion, hover, definition, code action, inlay hint
+and diagnostic pull — for months, on the platform most Unity developers use. It
+looked like "IntelliSense mostly works" because Monaco's word-based suggestions
+and the static Unity providers kept answering: members already spelled in the
+open file appeared, and anything that had to come from Roslyn never did. macOS
+paths have no drive letter, which is why it was invisible on the machine it was
+written on.
+
+A source scan in `file-uri-single-source.test.ts` forbids the shape returning.
 
 ## C# IntelliSense: verify it, every time
 
@@ -71,30 +100,107 @@ src/
 that have nothing to do with C#, LSP, or Unity.** It runs tsc, the module-boundary
 check, the JS and Rust suites, and `verify:intellisense`.
 
-`bun run verify:intellisense` alone (~8s) regenerates the project files through
-the real Rust generator, starts the real `csharp-ls`, and asserts it answers
-`transform.` with the real Unity member list and resolves hover on
-`MonoBehaviour`. It exits non-zero if IntelliSense is dead.
+`bun run verify:intellisense` alone (~40s, including a cargo build) regenerates the project files through
+the real Rust generator, starts the real `csharp-ls`, and asserts:
 
-**Why this is unconditional.** C# IntelliSense was completely broken for an
-unknown period — every hover, completion and code action returning `null` —
-while the entire test suite stayed green. Two properties made that possible and
-both still hold:
+- the request URI equals the `didOpen` URI, before anything is sent;
+- `Camera.` offers `main` and `allCameras` — static members come only from
+  Roslyn, while instance members can appear as word-based suggestions even when
+  the server is answering nothing at all;
+- `transform.` offers the real Unity member list;
+- three incremental `didChange` versions, then a completion reflecting the
+  newest text;
+- `completionItem/resolve` returns detail or documentation;
+- a deliberate type error produces CS0029, and no CS0518/CS0433;
+- the Unity analyzers report UNT0001, UNT0002 and UNT0004, and do NOT report
+  CS0649 on a `[SerializeField]` field;
+- the capabilities listed in `REQUIRED_CAPABILITIES` — the providers the
+  editor registers, not every capability it consumes;
+- latency budgets on the timed steps, printed every run.
 
-1. **The break was environmental, not a code change.** Unity stops generating
-   `.csproj` files once UnityIDE is registered as its external script editor, and
-   the generator used to read its Unity DLL paths out of those files. No diff
-   introduced the bug, so no amount of reviewing a diff could have caught it.
-   Only probing the running server detects this class of failure.
+It finds the Unity project itself (from the Unity Editor's own recent-projects
+list) and provisions the pinned csharp-ls from the bundled package when it is
+not installed yet — so a version bump cannot make the gate skip at the moment it
+matters most.
+
+**Why this is unconditional.** C# IntelliSense has been completely dead twice,
+for long periods, while the entire suite stayed green. Both breaks shared two
+properties, and both still hold:
+
+1. **The break was environmental, not a code change.** Once when Unity stopped
+   generating `.csproj` files; once when Monaco's URI formatting disagreed with
+   the client's on one platform. No diff introduced either, so no amount of
+   reviewing a diff could have caught them. Only probing the running server
+   detects this class of failure.
 2. **A skipped test looked identical to a passing one.** The Rust smoke tests
-   were pinned to a project path that had been deleted, so they returned early
-   and reported success.
+   were pinned to a path that had been deleted, so they returned early and
+   reported success. The probe's own project list was macOS-only, so it printed
+   SKIPPED on Windows — on the machine whose IntelliSense was dead.
 
 So: when the check reports `SKIPPED`, that is **not** a pass — it means the
 check did not run, and the claim "IntelliSense works" is unsupported. Say so
 plainly rather than treating it as green. Set
-`UNITYIDE_INTELLISENSE_E2E=required` to turn a skip into a failure, and
-`UNITYIDE_SMOKE_UNITY_PROJECT=<path>` to point it at a Unity project.
+`UNITYIDE_INTELLISENSE_E2E=required` to turn a skip into a failure,
+`UNITYIDE_SMOKE_E2E=required` to do the same for the Rust smoke tests, and
+`UNITYIDE_SMOKE_UNITY_PROJECT=<path>` to point either at a Unity project.
+
+## Unity inspections: two engines, one division of labour
+
+**Roslyn does semantics. The TypeScript rules do hot paths.**
+
+`Microsoft.Unity.Analyzers` (43 diagnostics, 23 suppressors) runs inside
+csharp-ls and reports what is semantically wrong *for Unity*: an empty
+`Update()`, `tag == "Player"`, a message with the wrong signature. It has a real
+parser and full type information, so where it and a local rule overlap, it wins
+— a rule marks itself `supersededBy: ['UNT…']` and stands down.
+
+It has **nothing** for "this is ruinous to call sixty times a second". That
+family — `GetComponent` in `Update`, scene searches, per-frame allocation,
+reflective messaging — is the entire reason `features/unity-analyzers` still
+exists, and it is what a Unity developer actually notices in a profiler. Never
+mark a hot-path rule superseded; a test in `rules/diagnostic-codes.test.ts`
+fails if you do.
+
+Four links in the analyzer chain fail silently, so each is asserted by the
+probe:
+
+| Link | Where | Failure mode |
+|---|---|---|
+| The package unpacks | `unity_analyzers.rs` | No inspections, no error |
+| The csproj names it | `unity.rs` `<Analyzer Include>` | No inspections, no error |
+| `WarningLevel` is not 0 | `unity.rs` | Roslyn **discards every analyzer diagnostic** above the project's warning level |
+| `analyzersEnabled` is sent | `csharp-configuration.ts` | csharp-ls defaults it **off** |
+
+Rules stand down only when the analyzers are *confirmed* live. That is three
+conditions, not one — the csproj names the assembly (read back from the file
+that was actually written), the user has not switched them off, and the server
+is running — because each can stop holding without the others noticing. See
+`roslynAnalyzersReporting`. A machine where the package failed to unpack, or a
+user who unticks the setting, would otherwise lose those inspections from both
+engines at once with nothing reported anywhere.
+
+Two more rules of the same kind:
+
+- **Diagnostic codes are user-facing.** People write
+  `#pragma warning disable UNITY0201`, and quick fixes are looked up by code.
+  Declare every code a rule emits in its `codes` field; never reuse a retired
+  one (`RETIRED_CODES` in `rules/index.ts`). Five codes were once claimed by two
+  rules each, so one suppression silenced two unrelated inspections.
+- **A rule must not import a store, or another feature's barrel.** A Zustand
+  store here reaches `@tauri-apps/api` and a feature barrel reaches Monaco and
+  CSS, neither of which loads in a test — that is why thirteen rules had no
+  coverage at all. Project knowledge arrives through `RuleContext`; shared
+  tables live in `src/data/`.
+- **A quick fix is derived from the diagnostic's range, so it is only correct
+  while that range keeps its shape.** Check a new builder against the running
+  analyzer, never against what looks natural: two shipped unreachable because
+  their unit tests built the same wrong ranges by hand. The probe now feeds
+  real diagnostics through the real builders.
+
+csharp-ls does not surface the code fixes those analyzers ship (its code-action
+handler reflects over three Roslyn assemblies and ignores the project's analyzer
+references), so `unt-quick-fixes.ts` reimplements the safe ones client-side,
+from the diagnostic's range alone.
 
 The generator must never depend on Unity's `Assembly-CSharp*.csproj` again; it
 derives its reference set from the Unity install (`unity.rs`,

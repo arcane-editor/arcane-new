@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { diagnosticsKey } from '../utils/diagnostics-key';
 import type { DiagnosticItem, DiagnosticSource } from '../types';
 import type { DotnetBlock } from '../features/lsp';
 
@@ -39,7 +40,9 @@ export function getFlatDiagnosticsForUri(
   diagnostics: DiagnosticsMap,
   uri: string,
 ): DiagnosticItem[] {
-  const sourceMap = diagnostics.get(uri);
+  // Normalised, so a caller holding a path finds what a caller holding a
+  // Monaco model URI stored — see `diagnosticsKey`.
+  const sourceMap = diagnostics.get(diagnosticsKey(uri));
   if (!sourceMap) return [];
 
   const lspItems = sourceMap.get('lsp') ?? [];
@@ -300,17 +303,18 @@ export const useUiStore = create<UiState>((set, get) => ({
   diagnostics: new Map(),
   setFileDiagnostics: (fileUri, source, items) => {
     set((state) => {
+      const key = diagnosticsKey(fileUri);
       const next: DiagnosticsMap = new Map(state.diagnostics);
-      const sourceMap = new Map(next.get(fileUri) ?? []);
+      const sourceMap = new Map(next.get(key) ?? []);
       if (items.length === 0) {
         sourceMap.delete(source);
       } else {
         sourceMap.set(source, items);
       }
       if (sourceMap.size === 0) {
-        next.delete(fileUri);
+        next.delete(key);
       } else {
-        next.set(fileUri, sourceMap);
+        next.set(key, sourceMap);
       }
       return { diagnostics: next, diagnosticCounts: recomputeCounts(next) };
     });
@@ -320,16 +324,17 @@ export const useUiStore = create<UiState>((set, get) => ({
     set((state) => {
       const next: DiagnosticsMap = new Map(state.diagnostics);
       for (const { fileUri, source, items } of entries) {
-        const sourceMap = new Map(next.get(fileUri) ?? []);
+        const key = diagnosticsKey(fileUri);
+        const sourceMap = new Map(next.get(key) ?? []);
         if (items.length === 0) {
           sourceMap.delete(source);
         } else {
           sourceMap.set(source, items);
         }
         if (sourceMap.size === 0) {
-          next.delete(fileUri);
+          next.delete(key);
         } else {
-          next.set(fileUri, sourceMap);
+          next.set(key, sourceMap);
         }
       }
       return { diagnostics: next, diagnosticCounts: recomputeCounts(next) };
@@ -338,7 +343,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   clearFileDiagnostics: (fileUri) => {
     set((state) => {
       const next: DiagnosticsMap = new Map(state.diagnostics);
-      next.delete(fileUri);
+      next.delete(diagnosticsKey(fileUri));
       return { diagnostics: next, diagnosticCounts: recomputeCounts(next) };
     });
   },

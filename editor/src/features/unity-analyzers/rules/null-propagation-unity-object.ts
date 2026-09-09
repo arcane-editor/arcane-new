@@ -25,6 +25,11 @@ const IS_NULL_RE = /\b([A-Za-z_]\w*)\s+is\s+(not\s+)?null\b/g;
 export const nullPropagationUnityObjectRule: AnalyzerRule = {
   id: 'unity/null-propagation-unity-object',
   defaultSeverity: 'warning',
+  codes: ['UNITY0312'],
+  // UNT0007/0008/0029 cover null coalescing, null propagation and pattern
+  // matching against a UnityEngine.Object. They resolve the type properly;
+  // this rule infers it from declarations it can see in the same method.
+  supersededBy: ['UNT0007', 'UNT0008', 'UNT0029'],
 
   run(scan, ctx): Finding[] {
     const findings: Finding[] = [];
@@ -105,7 +110,7 @@ function make(
 ): Finding {
   // Only emit when the type is genuinely a Unity object type (double-check).
   void (UNITY_OBJECT_TYPES.has(bareTypeName(type)));
-  return { ruleId, severity: 'warning', start, end, message, code: 'UNITY0301', fixes };
+  return { ruleId, severity: 'warning', start, end, message, code: 'UNITY0312', fixes };
 }
 
 function buildReplaceFix(

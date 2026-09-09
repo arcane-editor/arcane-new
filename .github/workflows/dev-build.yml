@@ -103,6 +103,12 @@ jobs:
       - name: Vendor csharp-ls package
         run: cd editor && bun run prepare:csharp-ls --require
 
+      # The Unity analyzers, same reasoning: without the package in the bundle
+      # the app produces an editor that compiles C# but says nothing about
+      # Unity mistakes, and nothing at build time would have said so.
+      - name: Vendor Unity analyzers package
+        run: cd editor && bun run prepare:unity-analyzers --require
+
       # `bunx tauri` (binary), NOT `bun run tauri`. Shell env beats
       # .env.production in Vite, so the dev URLs win at build time.
       - name: Build Tauri app (dev config)

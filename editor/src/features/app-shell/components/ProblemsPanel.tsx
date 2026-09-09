@@ -130,10 +130,31 @@ function ProblemsPanel() {
                         <SeverityIcon severity={item.severity} />
                       </span>
                       <span className="problems-item-message">{item.message}</span>
-                      {item.source && (
-                        <span className={`problems-item-source${item.source !== 'lsp' ? ' problems-source-badge' : ''}`}>
-                          {item.source}
+                      {/* The code, when there is one, says more than the
+                          source does: `UNT0002` is searchable and is what a
+                          suppression comment names, while "lsp" only says
+                          which process it came through. */}
+                      {item.code ? (
+                        <span
+                          className={`problems-item-source${
+                            /^(UNT|UNITY)\d{4}$/.test(item.code) ? ' problems-source-badge' : ''
+                          }`}
+                          title={
+                            item.code.startsWith('UNT')
+                              ? 'Unity analyzer (Roslyn)'
+                              : item.code.startsWith('UNITY')
+                                ? 'Unity analyzer (editor)'
+                                : undefined
+                          }
+                        >
+                          {item.code}
                         </span>
+                      ) : (
+                        item.source && (
+                          <span className={`problems-item-source${item.source !== 'lsp' ? ' problems-source-badge' : ''}`}>
+                            {item.source}
+                          </span>
+                        )
                       )}
                       <span className="problems-item-location">
                         Ln {item.line}, Col {item.col}

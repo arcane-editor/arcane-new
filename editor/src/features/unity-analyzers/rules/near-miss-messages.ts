@@ -1,4 +1,4 @@
-import { LIFECYCLE_METHOD_NAMES } from '../../csharp';
+import { LIFECYCLE_METHOD_NAMES } from '../../../data/unity-messages';
 import type { AnalyzerRule, Finding } from '../services/analyzer-engine';
 import {
   offsetInSpan,
@@ -60,6 +60,10 @@ export const nearMissMessagesRule: AnalyzerRule = {
   id: 'unity/near-miss-message',
   defaultSeverity: 'warning',
   settingKey: 'unity.nearMissDiagnostics.enabled',
+  codes: ['UNITY0001', 'UNITY0002', 'UNITY0003'],
+  // UNT0033 (message case) and UNT0006 (message signature) do this with a
+  // real parser and full type information.
+  supersededBy: ['UNT0033', 'UNT0006'],
 
   run(scan, ctx): Finding[] {
     const findings: Finding[] = [];

@@ -6,7 +6,7 @@ import { useWorkspaceStore } from '../../../stores/workspace';
 import { notify } from '../../../stores/notifications';
 import { fileUri, pathFromFileUri } from './document-sync';
 import { setApplyEditHandler } from './client';
-import type { LspPosition, LspRange } from './model-context';
+import { modelFilePath, type LspPosition, type LspRange } from './model-context';
 
 // ── LSP WorkspaceEdit types (structural, not imported) ──────────
 // LspPosition/LspRange live in ./model-context (canonical home).
@@ -81,11 +81,12 @@ function findModelForUri(
   if (canonical) return canonical;
 
   for (const model of monaco.editor.getModels()) {
-    const modelUri = model.uri.toString();
-    if (!modelUri.startsWith('file://')) continue;
-    // Same inverse as `uriToFsPath` above — comparing a differently-decoded
-    // spelling against `fsPath` would make this fallback dead code.
-    if (pathFromFileUri(modelUri) === fsPath) {
+    if (model.uri.scheme !== 'file') continue;
+    // `modelFilePath`, not `pathFromFileUri(model.uri.toString())`: Monaco's
+    // rendering lower-cases the drive letter, so on Windows the decoded
+    // spelling would never equal the server's `fsPath` and this fallback
+    // would be dead code.
+    if (modelFilePath(model) === fsPath) {
       return model;
     }
   }

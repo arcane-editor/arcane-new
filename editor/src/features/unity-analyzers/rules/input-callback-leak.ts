@@ -72,6 +72,7 @@ export const inputCallbackLeakRule: AnalyzerRule = {
   id: RULE_ID,
   defaultSeverity: 'warning',
   settingKey: 'unity.inputDiagnostics.enabled',
+  codes: ['UNITY0404'],
 
   run(scan): Finding[] {
     const enable = bodyOf(scan, 'OnEnable');

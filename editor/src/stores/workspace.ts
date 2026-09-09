@@ -18,6 +18,10 @@ import {
   forgetDocument,
   fileUri,
   markCsharpProjectLoaded,
+  markCsharpProjectLoading,
+  isLoadStartedMessage,
+  isLoadFinishedMessage,
+  setRoslynAnalyzersInjected,
   resetCsharpProjectLoaded,
   ensureCsharpLs,
   resetCsharpLsProvisioning,
@@ -175,7 +179,9 @@ async function runUnityCsprojReload(
   // Returns the solution path (or null if it couldn't be generated).
   let solutionPath: string | null;
   try {
-    solutionPath = await invoke<string | null>('unity_setup_lsp', { workspacePath });
+    const setup = await invoke<UnityLspSetup>('unity_setup_lsp', { workspacePath });
+    solutionPath = setup.solution;
+    setRoslynAnalyzersInjected(setup.analyzersInjected);
   } catch (err) {
     console.warn('[Workspace] unity_setup_lsp regen failed during hot-reload:', err);
     return;
@@ -267,6 +273,17 @@ async function proactivelyOpenCSharpFiles(workspacePath: string): Promise<void> 
 
 // Track the C# solution path for restart purposes (csharp-only).
 let csharpSolutionPath: string | null = null;
+
+/**
+ * What `unity_setup_lsp` reports back.
+ *
+ * `analyzersInjected` is the difference between "the Unity analyzers found
+ * nothing" and "the Unity analyzers never ran" — see `unity_analyzers.rs`.
+ */
+interface UnityLspSetup {
+  solution: string | null;
+  analyzersInjected: boolean;
+}
 
 // Per-language restart budget: if a server crashes more than N times within
 // the window, we stop auto-restarting and surface an error so the user can
@@ -450,23 +467,27 @@ async function runLspStart(
       else if (v.title) useUiStore.getState().setLspProgress(v.title);
     });
 
-    // csharp-ls 0.22 reports solution load progress via window/logMessage,
-    // not $/progress, and uses pull diagnostics so publishDiagnostics never
-    // arrives. Watch the log stream for the load-finished marker and flip
-    // to 'ready' so the StatusBar isn't a permanent "Loading".
+    // csharp-ls reports solution load progress via window/logMessage, not
+    // $/progress, and uses pull diagnostics so publishDiagnostics never
+    // arrives. Watch the log stream for the load markers and flip the status
+    // bar so it isn't a permanent "Loading".
+    //
+    // Both markers matter, not just the finish. Since csharp-ls 0.23 the
+    // solution loads ON DEMAND — nothing at `initialize`, the load starts with
+    // the first `didOpen` — so a load can begin long after startup and the
+    // graph goes back to being unusable while it runs.
     let solutionLoadFinished = false;
     unsubscribeCsharpLogMessage = client.onNotification('window/logMessage', (params: unknown) => {
-      const p = params as { message?: string };
-      const raw = p?.message ?? '';
-      const msg = raw.replace(/^csharp-ls:\s*/, '');
+      const msg = ((params as { message?: string })?.message ?? '').trim();
       if (!msg) return;
 
-      if (msg.startsWith('Loading solution') || msg.startsWith('Loading project')) {
-        useUiStore.getState().setLspProgress(msg);
-      } else if (
-        msg.startsWith('Finished loading solution') ||
-        msg.startsWith('Finished loading project')
-      ) {
+      if (isLoadStartedMessage(msg)) {
+        useUiStore.getState().setLspProgress(msg.replace(/^csharp-ls:\s*/i, ''));
+        // Hold diagnostics for the duration. A report answered mid-load is a
+        // CS0518 cascade over every line, indistinguishable at the wire level
+        // from a real one — see project-readiness.ts.
+        markCsharpProjectLoading();
+      } else if (isLoadFinishedMessage(msg)) {
         solutionLoadFinished = true;
         useUiStore.getState().setLspProgress(null);
         useUiStore.getState().setLspStatus('ready');
@@ -1058,6 +1079,14 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
     useProjectContextStore.getState().applyDetection(path, unityInfo);
 
+    // Nothing is known about this workspace's analyzers until `unity_setup_lsp`
+    // reports back, and the local rules that defer to them must not carry the
+    // previous project's answer across. Cleared here rather than in each of the
+    // paths below that return early — a non-Unity workspace, a dotnet block, a
+    // setup that threw — because forgetting one of those is exactly how a rule
+    // ends up switched off with nothing switched on in its place.
+    setRoslynAnalyzersInjected(false);
+
     // C# LSP eager startup is Unity-only. Non-Unity projects can still get
     // C# completions if the user opens a .cs file — ensureLspForFile (below)
     // handles lazy startup the same way it does for Python and TypeScript.
@@ -1084,7 +1113,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       } else {
         let solutionPath: string | null = null;
         try {
-          solutionPath = await invoke<string | null>('unity_setup_lsp', { workspacePath: path });
+          const setup = await invoke<UnityLspSetup>('unity_setup_lsp', {
+            workspacePath: path,
+          });
+          solutionPath = setup.solution;
+          setRoslynAnalyzersInjected(setup.analyzersInjected);
           if (solutionPath) {
             console.log('[Workspace] Unity project setup complete, solution:', solutionPath);
           }
@@ -1360,12 +1393,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     }
 
     // Diagnostics are keyed by document URI and nothing cleared them on close,
-    // so the Problems panel and the status-bar error count kept reporting files
-    // that are closed — or deleted — with no way to make them go away.
-    // Cleared under both keys: providers store some diagnostics by document
-    // URI and some by raw path (TabBar reads both), so clearing one alone
-    // leaves the other reporting a file that is no longer open.
-    useUiStore.getState().clearFileDiagnostics(fileUri(path));
+    // so the Problems panel and the status-bar error count kept reporting
+    // files that are closed — or deleted — with no way to make them go away.
+    // One call now: the store normalises every spelling of a file to a single
+    // key (`diagnosticsKey`), which is what the two-key dance here used to
+    // approximate and got wrong on Windows.
     useUiStore.getState().clearFileDiagnostics(path);
 
     // Free the Monaco model — AFTER didClose, so the server is told about a

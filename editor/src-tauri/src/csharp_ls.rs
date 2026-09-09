@@ -30,7 +30,7 @@
 //! user already has — [`resolve_existing`] checks their install first and the
 //! managed copy last, so nobody's working setup changes underneath them.
 //!
-//! **The prerequisite that is easy to get wrong.** csharp-ls 0.22.0 targets
+//! **The prerequisite that is easy to get wrong.** csharp-ls 0.27.0 targets
 //! `net10.0`, so "has dotnet" is not the requirement — the .NET 10 *runtime*
 //! is, plus an SDK on top of that because the server loads projects through
 //! MSBuildLocator. Both are probed before installing and each gets its own
@@ -49,13 +49,13 @@ use tokio::sync::Mutex;
 /// [`REQUIRED_RUNTIME_MAJOR`] if the new release retargets. The version is
 /// also load-bearing for `project-readiness.ts`, which parses log lines this
 /// release emits — see the notes there before moving it.
-pub const CSHARP_LS_VERSION: &str = "0.22.0";
+pub const CSHARP_LS_VERSION: &str = "0.27.0";
 
 /// The NuGet package id, which is also the command name users know.
 const PACKAGE_ID: &str = "csharp-ls";
 
 /// Major version of `Microsoft.NETCore.App` the pinned tool needs. Tied to
-/// the tool package's target framework: 0.22.0 ships `tools/net10.0/any`, so
+/// the tool package's target framework: 0.27.0 ships `tools/net10.0/any`, so
 /// a machine with only .NET 8 unpacks it fine and then cannot run it.
 const REQUIRED_RUNTIME_MAJOR: u32 = 10;
 
@@ -334,7 +334,7 @@ pub(crate) fn parse_max_runtime_major(stdout: &str) -> Option<u32> {
 
 /// True if `--version` reported the pinned version.
 ///
-/// Verbatim shape: `csharp-ls, 0.22.0.0` — a four-part assembly version, so
+/// Verbatim shape: `csharp-ls, 0.27.0.0` — a four-part assembly version, so
 /// this is a prefix match against the three-part package version.
 pub(crate) fn version_output_matches(stdout: &str) -> bool {
     stdout
@@ -359,7 +359,7 @@ pub struct InstallError {
 }
 
 impl InstallError {
-    fn new(code: &str, message: impl Into<String>) -> Self {
+    pub(crate) fn new(code: &str, message: impl Into<String>) -> Self {
         Self { code: code.to_string(), message: message.into() }
     }
 }
@@ -827,11 +827,16 @@ Microsoft.WindowsDesktop.App 10.0.4 [C:\\Program Files\\dotnet\\shared\\Microsof
 
     #[test]
     fn accepts_the_pinned_version_banner() {
-        assert!(version_output_matches("csharp-ls, 0.22.0.0\n"));
+        assert!(version_output_matches("csharp-ls, 0.27.0.0\n"));
     }
 
     #[test]
     fn rejects_a_different_version() {
+        // 0.22.0 is listed explicitly: it is the version this app shipped
+        // before, and the one a developer is most likely to still have
+        // unpacked in their data directory. Accepting it would mean running a
+        // server with no analyzer support while every check reported success.
+        assert!(!version_output_matches("csharp-ls, 0.22.0.0\n"));
         assert!(!version_output_matches("csharp-ls, 0.21.0.0\n"));
         assert!(!version_output_matches(""));
         assert!(!version_output_matches("csharp-ls"));
@@ -979,6 +984,44 @@ Microsoft.WindowsDesktop.App 10.0.4 [C:\\Program Files\\dotnet\\shared\\Microsof
             .filter(|n| n.contains(".tmp-"))
             .collect();
         assert!(leftovers.is_empty(), "staging left behind: {leftovers:?}");
+    }
+
+    /// Provision the managed copy for real, into the directory the app uses.
+    ///
+    /// Opt-in via `UNITYIDE_PROVISION_MANAGED=1`, and inert otherwise — it is
+    /// the one test here that writes outside a tempdir.
+    ///
+    /// It exists because of what happens on the FIRST run after the pin moves:
+    /// the app provisions the new server on its next C# start, but
+    /// `verify:intellisense` runs before that and finds nothing to probe, so
+    /// the gate prints SKIPPED at exactly the moment an upgrade most needs
+    /// checking. The probe invokes this so it can verify the server this build
+    /// actually pins, on a machine where the app has not been launched since.
+    ///
+    /// Deliberately the same `install_into` the app calls, not a
+    /// reimplementation: a provisioning path only the probe uses would prove
+    /// nothing about the one users get.
+    #[tokio::test]
+    async fn provisions_the_pinned_server_into_the_managed_directory() {
+        if std::env::var("UNITYIDE_PROVISION_MANAGED").as_deref() != Ok("1") {
+            eprintln!(
+                "SKIPPED provisioning the managed csharp-ls: \
+                 set UNITYIDE_PROVISION_MANAGED=1 to install it for real"
+            );
+            return;
+        }
+        let Some((dotnet_dir, nupkg)) = e2e_prerequisites() else { return };
+        let root = managed_root().expect("a data directory");
+
+        let dll = install_into(&dotnet_dir, &root, &nupkg, |_, _| {})
+            .await
+            .expect("provision the bundled package into the managed directory");
+
+        assert!(dll.is_file(), "entry assembly should exist at {}", dll.display());
+        verify_server(&dll, &dotnet_dir)
+            .await
+            .expect("the provisioned server should run and report the pinned version");
+        eprintln!("provisioned csharp-ls {CSHARP_LS_VERSION} at {}", dll.display());
     }
 
     /// Only the tool payload is unpacked, flattened. Packaging metadata

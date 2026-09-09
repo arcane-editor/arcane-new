@@ -51,6 +51,7 @@ export const nonSerializableTypesRule: AnalyzerRule = {
   id: 'unity/non-serializable-type',
   defaultSeverity: 'warning',
   settingKey: 'unity.serializationDiagnostics.enabled',
+  codes: ['UNITY0101', 'UNITY0102', 'UNITY0103'],
 
   run(scan, ctx): Finding[] {
     const findings: Finding[] = [];

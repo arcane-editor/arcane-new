@@ -21,6 +21,7 @@ import {
   toMonacoRange,
   toLspRange,
   buildTextDocumentPositionParams,
+  lspDocumentUri,
   type LspRange,
 } from './model-context';
 import { LSP_BACKED_MONACO_LANGUAGES } from '../../../utils/language-detect';
@@ -317,7 +318,7 @@ export function registerSemanticTokensForClient(
     async provideDocumentSemanticTokens(model: editor.ITextModel) {
       try {
         const res = (await request('textDocument/semanticTokens/full', {
-          textDocument: { uri: model.uri.toString() },
+          textDocument: { uri: lspDocumentUri(model) },
         })) as { data?: number[]; resultId?: string } | null;
         if (!res?.data || !Array.isArray(res.data)) return null;
         // LSP and Monaco use the identical relative 5-tuple encoding
@@ -349,7 +350,7 @@ export function registerSemanticTokensForClient(
     ) {
       try {
         const res = (await request('textDocument/semanticTokens/range', {
-          textDocument: { uri: model.uri.toString() },
+          textDocument: { uri: lspDocumentUri(model) },
           range: toLspRange(range),
         })) as { data?: number[] } | null;
         if (!res?.data || !Array.isArray(res.data)) return null;
@@ -420,7 +421,7 @@ export function registerLspSymbolProviders(monaco: Monaco): () => void {
             const result = await ctx.client.request<
               Array<LspDocumentSymbol | LspSymbolInformation> | null
             >('textDocument/documentSymbol', {
-              textDocument: { uri: model.uri.toString() },
+              textDocument: { uri: lspDocumentUri(model) },
             });
             return lspSymbolsToMonaco(result);
           } catch (err) {
@@ -487,7 +488,7 @@ export function registerLspSymbolProviders(monaco: Monaco): () => void {
             const result = await ctx.client.request<LspTextEdit[] | null>(
               'textDocument/formatting',
               {
-                textDocument: { uri: model.uri.toString() },
+                textDocument: { uri: lspDocumentUri(model) },
                 options: {
                   tabSize: options.tabSize,
                   insertSpaces: options.insertSpaces,
@@ -517,7 +518,7 @@ export function registerLspSymbolProviders(monaco: Monaco): () => void {
           try {
             const raw = await ctx.client.request<LspInlayHint[] | null>(
               'textDocument/inlayHint',
-              { textDocument: { uri: model.uri.toString() }, range: toLspRange(range) },
+              { textDocument: { uri: lspDocumentUri(model) }, range: toLspRange(range) },
             );
             const hints = lspInlayHintsToMonaco(raw);
             return { hints, dispose: () => {} };
@@ -543,7 +544,7 @@ export function registerLspSymbolProviders(monaco: Monaco): () => void {
             const result = await ctx.client.request<LspTextEdit[] | null>(
               'textDocument/rangeFormatting',
               {
-                textDocument: { uri: model.uri.toString() },
+                textDocument: { uri: lspDocumentUri(model) },
                 range: toLspRange(range),
                 options: {
                   tabSize: options.tabSize,

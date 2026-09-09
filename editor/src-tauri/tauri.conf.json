@@ -47,7 +47,7 @@
     "createUpdaterArtifacts": true,
     "targets": "all",
     "externalBin": ["binaries/unityide-graph", "binaries/typescript-language-server"],
-    "resources": { "../unity-bridge": "unity-bridge", "resources/csharp-ls": "csharp-ls" },
+    "resources": { "../unity-bridge": "unity-bridge", "resources/csharp-ls": "csharp-ls", "resources/unity-analyzers": "unity-analyzers" },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

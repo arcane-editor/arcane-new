@@ -43,6 +43,7 @@ const DEFAULT_SETTINGS: SettingsSchema = {
   'unity.uiDiagnostics.enabled': true,
   'unity.uiToolkit.panel': true,
   'lsp.solutionWideAnalysis': true,
+  'lsp.csharp.analyzers': true,
   'unity.asmdef.diagnostics': true,
   'unity.bridge.enabled': true,
   'unity.bridge.refreshOnSave': true,

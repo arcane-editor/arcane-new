@@ -103,6 +103,7 @@ export const inputActionsRule: AnalyzerRule = {
   id: RULE_ID,
   defaultSeverity: 'warning',
   settingKey: 'unity.inputDiagnostics.enabled',
+  codes: ['UNITY0401', 'UNITY0402', 'UNITY0403'],
 
   run(scan): Finding[] {
     const index = getInputActionsIndex();
