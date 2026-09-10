@@ -40,6 +40,13 @@ function ChatInput() {
   const activePlanPath = useAiStore((s) => s.activePlanPath);
   const workspacePath = useWorkspaceStore((s) => s.workspacePath);
   const attachmentCount = useAiStore((s) => s.attachments.length);
+  // A primitive, never an object/array literal: a selector returning a fresh
+  // reference re-renders on every store write.
+  // The number of ERRORS staged, not the number of chips — "these 3 errors" is
+  // a claim about the content.
+  const errorAttachmentCount = useAiStore((s) =>
+    s.attachments.reduce((n, a) => (a.kind === 'error-report' ? n + a.entries.length : n), 0),
+  );
   const pendingQuestion = useAiStore(selectPendingQuestion);
 
   const editorRef = useRef<LexicalChatInputHandle>(null);
@@ -55,6 +62,17 @@ function ChatInput() {
     }
     window.addEventListener('ai-compose-prefill', onPrefill);
     return () => window.removeEventListener('ai-compose-prefill', onPrefill);
+  }, []);
+
+  // "Ask AI" on an error row reveals the panel and then asks for focus, so the
+  // user can type their question straight away. It never prefills text — see
+  // `errorAttachmentCount` in `data/composer-copy.ts`.
+  useEffect(() => {
+    function onFocus() {
+      editorRef.current?.focus();
+    }
+    window.addEventListener('ai-focus-composer', onFocus);
+    return () => window.removeEventListener('ai-focus-composer', onFocus);
   }, []);
 
   function handleSubmit(text: string) {
@@ -98,6 +116,7 @@ function ChatInput() {
     mode,
     planRoute: routePlanSend(planPhase, activePlanPath),
     pendingQuestion: !!pendingQuestion,
+    errorAttachmentCount,
   });
 
   return (

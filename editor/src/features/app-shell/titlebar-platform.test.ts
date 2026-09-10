@@ -33,3 +33,36 @@ describe('title bar', () => {
     expect(MAIN).toMatch(/dataset\.os|setAttribute\(\s*['"]data-os['"]/);
   });
 });
+
+/**
+ * The project-management window (`WelcomeApp`, label `welcome`) is a second
+ * shell with its own title strip, and it was never given the same treatment.
+ * `lib.rs` turns its decorations off off-macOS — for the same doubled-bar
+ * reason as the project window — but nothing drew the minimize / maximize /
+ * close it then owes the user, so on Windows and Linux the manager had no
+ * window controls at all, while macOS's overlaid traffic lights (and the 80px
+ * gutter reserved for them, unconditionally) were the only chrome present.
+ */
+describe('project-management window', () => {
+  const WELCOME = readFileSync(path.join(ROOT, 'src/WelcomeApp.tsx'), 'utf8');
+  const MULTI_WINDOW = readFileSync(
+    path.join(ROOT, 'src/features/project/services/multi-window.ts'),
+    'utf8',
+  );
+
+  it('draws its own window controls where the OS draws none', () => {
+    expect(WELCOME).toMatch(/!isMac\(\)\s*&&\s*<WindowControls\s*\/>/);
+  });
+
+  it('reserves the traffic-light gutter only on macOS', () => {
+    const gutters = WELCOME.match(/paddingLeft:[^,}\n]*/g) ?? [];
+    expect(gutters.length).toBeGreaterThan(0);
+    for (const gutter of gutters) expect(gutter).toMatch(/isMac\(\)/);
+  });
+
+  it('turns decorations off off-macOS when it spawns the window itself', () => {
+    const start = MULTI_WINDOW.indexOf("new WebviewWindow('welcome'");
+    expect(start).toBeGreaterThan(-1);
+    expect(MULTI_WINDOW.slice(start, start + 1000)).toMatch(/decorations:\s*isMac\(\)/);
+  });
+});

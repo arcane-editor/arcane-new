@@ -98,7 +98,12 @@ A source scan in `file-uri-single-source.test.ts` forbids the shape returning.
 
 **Run `bun run verify` before reporting any change as done — including changes
 that have nothing to do with C#, LSP, or Unity.** It runs tsc, the module-boundary
-check, the JS and Rust suites, and `verify:intellisense`.
+check, the JS and Rust suites, `verify:intellisense`, `verify:acp` and
+`verify:debugger`.
+
+Run it from a shell whose PATH carries POSIX utilities (Git Bash, not
+PowerShell): two pre-existing tests in `execute_command_tests` shell out to
+`sleep`, so the suite is shell-dependent on Windows.
 
 `bun run verify:intellisense` alone (~40s, including a cargo build) regenerates the project files through
 the real Rust generator, starts the real `csharp-ls`, and asserts:
@@ -289,6 +294,75 @@ in a diff or break a mocked test. As with IntelliSense, **a `SKIPPED` is not a
 pass** — set `UNITYIDE_ACP_E2E=required` to turn a skip into a failure, and
 `UNITYIDE_ACP_ADAPTER=<path to dist/index.js>` to point it at an adapter outside
 the managed install.
+
+## The debugger talks to Unity directly, and Unity's agent is not defensive
+
+`src-tauri/src/debug/` is a Mono soft-debugger client written from scratch. It
+answers **DAP** in-process, which is why `dap-client.ts`, the debug store and
+all the panels were untouched by its arrival: only what sits behind
+`dap_start`/`dap_send` changed. There is no adapter process, no `Content-Length`
+framing, and nothing to install.
+
+It replaced a `vscode-mono-debug` sidecar that **could never run in a shipped
+build** — the binary was never vendored, `binaries/mono-debug` was in neither
+`resources` nor `externalBin`, and it needed a system Mono runtime. The feature
+looked complete and had never once attached to anything.
+
+**Sending the agent a bad id kills Unity.** Not an error, not a reply — the
+socket closes and the editor is gone. It happened to a live editor during this
+work, and it was reproduced four more times against the test fixture. Every one
+traced to the same shape: a reply mis-parsed, a zero read where an id belonged,
+that zero sent back. So:
+
+1. **Never synthesise an id.** Every id on the wire came from a decoded reply.
+2. **Never index a reply without a length check.** `wire::Reader` returns
+   `Err(Truncated)` instead of reading past the end; that is what turns a
+   protocol surprise into a reported error rather than a dead editor.
+3. **A timeout never closes the socket.** The pending entry stays so the reader
+   can drain the late reply. Abandoning a socket mid-reply is what killed the
+   editor.
+4. **`VM_DISPOSE` before close, always** — including on window close, which is
+   why `host.rs` runs `Router::shutdown` when the session channel ends.
+5. **One connection per target.** The agent accepts exactly one debugger; a
+   probe that connects and hangs up consumes it. The e2e harness's first version
+   did that and could never attach.
+
+**Unit tests cannot catch an encoding mistake here**, because a unit test
+asserts whatever the client encodes. Three real bugs passed every unit test:
+the event-modifier count written as an int instead of a byte (killed the
+runtime), `TYPE_ID_NULL` decoded with a payload it does not have (swallowed the
+next value), and string replies read without their leading encoding-flag byte
+(**every string read back as `""`**). The runtime disagreed with all three.
+
+So: **run `bun run verify:debugger` when you touch any of this.** It compiles a
+fixture with Unity's own bundled C# compiler and runs it under Unity's own Mono
+with a debugger agent, then drives the real client against it — hermetic, a few
+seconds, and structurally incapable of touching an editor anyone is using. A
+`SKIPPED` is not a pass; `UNITYIDE_DEBUGGER_E2E=required` turns one into a
+failure. Wire traffic goes to `debug_trace_path()`, decoded rather than as hex.
+
+Two more rules of the same family:
+
+- **Layouts are read off the wire, not recalled.** Several commands changed
+  shape across protocol revisions, and this client pins 2.58 in `conn.rs`
+  precisely so the captured layouts in `protocol.rs` mean something. If that pin
+  moves, the layouts must be re-captured — `TYPE_ID_NULL`, for instance, gains a
+  payload at 2.59.
+- **Command numbers are a hazard.** `TYPE_GET_METHODS` is command **2**;
+  command 5 is `TYPE_GET_OBJECT`, which answers with a 4-byte object id.
+  Reading that reply as a method array is exactly how the fatal zero id above
+  was produced.
+
+Breakpoint binding parses **no PDB**: `TYPE_LOAD` filtered by source file gives
+the types, `METHOD_GET_DEBUG_INFO` gives the line table. That is also why
+breakpoints survive a domain reload — Unity reloads the script assembly, the
+types load again, and the same path re-binds them. Do not "optimise" that into a
+one-shot resolve at attach.
+
+Finally, binding ranks **containment before proximity**. Resolving against
+whichever type loaded first once bound a breakpoint on line 15 to line 21, in a
+different class in the same file, because sliding to "the next executable line"
+crossed into it. `locate_in_types` compares candidates together.
 
 ## Drag and drop: HTML5 DnD does not work here
 

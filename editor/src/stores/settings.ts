@@ -65,6 +65,7 @@ const DEFAULT_SETTINGS: SettingsSchema = {
   'unity.git.yamlMergeIntegration': true,
   'unity.testRunner.enabled': true,
   'unity.inputHub.enabled': true,
+  'debug.inlineValues': true,
   'unity.debugger.enabled': true,
   'unity.shader.completions': true,
   'unity.packages.manifestIntelligence': true,

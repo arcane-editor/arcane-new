@@ -328,13 +328,13 @@ fn unity_editor_is_running(workspace_path: &str) -> bool {
 }
 
 #[cfg(unix)]
-fn process_is_alive(pid: u32) -> bool {
+pub(crate) fn process_is_alive(pid: u32) -> bool {
     // Signal 0 performs error checking without delivering a signal.
     unsafe { libc::kill(pid as i32, 0) == 0 }
 }
 
 #[cfg(windows)]
-fn process_is_alive(pid: u32) -> bool {
+pub(crate) fn process_is_alive(pid: u32) -> bool {
     crate::process_util::command("tasklist")
         .args(["/FI", &format!("PID eq {}", pid), "/NH"])
         .output()

@@ -20,7 +20,7 @@ import { registerImportLinkProvider } from '../services/import-link-provider';
 import { registerDotEnvLanguage } from '../services/dotenv-language';
 import { registerUsageHoverProvider } from '../services/usage-hover-provider';
 import { registerUnityDocsHover } from '../services/unity-docs-hover';
-import { registerBlameHoverProvider, attachGitGutter } from '../../git';
+import { attachInlineBlame, attachGitGutter } from '../../git';
 import { PackageCacheBanner, isPackageCachePath } from '../../unity-packages';
 import { initUsageCodeLens } from '../../unity-context';
 import { BinaryFileNotice } from './BinaryFileNotice';
@@ -40,8 +40,7 @@ import { toRelativePath } from '../../../utils/relative-path';
 import { ScriptableObjectEditor, initSoInstanceCodeLens } from '../../unity-scriptable-objects';
 import { attachUnityDecorations } from '../../csharp';
 import { initTestCodeLens } from '../../unity-test-runner';
-import { attachBreakpointGutter } from '../../debugger';
-import { registerInlineSuggestProvider } from '../../inline-suggest';
+import { attachBreakpointGutter, attachInlineValues } from '../../debugger';
 import { MarkdownPreview, PlanDocumentView, isMarkdownPath, isPlanPath, type PlanNote } from '../../markdown-preview';
 import { planController } from '../../ai-panel';
 import { SearchResultsTab } from '../../search';
@@ -491,7 +490,6 @@ function EditorPanel() {
           registerDotEnvLanguage(monaco);
           registerImportLinkProvider(monaco);
           registerUiToolkit(monaco);
-          registerBlameHoverProvider(monaco);
           initUsageCodeLens(monaco);
           initSoInstanceCodeLens(monaco);
           registerUsageHoverProvider(monaco);
@@ -499,7 +497,6 @@ function EditorPanel() {
           initUnityAnalyzers(monaco);
           initUnityCompilerDiagnostics(monaco);
           initTestCodeLens(monaco);
-          registerInlineSuggestProvider(monaco);
           ensureMonacoTheme(useThemeStore.getState().getActiveTheme());
         }}
         onMount={(editor, monaco) => {
@@ -538,12 +535,19 @@ function EditorPanel() {
           attachUnityDecorations(editor, monaco);
           // Debugger breakpoint gutter (Unity projects; self-gates otherwise).
           attachBreakpointGutter(editor, monaco);
+    const disposeInlineValues = attachInlineValues(editor, monaco);
+    editor.onDidDispose(disposeInlineValues);
           // Git changed-lines gutter (vs HEAD); disposed alongside this
           // editor instance (model swaps on file switch keep it alive and
           // just trigger a refresh — see attachGitGutter's onDidChangeModel
           // hookup).
           const disposeGitGutter = attachGitGutter(editor, monaco);
           editor.onDidDispose(disposeGitGutter);
+          // Git blame for the cursor's line, trailing the end of it. Was a
+          // hover provider, which put blame in the same popover as the
+          // language server's answer — see attachInlineBlame's note.
+          const disposeInlineBlame = attachInlineBlame(editor, monaco);
+          editor.onDidDispose(disposeInlineBlame);
 
           // Handle a pending navigation. This is the path taken whenever the
           // jump STARTS in a structured asset viewer (the Input Hub, the asset
@@ -614,7 +618,11 @@ function EditorPanel() {
           wordBasedSuggestions: isLargeFile ? 'off' : 'currentDocument',
           parameterHints: { enabled: !isLargeFile },
           snippetSuggestions: 'inline',
-          inlineSuggest: { enabled: !isLargeFile },
+          // Ghost-text AI suggestions are switched off for now (the
+          // provider is no longer registered above); Monaco's own inline
+          // suggest has nothing left to render, and leaving it enabled only
+          // keeps the widget's key handling in the way of Tab.
+          inlineSuggest: { enabled: false },
         }}
       />
     </div>

@@ -1,8 +1,19 @@
-import { useState, useMemo } from 'react';
-import { File, CircleX, TriangleAlert, Info, Lightbulb } from 'lucide-react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
+import {
+  File,
+  CircleX,
+  TriangleAlert,
+  Info,
+  Lightbulb,
+  Copy,
+  Check,
+  X,
+  MessageSquarePlus,
+} from 'lucide-react';
 import { useUiStore, getFlatAllDiagnostics } from '../../../stores/ui';
 import { useWorkspaceStore } from '../../../stores/workspace';
 import { recordJumpOrigin } from '../../../utils/jump-history';
+import { attachErrorReport, copyErrorReport } from '../../ai-panel';
 import type { DiagnosticItem } from '../../../types';
 
 type Severity = DiagnosticItem['severity'];
@@ -22,6 +33,69 @@ function SeverityIcon({ severity }: { severity: Severity }) {
   }
 }
 
+/** Identifies which control last reported a copy result, so only it shows the tick. */
+type CopyFlash = { key: string; ok: boolean } | null;
+
+function CopyGlyph({ flash }: { flash: CopyFlash }) {
+  if (!flash) return <Copy size={12} />;
+  return flash.ok ? (
+    <Check size={12} style={{ color: 'var(--success)' }} />
+  ) : (
+    <X size={12} style={{ color: 'var(--error-text)' }} />
+  );
+}
+
+/**
+ * Copy + Ask AI, shared by the row, the file header and the toolbar.
+ *
+ * Module scope, not nested in `ProblemsPanel`: a component declared inside a
+ * render is a NEW type on every render, so React unmounts and remounts it —
+ * which would drop focus, and `:focus-within` is what keeps these buttons
+ * reachable from the keyboard at all.
+ */
+function RowActions({
+  className,
+  flash,
+  copyTitle,
+  askTitle,
+  onCopy,
+  onAsk,
+}: {
+  className: string;
+  flash: CopyFlash;
+  copyTitle: string;
+  askTitle: string;
+  onCopy: () => void;
+  onAsk: () => void;
+}) {
+  return (
+    <div className={className}>
+      <button
+        type="button"
+        className="problems-item-action"
+        title={flash && !flash.ok ? "Couldn't copy — clipboard unavailable" : copyTitle}
+        onClick={(e) => {
+          e.stopPropagation();
+          onCopy();
+        }}
+      >
+        <CopyGlyph flash={flash} />
+      </button>
+      <button
+        type="button"
+        className="problems-item-action"
+        title={askTitle}
+        onClick={(e) => {
+          e.stopPropagation();
+          onAsk();
+        }}
+      >
+        <MessageSquarePlus size={12} />
+      </button>
+    </div>
+  );
+}
+
 function ProblemsPanel() {
   const diagnostics = useUiStore((s) => s.diagnostics);
   const allDiagnostics = useMemo(() => getFlatAllDiagnostics(diagnostics), [diagnostics]);
@@ -31,6 +105,7 @@ function ProblemsPanel() {
   const [activeSeverities, setActiveSeverities] = useState<Set<Severity>>(
     new Set(ALL_SEVERITIES),
   );
+  const [copyFlash, setCopyFlash] = useState<CopyFlash>(null);
 
   function toggleSeverity(severity: Severity) {
     setActiveSeverities((prev) => {
@@ -43,7 +118,10 @@ function ProblemsPanel() {
       return next;
     });
   }
-  const filtered = allDiagnostics.filter((d) => activeSeverities.has(d.severity));
+  const filtered = useMemo(
+    () => allDiagnostics.filter((d) => activeSeverities.has(d.severity)),
+    [allDiagnostics, activeSeverities],
+  );
 
   // Group by file
   const byFile = new Map<string, DiagnosticItem[]>();
@@ -72,6 +150,39 @@ function ProblemsPanel() {
     );
   }
 
+  /**
+   * Report the outcome on the button. `navigator.clipboard` rejects for reasons
+   * a user can actually hit — an unfocused window, a denied permission — and a
+   * silent failure looks exactly like a success until they paste.
+   */
+  const runCopy = useCallback(async (key: string, items: DiagnosticItem[]) => {
+    const ok = await copyErrorReport({ source: 'problems', items, workspacePath });
+    setCopyFlash({ key, ok });
+    setTimeout(() => setCopyFlash(null), ok ? 1200 : 2000);
+  }, [workspacePath]);
+
+  const runAsk = useCallback(
+    (items: DiagnosticItem[]) => {
+      void attachErrorReport({ source: 'problems', items, workspacePath });
+    },
+    [workspacePath],
+  );
+
+  // Palette commands act on what the panel is showing, which is state only the
+  // panel owns — hence the event hop (same shape as `ai.newChat`).
+  useEffect(() => {
+    const onCopyAll = () => void runCopy('all', filtered);
+    const onAskAi = () => runAsk(filtered);
+    window.addEventListener('problems-copy-all', onCopyAll);
+    window.addEventListener('problems-ask-ai', onAskAi);
+    return () => {
+      window.removeEventListener('problems-copy-all', onCopyAll);
+      window.removeEventListener('problems-ask-ai', onAskAi);
+    };
+  }, [filtered, runCopy, runAsk]);
+
+  const flashFor = (key: string): CopyFlash => (copyFlash?.key === key ? copyFlash : null);
+
   const severityLabels: Record<Severity, string> = {
     error: 'Errors',
     warning: 'Warnings',
@@ -97,6 +208,36 @@ function ProblemsPanel() {
             )}
           </button>
         ))}
+
+        {/* The severity chips to the left ARE the selector for these two, so
+            they act on what is on screen rather than on everything. */}
+        <span className="problems-bar-spacer" />
+        <div className="problems-bar-actions">
+          <button
+            type="button"
+            className="problems-bar-action"
+            disabled={filtered.length === 0}
+            title={
+              copyFlash?.key === 'all' && !copyFlash.ok
+                ? "Couldn't copy — clipboard unavailable"
+                : `Copy the ${filtered.length} problems currently shown`
+            }
+            onClick={() => void runCopy('all', filtered)}
+          >
+            <CopyGlyph flash={flashFor('all')} />
+            <span>Copy ({filtered.length})</span>
+          </button>
+          <button
+            type="button"
+            className="problems-bar-action"
+            disabled={filtered.length === 0}
+            title={`Add the ${filtered.length} problems currently shown to the AI chat as context`}
+            onClick={() => runAsk(filtered)}
+          >
+            <MessageSquarePlus size={12} />
+            <span>Ask AI ({filtered.length})</span>
+          </button>
+        </div>
       </div>
 
       {/* Results */}
@@ -117,13 +258,33 @@ function ProblemsPanel() {
                   <span className="problems-file-name">{fileName}</span>
                   <span className="problems-file-path">{relPath !== fileName ? relPath : ''}</span>
                   <span className="problems-file-count">{items.length}</span>
+                  <RowActions
+                    className="problems-file-actions"
+                    flash={flashFor(`file:${filePath}`)}
+                    copyTitle={`Copy this file's ${items.length} problems`}
+                    askTitle={`Add this file's ${items.length} problems to the AI chat as context`}
+                    onCopy={() => void runCopy(`file:${filePath}`, items)}
+                    onAsk={() => runAsk(items)}
+                  />
                 </div>
                 <div className="problems-item-list">
-                  {items.map((item, idx) => (
-                    <button
+                  {items.map((item, idx) => {
+                    const rowKey = `${item.file}:${item.line}:${item.col}:${item.code ?? ''}`;
+                    return (
+                    // A div, not a button: the row carries its own action
+                    // buttons and buttons cannot nest.
+                    <div
                       key={idx}
                       className="problems-item"
+                      role="button"
+                      tabIndex={0}
                       onClick={() => handleItemClick(item)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          void handleItemClick(item);
+                        }
+                      }}
                       title={item.message}
                     >
                       <span className="problems-item-icon">
@@ -159,8 +320,17 @@ function ProblemsPanel() {
                       <span className="problems-item-location">
                         Ln {item.line}, Col {item.col}
                       </span>
-                    </button>
-                  ))}
+                      <RowActions
+                        className="problems-item-actions"
+                        flash={flashFor(rowKey)}
+                        copyTitle="Copy this problem"
+                        askTitle="Add this problem to the AI chat as context"
+                        onCopy={() => void runCopy(rowKey, [item])}
+                        onAsk={() => runAsk([item])}
+                      />
+                    </div>
+                    );
+                  })}
                 </div>
               </div>
             );

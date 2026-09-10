@@ -226,6 +226,7 @@ export interface SettingsSchema {
   'unity.git.yamlMergeIntegration': boolean;
   'unity.testRunner.enabled': boolean;
   'unity.inputHub.enabled': boolean;
+  'debug.inlineValues': boolean;
   'unity.debugger.enabled': boolean;
   'unity.shader.completions': boolean;
   'unity.packages.manifestIntelligence': boolean;

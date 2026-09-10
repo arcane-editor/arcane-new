@@ -74,7 +74,6 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
     ], category: 'Terminal', label: 'Font Family', description: 'System fonts only — web fonts break xterm\'s cell measurement. Each option is previewed in its own face; one not installed on your machine falls back to the next in its stack.' },
   { key: 'terminal.cursorBlink', type: 'boolean', category: 'Terminal', label: 'Cursor Blink', description: 'Controls whether the terminal cursor blinks.' },
   { key: 'ui.coachMarks.enabled', type: 'boolean', category: 'Editor', label: 'Contextual Tips', description: 'Show a one-time hint the first time a capability becomes relevant — when Unity connects, when you open your first C# file. Each appears at most once.' },
-  { key: 'ai.inlineSuggestions.enabled', type: 'boolean', category: 'AI', label: 'Inline suggestions (Tab)', description: 'Ghost-text code suggestions as you type. Accept with Tab.' },
   { key: 'ai.checkpoints.enabled', type: 'boolean', category: 'AI', label: 'Checkpoints', description: 'Snapshot files before the AI writes to them, so you can restore a turn (and everything after it) from the chat timeline.' },
   { key: 'ai.escalation.enabled', type: 'boolean', category: 'AI', label: 'Repair-Triggered Escalation', description: 'When the agent needs 2+ compile/analyzer repairs in a single send, escalate to a stronger model for the rest of that send.' },
   { key: 'ai.edits.applyMode', type: 'select', options: ['approve', 'auto'], category: 'AI', label: 'Apply Mode', description: 'Auto (default): edits apply immediately and enter Accept/Reject review in the chat (checkpoints back "Reject" with a restore to the pre-image). Approve (legacy): review a diff and click Apply before any AI file edit reaches disk — "Apply all this session" makes an approved plan effectively one-click for the rest of the conversation. Either way, Unity serialized assets always pre-prompt (see below).' },
@@ -112,6 +111,14 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
   { key: 'unity.git.yamlMergeIntegration', type: 'boolean', category: 'Unity', label: 'Git: YAML Merge Integration', description: 'Use UnityYAMLMerge as the merge driver for Unity scene and prefab files.' },
   { key: 'unity.testRunner.enabled', type: 'boolean', category: 'Unity', label: 'Test Runner', description: 'Enable the Unity Test Runner panel for running EditMode and PlayMode tests.' },
   { key: 'unity.inputHub.enabled', type: 'boolean', category: 'Unity', label: 'Input Hub', description: 'Show the Input Actions panel. Only appears in projects that run the New Input System.' },
+  {
+    key: 'debug.inlineValues',
+    type: 'boolean',
+    category: 'Unity',
+    label: 'Inline Variable Values',
+    description:
+      'While paused, show variable values at the end of the lines they appear on.',
+  },
   { key: 'unity.debugger.enabled', type: 'boolean', category: 'Unity', label: 'Debugger', description: 'Enable the Unity Mono debugger (DAP) integration for breakpoints and step-through.' },
   { key: 'unity.shader.completions', type: 'boolean', category: 'Unity', label: 'Shader Completions', description: 'Provide ShaderLab/HLSL keyword completions and #include navigation.' },
   { key: 'unity.packages.manifestIntelligence', type: 'boolean', category: 'Unity', label: 'Packages: Manifest Intelligence', description: 'Enable completions and validation in Packages/manifest.json.' },

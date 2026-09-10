@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { formatUnityAssetBlock, type UnityAssetModel, promptTextForImages } from './attachments';
 
 // NOTE: only the pure formatter is unit-tested here (per the brief). Full
@@ -175,5 +177,34 @@ describe('promptTextForImages', () => {
     // own guards; inventing words there would put a sentence nobody typed into
     // the transcript.
     expect(promptTextForImages('', 0)).toBe('');
+  });
+});
+
+describe('the error-report branch delegates rather than renders', () => {
+  /**
+   * The feature's whole promise is that the text a user copies to the
+   * clipboard and the text the model receives are the same bytes. That holds
+   * only while `data/error-report.ts` is the sole renderer — a second one
+   * inlined here would drift silently, and neither side would report it.
+   *
+   * A source scan because `resolveAttachments` cannot run under Bun (Tauri
+   * `invoke` plus stores that touch `document`), as this file's header and
+   * `attachments.ts`'s own header both explain.
+   */
+  const source = readFileSync(path.join(import.meta.dir, 'attachments.ts'), 'utf-8');
+  const branch = source.slice(
+    source.indexOf("if (a.kind === 'error-report')"),
+    source.indexOf("if (a.kind === 'unity-context')"),
+  );
+
+  it('calls the shared builder', () => {
+    expect(branch).toContain('buildErrorReport(a.source, a.entries, a.capturedAt).block');
+  });
+
+  it('renders nothing of its own — no tags, no caps, no slicing', () => {
+    expect(branch).not.toContain('<console-errors');
+    expect(branch).not.toContain('<problems');
+    expect(branch).not.toContain('.slice(');
+    expect(branch).not.toMatch(/MAX_[A-Z_]+/);
   });
 });

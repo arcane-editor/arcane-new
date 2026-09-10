@@ -1,5 +1,16 @@
 import { useState, useRef, useEffect, useCallback, useMemo, useDeferredValue } from 'react';
-import { Search, Trash2, ArrowDown, ArrowUpRight, Sparkles, ChevronDown } from 'lucide-react';
+import {
+  Search,
+  Trash2,
+  ArrowDown,
+  ArrowUpRight,
+  Sparkles,
+  ChevronDown,
+  Copy,
+  Check,
+  X,
+  MessageSquarePlus,
+} from 'lucide-react';
 import { useVirtualizer, type Virtualizer } from '@tanstack/react-virtual';
 import { useUnityStore } from '../../../stores/unity';
 import { useWorkspaceStore } from '../../../stores/workspace';
@@ -8,7 +19,12 @@ import { useProjectContextStore } from '../../../stores/project-context';
 import { classifyFile, FilePriority } from '../../csharp';
 import { useSceneUsageStore } from '../../unity-context';
 import { BridgeInstallBanner } from '../../unity-bridge';
-import { fixConsoleError } from '../../ai-panel';
+import {
+  fixConsoleError,
+  attachErrorReport,
+  copyErrorReport,
+  isAskableConsoleEntry,
+} from '../../ai-panel';
 import { describeClearOutcome } from '../services/clear-outcome';
 import type { UnityLogEntry, UnityLogType } from '../../../types/unity';
 
@@ -92,6 +108,10 @@ function UnityConsolePanel() {
   // because the local ring empties either way and a silent failure reads as
   // though both consoles were cleared.
   const [clearNotice, setClearNotice] = useState<string | null>(null);
+  // Keyed on the store's monotonic `seq`, never on the collapsed index — that
+  // shifts every time a batch arrives. One scalar, so a copy costs one render;
+  // a per-row map would cost one per row.
+  const [copyFlash, setCopyFlash] = useState<{ key: number | 'all'; ok: boolean } | null>(null);
   const clearMenuRef = useRef<HTMLDivElement>(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -167,6 +187,39 @@ function UnityConsolePanel() {
     });
     return collapseEntries(filteredLogs);
   }, [logs, showLog, showWarning, showError, needle, modeFilter]);
+
+  // What the two bulk buttons act on. Copy transcribes exactly what is on
+  // screen; Ask AI drops the `Log` tier and the bridge's own chatter, because
+  // a play session's Debug.Log output is mostly noise that dilutes the
+  // question and costs tokens. The two counts are printed on the buttons, so
+  // the divergence is visible rather than silent.
+  const copySet = useMemo(() => collapsed.map((c) => c.entry), [collapsed]);
+  const askSet = useMemo(() => copySet.filter(isAskableConsoleEntry), [copySet]);
+
+  const runCopy = useCallback(async (key: number | 'all', entries: UnityLogEntry[]) => {
+    const ok = await copyErrorReport({ source: 'unity-console', entries });
+    setCopyFlash({ key, ok });
+    setTimeout(() => setCopyFlash(null), ok ? 1200 : 2000);
+  }, []);
+
+  const runAsk = useCallback((entries: UnityLogEntry[]) => {
+    void attachErrorReport({ source: 'unity-console', entries });
+  }, []);
+
+  // The palette commands act on what the panel is showing, which is filter
+  // state only the panel owns — hence the event hop (same shape as
+  // `ai.newChat`), and the same handlers the toolbar buttons call so the two
+  // paths cannot diverge.
+  useEffect(() => {
+    const onCopyAll = () => void runCopy('all', copySet);
+    const onAskAi = () => runAsk(askSet);
+    window.addEventListener('unity-console-copy-all', onCopyAll);
+    window.addEventListener('unity-console-ask-ai', onAskAi);
+    return () => {
+      window.removeEventListener('unity-console-copy-all', onCopyAll);
+      window.removeEventListener('unity-console-ask-ai', onAskAi);
+    };
+  }, [copySet, askSet, runCopy, runAsk]);
 
   // Historical entries (`backfillConsoleHistory`) are always prepended as a
   // leading run, so "how many at the front are historical" is enough to know
@@ -427,6 +480,44 @@ function UnityConsolePanel() {
           {modeFilter === 'all' ? 'All modes' : modeFilter === 'PlayMode' ? 'Play only' : 'Edit only'}
         </button>
 
+        {/* The filter chips to the left ARE the selector for these two: what
+            is on screen is what gets copied or asked about. */}
+        <span className="unity-console-bar-spacer" />
+        <button
+          className="unity-console-bar-action"
+          disabled={copySet.length === 0}
+          title={
+            copyFlash?.key === 'all' && !copyFlash.ok
+              ? "Couldn't copy — clipboard unavailable"
+              : `Copy the ${copySet.length} entries currently shown`
+          }
+          onClick={() => void runCopy('all', copySet)}
+        >
+          {copyFlash?.key === 'all' ? (
+            copyFlash.ok ? (
+              <Check size={12} style={{ color: 'var(--success)' }} />
+            ) : (
+              <X size={12} style={{ color: 'var(--error-text)' }} />
+            )
+          ) : (
+            <Copy size={12} />
+          )}
+          Copy ({copySet.length})
+        </button>
+        <button
+          className="unity-console-bar-action"
+          disabled={askSet.length === 0}
+          title={
+            askSet.length === 0
+              ? 'No errors in the current filter'
+              : `Add the ${askSet.length} errors currently shown to the AI chat as context`
+          }
+          onClick={() => runAsk(askSet)}
+        >
+          <MessageSquarePlus size={12} />
+          Ask AI ({askSet.length})
+        </button>
+
         {!autoScroll && (
           <button
             title="Scroll to Bottom"
@@ -520,6 +611,10 @@ function UnityConsolePanel() {
           const idx = virtualRow.index - rowOffset;
           const item = collapsed[idx];
           if (!item) return null;
+          // `seq` is assigned on ingest for every entry, streamed or backfilled;
+          // the fallback only keeps the key and the lookup using one value.
+          const rowSeq = item.entry.seq ?? -1;
+          const rowFlash = copyFlash && copyFlash.key === rowSeq ? copyFlash : null;
           return (
           <div
             key={virtualRow.key}
@@ -534,6 +629,7 @@ function UnityConsolePanel() {
             }}
           >
             <div
+              className="unity-console-row"
               onClick={() => setExpandedIdx(expandedIdx === idx ? null : idx)}
               style={{
                 display: 'flex',
@@ -575,6 +671,45 @@ function UnityConsolePanel() {
                   {item.count}
                 </span>
               )}
+              {/* Width is reserved at rest and only `opacity` animates. The
+                  rows are measured by `virtualizer.measureElement` and the
+                  message is `pre-wrap`, so a group that appeared on hover would
+                  narrow the message column, wrap a line, regrow the row and
+                  make every row below jump under the pointer. */}
+              <div className="unity-console-row-actions">
+                <button
+                  className="unity-console-row-action"
+                  title={
+                    rowFlash && !rowFlash.ok
+                      ? "Couldn't copy — clipboard unavailable"
+                      : 'Copy message and stack trace'
+                  }
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void runCopy(rowSeq, [item.entry]);
+                  }}
+                >
+                  {rowFlash ? (
+                    rowFlash.ok ? (
+                      <Check size={11} style={{ color: 'var(--success)' }} />
+                    ) : (
+                      <X size={11} style={{ color: 'var(--error-text)' }} />
+                    )
+                  ) : (
+                    <Copy size={11} />
+                  )}
+                </button>
+                <button
+                  className="unity-console-row-action"
+                  title="Add this entry to the AI chat as context"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    runAsk([item.entry]);
+                  }}
+                >
+                  <MessageSquarePlus size={11} />
+                </button>
+              </div>
               {isUnityProject && ERROR_TYPES.includes(item.entry.logType) && (
                 <button
                   title="Fix this error with AI"

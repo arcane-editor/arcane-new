@@ -21,6 +21,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import type { Attachment } from './types';
+import { buildErrorReport } from '../data/error-report';
 import type { HierarchyNode } from '../../unity-bridge';
 
 const MAX_FILE_BYTES = 200 * 1024;
@@ -59,6 +60,14 @@ export async function resolveAttachments(
       // makes visually in the composer.
       blocks.push(`Pasted content (${a.lineCount} lines):\n\n\`\`\`\n${a.text}\n\`\`\``);
       totalBytes += a.text.length;
+      continue;
+    }
+
+    if (a.kind === 'error-report') {
+      // Rendered here, from the entries frozen at capture, by the SAME builder
+      // the clipboard uses — that identity is the feature's whole promise, so
+      // never inline a second renderer in this branch.
+      blocks.push(buildErrorReport(a.source, a.entries, a.capturedAt).block);
       continue;
     }
 

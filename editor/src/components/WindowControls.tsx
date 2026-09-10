@@ -11,8 +11,13 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
  * *plus* ours, stacked. Turning decorations off removes the duplicate, which
  * means we owe them these buttons.
  *
- * Renders nothing on macOS — the caller gates on `data-os`, and this guard is
- * the belt to that's braces.
+ * Lives in shared `components/` rather than inside `app-shell` because both
+ * shells owe them: the project window's TitleBar and the project-management
+ * window (`WelcomeApp`), which is not part of app-shell and must not pull that
+ * feature's barrel — doing so would drag the whole editor (Monaco, the stores,
+ * the panels) into a 720x480 project picker.
+ *
+ * Callers gate on `isMac()`; macOS needs none of this.
  */
 function WindowControls() {
   const [maximized, setMaximized] = useState(false);

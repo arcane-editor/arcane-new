@@ -41,6 +41,13 @@ export {
   isDropOnAiPanel,
 } from './services/drop-target';
 export { fixConsoleError } from './services/fix-console-error';
+export {
+  attachErrorReport,
+  copyErrorReport,
+  errorSelectionText,
+  type ErrorSelection,
+} from './services/attach-errors';
+export { isAskableConsoleEntry } from './data/error-report';
 export { isAiComposerFocused } from './services/composer-focus';
 // The design dock submits through the SAME routing body the composer uses, so
 // a design send goes down one code path with every other send rather than

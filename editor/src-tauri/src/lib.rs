@@ -17,7 +17,7 @@ mod unity_diff;
 mod unity_tests;
 mod unity_ipc;
 mod unity_journal;
-mod dap;
+mod debug;
 mod acp;
 mod auth;
 mod auth_loopback;
@@ -1082,7 +1082,7 @@ pub fn run() {
         .manage(file_scanner::FileWatcherState::new())
         .manage(file_index::FileIndexState::new())
         .manage(unity_ipc::UnityIpcState::new())
-        .manage(dap::DapState::new())
+        .manage(debug::host::DebugState::new())
         .manage(acp::AcpState::new())
         .manage(search::ContentSearchState::new())
         .manage(auth_loopback::LoopbackState::new())
@@ -1219,10 +1219,12 @@ pub fn run() {
             unity_ipc::unity_ipc_request,
             unity_ipc::unity_ipc_reconnect,
             unity_ipc::unity_ipc_status,
-            dap::dap_start,
-            dap::dap_send,
-            dap::dap_stop,
-            dap::check_mono_installed,
+            debug::host::dap_start,
+            debug::host::dap_send,
+            debug::host::dap_stop,
+            debug::host::debug_targets,
+            debug::host::debug_scan_targets,
+            debug::host::debug_trace_path,
             acp::acp_probe,
             acp::acp_install,
             acp::acp_start,
@@ -1431,12 +1433,14 @@ pub fn run() {
                         dummy.drop_window(&label_clone).await;
                     });
                 }
-                // Per-window DAP session cleanup
-                if let Some(state) = window.try_state::<dap::DapState>() {
+                // Per-window debug session cleanup. Dropping the session ends
+                // its router task, which detaches from the runtime cleanly —
+                // abandoning the socket instead is what kills a Unity editor.
+                if let Some(state) = window.try_state::<debug::host::DebugState>() {
                     let inner = state.0.clone();
                     let label_clone = label.clone();
                     tauri::async_runtime::spawn(async move {
-                        let dummy = dap::DapState(inner);
+                        let dummy = debug::host::DebugState(inner);
                         dummy.drop_window(&label_clone).await;
                     });
                 }

@@ -83,6 +83,17 @@ interface GitState {
   amendMode: boolean;
   isLoading: boolean;
   isGitRepo: boolean;
+  /**
+   * Whether a `git status` has actually resolved for the current workspace.
+   *
+   * `isGitRepo` alone cannot answer "is this a git project?": it is `false`
+   * both before the first status lands and after one says "not a repository".
+   * Anything that hides a surface for a non-git workspace has to tell those
+   * apart, or it flashes on every launch of a git project -- see
+   * `showSourceControl`. Set by either verdict, left alone by a transient git
+   * failure (same rule as `isGitRepo`), cleared by `reset`.
+   */
+  repoChecked: boolean;
   ahead: number;
   behind: number;
   commitLog: GitLogEntry[];
@@ -242,6 +253,7 @@ async function doRefreshStatus(
       ahead: result.ahead,
       behind: result.behind,
       isGitRepo: true,
+      repoChecked: true,
       isLoading: false,
       lastError: null,
     });
@@ -257,6 +269,7 @@ async function doRefreshStatus(
         ahead: 0,
         behind: 0,
         isGitRepo: false,
+        repoChecked: true,
         isLoading: false,
         lastError: null,
       });
@@ -339,6 +352,7 @@ export const useGitStore = create<GitState>((set, get) => ({
   amendMode: false,
   isLoading: false,
   isGitRepo: false,
+  repoChecked: false,
   ahead: 0,
   behind: 0,
   commitLog: [],
@@ -645,6 +659,7 @@ export const useGitStore = create<GitState>((set, get) => ({
     amendMode: false,
     isLoading: false,
     isGitRepo: false,
+    repoChecked: false,
     ahead: 0,
     behind: 0,
     commitLog: [],

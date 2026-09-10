@@ -100,8 +100,14 @@ export async function openWelcomeWindow(): Promise<void> {
     minWidth: 600,
     minHeight: 360,
     resizable: true,
+    // Same macOS-only options, same reason, as the project window above: off
+    // macOS these are ignored and the OS would draw its bar over WelcomeApp's
+    // own strip. The welcome window declared in tauri.conf.json gets this from
+    // `lib.rs`; this path spawns one after that window was closed, and has to
+    // match it or the manager comes back with two title bars.
     titleBarStyle: 'overlay',
     hiddenTitle: true,
+    decorations: isMac(),
     backgroundColor: '#13121A',
   });
   await new Promise<void>((resolve, reject) => {

@@ -187,6 +187,49 @@ pub fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         .item(&find_usages)
         .build()?;
 
+    // Debug menu
+    //
+    // On macOS the native menu wins: `handle_menu_event` runs `executeCommand`
+    // with the item's id directly, bypassing the keybinding lookup entirely.
+    // So a chord registered only in `App.tsx` would be shadowed by whatever the
+    // OS menu already claims, and a chord registered only here would run a
+    // command the registry never gated. These ids and accelerators must stay in
+    // step with the `debug.*` block in App.tsx — `keybinding-parity.test.ts`
+    // parses both files and fails if one chord names two different commands.
+    let debug_continue = MenuItemBuilder::with_id("debug.continue", "Continue")
+        .accelerator("CmdOrCtrl+F5")
+        .build(&app_handle)?;
+    let debug_stop = MenuItemBuilder::with_id("debug.stop", "Stop Debugging")
+        .accelerator("CmdOrCtrl+Shift+F5")
+        .build(&app_handle)?;
+    let debug_step_over = MenuItemBuilder::with_id("debug.stepOver", "Step Over")
+        .accelerator("F10")
+        .build(&app_handle)?;
+    let debug_step_into = MenuItemBuilder::with_id("debug.stepInto", "Step Into")
+        .accelerator("F8")
+        .build(&app_handle)?;
+    let debug_step_out = MenuItemBuilder::with_id("debug.stepOut", "Step Out")
+        .accelerator("Shift+F8")
+        .build(&app_handle)?;
+    let debug_run_to_cursor = MenuItemBuilder::with_id("debug.runToCursor", "Run to Cursor")
+        .accelerator("CmdOrCtrl+F10")
+        .build(&app_handle)?;
+    let debug_toggle_breakpoint =
+        MenuItemBuilder::with_id("debug.toggleBreakpoint", "Toggle Breakpoint")
+            .accelerator("F9")
+            .build(&app_handle)?;
+    let debug_submenu = SubmenuBuilder::new(&app_handle, "Debug")
+        .item(&debug_continue)
+        .item(&debug_stop)
+        .separator()
+        .item(&debug_step_over)
+        .item(&debug_step_into)
+        .item(&debug_step_out)
+        .item(&debug_run_to_cursor)
+        .separator()
+        .item(&debug_toggle_breakpoint)
+        .build()?;
+
     // Window menu
     //
     // Minimize is a custom item rather than `PredefinedMenuItem::minimize`,
@@ -211,6 +254,7 @@ pub fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         .item(&edit_submenu)
         .item(&view_submenu)
         .item(&go_submenu)
+        .item(&debug_submenu)
         .item(&window_submenu)
         .build()?;
 

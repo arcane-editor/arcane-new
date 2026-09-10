@@ -457,6 +457,8 @@ interface AiState {
   markQuestionCancelled: (toolCallId: string) => void;
   addAttachment: (attachment: Attachment) => void;
   removeAttachment: (id: string) => void;
+  /** Replace one staged attachment in place, keeping its position in the bar. */
+  replaceAttachment: (id: string, next: Attachment) => void;
   clearAttachments: () => void;
   setPlanPhase: (phase: PlanPhase) => void;
   setActivePlanPath: (path: string | null) => void;
@@ -1244,6 +1246,11 @@ export const useAiStore = create<AiState>((set, get) => ({
 
   removeAttachment: (id: string) =>
     set((s) => ({ attachments: s.attachments.filter((a) => a.id !== id) })),
+
+  // In place, not remove-then-add: merging a second error into a staged
+  // report must not make its chip jump to the end of the bar.
+  replaceAttachment: (id: string, next: Attachment) =>
+    set((s) => ({ attachments: s.attachments.map((a) => (a.id === id ? next : a)) })),
 
   clearAttachments: () => set({ attachments: [] }),
 

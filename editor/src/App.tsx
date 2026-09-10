@@ -121,6 +121,7 @@ import {
 } from './utils/persistence';
 import { useRecentsStore } from './stores/recents';
 import { confirmCloseDirty } from './utils/dirty-guard';
+import { showSourceControl } from './utils/source-control-visibility';
 import { safeUnlisten } from './utils/tauri-listener';
 import { getMonacoInstance } from './utils/monaco-instance';
 import {
@@ -1408,19 +1409,6 @@ function App() {
       },
     },
     {
-      id: 'ai.toggleInlineSuggestions',
-      label: 'Toggle AI Inline Suggestions',
-      category: 'AI',
-      // No chord. mod+alt+I was an AltGr collision (see search.toggleCase),
-      // and this is a set-once preference rather than something worth a slot
-      // in a two-key keymap — the status-bar item (InlineSuggestStatusItem)
-      // and the palette are the ways in.
-      handler: () => {
-        const s = useSettingsStore.getState();
-        s.setSetting('ai.inlineSuggestions.enabled', !s.settings['ai.inlineSuggestions.enabled']);
-      },
-    },
-    {
       id: 'view.explorer',
       label: 'Explorer',
       category: 'View',
@@ -1439,6 +1427,10 @@ function App() {
         useUiStore.getState().setActiveSidebarView('source-control');
         useUiStore.getState().setSidebarVisible(true);
       },
+      // Same gate as the activity-bar icon: a workspace with no repository has
+      // no Source Control surface, so the chord and the palette entry go with
+      // the icon rather than opening a panel with nothing in it.
+      when: () => showSourceControl(useGitStore.getState()),
     },
     // The Unity views had no commands at all, so they were mouse-only and
     // their activity-bar tooltips had no chord to show. mod+shift+d matches
@@ -1584,6 +1576,65 @@ function App() {
         useUiStore.getState().setRightSidebarVisible(true);
         window.dispatchEvent(new CustomEvent('ai-toggle-history'));
       },
+    },
+    // Copy / Ask AI for the two error surfaces. No chords, deliberately: every
+    // free two-key combination is spoken for, a new one has to be mirrored into
+    // `src-tauri/src/menu.rs`, and `mod+shift+c` — the obvious pick — already
+    // belongs to the terminal's copy-selection. These are pointer-initiated
+    // actions with visible buttons; the palette is the right keyboard path.
+    //
+    // Each hops through a window event because the panels own the filter state
+    // that decides WHAT is on screen, and a command cannot reach it. The
+    // handlers on the other side are the same ones the toolbar buttons call.
+    {
+      id: 'problems.copyAll',
+      label: 'Copy Problems',
+      category: 'View',
+      handler: () => {
+        useUiStore.getState().setBottomPanelVisible(true);
+        useUiStore.getState().setActiveBottomTab('problems');
+        // Next frame: with the bottom panel closed, the listening panel has
+        // not mounted yet, so a synchronous dispatch reaches nothing.
+        requestAnimationFrame(() => window.dispatchEvent(new CustomEvent('problems-copy-all')));
+      },
+    },
+    {
+      id: 'problems.askAi',
+      label: 'Ask AI About Problems',
+      category: 'AI',
+      handler: () => {
+        useUiStore.getState().setBottomPanelVisible(true);
+        useUiStore.getState().setActiveBottomTab('problems');
+        // Next frame: with the bottom panel closed, the listening panel has
+        // not mounted yet, so a synchronous dispatch reaches nothing.
+        requestAnimationFrame(() => window.dispatchEvent(new CustomEvent('problems-ask-ai')));
+      },
+    },
+    {
+      id: 'unityConsole.copyAll',
+      label: 'Copy Unity Console',
+      category: 'Unity',
+      handler: () => {
+        useUiStore.getState().setBottomPanelVisible(true);
+        useUiStore.getState().setActiveBottomTab('unity-console');
+        // Next frame: with the bottom panel closed, the listening panel has
+        // not mounted yet, so a synchronous dispatch reaches nothing.
+        requestAnimationFrame(() => window.dispatchEvent(new CustomEvent('unity-console-copy-all')));
+      },
+      when: () => useProjectContextStore.getState().isUnityProject,
+    },
+    {
+      id: 'unityConsole.askAi',
+      label: 'Ask AI About Console Errors',
+      category: 'AI',
+      handler: () => {
+        useUiStore.getState().setBottomPanelVisible(true);
+        useUiStore.getState().setActiveBottomTab('unity-console');
+        // Next frame: with the bottom panel closed, the listening panel has
+        // not mounted yet, so a synchronous dispatch reaches nothing.
+        requestAnimationFrame(() => window.dispatchEvent(new CustomEvent('unity-console-ask-ai')));
+      },
+      when: () => useProjectContextStore.getState().isUnityProject,
     },
     {
       id: 'file.new',
@@ -1827,6 +1878,107 @@ function App() {
       category: 'Git',
       handler: () => setBranchPickerMode('create'),
       when: () => useGitStore.getState().isGitRepo,
+    },
+    // Debug commands.
+    //
+    // Chord choice is constrained by what already works here. F5/Shift+F5/F7
+    // belong to Unity's play family, and this app has already established that
+    // two chords are unusable on Windows: Shift+F10 is the context-menu key and
+    // F11 is the webview's fullscreen key. That rules out VS Code's F11 /
+    // Shift+F11 for step in/out, so those take Rider's F8 / Shift+F8 shape
+    // while the two most-used actions keep the F9 / F10 everyone knows.
+    //
+    // Stepping is gated on a live session rather than merely on a Unity
+    // project, so these keys fall through to the editor and shell when there is
+    // nothing to step.
+    {
+      id: 'debug.toggleBreakpoint',
+      label: 'Toggle Breakpoint',
+      category: 'Debug',
+      keybinding: 'f9',
+      handler: () => {
+        const file = useWorkspaceStore.getState().activeFilePath;
+        const line = useUiStore.getState().cursorPosition?.line;
+        if (file && line) useDebugStore.getState().toggleBreakpoint(file, line);
+      },
+      when: () => useProjectContextStore.getState().isUnityProject,
+    },
+    {
+      id: 'debug.continue',
+      label: 'Continue',
+      category: 'Debug',
+      keybinding: 'mod+f5',
+      handler: () => {
+        const debug = useDebugStore.getState();
+        // One key for "get going": attach when idle, resume when paused.
+        if (debug.status === 'inactive' || debug.status === 'terminated') void debug.attach(false);
+        else void debug.resume();
+      },
+      when: () => useProjectContextStore.getState().isUnityProject,
+    },
+    {
+      id: 'debug.stepOver',
+      label: 'Step Over',
+      category: 'Debug',
+      keybinding: 'f10',
+      handler: () => void useDebugStore.getState().stepOver(),
+      when: () => useDebugStore.getState().status === 'paused',
+    },
+    {
+      id: 'debug.stepInto',
+      label: 'Step Into',
+      category: 'Debug',
+      keybinding: 'f8',
+      handler: () => void useDebugStore.getState().stepIn(),
+      when: () => useDebugStore.getState().status === 'paused',
+    },
+    {
+      id: 'debug.stepOut',
+      label: 'Step Out',
+      category: 'Debug',
+      keybinding: 'shift+f8',
+      handler: () => void useDebugStore.getState().stepOut(),
+      when: () => useDebugStore.getState().status === 'paused',
+    },
+    {
+      id: 'debug.runToCursor',
+      label: 'Run to Cursor',
+      category: 'Debug',
+      keybinding: 'mod+f10',
+      handler: () => {
+        const file = useWorkspaceStore.getState().activeFilePath;
+        const line = useUiStore.getState().cursorPosition?.line;
+        if (file && line) void useDebugStore.getState().runToCursor(file, line);
+      },
+      when: () => useDebugStore.getState().status === 'paused',
+    },
+    {
+      id: 'debug.setNextStatement',
+      label: 'Set Next Statement',
+      category: 'Debug',
+      // No chord: it is a deliberate, occasional action, and every obvious
+      // combination here is already spoken for.
+      handler: () => {
+        const file = useWorkspaceStore.getState().activeFilePath;
+        const line = useUiStore.getState().cursorPosition?.line;
+        if (file && line) void useDebugStore.getState().setNextStatement(file, line);
+      },
+      when: () => useDebugStore.getState().status === 'paused',
+    },
+    {
+      id: 'debug.pause',
+      label: 'Pause',
+      category: 'Debug',
+      handler: () => void useDebugStore.getState().pause(),
+      when: () => useDebugStore.getState().status === 'running',
+    },
+    {
+      id: 'debug.stop',
+      label: 'Stop Debugging',
+      category: 'Debug',
+      keybinding: 'mod+shift+f5',
+      handler: () => void useDebugStore.getState().stop(),
+      when: () => useDebugStore.getState().status !== 'inactive',
     },
     // Unity commands
     {

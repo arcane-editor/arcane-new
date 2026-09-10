@@ -1,4 +1,5 @@
 import './styles/better-comments.css';
+import './styles/hover.css';
 
 export { default as EditorPanel } from './components/EditorPanel';
 export { default as EditorErrorBoundary } from './components/EditorErrorBoundary';

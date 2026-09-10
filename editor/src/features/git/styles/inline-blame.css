@@ -1,0 +1,31 @@
+/**
+ * The inline blame hint — dim text trailing the end of the cursor's line.
+ *
+ * It has to be legible without being looked for, and quiet enough that it
+ * never competes with the code it trails. That is one job for colour
+ * (`--text-secondary`, already this app's "metadata" tone) and one for scale.
+ * Never a border, a chip or a background: any of those would make a row of
+ * code look like it had grown a control.
+ *
+ * `--inline-blame-pad` is set per line by `attachInlineBlame` — the gap has a
+ * floor so the hint never crowds the code, and a minimum column so short lines
+ * do not park it hard against the text.
+ */
+.monaco-editor .inline-blame {
+  padding-left: var(--inline-blame-pad, 6ch);
+  color: var(--text-secondary);
+  font-size: 0.92em;
+  font-style: normal;
+  opacity: 0.75;
+  /* An annotation, not content: it must never join a selection drag, and
+     double-clicking the last word of a line must not catch it. */
+  user-select: none;
+  -webkit-user-select: none;
+  white-space: pre;
+}
+
+/* Hovering it is how you ask for the full commit, so it answers by
+   strengthening first. */
+.monaco-editor .inline-blame:hover {
+  opacity: 1;
+}

@@ -38,9 +38,9 @@ You are working on an AI-powered IDE purpose-built for Unity developers.
 - **The Unity bridge C# code is part of the single Unity extension package**, which lives at `arcane-extension/` in the repo root (`com.unityide.editor`, Editor-only) — the single source of truth. It merges the live socket bridge (`UnityIDE.Bridge`) with the external-code-editor integration (`UnityIDE.Editor`: External Tools registration, double-click open, `.sln`/`.csproj` generation). `scripts/sync-unity-bridge.mjs` copies it into a gitignored `unity-bridge/` staging folder before every `tauri dev`/`build` (wired via `beforeDevCommand`/`beforeBuildCommand`); Tauri bundles that as a resource and `unity_install_bridge` installs it into `<project>/Packages/com.unityide.editor/` (embedded package; no manifest.json surgery). It has NOT been run against a live Unity Editor yet — see "live validation" below.
 - **Analyzers are a TypeScript layer**, not Roslyn analyzers (spec §F-2.4 permits this fallback). Feature: `src/features/unity-analyzers/`. Monaco marker owner `'unity-analyzer'`.
 - **Multi-source diagnostics**: `useUiStore.setFileDiagnostics(uri, source, items)` with sources `lsp | unity-analyzer | unity-compiler | asmdef | unity-packages`; read-time dedup drops `unity-compiler` items on a line that also has an `lsp` item. (`src/stores/ui.ts`)
-- **Debugger = DAP via the external `vscode-mono-debug` adapter** (needs system Mono to run the adapter; Unity's own soft-debugger agent is the debuggee). Native-Rust soft-debugger client and self-contained adapter were considered and **deferred**. Rust host: `src-tauri/src/dap.rs`.
+- **Debugger = a native Rust Mono soft-debugger client**, in-process, answering DAP so the existing frontend is unchanged. `src-tauri/src/debug/`. *(Superseded 2026-09-09.* The original decision was a DAP sidecar over `vscode-mono-debug`. It was built, and it could not work in a shipped build: the adapter was never vendored, `binaries/mono-debug` was in neither `resources` nor `externalBin`, and it required a **system Mono runtime** the app does not ship — so the only users who ever got a debugger were those who already had VS Code with the Mono Debug extension installed. `dap.rs` and `scripts/fetch-mono-debug.ts` are deleted.*)*
 - **Every feature has a `unity.*` disable setting** already in `src/stores/settings.ts` + `src/types/index.ts` + Settings UI.
-- **New feature modules added** (deep-modules; each has an `index.ts` barrel): `unity-bridge`, `unity-analyzers`, `asmdef`, `unity-packages`, `debugger`. New stores: `asmdef`, `unity-index`, `debug`. New Rust modules: `asmdef.rs`, `unity_yaml.rs`, `unity_index.rs`, `dap.rs`.
+- **New feature modules added** (deep-modules; each has an `index.ts` barrel): `unity-bridge`, `unity-analyzers`, `asmdef`, `unity-packages`, `debugger`. New stores: `asmdef`, `unity-index`, `debug`. New Rust modules: `asmdef.rs`, `unity_yaml.rs`, `unity_index.rs`, and the `debug/` module tree (wire codec, protocol, socket, symbols, values, objects, session, evaluator, renderers, DAP router, discovery).
 
 ### Per-feature status
 | Feature | Status | Notes / where |
@@ -70,8 +70,8 @@ You are working on an AI-powered IDE purpose-built for Unity developers.
 | **F-6.1** GUID index | ✅ | `unity_index.rs` (guid↔path + reverse-ref + meta-hygiene + incremental delta, tests) + `resolveGuid` forward cache. Meta-pairing rename/delete pre-exists; **typed-confirm for lone-`.meta` delete** now wired (`explorer/components/TypedConfirmDialog.tsx`). |
 | **F-6.2** find usages in assets | ✅ | `SceneUsagePanel` re-backed by index + "Used in N prefabs, M scenes" CodeLens. Works Unity-closed. |
 | **F-6.3** safe-delete (P2) | ✅ | `ImpactDeleteDialog`: deleting a referenced asset/script first shows its blast radius (scenes/prefabs referencing it, via the offline index) before confirming. Lone-`.meta` typed-confirm takes precedence. Works Unity-closed. |
-| **F-7.1** attach to Unity Editor | ✅* | **Full debugger**: `dap.rs` host + DAP client + debug store (breakpoints persisted, attach/attach+play, step, stack, scopes/vars, watch) + breakpoint gutter + debug UI panels (`src/features/debugger/`). Unity-aware value rendering. Graceful degradation hardened. *Uses external mono-debug adapter (needs Mono); **NOT live-validated** (no Mono/adapter/Unity in build env). Adapter not vendored — `find_adapter` also picks up a system VS Code "Mono Debug" extension; see `scripts/fetch-mono-debug.ts`. |
-| **F-7.2** players & tests (P1/P2) | ⏳ | Not started. |
+| **F-7.1** attach to Unity Editor | ✅ | **Native Mono soft-debugger client** in `src-tauri/src/debug/`, answering DAP in-process. No adapter, no system Mono, nothing downloaded. Live-validated by `verify:debugger` against a real Mono agent: bind, hit, frames, locals, object fields, stepping, exception breakpoints, set-next-statement. Breakpoints re-bind across domain reloads. |
+| **F-7.2** players & tests (P1/P2) | 🟡 | Network player discovery (multicast) and Android (`adb forward`) implemented; test debugging attaches before running. The Android forward is **unverified — no device was available**. iOS is network-only. |
 | **F-8** test runner | ✅* | `unity_tests.rs` discovery (asmdef-based, cargo tests) + headless `-runTests` + NUnit3 parser (tested); C# `TestRunnerHandlers` (`TestRunnerApi` streaming via `test_event`, asmdef versionDefine-guarded); `unity-test-runner/` panel + Run/Debug CodeLens + `useTestStore` (one event path live+headless); "Run All Tests" verb. *TestRunnerApi streaming + the `-batchmode` run NOT live-validated. |
 | **F-9** Unity-aware git | ✅* | Backend (pre-existing) **+ frontend** (`git/`): SCM "Merge Conflicts" section with UnityYAMLMerge + ours/theirs resolve, meta-pairing commit-block (`unity-git.ts`), `.gitignore` doctor on Unity-repo open. *UnityYAMLMerge CLI not live-validated. |
 | **F-10** Unity-native UX | 🟡 | Status-bar cluster + attach-debugger (pre-existing). **Now done**: compile-feedback-on-save (F-4.2), Assets-first explorer + `.meta` hiding (`explorer/services/unity-tree-view.ts`), palette verbs (Show Hierarchy/Open Scene/Find Asset/Run All Tests/New Script), version-matched docs-on-hover (T10.2, `editor/services/unity-docs-hover.ts`). **Remaining: external-editor registration + `unityide://` deep link (T10.1 — needs a Tauri deep-link plugin + packaged build; only meaningfully testable when installed).** |
@@ -79,7 +79,7 @@ You are working on an AI-powered IDE purpose-built for Unity developers.
 
 ### ⚠️ Live-validation debt (cannot be tested in a headless build env — needs a real Unity install + machine with Mono/.NET)
 1. **C# bridge** end-to-end: `UnixDomainSocketEndPoint` under the project's .NET API compatibility level (needs .NET Standard 2.1), `log_batch` rendering (the C# sends a **bare array** to match the frontend listener), domain-reload survival, RPC round-trips.
-2. **Debugger** (F-7.1): the whole breakpoint→hit→step→inspect loop, and breakpoint rebinding across domain reloads. Needs `brew install mono` + a vendored/extension `mono-debug` adapter + a running Unity Editor.
+2. **Debugger** (F-7.1): covered by `verify:debugger`, which drives the real client against Unity's own bundled Mono. Still unverified against a *live Unity Editor* specifically — that path is `verify:debugger --section` with `UNITYIDE_DEBUGGER_UNITY_PROJECT`, and the Android forward has no device to test on.
 3. **`didChangeWatchedFiles`** (F-1.4) efficacy with live csharp-ls.
 4. **Analyzer CS-code suppression** (F-2.2) exact Roslyn `code` values.
 5. **UnityYAMLMerge** CLI invocation (F-9) against a real editor install.
@@ -92,7 +92,7 @@ You are working on an AI-powered IDE purpose-built for Unity developers.
 ### Recommended order to finish (remaining work)
 1. **Live-validation pass** on a real Unity + Mono machine — work the debt list above; this is now the bulk of what's left.
 2. **F-10 T10.1** external-editor registration + `unityide://` deep link — the one remaining buildable feature; needs a Tauri deep-link plugin + OS scheme registration that only functions in a packaged/installed build (not testable headlessly), so it was deferred.
-3. **F-7.2** player/mobile debugging (P2) — needs live dev players + multicast discovery.
+3. **F-7.2** player/mobile debugging (P2) — implemented; needs a live dev player and an Android device to validate.
 4. **F-11** load-test at the 10k-file scale.
 
 ---
@@ -304,17 +304,61 @@ One-click action on any console error/exception entry:
 
 Unity's scripting runtime is debugged via the **Mono soft debugger protocol** (even on IL2CPP *players* there's a variant; scope to Editor debugging first). This is not netcoredbg/vsdbg territory — do not attempt to attach a CoreCLR debugger to the Unity Editor.
 
-### F-7.1 Stage 1 — Attach to Unity Editor (P0)
-- Implement (or port) a Mono Soft Debugger client. Reference implementations to study: Mono's `debugger-libs` (MIT), the VS Code Unity debugging lineage (`vscode-unity-debug` / MonoDevelop.Debugger.Soft). Recommended architecture: a sidecar process implementing the **Debug Adapter Protocol** that translates DAP ↔ Mono soft debugger wire protocol; the IDE frontend implements a DAP client UI. This keeps the debugger swappable and testable independent of the UI.
-- Discovery: the Editor's debugger port is derived from the Unity process (56000 + pid%1000 historically) — but **prefer asking the bridge** (`getDebuggerEndpoint`) when connected; fall back to player-broadcast/port scan when not.
-- P0 feature set: attach/detach, breakpoints (incl. conditional + hit count), step in/over/out, call stacks for all threads, locals/watch with Unity-type-aware rendering (Vector3 shown as `(x, y, z)`, Color swatch, GameObject shown by name with instanceID, UnityEngine.Object "null-but-not-null" destroyed state rendered honestly as `<destroyed>`), exception breakpoints (break on thrown/user-unhandled), `Debug.Log` continues streaming to the console panel while paused.
-- Domain reload handling: breakpoints must survive Unity recompiles (rebind after reload; show "rebinding…" state).
-- One-click flows: "Attach to Unity" (status bar button when bridge sees a Unity instance), "Attach and Play" (attach, then bridge-play).
-- **Acceptance:** Set a breakpoint in `Update`, click Attach and Play → breakpoint hits; inspect a Vector3 local; step; recompile a script while attached → breakpoints still hit afterward.
+### F-7.1 Stage 1 — Attach to Unity Editor (P0) — **implemented natively**
+
+The Mono soft-debugger client is **written in Rust, in-process**, at
+`src-tauri/src/debug/`. It answers DAP directly, so the existing frontend
+(`dap-client.ts`, the debug store, the panels) is unchanged.
+
+This replaces the earlier plan of a DAP sidecar over `vscode-mono-debug`, which
+was built and could never work in a shipped build: the adapter was never
+vendored, `binaries/mono-debug` appeared in neither `resources` nor
+`externalBin`, and it needed a **system Mono runtime** the app does not ship.
+Nothing is downloaded now — no adapter, no .NET, no Mono.
+
+- **Discovery** (`debug/discovery.rs`): `Library/EditorInstance.json` → pid →
+  `56000 + pid % 1000`. The bridge (`getDebuggerEndpoint`) is a *fallback*, not
+  a requirement — attach used to abort whenever the in-editor package was not
+  connected.
+- **Binding** (`debug/symbols.rs`): no PDB is parsed. `TYPE_LOAD` filtered by
+  source file, plus `METHOD_GET_DEBUG_INFO` for the line table. Because Unity
+  reloads its script assembly on every recompile, **breakpoints re-bind
+  themselves after a domain reload** — that path is the mechanism, not an extra
+  feature.
+- **Delivered:** attach/detach, breakpoints, conditional breakpoints and hit
+  counts, logpoints, exception breakpoints, step in/over/out with "my code
+  only" filters, run-to-cursor, set-next-statement, threads, call stacks,
+  locals/watch, an expression evaluator, inline values, a debug console, and
+  Unity renderers (Vector-likes inline, inherited fields, coroutine state
+  machines de-mangled, and destroyed `UnityEngine.Object` reported honestly via
+  `m_CachedPtr`).
+- **Code optimization**: Unity 2020.1+ starts the Editor in Release, where
+  locals and stepping degrade with nothing reporting why. `getCodeOptimization`
+  / `setCodeOptimization` on the bridge detect it and offer the switch.
+- **Not supported, deliberately:** IL2CPP. It is AOT-compiled C++ with no
+  managed runtime to attach to; Rider cannot debug it either. Reported by name
+  rather than failing to attach.
+- **Verification:** `bun run verify:debugger` compiles a fixture with Unity's
+  own bundled C# compiler and runs it under Unity's own Mono with a debugger
+  agent, then drives the real client against it. It never touches an editor the
+  developer is using. A `SKIPPED` is not a pass; `UNITYIDE_DEBUGGER_E2E=required`
+  makes a skip a failure.
 
 ### F-7.2 Stage 2 — Players & tests (P1/P2)
-- P1: attach to development **PlayMode tests** runs (same Editor attach, coordinated with F-8 so "Debug test" works).
-- P2: attach to local development builds/players (player connection discovery via multicast), incl. mobile over USB stretch goal.
+- **Network players** (`debug/players.rs`): PlayerConnection multicast on
+  `225.0.0.222:54997`. The debugger port comes from `56000 + (guid % 1000)`, not
+  the announced `[Port]` (that one carries profiler traffic), and `[Debug] 0`
+  builds are filtered out rather than offered.
+- **Android** (`debug/android.rs`): `adb forward tcp:<port>
+  localabstract:Unity-<application identifier>`. `adb` comes from the Unity
+  install's Android module first, so still nothing to download. **The forward
+  itself is unverified — no device was available.** Parsing and command
+  construction are tested; that last hop is not.
+- **Tests**: `debugTest` attaches (reusing a live session) and only then asks
+  the bridge to run, so the test cannot finish before the breakpoints bind.
+- **iOS**: reachable over the network like any other player. USB needs
+  `usbmuxd`/Apple Mobile Device Support, which is a genuine external
+  dependency on Windows — not implemented.
 
 ---
 

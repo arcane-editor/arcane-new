@@ -16,7 +16,6 @@ import { lspManager } from '../../lsp';
 import { GraphifyStatusBadge } from '../../graphify';
 import { TelemetryStatusItem } from '../../unity-telemetry';
 import { UnityBridgeStatusItem } from '../../unity-bridge';
-import { InlineSuggestStatusItem } from '../../inline-suggest';
 import { detectLanguage } from '../../../utils/language-detect';
 import { getDocumentInfo } from '../../editor';
 
@@ -199,7 +198,6 @@ function StatusBar() {
             <span>AI usage {usedPct}%</span>
           </span>
         )}
-        <InlineSuggestStatusItem />
         <GraphifyStatusBadge />
         {cursorPosition && (
           <span className="status-bar-item">

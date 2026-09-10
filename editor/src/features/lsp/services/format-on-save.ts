@@ -15,7 +15,7 @@
 import { getMonacoInstance } from '../../../utils/monaco-instance';
 import type { LspClient } from './client';
 import { fileUri } from './document-sync';
-import { toMonacoRange, type LspRange } from './model-context';
+import { lspDocumentUri, toMonacoRange, type LspRange } from './model-context';
 
 interface LspTextEdit {
   range: LspRange;
@@ -49,7 +49,10 @@ export async function formatDocumentBeforeSave(
   let edits: LspTextEdit[] | null = null;
   try {
     edits = await client.request<LspTextEdit[] | null>('textDocument/formatting', {
-      textDocument: { uri: model.uri.toString() },
+      // Never `model.uri.toString()`: Monaco renders a Windows drive letter
+      // lower-cased and percent-encoded, which is not the URI `didOpen` used,
+      // so the server answers null and the file saves unformatted forever.
+      textDocument: { uri: lspDocumentUri(model) },
       options: { tabSize, insertSpaces },
     });
   } catch (err) {

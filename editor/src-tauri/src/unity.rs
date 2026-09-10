@@ -777,6 +777,23 @@ fn workspace_scripting_root(workspace_path: &Path) -> Option<PathBuf> {
     unity_scripting_root(Path::new(&install.path))
 }
 
+/// The Unity install's `Data` directory for a project.
+///
+/// `PlaybackEngines` — and the Android SDK inside it, which is where `adb`
+/// comes from without anyone downloading anything — lives directly under Data,
+/// while the scripting root may sit a level deeper. So this repeats the layout
+/// choice rather than reusing `workspace_scripting_root`.
+pub(crate) fn workspace_editor_data(workspace_path: &Path) -> Option<PathBuf> {
+    let version = read_unity_version(&workspace_path.join("ProjectSettings"))?;
+    let install = resolve_unity_editor(version).ok()??;
+    let install_path = Path::new(&install.path);
+    Some(if install_path.extension().is_some_and(|e| e == "app") {
+        install_path.join("Contents")
+    } else {
+        install_path.parent()?.join("Data")
+    })
+}
+
 /// Collect every reference assembly Roslyn needs straight out of the Unity
 /// install: the UnityEngine/UnityEditor modules, the top-level engine and
 /// editor assemblies, and the netstandard 2.1 reference + shim facades.
