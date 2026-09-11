@@ -16,6 +16,7 @@ interface ErrorBoundaryProps {
   /** Optional compact fallback (e.g. for a single panel) instead of the
    *  full-screen error UI. Keeps a localized failure from taking over the app. */
   fallback?: React.ReactNode;
+  resetKey?: unknown;
 }
 
 export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
@@ -40,6 +41,10 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
       stack: error.stack,
       componentStack: info.componentStack ?? undefined,
     });
+  }
+
+  componentDidUpdate(previous: ErrorBoundaryProps) {
+    if (this.state.hasError && !Object.is(previous.resetKey, this.props.resetKey)) this.handleDismiss();
   }
 
   handleReload = () => {
@@ -75,6 +80,7 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
                 <pre style={compactPreStyle}>{summary.detail}</pre>
               </details>
             )}
+            <button onClick={this.handleDismiss} style={compactCopyStyle}>Retry</button>
             <button onClick={this.handleCopy} style={compactCopyStyle}>
               Copy details
             </button>

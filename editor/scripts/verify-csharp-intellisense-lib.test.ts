@@ -317,3 +317,7 @@ describe('locate', () => {
     expect(() => locate(SRC, 'NotThere')).toThrow(/no longer contains/);
   });
 });
+
+it('dotnet discovery follows a symlinked launcher to the SDK root', () => {
+  expect(resolveDotnetRoot('darwin', {}, () => '/opt/homebrew/bin/dotnet', () => '/usr/local/share/dotnet/dotnet')).toBe('/usr/local/share/dotnet');
+});

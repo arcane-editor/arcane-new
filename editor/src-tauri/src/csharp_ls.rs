@@ -26,9 +26,9 @@
 //! is left is reading a file we shipped and writing files into a directory we
 //! own, which is the whole job.
 //!
-//! **What it deliberately does not do.** It never overrides a `csharp-ls` the
-//! user already has — [`resolve_existing`] checks their install first and the
-//! managed copy last, so nobody's working setup changes underneath them.
+//! The managed, pinned copy takes precedence over automatic global/PATH
+//! discovery. An explicit path override still wins. Global tools are never
+//! overwritten; incompatible automatic discoveries trigger managed provisioning.
 //!
 //! **The prerequisite that is easy to get wrong.** csharp-ls 0.27.0 targets
 //! `net10.0`, so "has dotnet" is not the requirement — the .NET 10 *runtime*
@@ -184,28 +184,33 @@ pub enum Source {
 
 /// Locate an existing csharp-ls, in precedence order.
 ///
-/// The user's own install wins over ours on purpose. Someone who ran
-/// `dotnet tool install -g csharp-ls`, or who pinned a build for a reason we
-/// cannot see, must not have that silently replaced by an app update.
+/// An explicit override wins; otherwise prefer the version this app verifies.
+/// An unrelated global tool can predate the project's required LSP features.
 pub fn resolve_existing() -> Option<(ServerLaunch, Source)> {
-    if let Some(raw) = std::env::var_os(PATH_OVERRIDE_ENV) {
-        let p = PathBuf::from(raw);
-        if p.is_file() {
-            return Some((ServerLaunch::Executable(p), Source::Override));
-        }
+    select_existing(
+        std::env::var_os(PATH_OVERRIDE_ENV).map(PathBuf::from).filter(|p| p.is_file()),
+        managed_version_dir().as_deref().and_then(entry_point_in),
+        global_tool_binary().filter(|p| p.is_file()),
+        path_binary(),
+    )
+}
+
+fn select_existing(explicit: Option<PathBuf>, managed: Option<PathBuf>, user: Option<PathBuf>, path: Option<PathBuf>) -> Option<(ServerLaunch, Source)> {
+    explicit.map(|p| (ServerLaunch::Executable(p), Source::Override))
+        .or_else(|| managed.map(|p| (ServerLaunch::DotnetDll(p), Source::Managed)))
+        .or_else(|| user.map(|p| (ServerLaunch::Executable(p), Source::User)))
+        .or_else(|| path.map(|p| (ServerLaunch::Executable(p), Source::Path)))
+}
+
+async fn compatible_existing() -> Option<(ServerLaunch, Source)> {
+    let (launch, source) = resolve_existing()?;
+    if matches!(source, Source::User | Source::Path) {
+        let output = tokio::time::timeout(std::time::Duration::from_secs(5),
+            crate::process_util::async_command(launch.path()).arg("--version").kill_on_drop(true).output()
+        ).await.ok()?.ok()?;
+        if !output.status.success() || !version_output_matches(&String::from_utf8_lossy(&output.stdout)) { return None; }
     }
-    if let Some(p) = global_tool_binary() {
-        if p.is_file() {
-            return Some((ServerLaunch::Executable(p), Source::User));
-        }
-    }
-    if let Some(p) = path_binary() {
-        return Some((ServerLaunch::Executable(p), Source::Path));
-    }
-    if let Some(dll) = managed_version_dir().as_deref().and_then(entry_point_in) {
-        return Some((ServerLaunch::DotnetDll(dll), Source::Managed));
-    }
-    None
+    Some((launch, source))
 }
 
 /// The bundled nupkg, if it shipped with this build.
@@ -717,7 +722,7 @@ pub struct CsharpLsStatus {
 
 #[tauri::command]
 pub async fn csharp_ls_status() -> CsharpLsStatus {
-    let existing = resolve_existing();
+    let existing = compatible_existing().await;
     let dotnet = probe_dotnet().await;
     let can_install = dotnet.present
         && dotnet.has_sdk
@@ -742,7 +747,7 @@ pub async fn csharp_ls_install(
 ) -> Result<String, InstallError> {
     // Serialized so two windows cannot unpack into the same directory.
     let _guard = state.0.lock().await;
-    if let Some((launch, _)) = resolve_existing() {
+    if let Some((launch, _)) = compatible_existing().await {
         return Ok(launch.path().to_string_lossy().into_owned());
     }
     let path = install(&app).await?;
@@ -752,6 +757,19 @@ pub async fn csharp_ls_install(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn managed_server_wins_over_automatic_global_discovery_but_not_an_explicit_override() {
+        let managed = PathBuf::from("managed/CSharpLanguageServer.dll");
+        let global = PathBuf::from("global/csharp-ls");
+        let explicit = PathBuf::from("custom/csharp-ls");
+        let (launch, source) = select_existing(None, Some(managed.clone()), Some(global.clone()), None).unwrap();
+        assert_eq!(source, Source::Managed);
+        assert_eq!(launch.path(), managed);
+        let (launch, source) = select_existing(Some(explicit.clone()), Some(managed), Some(global), None).unwrap();
+        assert_eq!(source, Source::Override);
+        assert_eq!(launch.path(), explicit);
+    }
 
     /// Verbatim `dotnet --list-runtimes` from a .NET 10 macOS install.
     const RUNTIMES_NET10: &str = "\

@@ -33,7 +33,7 @@ import AttachmentBar from './AttachmentBar';
 import ImageAttachButton from './ImageAttachButton';
 
 function ChatInput() {
-  const isAgentRunning = useAiStore((s) => s.isAgentRunning);
+  const isAgentRunning = useAiStore((s) => s.isAgentRunning || s.isSubmitting);
   const mode = useAiStore((s) => s.mode);
   const selectedAgent = useAiStore((s) => s.selectedAgent);
   const planPhase = useAiStore((s) => s.planPhase);
@@ -81,11 +81,14 @@ function ChatInput() {
     // `addUserMessage` (the answer shows in the locked QuestionBlock, not as
     // a user bubble) and no `clearAttachments` (staged attachments are
     // unrelated to the question and must survive to the next real send).
-    if (shouldRouteToQuestion({ pendingQuestion: !!pendingQuestion, text })) {
-      useAiStore.getState().resolveQuestionRequest(pendingQuestion!.toolCallId, { answer: text.trim() });
-      return;
+    const currentQuestion = selectPendingQuestion(useAiStore.getState());
+    if (shouldRouteToQuestion({ pendingQuestion: !!currentQuestion, text })) {
+      useAiStore.getState().resolveQuestionRequest(currentQuestion!.toolCallId, { answer: text.trim() });
+      return true;
     }
 
+    const state = useAiStore.getState();
+    if (state.isAgentRunning || state.isSubmitting) return false;
     // Sending from the SIDEBAR leaves the design chat's mode behind. The mode
     // pill here shows Agent for a design thread (`modeOptionFor`), and this is
     // what makes that true rather than a label the next send contradicts — the
@@ -95,7 +98,7 @@ function ChatInput() {
       useAiStore.getState().setMode('agent');
     }
 
-    dispatchComposerSend(text, useAiStore.getState().attachments);
+    return dispatchComposerSend(text, useAiStore.getState().attachments);
   }
 
   function handleStop() {

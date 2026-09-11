@@ -1,0 +1,5 @@
+{
+  "name": "UnityIDE.Automation.Runtime",
+  "rootNamespace": "UnityIDE.Automation",
+  "autoReferenced": false
+}

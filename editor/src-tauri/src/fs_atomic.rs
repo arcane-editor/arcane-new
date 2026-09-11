@@ -1,27 +1,13 @@
-// ── Atomic file replacement ─────────────────────────────────────────────────
-//
-// `lib.rs::write_file` is a bare `fs::write`: it truncates the target and then
-// streams into it, so a crash or a full disk mid-write leaves a half-written
-// file and the original is gone. For an editor buffer that is survivable — the
-// text is still in memory. For a Unity `.asset` it is not: the file IS the data,
-// and a truncated one loses a designer's tuning and breaks every reference into
-// it.
-//
-// So writes on the ScriptableObject path go through here instead: write a temp
-// file beside the target, fsync it, then rename over the target. `rename` is
-// atomic within a filesystem, so a reader sees either the whole old file or the
-// whole new one, never a torn one.
-//
-// This deliberately does NOT replace `write_file`. That call backs every editor
-// save in the app, and changing its durability, temp-file footprint and Windows
-// sharing-violation surface at the same time as shipping a new feature would
-// make any save regression look like this feature's fault.
+//! Atomic, serialized replacement for editor buffers, history and assets.
+//! Stage and sync bytes beside the destination before replacing the old file.
 
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, OpenOptions};
+use std::hash::{Hash, Hasher};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{LazyLock, Mutex};
 
 /// Distinguishes the temp files from anything a user or Unity would create.
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -99,7 +85,71 @@ fn rename_with_retry(from: &Path, to: &Path) -> io::Result<()> {
 /// could round-trip through `String` and silently normalise line endings, which
 /// is the exact class of corruption the byte-exact asset writer exists to
 /// prevent.
+static WRITE_LOCKS: LazyLock<[Mutex<()>; 64]> =
+    LazyLock::new(|| std::array::from_fn(|_| Mutex::new(())));
+
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    replace(path, bytes, None).map(|_| ())
+}
+
+/// A missing baseline never grants permission to overwrite an existing file.
+/// Recheck immediately before replacement, including changes during staging.
+pub fn write_if_unchanged(path: &Path, bytes: &[u8], expected: Option<&str>) -> io::Result<bool> {
+    replace(path, bytes, Some(expected))
+}
+
+fn replace(path: &Path, bytes: &[u8], expected: Option<Option<&str>>) -> io::Result<bool> {
+    // Follow existing symlinks instead of replacing the link itself. Canonical
+    // parent identity also serializes aliases of a newly-created destination.
+    let target = match fs::canonicalize(path) {
+        Ok(p) => p,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
+            if fs::symlink_metadata(path).is_ok() {
+                return Err(e);
+            }
+            let parent = path
+                .parent()
+                .filter(|p| !p.as_os_str().is_empty())
+                .unwrap_or(Path::new("."));
+            fs::canonicalize(parent)?.join(path.file_name().ok_or(e)?)
+        }
+        Err(e) => return Err(e),
+    };
+    let mut hash = std::collections::hash_map::DefaultHasher::new();
+    target.hash(&mut hash);
+    let _lock = WRITE_LOCKS[hash.finish() as usize % WRITE_LOCKS.len()]
+        .lock()
+        .map_err(|_| io::Error::other("file write lock poisoned"))?;
+    replace_locked(&target, bytes, expected, || Ok(()))
+}
+
+fn matches_baseline(path: &Path, expected: Option<&str>) -> io::Result<bool> {
+    use std::io::Read;
+    match fs::File::open(path) {
+        Ok(file) => match expected {
+            None => Ok(false),
+            Some(text) => {
+                let mut bytes = Vec::new();
+                file.take(text.len() as u64 + 1).read_to_end(&mut bytes)?;
+                Ok(bytes == text.as_bytes())
+            }
+        },
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(expected.is_none()),
+        Err(e) => Err(e),
+    }
+}
+
+fn replace_locked(
+    path: &Path,
+    bytes: &[u8],
+    expected: Option<Option<&str>>,
+    before_commit: impl FnOnce() -> io::Result<()>,
+) -> io::Result<bool> {
+    if let Some(baseline) = expected {
+        if !matches_baseline(path, baseline)? {
+            return Ok(false);
+        }
+    }
     let parent = path.parent().ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -158,6 +208,12 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
         }
     }
 
+    before_commit()?;
+    if let Some(baseline) = expected {
+        if !matches_baseline(path, baseline)? {
+            return Ok(false);
+        }
+    }
     rename_with_retry(&tmp_path, path)?;
     guard.disarm();
 
@@ -169,13 +225,85 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
         }
     }
 
-    Ok(())
+    Ok(true)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn failed_staging_keeps_original_and_removes_temp() {
+        let dir = tmpdir();
+        let path = dir.path().join("Player.cs");
+        fs::write(&path, b"original").unwrap();
+        let result = replace_locked(&path, b"new", None, || {
+            Err(io::Error::other("injected disk failure"))
+        });
+        assert!(result.is_err());
+        assert_eq!(fs::read(&path).unwrap(), b"original");
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn checks_disk_again_after_staging() {
+        let dir = tmpdir();
+        let path = dir.path().join("Player.cs");
+        fs::write(&path, b"original").unwrap();
+        let saved = replace_locked(&path, b"user", Some(Some("original")), || {
+            fs::write(&path, b"external")
+        })
+        .unwrap();
+        assert!(!saved);
+        assert_eq!(fs::read(&path).unwrap(), b"external");
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn conflicting_concurrent_saves_do_not_both_commit() {
+        let dir = tmpdir();
+        let path = dir.path().join("Player.cs");
+        fs::write(&path, b"original").unwrap();
+        std::thread::scope(|scope| {
+            let a = scope.spawn(|| write_if_unchanged(&path, b"first", Some("original")).unwrap());
+            let b = scope.spawn(|| write_if_unchanged(&path, b"second", Some("original")).unwrap());
+            assert_ne!(a.join().unwrap(), b.join().unwrap());
+        });
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn follows_symlink_and_preserves_bom_and_crlf() {
+        let dir = tmpdir();
+        let path = dir.path().join("real.cs");
+        let link = dir.path().join("alias.cs");
+        fs::write(&path, b"old").unwrap();
+        std::os::unix::fs::symlink(&path, &link).unwrap();
+        let text = b"\xef\xbb\xbfclass Player {}\r\n";
+        write_atomic(&link, text).unwrap();
+        assert!(fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(fs::read(&path).unwrap(), text);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn locked_destination_stays_intact() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let dir = tmpdir();
+        let path = dir.path().join("locked.cs");
+        fs::write(&path, b"original").unwrap();
+        let _held = OpenOptions::new()
+            .read(true)
+            .share_mode(1)
+            .open(&path)
+            .unwrap();
+        assert!(write_atomic(&path, b"new").is_err());
+        assert_eq!(fs::read(&path).unwrap(), b"original");
+    }
 
     fn tmpdir() -> tempfile::TempDir {
         tempfile::tempdir().expect("tempdir")
@@ -190,7 +318,10 @@ mod tests {
         write_atomic(&path, b"new contents").unwrap();
 
         assert_eq!(fs::read(&path).unwrap(), b"new contents");
-        let entries: Vec<_> = fs::read_dir(dir.path()).unwrap().map(|e| e.unwrap()).collect();
+        let entries: Vec<_> = fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap())
+            .collect();
         assert_eq!(entries.len(), 1, "a temp file was left behind");
     }
 
@@ -229,7 +360,10 @@ mod tests {
         let b = temp_name(OsStr::new("Weapon.asset"));
         let a = a.to_string_lossy().to_string();
         let b = b.to_string_lossy().to_string();
-        assert!(a.starts_with('.'), "{a} must be a dot-file so Unity skips it");
+        assert!(
+            a.starts_with('.'),
+            "{a} must be a dot-file so Unity skips it"
+        );
         assert!(a.ends_with(".tmp"), "{a} must end in .tmp");
         assert!(a.contains("Weapon.asset"));
         assert_ne!(a, b, "two temps in the same directory must not collide");

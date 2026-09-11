@@ -2,6 +2,7 @@
     "name": "UnityIDE.Editor",
     "rootNamespace": "UnityIDE",
     "references": [
+        "UnityIDE.Automation.Runtime",
         "UnityEditor.TestRunner",
         "UnityEngine.TestRunner"
     ],

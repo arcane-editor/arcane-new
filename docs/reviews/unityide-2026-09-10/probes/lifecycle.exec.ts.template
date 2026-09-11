@@ -1,0 +1,161 @@
+import { describe, it, expect, beforeEach, afterAll, mock } from 'bun:test';
+
+/**
+ * REAL-EXECUTION test for format-on-save, in `saveFile`.
+ *
+ * Named `.exec.ts` for the same reason as `search-tab-lifecycle.exec.ts`:
+ * `bun test src` collects only `*.test.*`, and this file mocks the Tauri SDK
+ * boundary with `mock.module`, which mutates Bun's module registry for the rest
+ * of the process. Run explicitly by `bun run test:isolated`, in its own process.
+ *
+ * What it is actually guarding: `saveFile` snapshots the buffer into `written`
+ * before invoking `write_file`, and formatting mutates that buffer. If the
+ * snapshot is taken from the stale closure value instead of re-read from the
+ * store, the formatter runs and its result is then thrown away — a silent
+ * "format on save does nothing", or worse, a write of pre-format text over a
+ * post-format model. A unit test of the formatter alone cannot see that.
+ */
+import * as realCore from '@tauri-apps/api/core';
+import * as realWebviewWindow from '@tauri-apps/api/webviewWindow';
+import * as realWindow from '@tauri-apps/api/window';
+
+let diskText = 'class Player{}';
+let notifyCalls: any[] = [];
+let disposed: string[] = [];
+let delayedReads: Array<(value: any) => void> | null = null;
+let writes: Array<{ path: string; contents: string }> = [];
+const FILE = '/ws/Player.cs';
+const ORIGINAL = 'class Player{void Update(){}}';
+const FORMATTED = 'class Player\n{\n    void Update() { }\n}';
+
+mock.module('@tauri-apps/api/core', () => ({
+  ...realCore,
+  invoke: async (cmd: string, args?: Record<string, unknown>) => {
+    if (cmd === 'read_directory') return [];
+    if (cmd === 'read_file_checked' && delayedReads) return new Promise(resolve => delayedReads!.push(resolve));
+    if (cmd === 'read_file_checked') return { text: ORIGINAL, isBinary: false, size: ORIGINAL.length };
+    if (cmd === 'write_file') {
+      writes.push(args as { path: string; contents: string });
+      diskText = String(args?.contents);
+      return undefined;
+    }
+    // saveFile pings git and Unity afterwards; neither is under test.
+    return undefined;
+  },
+}));
+mock.module('@tauri-apps/api/webviewWindow', () => ({
+  ...realWebviewWindow,
+  getCurrentWebviewWindow: () => ({ listen: async () => () => {} }),
+}));
+mock.module('@tauri-apps/api/window', () => ({
+  ...realWindow,
+  getCurrentWindow: () => ({ setBackgroundColor: async () => {} }),
+}));
+
+// `features/editor`'s barrel statically imports monaco-editor, which runs
+// browser-only code at module-eval time and crashes under plain `bun test`.
+mock.module('__EDITOR__/src/features/editor', () => ({
+  initMonaco: async () => {},
+  getMonaco: () => null,
+  setupWorkspaceIntelliSense: async () => {},
+  teardownWorkspaceIntelliSense: () => {},
+  disposeModelForPath: (path: string) => { disposed.push(path); },
+  getDocumentInfo: () => null,
+  configureTypeScriptDefaults: () => {},
+  loadWorkspaceFiles: async () => {},
+  loadTypeDefinitions: async () => {},
+  updateExtraLib: () => {},
+  disposeExtraLibs: () => {},
+  loadMonacoWorkers: async () => {},
+  EditorPanel: () => null,
+  EditorErrorBoundary: ({ children }: { children?: unknown }) => children ?? null,
+  Breadcrumbs: () => null,
+}));
+mock.module('__EDITOR__/src/features/ai-panel/components/LexicalChatInput', () => ({
+  default: () => null,
+}));
+
+// Mocked at the LEAF, not at the `features/lsp` barrel: replacing a module
+// makes bun re-evaluate its dependents, so the barrel picks these up and
+// `workspace.ts`'s barrel import sees them — without having to mirror the
+// barrel's ~40 other exports (and re-mirror them on every change).
+// `isRunning: true` is what makes `getRunningClientForFile` hand back a client
+// at all — without it the format branch is skipped and every case below passes
+// vacuously. The document-sync calls around the save reach `notify`/`request`
+// on the same object, so the fake has to answer those too.
+mock.module('__EDITOR__/src/features/lsp/services/manager', () => ({
+  lspManager: {
+    client: () => ({
+      isRunning: () => true,
+      notify: (method: string, params: any) => { notifyCalls.push({ method, params }); },
+      request: async () => null,
+    }),
+  },
+  LspManager: class {},
+}));
+
+/** What the fake formatter does on the next save. */
+let formatResult: string | null | (() => never) = null;
+mock.module('__EDITOR__/src/features/lsp/services/format-on-save', () => ({
+  formatDocumentBeforeSave: async () => {
+    if (typeof formatResult === 'function') formatResult();
+    return formatResult;
+  },
+}));
+
+// Minimal DOM stub for the theme store's module-scope FOUC bootstrap.
+const hadDocument = 'document' in globalThis;
+const hadWindow = 'window' in globalThis;
+if (!hadDocument) {
+  (globalThis as unknown as { document: unknown }).document = {
+    documentElement: {
+      setAttribute: () => {},
+      style: { setProperty: () => {}, backgroundColor: '' },
+    },
+    createElement: () => ({ style: {}, setAttribute: () => {}, appendChild: () => {} }),
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  };
+}
+if (!hadWindow) {
+  (globalThis as unknown as { window: unknown }).window = {
+    localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
+    matchMedia: () => ({ matches: false, addEventListener: () => {}, removeEventListener: () => {} }),
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    dispatchEvent: () => true,
+  };
+}
+
+
+import * as realVerified from '__EDITOR__/src/features/ai-panel/services/verified-pass.ts';
+let finishVerify!: (value:any)=>void;
+mock.module('__EDITOR__/src/features/ai-panel/services/verified-pass.ts',()=>({
+ ...realVerified, touchedFileCount:()=>1,runVerifiedPass:()=>new Promise(resolve=>{finishVerify=resolve;}),
+}));
+const { useWorkspaceStore } = await import('__EDITOR__/src/stores/workspace.ts');
+const { useSettingsStore } = await import('__EDITOR__/src/stores/settings.ts');
+const { useProjectContextStore } = await import('__EDITOR__/src/stores/project-context.ts');
+const { useAiStore } = await import('__EDITOR__/src/stores/ai.ts');
+const { AgentService } = await import('__EDITOR__/src/features/ai-panel/services/agent-service.ts');
+it('REPRO New Chat during closing verification receives the disposed turn card', async () => {
+  useProjectContextStore.setState({isUnityProject:true});
+  useWorkspaceStore.setState({workspacePath:'/ws'});
+  useSettingsStore.setState({settings:{...useSettingsStore.getState().settings,'unity.verifiedPass.enabled':true,'unity.consoleCheck.enabled':false}});
+  useAiStore.setState({messages:[],sessionId:'old-session'});
+  // No model calls: exercise the real lifecycle methods with a deferred verification boundary.
+  const service = Object.create(AgentService.prototype) as any;
+  service.abortRequested=false;
+  service.agent={ getMessages:()=>[{role:'assistant',content:[],stopReason:'stop'}], abort:()=>{} };
+  const checking=service.runClosingChecks('agent');
+  expect(typeof finishVerify).toBe('function');
+  useAiStore.getState().resetConversation();
+  service.dispose();
+  expect(service.wasLastSendAborted()).toBe(false);
+  useAiStore.setState({sessionId:'new-session',messages:[]});
+  finishVerify({files:1,touchedFiles:['Assets/OldSession.cs'],compile:'clean',analyzers:'skipped',guids:'skipped',uiToolkit:'skipped',scriptableObjects:'skipped',input:'skipped',layout:'skipped',console:'skipped',tests:'skipped'});
+  await checking;
+  expect(useAiStore.getState().sessionId).toBe('new-session');
+  expect(useAiStore.getState().messages.at(-1)?.verifiedPass?.touchedFiles).toEqual(['Assets/OldSession.cs']);
+  console.log('REPRO stale completion: old session verification was appended to new-session after dispose');
+});

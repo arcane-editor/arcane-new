@@ -121,3 +121,10 @@ describe('filterAppliedRestoreEntries', () => {
     expect(filterAppliedRestoreEntries(plan, [])).toEqual([]);
   });
 });
+
+it('restores binary authoring assets without sending base64 through the text writer', async () => {
+  let restored: number[] = [];
+  const { deps, calls } = fakeDeps({ writeBinary: async (_path, data) => { restored = Array.from(atob(data), (c) => c.charCodeAt(0)); } });
+  const result = await runRestorePlan([{ path: '/mesh.asset', action: 'write', content: 'AP/+AQ==', encoding: 'base64' }], deps);
+  expect(result.applied).toEqual(['/mesh.asset']); expect(calls.writeFile).toEqual([]); expect(restored).toEqual([0, 255, 254, 1]);
+});

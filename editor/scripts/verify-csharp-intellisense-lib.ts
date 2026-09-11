@@ -265,10 +265,13 @@ export function resolveDotnetRoot(
   platform: NodeJS.Platform,
   env: NodeJS.ProcessEnv,
   which: (cmd: string) => string | null,
+  realpath: (path: string) => string = fs.realpathSync,
 ): string | undefined {
   if (env.DOTNET_ROOT) return env.DOTNET_ROOT;
   const found = which(platform === 'win32' ? 'dotnet.exe' : 'dotnet');
-  if (found) return path.dirname(found);
+  if (found) {
+    try { return path.dirname(realpath(found)); } catch { return path.dirname(found); }
+  }
   if (platform === 'win32') return 'C:/Program Files/dotnet';
   if (platform === 'darwin') return '/usr/local/share/dotnet';
   return undefined;

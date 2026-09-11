@@ -1,3 +1,4 @@
+import { restoreRenamedView } from '../../../utils/renamed-editor-view';
 import { useEffect, useRef } from 'react';
 import MonacoEditor, { DiffEditor } from '@monaco-editor/react';
 import type { editor as MonacoEditorNs } from 'monaco-editor';
@@ -106,6 +107,7 @@ function EditorPanel() {
     // Defer one frame so the model swap initiated by the path-prop
     // change has actually completed before we move the cursor / focus.
     requestAnimationFrame(() => {
+      restoreRenamedView(editor, activeFilePath);
       if (nav) applyPendingNavigation(editor, nav);
       editor.focus();
     });
@@ -195,8 +197,8 @@ function EditorPanel() {
   // First in the ladder on purpose: `unity_parse_asset` reads the file as a
   // string too, so routing a binary `.asset` to the structured viewer would
   // just move the same UTF-8 failure one step later.
-  if (activeFile.isBinary) {
-    return <BinaryFileNotice name={activeFile.name} byteSize={activeFile.byteSize} />;
+  if (activeFile.isBinary || activeFile.isTooLarge) {
+    return <BinaryFileNotice name={activeFile.name} byteSize={activeFile.byteSize} isTooLarge={activeFile.isTooLarge} />;
   }
 
   const isUnityAsset = isUnityProject && isUnityAssetFile(activeFile.name);
@@ -501,6 +503,7 @@ function EditorPanel() {
         }}
         onMount={(editor, monaco) => {
           editorRef.current = editor;
+          restoreRenamedView(editor, activeFile.path);
           // EditorPanel has early-return render paths (AssetViewer,
           // SceneDiffViewer, structured asset viewers) where this
           // MonacoEditor instance unmounts without a new one replacing it.

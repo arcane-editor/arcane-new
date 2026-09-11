@@ -122,6 +122,8 @@ const APP_VERSION = '0.3.3';
 // the backend's errors to live.
 export { ClaudeSetupRequiredError } from './claude-connect';
 
+import { cancelPendingSends, captureSendCancellation } from './send-cancellation';
+
 export class ClaudeBackend {
   readonly kind = 'claude' as const;
 
@@ -162,9 +164,15 @@ export class ClaudeBackend {
     if (this.promptInFlight) return;
 
     const ai = useAiStore.getState();
+    const generation = ai.conversationGeneration;
+    const workspace = useWorkspaceStore.getState().workspacePath;
+    const cancelled = captureSendCancellation();
+    const current = () => generation === useAiStore.getState().conversationGeneration
+      && workspace === useWorkspaceStore.getState().workspacePath;
     this.abortRequested = false;
 
     const connection = await this.connect();
+    if (!current() || cancelled()) return;
     if (connection.kind !== 'ready') {
       // `connect` has already written the reason to the store, and
       // `ClaudeSetupGate` renders it as a card with the one button that fixes
@@ -176,6 +184,7 @@ export class ClaudeBackend {
     }
 
     const prompt = await this.buildPromptBlocks(text, opts.attachments ?? []);
+    if (!current() || cancelled()) return;
 
     this.promptInFlight = true;
     this.turnAbort = new AbortController();
@@ -195,8 +204,10 @@ export class ClaudeBackend {
         { sessionId: this.acpSessionId, prompt },
         ACP_PROMPT_TIMEOUT_MS,
       );
+      if (!current()) return;
       this.finalizeStreaming(stopReasonFor(result?.stopReason));
     } catch (e) {
+      if (!current()) return;
       this.finalizeStreaming('error');
       if (this.abortRequested) {
         // Invariant 2: a user-requested stop produces no outcome block.
@@ -208,8 +219,10 @@ export class ClaudeBackend {
     } finally {
       this.promptInFlight = false;
       this.endTurnQuestions();
-      useCheckpointsStore.getState().endTurn();
-      useAiStore.getState().handleAgentEvent({ type: 'agent_end', messages: [] });
+      if (current()) {
+        useCheckpointsStore.getState().endTurn();
+        useAiStore.getState().handleAgentEvent({ type: 'agent_end', messages: [] });
+      }
     }
   }
 
@@ -264,8 +277,9 @@ export class ClaudeBackend {
   }
 
   abort(): void {
-    if (!this.promptInFlight || !this.client || !this.acpSessionId) return;
+    cancelPendingSends();
     this.abortRequested = true;
+    if (!this.promptInFlight || !this.client || !this.acpSessionId) return;
     // A notification, not a request: the agent acknowledges by ending the turn
     // with `stopReason: 'cancelled'`, which the prompt call above is awaiting.
     void this.client

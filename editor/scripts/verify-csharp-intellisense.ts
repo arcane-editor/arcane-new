@@ -231,7 +231,7 @@ if (!pinnedVersion) fail('could not read CSHARP_LS_VERSION from src-tauri/src/cs
 
 const lookup = { env: process.env, platform: process.platform, home, pinnedVersion };
 let server0 = discoverCsharpLs(lookup);
-if (!server0) {
+if (!server0 || server0.source === 'user-tool' || server0.source === 'path') {
   // Provision it, rather than skipping. The app installs the pinned server on
   // its next C# start, but that is AFTER this gate runs — so on the first run
   // following a version bump the check would print SKIPPED at exactly the

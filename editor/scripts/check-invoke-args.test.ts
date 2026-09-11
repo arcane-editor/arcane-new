@@ -138,3 +138,8 @@ pub fn fuzzy_search_files(workspace_path: String, query: String, max_results: us
     expect(violations[0].kind).toBe('no-such-command');
   });
 });
+
+it('ignores invoke examples inside comments and strings without skipping actual calls', () => {
+  const source = `// invoke('wrong')\n/** invoke('wrong') */\nconst example = "invoke('wrong')";\nawait invoke('actual', { path });`;
+  expect(parseInvokeCalls(source, 'example.ts').map((c: { command: string }) => c.command)).toEqual(['actual']);
+});

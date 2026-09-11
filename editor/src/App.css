@@ -10902,3 +10902,7 @@ html, body, #root {
   gap: 4px;
   flex-shrink: 0;
 }
+.ai-specialist-activity { margin: 8px 12px; padding: 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 12px; }
+.ai-specialist-activity summary { cursor: pointer; }
+.ai-specialist-activity summary span { margin-left: 8px; opacity: 0.7; }
+.ai-specialist-summary { white-space: pre-wrap; overflow-wrap: anywhere; }

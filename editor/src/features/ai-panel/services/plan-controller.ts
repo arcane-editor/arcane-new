@@ -34,6 +34,7 @@ import { buildRegeneratePrompt, type PriorPlan } from './plan-regen';
 import { buildReviseNotesPrompt } from './plan-revise';
 import { validatePlanDocument, buildPlanRepairPrompt, type PlanQualityReport } from './plan-quality';
 import { beginSubmitBudget, endSubmitBudget } from './turn-governor';
+import { captureSendCancellation } from './send-cancellation';
 import { unityRecipesFor } from './prompts/unity-recipes';
 import { runPlanExecution, liveDeps } from './plan-run';
 import {
@@ -48,6 +49,12 @@ import type { PlanNote } from '../../markdown-preview';
 
 function getCurrentWorkspacePath(): string | null {
   return useWorkspaceStore.getState().workspacePath;
+}
+
+function captureConversation(): () => boolean {
+  const generation = useAiStore.getState().conversationGeneration;
+  const workspace = getCurrentWorkspacePath();
+  return () => useAiStore.getState().conversationGeneration === generation && getCurrentWorkspacePath() === workspace;
 }
 
 /** Pull the assistant's last text content from a planning conversation. */
@@ -77,6 +84,8 @@ async function startPlanning(
     sendText?: string;
   } = {},
 ): Promise<void> {
+  const current = captureConversation();
+  const service = getAgentService();
   const workspacePath = getCurrentWorkspacePath();
   if (!workspacePath) {
     useAiStore.getState().setError('Open a workspace before planning.');
@@ -104,16 +113,17 @@ async function startPlanning(
   // running count alone.
   let planMarkdown = '';
   let report: PlanQualityReport | null = null;
-  beginSubmitBudget();
+  const budget = beginSubmitBudget();
   try {
     try {
-      await getAgentService().sendMessage(recipes ? `${sendText}\n${recipes}` : sendText, {
+      await service.sendMessage(recipes ? `${sendText}\n${recipes}` : sendText, {
         mode: 'plan',
         effort: store.effort,
         promptMode: 'plan-planning',
         attachments,
       });
     } catch (err) {
+      if (!current()) return;
       // Without this, a throw stranded planPhase at 'planning' forever and the
       // composer had no way back to a working plan mode.
       useAiStore.getState().setPlanPhase('idle');
@@ -122,6 +132,7 @@ async function startPlanning(
     }
 
     // Pull the freshest state after the agent loop completes.
+    if (!current() || service.wasLastSendAborted()) return;
     const afterSend1 = useAiStore.getState();
     planMarkdown = latestPlanMarkdown();
 
@@ -141,11 +152,12 @@ async function startPlanning(
     report = validatePlanDocument(planMarkdown);
     if (!report.ok) {
       try {
-        await getAgentService().sendMessage(buildPlanRepairPrompt(report.problems), {
+        await service.sendMessage(buildPlanRepairPrompt(report.problems), {
           mode: 'plan',
           effort: store.effort,
           promptMode: 'plan-planning',
         });
+        if (!current() || service.wasLastSendAborted()) return;
         const repaired = latestPlanMarkdown();
         if (repaired) {
           planMarkdown = repaired;
@@ -157,19 +169,25 @@ async function startPlanning(
       }
     }
   } finally {
-    endSubmitBudget();
+    endSubmitBudget(budget);
+    if (current() && service.wasLastSendAborted()) useAiStore.getState().setPlanPhase('idle');
   }
 
+  if (!current()) return;
   const after = useAiStore.getState();
   const planPath = await reservePlanPath(workspacePath, prompt);
+  if (!current()) return;
+  if (service.wasLastSendAborted()) { after.setPlanPhase('idle'); return; }
   try {
     await writePlan(planPath, planMarkdown);
   } catch (err) {
+    if (!current()) return;
     after.setPlanPhase('idle');
     after.setError(`Failed to write plan file: ${formatErr(err)}`);
     return;
   }
 
+  if (!current()) return;
   openPlanInEditor(planPath);
   after.setActivePlanPath(planPath);
   // Attach the plan to this session so it is reachable later from chat
@@ -218,7 +236,11 @@ function latestPlanMarkdown(): string {
  * deps-injected core — see this file's header.
  */
 async function runExecution(planPath: string, sendText: string): Promise<void> {
-  await runPlanExecution(await liveDeps(), planPath, sendText);
+  const current = captureConversation();
+  const isCancelled = captureSendCancellation();
+  const deps = await liveDeps();
+  if (!current() || isCancelled()) return;
+  await runPlanExecution({ ...deps, isCurrent: current, isCancelled }, planPath, sendText);
 }
 
 async function executePlan(planPath: string): Promise<void> {
@@ -258,6 +280,8 @@ async function sendPlanModeMessage(text: string, attachments: Attachment[]): Pro
 }
 
 async function regenerate(): Promise<void> {
+  const current = captureConversation();
+  const cancelled = captureSendCancellation();
   const store = useAiStore.getState();
   if (!store.pendingPrompt) {
     store.setError('No previous prompt to regenerate from.');
@@ -274,6 +298,8 @@ async function regenerate(): Promise<void> {
       /* plan file gone — regenerate from the prompt alone */
     }
   }
+  if (!current()) return;
+  if (cancelled()) return;
   await startPlanning(store.pendingPrompt, store.lastAttachments, {
     sendText: buildRegeneratePrompt(store.pendingPrompt, priorPlan),
   });
@@ -293,7 +319,10 @@ async function reviseWithNotes(
   notes: PlanNote[],
   freeText?: string,
 ): Promise<void> {
+  const current = captureConversation();
+  const service = getAgentService();
   const store = useAiStore.getState();
+  const cancelled = captureSendCancellation();
   if (notes.length === 0 && !freeText?.trim()) return;
   if (store.isAgentRunning) return;
 
@@ -301,20 +330,24 @@ async function reviseWithNotes(
   try {
     planContent = await readPlan(planPath);
   } catch (err) {
+    if (!current()) return;
     store.setError(`Could not read plan file: ${formatErr(err)}`);
     return;
   }
 
+  if (!current()) return;
   store.setPlanPhase('planning');
+  if (cancelled()) { store.setPlanPhase('awaiting-execute'); return; }
   // Pin the plan being revised — same reason runExecution pins it.
   store.setActivePlanPath(planPath);
   try {
-    await getAgentService().sendMessage(buildReviseNotesPrompt(planPath, planContent, notes, freeText), {
+    await service.sendMessage(buildReviseNotesPrompt(planPath, planContent, notes, freeText), {
       mode: 'plan',
       effort: store.effort,
       promptMode: 'plan-planning',
     });
 
+    if (!current() || service.wasLastSendAborted()) return;
     const after = useAiStore.getState();
     const revised = latestPlanMarkdown();
     if (!revised) {
@@ -328,13 +361,15 @@ async function reviseWithNotes(
       // a rewrite moves their quoted text they came back as a list of
       // "text changed" cards to be dismissed one at a time. Clearing only
       // after the write succeeds means a failed revision keeps them.
+      if (!current()) return;
       after.setPlanNotes(planPath, []);
       openPlanInEditor(planPath);
     } catch (err) {
+      if (!current()) return;
       after.setError(`Failed to write revised plan: ${formatErr(err)}`);
     }
   } finally {
-    useAiStore.getState().setPlanPhase('awaiting-execute');
+    if (current()) useAiStore.getState().setPlanPhase('awaiting-execute');
   }
 }
 

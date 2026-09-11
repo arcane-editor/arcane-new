@@ -26,7 +26,7 @@ use tokio::sync::{mpsc, oneshot, Mutex};
 /// reads any rpc_response to refreshAssets as "the import finished" — so the
 /// version is the signal that lets the package keep the old blocking behaviour
 /// for such an IDE, and lets a current IDE tell the user their package is stale.
-const PROTOCOL_VERSION: u32 = 4;
+const PROTOCOL_VERSION: u32 = 5;
 /// Default timeout for an RPC request to the Unity bridge (spec §11 — every
 /// bridge call must have a timeout so a hung Unity never freezes the IDE).
 const DEFAULT_RPC_TIMEOUT_MS: u64 = 10_000;
@@ -63,7 +63,7 @@ const STALE_PACKAGE_AFTER_MS: u64 = 15_000;
 /// Oldest `com.unityide.editor` this IDE will work with. Must stay in lockstep
 /// with `minPackageVersion` in `write_bridge_discovery` and `PackageVersion` in
 /// `arcane-extension/Editor/BridgeBootstrap.cs`.
-const MIN_PACKAGE_VERSION: &str = "0.2.0";
+const MIN_PACKAGE_VERSION: &str = "0.3.0";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -1267,10 +1267,10 @@ mod tests {
         let text = std::fs::read_to_string(&path)
             .unwrap_or_else(|e| panic!("read {}: {}", path.display(), e));
         assert!(
-            text.contains("ProtocolVersion = 4;"),
-            "Discovery.cs must declare `ProtocolVersion = 4;` to match PROTOCOL_VERSION"
+            text.contains("ProtocolVersion = 5;"),
+            "Discovery.cs must declare `ProtocolVersion = 5;` to match PROTOCOL_VERSION"
         );
-        assert_eq!(PROTOCOL_VERSION, 4);
+        assert_eq!(PROTOCOL_VERSION, 5);
     }
 
     #[test]

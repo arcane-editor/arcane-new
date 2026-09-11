@@ -862,7 +862,7 @@ namespace UnityIDE.Bridge
         }
 
         /// <summary>Write `value` into `prop`. Returns null on success, a refusal reason otherwise.</summary>
-        private static string ApplyValue(SerializedProperty prop, JsonValue value)
+        internal static string ApplyValue(SerializedProperty prop, JsonValue value)
         {
             string kind = value["kind"].AsStringOr("");
             JsonValue raw = value["value"];

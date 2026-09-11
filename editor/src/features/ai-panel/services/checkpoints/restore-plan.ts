@@ -39,6 +39,7 @@ export interface CheckpointEntry {
    * snapshots (see `tooLarge`).
    */
   beforeContent?: string;
+  encoding?: 'base64';
   /** Set when the pre-image exceeded the snapshot size cap — content wasn't stored. */
   tooLarge?: true;
   /** The tool call that triggered this snapshot, if known (future per-file revert UI). */
@@ -68,6 +69,7 @@ export interface RestorePlanEntry {
   action: 'write' | 'delete';
   /** Present only for action: 'write'. */
   content?: string;
+  encoding?: 'base64';
 }
 
 function indexOfTurn(turns: CheckpointTurn[], turnId: string): number {
@@ -103,7 +105,7 @@ export function computeRestorePlan(turns: CheckpointTurn[], turnId: string): Res
     } else if (entry.tooLarge) {
       continue; // skipped — see getSkippedTooLargePaths
     } else {
-      plan.push({ path: entry.path, action: 'write', content: entry.beforeContent ?? '' });
+      plan.push({ path: entry.path, action: 'write', content: entry.beforeContent ?? '', ...(entry.encoding ? { encoding: entry.encoding } : {}) });
     }
   }
   return plan;

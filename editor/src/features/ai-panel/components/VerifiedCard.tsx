@@ -1,3 +1,4 @@
+import { normalizeVerifiedCard } from '../services/verified-card-data';
 /**
  * VerifiedCard — the "AI you can trust" closing proof (P3.4). Renders the
  * verified-pass result (`verified-pass.ts`) as a compact single-row summary:
@@ -58,8 +59,8 @@ function plural(n: number, word: string): string {
 
 function VerifiedCard({ message }: Props) {
   const [expanded, setExpanded] = useState(false);
-  const data = message.verifiedPass;
-  if (!data) return null;
+  if (!message.verifiedPass) return null;
+  const data = normalizeVerifiedCard(message.verifiedPass);
 
   const {
     files,
@@ -180,7 +181,7 @@ function VerifiedCard({ message }: Props) {
     inputMarker,
     consoleCheckMarker,
     testsCheckMarker,
-  ]);
+  ], data.requiredEvidence);
   const missingGuids = guids !== 'skipped' && guids !== 'intact' ? guids.missing : [];
   const consoleItems =
     consoleCheck !== 'skipped' &&
@@ -222,6 +223,12 @@ function VerifiedCard({ message }: Props) {
         )}
         <span className="ai-verified-title">{verdictTitle(verdict)}</span>
         <span className="ai-verified-summary">
+          {data.requiredEvidence?.map((e) => (
+            <span className="ai-verified-item" key={e.id} title={e.summary}>
+              <MarkerIcon marker={e.status === 'passed' ? 'ok' : e.status === 'failed' ? 'bad' : 'skip'} />
+              {e.kind.replace(/-/g, ' ')}: {e.status.replace(/-/g, ' ')}
+            </span>
+          ))}
           <span className="ai-verified-item">
             <MarkerIcon marker={compileMarker} />
             {compileLabel}

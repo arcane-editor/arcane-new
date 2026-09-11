@@ -1,0 +1,12 @@
+import path from 'node:path';
+const result=await Bun.build({entrypoints:['__FIXTURE__/ui.tsx'],outdir:'__FIXTURE__/ui-dist',target:'browser',plugins:[{name:'review-fixture-boundaries',setup(build){
+ build.onResolve({filter:/^\.\.\/\.\.\/ai-panel$/},args=>({path:'__FIXTURE__/ui-panel.tsx'}));
+ build.onResolve({filter:/stores\/project-context$/},()=>({path:'project',namespace:'fixture'}));
+ build.onResolve({filter:/^\.\.\/\.\.\/unity-scriptable-objects$/},()=>({path:'inspector',namespace:'fixture'}));
+ build.onResolve({filter:/utils\/crash-report$/},()=>({path:'crash',namespace:'fixture'}));
+ build.onResolve({filter:/(MentionTrigger|SlashTrigger|PasteImage|PasteText|DropImage)Plugin$/},()=>({path:'noop',namespace:'fixture'}));
+ build.onLoad({filter:/.*/,namespace:'fixture'},args=>({loader:'js',contents:args.path==='project'?'export const useProjectContextStore=sel=>sel({isUnityProject:true});':args.path==='inspector'?'export const UnityInspectorPanel=()=>null;':args.path==='crash'?'export const reportCrash=()=>{};export const crashSummary=e=>({headline:e.message});':'export default ()=>null;'}));
+}}]});
+if(!result.success){console.error(result.logs);process.exit(1);}
+await Bun.write('__FIXTURE__/ui-dist/index.html','<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="ui.css"><style>body{font:14px system-ui;background:#222;color:#eee}.ai-panel{height:100%}.ai-panel-overlay-root{position:fixed;inset:50px;background:#333}.lexical-chat-input-content{min-height:90px;border:1px solid #888;padding:10px}</style></head><body><div id="root"></div><script type="module" src="ui.js"></script></body></html>');
+console.log('UI fixture built with real Allotment, RightSidebarPanel, ErrorBoundary, maximized overlay and Lexical composer. Chat service and attachment plugins are stubbed.');

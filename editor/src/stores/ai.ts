@@ -80,6 +80,8 @@ export interface QuestionRequestData {
 }
 
 export interface AiMessage {
+  specialistRun?: import('../features/ai-panel').SpecialistResult;
+  specialistTask?: import('../features/ai-panel').TaskRunSnapshot;
   id: string;
   role:
     | 'user'
@@ -251,6 +253,8 @@ interface AiState {
 
   // Agent status
   isAgentRunning: boolean;
+  isSubmitting: boolean;
+  conversationGeneration: number;
   toolCalls: Map<string, ToolCallStatus>;
   errorMessage: string | null;
   /**
@@ -663,6 +667,8 @@ export const useAiStore = create<AiState>((set, get) => ({
   messages: [],
   streamingMessageId: null,
   isAgentRunning: false,
+  isSubmitting: false,
+  conversationGeneration: 0,
   toolCalls: new Map(),
   errorMessage: null,
   authNotice: null,
@@ -953,6 +959,8 @@ export const useAiStore = create<AiState>((set, get) => ({
 
   resetConversation: () => {
     set({
+      conversationGeneration: get().conversationGeneration + 1,
+      isSubmitting: false,
       messages: [],
       streamingMessageId: null,
       isAgentRunning: false,
@@ -984,6 +992,8 @@ export const useAiStore = create<AiState>((set, get) => ({
 
   loadSessionIntoStore: (session: SessionData) => {
     set(() => ({
+      conversationGeneration: get().conversationGeneration + 1,
+      isSubmitting: false,
       messages: sweepUnresolvedQuestions(session.messages ?? []),
       streamingMessageId: null,
       isAgentRunning: false,

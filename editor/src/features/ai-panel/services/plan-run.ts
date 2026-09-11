@@ -69,6 +69,8 @@ export interface PlanRunAgentService {
 }
 
 export interface PlanRunDeps {
+  isCurrent?: () => boolean;
+  isCancelled?: () => boolean;
   getAiState(): PlanRunAiState;
   getAgentService(): PlanRunAgentService;
   readPlan(path: string): Promise<string>;
@@ -141,6 +143,7 @@ export async function runPlanExecution(
   planPath: string,
   sendText: string,
 ): Promise<void> {
+  if (deps.isCurrent?.() === false || deps.isCancelled?.()) return;
   const state = deps.getAiState();
 
   // Dirty-tab guard: if the plan tab has unsaved edits, ask user to save first.
@@ -152,7 +155,9 @@ export async function runPlanExecution(
   let planContent: string;
   try {
     planContent = await deps.readPlan(planPath);
+    if (deps.isCurrent?.() === false || deps.isCancelled?.()) return;
   } catch (err) {
+    if (deps.isCurrent?.() === false || deps.isCancelled?.()) return;
     // Clear the plan state, or every subsequent plan-mode message routes to
     // 'resume' and dead-ends on this same unreadable file forever.
     state.setActivePlanPath(null);
@@ -193,6 +198,7 @@ export async function runPlanExecution(
       planExecution: { planPath, planContent },
     });
   } finally {
+    if (deps.isCurrent?.() === false) return;
     // Whatever happened — clean finish, abort, turn cap, or a REJECTED send —
     // the file's own [x] ticks are the progress record. Re-read it fresh
     // (a `null` read — file gone, permissions — falls through to the send's
@@ -204,6 +210,7 @@ export async function runPlanExecution(
     } catch {
       after = null;
     }
+    if (deps.isCurrent?.() === false) return;
     const steps = after !== null ? deps.planStepsOf(after) : null;
 
     // Pull the freshest state — the send may have appended messages (an

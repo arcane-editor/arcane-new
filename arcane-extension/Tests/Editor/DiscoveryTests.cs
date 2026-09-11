@@ -99,7 +99,7 @@ namespace UnityIDE.Tests
             // ACCEPTANCE, real completion arrives as refresh_completed).
             // 4 = console snapshot/clear RPCs, queued runTests +
             // test_run_completed, attachUiDocument/setSerializedProperty.
-            Assert.AreEqual(4, Discovery.ProtocolVersion);
+            Assert.AreEqual(5, Discovery.ProtocolVersion);
         }
     }
 }

@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import type { ConsoleSnapshot, UnityLogType } from '../../../types/unity';
+import type { AuthoringOperation, AutomationReport, GameplayScenario } from '../../../types/automation';
 
 /**
  * Typed wrappers over the `unity_ipc_request` Tauri command, which sends an
@@ -242,6 +243,13 @@ export interface SetSerializedPropertyResult {
 const ATTACH_UI_DOCUMENT_TIMEOUT_MS = 30_000;
 
 export const bridgeRpc = {
+  author: (operation: AuthoringOperation) => rpc<AutomationReport>('authorScene', { ...operation }, 120_000),
+  authorStatus: (operationId: string) => rpc<AutomationReport>('getAuthoringStatus', { operationId }),
+  verifyScene: (scenePath: string, requireAuthoredLevel = false) => rpc<AutomationReport>('verifySavedScene', { scenePath, requireAuthoredLevel }, 30_000),
+  startPlaytest: (operationId: string, scenario: GameplayScenario, taskId: string) => rpc<AutomationReport>('startPlaytest', { operationId, scenario, taskId }),
+  automationState: () => rpc<{ activePlaytest?: string; taskId?: string }>('getAutomationState', {}),
+  playtestStatus: (operationId: string, includeCaptures = false) => rpc<AutomationReport>('getPlaytestStatus', { operationId, includeCaptures }),
+  cancelPlaytest: (operationId: string) => rpc<AutomationReport>('cancelPlaytest', { operationId }),
   getEditorState: () => rpc<EditorState>('getEditorState'),
   getSceneHierarchy: () => rpc<SceneHierarchy>('getSceneHierarchy'),
   getGameObject: (target: { instanceId?: number; path?: string }) =>

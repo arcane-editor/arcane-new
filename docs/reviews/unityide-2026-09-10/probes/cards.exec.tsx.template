@@ -1,0 +1,18 @@
+import { it, expect } from 'bun:test';
+import React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import VerifiedCard from '__EDITOR__/src/features/ai-panel/components/VerifiedCard.tsx';
+import { parseSessionData } from '__EDITOR__/src/features/ai-panel/services/session-persistence.ts';
+const legacy={id:'m1', role:'verifiedPass', timestamp:1, verifiedPass:{files:1,touchedFiles:['Assets/A.cs'],compile:'clean',analyzers:{errors:0},guids:'intact'}};
+it('existing migration repairs the historical missing-problems crash', () => {
+  const s = parseSessionData(JSON.stringify({id:'old',messages:[legacy]}));
+  const html=renderToStaticMarkup(<VerifiedCard message={s.messages[0]}/>);
+  expect(html).toContain('compiles clean');
+  expect(s.messages[0].verifiedPass?.uiToolkit).toBe('skipped');
+  console.log('CONFIRMED historical card with absent subsystem fields renders after migration');
+});
+it('REPRO robustness gap: null subsystem field survives restore and crashes the actual component', () => {
+  const s=parseSessionData(JSON.stringify({id:'bad',messages:[{...legacy,verifiedPass:{...legacy.verifiedPass,uiToolkit:null}}]}));
+  expect(() => renderToStaticMarkup(<VerifiedCard message={s.messages[0]}/>)).toThrow(/problems/);
+  console.log('REPRO malformed card: uiToolkit:null survives parsing and throws reading problems');
+});

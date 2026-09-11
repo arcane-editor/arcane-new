@@ -36,6 +36,8 @@ import type { Finding } from '../../unity-analyzers';
 import type { ConsoleCheckResult, TestsCheckResult, RepairInfo } from './console-check';
 
 export interface VerifiedCardData {
+  /** Required task evidence; a missing required row prevents a green verdict. */
+  requiredEvidence?: import('./specialists/contracts').VerificationEvidence[];
   /** Total files touched by the send (any extension). */
   files: number;
   /** Workspace-relative paths, for the collapsed detail list. */
@@ -487,11 +489,14 @@ async function computeAnalyzers(
 async function computeCompile(
   deps: VerifiedPassDeps,
   budgetMs: number,
+  signal?: AbortSignal,
 ): Promise<VerifiedCardData['compile']> {
   const connected = await deps.bridgeConnected();
-  if (!connected) return 'skipped';
+  if (!connected || signal?.aborted) return 'skipped';
 
   const controller = new AbortController();
+  const abort = () => controller.abort();
+  signal?.addEventListener('abort', abort, { once: true });
   let abortTimer: ReturnType<typeof setTimeout> | null = null;
 
   try {
@@ -510,6 +515,7 @@ async function computeCompile(
     return errors === 0 ? 'clean' : { errors };
   } finally {
     if (abortTimer) clearTimeout(abortTimer);
+    signal?.removeEventListener('abort', abort);
   }
 }
 
@@ -536,6 +542,8 @@ async function computeGuids(
  * step to `'skipped'` without blocking the others.
  */
 export interface RunVerifiedPassOptions {
+  signal?: AbortSignal;
+  touchedFiles?: readonly string[];
   /**
    * Skip the compile step.
    *
@@ -554,9 +562,9 @@ export async function runVerifiedPass(
   deps: VerifiedPassDeps = DEFAULT_DEPS,
   options: RunVerifiedPassOptions = {},
 ): Promise<VerifiedCardData> {
-  const files = Array.from(touched);
+  const files = Array.from(options.touchedFiles ?? touched);
   const startedAt = Date.now();
-  const remaining = () => PASS_BUDGET_MS - (Date.now() - startedAt);
+  const remaining = () => { options.signal?.throwIfAborted(); return PASS_BUDGET_MS - (Date.now() - startedAt); };
 
   const analyzers = await withBudget<VerifiedCardData['analyzers']>(
     () => computeAnalyzers(files, deps),
@@ -595,7 +603,7 @@ export async function runVerifiedPass(
   const compile = options.skipCompile
     ? ('skipped' as const)
     : await withBudget<VerifiedCardData['compile']>(
-        () => computeCompile(deps, remaining()),
+        () => computeCompile(deps, remaining(), options.signal),
         remaining(),
         'skipped',
       );
@@ -605,6 +613,7 @@ export async function runVerifiedPass(
     'skipped',
   );
 
+  options.signal?.throwIfAborted();
   const guids: VerifiedCardData['guids'] =
     guidsRaw === 'intact' || guidsRaw === 'skipped'
       ? guidsRaw

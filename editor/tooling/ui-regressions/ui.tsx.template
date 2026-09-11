@@ -1,0 +1,46 @@
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import { flushSync } from 'react-dom';
+import { Allotment } from 'allotment';
+import 'allotment/dist/style.css';
+import RightSidebarPanel from '__EDITOR__/src/features/app-shell/components/RightSidebarPanel.tsx';
+import { useUiStore } from '__EDITOR__/src/stores/ui.ts';
+import { fixture } from './ui-panel';
+const tick = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+async function run() {
+ const out = document.getElementById('results')!;
+ out.textContent='';
+ const check = (ok:boolean,label:string) => {out.textContent += `${ok?'PASS':'FAIL'} ${label}\n`; if(!ok)throw new Error(label);};
+ await tick(); out.textContent += 'Input API ready: '+String(!!fixture.input)+'\n'; fixture.input?.setText('unfinished Unity prompt'); await tick();
+ const original = document.querySelector('[contenteditable]');
+ out.textContent += 'Before maximize: '+JSON.stringify(original?.textContent)+'\n';
+ flushSync(()=>useUiStore.getState().setAiPanelMaximized(true)); await tick();
+ out.textContent += 'After maximize: same node='+String(document.querySelector('[contenteditable]')===original)+' old='+JSON.stringify(original?.textContent)+' new='+JSON.stringify(document.querySelector('[contenteditable]')?.textContent)+'\n';
+ check(document.querySelector('[contenteditable]')===original && original?.textContent==='unfinished Unity prompt','maximize preserves the composer instance and draft');
+ flushSync(()=>useUiStore.getState().setAiPanelMaximized(false)); await tick();
+ check(document.querySelector('[contenteditable]')===original && original?.textContent==='unfinished Unity prompt','restore preserves the composer instance and draft');
+ flushSync(()=>useUiStore.getState().setActiveRightSidebarView('unity-inspector')); await tick();
+ flushSync(()=>useUiStore.getState().setActiveRightSidebarView('ai-panel')); await tick();
+ check(document.querySelector('[contenteditable]')===original && original?.textContent==='unfinished Unity prompt','inspector round trip preserves the composer');
+ fixture.setCrash(true); await tick();
+ check(!document.querySelector('[contenteditable]'),'transient error reaches the panel boundary');
+ fixture.setCrash(false);
+ flushSync(()=>useUiStore.getState().setRightSidebarVisible(false)); await tick();
+ flushSync(()=>useUiStore.getState().setRightSidebarVisible(true)); await tick();
+ check(!!document.querySelector('[contenteditable]'),'hide/reopen recovers the crashed panel');
+ fixture.setCrash(true); await tick(); fixture.setCrash(false);
+ const retry = Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='Retry');
+ retry?.click(); await tick();
+ check(!!document.querySelector('[contenteditable]'),'Retry recovers the crashed panel');
+ fixture.acceptSubmit=false; fixture.input?.setText('keep while busy'); await tick();
+ fixture.input?.submit(); await tick();
+ check(document.querySelector('[contenteditable]')?.textContent==='keep while busy','declined submission preserves the Lexical draft');
+ fixture.acceptSubmit=true; fixture.input?.submit(); await tick();
+ check(document.querySelector('[contenteditable]')?.textContent==='','accepted submission clears the draft');
+}
+function App() {
+ const visible=useUiStore(s=>s.rightSidebarVisible), max=useUiStore(s=>s.aiPanelMaximized);
+ return <><button onClick={()=>void run().catch(console.error)}>Run editor UI checks</button><pre id="results"/><div style={{height:350,position:'relative'}}><Allotment><Allotment.Pane>Editor placeholder</Allotment.Pane><Allotment.Pane visible={visible&&!max} minSize={200}><RightSidebarPanel/></Allotment.Pane></Allotment></div></>;
+}
+useUiStore.setState({rightSidebarVisible:true});
+createRoot(document.getElementById('root')!).render(<App/>);

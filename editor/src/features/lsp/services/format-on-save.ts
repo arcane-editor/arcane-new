@@ -46,6 +46,7 @@ export async function formatDocumentBeforeSave(
   // width than the editor displays would reindent the whole file on save.
   const { tabSize, insertSpaces } = model.getOptions();
 
+  const version = model.getVersionId();
   let edits: LspTextEdit[] | null = null;
   try {
     edits = await client.request<LspTextEdit[] | null>('textDocument/formatting', {
@@ -61,7 +62,7 @@ export async function formatDocumentBeforeSave(
   }
 
   if (!edits || edits.length === 0) return null;
-  if (model.isDisposed()) return null;
+  if (model.isDisposed() || model.getVersionId() !== version) return null;
 
   model.pushEditOperations(
     null,

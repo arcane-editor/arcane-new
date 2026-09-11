@@ -1,0 +1,8 @@
+{
+  "name": "UnityIDE.Automation.InputSystem",
+  "references": ["UnityIDE.Editor", "Unity.InputSystem"],
+  "includePlatforms": ["Editor"],
+  "defineConstraints": ["UNITYIDE_HAS_INPUT_SYSTEM"],
+  "versionDefines": [{ "name": "com.unity.inputsystem", "expression": "1.0.0", "define": "UNITYIDE_HAS_INPUT_SYSTEM" }],
+  "autoReferenced": true
+}

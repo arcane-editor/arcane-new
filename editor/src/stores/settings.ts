@@ -23,6 +23,8 @@ const DEFAULT_SETTINGS: SettingsSchema = {
   'graphify.suppressFirstOpenToast': false,
   'ai.checkpoints.enabled': true,
   'ai.escalation.enabled': true,
+  // Remains opt-in until the real Unity acceptance benchmark passes.
+  'ai.specialists.enabled': false,
   'ai.memory.enabled': true,
   'ai.edits.applyMode': 'auto',
   'ai.edits.alwaysApproveUnityAssets': true,

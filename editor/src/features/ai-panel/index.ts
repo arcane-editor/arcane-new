@@ -126,3 +126,5 @@ export type {
 // dependency-free timing utility, and re-exporting it through this barrel made
 // it part of a cycle that broke app startup outright — see
 // src/utils/update-coalescer.ts. Import it from '../utils/update-coalescer'.
+export type { SpecialistResult } from './services/specialists/contracts';
+export type { TaskRunSnapshot } from './services/specialists/task-context';

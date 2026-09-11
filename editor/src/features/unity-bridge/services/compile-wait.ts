@@ -87,7 +87,7 @@ const storeIo: CompileWaitIo = {
  * success and never hangs past the overall cap.
  */
 export function triggerRecompileAndWait(
-  opts: { timeoutMs?: number; signal?: AbortSignal } = {},
+  opts: { timeoutMs?: number; signal?: AbortSignal; force?: boolean } = {},
 ): Promise<CompileWaitOutcome> {
-  return waitForCompileReport(storeIo, opts);
+  return waitForCompileReport(opts.force ? { ...storeIo, requestCompile: () => bridgeRpc.requestCompile(true) } : storeIo, opts);
 }

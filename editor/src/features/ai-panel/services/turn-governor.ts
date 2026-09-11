@@ -97,6 +97,7 @@ let noticeFired = false;
 let softNoticeFired = false;
 let extraCallsGranted = 0;
 let submitOpen = false;
+let submitEpoch = 0;
 let capReachedThisSend = false;
 
 /**
@@ -123,16 +124,17 @@ export function resetTurnGovernor(): void {
  * sends). Calling this while a submit is already open restarts it — as if
  * the previous submit's calls never happened.
  */
-export function beginSubmitBudget(): void {
+export function beginSubmitBudget(): number {
   submitCallCount = 0;
   noticeFired = false;
   softNoticeFired = false;
   submitOpen = true;
+  return ++submitEpoch;
 }
 
 /** Close the current submit-scoped budget. Idempotent. */
-export function endSubmitBudget(): void {
-  submitOpen = false;
+export function endSubmitBudget(epoch = submitEpoch): void {
+  if (epoch === submitEpoch) submitOpen = false;
 }
 
 /** The submit-scoped call count the cap is currently measured against. */

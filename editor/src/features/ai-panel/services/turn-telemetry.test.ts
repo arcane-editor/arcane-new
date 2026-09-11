@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
 import {
   isRepairNote,
+  createTurnTelemetry,
   resetTurnTelemetry,
   nextTurnTelemetry,
   recordTelemetryEvent,
@@ -274,4 +275,11 @@ describe('console-check repairs (Task 13) never inflate repairCount', () => {
     expect(isRepairNote('[Console check] Your last turn left problems behind.')).toBe(false);
     expect(isRepairNote('[Console check] 3 compiler error(s) remain after this turn.')).toBe(false);
   });
+});
+
+it('isolates telemetry across concurrent specialists', () => {
+  const a = createTurnTelemetry(), b = createTurnTelemetry();
+  a.recordTelemetryEvent(toolEnd(true)); a.recordLoopGuardHit(); a.nextTurnTelemetry();
+  const independent = b.nextTurnTelemetry();
+  expect(independent.toolErrorCount).toBe(0); expect(independent.loopGuardHits).toBe(0); expect(independent.turnIndex).toBe(1);
 });

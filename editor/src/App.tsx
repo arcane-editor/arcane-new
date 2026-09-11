@@ -1,3 +1,4 @@
+import { SaveConflictBanner } from './components/SaveConflictBanner';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Allotment, LayoutPriority, type AllotmentHandle } from 'allotment';
 import { invoke } from '@tauri-apps/api/core';
@@ -38,8 +39,6 @@ import {
 } from './features/project';
 import { startUpdateNotices } from './features/updates';
 import {
-  AiChatPanel,
-  MaximizedAiOverlay,
   isAiComposerFocused,
   cycleEffort,
   restoreLatestSessionForWorkspace,
@@ -47,7 +46,6 @@ import {
   disposeExternalBackends,
 } from './features/ai-panel';
 import TooltipHost from './components/TooltipHost';
-import { ErrorBoundary } from './components/ErrorBoundary';
 import {
   focusTerminalById,
   handleTerminalDrop,
@@ -2235,7 +2233,7 @@ function App() {
                           <TabBar />
                           <Breadcrumbs />
                           <EditorErrorBoundary>
-                            {activeFilePath ? <EditorPanel /> : <WelcomeScreen hasWorkspace />}
+                            {activeFilePath ? <><SaveConflictBanner /><EditorPanel /></> : <WelcomeScreen hasWorkspace />}
                           </EditorErrorBoundary>
                         </div>
                       </Allotment.Pane>
@@ -2268,7 +2266,7 @@ function App() {
                 </Allotment.Pane>
                 <Allotment.Pane
                   key="right"
-                  visible={rightSidebarVisible}
+                  visible={rightSidebarVisible && !aiPanelMaximized}
                   preferredSize={initialLayout.right}
                   minSize={200}
                 >
@@ -2319,19 +2317,6 @@ function App() {
       )}
       <TooltipHost />
       <CoachMarks />
-      {aiPanelMaximized && (
-        <MaximizedAiOverlay>
-          {/* Same local boundary RightSidebarPanel gives the docked panel — a
-              panel crash must never replace the whole editor. */}
-          <ErrorBoundary
-            fallback={
-              <div className="sidebar-empty">AI panel crashed — close and reopen it to retry.</div>
-            }
-          >
-            <AiChatPanel />
-          </ErrorBoundary>
-        </MaximizedAiOverlay>
-      )}
       {graphifyIntroOpen && (
         <GraphifyIntroModal
           onClose={() => setGraphifyIntroOpen(false)}
