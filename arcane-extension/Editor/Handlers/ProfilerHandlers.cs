@@ -80,7 +80,7 @@ namespace UnityIDE.Bridge
             _metadata["project"] = Application.productName;
             _metadata["deepProfiling"] = ProfilerDriver.deepProfiling;
             _metadata["limitBytes"] = (double)_limit;
-            File.WriteAllText(Path.Combine(_directory, "metadata.json"), _metadata.ToString());
+            File.WriteAllText(Path.Combine(_directory, "metadata.json"), _metadata.Serialize());
             SessionState.SetString(SessionKey, _id);
             _nextFrame = ProfilerDriver.lastFrameIndex + 1;
             ProfilerDriver.enabled = true; _recording = true;
@@ -210,7 +210,7 @@ namespace UnityIDE.Bridge
                             chunk["durationMs"] = view.frameTimeMs;
                             if (view.frameGpuTimeMs > 0) chunk["gpuMs"] = view.frameGpuTimeMs;
                             chunk["samples"] = samples; chunk["counters"] = Counters(view);
-                            Publish(chunk.ToString()); samples = JsonValue.NewArray();
+                            Publish(chunk.Serialize()); samples = JsonValue.NewArray();
                             yield return null;
                             while (_writer != null && !_writer.IsCompleted) yield return null;
                         }

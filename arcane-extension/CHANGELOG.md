@@ -5,6 +5,16 @@ All notable changes to this package will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - Unreleased
+
+### Added
+- Protocol 6 stable scene-object and component identities, existing-root edits,
+  root-scoped persistence checks, and Scene view selection/framing after authoring.
+
+### Changed
+- Saved editable scene authoring is the default specialist workflow. Runtime-only
+  level generators must be converted to explicit Editor builders.
+
 ## [0.3.0] - Unreleased
 
 ### Added

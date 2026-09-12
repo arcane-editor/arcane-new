@@ -18,7 +18,7 @@ namespace UnityIDE.Bridge
         {
             RpcDispatcher.Register("authorScene", Author);
             RpcDispatcher.Register("getAuthoringStatus", p => Status(p["operationId"].AsString));
-            RpcDispatcher.Register("verifySavedScene", p => Verify(p["scenePath"].AsString, p["requireAuthoredLevel"].AsBool));
+            RpcDispatcher.Register("verifySavedScene", p => Verify(p["scenePath"].AsString, p["requireAuthoredLevel"].AsBool, p["root"].AsString));
         }
 
         internal static JsonValue Status(string id)
@@ -70,7 +70,12 @@ namespace UnityIDE.Bridge
                 targetPath = path;
                 if (!path.EndsWith(".unity", StringComparison.OrdinalIgnoreCase)) throw new ArgumentException("scenePath must end in .unity");
                 string rootName = p["ownedRoot"].AsString;
-                if (string.IsNullOrWhiteSpace(rootName) || rootName.Contains("/") || rootName.Contains("\\")) throw new ArgumentException("ownedRoot must be one root name.");
+                string rootGlobalObjectId = p["rootGlobalObjectId"].AsString;
+                bool existingRoot = !string.IsNullOrEmpty(rootGlobalObjectId);
+                if (existingRoot == !string.IsNullOrEmpty(rootName)) throw new ArgumentException("Provide exactly one of ownedRoot or rootGlobalObjectId.");
+                if (!existingRoot && (string.IsNullOrWhiteSpace(rootName) || rootName.Contains("/") || rootName.Contains("\\"))) throw new ArgumentException("ownedRoot must be one root name.");
+                if (existingRoot && p["builder"].IsObject) throw new ArgumentException("Existing-scene authoring uses scoped actions; an Editor builder cannot be confined to the selected root.");
+                if (existingRoot && !p["expectedAssetHashes"].IsObject) throw new ArgumentException("Existing-scene authoring requires checkpoint hashes.");
                 var outputs = new HashSet<string>();
                 if (!p["outputs"].IsArray || !p["actions"].IsArray) throw new ArgumentException("Declare outputs and actions.");
                 foreach (var output in p["outputs"].Array) outputs.Add(AutomationStore.AssetPath(output.AsString));
@@ -84,7 +89,7 @@ namespace UnityIDE.Bridge
                 }
                 foreach (string output in outputs)
                 {
-                    if (output != path && File.Exists(output) && AutomationStore.Read("ownership", OwnershipKey(output, rootName))["status"].AsString != "passed")
+                    if (!existingRoot && output != path && File.Exists(output) && AutomationStore.Read("ownership", OwnershipKey(output, rootName))["status"].AsString != "passed")
                         throw new InvalidOperationException("Refusing to overwrite an asset not owned by this builder: " + output);
                     backups[output] = File.Exists(output) ? File.ReadAllBytes(output) : null;
                     backups[output + ".meta"] = File.Exists(output + ".meta") ? File.ReadAllBytes(output + ".meta") : null;
@@ -94,16 +99,37 @@ namespace UnityIDE.Bridge
                 if (!scene.IsValid() || !scene.isLoaded)
                 {
                     Directory.CreateDirectory(Path.GetDirectoryName(path));
-                    scene = File.Exists(path) ? EditorSceneManager.OpenScene(path, OpenSceneMode.Additive) : EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Additive);
+                    if (File.Exists(path)) scene = EditorSceneManager.OpenScene(path, OpenSceneMode.Additive);
+                    else
+                    {
+                        // Unity 6 refuses NewSceneMode.Additive while its clean,
+                        // untitled startup scene is open. That scene contains no
+                        // persistent user work (dirty scenes were rejected above),
+                        // so replace it only when it is the sole loaded scene;
+                        // otherwise close just the untitled scene and preserve
+                        // every saved scene in the designer's current setup.
+                        Scene untitled = Enumerable.Range(0, SceneManager.sceneCount)
+                            .Select(SceneManager.GetSceneAt)
+                            .FirstOrDefault(candidate => string.IsNullOrEmpty(candidate.path));
+                        if (untitled.IsValid() && SceneManager.sceneCount == 1)
+                            scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+                        else
+                        {
+                            if (untitled.IsValid()) EditorSceneManager.CloseScene(untitled, true);
+                            scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Additive);
+                        }
+                    }
                     opened = true;
                 }
                 SceneManager.SetActiveScene(scene);
-                string ownership = OwnershipKey(path, rootName);
-                GameObject root = scene.GetRootGameObjects().SingleOrDefault(g => g.name == rootName);
-                if (root != null && AutomationStore.Read("ownership", ownership)["status"].AsString != "passed")
+                string ownership = existingRoot ? null : OwnershipKey(path, rootName);
+                GameObject root = existingRoot ? ResolveStableGameObject(rootGlobalObjectId, scene) : scene.GetRootGameObjects().SingleOrDefault(g => g.name == rootName);
+                if (!existingRoot && root != null && AutomationStore.Read("ownership", ownership)["status"].AsString != "passed")
                     throw new InvalidOperationException("The target root was not created by UnityIDE automation. Choose a new ownedRoot.");
                 Undo.IncrementCurrentGroup(); group = Undo.GetCurrentGroup(); Undo.SetCurrentGroupName("UnityIDE authoring");
-                if (root == null) { root = new GameObject(rootName); SceneManager.MoveGameObjectToScene(root, scene); Undo.RegisterCreatedObjectUndo(root, "Create owned root"); }
+                if (root == null && !existingRoot) { root = new GameObject(rootName); SceneManager.MoveGameObjectToScene(root, scene); Undo.RegisterCreatedObjectUndo(root, "Create owned root"); }
+                if (root == null) throw new ArgumentException("Existing authored root was not found in the declared scene.");
+                rootName = root.name;
                 foreach (var action in p["actions"].Array) Apply(root, action, outputs);
                 if (p["builder"].IsObject) RunBuilder(p["builder"]);
                 foreach (string output in outputs) {
@@ -116,25 +142,29 @@ namespace UnityIDE.Bridge
                         finally { PrefabUtility.UnloadPrefabContents(prefab); }
                     }
                 }
-                AssertPersistentDependencies(scene);
-                if (p["requireAuthoredLevel"].AsBool) AssertRepresentativeLevel(scene);
-                if (!EditorSceneManager.SaveScene(scene, path)) throw new IOException("Unity refused to save the scene.");
+                AssertPersistentDependencies(scene, root);
+                if (p["requireAuthoredLevel"].AsBool) AssertRepresentativeLevel(scene, root);
                 Undo.CollapseUndoOperations(group);
-                AutomationStore.Save("ownership", ownership, AutomationStore.Report(ownership, "passed"));
+                if (!EditorSceneManager.SaveScene(scene, path)) throw new IOException("Unity refused to save the scene.");
+                if (!existingRoot) AutomationStore.Save("ownership", ownership, AutomationStore.Report(ownership, "passed"));
                 // Reopen from disk; inspecting the in-memory scene is not persistence verification.
                 Scene reopened = EditorSceneManager.OpenPreviewScene(path);
                 try {
-                    AssertPersistentDependencies(reopened);
-                    if (!reopened.GetRootGameObjects().Any(g => g.name == rootName)) throw new IOException("Owned root did not survive reopening.");
+                    GameObject reopenedRoot = existingRoot ? FindStableGameObjectInScene(rootGlobalObjectId, reopened) : reopened.GetRootGameObjects().SingleOrDefault(g => g.name == rootName);
+                    if (reopenedRoot == null) throw new IOException("Authored root did not survive reopening.");
+                    AssertPersistentDependencies(reopened, reopenedRoot);
+                    if (p["requireAuthoredLevel"].AsBool) AssertRepresentativeLevel(reopened, reopenedRoot);
                 } finally { EditorSceneManager.ClosePreviewScene(reopened); }
                 report = AutomationStore.Report(id, "passed", "Saved scene reopened with persistent content.");
                 report["taskId"] = p["taskId"];
                 report["payloadHash"] = payloadHash;
-                report["scenePersistence"] = true; report["outputs"] = p["outputs"];
-                foreach (string output in outputs) AutomationStore.Save("ownership", OwnershipKey(output, rootName), AutomationStore.Report(id, "passed"));
+                report["scenePersistence"] = true; report["outputs"] = p["outputs"]; report["authoredRoot"] = rootName;
+                if (!existingRoot) foreach (string output in outputs) AutomationStore.Save("ownership", OwnershipKey(output, rootName), AutomationStore.Report(id, "passed"));
                 AutomationStore.Save("author", id, report);
                 // Leave authored content visible and editable in the Scene view.
                 SceneManager.SetActiveScene(scene);
+                Selection.activeGameObject = root;
+                FrameInSceneView(root);
                 return report;
             }
             catch (Exception e)
@@ -170,8 +200,10 @@ namespace UnityIDE.Bridge
             string kind = action["kind"].AsString;
             if (kind != "object" && kind != "prefab" && kind != "component" && kind != "property" && kind != "savePrefab") throw new ArgumentException("Unknown authoring action.");
             if (action["parent"].IsString) throw new ArgumentException("Use a hierarchical target path to name the parent, for example Track/Obstacle.");
-            Transform found = string.IsNullOrEmpty(relative) ? root.transform : root.transform.Find(relative);
-            GameObject go = found != null ? found.gameObject : null;
+            string targetGlobalObjectId = action["targetGlobalObjectId"].AsString;
+            Transform found = string.IsNullOrEmpty(targetGlobalObjectId) ? (string.IsNullOrEmpty(relative) ? root.transform : root.transform.Find(relative)) : null;
+            GameObject go = !string.IsNullOrEmpty(targetGlobalObjectId) ? ResolveStableGameObject(targetGlobalObjectId, root.scene) : found != null ? found.gameObject : null;
+            if (go != null && !IsWithinRoot(go.transform, root.transform)) throw new ArgumentException("Stable target is outside the declared authored root.");
             if ((kind == "object" || kind == "prefab") && go == null)
             {
                 string parentPath = relative.Contains("/") ? relative.Substring(0, relative.LastIndexOf('/')) : "";
@@ -201,7 +233,10 @@ namespace UnityIDE.Bridge
             if (kind == "property")
             {
                 Type type = ResolveType(action["component"].AsString);
-                var component = type == null ? null : go.GetComponent(type);
+                string componentGlobalObjectId = action["componentGlobalObjectId"].AsString;
+                Component component = !string.IsNullOrEmpty(componentGlobalObjectId)
+                    ? ResolveStableComponent(componentGlobalObjectId, go)
+                    : type == null ? null : go.GetComponent(type);
                 if (component == null) throw new ArgumentException("Component not found.");
                 Undo.RecordObject(component, "Set authored property");
                 var serialized = new SerializedObject(component);
@@ -220,6 +255,56 @@ namespace UnityIDE.Bridge
                 PrefabUtility.SaveAsPrefabAsset(go, output, out bool success);
                 if (!success) throw new IOException("Prefab save failed.");
             }
+        }
+
+        private static bool IsWithinRoot(Transform target, Transform root)
+        {
+            for (Transform current = target; current != null; current = current.parent)
+                if (current == root) return true;
+            return false;
+        }
+
+        private static GameObject ResolveStableGameObject(string value, Scene scene)
+        {
+            var resolved = HierarchyHandlers.ResolveGlobalObject(value);
+            GameObject go = resolved as GameObject;
+            if (go == null && resolved is Component component) go = component.gameObject;
+            if (go == null || go.scene != scene) throw new ArgumentException("Stable GameObject target is stale or outside the declared scene.");
+            return go;
+        }
+
+        private static Component ResolveStableComponent(string value, GameObject owner)
+        {
+            var component = HierarchyHandlers.ResolveGlobalObject(value) as Component;
+            if (component == null || component.gameObject != owner) throw new ArgumentException("Stable component target is stale or belongs to another GameObject.");
+            return component;
+        }
+
+        private static GameObject FindStableGameObjectInScene(string value, Scene scene)
+        {
+            foreach (var sceneRoot in scene.GetRootGameObjects())
+            foreach (var transform in sceneRoot.GetComponentsInChildren<Transform>(true))
+                if (GlobalObjectId.GetGlobalObjectIdSlow(transform.gameObject).ToString() == value) return transform.gameObject;
+            return null;
+        }
+
+        private static GameObject FindAuthoredRoot(Scene scene, string root)
+        {
+            if (string.IsNullOrEmpty(root)) return null;
+            if (root.StartsWith("GlobalObjectId_V1-", StringComparison.Ordinal)) return FindStableGameObjectInScene(root, scene);
+            var matches = scene.GetRootGameObjects().Where(go => go.name == root).ToArray();
+            if (matches.Length != 1) throw new InvalidOperationException("The authored root must identify exactly one saved scene root.");
+            return matches[0];
+        }
+
+        private static void FrameInSceneView(GameObject root)
+        {
+            var renderers = root.GetComponentsInChildren<Renderer>(false).Where(r => r.enabled).ToArray();
+            if (renderers.Length == 0 || SceneView.lastActiveSceneView == null) return;
+            Bounds bounds = renderers[0].bounds;
+            foreach (var renderer in renderers.Skip(1)) bounds.Encapsulate(renderer.bounds);
+            SceneView.lastActiveSceneView.Frame(bounds, true);
+            SceneView.lastActiveSceneView.Repaint();
         }
 
         internal static Type ResolveType(string name)
@@ -249,11 +334,11 @@ namespace UnityIDE.Bridge
             method.Invoke(null, new object[] { builder["parameters"].AsStringOr("{}") });
         }
 
-        internal static void AssertPersistentDependencies(Scene scene)
+        internal static void AssertPersistentDependencies(Scene scene, GameObject authoredRoot = null)
         {
             var roots = scene.GetRootGameObjects();
             if (roots.Length == 0) throw new InvalidOperationException("Saved scene contains no objects.");
-            foreach (var root in roots)
+            foreach (var root in authoredRoot != null ? new[] { authoredRoot } : roots)
             foreach (var transform in root.GetComponentsInChildren<Transform>(true))
             {
                 if (GameObjectUtility.GetMonoBehavioursWithMissingScriptCount(transform.gameObject) > 0) throw new InvalidOperationException("Missing script: " + transform.name);
@@ -273,15 +358,19 @@ namespace UnityIDE.Bridge
             }
         }
 
-        internal static void AssertRepresentativeLevel(Scene scene)
+        internal static void AssertRepresentativeLevel(Scene scene, GameObject authoredRoot = null)
         {
-            var roots = scene.GetRootGameObjects();
-            bool visible = roots.Any(r => r.GetComponentsInChildren<Renderer>(true).Length > 0 || r.GetComponentsInChildren<Terrain>(true).Length > 0);
-            bool collision = roots.Any(r => r.GetComponentsInChildren<Collider>(true).Length > 0 || r.GetComponentsInChildren<Collider2D>(true).Length > 0);
+            var roots = authoredRoot != null ? new[] { authoredRoot } : scene.GetRootGameObjects();
+            bool visible = roots.Any(root =>
+                root.GetComponentsInChildren<Renderer>(false).Any(renderer => renderer.enabled && renderer.bounds.size.sqrMagnitude > 0.0001f) ||
+                root.GetComponentsInChildren<Terrain>(false).Any(terrain => terrain.enabled && terrain.terrainData != null));
+            bool collision = roots.Any(root =>
+                root.GetComponentsInChildren<Collider>(false).Any(collider => collider.enabled && collider.bounds.size.sqrMagnitude > 0.0001f) ||
+                root.GetComponentsInChildren<Collider2D>(false).Any(collider => collider.enabled && collider.bounds.size.sqrMagnitude > 0.0001f));
             if (!visible || !collision) throw new InvalidOperationException("No saved representative level geometry with collision exists before Play. Runtime-only construction does not satisfy level authoring.");
         }
 
-        internal static JsonValue Verify(string path, bool requireAuthoredLevel = false)
+        internal static JsonValue Verify(string path, bool requireAuthoredLevel = false, string root = null)
         {
             string id = "scene-check";
             Scene scene = default;
@@ -289,10 +378,13 @@ namespace UnityIDE.Bridge
             {
                 RequireIdleClean(); path = AutomationStore.AssetPath(path);
                 scene = EditorSceneManager.OpenPreviewScene(path);
-                AssertPersistentDependencies(scene);
-                if (requireAuthoredLevel) AssertRepresentativeLevel(scene);
-                var report = AutomationStore.Report(id, "passed", "Saved scene reopens with objects and persistent dependencies.");
+                GameObject authoredRoot = string.IsNullOrEmpty(root) ? null : FindAuthoredRoot(scene, root);
+                if (!string.IsNullOrEmpty(root) && authoredRoot == null) throw new InvalidOperationException("Required authored root did not survive reopening.");
+                AssertPersistentDependencies(scene, authoredRoot);
+                if (requireAuthoredLevel) AssertRepresentativeLevel(scene, authoredRoot);
+                var report = AutomationStore.Report(id, "passed", "Saved scene reopens with visible Edit Mode content and persistent dependencies.");
                 report["scenePersistence"] = true; var outputs = JsonValue.NewArray(); outputs.Add(path); report["outputs"] = outputs;
+                if (authoredRoot != null) report["authoredRoot"] = authoredRoot.name;
                 return report;
             }
             catch (Exception e) { return AutomationStore.Report(id, "failed", e.Message); }
