@@ -45,6 +45,7 @@ export function BreakpointsPanel() {
         return (
           <div className="dbg-bp-row" key={key}>
             <div className="dbg-bp-main">
+              <input type="checkbox" aria-label={`Enable breakpoint at ${name}:${bp.line}`} checked={bp.enabled !== false} onChange={e => useDebugStore.getState().setBreakpointEnabled(file, bp.line, e.target.checked)} />
               <CircleDot
                 size={12}
                 className={bp.verified ? 'dbg-bp-dot' : 'dbg-bp-dot dbg-bp-dot--pending'}

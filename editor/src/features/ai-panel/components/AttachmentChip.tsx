@@ -119,6 +119,12 @@ function AttachmentChip({ attachment: a, removable = true }: Props) {
       preview = a.text.split('\n', 1)[0].trim().slice(0, 80);
       title = a.text.slice(0, 400) + (a.text.length > 400 ? '\n…' : '');
       break;
+    case 'unity-evidence': {
+      icon = <ClipboardList size={12} />;
+      label = a.evidence.label;
+      title = `${a.evidence.label} · ${a.evidence.capturedAt}`;
+      break;
+    }
     case 'error-report': {
       const report = buildErrorReport(a.source, a.entries, a.capturedAt);
       const allErrors = a.entries.every((e) => e.severity === 'error');

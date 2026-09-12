@@ -2018,6 +2018,13 @@ function App() {
       when: () => useProjectContextStore.getState().isUnityProject,
     },
     {
+      id: 'unity.showProfiler',
+      label: 'Show Unity Profiler',
+      category: 'Unity',
+      handler: () => { useUiStore.getState().setActiveBottomTab('unity-profiler'); useUiStore.getState().setBottomPanelVisible(true); },
+      when: () => useProjectContextStore.getState().isUnityProject,
+    },
+    {
       id: 'unity.attachDebugger',
       label: 'Attach Debugger',
       category: 'Unity',

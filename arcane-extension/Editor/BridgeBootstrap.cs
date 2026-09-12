@@ -153,6 +153,7 @@ namespace UnityIDE.Bridge
             EditorStateHandlers.Register(_client);
             HierarchyHandlers.Register(_client);
             DebuggerHandlers.Register(_client);
+            ProfilerHandlers.Register(_client);
             TestRunnerHandlers.Register(_client);
             ConsoleHandlers.Register(_client);
             SceneMutationHandlers.Register(_client);
@@ -227,6 +228,7 @@ namespace UnityIDE.Bridge
                 TestRunnerHandlers.Tick();     // (no-op; TestRunnerApi fires on the main thread)
                 PlayModeStatsHook.Tick();      // ≤4Hz play-mode telemetry
                 PlaytestHandlers.Tick();
+                ProfilerHandlers.Tick();
             }
             catch (Exception e)
             {
@@ -347,6 +349,7 @@ namespace UnityIDE.Bridge
                 PlayStateHook.Uninstall();
                 CompilationHook.Uninstall();
                 PlayModeStatsHook.Uninstall();
+                ProfilerHandlers.Uninstall();
                 EditorStateHandlers.UninstallSelectionHook();
                 HierarchyHandlers.UninstallHierarchyHook();
                 TestRunnerHandlers.Shutdown();

@@ -61,12 +61,19 @@ pub enum Value {
     Void,
     Bool(bool),
     Char(u16),
-    Int { value: i64, tag: u8 },
+    Int {
+        value: i64,
+        tag: u8,
+    },
     Float(f64),
+    Single(f32),
     /// A `System.String`. The characters are fetched separately by id.
     Str(u32),
     /// A reference. `id == 0` is a null reference.
-    Object { tag: u8, id: u32 },
+    Object {
+        tag: u8,
+        id: u32,
+    },
     /// An explicit null, which the agent sends instead of a typed reference.
     Null,
     /// A struct, inlined field by field.
@@ -108,12 +115,10 @@ pub fn decode_value(r: &mut Reader<'_>) -> Result<Value, WireError> {
             value: r.long()?,
             tag,
         },
-        TYPE_R4 => Value::Float(f32::from_bits(r.int()? as u32) as f64),
+        TYPE_R4 => Value::Single(f32::from_bits(r.int()? as u32)),
         TYPE_R8 => Value::Float(f64::from_bits(r.long()? as u64)),
         TYPE_STRING => Value::Str(r.id()?),
-        TYPE_CLASS | TYPE_OBJECT | TYPE_SZARRAY | TYPE_ARRAY => {
-            Value::Object { tag, id: r.id()? }
-        }
+        TYPE_CLASS | TYPE_OBJECT | TYPE_SZARRAY | TYPE_ARRAY => Value::Object { tag, id: r.id()? },
         TYPE_PTR | TYPE_I | TYPE_U => Value::Pointer(r.long()?),
         TYPE_VALUETYPE => {
             let is_enum = r.byte()? != 0;
@@ -156,6 +161,7 @@ pub fn type_label(value: &Value) -> Option<&'static str> {
         Value::Bool(_) => "bool",
         Value::Char(_) => "char",
         Value::Float(_) => "double",
+        Value::Single(_) => "float",
         Value::Str(_) => "string",
         Value::Void => "void",
         Value::Int { tag, .. } => match *tag {
@@ -188,6 +194,8 @@ pub fn summarize(value: &Value) -> String {
         // mistaken for an `int` in the pane.
         Value::Float(f) if f.is_finite() && f.fract() == 0.0 => format!("{:.1}", f),
         Value::Float(f) => f.to_string(),
+        Value::Single(f) if f.is_finite() && f.fract() == 0.0 => format!("{:.1}", f),
+        Value::Single(f) => f.to_string(),
         Value::Null => "null".to_string(),
         Value::Str(0) => "null".to_string(),
         Value::Str(_) => "\"…\"".to_string(),
@@ -292,7 +300,7 @@ mod tests {
         w.byte(TYPE_R8).long(2.25f64.to_bits() as i64);
         let bytes = w.into_bytes();
         let mut r = Reader::new(&bytes);
-        assert_eq!(decode_value(&mut r).unwrap(), Value::Float(1.5));
+        assert_eq!(decode_value(&mut r).unwrap(), Value::Single(1.5));
         assert_eq!(decode_value(&mut r).unwrap(), Value::Float(2.25));
     }
 
@@ -360,7 +368,7 @@ mod tests {
             Value::Struct {
                 type_id: 19,
                 is_enum: false,
-                fields: vec![Value::Float(1.0), Value::Float(2.0), Value::Float(3.0)],
+                fields: vec![Value::Single(1.0), Value::Single(2.0), Value::Single(3.0)],
             }
         );
         assert!(r.is_empty());
@@ -481,7 +489,13 @@ mod tests {
     /// here would be a guess the pane would display as fact.
     #[test]
     fn reference_types_have_no_label_of_their_own() {
-        assert_eq!(type_label(&Value::Object { tag: TYPE_CLASS, id: 2 }), None);
+        assert_eq!(
+            type_label(&Value::Object {
+                tag: TYPE_CLASS,
+                id: 2
+            }),
+            None
+        );
         assert_eq!(
             type_label(&Value::Struct {
                 type_id: 19,

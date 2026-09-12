@@ -28,6 +28,7 @@
 //! | `trace`    | the wire log |
 
 pub mod android;
+pub mod assignment;
 pub mod breakpoints;
 pub mod conn;
 pub mod eval;

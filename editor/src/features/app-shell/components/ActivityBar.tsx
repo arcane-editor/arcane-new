@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { Files, GitBranch, Search, Settings, Bug, Network, FlaskConical, SquareTerminal, Gamepad2, Boxes, PanelsTopLeft } from 'lucide-react';
+import { Files, GitBranch, Search, Settings, Bug, Network, FlaskConical, SquareTerminal, Gamepad2, Boxes, PanelsTopLeft, Gauge } from 'lucide-react';
 import Tooltip from '../../../components/Tooltip';
 import { useUiStore, type SidebarView } from '../../../stores/ui';
 import { useCommandsStore } from '../../../stores/commands';
@@ -131,6 +131,19 @@ function ActivityBar() {
           </button>
         </Tooltip>
       ))}
+
+      {isUnityProject && (
+        <Tooltip label="Unity Profiler" commandId="unity.showProfiler">
+          <button
+            aria-label="Unity Profiler"
+            aria-pressed={bottomPanelVisible && activeBottomTab === 'unity-profiler'}
+            className={`activity-bar-icon${bottomPanelVisible && activeBottomTab === 'unity-profiler' ? ' active' : ''}`}
+            onClick={() => useCommandsStore.getState().executeCommand('unity.showProfiler')}
+          >
+            <Gauge size={18} />
+          </button>
+        </Tooltip>
+      )}
 
       <div className="activity-bar-bottom">
         {/* The terminal had no button at all — keyboard or palette only, which

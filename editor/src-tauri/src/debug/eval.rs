@@ -277,6 +277,7 @@ async fn atom(conn: &Conn, value: &Val) -> Result<Atom, EvalError> {
         Val::Runtime(runtime) => match runtime {
             Value::Int { value, .. } => Atom::Int(*value),
             Value::Float(v) => Atom::Real(*v),
+            Value::Single(v) => Atom::Real(*v as f64),
             Value::Bool(b) => Atom::Bool(*b),
             Value::Char(c) => Atom::Str(
                 char::from_u32(*c as u32)
@@ -402,9 +403,7 @@ fn apply_binary(op: BinaryOp, left: Atom, right: Atom) -> Result<Val, EvalError>
             Add => x.wrapping_add(y),
             Subtract => x.wrapping_sub(y),
             Multiply => x.wrapping_mul(y),
-            Divide | Remainder if y == 0 => {
-                return Err(EvalError::Type("division by zero".into()))
-            }
+            Divide | Remainder if y == 0 => return Err(EvalError::Type("division by zero".into())),
             Divide => x / y,
             Remainder => x % y,
             _ => return Err(EvalError::Type("unsupported operator".into())),
@@ -493,7 +492,13 @@ mod tests {
             }
             (protocol::CMD_SET_TYPE, protocol::CMD_TYPE_GET_INFO) => {
                 let mut w = Writer::new();
-                w.string("").string("Player").string("Player").id(1).id(1).id(0).id(0);
+                w.string("")
+                    .string("Player")
+                    .string("Player")
+                    .id(1)
+                    .id(1)
+                    .id(0)
+                    .id(0);
                 Some((0, w.into_bytes()))
             }
             (protocol::CMD_SET_TYPE, protocol::CMD_TYPE_GET_FIELDS) => {

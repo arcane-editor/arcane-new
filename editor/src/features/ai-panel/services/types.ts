@@ -65,6 +65,7 @@ export function coerceEffort(value: unknown): Effort {
 }
 
 export type Attachment =
+  | { kind: 'unity-evidence'; id: string; evidence: import('../../../types/unity-evidence').UnityEvidence }
   | {
       kind: 'file';
       id: string;

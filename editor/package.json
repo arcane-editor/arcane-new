@@ -24,9 +24,10 @@
     "verify:intellisense": "bun run scripts/verify-csharp-intellisense.ts",
     "verify:acp": "node scripts/verify-acp.mjs",
     "verify:debugger": "bun run scripts/verify-unity-debugger.ts",
-    "verify": "tsc --noEmit && bun run check:modules && bun run check:invoke && bun run check:version && bun test src && bun test scripts && bun run test:isolated && (cd src-tauri && cargo test --lib) && bun run verify:intellisense && bun run verify:acp && bun run verify:debugger",
+    "verify": "tsc --noEmit && bun run check:modules && bun run check:invoke && bun run check:version && bun test src && bun test scripts && bun run test:isolated && (cd src-tauri && cargo test --lib) && bun run verify:intellisense && bun run verify:acp && bun run verify:debugger && bun run verify:profiler",
     "eval": "bun tooling/unity-eval/run-eval.ts",
-    "verify:unity-automation": "bun run scripts/verify-unity-automation.ts"
+    "verify:unity-automation": "bun run scripts/verify-unity-automation.ts",
+    "verify:profiler": "bun run scripts/verify-unity-profiler.ts"
   },
   "dependencies": {
     "@fontsource-variable/geist-mono": "^5.2.7",

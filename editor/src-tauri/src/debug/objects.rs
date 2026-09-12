@@ -18,7 +18,8 @@ use super::wire::{Reader, Writer};
 /// `OBJECT_REF` commands.
 const CMD_OBJECT_REF_GET_TYPE: u8 = 1;
 const CMD_OBJECT_REF_GET_VALUES: u8 = 2;
-const CMD_OBJECT_REF_SET_VALUES: u8 = 3;
+// Mono soft debugger: command 3 is IS_COLLECTED, not SET_VALUES.
+const CMD_OBJECT_REF_SET_VALUES: u8 = 6;
 
 /// `STRING_REF` commands.
 const CMD_STRING_REF_GET_VALUE: u8 = 1;
@@ -507,7 +508,16 @@ mod tests {
         let conn = connect(&agent).await;
 
         let read = object_values(&conn, 2, &[11, 12]).await.unwrap();
-        assert_eq!(read, vec![Value::Str(31), Value::Int { value: 3, tag: TYPE_I4 }]);
+        assert_eq!(
+            read,
+            vec![
+                Value::Str(31),
+                Value::Int {
+                    value: 3,
+                    tag: TYPE_I4
+                }
+            ]
+        );
 
         let (cs, cmd, body) = seen.recv().await.unwrap();
         assert_eq!(
@@ -606,7 +616,13 @@ mod tests {
 
         let read = array_values(&conn, 40, 1, 2).await.unwrap();
         assert_eq!(read.len(), 2);
-        assert_eq!(read[0], Value::Int { value: 7, tag: TYPE_I4 });
+        assert_eq!(
+            read[0],
+            Value::Int {
+                value: 7,
+                tag: TYPE_I4
+            }
+        );
 
         let (cs, cmd, body) = seen.recv().await.unwrap();
         assert_eq!(
@@ -792,4 +808,26 @@ mod tests {
         assert_eq!(r.byte().unwrap(), TYPE_I4);
         assert_eq!(r.int().unwrap(), 42);
     }
+}
+
+/// ARRAY_REF.SET_VALUES uses the same element encoding as GET_VALUES.
+pub async fn set_array_value(
+    conn: &Conn,
+    array: u32,
+    index: u32,
+    encoded: Vec<u8>,
+) -> Result<(), ConnError> {
+    let mut w = Writer::new();
+    w.id(array).int(index as i32).int(1).raw(&encoded);
+    let reply = conn
+        .request(protocol::CMD_SET_ARRAY_REF, 3, w.into_bytes())
+        .await?;
+    if !reply.is_ok() {
+        return Err(ConnError::Agent {
+            command_set: protocol::CMD_SET_ARRAY_REF,
+            command: 3,
+            error: reply.error,
+        });
+    }
+    Ok(())
 }

@@ -74,6 +74,11 @@ fn unity_mono() -> Option<(PathBuf, PathBuf)> {
             for data in [
                 version.join("Editor").join("Data"),
                 version.join("Unity.app").join("Contents"),
+                version
+                    .join("Unity.app")
+                    .join("Contents")
+                    .join("Resources")
+                    .join("Scripting"),
             ] {
                 let bin = data.join("MonoBleedingEdge").join("bin").join(exe);
                 let mcs = data
@@ -214,7 +219,7 @@ using System.Threading;
 
 public class Player {
     public string Name;
-    public int Score;
+    public int Score; public Pair Data = new Pair { X = 1.5f, Y = 7 }; public int[] Samples = new int[] { 4, 5 };
 
     public Player(string name, int score) {
         Name = name;
@@ -246,6 +251,7 @@ public class Fixture {
         }
     }
 }
+public struct Pair { public float X; public int Y; }
 "#;
 
 /// The line in `FIXTURE` holding `Score = before + delta;`.
@@ -348,10 +354,96 @@ mod tests {
             .await
             .expect("arm breakpoint");
 
-        let hit = wait_for(&mut events, protocol::EVENT_BREAKPOINT, Duration::from_secs(20))
-            .await
-            .expect("the breakpoint should be hit");
+        let hit = wait_for(
+            &mut events,
+            protocol::EVENT_BREAKPOINT,
+            Duration::from_secs(20),
+        )
+        .await
+        .expect("the breakpoint should be hit");
         (conn, events, location, hit)
+    }
+
+    #[tokio::test]
+    async fn writes_locals_arrays_and_nested_struct_fields() {
+        use crate::debug::assignment::{replacement, Location as Write};
+        let Some(mut debuggee) = Debuggee::launch(FIXTURE) else {
+            skip("no Unity install found");
+            return;
+        };
+        let (conn, _events, _, hit) = stop_at_breakpoint(&debuggee).await;
+        let frame = session::frames(&conn, hit.thread).await.unwrap()[0];
+        let locals = session::locals_info(&conn, frame.method).await.unwrap();
+        let slot = locals.iter().position(|l| l.name == "before").unwrap();
+        let local = Write::Local {
+            thread: hit.thread,
+            frame: frame.id,
+            slot: slot as i32,
+        };
+        let old = local.read(&conn).await.unwrap();
+        local
+            .write(&conn, replacement(&old, "42").unwrap())
+            .await
+            .unwrap();
+        assert_eq!(summarize(&local.read(&conn).await.unwrap()), "42");
+        let object = session::frame_this(&conn, hit.thread, frame.id)
+            .await
+            .unwrap()
+            .object_id()
+            .unwrap();
+        let type_id = objects::object_type(&conn, object).await.unwrap();
+        let fields = objects::all_instance_fields(&conn, type_id).await.unwrap();
+        let field = |name: &str| fields.iter().find(|f| f.name == name).unwrap().id;
+        let data = Write::Field {
+            object,
+            field: field("Data"),
+        };
+        let x = Write::Nested {
+            parent: Box::new(data.clone()),
+            index: 0,
+        };
+        let y = Write::Nested {
+            parent: Box::new(data.clone()),
+            index: 1,
+        };
+        y.write(
+            &conn,
+            replacement(&y.read(&conn).await.unwrap(), "99").unwrap(),
+        )
+        .await
+        .unwrap();
+        x.write(
+            &conn,
+            replacement(&x.read(&conn).await.unwrap(), "2.5f").unwrap(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            summarize(&y.read(&conn).await.unwrap()),
+            "99",
+            "a sibling edit survives nested struct writeback"
+        );
+        assert_eq!(x.read(&conn).await.unwrap(), Value::Single(2.5));
+        let array = Write::Field {
+            object,
+            field: field("Samples"),
+        }
+        .read(&conn)
+        .await
+        .unwrap()
+        .object_id()
+        .unwrap();
+        let element = Write::Element { array, index: 1 };
+        element
+            .write(
+                &conn,
+                replacement(&element.read(&conn).await.unwrap(), "88").unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(summarize(&element.read(&conn).await.unwrap()), "88");
+        conn.dispose().await;
+        assert!(debuggee.is_alive());
     }
 
     /// The whole Phase 1 loop against a real runtime: attach, watch the source
@@ -366,7 +458,11 @@ mod tests {
         let (conn, _events, location, hit) = stop_at_breakpoint(&debuggee).await;
 
         let stack = session::frames(&conn, hit.thread).await.expect("frames");
-        assert!(stack.len() >= 2, "Tick is called from Main, got {:?}", stack);
+        assert!(
+            stack.len() >= 2,
+            "Tick is called from Main, got {:?}",
+            stack
+        );
         let frame = stack[0];
         assert_eq!(
             frame.method, location.method,
@@ -436,7 +532,10 @@ mod tests {
                 _ => {}
             }
         }
-        assert!(saw_before && saw_tag, "both locals should be live at line 16");
+        assert!(
+            saw_before && saw_tag,
+            "both locals should be live at line 16"
+        );
 
         // Expand `this` one level, the way the variables pane does: runtime
         // type, its declared fields, their values, and the characters behind a
@@ -457,7 +556,9 @@ mod tests {
         let info = objects::type_info(&conn, type_id).await.expect("type info");
         let parent = info.parent.expect("Player derives from something");
         assert_eq!(
-            objects::type_name(&conn, parent).await.expect("parent name"),
+            objects::type_name(&conn, parent)
+                .await
+                .expect("parent name"),
             "System.Object",
             "the parent id decoded out of TYPE_GET_INFO must be the real base type"
         );
@@ -527,9 +628,13 @@ mod tests {
             .expect("arm exception breakpoint");
         session::resume(&conn).await.expect("resume");
 
-        let hit = wait_for(&mut events, protocol::EVENT_EXCEPTION, Duration::from_secs(20))
-            .await
-            .expect("the fixture throws every iteration, so this should stop");
+        let hit = wait_for(
+            &mut events,
+            protocol::EVENT_EXCEPTION,
+            Duration::from_secs(20),
+        )
+        .await
+        .expect("the fixture throws every iteration, so this should stop");
 
         let stack = session::frames(&conn, hit.thread).await.expect("frames");
         assert!(
@@ -607,9 +712,14 @@ mod tests {
         let before = session::frames(&conn, hit.thread).await.expect("frames")[0];
         assert_eq!(before.il_offset, location.il_offset);
 
-        let request = session::step(&conn, hit.thread, StepDepth::Over, session::step_filter::MY_CODE_ONLY)
-            .await
-            .expect("arm step");
+        let request = session::step(
+            &conn,
+            hit.thread,
+            StepDepth::Over,
+            session::step_filter::MY_CODE_ONLY,
+        )
+        .await
+        .expect("arm step");
         session::resume(&conn).await.expect("resume into the step");
 
         let stepped = wait_for(&mut events, protocol::EVENT_STEP, Duration::from_secs(15))
@@ -619,7 +729,9 @@ mod tests {
             .await
             .expect("clear the step request");
 
-        let after = session::frames(&conn, stepped.thread).await.expect("frames");
+        let after = session::frames(&conn, stepped.thread)
+            .await
+            .expect("frames");
         assert!(!after.is_empty(), "the stack is readable after a step");
         assert_eq!(
             after[0].method, before.method,

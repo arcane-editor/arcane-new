@@ -18,6 +18,7 @@ mod unity_tests;
 mod unity_ipc;
 mod unity_journal;
 mod debug;
+mod unity_profiler;
 mod acp;
 mod auth;
 mod auth_loopback;
@@ -1283,6 +1284,13 @@ pub fn run() {
             debug::host::dap_start,
             debug::host::dap_send,
             debug::host::dap_stop,
+            unity_profiler::profiler_create,
+            unity_profiler::profiler_ingest,
+            unity_profiler::profiler_list,
+            unity_profiler::profiler_frames,
+            unity_profiler::profiler_query,
+            unity_profiler::profiler_export,
+            unity_profiler::profiler_import,
             debug::host::debug_targets,
             debug::host::debug_scan_targets,
             debug::host::debug_trace_path,

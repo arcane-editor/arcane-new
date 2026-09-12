@@ -8,6 +8,7 @@ import { UnityConsolePanel } from '../../unity-console';
 import ProblemsPanel from './ProblemsPanel';
 import { ReferencesPanel } from '../../references';
 import { DebugConsole } from '../../debugger';
+import { UnityProfilerPanel } from '../../unity-profiler';
 import { useDebugStore } from '../../../stores/debug';
 
 function BottomPanel() {
@@ -49,6 +50,7 @@ function BottomPanel() {
     // Only while a debug session exists: an always-present tab that is always
     // empty teaches people to ignore it.
     ...(debugActive ? [{ id: 'debug-console' as BottomPanelTab, label: 'Debug Console' }] : []),
+    ...(isUnityProject ? [{ id: 'unity-profiler' as BottomPanelTab, label: 'Unity Profiler' }] : []),
     { id: 'problems', label: 'Problems' },
     { id: 'references', label: 'Usages' },
   ];
@@ -115,6 +117,7 @@ function BottomPanel() {
         {effectiveTab === 'problems' && <ProblemsPanel />}
         {effectiveTab === 'references' && <ReferencesPanel />}
         {effectiveTab === 'debug-console' && <DebugConsole />}
+        {effectiveTab === 'unity-profiler' && <UnityProfilerPanel />}
       </div>
     </div>
   );

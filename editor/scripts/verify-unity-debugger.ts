@@ -127,6 +127,10 @@ async function main(): Promise<void> {
     const { code, output } = await run(section.filter);
     const elapsed = Date.now() - started;
 
+    if (code !== 0) {
+      fail(`section '${name}' failed`, output.split('\n').slice(-40).join('\n'));
+    }
+
     if (/SKIPPED\s+Unity debugger end-to-end check/.test(output)) {
       skipped = /no Unity install found/.test(output)
         ? 'no Unity install found (set UNITYIDE_DEBUGGER_MONO to override)'
@@ -135,9 +139,6 @@ async function main(): Promise<void> {
       continue;
     }
 
-    if (code !== 0) {
-      fail(`section '${name}' failed`, output.split('\n').slice(-40).join('\n'));
-    }
 
     const overBudget = elapsed > section.budgetMs ? '  OVER BUDGET' : '';
     console.log(

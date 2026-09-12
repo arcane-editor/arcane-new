@@ -128,3 +128,5 @@ export type {
 // src/utils/update-coalescer.ts. Import it from '../utils/update-coalescer'.
 export type { SpecialistResult } from './services/specialists/contracts';
 export type { TaskRunSnapshot } from './services/specialists/task-context';
+
+export { attachUnityEvidence } from './services/attach-unity-evidence';

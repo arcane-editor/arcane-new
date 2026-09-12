@@ -125,7 +125,7 @@ mod tests {
     use crate::debug::values::TYPE_R4;
 
     fn f(value: f64) -> Value {
-        Value::Float(value)
+        Value::Single(value as f32)
     }
 
     #[test]

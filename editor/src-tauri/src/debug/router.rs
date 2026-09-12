@@ -31,6 +31,7 @@ use std::path::PathBuf;
 use serde_json::{json, Value as Json};
 use tokio::sync::mpsc;
 
+use super::assignment::{self, Location as WriteLocation};
 use super::conn::Conn;
 use super::handles::{Handle, Handles};
 use super::objects;
@@ -110,6 +111,7 @@ pub struct Router {
     /// The thread the runtime is stopped on, if any.
     stopped_thread: Option<u32>,
     handles: Handles,
+    write_locations: HashMap<i64, WriteLocation>,
     /// Per type: the id of its `m_CachedPtr` field, or `None` when it is not a
     /// Unity object at all. Cached because finding it means walking the whole
     /// base-type chain, and the answer never changes for a given type.
@@ -139,6 +141,7 @@ impl Router {
             known_types: Vec::new(),
             stopped_thread: None,
             handles: Handles::new(),
+            write_locations: HashMap::new(),
             unity_ptr_field: HashMap::new(),
         }
     }
@@ -151,6 +154,7 @@ impl Router {
                 self.conn = None;
                 self.stopped_thread = None;
                 self.handles.invalidate();
+                self.write_locations.clear();
                 self.event("terminated", json!({}));
             }
             Msg::TypesFound { path, types } => {
@@ -246,6 +250,7 @@ impl Router {
             "stackTrace" => self.stack_trace(&request).await,
             "scopes" => self.scopes(&request).await,
             "variables" => self.variables(&request).await,
+            "setVariable" => self.set_variable(&request).await,
             "evaluate" => self.evaluate(&request).await,
             "continue" => self.resume_with(&request, None).await,
             "next" => self.resume_with(&request, Some(StepDepth::Over)).await,
@@ -262,21 +267,21 @@ impl Router {
 
     async fn attach(&mut self, request: &Json) {
         let args = request.get("arguments").cloned().unwrap_or(json!({}));
-        let explicit = args
-            .get("port")
-            .and_then(|p| p.as_u64())
-            .map(|port| {
-                let host = args
-                    .get("host")
-                    .and_then(|h| h.as_str())
-                    .unwrap_or("127.0.0.1")
-                    .to_string();
-                (host, port as u16)
-            });
+        let explicit = args.get("port").and_then(|p| p.as_u64()).map(|port| {
+            let host = args
+                .get("host")
+                .and_then(|h| h.as_str())
+                .unwrap_or("127.0.0.1")
+                .to_string();
+            (host, port as u16)
+        });
 
         let (host, port) = match explicit {
             Some(pair) => pair,
-            None => match discovery::targets_for_workspace(&self.workspace).into_iter().next() {
+            None => match discovery::targets_for_workspace(&self.workspace)
+                .into_iter()
+                .next()
+            {
                 Some(target) => (target.host, target.port),
                 None => {
                     self.refuse(
@@ -291,7 +296,10 @@ impl Router {
         let addr = match format!("{}:{}", host, port).parse() {
             Ok(addr) => addr,
             Err(_) => {
-                self.refuse(request, format!("invalid debugger address {}:{}", host, port));
+                self.refuse(
+                    request,
+                    format!("invalid debugger address {}:{}", host, port),
+                );
                 return;
             }
         };
@@ -486,7 +494,9 @@ impl Router {
     /// Re-applied after attach as well as on request, because an event request
     /// registered against a previous connection does not survive it.
     async fn rearm_exceptions(&mut self) {
-        let Some(conn) = self.conn.clone() else { return };
+        let Some(conn) = self.conn.clone() else {
+            return;
+        };
 
         if let Some(previous) = self.exception_request.take() {
             let _ = symbols::clear_event_request(&conn, protocol::EVENT_EXCEPTION, previous).await;
@@ -511,7 +521,9 @@ impl Router {
 
     /// Re-register the `TYPE_LOAD` subscription over every watched file.
     async fn rewatch(&mut self) {
-        let Some(conn) = self.conn.clone() else { return };
+        let Some(conn) = self.conn.clone() else {
+            return;
+        };
         if let Some(previous) = self.watch_request.take() {
             let _ = symbols::clear_event_request(&conn, protocol::EVENT_TYPE_LOAD, previous).await;
         }
@@ -530,7 +542,9 @@ impl Router {
     /// otherwise every file is tried, which is what a `TYPE_LOAD` after a
     /// domain reload needs.
     async fn bind_against(&mut self, types: &[u32], only: Option<&str>) {
-        let Some(conn) = self.conn.clone() else { return };
+        let Some(conn) = self.conn.clone() else {
+            return;
+        };
         if types.is_empty() {
             return;
         }
@@ -545,8 +559,7 @@ impl Router {
         for (path, lines) in targets {
             for line in lines {
                 let key = (path.clone(), line);
-                let Ok(Some(location)) =
-                    symbols::locate_in_types(&conn, types, &path, line).await
+                let Ok(Some(location)) = symbols::locate_in_types(&conn, types, &path, line).await
                 else {
                     continue;
                 };
@@ -569,8 +582,13 @@ impl Router {
 
                 if let Ok(request_id) = symbols::arm_breakpoint(&conn, location).await {
                     self.by_request.insert(request_id, key.clone());
-                    self.bound
-                        .insert(key, Bound { request_id, location });
+                    self.bound.insert(
+                        key,
+                        Bound {
+                            request_id,
+                            location,
+                        },
+                    );
                     self.event(
                         "breakpoint",
                         json!({
@@ -698,13 +716,16 @@ impl Router {
             return;
         };
 
-        let variables = match handle {
+        let variables = match handle.clone() {
             Handle::FrameLocals {
                 thread,
                 frame_id,
                 method,
                 il_offset,
-            } => self.frame_variables(&conn, thread, frame_id, method, il_offset).await,
+            } => {
+                self.frame_variables(&conn, thread, frame_id, method, il_offset)
+                    .await
+            }
             Handle::Object { id } => self.object_variables(&conn, id).await,
             Handle::Struct { type_id, fields } => {
                 self.struct_variables(&conn, type_id, &fields).await
@@ -716,7 +737,151 @@ impl Router {
             } => self.array_variables(&conn, array, start, count).await,
         };
 
+        // Attach an address to expandable structs, which have no runtime object id.
+        for row in &variables {
+            let child = row["variablesReference"].as_i64().unwrap_or(0);
+            if child > 0 {
+                if let Ok(location) = self
+                    .writable_location(
+                        &conn,
+                        reference,
+                        &handle,
+                        row["name"].as_str().unwrap_or(""),
+                    )
+                    .await
+                {
+                    self.write_locations.insert(child, location);
+                }
+            }
+        }
         self.respond(request, json!({ "variables": variables }));
+    }
+
+    async fn writable_location(
+        &self,
+        conn: &Conn,
+        reference: i64,
+        handle: &Handle,
+        name: &str,
+    ) -> Result<WriteLocation, String> {
+        match handle {
+            Handle::FrameLocals {
+                thread,
+                frame_id,
+                method,
+                il_offset,
+            } => {
+                let locals = session::locals_info(conn, *method)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                let (slot, _) = locals
+                    .iter()
+                    .enumerate()
+                    .find(|(_, l)| l.name == name && l.is_live_at(*il_offset))
+                    .ok_or("Local is unavailable or read-only")?;
+                Ok(WriteLocation::Local {
+                    thread: *thread,
+                    frame: *frame_id,
+                    slot: slot as i32,
+                })
+            }
+            Handle::Object { id } => {
+                let type_id = objects::object_type(conn, *id)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                let fields = objects::all_instance_fields(conn, type_id)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                let matching: Vec<_> = fields
+                    .iter()
+                    .filter(|f| renderers::readable_field_name(f.display_name()) == name)
+                    .collect();
+                if matching.len() != 1 {
+                    return Err("Field is unavailable or ambiguous".into());
+                }
+                if matching[0].attributes & 0x20 != 0 {
+                    return Err("Readonly fields cannot be edited".into());
+                }
+                Ok(WriteLocation::Field {
+                    object: *id,
+                    field: matching[0].id,
+                })
+            }
+            Handle::ArraySlice {
+                array,
+                start,
+                count,
+            } => {
+                let index: u32 = name
+                    .strip_prefix('[')
+                    .and_then(|s| s.strip_suffix(']'))
+                    .and_then(|s| s.parse().ok())
+                    .ok_or("Invalid array index")?;
+                if index < *start || index >= start.saturating_add(*count) {
+                    return Err("Index outside this array page".into());
+                }
+                Ok(WriteLocation::Element {
+                    array: *array,
+                    index,
+                })
+            }
+            Handle::Struct { type_id, .. } => {
+                let fields = objects::type_fields(conn, *type_id)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                let (index, field) = fields
+                    .iter()
+                    .filter(|f| f.is_instance_field())
+                    .enumerate()
+                    .find(|(_, f)| renderers::readable_field_name(f.display_name()) == name)
+                    .ok_or("Field is unavailable")?;
+                if field.attributes & 0x20 != 0 {
+                    return Err("Readonly fields cannot be edited".into());
+                }
+                let parent = self
+                    .write_locations
+                    .get(&reference)
+                    .cloned()
+                    .ok_or("This value is a read-only evaluation result")?;
+                Ok(WriteLocation::Nested {
+                    parent: Box::new(parent),
+                    index,
+                })
+            }
+        }
+    }
+
+    async fn set_variable(&mut self, request: &Json) {
+        let args = &request["arguments"];
+        let reference = args["variablesReference"].as_i64().unwrap_or(0);
+        let name = args["name"].as_str().unwrap_or("");
+        let text = args["value"].as_str().unwrap_or("");
+        let (Some(conn), Some(handle)) = (self.conn.clone(), self.handles.get(reference).cloned())
+        else {
+            self.refuse(request, "Variable is stale; pause and expand it again");
+            return;
+        };
+        if self.stopped_thread.is_none() {
+            self.refuse(request, "Pause execution before changing a value");
+            return;
+        }
+        let result = async {
+            let location = self
+                .writable_location(&conn, reference, &handle, name)
+                .await?;
+            let old = location.read(&conn).await?;
+            let value = assignment::replacement(&old, text)?;
+            location.write(&conn, value).await?;
+            location.read(&conn).await
+        }
+        .await;
+        match result {
+            Ok(value) => {
+                let row = self.describe(&conn, name, &value).await;
+                self.respond(request, row);
+            }
+            Err(error) => self.refuse(request, error),
+        }
     }
 
     async fn frame_variables(
@@ -792,7 +957,9 @@ impl Router {
     }
 
     async fn struct_variables(&mut self, conn: &Conn, type_id: u32, fields: &[Value]) -> Vec<Json> {
-        let declared = objects::type_fields(conn, type_id).await.unwrap_or_default();
+        let declared = objects::type_fields(conn, type_id)
+            .await
+            .unwrap_or_default();
         let names: Vec<String> = declared
             .iter()
             .filter(|f| f.is_instance_field())
@@ -895,13 +1062,21 @@ impl Router {
                         start: 0,
                         count: length.min(MAX_ARRAY_PREVIEW),
                     });
-                    (format!("{}[{}]", renderers::short_name(&label), length), reference)
+                    (
+                        format!("{}[{}]", renderers::short_name(&label), length),
+                        reference,
+                    )
                 } else {
                     let reference = self.handles.alloc(Handle::Object { id: *id });
-                    (format!("{} {{…}}", renderers::short_name(&label)), reference)
+                    (
+                        format!("{} {{…}}", renderers::short_name(&label)),
+                        reference,
+                    )
                 }
             }
-            Value::Struct { type_id, fields, .. } => {
+            Value::Struct {
+                type_id, fields, ..
+            } => {
                 let label = objects::type_name(conn, *type_id)
                     .await
                     .unwrap_or_else(|_| String::from("struct"));
@@ -1001,15 +1176,11 @@ impl Router {
             }
             Ok(literal) => {
                 let text = eval::display(&conn, &literal).await;
-                self.respond(
-                    request,
-                    json!({ "result": text, "variablesReference": 0 }),
-                );
+                self.respond(request, json!({ "result": text, "variablesReference": 0 }));
             }
             Err(e) => self.refuse(request, e.to_string()),
         }
     }
-
 
     async fn resume_with(&mut self, request: &Json, step: Option<StepDepth>) {
         let Some(conn) = self.conn.clone() else {
@@ -1038,10 +1209,14 @@ impl Router {
         }
 
         self.handles.invalidate();
+        self.write_locations.clear();
         self.stopped_thread = None;
         let _ = session::resume(&conn).await;
         self.respond(request, json!({ "allThreadsContinued": true }));
-        self.event("continued", json!({ "threadId": thread, "allThreadsContinued": true }));
+        self.event(
+            "continued",
+            json!({ "threadId": thread, "allThreadsContinued": true }),
+        );
     }
 
     /// Where execution could be moved to, for a "set next statement".
@@ -1076,8 +1251,7 @@ impl Router {
             return;
         };
 
-        let Ok(Some(location)) =
-            symbols::locate_in_method(&conn, frame.method, &path, line).await
+        let Ok(Some(location)) = symbols::locate_in_method(&conn, frame.method, &path, line).await
         else {
             self.respond(request, json!({ "targets": [] }));
             return;
@@ -1125,6 +1299,7 @@ impl Router {
                 // The stack did not change, but where it is pointing did, so
                 // the UI has to re-read it.
                 self.handles.invalidate();
+                self.write_locations.clear();
                 self.announce_stop(thread, "goto").await;
             }
             Err(e) => self.refuse(request, format!("could not move execution: {}", e)),
@@ -1155,10 +1330,7 @@ impl Router {
         // cursor is an interactive action and must not wait on the slow scan.
         let types: Vec<u32> = self.known_types.clone();
         let Ok(Some(location)) = symbols::locate_in_types(&conn, &types, &path, line).await else {
-            self.refuse(
-                request,
-                "that line has no code the runtime knows about yet",
-            );
+            self.refuse(request, "that line has no code the runtime knows about yet");
             return;
         };
 
@@ -1204,6 +1376,7 @@ impl Router {
         }
         self.stopped_thread = None;
         self.handles.invalidate();
+        self.write_locations.clear();
         self.bound.clear();
         self.watch_request = None;
         self.respond(request, json!({}));
@@ -1253,10 +1426,16 @@ impl Router {
                     self.event("terminated", json!({}));
                 }
                 protocol::EVENT_THREAD_START => {
-                    self.event("thread", json!({ "reason": "started", "threadId": event.thread }));
+                    self.event(
+                        "thread",
+                        json!({ "reason": "started", "threadId": event.thread }),
+                    );
                 }
                 protocol::EVENT_THREAD_DEATH => {
-                    self.event("thread", json!({ "reason": "exited", "threadId": event.thread }));
+                    self.event(
+                        "thread",
+                        json!({ "reason": "exited", "threadId": event.thread }),
+                    );
                 }
                 _ => {}
             }
@@ -1276,9 +1455,8 @@ impl Router {
         if self.one_shot == Some(request_id) {
             self.one_shot = None;
             if let Some(conn) = self.conn.clone() {
-                let _ =
-                    symbols::clear_event_request(&conn, protocol::EVENT_BREAKPOINT, request_id)
-                        .await;
+                let _ = symbols::clear_event_request(&conn, protocol::EVENT_BREAKPOINT, request_id)
+                    .await;
             }
             self.announce_stop(thread, "step").await;
             return;
@@ -1375,6 +1553,7 @@ impl Router {
     async fn resume_quietly(&mut self) {
         if let Some(conn) = self.conn.clone() {
             self.handles.invalidate();
+            self.write_locations.clear();
             let _ = session::resume(&conn).await;
         }
     }
@@ -1438,16 +1617,14 @@ impl Router {
 
     /// Send a line to the debug console.
     fn output(&mut self, text: &str) {
-        self.event(
-            "output",
-            json!({ "category": "console", "output": text }),
-        );
+        self.event("output", json!({ "category": "console", "output": text }));
     }
 
     async fn announce_stop(&mut self, thread: u32, reason: &str) {
         // Every object id handed out before this moment named memory from the
         // previous stop.
         self.handles.invalidate();
+        self.write_locations.clear();
         self.stopped_thread = Some(thread);
         self.event(
             "stopped",

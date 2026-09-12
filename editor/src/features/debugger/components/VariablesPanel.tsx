@@ -12,7 +12,7 @@ import { renderValue } from '../services/value-rendering';
  * without this a row has no way to say where it lives and nothing could be
  * edited.
  */
-function VarRow({
+export function VarRow({
   node,
   depth,
   containerRef,
@@ -42,7 +42,7 @@ function VarRow({
   };
 
   const beginEdit = (e: React.MouseEvent) => {
-    if (!canEdit) return;
+    if (!canEdit || containerRef <= 0) return;
     e.stopPropagation(); // don't toggle expansion on the double-click
     // Seed from the RAW value, not `rendered.display`: renderValue is lossy
     // (it trims float precision and rewrites Vector3/Color into a friendlier

@@ -21,7 +21,8 @@ export type BottomPanelTab =
   | 'problems'
   | 'unity-console'
   | 'references'
-  | 'debug-console';
+  | 'debug-console'
+  | 'unity-profiler';
 export type LspStatus = 'idle' | 'starting' | 'indexing' | 'ready' | 'error';
 
 // DiagnosticSource is defined in ../types and re-exported here for consumers

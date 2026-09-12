@@ -14,6 +14,7 @@ export type DebugStatus = 'inactive' | 'attaching' | 'running' | 'paused' | 'ter
 
 export interface Breakpoint {
   line: number;
+  enabled?: boolean;
   condition?: string;
   hitCondition?: string;
   /**
@@ -104,6 +105,12 @@ interface DebugState {
   variables: Map<number, VariableNode[]>;
   watches: string[];
   watchResults: Map<string, string>;
+  watchVariables: Map<string, VariableNode>;
+  stopReason: string | null;
+  exceptionFilters: string[];
+  selectThread: (id: number) => Promise<void>;
+  setExceptionFilters: (filters: string[]) => Promise<void>;
+  setBreakpointEnabled: (file: string, line: number, enabled: boolean) => void;
   /** Debug console output: logpoints, condition failures, adapter notices. */
   consoleLines: ConsoleLine[];
   clearConsole: () => void;
@@ -185,6 +192,29 @@ export const useDebugStore = create<DebugState>((set, get) => ({
   variables: new Map(),
   watches: [],
   watchResults: new Map(),
+  watchVariables: new Map(),
+  stopReason: null,
+  exceptionFilters: ['uncaught'],
+  setExceptionFilters: async (exceptionFilters) => {
+    await dapClient.request('setExceptionBreakpoints', { filters: exceptionFilters }).then(() => set({ exceptionFilters })).catch(e => notify.error(String(e)));
+  },
+  setBreakpointEnabled: (file, line, enabled) => {
+    const map = new Map(get().breakpoints);
+    const list = (map.get(file) ?? []).map(bp => bp.line === line ? { ...bp, enabled, verified: false } : bp);
+    map.set(file, list); set({ breakpoints: map });
+    persistBreakpoints(useWorkspaceStore.getState().workspacePath ?? '', map);
+    void syncBreakpointsForFile(file, list);
+  },
+  selectThread: async (currentThreadId) => {
+    if (get().status !== 'paused') return;
+    set({ currentThreadId, currentFrameId: null, frames: [], scopes: [], variables: new Map(), watchVariables: new Map() });
+    try {
+      const res = await dapClient.request<{ stackFrames: Array<{ id: number; name: string; line: number; column: number; source?: { path?: string } }> }>('stackTrace', { threadId: currentThreadId, startFrame: 0, levels: 100 });
+      if (get().status !== 'paused' || get().currentThreadId !== currentThreadId) return;
+      const frames = (res.stackFrames ?? []).map(f => ({ ...f, path: f.source?.path }));
+      set({ frames }); if (frames[0]) await get().selectFrame(frames[0].id);
+    } catch (e) { notify.error(`Could not load thread: ${String(e)}`); }
+  },
   consoleLines: [],
 
   clearConsole: () => set({ consoleLines: [] }),
@@ -329,7 +359,7 @@ export const useDebugStore = create<DebugState>((set, get) => ({
       if (play) {
         await useUnityStore.getState().sendPlay();
       }
-      set({ status: 'running' });
+      if (get().status === 'attaching') set({ status: 'running' });
       void warnIfEditorIsOptimized();
     } catch (err) {
       notify({ type: 'error', message: `Attach failed: ${String(err)}` });
@@ -340,21 +370,23 @@ export const useDebugStore = create<DebugState>((set, get) => ({
 
   resume: async () => {
     const tid = get().currentThreadId;
-    await dapClient.request('continue', { threadId: tid ?? 0 }).catch(() => {});
-    set({ status: 'running', frames: [], scopes: [], variables: new Map() });
+    try {
+      await dapClient.request('continue', { threadId: tid ?? 0 });
+      set({ status: 'running', currentFrameId: null, stopReason: null, frames: [], scopes: [], variables: new Map(), watchVariables: new Map(), watchResults: new Map() });
+    } catch (e) { notify.error(`Continue failed: ${String(e)}`); }
   },
   pause: async () => {
     const tid = get().currentThreadId ?? get().threads[0]?.id ?? 0;
-    await dapClient.request('pause', { threadId: tid }).catch(() => {});
+    await dapClient.request('pause', { threadId: tid }).catch(e => notify.error(`Debugger operation failed: ${String(e)}`));
   },
   stepOver: async () => {
-    await dapClient.request('next', { threadId: get().currentThreadId ?? 0 }).catch(() => {});
+    await dapClient.request('next', { threadId: get().currentThreadId ?? 0 }).catch(e => notify.error(`Debugger operation failed: ${String(e)}`));
   },
   stepIn: async () => {
-    await dapClient.request('stepIn', { threadId: get().currentThreadId ?? 0 }).catch(() => {});
+    await dapClient.request('stepIn', { threadId: get().currentThreadId ?? 0 }).catch(e => notify.error(`Debugger operation failed: ${String(e)}`));
   },
   stepOut: async () => {
-    await dapClient.request('stepOut', { threadId: get().currentThreadId ?? 0 }).catch(() => {});
+    await dapClient.request('stepOut', { threadId: get().currentThreadId ?? 0 }).catch(e => notify.error(`Debugger operation failed: ${String(e)}`));
   },
   stop: async () => {
     await dapClient.stop().catch(() => {});
@@ -369,6 +401,7 @@ export const useDebugStore = create<DebugState>((set, get) => ({
         { frameId },
       );
       const scopes = res.scopes ?? [];
+      if (get().status !== 'paused' || get().currentFrameId !== frameId) return;
       set({ scopes });
       // Eagerly load the first scope (Locals).
       if (scopes[0]) await get().loadChildren(scopes[0].variablesReference);
@@ -382,9 +415,11 @@ export const useDebugStore = create<DebugState>((set, get) => ({
   loadChildren: async (variablesReference) => {
     if (variablesReference <= 0) return;
     try {
+      const frame = get().currentFrameId;
       const res = await dapClient.request<{ variables: VariableNode[] }>('variables', {
         variablesReference,
       });
+      if (get().status !== 'paused' || get().currentFrameId !== frame) return;
       const map = new Map(get().variables);
       map.set(variablesReference, res.variables ?? []);
       set({ variables: map });
@@ -404,6 +439,8 @@ export const useDebugStore = create<DebugState>((set, get) => ({
 
       set({ variables: applySetVariable(get().variables, containerRef, name, res) });
 
+      // Reload expanded containers so aliases and parent struct summaries update.
+      for (const reference of [...get().variables.keys()]) await get().loadChildren(reference);
       // A watch expression may read the field just changed, so re-evaluate.
       const fid = get().currentFrameId;
       if (fid != null) void refreshWatches(fid, set, get);
@@ -476,7 +513,7 @@ async function syncBreakpointsForFile(file: string, list: Breakpoint[]): Promise
   try {
     await dapClient.request('setBreakpoints', {
       source: { path: file, name: file.split('/').pop() },
-      breakpoints: list.map((b) => ({
+      breakpoints: list.filter(b => b.enabled !== false).map((b) => ({
         line: b.line,
         condition: b.condition,
         hitCondition: b.hitCondition,
@@ -499,20 +536,22 @@ async function refreshWatches(
   set: (partial: Partial<DebugState>) => void,
   get: () => DebugState,
 ): Promise<void> {
-  const results = new Map(get().watchResults);
+  const results = new Map<string, string>();
+  const watchVariables = new Map<string, VariableNode>();
   for (const expr of get().watches) {
     try {
-      const res = await dapClient.request<{ result: string }>('evaluate', {
+      const res = await dapClient.request<{ result: string; type?: string; variablesReference?: number }>('evaluate', {
         expression: expr,
         frameId,
         context: 'watch',
       });
       results.set(expr, res.result);
-    } catch {
-      results.set(expr, '<error>');
+      watchVariables.set(expr, { name: expr, value: res.result, type: res.type, variablesReference: res.variablesReference ?? 0 });
+    } catch (e) {
+      results.set(expr, String(e));
     }
   }
-  set({ watchResults: results });
+  if (get().status === 'paused' && get().currentFrameId === frameId) set({ watchResults: results, watchVariables });
 }
 
 /** Bind DAP adapter events to store updates. Idempotent. */
@@ -590,10 +629,10 @@ function bindDapHandlers(
       // name. The old code always sent `user-unhandled`, which meant the
       // exception-filter capability was reported and then ignored.
       const offered = get().capabilities.exceptionBreakpointFilters ?? [];
-      const enabled = offered.filter((f) => f.default).map((f) => f.filter);
+      const enabled = get().exceptionFilters.filter(id => offered.some(f => f.filter === id));
       await dapClient
         .request('setExceptionBreakpoints', {
-          filters: enabled.length ? enabled : ['uncaught'],
+          filters: enabled,
         })
         .catch(() => {});
       await dapClient.request('configurationDone').catch(() => {});
@@ -601,32 +640,21 @@ function bindDapHandlers(
   });
 
   dapClient.on('stopped', (body) => {
-    const b = body as { threadId?: number };
+    const b = body as { threadId?: number; reason?: string; description?: string };
     const threadId = b.threadId ?? get().currentThreadId ?? 0;
-    set({ status: 'paused', currentThreadId: threadId });
+    set({ status: 'paused', currentThreadId: threadId, stopReason: b.description ?? b.reason ?? 'Paused' });
     void (async () => {
       try {
-        const threadsRes = await dapClient.request<{ threads: Array<{ id: number; name: string }> }>('threads');
-        const stackRes = await dapClient.request<{
-          stackFrames: Array<{ id: number; name: string; line: number; column: number; source?: { path?: string } }>;
-        }>('stackTrace', { threadId, startFrame: 0, levels: 50 });
-        const frames: StackFrame[] = (stackRes.stackFrames ?? []).map((f) => ({
-          id: f.id,
-          name: f.name,
-          path: f.source?.path,
-          line: f.line,
-          column: f.column,
-        }));
-        set({ threads: threadsRes.threads ?? [], frames });
-        if (frames[0]) await get().selectFrame(frames[0].id);
-      } catch {
-        /* ignore */
-      }
+        const threads = await dapClient.request<{ threads: Array<{ id: number; name: string }> }>('threads');
+        if (get().status !== 'paused') return;
+        set({ threads: threads.threads });
+        await get().selectThread(threadId);
+      } catch (e) { notify.error(`Could not inspect stopped thread: ${String(e)}`); }
     })();
   });
 
   dapClient.on('continued', () => {
-    set({ status: 'running', frames: [], scopes: [], variables: new Map() });
+    set({ status: 'running', currentFrameId: null, stopReason: null, frames: [], scopes: [], variables: new Map(), watchVariables: new Map(), watchResults: new Map() });
   });
 
   // Logpoint output, condition failures and adapter notices. Nothing consumed
@@ -671,7 +699,7 @@ function bindDapHandlers(
     set({ breakpoints: map });
   });
 
-  const onEnd = () => set({ status: 'terminated', frames: [], scopes: [], variables: new Map(), threads: [] });
+  const onEnd = () => set({ status: 'terminated', frames: [], scopes: [], variables: new Map(), threads: [], currentFrameId: null, currentThreadId: null, stopReason: null, watchVariables: new Map(), watchResults: new Map() });
   dapClient.on('terminated', onEnd);
   dapClient.on('exited', onEnd);
   dapClient.on('__exited', onEnd);

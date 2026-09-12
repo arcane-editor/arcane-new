@@ -65,6 +65,8 @@ tauri-plugin-clipboard-manager = "2.3.2"
 # already resolved transitively at this version, so this adds no new
 # resolution — same reasoning as the objc2 block below.
 png = "0.17"
+rusqlite = { version = "0.37", features = ["bundled"] }
+flate2 = "1"
 
 # macOS-only: objc2 shim for the dock right-click menu ("New Window"). tao's
 # NSApplication delegate does not implement `applicationDockMenu:`, and neither
