@@ -47,6 +47,36 @@ interface UnityIndexState {
   progress: IndexProgress | null;
   summary: IndexSummary | null;
   error: string | null;
+  /**
+   * Bumped every time the index content changes — full build AND incremental
+   * delta. Consumers that cache index-derived results key on this.
+   *
+   * `status` is not sufficient: a delta leaves status untouched, so anything
+   * watching status alone serves stale results until a full rebuild or an app
+   * restart. On a large project deltas are the normal path, so that staleness
+   * is permanent in practice.
+   */
+  indexRevision: number;
+  /**
+   * Bumped only when a delta touched an `.inputactions` asset.
+   *
+   * Separate from `indexRevision` on purpose. Reloading the analyzers' input
+   * snapshot costs a project scan, so hanging it off the general revision
+   * would run that scan on every prefab and scene save. This fires only when
+   * the input assets themselves changed.
+   */
+  inputActionsRevision: number;
+  /**
+   * Bumped only when a delta touched a `.uxml` or `.uss`.
+   *
+   * Its own counter for exactly the reason `inputActionsRevision` has one:
+   * reloading the UI Toolkit snapshot re-reads every document and, in its
+   * second phase, walks the project's C#. Before this existed the snapshot was
+   * only ever loaded on workspace open, so editing a stylesheet in Unity left
+   * UNITY0501 — and the AI's `unity_ui_toolkit` — validating against the
+   * documents as they were when the project was opened.
+   */
+  uiToolkitRevision: number;
 
   /** Full build (persists + caches in Rust). Background, non-blocking. */
   build: (workspacePath: string, unityVersion: string, force?: boolean) => Promise<void>;
@@ -103,6 +133,9 @@ export const useUnityIndexStore = create<UnityIndexState>((set) => ({
   status: 'idle',
   progress: null,
   summary: null,
+  indexRevision: 0,
+  inputActionsRevision: 0,
+  uiToolkitRevision: 0,
   error: null,
 
   build: async (workspacePath, unityVersion, force = false) => {
@@ -195,6 +228,19 @@ export const INDEX_RELEVANT = [
   '.mat',
   '.controller',
   '.anim',
+  // `.inputactions` carries no outgoing `guid:` refs, so the Rust reingest is
+  // a no-op for it and its GUID already arrives via the `.meta` sidecar. It is
+  // listed here for the two things this list actually gates: the `@asset`
+  // mention category, and the `indexRevision` bump that tells consumers (the
+  // analyzers' input snapshot) that the asset changed on disk.
+  '.inputactions',
+  // Same bargain as `.inputactions` above: neither carries an outgoing `guid:`
+  // reference that `REF_EXTENSIONS` (`unity_index.rs`) ingests, so the Rust
+  // reingest is a no-op for both. They are listed for the `@asset` mention
+  // category and for the `uiToolkitRevision` bump that tells the analyzers'
+  // snapshot the documents changed on disk.
+  '.uxml',
+  '.uss',
 ];
 
 function isIndexRelevant(p: string): boolean {
@@ -237,12 +283,29 @@ function initDeltaListener(): void {
       if (!workspacePath || !indexEnabled()) return;
       if (changed.length === 0 && removedList.length === 0) return;
 
+      // Bumped separately below so a prefab save does not trigger the
+      // analyzers' `.inputactions` rescan (see `inputActionsRevision`).
+      const inputTouched = [...changed, ...removedList].some((p) =>
+        p.toLowerCase().endsWith('.inputactions'),
+      );
+      const uiTouched = [...changed, ...removedList].some((p) => {
+        const lower = p.toLowerCase();
+        return lower.endsWith('.uxml') || lower.endsWith('.uss');
+      });
+
       void invoke('unity_index_apply_delta', {
         workspacePath,
         changed,
         removed: removedList,
       })
-        .then(() => invalidateGuidMap())
+        .then(() => {
+          invalidateGuidMap();
+          useUnityIndexStore.setState((s) => ({
+            indexRevision: s.indexRevision + 1,
+            inputActionsRevision: s.inputActionsRevision + (inputTouched ? 1 : 0),
+            uiToolkitRevision: s.uiToolkitRevision + (uiTouched ? 1 : 0),
+          }));
+        })
         .catch((err) => {
           console.warn('[UnityIndex] apply_delta failed:', err);
         });
@@ -252,12 +315,59 @@ function initDeltaListener(): void {
   });
 }
 
+// ── file-content-changed → uiToolkitRevision ────────────────────────────
+//
+// The OTHER half of "a `.uxml`/`.uss` changed on disk", and the half that was
+// missing.
+//
+// `file-index-changed` carries only what `file_scanner.rs` puts in its
+// `added`/`removed` lists, and those are populated from `Create` and
+// `Modify(Name)` — creations and renames. A plain in-place rewrite of an
+// existing file arrives as `Modify(Data)`, which the scanner reports on a
+// SEPARATE event, `file-content-changed`. So the delta listener above sees a
+// stylesheet the first time it is written and never again.
+//
+// That gap is the whole difference between the design dock's render and the
+// `.uxml` preview: `layout-gate.ts` re-reads every file from disk on every
+// probe, while every consumer of `uiToolkitRevision` waits for a signal that
+// only fired on creation. Iterating on a screen — the AI rewriting a `.uss` it
+// already wrote, or a human editing one in Unity — changed the file and
+// notified nobody.
+//
+// Gated the same way as the delta listener so the two signals cannot disagree
+// about whether this project is being indexed at all.
+
+let contentListenerInitialized = false;
+
+function initUiContentListener(): void {
+  if (contentListenerInitialized) return;
+  contentListenerInitialized = true;
+  listenScoped<string[]>('file-content-changed', (event) => {
+    if (!indexEnabled()) return;
+    // Rust already dedups and settles each burst before emitting, so one bump
+    // per event is one bump per burst — no debounce needed here.
+    const uiTouched = (event.payload ?? []).some((p) => {
+      const lower = p.toLowerCase();
+      return lower.endsWith('.uxml') || lower.endsWith('.uss');
+    });
+    if (!uiTouched) return;
+    // Only `uiToolkitRevision`: an in-place edit changes a document's CONTENT,
+    // never its guid, so neither the guid map nor the reverse-reference index
+    // has gone stale. (This is the same reasoning that keeps `.uxml`/`.uss` out
+    // of the Rust reingest — see `INDEX_RELEVANT`.)
+    useUnityIndexStore.setState((s) => ({ uiToolkitRevision: s.uiToolkitRevision + 1 }));
+  }).catch(() => {
+    contentListenerInitialized = false;
+  });
+}
+
 /**
- * Install the unity-index listeners (progress + incremental delta). Idempotent
- * and inert for non-Unity projects (the delta listener self-gates). Call once
- * on app mount.
+ * Install the unity-index listeners (progress + incremental delta + UI
+ * document content). Idempotent and inert for non-Unity projects (the delta
+ * and content listeners self-gate). Call once on app mount.
  */
 export function initUnityIndexListeners(): void {
   initProgressListener();
   initDeltaListener();
+  initUiContentListener();
 }

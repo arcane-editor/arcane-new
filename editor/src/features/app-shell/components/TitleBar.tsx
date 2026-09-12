@@ -1,12 +1,13 @@
 import { Search, Settings, Loader2 } from 'lucide-react';
 import { isMac } from '../../../utils/platform';
 import Tooltip from '../../../components/Tooltip';
-import WindowControls from './WindowControls';
+import WindowControls from '../../../components/WindowControls';
 import { useAuthStore } from '../../../stores/auth';
 import { useCommandsStore } from '../../../stores/commands';
 import { useUnityStore } from '../../../stores/unity';
 import { useProjectContextStore } from '../../../stores/project-context';
 import { UnityPlayControls } from '../../unity-toolbar';
+import { UpdateButton } from '../../updates';
 
 function TitleBar() {
   const authEmail = useAuthStore((s) => s.email);
@@ -51,6 +52,11 @@ function TitleBar() {
         )}
       </div>
       <div className="title-bar-right" data-tauri-drag-region>
+        {/* Leads the cluster rather than sitting between Search and Settings:
+            those two are a pair ("act on the workspace") that the divider
+            below already frames, and this is a third thing — state that wants
+            you. It renders nothing at all until an update is staged. */}
+        <UpdateButton />
         <Tooltip label="Quick Open" commandId="palette.quickOpen" side="bottom">
           <button
             className="title-bar-btn"

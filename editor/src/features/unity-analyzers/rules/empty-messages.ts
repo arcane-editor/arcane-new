@@ -1,4 +1,4 @@
-import { LIFECYCLE_METHOD_NAMES } from '../../csharp';
+import { LIFECYCLE_METHOD_NAMES } from '../../../data/unity-messages';
 import type { AnalyzerRule, Finding } from '../services/analyzer-engine';
 import {
   offsetInSpan,
@@ -24,6 +24,10 @@ const FREQUENT_MESSAGES = new Set([
 export const emptyMessagesRule: AnalyzerRule = {
   id: 'unity/empty-message',
   defaultSeverity: 'warning',
+  codes: ['UNITY0209'],
+  // UNT0001 is the same inspection, and knows a comment-only body from an
+  // empty one — which this rule does not.
+  supersededBy: ['UNT0001'],
 
   run(scan, ctx): Finding[] {
     const findings: Finding[] = [];

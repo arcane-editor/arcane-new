@@ -42,6 +42,7 @@ export type AppEnv = {
         RL_AUTH_STRICT?: RateLimiter;   // 10/60s/IP (absent in tests → fail open)
         RL_AUTH_POLL?: RateLimiter;     // 60/60s/IP (absent in tests → fail open)
         RL_INLINE?: RateLimiter;        // 30/60s/user inline-completion burst cap (absent in tests → fail open)
+        RL_CLIENT_ERROR?: RateLimiter; // 20/60s/IP crash-report cap (absent in tests → fail open)
         GOOGLE_CLIENT_ID?: string;      // secret — unset until owner provisions OAuth client
         GOOGLE_CLIENT_SECRET?: string;  // secret
         GITHUB_CLIENT_ID?: string;      // secret — one OAuth App per environment (GitHub allows a single callback URL each)
@@ -157,4 +158,4 @@ export type StreamEvent =
     | { type: 'tool_call'; id: string; name: string; arguments: string; finished: boolean }
     | { type: 'usage'; input_tokens: number; output_tokens: number; cached_input_tokens?: number; model?: string }
     | { type: 'thinking'; thought: string; signature: string }
-    | { type: 'error'; code?: 'model_error' | 'rate_limit' | 'server_error'; message: string };
+    | { type: 'error'; code?: 'model_error' | 'rate_limit' | 'server_error'; message: string; retryAfterSeconds?: number };

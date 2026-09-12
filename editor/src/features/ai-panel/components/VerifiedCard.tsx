@@ -1,8 +1,23 @@
+import { normalizeVerifiedCard } from '../services/verified-card-data';
 /**
  * VerifiedCard — the "AI you can trust" closing proof (P3.4). Renders the
  * verified-pass result (`verified-pass.ts`) as a compact single-row summary:
- * compile / analyzers / GUID integrity, plus the touched-file count, each with
- * a ✓ / ✗ / – (skipped) marker. The touched-file list (and any missing-GUID
+ * compile / analyzers / GUID integrity, plus the three Unity subsystems whose
+ * breakage a compile can never report (UI Toolkit, ScriptableObjects, Input),
+ * plus the touched-file count, each with a ✓ / ✗ / – (skipped) marker.
+ *
+ * Task 13 adds two more chips on the same rule: what Unity's own console said
+ * after the turn, and the latest test run the send made. Those two are the only
+ * evidence that the change actually WORKS rather than merely compiling, and a
+ * repair pass the check made is labelled honestly — a console error is never
+ * called "fixed", only "not seen again".
+ *
+ * The three subsystem chips render only when their step actually ran. Unlike
+ * compile/analyzers/GUIDs, which apply to every send, a send that touched no
+ * .uxml has nothing to say about UI Toolkit — and a chip reading "UI Toolkit
+ * skipped" on every C#-only change is noise that trains the user to stop
+ * reading the card. Their markers still feed the verdict, so a real failure
+ * both appears and turns the shield red. The touched-file list (and any missing-GUID
  * detail) sits collapsed behind a chevron, same pattern as ToolCallBlock.
  */
 
@@ -18,7 +33,8 @@ import {
   ShieldQuestion,
 } from 'lucide-react';
 import type { AiMessage } from '../../../stores/ai';
-import { verifiedVerdict, verdictTitle } from '../services/verified-verdict';
+import { verifiedVerdict, verdictTitle, consoleMarker, testsMarker } from '../services/verified-verdict';
+import { consoleRowLabel, testsRowLabel } from '../services/console-check';
 
 interface Props {
   message: AiMessage;
@@ -43,10 +59,36 @@ function plural(n: number, word: string): string {
 
 function VerifiedCard({ message }: Props) {
   const [expanded, setExpanded] = useState(false);
-  const data = message.verifiedPass;
-  if (!data) return null;
+  if (!message.verifiedPass) return null;
+  const data = normalizeVerifiedCard(message.verifiedPass);
 
-  const { files, touchedFiles, analyzers, compile, guids } = data;
+  const {
+    files,
+    touchedFiles,
+    // Defaulted for the same reason `layout` is below: these cards are
+    // PERSISTED with the session and the shape has only ever grown, so which
+    // fields a saved card carries depends on the build that wrote it. A
+    // missing one is `undefined`, matches neither string variant, and throws
+    // on the object read (`uiToolkit.problems`) — which is exactly how this
+    // component took the whole AI panel down. `backfillVerifiedCards` repairs
+    // restored sessions; these are the last line of defence.
+    analyzers = 'skipped',
+    compile = 'skipped',
+    guids = 'skipped',
+    uiToolkit = 'skipped',
+    scriptableObjects = 'skipped',
+    input = 'skipped',
+    // Absent on cards saved before the layout probe existed, so a restored
+    // session shows no layout chip rather than a broken one.
+    layout = 'skipped',
+    // Task 13: `'skipped'` on both means the closing check never ran (not a
+    // Unity send, the setting is off, nothing was touched) — same rule the
+    // three subsystem chips follow, so the card does not grow two permanent
+    // "skipped" chips users learn to ignore.
+    console: consoleCheck = 'skipped',
+    tests = 'skipped',
+    repair,
+  } = data;
 
   const compileMarker: Marker = compile === 'clean' ? 'ok' : compile === 'skipped' ? 'skip' : 'bad';
   const compileLabel =
@@ -69,11 +111,91 @@ function VerifiedCard({ message }: Props) {
         ? 'GUIDs ok'
         : plural(guids.missing.length, 'GUID missing');
 
+  // ── The three silent-failure subsystems ───────────────────────────────────
+  const uiMarker: Marker =
+    uiToolkit === 'skipped'
+      ? 'skip'
+      : uiToolkit === 'clean'
+        ? 'ok'
+        : uiToolkit.problems > 0 || uiToolkit.queriesResolved < uiToolkit.queriesTotal
+          ? 'bad'
+          : 'ok';
+  const uiLabel =
+    uiToolkit === 'skipped' || uiToolkit === 'clean'
+      ? 'UI Toolkit ok'
+      : uiToolkit.problems > 0
+        ? `UI Toolkit: ${plural(uiToolkit.problems, 'problem')}`
+        : `${uiToolkit.queriesResolved}/${uiToolkit.queriesTotal} Q<T>() resolve`;
+
+  const soMarker: Marker =
+    scriptableObjects === 'skipped' ? 'skip' : scriptableObjects === 'clean' ? 'ok' : 'bad';
+  const soLabel =
+    scriptableObjects === 'skipped' || scriptableObjects === 'clean'
+      ? 'no ScriptableObject drift'
+      : `${plural(scriptableObjects.drift, 'ScriptableObject drift')}`;
+
+  // The one row that reports a MEASUREMENT rather than a re-read: what the
+  // documents this send wrote actually laid out to.
+  //
+  // Two readings of one render, and the row is only good when both are. A
+  // document can lay out perfectly — every box the right size, zero geometry
+  // problems — and render as flat default grey; that screen used to come back
+  // from this card as "14 elements laid out", which is true and reads as
+  // success. `unstyled` is absent on cards saved before it existed, so an old
+  // restored session reports geometry alone rather than claiming zero.
+  const unstyled = layout === 'skipped' ? 0 : (layout.unstyled ?? 0);
+  const layoutMarker: Marker =
+    layout === 'skipped' ? 'skip' : layout.problems > 0 || unstyled > 0 ? 'bad' : 'ok';
+  const layoutLabel =
+    layout === 'skipped'
+      ? 'layout not measured'
+      : layout.problems > 0 && unstyled > 0
+        ? `layout: ${plural(layout.problems, 'problem')} · ${unstyled} unstyled`
+        : layout.problems > 0
+          ? `layout: ${plural(layout.problems, 'problem')}`
+          : unstyled > 0
+            ? `${unstyled} of ${layout.elements} elements unstyled`
+            : `${plural(layout.elements, 'element')} laid out`;
+
+  const inputMarker: Marker = input === 'skipped' ? 'skip' : input === 'clean' ? 'ok' : 'bad';
+  const inputLabel =
+    input === 'skipped' || input === 'clean'
+      ? 'input actions ok'
+      : `input: ${plural(input.problems, 'problem')}`;
+
+  // ── What Unity itself said after the turn ─────────────────────────────────
+  const consoleCheckMarker = consoleMarker(consoleCheck);
+  const consoleLabel = consoleRowLabel(consoleCheck);
+  const testsCheckMarker = testsMarker(tests);
+  const testsLabel = testsRowLabel(tests);
+
   // A skipped check is NOT a passing one: when the bridge is down and the budget
   // runs out, all three skip — and this used to render a green "Verified".
-  const verdict = verifiedVerdict([compileMarker, analyzersMarker, guidsMarker]);
+  const verdict = verifiedVerdict([
+    compileMarker,
+    analyzersMarker,
+    guidsMarker,
+    uiMarker,
+    layoutMarker,
+    soMarker,
+    inputMarker,
+    consoleCheckMarker,
+    testsCheckMarker,
+  ], data.requiredEvidence);
   const missingGuids = guids !== 'skipped' && guids !== 'intact' ? guids.missing : [];
-  const hasDetail = touchedFiles.length > 0 || missingGuids.length > 0;
+  const consoleItems =
+    consoleCheck !== 'skipped' &&
+    consoleCheck !== 'clean' &&
+    !('unknown' in consoleCheck) &&
+    !('repairAttempted' in consoleCheck)
+      ? consoleCheck.items
+      : [];
+  const testFailures = tests !== 'skipped' && !('unfinished' in tests) ? tests.failures : [];
+  const hasDetail =
+    touchedFiles.length > 0 ||
+    missingGuids.length > 0 ||
+    consoleItems.length > 0 ||
+    testFailures.length > 0;
 
   return (
     <div className={`ai-verified-card is-${verdict}`}>
@@ -101,6 +223,12 @@ function VerifiedCard({ message }: Props) {
         )}
         <span className="ai-verified-title">{verdictTitle(verdict)}</span>
         <span className="ai-verified-summary">
+          {data.requiredEvidence?.map((e) => (
+            <span className="ai-verified-item" key={e.id} title={e.summary}>
+              <MarkerIcon marker={e.status === 'passed' ? 'ok' : e.status === 'failed' ? 'bad' : 'skip'} />
+              {e.kind.replace(/-/g, ' ')}: {e.status.replace(/-/g, ' ')}
+            </span>
+          ))}
           <span className="ai-verified-item">
             <MarkerIcon marker={compileMarker} />
             {compileLabel}
@@ -115,6 +243,68 @@ function VerifiedCard({ message }: Props) {
             <MarkerIcon marker={guidsMarker} />
             {guidsLabel}
           </span>
+          {uiToolkit !== 'skipped' && (
+            <>
+              <span className="ai-verified-sep">·</span>
+              <span className="ai-verified-item">
+                <MarkerIcon marker={uiMarker} />
+                {uiLabel}
+              </span>
+            </>
+          )}
+          {layout !== 'skipped' && (
+            <>
+              <span className="ai-verified-sep">·</span>
+              <span className="ai-verified-item">
+                <MarkerIcon marker={layoutMarker} />
+                {layoutLabel}
+              </span>
+            </>
+          )}
+          {scriptableObjects !== 'skipped' && (
+            <>
+              <span className="ai-verified-sep">·</span>
+              <span className="ai-verified-item">
+                <MarkerIcon marker={soMarker} />
+                {soLabel}
+              </span>
+            </>
+          )}
+          {input !== 'skipped' && (
+            <>
+              <span className="ai-verified-sep">·</span>
+              <span className="ai-verified-item">
+                <MarkerIcon marker={inputMarker} />
+                {inputLabel}
+              </span>
+            </>
+          )}
+          {consoleCheck !== 'skipped' && (
+            <>
+              <span className="ai-verified-sep">·</span>
+              <span className="ai-verified-item">
+                <MarkerIcon marker={consoleCheckMarker} />
+                {consoleLabel}
+              </span>
+            </>
+          )}
+          {tests !== 'skipped' && (
+            <>
+              <span className="ai-verified-sep">·</span>
+              <span className="ai-verified-item">
+                <MarkerIcon marker={testsCheckMarker} />
+                {testsLabel}
+              </span>
+            </>
+          )}
+          {repair && (
+            <>
+              <span className="ai-verified-sep">·</span>
+              <span className="ai-verified-item ai-verified-files">
+                {repair.interrupted ? '1 repair pass (stopped)' : '1 repair pass'}
+              </span>
+            </>
+          )}
           <span className="ai-verified-sep">·</span>
           <span className="ai-verified-item ai-verified-files">{plural(files, 'file')}</span>
         </span>
@@ -138,6 +328,34 @@ function VerifiedCard({ message }: Props) {
               <ul className="ai-verified-file-list">
                 {missingGuids.map((f) => (
                   <li key={f}>{f}</li>
+                ))}
+              </ul>
+            </>
+          )}
+          {consoleItems.length > 0 && (
+            <>
+              <div className="ai-verified-body-label ai-verified-error-label">New console errors</div>
+              <ul className="ai-verified-file-list">
+                {consoleItems.map((item, i) => (
+                  <li key={`${item.logType}-${item.location ?? 'external'}-${i}`}>
+                    [{item.logType}] {item.firstLine}
+                    {item.location ? ` — ${item.location}` : ''}
+                    {item.count > 1 ? ` ×${item.count}` : ''}
+                    {item.external ? ' (package/engine)' : ''}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+          {testFailures.length > 0 && (
+            <>
+              <div className="ai-verified-body-label ai-verified-error-label">Failed tests</div>
+              <ul className="ai-verified-file-list">
+                {testFailures.map((f) => (
+                  <li key={f.fullName}>
+                    {f.fullName}
+                    {f.message ? ` — ${f.message}` : ''}
+                  </li>
                 ))}
               </ul>
             </>

@@ -84,7 +84,7 @@ interface CheckpointsState {
    * `findCheckpointTurnForToolCall` can match the exact call, falling back
    * to the (userMessageId, path) heuristic when absent.
    */
-  recordPreWrite: (path: string, beforeContent: string | null, toolCallId?: string) => void;
+  recordPreWrite: (path: string, beforeContent: string | null, toolCallId?: string, encoding?: 'base64') => void;
   /**
    * Record that a `bash` command in the open turn appears to have changed files.
    * Checkpoints only ever hold write/edit pre-images, so those changes cannot be
@@ -158,6 +158,7 @@ async function applyRestorePlan(
   return runRestorePlan(plan, {
     deletePath: (path) => invoke('delete_path', { path }),
     writeFile: (path, contents) => invoke('write_file', { path, contents }),
+    writeBinary: (path, base64) => invoke('write_file_bytes', { path, contents: Array.from(atob(base64), (c) => c.charCodeAt(0)) }),
     coDeleteMeta,
   });
 }
@@ -226,7 +227,7 @@ export const useCheckpointsStore = create<CheckpointsState>((set, get) => ({
 
   endTurn: () => set({ activeTurnId: null }),
 
-  recordPreWrite: (path, beforeContent, toolCallId) => {
+  recordPreWrite: (path, beforeContent, toolCallId, encoding) => {
     set((s) => {
       if (!s.activeTurnId) return s; // no turn open for THIS send — discard
       const last = s.turns[s.turns.length - 1];
@@ -240,9 +241,9 @@ export const useCheckpointsStore = create<CheckpointsState>((set, get) => ({
       const entry: CheckpointEntry =
         beforeContent === null
           ? { path, kind: 'created', timestamp: Date.now(), toolCallId }
-          : byteLength(beforeContent) > MAX_SNAPSHOT_BYTES
+          : (encoding === 'base64' ? beforeContent.length * .75 - (beforeContent.endsWith('==') ? 2 : beforeContent.endsWith('=') ? 1 : 0) : byteLength(beforeContent)) > MAX_SNAPSHOT_BYTES
             ? { path, kind: 'modified', tooLarge: true, timestamp: Date.now(), toolCallId }
-            : { path, kind: 'modified', beforeContent, timestamp: Date.now(), toolCallId };
+            : { path, kind: 'modified', beforeContent, timestamp: Date.now(), toolCallId, ...(encoding ? { encoding } : {}) };
 
       const updatedTurn: CheckpointTurn = { ...last, entries: [...last.entries, entry] };
       return { turns: [...s.turns.slice(0, -1), updatedTurn] };

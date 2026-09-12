@@ -1,3 +1,4 @@
+import { SaveConflictBanner } from './components/SaveConflictBanner';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Allotment, LayoutPriority, type AllotmentHandle } from 'allotment';
 import { invoke } from '@tauri-apps/api/core';
@@ -11,6 +12,7 @@ import {
   MIN_EDITOR_WIDTH,
   RightActivityBar,
   RightSidebarPanel,
+  ShortcutsHelpModal,
   SidebarPanel,
   StatusBar,
   TabBar,
@@ -33,12 +35,10 @@ import {
   openFolderInNewWindow,
   setProjectWindowTitle,
   initialBootSurface,
-  consumePendingGotoForWorkspace,
+  consumePendingOpenForWorkspace,
 } from './features/project';
 import { startUpdateNotices } from './features/updates';
 import {
-  AiChatPanel,
-  MaximizedAiOverlay,
   isAiComposerFocused,
   cycleEffort,
   restoreLatestSessionForWorkspace,
@@ -46,7 +46,6 @@ import {
   disposeExternalBackends,
 } from './features/ai-panel';
 import TooltipHost from './components/TooltipHost';
-import { ErrorBoundary } from './components/ErrorBoundary';
 import {
   focusTerminalById,
   handleTerminalDrop,
@@ -78,11 +77,18 @@ import {
   highlightAiPanelDropTarget,
   isDropOnAiPanel,
 } from './features/ai-panel';
+import {
+  DESIGN_STAGE_PATHS,
+  clearDesignDockDropTarget,
+  highlightDesignDockDropTarget,
+  isDropOnDesignDock,
+} from './features/design-chat';
 import { useUnitySceneStore } from './stores/unity-scene';
 import { useRegisterCommands } from './hooks/useRegisterCommands';
 import { useAutoSave } from './hooks/useAutoSave';
 import { useCloseGuard } from './hooks/useCloseGuard';
 import { notify, useNotificationsStore } from './stores/notifications';
+import { runWorkspaceDiagnostics, resetWorkspaceDiagnostics } from './features/lsp';
 import { checkReleaseChannel } from './config/api';
 import { useCommandsStore } from './stores/commands';
 import { listenScoped } from './utils/tauri-listener';
@@ -113,9 +119,46 @@ import {
 } from './utils/persistence';
 import { useRecentsStore } from './stores/recents';
 import { confirmCloseDirty } from './utils/dirty-guard';
+import { showSourceControl } from './utils/source-control-visibility';
 import { safeUnlisten } from './utils/tauri-listener';
 import { getMonacoInstance } from './utils/monaco-instance';
+import {
+  installJumpHistory,
+  navigateBack,
+  navigateForward,
+  canNavigateBack,
+  canNavigateForward,
+} from './utils/jump-history';
+import { findUsagesAtCursor, canFindUsages } from './features/references';
 import type { Command } from './types';
+
+/**
+ * True only while a Monaco text editor actually holds the caret.
+ *
+ * `commandBeatsShell` (app-shell/skip-shell.ts) lets any chord that is not a
+ * bare Ctrl+letter fire on Windows/Linux even with the terminal focused, so a
+ * command whose chord is plain text elsewhere — `alt+enter` — needs this guard
+ * rather than the usual `!!activeFilePath`.
+ */
+function isTextEditorFocused(): boolean {
+  const monaco = getMonacoInstance();
+  return (monaco?.editor.getEditors() ?? []).some((e) => e.hasTextFocus());
+}
+
+/**
+ * True while a Search tab is the active editor tab.
+ *
+ * The three find toggles are bare `alt+<letter>` chords, and
+ * KeyboardShortcutManager runs with enableOnFormTags/enableOnContentEditable,
+ * so without a gate they would fire — and preventDefault — inside every text
+ * field in the app. Asking the search store instead would not work: its
+ * default session always exists (search.ts seeds one), so it can never
+ * answer "no". The `search://` scheme is how `search.openTab` identifies
+ * its own tab, so it is the honest signal here too.
+ */
+function searchTabIsActive(): boolean {
+  return !!useWorkspaceStore.getState().activeFilePath?.startsWith('search://');
+}
 
 /** The editor selection, when the seed setting allows it. Returns '' when
  *  there is nothing to seed with, so callers can treat it as falsy. */
@@ -189,8 +232,12 @@ function cycleAiMode(): void {
   // cycles isn't even rendered (AgentConfigBar takes that slot), so firing
   // would silently change a hidden value that nothing reads.
   if (ai.selectedAgent !== 'hosted') return;
+  // Design is deliberately absent: it is entered from the design dock on a
+  // .uxml, never cycled into from a keyboard chord with no document in sight.
+  // Cycling out of it is allowed, and lands on Ask.
   const order: Array<'ask' | 'agent' | 'plan'> = ['ask', 'agent', 'plan'];
-  ai.setMode(order[(order.indexOf(ai.mode) + 1) % order.length]);
+  const at = order.indexOf(ai.mode as 'ask' | 'agent' | 'plan');
+  ai.setMode(order[(at + 1) % order.length]);
   useUiStore.getState().setActiveRightSidebarView('ai-panel');
   useUiStore.getState().setRightSidebarVisible(true);
 }
@@ -223,11 +270,12 @@ function App() {
   const aiPanelMaximized = useUiStore((s) => s.aiPanelMaximized);
   const graphifyIntroOpen = useUiStore((s) => s.graphifyIntroOpen);
   const setGraphifyIntroOpen = useUiStore((s) => s.setGraphifyIntroOpen);
-  const dotnetMissingModalOpen = useUiStore((s) => s.dotnetMissingModalOpen);
-  const setDotnetMissingModalOpen = useUiStore((s) => s.setDotnetMissingModalOpen);
+  const dotnetMissingModal = useUiStore((s) => s.dotnetMissingModal);
+  const setDotnetMissingModal = useUiStore((s) => s.setDotnetMissingModal);
   const restoredRef = useRef(false);
   const [showThemePicker, setShowThemePicker] = useState(false);
-  const [paletteMode, setPaletteMode] = useState<'commands' | 'files' | null>(null);
+  const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
+  const [paletteMode, setPaletteMode] = useState<'commands' | 'files' | 'symbols' | 'recent' | null>(null);
   const [branchPickerMode, setBranchPickerMode] = useState<'switch' | 'create' | null>(null);
   const [unityPicker, setUnityPicker] = useState<UnityPickerMode | null>(null);
   const [newScriptDir, setNewScriptDir] = useState<string | null>(null);
@@ -454,6 +502,12 @@ function App() {
       const store = useWorkspaceStore.getState();
       store.setWorkspace(workspacePath).then(async () => {
         if (urlPath || workspacePath === persisted?.workspacePath) {
+          // Seed the MRU BEFORE the tabs reopen. `setWorkspace` clears it, and
+          // reopening tabs below re-visits each one — without the seed the
+          // list would come back as tab order, which is what it is not.
+          if (persisted?.recentFiles?.length) {
+            useWorkspaceStore.setState({ recentFiles: persisted.recentFiles });
+          }
           const restoredPaths: string[] = [];
           for (const file of persisted?.openFilePaths ?? []) {
             try {
@@ -486,12 +540,23 @@ function App() {
             store.setActiveFile(activeToSet);
           }
         }
-        // Unity's `--goto` lands last, so it wins over the restored active
-        // tab: the user double-clicked a specific script and that is what
-        // they are waiting to see. The claim is conditional on the Rust side,
-        // so a target belonging to another project stays pending for the
-        // window that owns it.
-        await consumePendingGotoForWorkspace(workspacePath);
+        // Announce which project this window owns, so the single-instance
+        // handler can route a later launch straight here and raise THIS
+        // window instead of putting the welcome panel in front of it. After
+        // setWorkspace, never before: a window that is still booting cannot
+        // serve a request, and registering early would route one to a window
+        // that then fails to open the project.
+        try {
+          await invoke('register_window_workspace', { workspacePath });
+        } catch {
+          // Only costs us the direct route; the welcome window still relays.
+        }
+        // Unity's request lands last, so it wins over the restored active tab:
+        // the user double-clicked a specific script and that is what they are
+        // waiting to see. The claim is conditional on the Rust side, so a
+        // request belonging to another project stays pending for the window
+        // that owns it.
+        await consumePendingOpenForWorkspace(workspacePath);
       }).catch((err) => {
         // setWorkspace's own catch already surfaces a user-facing toast
         // (path + "moved or deleted" hint) before rethrowing — this handler
@@ -528,6 +593,12 @@ function App() {
         .getState()
         .addNotification({ type: 'error', message: problem, persistent: true });
     });
+  }, []);
+
+  // Jump history: hook `setPendingNavigation` so every cross-file jump records
+  // where it came from. Idempotent — it installs a single module-level listener.
+  useEffect(() => {
+    installJumpHistory();
   }, []);
 
   // Auto-save hook
@@ -596,15 +667,16 @@ function App() {
   }, []);
 
   // Unity re-launching an already-running app: the single-instance handler
-  // stores the --goto and emits this. Every project window tries to claim it;
-  // the Rust side only hands it to the one whose workspace matches, so exactly
-  // one window opens the file and the rest are no-ops.
+  // stores the request and emits this. It targets this window directly when the
+  // registry knows we own the project, and goes to every window otherwise; the
+  // Rust side only hands the request to the one whose workspace matches, so
+  // exactly one window acts on it and the rest are no-ops.
   useEffect(() => {
     let unlisten: (() => void) | null = null;
     let cancelled = false;
     (async () => {
-      const fn = await listenScoped('unityide-goto-pending', () => {
-        void consumePendingGotoForWorkspace(useWorkspaceStore.getState().workspacePath);
+      const fn = await listenScoped('unityide-open-pending', () => {
+        void consumePendingOpenForWorkspace(useWorkspaceStore.getState().workspacePath);
       });
       if (cancelled) safeUnlisten(fn);
       else unlisten = fn;
@@ -691,18 +763,21 @@ function App() {
           highlightTerminalDropTarget(event.payload.position);
           highlightExplorerDropTarget(event.payload.position);
           highlightAiPanelDropTarget(event.payload.position);
+          highlightDesignDockDropTarget(event.payload.position);
           return;
         }
         if (event.payload.type === 'leave') {
           clearTerminalDropTarget();
           clearExplorerDropTarget();
           clearAiPanelDropTarget();
+          clearDesignDockDropTarget();
           return;
         }
 
         const paths = event.payload.paths;
         clearExplorerDropTarget();
         clearAiPanelDropTarget();
+        clearDesignDockDropTarget();
         if (await handleTerminalDrop(event.payload.position, paths)) return;
 
         // Dropped on the AI panel: stage as chat context rather than opening
@@ -711,6 +786,15 @@ function App() {
         // under the cursor — that fallback is what every OS drop did until now,
         // and it is why dragging a file from Finder onto the chat opened it in
         // the editor instead of attaching it.
+        // Checked BEFORE the AI panel: the design dock floats over the canvas,
+        // so it is the more specific target wherever both could match, and a
+        // reference image dropped on the dock is meant for the screen you are
+        // looking at rather than for whatever thread the panel is showing.
+        if (isDropOnDesignDock(event.payload.position)) {
+          window.dispatchEvent(new CustomEvent(DESIGN_STAGE_PATHS, { detail: { paths } }));
+          return;
+        }
+
         if (isDropOnAiPanel(event.payload.position)) {
           window.dispatchEvent(new CustomEvent('ai-stage-paths', { detail: { paths } }));
           return;
@@ -779,6 +863,9 @@ function App() {
               ...(f.diff ? { diff: { filePath: f.diff.filePath, staged: f.diff.staged } } : {}),
             })),
           activeFilePath: state.activeFilePath?.startsWith('auth://') ? null : state.activeFilePath,
+          // Recent Files is worth nothing if it empties on restart, so it
+          // rides along with the tab list rather than being session-only.
+          recentFiles: state.recentFiles,
         });
       }, 1000);
     });
@@ -805,6 +892,11 @@ function App() {
       // handler fires while a terminal has focus, not whether xterm hands
       // the shell a byte first.
       keybinding: 'mod+j',
+      // mod+` is what every other editor uses for this and what our own
+      // published docs have always claimed, so it answers here too. Not a
+      // legacy alias — it was never bound before — and only `keybinding` is
+      // advertised or mirrored into menu.rs.
+      extraKeybindings: ['mod+backquote'],
       handler: () => {
         const ui = useUiStore.getState();
         const wasVisible = ui.bottomPanelVisible;
@@ -820,7 +912,12 @@ function App() {
       id: 'terminal.new',
       label: 'New Terminal',
       category: 'Terminal',
-      keybinding: 'mod+shift+`',
+      // Named physical-key token, not the literal character, for the same
+      // reason terminal.split spells its chord `backslash` below:
+      // react-hotkeys-hook v5 matches on `event.code`, and 'Backquote'
+      // normalizes to "backquote" — a literal ` can never equal it, so this
+      // chord never fired at all until it was spelled this way.
+      keybinding: 'mod+shift+backquote',
       handler: () => {
         const wp = useWorkspaceStore.getState().workspacePath;
         if (wp) {
@@ -952,6 +1049,33 @@ function App() {
       category: 'View',
       handler: () => {
         useWorkspaceStore.getState().restartLsp();
+        // Result ids belong to the process that issued them; a restarted
+        // server would answer 'unchanged' for files it has never analysed.
+        resetWorkspaceDiagnostics();
+      },
+      when: () => !!useWorkspaceStore.getState().workspacePath,
+    },
+    {
+      id: 'lsp.analyzeSolution',
+      label: 'Analyze Whole Solution',
+      category: 'View',
+      handler: async () => {
+        const res = await runWorkspaceDiagnostics().catch((err) => {
+          notify.error(`Solution analysis failed: ${String(err)}`);
+          return null;
+        });
+        if (!res) return;
+        if (!res.ran) {
+          notify.warning(`Solution analysis did not run — ${res.reason}`);
+          return;
+        }
+        const problems = res.errors + res.warnings;
+        notify.info(
+          problems === 0
+            ? `No problems found across ${res.filesReported} files.`
+            : `${res.errors} error(s), ${res.warnings} warning(s) in ${res.filesReported} files` +
+              (res.truncated ? ' (list truncated)' : ''),
+        );
       },
       when: () => !!useWorkspaceStore.getState().workspacePath,
     },
@@ -990,7 +1114,9 @@ function App() {
       id: 'settings.open',
       label: 'Open Settings',
       category: 'Preferences',
-      keybinding: 'mod+,',
+      // `comma`, not ',' — see terminal.new: the registry is matched
+      // against `event.code`, which reports 'Comma'.
+      keybinding: 'mod+comma',
       handler: () => {
         useUiStore.getState().toggleSettings();
       },
@@ -1000,6 +1126,9 @@ function App() {
       label: 'Command Palette',
       category: 'View',
       keybinding: 'mod+shift+p',
+      // F1 is the palette everywhere; a single key is the cheapest possible
+      // chord and nothing else claims it.
+      extraKeybindings: ['f1'],
       handler: () => setPaletteMode('commands'),
     },
     {
@@ -1008,6 +1137,44 @@ function App() {
       category: 'View',
       keybinding: 'mod+p',
       handler: () => setPaletteMode('files'),
+    },
+    {
+      id: 'help.keyboardShortcuts',
+      label: 'Keyboard Shortcuts',
+      category: 'Help',
+      // mod+shift+/ is Ctrl+? — what almost everything uses for "show me the
+      // shortcuts". Three keys, which the rest of this keymap avoids, but a
+      // two-key slot is worth more to an action you run daily than to the one
+      // you run when you have forgotten the others.
+      keybinding: 'mod+shift+slash',
+      handler: () => setShowShortcutsHelp((prev) => !prev),
+    },
+    {
+      // `mod+t` matches Rider's and VS Code's Go-to-Symbol-in-project. Verified
+      // free in both the command registry and src-tauri/src/menu.rs, which owns
+      // CmdOrCtrl+Shift+T but not CmdOrCtrl+T.
+      id: 'palette.gotoSymbolInProject',
+      label: 'Go to Symbol in Project...',
+      category: 'View',
+      keybinding: 'mod+t',
+      handler: () => setPaletteMode('symbols'),
+      when: () => !!useWorkspaceStore.getState().workspacePath,
+    },
+    {
+      // JetBrains' Switcher chord on both platforms, and VS Code's
+      // recent-editor chord — one binding covers both muscle memories.
+      //
+      // NOT Cmd+E, which Rider also uses for this: on macOS that is Monaco's
+      // own `actions.findWithSelection`, and `search.useSelection` below
+      // already carries `skipMonacoBridge` to keep it reachable. Taking it
+      // here would put two handlers on one keystroke. Ctrl+Tab has no Monaco
+      // default at all, so it bridges normally.
+      id: 'palette.recent',
+      label: 'Recent Files',
+      category: 'View',
+      keybinding: 'ctrl+tab',
+      handler: () => setPaletteMode('recent'),
+      when: () => !!useWorkspaceStore.getState().workspacePath,
     },
     {
       id: 'search.openTab',
@@ -1063,12 +1230,21 @@ function App() {
       id: 'search.toggleCase',
       label: 'Toggle Match Case',
       category: 'Search',
-      keybinding: 'mod+alt+c',
+      // Alt+C, not mod+alt+C. On Windows `mod` is Ctrl, and Ctrl+Alt IS
+      // AltGr on every non-US layout — so the old chord fired (and
+      // preventDefault'd) whenever someone typed @ \ { } ~ |, swallowing the
+      // character. Alt+C is what VS Code binds on every platform.
+      keybinding: 'alt+c',
       // Monaco's own `toggleFindCaseSensitive` is bound to Cmd+Alt+C on mac
       // with `precondition: undefined` — active whenever the editor has
       // focus, not just while the find widget is open. Same shadowing risk
       // as search.useSelection above: skip the Monaco bridge.
       skipMonacoBridge: true,
+      // A bare alt+<letter> with no gate would fire — and preventDefault — in
+      // every text field in the app, since KeyboardShortcutManager sets
+      // enableOnFormTags/enableOnContentEditable. These three toggles only
+      // mean anything with a search session open, so that is when they exist.
+      when: searchTabIsActive,
       handler: () => {
         const { activeSessionId, sessions, update } = useSearchStore.getState();
         update(activeSessionId, { caseSensitive: !sessions[activeSessionId]?.caseSensitive });
@@ -1078,10 +1254,12 @@ function App() {
       id: 'search.toggleWholeWord',
       label: 'Toggle Match Whole Word',
       category: 'Search',
-      keybinding: 'mod+alt+w',
+      // See search.toggleCase for why this is not mod+alt+W.
+      keybinding: 'alt+w',
       // Same as search.toggleCase: Monaco's `toggleFindWholeWord` owns
       // Cmd+Alt+W on mac whenever the editor has focus.
       skipMonacoBridge: true,
+      when: searchTabIsActive,
       handler: () => {
         const { activeSessionId, sessions, update } = useSearchStore.getState();
         update(activeSessionId, { wholeWord: !sessions[activeSessionId]?.wholeWord });
@@ -1091,7 +1269,12 @@ function App() {
       id: 'search.toggleRegex',
       label: 'Toggle Regular Expression',
       category: 'Search',
-      keybinding: 'mod+alt+x',
+      // alt+R is VS Code's regex toggle on every platform, and mod+alt+X was
+      // an AltGr collision like its two siblings. `skipMonacoBridge` matches
+      // them too — Monaco's own toggleFindRegex would otherwise be shadowed.
+      keybinding: 'alt+r',
+      skipMonacoBridge: true,
+      when: searchTabIsActive,
       handler: () => {
         const { activeSessionId, sessions, update } = useSearchStore.getState();
         update(activeSessionId, { isRegex: !sessions[activeSessionId]?.isRegex });
@@ -1191,7 +1374,16 @@ function App() {
       id: 'view.aiPanel',
       label: 'AI Assistant',
       category: 'View',
-      keybinding: 'mod+shift+a',
+      // Two keys, because this is the single most-used action in the app.
+      // mod+L is what every AI editor binds it to. A bare Ctrl+<letter> also
+      // means skip-shell.ts hands it back to the shell while a terminal has
+      // focus, which is right: Ctrl+L must stay clear-screen there.
+      //
+      // Inside the editor this takes a Monaco default: 'expandLineSelection'
+      // (Ctrl+I in monaco-editor, which VS Code remaps to Ctrl+L). Deliberate
+      // — the bridge in bind-shortcuts.ts wins there, and the same trade is
+      // what every AI editor makes for this chord.
+      keybinding: 'mod+l',
       handler: () => {
         useUiStore.getState().setActiveRightSidebarView('ai-panel');
         useUiStore.getState().setRightSidebarVisible(true);
@@ -1215,16 +1407,6 @@ function App() {
       },
     },
     {
-      id: 'ai.toggleInlineSuggestions',
-      label: 'Toggle AI Inline Suggestions',
-      category: 'AI',
-      keybinding: 'mod+alt+i',
-      handler: () => {
-        const s = useSettingsStore.getState();
-        s.setSetting('ai.inlineSuggestions.enabled', !s.settings['ai.inlineSuggestions.enabled']);
-      },
-    },
-    {
       id: 'view.explorer',
       label: 'Explorer',
       category: 'View',
@@ -1243,6 +1425,10 @@ function App() {
         useUiStore.getState().setActiveSidebarView('source-control');
         useUiStore.getState().setSidebarVisible(true);
       },
+      // Same gate as the activity-bar icon: a workspace with no repository has
+      // no Source Control surface, so the chord and the palette entry go with
+      // the icon rather than opening a panel with nothing in it.
+      when: () => showSourceControl(useGitStore.getState()),
     },
     // The Unity views had no commands at all, so they were mouse-only and
     // their activity-bar tooltips had no chord to show. mod+shift+d matches
@@ -1259,12 +1445,55 @@ function App() {
       },
     },
     {
+      // No keybinding on purpose: a chord here would also have to be mirrored
+      // in src-tauri/src/menu.rs, whose accelerators win on macOS, and
+      // keybinding-parity.test.ts enforces that. The command is still
+      // reachable from the command palette and supplies the tooltip.
+      id: 'view.scriptableObjects',
+      label: 'Scriptable Objects',
+      category: 'View',
+      handler: () => {
+        useUiStore.getState().setActiveSidebarView('scriptable-objects');
+        useUiStore.getState().setSidebarVisible(true);
+      },
+    },
+    {
       id: 'view.testRunner',
       label: 'Unity Tests',
       category: 'View',
       keybinding: 'mod+shift+u',
       handler: () => {
         useUiStore.getState().setActiveSidebarView('test');
+        useUiStore.getState().setSidebarVisible(true);
+      },
+    },
+    {
+      id: 'view.toggleAssetSource',
+      label: 'Toggle Source / Preview',
+      category: 'View',
+      handler: () => {
+        const path = useWorkspaceStore.getState().activeFilePath;
+        if (!path) return;
+        const ui = useUiStore.getState();
+        const mode = ui.assetViewerMode[path];
+        ui.setAssetViewerMode(path, mode === 'structured' || mode === undefined ? 'raw-edit' : 'structured');
+      },
+    },
+    {
+      id: 'view.unityUi',
+      label: 'Unity UI',
+      category: 'View',
+      handler: () => {
+        useUiStore.getState().setActiveSidebarView('unity-ui');
+        useUiStore.getState().setSidebarVisible(true);
+      },
+    },
+    {
+      id: 'view.inputHub',
+      label: 'Input Actions',
+      category: 'View',
+      handler: () => {
+        useUiStore.getState().setActiveSidebarView('input');
         useUiStore.getState().setSidebarVisible(true);
       },
     },
@@ -1325,7 +1554,10 @@ function App() {
       id: 'ai.newChat',
       label: 'New Chat',
       category: 'AI',
-      keybinding: 'mod+shift+l',
+      // Two keys; the second most-used AI action. Like mod+l it yields to
+      // the shell in a terminal, where Ctrl+I is Tab, and like it takes
+      // Monaco's 'expandLineSelection' inside the editor.
+      keybinding: 'mod+i',
       handler: () => {
         useUiStore.getState().setActiveRightSidebarView('ai-panel');
         useUiStore.getState().setRightSidebarVisible(true);
@@ -1343,6 +1575,65 @@ function App() {
         window.dispatchEvent(new CustomEvent('ai-toggle-history'));
       },
     },
+    // Copy / Ask AI for the two error surfaces. No chords, deliberately: every
+    // free two-key combination is spoken for, a new one has to be mirrored into
+    // `src-tauri/src/menu.rs`, and `mod+shift+c` — the obvious pick — already
+    // belongs to the terminal's copy-selection. These are pointer-initiated
+    // actions with visible buttons; the palette is the right keyboard path.
+    //
+    // Each hops through a window event because the panels own the filter state
+    // that decides WHAT is on screen, and a command cannot reach it. The
+    // handlers on the other side are the same ones the toolbar buttons call.
+    {
+      id: 'problems.copyAll',
+      label: 'Copy Problems',
+      category: 'View',
+      handler: () => {
+        useUiStore.getState().setBottomPanelVisible(true);
+        useUiStore.getState().setActiveBottomTab('problems');
+        // Next frame: with the bottom panel closed, the listening panel has
+        // not mounted yet, so a synchronous dispatch reaches nothing.
+        requestAnimationFrame(() => window.dispatchEvent(new CustomEvent('problems-copy-all')));
+      },
+    },
+    {
+      id: 'problems.askAi',
+      label: 'Ask AI About Problems',
+      category: 'AI',
+      handler: () => {
+        useUiStore.getState().setBottomPanelVisible(true);
+        useUiStore.getState().setActiveBottomTab('problems');
+        // Next frame: with the bottom panel closed, the listening panel has
+        // not mounted yet, so a synchronous dispatch reaches nothing.
+        requestAnimationFrame(() => window.dispatchEvent(new CustomEvent('problems-ask-ai')));
+      },
+    },
+    {
+      id: 'unityConsole.copyAll',
+      label: 'Copy Unity Console',
+      category: 'Unity',
+      handler: () => {
+        useUiStore.getState().setBottomPanelVisible(true);
+        useUiStore.getState().setActiveBottomTab('unity-console');
+        // Next frame: with the bottom panel closed, the listening panel has
+        // not mounted yet, so a synchronous dispatch reaches nothing.
+        requestAnimationFrame(() => window.dispatchEvent(new CustomEvent('unity-console-copy-all')));
+      },
+      when: () => useProjectContextStore.getState().isUnityProject,
+    },
+    {
+      id: 'unityConsole.askAi',
+      label: 'Ask AI About Console Errors',
+      category: 'AI',
+      handler: () => {
+        useUiStore.getState().setBottomPanelVisible(true);
+        useUiStore.getState().setActiveBottomTab('unity-console');
+        // Next frame: with the bottom panel closed, the listening panel has
+        // not mounted yet, so a synchronous dispatch reaches nothing.
+        requestAnimationFrame(() => window.dispatchEvent(new CustomEvent('unity-console-ask-ai')));
+      },
+      when: () => useProjectContextStore.getState().isUnityProject,
+    },
     {
       id: 'file.new',
       label: 'New File',
@@ -1357,7 +1648,10 @@ function App() {
       id: 'tab.next',
       label: 'Next Tab',
       category: 'View',
-      keybinding: 'mod+alt+right',
+      // mod+alt+arrows were the worst of the AltGr chords: on top of eating
+      // typed characters, Ctrl+Alt+Arrow rotates the screen under Intel's
+      // display driver. mod+PgDn/PgUp is what VS Code uses and is two keys.
+      keybinding: 'mod+pagedown',
       handler: () => {
         const ws = useWorkspaceStore.getState();
         const files = ws.openFiles;
@@ -1371,7 +1665,8 @@ function App() {
       id: 'tab.prev',
       label: 'Previous Tab',
       category: 'View',
-      keybinding: 'mod+alt+left',
+      // See tab.next.
+      keybinding: 'mod+pageup',
       handler: () => {
         const ws = useWorkspaceStore.getState();
         const files = ws.openFiles;
@@ -1471,10 +1766,88 @@ function App() {
       when: () => !!useWorkspaceStore.getState().activeFilePath,
     },
     {
+      // Monaco's own alt+enter bindings (SelectAllMatches, ReplaceAll) are
+      // gated on CONTEXT_FIND_WIDGET_VISIBLE, so the bridge's standard
+      // `!findWidgetVisible` precondition already keeps them reachable — this
+      // one bridges normally, no `skipMonacoBridge` needed. Cmd+. still works;
+      // this is an alias, not a move.
+      // Rider's Find Usages chord, free in both registries. Monaco's own
+      // Shift+F12 peek keeps working — this is the walkable list, not a
+      // replacement for the inline glance.
+      id: 'editor.findUsages',
+      label: 'Find Usages',
+      category: 'Editor',
+      keybinding: 'alt+f7',
+      handler: () => void findUsagesAtCursor(),
+      when: () => canFindUsages(),
+    },
+    {
+      id: 'editor.quickFix',
+      label: 'Quick Fix / Show Intentions',
+      category: 'Editor',
+      keybinding: 'alt+enter',
+      handler: () => window.dispatchEvent(new CustomEvent('quick-fix')),
+      when: () => isTextEditorFocused(),
+    },
+    {
+      // Rider's own Back/Forward chords, and free in both the command registry
+      // and menu.rs.
+      //
+      // They ARE Monaco's `editor.action.outdentLines` / `indentLines`, which
+      // are gated on plain editor focus rather than the find widget — so the
+      // usual `!findWidgetVisible` precondition in bind-shortcuts.ts does not
+      // protect them and the bridge shadows both. That is deliberate here:
+      // indent/outdent stays fully reachable on Tab / Shift+Tab, which is how
+      // it is actually used, and navigation has to be live INSIDE the editor.
+      //
+      // `skipMonacoBridge` would be the wrong tool. It works for the terminal
+      // pane commands (App.tsx above) only because their `when()` is false
+      // wherever Monaco's default should win; there is no such guard for a
+      // command whose whole job is to fire while you are editing.
+      id: 'nav.back',
+      label: 'Back',
+      category: 'Go',
+      keybinding: 'mod+bracketleft',
+      handler: () => void navigateBack(),
+      when: () => canNavigateBack(),
+    },
+    {
+      id: 'nav.forward',
+      label: 'Forward',
+      category: 'Go',
+      keybinding: 'mod+bracketright',
+      handler: () => void navigateForward(),
+      when: () => canNavigateForward(),
+    },
+    {
+      id: 'editor.gotoSymbol',
+      label: 'Go to Symbol in File...',
+      category: 'Editor',
+      keybinding: 'mod+shift+o',
+      handler: () => window.dispatchEvent(new CustomEvent('goto-symbol')),
+      when: () => !!useWorkspaceStore.getState().activeFilePath,
+    },
+    {
+      // mod+shift+r, which is what Monaco itself uses for this action. It
+      // used to belong to `view.revealInExplorer`, whose Monaco bridge
+      // shadowed the built-in whenever the editor had focus; that command has
+      // moved to shift+alt+r (VS Code's actual Reveal chord) so this one can
+      // sit where the editor already expects it. The old mod+alt+R was an
+      // AltGr collision — see search.toggleCase.
+      id: 'editor.refactor',
+      label: 'Refactor This...',
+      category: 'Editor',
+      keybinding: 'mod+shift+r',
+      handler: () => window.dispatchEvent(new CustomEvent('refactor-this')),
+      when: () => !!useWorkspaceStore.getState().activeFilePath,
+    },
+    {
       id: 'view.revealInExplorer',
       label: 'Reveal Active File in Explorer',
       category: 'View',
-      keybinding: 'mod+shift+r',
+      // shift+alt+r is VS Code's own Reveal chord, and vacating mod+shift+r
+      // hands that one back to editor.refactor / Monaco.
+      keybinding: 'shift+alt+r',
       handler: () => {
         const path = useWorkspaceStore.getState().activeFilePath;
         if (!path) return;
@@ -1504,12 +1877,119 @@ function App() {
       handler: () => setBranchPickerMode('create'),
       when: () => useGitStore.getState().isGitRepo,
     },
+    // Debug commands.
+    //
+    // Chord choice is constrained by what already works here. F5/Shift+F5/F7
+    // belong to Unity's play family, and this app has already established that
+    // two chords are unusable on Windows: Shift+F10 is the context-menu key and
+    // F11 is the webview's fullscreen key. That rules out VS Code's F11 /
+    // Shift+F11 for step in/out, so those take Rider's F8 / Shift+F8 shape
+    // while the two most-used actions keep the F9 / F10 everyone knows.
+    //
+    // Stepping is gated on a live session rather than merely on a Unity
+    // project, so these keys fall through to the editor and shell when there is
+    // nothing to step.
+    {
+      id: 'debug.toggleBreakpoint',
+      label: 'Toggle Breakpoint',
+      category: 'Debug',
+      keybinding: 'f9',
+      handler: () => {
+        const file = useWorkspaceStore.getState().activeFilePath;
+        const line = useUiStore.getState().cursorPosition?.line;
+        if (file && line) useDebugStore.getState().toggleBreakpoint(file, line);
+      },
+      when: () => useProjectContextStore.getState().isUnityProject,
+    },
+    {
+      id: 'debug.continue',
+      label: 'Continue',
+      category: 'Debug',
+      keybinding: 'mod+f5',
+      handler: () => {
+        const debug = useDebugStore.getState();
+        // One key for "get going": attach when idle, resume when paused.
+        if (debug.status === 'inactive' || debug.status === 'terminated') void debug.attach(false);
+        else void debug.resume();
+      },
+      when: () => useProjectContextStore.getState().isUnityProject,
+    },
+    {
+      id: 'debug.stepOver',
+      label: 'Step Over',
+      category: 'Debug',
+      keybinding: 'f10',
+      handler: () => void useDebugStore.getState().stepOver(),
+      when: () => useDebugStore.getState().status === 'paused',
+    },
+    {
+      id: 'debug.stepInto',
+      label: 'Step Into',
+      category: 'Debug',
+      keybinding: 'f8',
+      handler: () => void useDebugStore.getState().stepIn(),
+      when: () => useDebugStore.getState().status === 'paused',
+    },
+    {
+      id: 'debug.stepOut',
+      label: 'Step Out',
+      category: 'Debug',
+      keybinding: 'shift+f8',
+      handler: () => void useDebugStore.getState().stepOut(),
+      when: () => useDebugStore.getState().status === 'paused',
+    },
+    {
+      id: 'debug.runToCursor',
+      label: 'Run to Cursor',
+      category: 'Debug',
+      keybinding: 'mod+f10',
+      handler: () => {
+        const file = useWorkspaceStore.getState().activeFilePath;
+        const line = useUiStore.getState().cursorPosition?.line;
+        if (file && line) void useDebugStore.getState().runToCursor(file, line);
+      },
+      when: () => useDebugStore.getState().status === 'paused',
+    },
+    {
+      id: 'debug.setNextStatement',
+      label: 'Set Next Statement',
+      category: 'Debug',
+      // No chord: it is a deliberate, occasional action, and every obvious
+      // combination here is already spoken for.
+      handler: () => {
+        const file = useWorkspaceStore.getState().activeFilePath;
+        const line = useUiStore.getState().cursorPosition?.line;
+        if (file && line) void useDebugStore.getState().setNextStatement(file, line);
+      },
+      when: () => useDebugStore.getState().status === 'paused',
+    },
+    {
+      id: 'debug.pause',
+      label: 'Pause',
+      category: 'Debug',
+      handler: () => void useDebugStore.getState().pause(),
+      when: () => useDebugStore.getState().status === 'running',
+    },
+    {
+      id: 'debug.stop',
+      label: 'Stop Debugging',
+      category: 'Debug',
+      keybinding: 'mod+shift+f5',
+      handler: () => void useDebugStore.getState().stop(),
+      when: () => useDebugStore.getState().status !== 'inactive',
+    },
     // Unity commands
     {
       id: 'unity.play',
       label: 'Play',
       category: 'Unity',
-      keybinding: 'ctrl+shift+F5',
+      // The play family is bare F-keys: one keystroke for the action a Unity
+      // developer runs more than any other, and it clears the two chords that
+      // did not work on Windows at all (Shift+F10 is the context-menu key,
+      // F11 is the webview's fullscreen key). KeyboardShortcutManager swallows
+      // F5 unconditionally so this staying `when`-gated cannot leave a bare
+      // F5 falling through to the webview and reloading the app.
+      keybinding: 'f5',
       handler: () => useUnityStore.getState().sendPlay(),
       when: () => useProjectContextStore.getState().isUnityProject,
     },
@@ -1517,7 +1997,7 @@ function App() {
       id: 'unity.pause',
       label: 'Pause',
       category: 'Unity',
-      keybinding: 'ctrl+shift+F6',
+      keybinding: 'f6',
       handler: () => useUnityStore.getState().sendPause(),
       when: () => useProjectContextStore.getState().isUnityProject,
     },
@@ -1525,7 +2005,7 @@ function App() {
       id: 'unity.stop',
       label: 'Stop',
       category: 'Unity',
-      keybinding: 'ctrl+shift+F10',
+      keybinding: 'shift+f5',
       handler: () => useUnityStore.getState().sendStop(),
       when: () => useProjectContextStore.getState().isUnityProject,
     },
@@ -1533,8 +2013,15 @@ function App() {
       id: 'unity.step',
       label: 'Step',
       category: 'Unity',
-      keybinding: 'ctrl+shift+F11',
+      keybinding: 'f7',
       handler: () => useUnityStore.getState().sendStep(),
+      when: () => useProjectContextStore.getState().isUnityProject,
+    },
+    {
+      id: 'unity.showProfiler',
+      label: 'Show Unity Profiler',
+      category: 'Unity',
+      handler: () => { useUiStore.getState().setActiveBottomTab('unity-profiler'); useUiStore.getState().setBottomPanelVisible(true); },
       when: () => useProjectContextStore.getState().isUnityProject,
     },
     {
@@ -1563,7 +2050,7 @@ function App() {
       id: 'unity.clearConsole',
       label: 'Clear Unity Console',
       category: 'Unity',
-      handler: () => useUnityStore.getState().clearLogs(),
+      handler: () => void useUnityStore.getState().clearLogs(),
       when: () => useProjectContextStore.getState().isUnityProject,
     },
     {
@@ -1753,7 +2240,7 @@ function App() {
                           <TabBar />
                           <Breadcrumbs />
                           <EditorErrorBoundary>
-                            {activeFilePath ? <EditorPanel /> : <WelcomeScreen hasWorkspace />}
+                            {activeFilePath ? <><SaveConflictBanner /><EditorPanel /></> : <WelcomeScreen hasWorkspace />}
                           </EditorErrorBoundary>
                         </div>
                       </Allotment.Pane>
@@ -1786,7 +2273,7 @@ function App() {
                 </Allotment.Pane>
                 <Allotment.Pane
                   key="right"
-                  visible={rightSidebarVisible}
+                  visible={rightSidebarVisible && !aiPanelMaximized}
                   preferredSize={initialLayout.right}
                   minSize={200}
                 >
@@ -1817,6 +2304,9 @@ function App() {
       {/* Mounted at the app root, not inside the editor pane: it overlays the
           workspace instead of displacing it. Gates itself on `settingsOpen`. */}
       <SettingsModal />
+      {showShortcutsHelp && (
+        <ShortcutsHelpModal onClose={() => setShowShortcutsHelp(false)} />
+      )}
       {showThemePicker && (
         <ThemePicker onClose={() => setShowThemePicker(false)} />
       )}
@@ -1834,19 +2324,6 @@ function App() {
       )}
       <TooltipHost />
       <CoachMarks />
-      {aiPanelMaximized && (
-        <MaximizedAiOverlay>
-          {/* Same local boundary RightSidebarPanel gives the docked panel — a
-              panel crash must never replace the whole editor. */}
-          <ErrorBoundary
-            fallback={
-              <div className="sidebar-empty">AI panel crashed — close and reopen it to retry.</div>
-            }
-          >
-            <AiChatPanel />
-          </ErrorBoundary>
-        </MaximizedAiOverlay>
-      )}
       {graphifyIntroOpen && (
         <GraphifyIntroModal
           onClose={() => setGraphifyIntroOpen(false)}
@@ -1861,8 +2338,11 @@ function App() {
           }}
         />
       )}
-      {dotnetMissingModalOpen && (
-        <DotnetMissingModal onClose={() => setDotnetMissingModalOpen(false)} />
+      {dotnetMissingModal && (
+        <DotnetMissingModal
+          block={dotnetMissingModal}
+          onClose={() => setDotnetMissingModal(null)}
+        />
       )}
     </div>
   );

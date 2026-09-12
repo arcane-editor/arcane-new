@@ -1,0 +1,40 @@
+/* A realistic slice of a project stylesheet: mostly valid USS, with the two
+   mistakes that cost the most time in practice — a CSS property USS does not
+   implement, and a class the UXML uses that nothing here declares. */
+
+.hud {
+    flex-grow: 1;
+    flex-direction: row;
+    justify-content: space-between;
+    padding: 12px;
+}
+
+.hud__panel {
+    flex-direction: column;
+    background-color: rgba(0, 0, 0, 0.6);
+    border-radius: 4px;
+    /* USS has no box-shadow. Unity drops it at import with no message. */
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+}
+
+.hud__label {
+    -unity-font-style: bold;
+    -unity-text-align: middle-left;
+    color: rgb(235, 235, 235);
+}
+
+.hud__label--big {
+    font-size: 28px;
+}
+
+.hud__bar {
+    height: 8px;
+}
+
+.hud__button {
+    width: 32px;
+    height: 32px;
+}
+
+/* `.hud__panel--left` and `.hud__button--ghost` are used by HUD.uxml and
+   declared nowhere — the second thing this fixture exists to exercise. */

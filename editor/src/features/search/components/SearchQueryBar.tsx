@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import Tooltip from '../../../components/Tooltip';
 import { Search, EyeOff, SlidersHorizontal, Boxes } from 'lucide-react';
 import { useSearchStore } from '../../../stores/search';
 import { useWorkspaceStore } from '../../../stores/workspace';
@@ -158,33 +159,36 @@ function SearchQueryBar({ sessionId }: SearchQueryBarProps) {
             autoCapitalize="off"
           />
           <div className="search-toggle-group">
-            <button
-              type="button"
-              className={`search-toggle-btn${session.caseSensitive ? ' active' : ''}`}
-              title="Match case (⌥⌘C)"
-              aria-pressed={session.caseSensitive}
-              onClick={() => toggle('caseSensitive')}
-            >
-              Aa
-            </button>
-            <button
-              type="button"
-              className={`search-toggle-btn${session.wholeWord ? ' active' : ''}`}
-              title="Match whole word (⌥⌘W)"
-              aria-pressed={session.wholeWord}
-              onClick={() => toggle('wholeWord')}
-            >
-              ab
-            </button>
-            <button
-              type="button"
-              className={`search-toggle-btn${session.isRegex ? ' active' : ''}`}
-              title="Use regular expression (⌥⌘X)"
-              aria-pressed={session.isRegex}
-              onClick={() => toggle('isRegex')}
-            >
-              .*
-            </button>
+            <Tooltip label="Match case" commandId="search.toggleCase" side="bottom">
+              <button
+                type="button"
+                className={`search-toggle-btn${session.caseSensitive ? ' active' : ''}`}
+                aria-pressed={session.caseSensitive}
+                onClick={() => toggle('caseSensitive')}
+              >
+                Aa
+              </button>
+            </Tooltip>
+            <Tooltip label="Match whole word" commandId="search.toggleWholeWord" side="bottom">
+              <button
+                type="button"
+                className={`search-toggle-btn${session.wholeWord ? ' active' : ''}`}
+                aria-pressed={session.wholeWord}
+                onClick={() => toggle('wholeWord')}
+              >
+                ab
+              </button>
+            </Tooltip>
+            <Tooltip label="Use regular expression" commandId="search.toggleRegex" side="bottom">
+              <button
+                type="button"
+                className={`search-toggle-btn${session.isRegex ? ' active' : ''}`}
+                aria-pressed={session.isRegex}
+                onClick={() => toggle('isRegex')}
+              >
+                .*
+              </button>
+            </Tooltip>
             <span className="search-toggle-divider" aria-hidden="true" />
             <button
               type="button"
@@ -240,6 +244,8 @@ function SearchQueryBar({ sessionId }: SearchQueryBarProps) {
               onChange={(e) => update(sessionId, { includePattern: e.target.value })}
               spellCheck={false}
               autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
             />
           </label>
           <label className="search-filter-field">
@@ -252,6 +258,8 @@ function SearchQueryBar({ sessionId }: SearchQueryBarProps) {
               onChange={(e) => update(sessionId, { excludePattern: e.target.value })}
               spellCheck={false}
               autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
             />
           </label>
         </div>

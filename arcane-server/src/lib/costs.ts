@@ -89,15 +89,60 @@ export const MODEL_CATALOG: Record<string, ModelInfo> = {
             inputCostPer1M: 0.40, outputCostPer1M: 1.80, cachedInputCostPer1M: 0.04,
         },
     },
-    // Deep Think — extended reasoning. Terminal-Bench 2.1 leader (81.0%).
-    // Flat pricing: the only tier with no long-context cliff, which makes it
-    // the correct choice for genuinely large-context work.
+    // UNROUTED since 2026-09-03: spark/muse-spark-1.3-contributor took every
+    // slot this held (Standard/Deep-Think/Max executor + the Standard
+    // planner), which it had itself taken from spark 1.2 on 2026-08-27. Kept
+    // as the documented rollback and for historical usage rows — see
+    // config/plans.ts's FLASH_MODEL. Rates from the model page, verified
+    // 2026-08-27.
+    //
+    // Context window: the model page publishes 1,048,576 while the live
+    // /accounts/*/models catalog reports 1,310,720. Seeded at the SMALLER of
+    // the two on purpose — this number is a send budget (routes/config.ts
+    // feeds it to the editor's compaction), so over-stating it builds requests
+    // the provider rejects, while under-stating it only compacts sooner.
+    //
+    // maxOutput is published nowhere for this model; 32_000 matches glm-5.2,
+    // the closest sibling in the family, and is the conservative assumption.
+    '@cf/zai-org/glm-5.3-flash': {
+        route: 'workers-ai',
+        inputCostPer1M: 0.15, outputCostPer1M: 0.50, cachedInputCostPer1M: 0.03,
+        contextWindow: 1_048_576, maxOutput: 32_000,
+    },
+    // Deep-Think PLANNER and the Max tier's hard-task executor (2026-08-30).
+    // Replaced xai/grok-4.6 in both slots — see config/plans.ts. Rates from
+    // the model page, verified 2026-08-30 against the CF changelog announcing
+    // it (2026-08-28): identical to glm-5.2's, while roughly doubling it on
+    // long-horizon agentic benchmarks (Terminal-Bench 2.1 88.2 vs 81.0,
+    // SWE-Marathon 42.5 vs 19.4).
+    //
+    // Strictly cheaper than the grok it replaces in every dimension that
+    // matters here: $1.40/$4.40 against $2.00/$6.00, a real cached-input rate
+    // ($0.26 where grok published none and we conservatively billed cache
+    // hits at full price), 2x the context (1,048,576 vs 500,000), and NO
+    // long-context cliff — grok repriced the entire request to $4.00/$12.00
+    // above 200k input, which is precisely the size the Deep Think tier
+    // exists to serve.
+    //
+    // maxOutput is published nowhere for this model; 32_000 matches glm-5.2
+    // and glm-5.3-flash, the closest siblings, and is the conservative
+    // assumption.
+    '@cf/zai-org/glm-5.3': {
+        route: 'workers-ai',
+        inputCostPer1M: 1.40, outputCostPer1M: 4.40, cachedInputCostPer1M: 0.26,
+        contextWindow: 1_048_576, maxOutput: 32_000,
+    },
+    // Former Deep Think tier. Flat pricing, no long-context cliff.
     '@cf/zai-org/glm-5.2': {
         route: 'workers-ai',
         inputCostPer1M: 1.40, outputCostPer1M: 4.40, cachedInputCostPer1M: 0.26,
         contextWindow: 262_144, maxOutput: 32_000,
     },
-    // Max — frontier intelligence. Above 200k the whole request reprices.
+    // UNROUTED since 2026-08-30: @cf/zai-org/glm-5.3 took both slots this
+    // held (mid planner, high executorHard). Kept for the same two reasons as
+    // the spark entry below — usage rows are keyed by model id, so deleting
+    // it stops historical debits costing out, and it is the one-line rollback.
+    // Above 200k input the whole request repriced.
     'xai/grok-4.6': {
         route: 'unified',
         wireFormat: 'chat',
@@ -137,10 +182,35 @@ export const MODEL_CATALOG: Record<string, ModelInfo> = {
         inputCostPer1M: 5.00, outputCostPer1M: 30.00, cachedInputCostPer1M: 0.50,
         contextWindow: 400_000, maxOutput: 128_000,
     },
-    // Direct OpenAI-compatible provider (owner's Spark key; no CF gateway).
-    // Output rate confirmed by owner; input/cached SEEDED = output rate as a
-    // conservative over-charge until the owner enters real prices via the
-    // admin Pricing panel. Context window conservative for the same reason.
+    // Standard/Deep-Think/Max EXECUTOR, and the Standard tier's planner
+    // (2026-09-03). Direct OpenAI-compatible provider called with the owner's
+    // own Spark key — no Workers AI, no AI Gateway, no Cloudflare in the
+    // request path at all, which is what `route: 'direct'` means here and the
+    // reason this entry is the only one whose availability is not Cloudflare's.
+    //
+    // Rates and window are CARRIED OVER VERBATIM from the 1.2 seed below and
+    // are deliberately conservative: input/cached seeded equal to the
+    // owner-confirmed output rate (a flat over-charge, never an under-charge)
+    // and a 131,072 window well under what the endpoint likely serves. Both
+    // are the owner's to correct through the admin Pricing panel.
+    //
+    // The window is not just a billing number: routes/config.ts publishes each
+    // tier's usable context as the MINIMUM across that tier's role models, so
+    // this 131,072 is once again the binding constraint on all three tiers
+    // (they read 1,048,576 / 1,048,576 / 400,000 while glm-5.3-flash held the
+    // executor slots). Raising it here raises every tier's window.
+    //
+    // It is also the ONLY model permitted to run at 'max' reasoning effort —
+    // config/routing.ts clamps every other provider to 'xhigh'.
+    'spark/muse-spark-1.3-contributor': {
+        route: 'direct',
+        inputCostPer1M: 0.20, outputCostPer1M: 0.20, cachedInputCostPer1M: 0.20,
+        contextWindow: 131_072, maxOutput: 16_384,
+    },
+    // Retired 2026-08-27 (glm-5.3-flash took its slots) and superseded
+    // outright by 1.3 on 2026-09-03. Unrouted; kept because usage rows are
+    // keyed by model id, so deleting it stops every historical debit against
+    // it from costing out.
     'spark/muse-spark-1.2-contributor': {
         route: 'direct',
         inputCostPer1M: 0.20, outputCostPer1M: 0.20, cachedInputCostPer1M: 0.20,

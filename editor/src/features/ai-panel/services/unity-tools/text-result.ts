@@ -15,3 +15,15 @@ export function txt(s: string): AgentToolResult {
 export function cap(s: string, max = 8000): string {
   return s.length > max ? s.slice(0, max) + `\n…(${s.length - max} more chars truncated)` : s;
 }
+
+/**
+ * Standard refusal text for a bridge-requiring tool with no connection. Pure
+ * data (no store read) — lives here rather than `shared.ts` so `read-tools.ts`
+ * can use it without pulling that file's `bridgeConnected()` (and therefore
+ * `stores/unity.ts`) into scope. `shared.ts` re-exports it for existing callers.
+ */
+export const NOT_CONNECTED =
+  'Unity bridge not connected — this needs a running Unity Editor with the UnityIDE bridge installed. ' +
+  'If Unity is running, the connection drops briefly during every script recompile/domain reload and ' +
+  'reconnects automatically — do any remaining file creation/editing first, then retry this. ' +
+  'The IDE can still read project files statically with the read/list tools.';

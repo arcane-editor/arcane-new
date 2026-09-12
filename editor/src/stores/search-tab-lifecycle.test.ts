@@ -60,7 +60,7 @@ function extractBody(source: string, startMarker: string, endMarker: string): st
 }
 
 const openSearchTabBody = extractBody(WORKSPACE_SOURCE, 'openSearchTab: (seed) => {', '\n  refreshTree:');
-const closeFileBody = extractBody(WORKSPACE_SOURCE, 'closeFile: (path: string) => {', '\n  popRecentlyClosed:');
+const closeFileBody = extractBody(WORKSPACE_SOURCE, 'function releaseFile(', '// Track provider dispose').replace(/file\.path/g, 'path') + extractBody(WORKSPACE_SOURCE, 'closeFile: (path: string) => {', '\n  popRecentlyClosed:');
 const setActiveFileBody = extractBody(WORKSPACE_SOURCE, 'setActiveFile: (path: string) => {', '\n  reorderTabs:');
 const deletePathBody = extractBody(WORKSPACE_SOURCE, 'deletePath: async (path: string) => {', '\n  restartLsp:');
 const syncActiveSearchSessionBody = extractBody(
@@ -190,12 +190,12 @@ describe('closeFile (source text — see file header)', () => {
   // source facts is what stands in for "and deletes its sessions entry"
   // without running either function.
   it('calls closeSession(path) for a search:// tab before the rest of the teardown', () => {
-    const guardIdx = closeFileBody.indexOf("if (path.startsWith('search://')) {");
+    const guardIdx = closeFileBody.indexOf("if (path.startsWith('search://'))");
     const closeSessionIdx = closeFileBody.indexOf('useSearchStore.getState().closeSession(path);');
     // The first thing closeFile does after its own signature is this guard —
     // nothing else in the body (LSP notify, diagnostics clear, model
     // dispose) appears before it.
-    const lspNotifyIdx = closeFileBody.indexOf("Notify the LSP server for this file's language");
+    const lspNotifyIdx = closeFileBody.indexOf("syncDocumentClose");
     const disposeIdx = closeFileBody.indexOf('disposeModelForPath(path);');
     expect(guardIdx).toBeGreaterThan(-1);
     expect(closeSessionIdx).toBeGreaterThan(guardIdx);

@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'bun:test';
-import { formatUnityAssetBlock, type UnityAssetModel } from './attachments';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { formatUnityAssetBlock, type UnityAssetModel, promptTextForImages } from './attachments';
 
 // NOTE: only the pure formatter is unit-tested here (per the brief). Full
 // `resolveAttachments` / `resolveUnityAsset` resolution touches Tauri's
@@ -145,5 +147,64 @@ describe('formatUnityAssetBlock', () => {
     };
     const args = { relPath: 'Assets/A.prefab', model, refCount: 2 };
     expect(formatUnityAssetBlock(args)).toBe(formatUnityAssetBlock(args));
+  });
+});
+
+describe('promptTextForImages', () => {
+  // The defect this exists for: an image attachment contributes no text prefix,
+  // so an image-only send produced `{ type: 'text', text: '' }`. Providers
+  // reject an empty content part every time, and the client retries it — the
+  // turn sits on "Thinking…" through the backoff and ends in a bare
+  // "Server error" with nothing naming the cause.
+  it('never returns an empty string when there are images to send', () => {
+    for (const text of ['', '   ', '\n']) {
+      expect(promptTextForImages(text, 1).trim().length).toBeGreaterThan(0);
+    }
+  });
+
+  it('leaves a real prompt exactly as written, whitespace and all', () => {
+    expect(promptTextForImages('make it warmer', 2)).toBe('make it warmer');
+    expect(promptTextForImages('  padded  ', 1)).toBe('  padded  ');
+  });
+
+  it('counts the images, so the sentence matches what was attached', () => {
+    expect(promptTextForImages('', 1)).toContain('the attached image');
+    expect(promptTextForImages('', 3)).toContain('3 attached images');
+  });
+
+  it('changes nothing when there are no images — an empty send stays empty', () => {
+    // With no images the caller is on the plain `prompt()` path, which has its
+    // own guards; inventing words there would put a sentence nobody typed into
+    // the transcript.
+    expect(promptTextForImages('', 0)).toBe('');
+  });
+});
+
+describe('the error-report branch delegates rather than renders', () => {
+  /**
+   * The feature's whole promise is that the text a user copies to the
+   * clipboard and the text the model receives are the same bytes. That holds
+   * only while `data/error-report.ts` is the sole renderer — a second one
+   * inlined here would drift silently, and neither side would report it.
+   *
+   * A source scan because `resolveAttachments` cannot run under Bun (Tauri
+   * `invoke` plus stores that touch `document`), as this file's header and
+   * `attachments.ts`'s own header both explain.
+   */
+  const source = readFileSync(path.join(import.meta.dir, 'attachments.ts'), 'utf-8');
+  const branch = source.slice(
+    source.indexOf("if (a.kind === 'error-report')"),
+    source.indexOf("if (a.kind === 'unity-context')"),
+  );
+
+  it('calls the shared builder', () => {
+    expect(branch).toContain('buildErrorReport(a.source, a.entries, a.capturedAt).block');
+  });
+
+  it('renders nothing of its own — no tags, no caps, no slicing', () => {
+    expect(branch).not.toContain('<console-errors');
+    expect(branch).not.toContain('<problems');
+    expect(branch).not.toContain('.slice(');
+    expect(branch).not.toMatch(/MAX_[A-Z_]+/);
   });
 });

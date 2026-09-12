@@ -173,3 +173,25 @@ describe('convertToOpenAI — duplicate tool-call ids', () => {
     expect(toolMsgs[1].content).toContain('interrupted');
   });
 });
+
+describe('rendered tool evidence', () => {
+  it('delivers images only after all tool results in a batch, including a repaired missing result', () => {
+    const messages = [
+      { role: 'assistant', content: [
+        { type: 'toolCall', id: 'one', name: 'unity_playtest', arguments: {} },
+        { type: 'toolCall', id: 'two', name: 'read', arguments: {} },
+      ], stopReason: 'toolUse', timestamp: 1 },
+      { role: 'toolResult', toolCallId: 'one', toolName: 'unity_playtest', content: [
+        { type: 'text', text: 'Captured frame' }, { type: 'image', mimeType: 'image/png', data: 'ACTUAL_FRAME' },
+      ], isError: false, timestamp: 2 },
+    ];
+    const converted = convertToOpenAI('', messages as never);
+    expect(converted.map((m) => m.role)).toEqual(['assistant', 'tool', 'tool', 'user']);
+    expect(JSON.stringify(converted[3])).toContain('data:image/png;base64,ACTUAL_FRAME');
+    expect(converted[2].tool_call_id).toBe('two');
+  });
+  it('drops images from orphaned tool results', () => {
+    const converted = convertToOpenAI('', [{ role: 'toolResult', toolCallId: 'orphan', toolName: 'capture', content: [{ type: 'image', mimeType: 'image/png', data: 'OLD' }], timestamp: 1, isError: false }] as never);
+    expect(converted).toEqual([]);
+  });
+});

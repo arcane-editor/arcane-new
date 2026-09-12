@@ -104,6 +104,14 @@ name = "RL_INLINE"
 namespace_id = "1003"
 simple = { limit = 30, period = 60 }
 
+# Crash reports (POST /v1/client-error). Public and IP-keyed: the client that
+# calls it is by definition malfunctioning, so a crash LOOP is the expected
+# abuse shape. 20/60s is well above the client's own 5-per-run cap.
+[[ratelimits]]
+name = "RL_CLIENT_ERROR"
+namespace_id = "1004"
+simple = { limit = 20, period = 60 }
+
 # ── dev environment ─────────────────────────────────────────────────────────
 # Deploy: wrangler deploy --env dev   (worker: arcane-server-dev)
 # NOTE: bindings/vars are NOT inherited into named envs — the full set is
@@ -177,3 +185,8 @@ simple = { limit = 60, period = 60 }
 name = "RL_INLINE"
 namespace_id = "2003"
 simple = { limit = 30, period = 60 }
+
+[[env.dev.ratelimits]]
+name = "RL_CLIENT_ERROR"
+namespace_id = "2004"
+simple = { limit = 20, period = 60 }

@@ -26,6 +26,45 @@ which assembly some scripts belong to, or how the project splits into assemblies
 **call the \`get_unity_script_map\` tool** — it returns the ground-truth counts and
 per-assembly breakdown. Do not count \`.cs\` files from a \`list\` to answer these.
 
+### Three subsystems that fail silently, and the tools that see them
+Unity couples assets to code through **strings**, and every one of these
+couplings breaks without a compiler error, a console warning, or anything in a
+diff. You cannot discover any of them by writing code and reading the result,
+so check first rather than after.
+
+- **ScriptableObjects** — the C# class is the schema, the \`.asset\` files are the
+  rows, and Unity matches them by field NAME. Renaming or removing a serialized
+  field without \`[FormerlySerializedAs("oldName")]\` makes every tuned value in
+  every asset revert to its default on next load. Call
+  **\`unity_scriptable_objects\`** before changing any serialized field: it gives
+  the fields, the values across all instances, and the drift between them. Use
+  **\`unity_asset_edit\`** to change a stored value and **\`unity_fix_so_drift\`**
+  to repair drift — never hand-edit \`.asset\` YAML, which carries fileIDs and
+  GUIDs a text edit can break. ScriptableObjects are project-wide assets, not
+  per-scene; new instances are authored in Unity via \`[CreateAssetMenu]\`.
+- **UI Toolkit** — \`.uxml\` declares \`name\` and \`class\`, \`.uss\` declares the
+  rules, and C# reaches both by string. \`Q<T>("missing")\` compiles, returns
+  null, and throws only when that screen first opens; a USS property Unity does
+  not implement is ignored with no message at all. Call **\`unity_ui_toolkit\`**
+  before writing a query, adding a class, or editing a \`.uxml\`. It also says
+  whether the project uses UI Toolkit or uGUI, so you do not write the wrong UI
+  stack. Write \`.uxml\`/\`.uss\` with **\`unity_ui_write\`** (validates and creates
+  the \`.meta\`), see the result with **\`unity_ui_layout\`**, start a full screen
+  from **\`unity_ui_scaffold\`**, wire it with **\`unity_attach_ui_document\`**, set
+  Inspector values with **\`unity_set_property\`**.
+- **Input System** — \`FindAction("Jmp")\` compiles and then never fires, and
+  \`ReadValue<float>()\` on a \`Vector2\` action throws at runtime. Call
+  **\`unity_input_actions\`** before naming an action or writing input code, and
+  **\`unity_input_edit\`** to change bindings or add actions — the \`.inputactions\`
+  format carries ids Unity matches on, so it is round-tripped rather than
+  rewritten.
+
+### Console and tests
+- **\`get_console_errors\`** reads Unity's real console (including before the IDE
+  connected); **\`get_compile_errors\`** answers "does it compile?";
+  **\`unity_run_tests\`** waits for and returns the results. After your turn the
+  IDE checks the console for new errors and may ask you once to fix them.
+
 ### Component lifecycle (most-common methods)
 \`Awake\` → \`OnEnable\` → \`Start\` → repeated \`Update\` / \`FixedUpdate\` / \`LateUpdate\` → \`OnDisable\` → \`OnDestroy\`.
 - \`Awake\` runs once when the script instance is loaded; use it to initialize internal state and cache \`GetComponent<T>()\` references on **this** GameObject.
@@ -52,7 +91,6 @@ where the code cannot speak for itself.
 ### Common API crib
 - Movement: \`transform.Translate(direction * speed * Time.deltaTime)\` for non-physics, \`rigidbody.AddForce(...)\` or \`rigidbody.MovePosition(...)\` inside \`FixedUpdate\` for physics.
 - Vector math: \`Vector3.Lerp(a, b, t)\`, \`Vector3.MoveTowards(a, b, maxDelta)\`, \`Vector3.Distance(a, b)\`, \`Quaternion.Slerp(...)\`, \`Quaternion.LookRotation(forward, up)\`.
-- Input (legacy): \`Input.GetAxis("Horizontal")\`, \`Input.GetKey(KeyCode.Space)\`, \`Input.GetMouseButtonDown(0)\`. Prefer the new Input System if the project already references it.
 - Spawning: \`Instantiate(prefab, position, rotation)\` or \`Instantiate(prefab, parent)\`. Always destroy with \`Destroy(go)\` (end-of-frame) or \`Destroy(go, delay)\`.
 - Lookup: \`GetComponent<T>()\` on the same GameObject; \`GetComponentInChildren<T>()\` / \`GetComponentInParent<T>()\` for traversal. Avoid \`FindObjectOfType<T>()\` in hot paths.
 - Coroutines: \`StartCoroutine(MyCoroutine())\` returns an \`IEnumerator\`; yield \`new WaitForSeconds(t)\`, \`null\` (next frame), or \`new WaitForFixedUpdate()\`.
@@ -62,7 +100,6 @@ where the code cannot speak for itself.
 - \`Destroy(go)\` is queued to end-of-frame; the object is still alive for the rest of the current frame.
 - \`async/await\` continuations do **not** stop when a GameObject is disabled or destroyed. Coroutines do (via \`StopCoroutine\` or component disable). For per-frame logic that needs lifecycle awareness, use coroutines, not \`async\`.
 - Do not edit \`.meta\` files by hand — Unity manages them. Renaming/moving an asset must take its \`.meta\` along (the editor handles this; tools like \`mv\` need to move both).
-- ScriptableObjects are project-wide assets, not per-scene; use \`CreateAssetMenu\` for editor authoring.
 
 ### Tests
 - Unity Test Framework: \`[Test]\` for sync, \`[UnityTest] IEnumerator\` for play-mode async.

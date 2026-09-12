@@ -26,6 +26,7 @@ mock.module('../../../stores/auth', () => ({
 }));
 
 let aiState: {
+  conversationGeneration?: number;
   mode: 'ask' | 'agent' | 'plan';
   hostedPlan: Array<{ status: string; difficulty?: 'easy' | 'hard' }> | null;
 } = { mode: 'ask', hostedPlan: null };
@@ -73,6 +74,7 @@ function sseResponse(lines: string[], status = 200): Response {
 
 interface CapturedRequestBody {
   metadata: Record<string, unknown>;
+  messages: Array<{ role: string; content: unknown }>;
 }
 
 /** Captures the JSON body of the (single, non-retried) fetch call for metadata assertions. */
@@ -151,6 +153,18 @@ beforeEach(() => {
 });
 
 describe('createHostedStreamFn', () => {
+  it('sends captured tool frames to the hosted router after the corresponding result batch', async () => {
+    const { fetchImpl, bodies } = capturingFetchImpl(sseResponse(['data: [DONE]\n\n']));
+    const streamFn = createHostedStreamFn({ fetchImpl });
+    await drain(streamFn({ ...ctx, messages: [
+      { role: 'assistant', content: [{ type: 'toolCall', id: 'capture', name: 'unity_playtest_status', arguments: {} }], stopReason: 'toolUse', timestamp: 1 },
+      { role: 'toolResult', toolCallId: 'capture', toolName: 'unity_playtest_status', content: [{ type: 'text', text: 'Game view' }, { type: 'image', mimeType: 'image/png', data: 'TEST_FRAME' }], isError: false, timestamp: 2 },
+    ] }, opts()));
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0].messages.map((m) => m.role)).toEqual(['system', 'assistant', 'tool', 'user']);
+    expect(JSON.stringify(bodies[0].messages.at(-1)?.content)).toContain('data:image/png;base64,TEST_FRAME');
+  });
+
   it('retries once after a transient 500 and succeeds on the second attempt', async () => {
     let calls = 0;
     const fetchImpl = (async () => {
@@ -396,6 +410,49 @@ describe('createHostedStreamFn', () => {
     expect(events.some((e) => e.type === 'done')).toBe(false);
   });
 
+  it('treats server keepalive comments as liveness, so a slow model never trips the first-token watchdog', async () => {
+    // The "Stream stalled before the first token" fix. The server now writes
+    // a `: keepalive` comment immediately and every 10s while the model is
+    // still thinking (arcane-server/src/lib/sse-heartbeat.ts). This locks the
+    // client half of that contract: a comment frame must count as a live
+    // stream, must hand every later read to the idle-gap watchdog, and must
+    // never be mistaken for a malformed event.
+    const fetchImpl = (async () => {
+      let pulls = 0;
+      const body = new ReadableStream<Uint8Array>({
+        async pull(controller) {
+          pulls++;
+          const enc = new TextEncoder();
+          if (pulls <= 4) {
+            // The model is still thinking — keepalives only, for well past
+            // the first-token window this test sets.
+            await sleep(10);
+            controller.enqueue(enc.encode(': keepalive\n\n'));
+            return;
+          }
+          if (pulls === 5) {
+            controller.enqueue(enc.encode('data: {"type":"text","content":"finally"}\n\n'));
+            return;
+          }
+          controller.enqueue(enc.encode('data: [DONE]\n\n'));
+          controller.close();
+        },
+      });
+      return new Response(body, { status: 200 });
+    }) as unknown as typeof fetch;
+
+    // 25ms first-token window vs ~40ms of keepalive-only traffic: without the
+    // keepalives counting as liveness this errors out before the text lands.
+    const streamFn = createHostedStreamFn({ fetchImpl, firstTokenTimeoutMs: 25, idleTimeoutMs: 5_000 });
+    const events = await drain(streamFn(ctx, opts()));
+
+    expect(events.some((e) => e.type === 'error')).toBe(false);
+    const done = events.find((e) => e.type === 'done') as Extract<AssistantMessageEvent, { type: 'done' }>;
+    expect(done).toBeDefined();
+    // Not "Response corrupted": comments must not count as malformed events.
+    expect(done.message.content).toEqual([{ type: 'text', text: 'finally' }]);
+  });
+
   it('does not retry a failure that happens after the first chunk has already been consumed', async () => {
     let calls = 0;
     let pullCount = 0;
@@ -530,6 +587,23 @@ describe('createHostedStreamFn', () => {
     ]);
   });
 
+  it('late usage from a replaced conversation cannot update the new session', async () => {
+    aiState.conversationGeneration = 1;
+    let respond!: (response: Response) => void;
+    const fetchImpl = (() => new Promise<Response>((resolve) => { respond = resolve; })) as unknown as typeof fetch;
+    const pending = drain(createHostedStreamFn({ fetchImpl })(ctx, opts()));
+    await Promise.resolve();
+    aiState.conversationGeneration = 2;
+    respond(sseResponse([
+      'data: {"type":"usage","input_tokens":10,"output_tokens":5,"model":"old-model"}\n\n',
+      'data: [DONE]\n\n',
+    ]));
+    await pending;
+    expect(sessionUsageCalls).toEqual([]);
+    expect(servedModelCalls).toEqual([]);
+    expect(nextTurnTelemetry().lastTurnLatencyMs).toBeNull();
+  });
+
   it('reports corruption when the stream carries only malformed data: lines before [DONE]', async () => {
     const fetchImpl = (async () =>
       sseResponse([
@@ -638,6 +712,24 @@ describe('createHostedStreamFn', () => {
     const errorEvent = events.find((e) => e.type === 'error') as Extract<AssistantMessageEvent, { type: 'error' }>;
     expect(errorEvent).toBeDefined();
     expect(errorEvent.error.message).toBe('[code:rate_limit] Unknown server error');
+  });
+
+  // A provider 429 relayed mid-stream carries its own `Retry-After` (server's
+  // `retryAfterSecondsFrom`, llm-router.ts) — folded into the same
+  // `retryAfter:<n>` marker suffix the 429 connect-phase path produces below,
+  // so `classifyTurnError` sets `retryAt` off either source identically.
+  it('folds a mid-stream SSE rate_limit event\'s retryAfterSeconds into the marker', async () => {
+    const fetchImpl = (async () =>
+      sseResponse([
+        'data: {"type":"error","code":"rate_limit","message":"provider busy","retryAfterSeconds":5}\n\n',
+      ])) as unknown as typeof fetch;
+
+    const streamFn = createHostedStreamFn({ fetchImpl });
+    const events = await drain(streamFn(ctx, opts()));
+
+    const errorEvent = events.find((e) => e.type === 'error') as Extract<AssistantMessageEvent, { type: 'error' }>;
+    expect(errorEvent).toBeDefined();
+    expect(errorEvent.error.message).toBe('[code:rate_limit retryAfter:5] provider busy');
   });
 
   it('surfaces "not logged in" without ever calling fetch', async () => {
@@ -896,10 +988,17 @@ describe('tool_call argument parsing', () => {
 });
 
 describe('429 rate-limit messaging', () => {
-  async function errorFrom(body: string): Promise<string> {
-    const fetchImpl = (async () => new Response(body, { status: 429 })) as unknown as typeof fetch;
+  function fetch429(body: string, headers?: Record<string, string>): typeof fetch {
+    return (async () => new Response(body, { status: 429, headers })) as unknown as typeof fetch;
+  }
+
+  async function errorFrom(body: string, headers?: Record<string, string>): Promise<string> {
     // maxAttempts 1 so the transient-retry path doesn't consume the response.
-    const streamFn = createHostedStreamFn({ fetchImpl, retryBaseDelayMs: 1, maxAttempts: 1 });
+    const streamFn = createHostedStreamFn({
+      fetchImpl: fetch429(body, headers),
+      retryBaseDelayMs: 1,
+      maxAttempts: 1,
+    });
     const events = await drain(streamFn(ctx, opts()));
     const err = events.find((e) => e.type === 'error') as { error: Error } | undefined;
     return err?.error.message ?? '';
@@ -908,21 +1007,85 @@ describe('429 rate-limit messaging', () => {
   // The server computes a real reset time for the hourly spend cap; the client
   // replaced it with "wait a moment", which is wrong by up to an hour and sends
   // the user straight back into another 429.
-  it('surfaces the server’s reset-time hint', async () => {
+  it('surfaces the server’s reset-time hint, marked with the (unrecognized) body code', async () => {
     const msg = await errorFrom(
       JSON.stringify({ code: 'rate_limited', error: 'Too many AI requests in a short window. Try again in ~47 minute(s).' }),
     );
     expect(msg).toContain('~47 minute(s)');
+    expect(msg).toStartWith('[code:rate_limited] Rate limit exceeded.');
   });
 
-  it('keeps the prefix that classifyTurnError routes on', async () => {
+  it('keeps the prefix that classifyTurnError routes on, defaulting the marker code to rate_limit', async () => {
     const msg = await errorFrom(JSON.stringify({ error: 'Try again in ~3 minute(s).' }));
     expect(msg.toLowerCase()).toContain('rate limit');
+    expect(msg).toStartWith('[code:rate_limit] Rate limit exceeded.');
   });
 
   it('falls back to the generic message when the body is not JSON', async () => {
     const msg = await errorFrom('<html>429 Too Many Requests</html>');
-    expect(msg).toContain('Rate limit exceeded');
+    expect(msg).toStartWith('[code:rate_limit] Rate limit exceeded.');
     expect(msg).toContain('wait a moment');
+  });
+
+  // The hourly cap's retryAfterSeconds (minutes-to-an-hour) is always well
+  // past RATE_LIMIT_INLINE_RETRY_MAX_MS (20s) — never retried inline, exactly
+  // one fetch, and the marker carries the seconds so classifyTurnError can
+  // set a real `retryAt`.
+  it('a 429 with a long retryAfterSeconds (hourly cap) makes exactly one fetch and marks the error with it', async () => {
+    let calls = 0;
+    const fetchImpl = (async () => {
+      calls++;
+      return new Response(
+        JSON.stringify({ error: 'Too many AI requests in a short window. Try again in ~47 minute(s).', code: 'hourly_cap', retryAfterSeconds: 2820 }),
+        { status: 429 },
+      );
+    }) as unknown as typeof fetch;
+
+    const streamFn = createHostedStreamFn({ fetchImpl, retryBaseDelayMs: 1, maxAttempts: 3 });
+    const events = await drain(streamFn(ctx, opts()));
+
+    expect(calls).toBe(1);
+    const err = events.find((e) => e.type === 'error') as { error: Error } | undefined;
+    expect(err?.error.message).toStartWith('[code:hourly_cap retryAfter:2820] Rate limit exceeded.');
+  });
+
+  // A short retryAfterSeconds (well under the inline cap) is worth waiting
+  // out inline instead of surfacing an error: the connect loop sleeps and
+  // retries, transparently to the caller. Uses a sub-1s retryAfterSeconds
+  // (rather than the brief's illustrative "2") to exercise the delay FLOOR
+  // (rateLimitRetryPlan: `max(retryAfterSeconds * 1000, 1000)`) at the same
+  // time — the exact multiply-by-1000 arithmetic for larger values is
+  // already unit-tested in stream-retry.test.ts, so this only needs to prove
+  // the end-to-end wait-then-retry mechanics without a multi-second test.
+  it('a 429 with a short retryAfterSeconds sleeps (at least the 1s floor), then retries and succeeds', async () => {
+    let calls = 0;
+    const retryAfterSeconds = 0.05;
+    const fetchImpl = (async () => {
+      calls++;
+      if (calls === 1) {
+        return new Response(JSON.stringify({ error: 'slow down', code: 'rate_limit', retryAfterSeconds }), {
+          status: 429,
+        });
+      }
+      return sseResponse(['data: {"type":"text","content":"hello"}\n\n', 'data: [DONE]\n\n']);
+    }) as unknown as typeof fetch;
+
+    const start = Date.now();
+    const streamFn = createHostedStreamFn({ fetchImpl, maxAttempts: 3 });
+    const events = await drain(streamFn(ctx, opts()));
+    const elapsed = Date.now() - start;
+
+    expect(calls).toBe(2);
+    expect(elapsed).toBeGreaterThanOrEqual(995); // the 1000ms floor, minus scheduling slack
+    const done = events.find((e) => e.type === 'done') as Extract<AssistantMessageEvent, { type: 'done' }>;
+    expect(done).toBeDefined();
+    expect(done.message.content[0]).toEqual({ type: 'text', text: 'hello' });
+  });
+
+  // Header-only Retry-After (no body retryAfterSeconds field) is honoured
+  // the same way — folded into the marker via parseRetryAfter's header path.
+  it('honours a header-only Retry-After when the body carries no retryAfterSeconds', async () => {
+    const msg = await errorFrom(JSON.stringify({ error: 'slow down' }), { 'Retry-After': '3' });
+    expect(msg).toStartWith('[code:rate_limit retryAfter:3] Rate limit exceeded.');
   });
 });

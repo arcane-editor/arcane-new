@@ -1,7 +1,9 @@
 import { create } from 'zustand';
+import { diagnosticsKey } from '../utils/diagnostics-key';
 import type { DiagnosticItem, DiagnosticSource } from '../types';
+import type { DotnetBlock } from '../features/lsp';
 
-export type SidebarView = 'explorer' | 'source-control' | 'search' | 'scene-context' | 'hierarchy' | 'test' | 'debug';
+export type SidebarView = 'explorer' | 'source-control' | 'search' | 'scene-context' | 'hierarchy' | 'test' | 'debug' | 'input' | 'scriptable-objects' | 'unity-ui';
 /** Per-file view mode for Unity YAML assets: structured tree vs raw Monaco. */
 export type AssetViewerMode = 'structured' | 'raw-view' | 'raw-edit';
 /** Per-tab view mode for a Unity-asset git diff tab: semantic tree vs raw Monaco text diff. */
@@ -14,7 +16,13 @@ export type RightSidebarView = 'ai-panel' | 'unity-inspector';
 // codebase could ever write to it — it rendered a permanent "No output".
 export type MarkdownViewMode = 'preview' | 'source';
 
-export type BottomPanelTab = 'terminal' | 'problems' | 'unity-console';
+export type BottomPanelTab =
+  | 'terminal'
+  | 'problems'
+  | 'unity-console'
+  | 'references'
+  | 'debug-console'
+  | 'unity-profiler';
 export type LspStatus = 'idle' | 'starting' | 'indexing' | 'ready' | 'error';
 
 // DiagnosticSource is defined in ../types and re-exported here for consumers
@@ -38,7 +46,9 @@ export function getFlatDiagnosticsForUri(
   diagnostics: DiagnosticsMap,
   uri: string,
 ): DiagnosticItem[] {
-  const sourceMap = diagnostics.get(uri);
+  // Normalised, so a caller holding a path finds what a caller holding a
+  // Monaco model URI stored — see `diagnosticsKey`.
+  const sourceMap = diagnostics.get(diagnosticsKey(uri));
   if (!sourceMap) return [];
 
   const lspItems = sourceMap.get('lsp') ?? [];
@@ -99,8 +109,14 @@ interface UiState {
   graphifyIntroOpen: boolean;
   setGraphifyIntroOpen: (open: boolean) => void;
 
-  dotnetMissingModalOpen: boolean;
-  setDotnetMissingModalOpen: (open: boolean) => void;
+  /**
+   * Why C# support is unavailable, or `null` when it is fine. Carries the
+   * reason rather than a bare boolean because "no .NET" and "the wrong .NET
+   * major" need different copy — a user with .NET 8 who is told to "install
+   * .NET" will install .NET 8 again.
+   */
+  dotnetMissingModal: DotnetBlock | null;
+  setDotnetMissingModal: (block: DotnetBlock | null) => void;
 
   cursorPosition: EditorCursorInfo | null;
   setCursorPosition: (pos: EditorCursorInfo | null) => void;
@@ -162,6 +178,18 @@ interface UiState {
    * sources for a URI become empty the inner map is removed.
    */
   setFileDiagnostics: (fileUri: string, source: DiagnosticSource, items: DiagnosticItem[]) => void;
+  /**
+   * Publish many files at once.
+   *
+   * `setFileDiagnostics` recomputes counts by flattening AND sorting the whole
+   * map, so calling it in a loop is quadratic: solution-wide analysis publishes
+   * thousands of files and would flatten a growing map once per file, on the
+   * main thread, with a Zustand set() (and a Problems-panel re-render) each
+   * time. This does one pass and one set().
+   */
+  setManyFileDiagnostics: (
+    entries: Array<{ fileUri: string; source: DiagnosticSource; items: DiagnosticItem[] }>,
+  ) => void;
   /** Remove all sources for a URI. */
   clearFileDiagnostics: (fileUri: string) => void;
   /** All diagnostics across all URIs and sources, deduped and sorted. */
@@ -203,8 +231,8 @@ export const useUiStore = create<UiState>((set, get) => ({
   graphifyIntroOpen: false,
   setGraphifyIntroOpen: (open) => set({ graphifyIntroOpen: open }),
 
-  dotnetMissingModalOpen: false,
-  setDotnetMissingModalOpen: (open) => set({ dotnetMissingModalOpen: open }),
+  dotnetMissingModal: null,
+  setDotnetMissingModal: (block) => set({ dotnetMissingModal: block }),
 
   cursorPosition: null,
   setCursorPosition: (pos) => set({ cursorPosition: pos }),
@@ -281,17 +309,39 @@ export const useUiStore = create<UiState>((set, get) => ({
   diagnostics: new Map(),
   setFileDiagnostics: (fileUri, source, items) => {
     set((state) => {
+      const key = diagnosticsKey(fileUri);
       const next: DiagnosticsMap = new Map(state.diagnostics);
-      const sourceMap = new Map(next.get(fileUri) ?? []);
+      const sourceMap = new Map(next.get(key) ?? []);
       if (items.length === 0) {
         sourceMap.delete(source);
       } else {
         sourceMap.set(source, items);
       }
       if (sourceMap.size === 0) {
-        next.delete(fileUri);
+        next.delete(key);
       } else {
-        next.set(fileUri, sourceMap);
+        next.set(key, sourceMap);
+      }
+      return { diagnostics: next, diagnosticCounts: recomputeCounts(next) };
+    });
+  },
+  setManyFileDiagnostics: (entries) => {
+    if (entries.length === 0) return;
+    set((state) => {
+      const next: DiagnosticsMap = new Map(state.diagnostics);
+      for (const { fileUri, source, items } of entries) {
+        const key = diagnosticsKey(fileUri);
+        const sourceMap = new Map(next.get(key) ?? []);
+        if (items.length === 0) {
+          sourceMap.delete(source);
+        } else {
+          sourceMap.set(source, items);
+        }
+        if (sourceMap.size === 0) {
+          next.delete(key);
+        } else {
+          next.set(key, sourceMap);
+        }
       }
       return { diagnostics: next, diagnosticCounts: recomputeCounts(next) };
     });
@@ -299,7 +349,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   clearFileDiagnostics: (fileUri) => {
     set((state) => {
       const next: DiagnosticsMap = new Map(state.diagnostics);
-      next.delete(fileUri);
+      next.delete(diagnosticsKey(fileUri));
       return { diagnostics: next, diagnosticCounts: recomputeCounts(next) };
     });
   },

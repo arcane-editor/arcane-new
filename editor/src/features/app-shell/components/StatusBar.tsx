@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import Tooltip from '../../../components/Tooltip';
 import { AlertCircle, AlertTriangle, Boxes, CheckCircle, Circle, GitBranch, LoaderCircle } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { openPath } from '@tauri-apps/plugin-opener';
@@ -15,7 +16,6 @@ import { lspManager } from '../../lsp';
 import { GraphifyStatusBadge } from '../../graphify';
 import { TelemetryStatusItem } from '../../unity-telemetry';
 import { UnityBridgeStatusItem } from '../../unity-bridge';
-import { InlineSuggestStatusItem } from '../../inline-suggest';
 import { detectLanguage } from '../../../utils/language-detect';
 import { getDocumentInfo } from '../../editor';
 
@@ -107,14 +107,15 @@ function StatusBar() {
     <div className="status-bar">
       <div className="status-bar-left">
         {isGitRepo && branch && (
-          <span
-            className="status-bar-item clickable"
-            onClick={() => useCommandsStore.getState().executeCommand('git.switchBranch')}
-            title="Switch Branch (⇧⌘B)"
-          >
-            <span className="icon"><GitBranch size={14} /></span>
-            <span>{branch}</span>
-          </span>
+          <Tooltip label="Switch Branch" commandId="git.switchBranch" side="top">
+            <span
+              className="status-bar-item clickable"
+              onClick={() => useCommandsStore.getState().executeCommand('git.switchBranch')}
+            >
+              <span className="icon"><GitBranch size={14} /></span>
+              <span>{branch}</span>
+            </span>
+          </Tooltip>
         )}
 
         {language && (
@@ -197,7 +198,6 @@ function StatusBar() {
             <span>AI usage {usedPct}%</span>
           </span>
         )}
-        <InlineSuggestStatusItem />
         <GraphifyStatusBadge />
         {cursorPosition && (
           <span className="status-bar-item">

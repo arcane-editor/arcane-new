@@ -1,9 +1,20 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { env } from 'cloudflare:test';
-import { debitCredits, getUserBillingRow, grantPlanCredits, addTopupCredits, upsertSubscription } from '../src/lib/db.ts';
+import { debitCredits, getUserBillingRow, grantPlanCredits, addTopupCredits, upsertSubscription, createRequestLog } from '../src/lib/db.ts';
+import * as db from '../src/lib/db.ts';
 import { checkAiBudget, refreshAndGetBalance } from '../src/lib/credits.ts';
 import { tierGrantMicro } from '../src/config/tiers.ts';
 import { seedPasswordUser } from './helpers.ts';
+
+/** Seeds a request_logs row that alone busts the $1/hr anti-abuse cap
+ *  (HOURLY_LIMIT_USD in credits.ts) — created_at defaults to now, so it
+ *  always lands inside getHourlyCost's 1h window. */
+async function seedOverHourlyCap(userId: number): Promise<void> {
+    await createRequestLog(env.arcane_db, {
+        userId, model: 'test-model', inputTokens: 100, outputTokens: 100,
+        costUsd: 1.5, durationMs: 100,
+    });
+}
 
 async function setBalances(id: number, plan: string, planMicro: number, topupMicro: number, periodEnd: string | null) {
     await env.arcane_db.prepare(
@@ -160,5 +171,50 @@ describe('checkAiBudget', () => {
         await addTopupCredits(env.arcane_db, u.id, 100_000);
         const r = await getUserBillingRow(env.arcane_db, u.id);
         expect(r!.topup_credits_micro).toBe(100_000);
+    });
+});
+
+// The $1/hr anti-abuse backstop is a FREE-PLAN-ONLY check (owner decision):
+// paid plans are already bounded by their own credit balance, so the hourly
+// cap would only throttle a paying customer's legitimate burst. Paid plans
+// must skip the getHourlyCost query entirely, not just the comparison.
+describe('checkAiBudget — hourly cap is free-plan only', () => {
+    it('429 hourly_cap for a free user over $1/h, with retryAfterSeconds in the expected window', async () => {
+        const u = await seedPasswordUser('hourly-free@test.dev', 'password123');
+        await setBalances(u.id, 'free', 500_000, 0, null);
+        await seedOverHourlyCap(u.id);
+
+        const res = await checkAiBudget(env.arcane_db, u.id);
+        expect(res.ok).toBe(false);
+        if (res.ok) throw new Error('unreachable');
+        expect(res.status).toBe(429);
+        expect(res.code).toBe('hourly_cap');
+        // resetMs ~= now + 1h (the seeded row's created_at is ~now), so
+        // retryAfterSeconds should sit just under the 3600s ceiling and
+        // comfortably clear the 60s floor.
+        expect(res.retryAfterSeconds).toBeGreaterThan(3000);
+        expect(res.retryAfterSeconds).toBeLessThanOrEqual(3600);
+    });
+
+    it('a paid user over $1/h passes, and the hourly query never runs', async () => {
+        const u = await seedPasswordUser('hourly-paid@test.dev', 'password123');
+        await setBalances(u.id, 'pro', 500_000, 0, '2099-01-01T00:00:00.000Z');
+        await seedOverHourlyCap(u.id);
+
+        const spy = vi.spyOn(db, 'getHourlyCost');
+        try {
+            const res = await checkAiBudget(env.arcane_db, u.id);
+            expect(res.ok).toBe(true);
+            expect(spy).not.toHaveBeenCalled();
+        } finally {
+            spy.mockRestore();
+        }
+    });
+
+    it('a free user under $1/h passes (no retryAfterSeconds field on ok results)', async () => {
+        const u = await seedPasswordUser('hourly-free-ok@test.dev', 'password123');
+        await setBalances(u.id, 'free', 500_000, 0, null);
+        const res = await checkAiBudget(env.arcane_db, u.id);
+        expect(res.ok).toBe(true);
     });
 });

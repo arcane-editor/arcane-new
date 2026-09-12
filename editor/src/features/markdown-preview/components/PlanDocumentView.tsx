@@ -1,11 +1,43 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Check, ChevronDown, ChevronRight, MessageSquarePlus, Play, Square, X } from 'lucide-react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowDown, ArrowUp, Check, ChevronDown, ChevronRight, MessageSquarePlus, Play, Plus, RotateCw, Square, Trash2, X } from 'lucide-react';
 import { useAiStore } from '../../../stores/ai';
 import { useWorkspaceStore } from '../../../stores/workspace';
-import MarkdownPreview from './MarkdownPreview';
-import { reanchorNotes, type PlanNote } from '../services/note-anchor';
-import { replaceBlock, toggleTaskAt } from '../services/block-edit';
+import PlanRegionEditor, { type CaretTarget, type RegionFocuser } from './PlanRegionEditor';
+import SuggestPopover from './SuggestPopover';
+import { createNote, reanchorNotes, type PlanNote } from '../services/note-anchor';
+import { toggleTaskAt } from '../services/block-edit';
+import { insertTodoAfter, removeTodoAt, moveTodo } from '../services/todo-edit';
 import { parsePlanDocument, type PlanStepBlock } from '../services/plan-document';
+import { planRegions, regionsInOrder, type PlanRegion } from '../services/region-model';
+import { splitRegionText } from '../services/region-markdown';
+import { spliceRegion } from '../services/region-write';
+import { createSaveScheduler } from '../services/save-scheduler';
+import type { NavIntent } from '../services/region-nav';
+
+/**
+ * How long typing has to pause before the plan hits the disk.
+ *
+ * Editing in place means a change per keystroke, where the old click-to-edit
+ * boxes produced one per blur. Every write is a `write_file` IPC round trip
+ * plus a git status refresh (`workspace.ts`'s `saveFile`), so they are
+ * debounced — and flushed the moment anything needs the file on disk to be
+ * current (blur, Execute, unmount).
+ */
+const SAVE_IDLE_MS = 400;
+
+/**
+ * What every region editor needs and none of them differ on. Passed as one
+ * object so a step card's props change only when the document's STRUCTURE
+ * does — not on every keystroke somewhere else in the plan.
+ */
+interface RegionWiring {
+  regions: readonly PlanRegion[];
+  editable: boolean;
+  onChange: (regionId: string, body: string) => void;
+  onNavIntent: (regionId: string, intent: NavIntent) => void;
+  onBlur: () => void;
+  registerFocuser: (regionId: string, focus: RegionFocuser | null) => void;
+}
 
 interface PlanDocumentViewProps {
   path: string;
@@ -29,11 +61,13 @@ interface PlanDocumentViewProps {
  *
  * Three things it is deliberately not:
  *
- * - **Not a source editor.** There is no Preview/Source toggle and no Monaco.
- *   Every part of the document is edited where it is rendered, Notion-style:
- *   click a step title, a paragraph, a bullet, and you are editing the
- *   markdown that produced it. `parsePlanDocument` hands back offsets rather
- *   than copies precisely so that this can write back to the real file.
+ * - **Not a source editor.** There is no Preview/Source toggle and no Monaco,
+ *   and no box opens when you click. Every part of the document is editable
+ *   where it is rendered (`PlanRegionEditor`): the caret lands where you
+ *   clicked, the text keeps its formatting while you type, and markdown
+ *   shortcuts apply as you write them. What reaches the file is markdown —
+ *   `parsePlanDocument` hands back offsets rather than copies precisely so
+ *   each region can be spliced back into the real file.
  * - **Not a place to see bookkeeping.** The `T<n>` ids and `[easy]`/`[hard]`
  *   tags stay in the file — the executor routes models on them — and never
  *   reach the screen. Step numbers come from position instead, so they stay
@@ -58,8 +92,19 @@ function PlanDocumentView({
 
   const executing = planPhase === 'executing';
   const editable = !executing;
+  // An interrupted run (capped/aborted/errored — Task 5/6) still shows this
+  // toolbar's primary button (`executing` is false), but it must read as
+  // "pick back up", not "start over" — mirrors PlanActions.tsx's `interrupted`
+  // branch, the message-list card for the same phase.
+  const interrupted = planPhase === 'interrupted';
+  // Same for a run that finished every step: the toolbar must not read
+  // "Execute" for work it just watched complete. Mirrors PlanActions.tsx's
+  // `completed` branch — the two are the same card in two places.
+  const completed = planPhase === 'completed';
 
   const doc = useMemo(() => parsePlanDocument(content), [content]);
+  /** The selection host for suggestions — every region editor sits inside it. */
+  const pageRef = useRef<HTMLDivElement>(null);
 
   // Step state comes from the FILE — plan-execution.ts rewrites `- [ ]` to
   // `- [x]` as it finishes each one — while the RUNNING step comes from the
@@ -77,56 +122,193 @@ function PlanDocumentView({
   const total = doc.steps.length;
   const pct = total > 0 ? Math.round((doneCount / total) * 100) : 0;
 
-  // Only the parent sees every slice, so re-anchoring notes is its job here
-  // (MarkdownPreview skips it in slice mode — see its `slice` prop).
+  // Debounced, and skipped entirely when there is nothing pinned: this scans
+  // the whole document once per note (`note-anchor.ts`'s heading walk), which
+  // was affordable when an edit was one blur and is not when it is one
+  // keystroke. Notes only need to be right once the typing stops.
   useEffect(() => {
-    const next = reanchorNotes(notes, content);
-    const changed = next.some(
-      (n, i) => n.anchored !== notes[i]?.anchored || n.headingPath !== notes[i]?.headingPath,
-    );
-    if (changed) onNotesChange(next);
+    if (notes.length === 0) return;
+    const timer = setTimeout(() => {
+      const next = reanchorNotes(notes, content);
+      const changed = next.some(
+        (n, i) => n.anchored !== notes[i]?.anchored || n.headingPath !== notes[i]?.headingPath,
+      );
+      if (changed) onNotesChange(next);
+    }, 300);
+    return () => clearTimeout(timer);
     // Keyed on `content` alone: re-running on `notes` would loop.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [content]);
 
-  // Block edits commit straight to disk as one atomic update-then-save, so the
-  // tab never LINGERS dirty — which keeps both the Execute dirty-guard and the
-  // fs-watcher's live tick-off refresh (skipIfDirty) working.
-  const write = useCallback(
-    (next: string) => {
-      if (next === content) return;
-      const ws = useWorkspaceStore.getState();
-      ws.updateFileContent(path, next);
-      void ws.saveFile(path);
-    },
-    [content, path],
+  // The store update is immediate — it is what re-renders the document — but
+  // the DISK write is debounced (see SAVE_IDLE_MS). The tab is therefore dirty
+  // between keystrokes, which is exactly the window `reloadFileFromDisk`'s
+  // `skipIfDirty` exists to protect, and `flush()` closes it wherever the file
+  // itself has to be current: Execute's dirty guard (`plan-run.ts`), a region
+  // losing focus, and unmount.
+  const saver = useMemo(
+    () =>
+      createSaveScheduler({
+        save: () => useWorkspaceStore.getState().saveFile(path),
+        delayMs: SAVE_IDLE_MS,
+      }),
+    [path],
   );
 
-  // Identity matters here: these are memo keys inside every nested preview, and
-  // a plan renders one preview per step. Re-creating them each render would
-  // re-parse the whole document every time a todo ticks over during execution.
-  const commitBlockEdit = useCallback(
-    (start: number, end: number, newText: string) => write(replaceBlock(content, start, end, newText)),
-    [content, write],
+  useEffect(() => () => void saver.flush(), [saver]);
+
+  /** The freshest text of this file, straight from the store. */
+  const currentContent = useCallback(
+    () => useWorkspaceStore.getState().openFiles.find((f) => f.path === path)?.content ?? '',
+    [path],
+  );
+
+  const write = useCallback(
+    (next: string) => {
+      if (next === currentContent()) return;
+      useWorkspaceStore.getState().updateFileContent(path, next);
+      saver.schedule();
+    },
+    [currentContent, path, saver],
   );
 
   const toggleTask = useCallback(
     (offset: number) => {
-      const next = toggleTaskAt(content, offset);
+      const next = toggleTaskAt(currentContent(), offset);
       if (next != null) write(next);
     },
-    [content, write],
+    [currentContent, write],
   );
 
-  const sliceProps = (start: number, end: number) => ({
-    content: content.slice(start, end),
-    slice: { base: start, document: content },
-    notes,
-    onNotesChange,
-    editable,
-    onCommitBlockEdit: commitBlockEdit,
-    onToggleTask: toggleTask,
+  // A note pinned from a step's own Comment button, anchored on the step title.
+  // The selection popover still exists for finer targeting, but requiring a
+  // text selection to say anything meant there was no way at all to comment on
+  // a step AS a step — which is the level most feedback is actually about.
+  const addStepNote = useCallback(
+    (title: string, body: string) => {
+      onNotesChange([...notes, createNote(content, title, body)]);
+    },
+    [content, notes, onNotesChange],
+  );
+
+  // ---- editable regions ---------------------------------------------------
+  // Every span of this document that is TEXT rather than chrome, and the text
+  // inside each one. Regions carry offsets; the editors are handed only their
+  // own slice, so a keystroke in one guide leaves every other editor's props
+  // untouched and `PlanRegionEditor`'s memo bails on them.
+  const regions = useMemo(() => planRegions(doc), [doc]);
+
+  const regionText = useMemo(() => {
+    const texts = new Map<string, string>();
+    for (const r of regions) {
+      texts.set(r.id, splitRegionText(content.slice(r.range.start, r.range.end)).body);
+    }
+    return texts;
+  }, [regions, content]);
+
+  /**
+   * The same regions, but with an identity that survives typing.
+   *
+   * `regions` is rebuilt from a fresh parse on every keystroke, so handing it
+   * to the editors directly would give every one of them new props for a
+   * change in a different region — exactly the whole-document re-render this
+   * work exists to stop. Boundary hand-off only cares about which regions
+   * exist and in what order, so this re-identifies only when THAT changes.
+   */
+  const regionShape = regions.map((r) => `${r.id}:${r.kind}`).join('|');
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const navRegions = useMemo(() => regions, [regionShape]);
+
+  /** A step with neither a title nor guide text — what Backspace may delete. */
+  const emptySteps = useMemo(() => {
+    const empty = new Set<number>();
+    doc.steps.forEach((_step, i) => {
+      const title = (regionText.get(`step-${i}-title`) ?? '').trim();
+      const guide = (regionText.get(`step-${i}-guide`) ?? '').trim();
+      if (!title && !guide) empty.add(i);
+    });
+    return empty;
+  }, [doc.steps, regionText]);
+
+  /**
+   * Splice an edited region back into the file (`region-write.ts`).
+   *
+   * Against the FRESHEST content rather than this render's, because a fast
+   * typist outruns React: two keystrokes in one frame would otherwise both
+   * splice into the same stale string and the first would be lost.
+   */
+  const handleRegionChange = useCallback(
+    (regionId: string, body: string) => {
+      const next = spliceRegion(currentContent(), regionId, body);
+      if (next !== null) write(next);
+    },
+    [currentContent, write],
+  );
+
+  // Focus hand-off. A region that has not mounted yet — the title of a step
+  // created half a keystroke ago — is remembered and focused by the effect
+  // below once it registers, so promoting a step lands the caret in it.
+  const focusers = useRef(new Map<string, RegionFocuser>());
+  const pendingFocus = useRef<{ id: string; caret: CaretTarget } | null>(null);
+
+  const registerFocuser = useCallback((id: string, focus: RegionFocuser | null) => {
+    if (focus) focusers.current.set(id, focus);
+    else focusers.current.delete(id);
+  }, []);
+
+  const focusRegion = useCallback((id: string, caret: CaretTarget) => {
+    const focus = focusers.current.get(id);
+    if (focus) focus(caret);
+    else pendingFocus.current = { id, caret };
+  }, []);
+
+  useEffect(() => {
+    const want = pendingFocus.current;
+    if (!want) return;
+    const focus = focusers.current.get(want.id);
+    if (!focus) return;
+    pendingFocus.current = null;
+    focus(want.caret);
   });
+
+  /** What a keystroke at a region's edge asked for (`region-nav.ts`). */
+  const handleNavIntent = useCallback(
+    (regionId: string, intent: NavIntent) => {
+      if (intent.kind === 'focus') {
+        focusRegion(intent.regionId, intent.caret);
+        return;
+      }
+      if (intent.kind === 'promote-step') {
+        write(insertTodoAfter(currentContent(), intent.afterStepIndex, ''));
+        // The new step's title is a placeholder, so select it: the next
+        // character typed replaces it instead of appending to it.
+        focusRegion(`step-${intent.afterStepIndex + 1}-title`, 'all');
+        return;
+      }
+      if (intent.kind === 'remove-step') {
+        const { previous } = regionsInOrder(navRegions, regionId);
+        write(removeTodoAt(currentContent(), intent.stepIndex));
+        if (previous) focusRegion(previous.id, 'end');
+      }
+    },
+    [currentContent, focusRegion, navRegions, write],
+  );
+
+  /** Leaving a region is the cheap moment to get the file onto disk. */
+  const handleRegionBlur = useCallback(() => void saver.flush(), [saver]);
+
+  /** Everything a region editor needs that is the same for all of them. */
+  const regionWiring = useMemo(
+    () => ({
+      regions: navRegions,
+      editable,
+      onChange: handleRegionChange,
+      onNavIntent: handleNavIntent,
+      onBlur: handleRegionBlur,
+      registerFocuser,
+    }),
+    [navRegions, editable, handleRegionChange, handleNavIntent, handleRegionBlur, registerFocuser],
+  );
 
   return (
     <div className="plan-doc">
@@ -148,7 +330,11 @@ function PlanDocumentView({
           <button
             type="button"
             className="plan-doc-btn"
-            onClick={onRevise}
+            // Both of these hand the file to the agent, which reads it from
+            // DISK — Revise through `readPlan`, Execute through
+            // `runPlanExecution` (which also refuses to start while the tab is
+            // dirty). Debounced keystrokes have to be on disk first.
+            onClick={() => void saver.flush().then(onRevise)}
             disabled={notes.length === 0 || isAgentRunning}
             title={
               notes.length === 0
@@ -167,12 +353,19 @@ function PlanDocumentView({
           ) : (
             <button
               type="button"
-              className="plan-doc-btn plan-doc-btn--primary"
-              onClick={onExecute}
+              className={`plan-doc-btn${completed ? '' : ' plan-doc-btn--primary'}`}
+              onClick={() => void saver.flush().then(onExecute)}
               disabled={isAgentRunning}
+              title={
+                interrupted
+                  ? 'Resume the plan from where it stopped'
+                  : completed
+                    ? 'Run this plan again from the top'
+                    : undefined
+              }
             >
-              <Play size={11} />
-              Execute
+              {completed ? <RotateCw size={11} /> : <Play size={11} />}
+              {interrupted ? 'Resume' : completed ? 'Run again' : 'Execute'}
             </button>
           )}
           {/* Effort is adjustable mid-plan; the model tier follows it. There is
@@ -197,24 +390,36 @@ function PlanDocumentView({
       </header>
 
       <div className="plan-doc-scroll">
-        <div className="plan-doc-page">
+        <div className="plan-doc-page" ref={pageRef}>
           {doc.blocks.map((block, i) =>
             block.kind === 'markdown' ? (
-              <MarkdownPreview key={`md-${block.range.start}-${i}`} {...sliceProps(block.range.start, block.range.end)} />
+              <ProseRegion
+                key={`md-${block.range.start}-${i}`}
+                regions={regions}
+                regionText={regionText}
+                range={block.range}
+                wiring={regionWiring}
+              />
             ) : (
               <ol className="plan-spine" key={`steps-${i}`}>
-                {block.steps.map((step) => (
+                {block.steps.map((step, si) => (
                   <PlanStepCard
                     key={step.ordinal}
                     step={step}
                     state={step.done ? 'done' : step.ordinal - 1 === runningIndex ? 'running' : 'pending'}
                     executing={executing}
-                    document={content}
                     onToggle={() => toggleTask(step.checkboxOffset)}
-                    onRename={(text) =>
-                      commitBlockEdit(step.titleRange.start, step.titleRange.end, text)
-                    }
-                    guideProps={step.guide ? sliceProps(step.guide.start, step.guide.end) : null}
+                    onComment={(body) => addStepNote(step.title, body)}
+                    onInsertAfter={() => write(insertTodoAfter(content, si, 'New step'))}
+                    onRemove={() => write(removeTodoAt(content, si))}
+                    onMove={(delta) => write(moveTodo(content, si, si + delta))}
+                    canMoveUp={si > 0}
+                    canMoveDown={si < block.steps.length - 1}
+                    titleText={regionText.get(`step-${si}-title`) ?? ''}
+                    guideText={step.guide ? (regionText.get(`step-${si}-guide`) ?? '') : null}
+                    stepIndex={si}
+                    stepIsEmpty={emptySteps.has(si)}
+                    wiring={regionWiring}
                   />
                 ))}
               </ol>
@@ -260,9 +465,49 @@ function PlanDocumentView({
                 : 'Running — the plan is read-only until it finishes.'}
             </div>
           )}
+
+          {/* Selecting text inside any region still pins a suggestion — one
+              listener on the page covers every editor on it. */}
+          <SuggestPopover
+            containerRef={pageRef}
+            anchorDoc={content}
+            notes={notes}
+            onNotesChange={onNotesChange}
+            enabled={editable}
+          />
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * A markdown block between the steps — the lead paragraph, `## Risks`, the
+ * tail. Looked up by offset rather than passed an index so it stays correct
+ * when a step above it is added or deleted.
+ */
+function ProseRegion({
+  regions,
+  regionText,
+  range,
+  wiring,
+}: {
+  regions: readonly PlanRegion[];
+  regionText: Map<string, string>;
+  range: { start: number; end: number };
+  wiring: RegionWiring;
+}) {
+  const region = regions.find((r) => r.kind === 'prose' && r.range.start === range.start);
+  if (!region) return null;
+  return (
+    <PlanRegionEditor
+      regionId={region.id}
+      kind="prose"
+      text={regionText.get(region.id) ?? ''}
+      stepIsEmpty={false}
+      ariaLabel="Plan text"
+      {...wiring}
+    />
   );
 }
 
@@ -272,10 +517,21 @@ interface PlanStepCardProps {
   step: PlanStepBlock;
   state: StepState;
   executing: boolean;
-  document: string;
   onToggle: () => void;
-  onRename: (text: string) => void;
-  guideProps: React.ComponentProps<typeof MarkdownPreview> | null;
+  /** Pin a suggestion to this step without having to select its text first. */
+  onComment: (body: string) => void;
+  onInsertAfter: () => void;
+  onRemove: () => void;
+  onMove: (delta: -1 | 1) => void;
+  canMoveUp: boolean;
+  canMoveDown: boolean;
+  /** This step's own text — never the whole document (see the memo below). */
+  titleText: string;
+  /** Null when the plan has no guide entry for this step. */
+  guideText: string | null;
+  stepIndex: number;
+  stepIsEmpty: boolean;
+  wiring: RegionWiring;
 }
 
 /**
@@ -285,55 +541,29 @@ interface PlanStepCardProps {
  * document to read — and only the running step while it executes, when what
  * matters is what is happening now.
  */
-function PlanStepCard({
+const PlanStepCard = memo(function PlanStepCard({
   step,
   state,
   executing,
-  document: doc,
   onToggle,
-  onRename,
-  guideProps,
+  onComment,
+  onInsertAfter,
+  onRemove,
+  onMove,
+  canMoveUp,
+  canMoveDown,
+  titleText,
+  guideText,
+  stepIndex,
+  stepIsEmpty,
+  wiring,
 }: PlanStepCardProps) {
   const [override, setOverride] = useState<boolean | null>(null);
-  /** Holds the title text as it was when editing began — see commitRename. */
-  const [renaming, setRenaming] = useState<{ original: string } | null>(null);
-  const [draft, setDraft] = useState('');
-  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const [comment, setComment] = useState<string | null>(null);
+  const commentRef = useRef<HTMLTextAreaElement>(null);
 
   const open = override ?? (executing ? state === 'running' : true);
-  const raw = doc.slice(step.titleRange.start, step.titleRange.end);
-
-  useEffect(() => {
-    if (renaming) inputRef.current?.select();
-  }, [renaming]);
-
-  useEffect(() => {
-    if (executing) setRenaming(null);
-  }, [executing]);
-
-  function beginRename(e: React.MouseEvent) {
-    if (executing) return;
-    // A real selection means the user is suggesting, not editing.
-    const sel = window.getSelection();
-    if (sel && !sel.isCollapsed) return;
-    e.stopPropagation();
-    setDraft(raw);
-    setRenaming({ original: raw });
-  }
-
-  function commitRename() {
-    if (!renaming) return;
-    const { original } = renaming;
-    setRenaming(null);
-    // Stale guard: the agent rewrote the plan while this title was open for
-    // editing. Compare against the text captured at edit-START — comparing two
-    // values both derived from the current render would always agree, and the
-    // edit would splice into a document that had moved on.
-    if (doc.slice(step.titleRange.start, step.titleRange.end) !== original) return;
-    const next = draft.trim();
-    if (!next || next === original) return;
-    onRename(next);
-  }
+  const hasGuide = guideText !== null;
 
   return (
     <li className={`plan-step plan-step--${state}`}>
@@ -359,34 +589,80 @@ function PlanStepCard({
 
       <div className="plan-step-main">
         <div className="plan-step-head">
-          {renaming ? (
-            <textarea
-              ref={inputRef}
-              className="plan-step-title-input"
-              value={draft}
-              rows={Math.max(1, draft.split('\n').length)}
-              onChange={(e) => setDraft(e.target.value)}
-              onBlur={commitRename}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  commitRename();
-                } else if (e.key === 'Escape') {
-                  setRenaming(null);
-                }
-              }}
-              aria-label="Edit step title"
+          {/* The title IS the editor — one line of plain text, so `- ` or `# `
+              typed here stays literal instead of turning the title into a
+              list. Markdown formatting belongs in the guide below it. */}
+          <h3 className="plan-step-title">
+            <PlanRegionEditor
+              regionId={`step-${stepIndex}-title`}
+              kind="title"
+              text={titleText}
+              stepIsEmpty={stepIsEmpty}
+              placeholder="Untitled step"
+              ariaLabel={`Step ${step.ordinal} title`}
+              {...wiring}
             />
-          ) : (
-            <h3
-              className={`plan-step-title${executing ? '' : ' is-editable'}`}
-              onClick={beginRename}
-            >
-              {inlineCode(step.title)}
-            </h3>
+          </h3>
+
+          {/* Editing a plan means changing what the steps ARE, not only what
+              they say — adding one, dropping one, doing that first. Those had
+              no affordance at all, so the only way to ask for them was to
+              select some text and describe the change in prose. The row is
+              hidden until the step is hovered or focused (see App.css) so a
+              plan being read stays a document. */}
+          {!executing && (
+            <div className="plan-step-actions">
+              <button
+                type="button"
+                className="plan-step-action"
+                onClick={() => setComment(comment === null ? '' : null)}
+                aria-label={`Comment on step ${step.ordinal}`}
+                title="Comment on this step"
+              >
+                <MessageSquarePlus size={12} />
+              </button>
+              <button
+                type="button"
+                className="plan-step-action"
+                onClick={() => onMove(-1)}
+                disabled={!canMoveUp}
+                aria-label={`Move step ${step.ordinal} up`}
+                title="Move up"
+              >
+                <ArrowUp size={12} />
+              </button>
+              <button
+                type="button"
+                className="plan-step-action"
+                onClick={() => onMove(1)}
+                disabled={!canMoveDown}
+                aria-label={`Move step ${step.ordinal} down`}
+                title="Move down"
+              >
+                <ArrowDown size={12} />
+              </button>
+              <button
+                type="button"
+                className="plan-step-action"
+                onClick={onInsertAfter}
+                aria-label={`Add a step after step ${step.ordinal}`}
+                title="Add a step below"
+              >
+                <Plus size={12} />
+              </button>
+              <button
+                type="button"
+                className="plan-step-action plan-step-action--danger"
+                onClick={onRemove}
+                aria-label={`Delete step ${step.ordinal}`}
+                title="Delete this step"
+              >
+                <Trash2 size={12} />
+              </button>
+            </div>
           )}
 
-          {guideProps && (
+          {hasGuide && (
             <button
               type="button"
               className="plan-step-disclose"
@@ -399,31 +675,64 @@ function PlanStepCard({
           )}
         </div>
 
-        {guideProps && open && (
+        {comment !== null && (
+          <div className="plan-step-comment">
+            <textarea
+              ref={commentRef}
+              className="plan-step-comment-input"
+              value={comment}
+              onChange={(e) => setComment(e.target.value)}
+              placeholder={`What should change about "${step.title}"?`}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                  e.preventDefault();
+                  if (comment.trim()) onComment(comment.trim());
+                  setComment(null);
+                } else if (e.key === 'Escape') {
+                  e.preventDefault();
+                  setComment(null);
+                }
+              }}
+              autoFocus
+              aria-label={`Comment on step ${step.ordinal}`}
+            />
+            <div className="plan-step-comment-actions">
+              <span className="plan-step-comment-hint">⌘⏎ to add</span>
+              <button type="button" className="md-suggest-btn" onClick={() => setComment(null)}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="md-suggest-btn md-suggest-btn--primary"
+                disabled={!comment.trim()}
+                onClick={() => {
+                  onComment(comment.trim());
+                  setComment(null);
+                }}
+              >
+                Add
+              </button>
+            </div>
+          </div>
+        )}
+
+        {hasGuide && open && (
           <div className="plan-step-guide">
-            <MarkdownPreview {...guideProps} />
+            <PlanRegionEditor
+              regionId={`step-${stepIndex}-guide`}
+              kind="guide"
+              text={guideText ?? ''}
+              stepIsEmpty={stepIsEmpty}
+              placeholder="Notes for this step…"
+              ariaLabel={`Step ${step.ordinal} details`}
+              {...wiring}
+            />
           </div>
         )}
       </div>
     </li>
   );
-}
-
-/**
- * Render backtick spans in a step title as code, leaving the rest as text.
- *
- * Titles are the most-read text in this view and they are full of identifiers
- * — `GET /b2b/domain/:domainName`, `MonoBehaviour`. Stripping the backticks
- * (what the old flat render did) made those read as prose; running the title
- * through a full markdown renderer would drag block semantics into a heading.
- */
-function inlineCode(title: string): React.ReactNode {
-  const parts = title.split('`');
-  if (parts.length < 3) return title.replace(/\*\*/g, '');
-  return parts.map((part, i) =>
-    i % 2 === 1 ? <code key={i}>{part}</code> : <span key={i}>{part.replace(/\*\*/g, '')}</span>,
-  );
-}
+});
 
 function truncate(s: string, n: number): string {
   return s.length > n ? `${s.slice(0, n - 1)}…` : s;

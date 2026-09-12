@@ -1,0 +1,241 @@
+/*
+ * Debugger panels added with the native Mono client: the debug console and the
+ * breakpoints list.
+ *
+ * Theme tokens only. The older `.dbg-*` rules in App.css carry four hardcoded
+ * hexes (the breakpoint dot, the conditional dot, the current-line arrow and
+ * its highlight), which is why breakpoints look the same in every theme
+ * including the light ones. Nothing new here repeats that.
+ */
+
+/* -- Debug console ------------------------------------------------------- */
+
+.dbg-console {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--bg-primary);
+}
+
+.dbg-console-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding: var(--space-1) var(--space-2);
+  border-bottom: 1px solid var(--border);
+}
+
+.dbg-console-clear {
+  display: flex;
+  align-items: center;
+  padding: 2px 4px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.dbg-console-clear:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--text-primary);
+}
+
+.dbg-console-clear:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.dbg-console-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-1) var(--space-2);
+  font-family: var(--font-mono, monospace);
+  font-size: var(--text-xs);
+  line-height: var(--text-xs-lh);
+}
+
+.dbg-console-line {
+  /* Logpoint output is program text: keep its spacing, but never let a long
+     line force the whole panel to scroll sideways. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--text-primary);
+}
+
+.dbg-console-line--stderr,
+.dbg-console-line--important {
+  color: var(--error-text);
+}
+
+/* -- Breakpoints --------------------------------------------------------- */
+
+.dbg-breakpoints {
+  display: flex;
+  flex-direction: column;
+}
+
+.dbg-bp-row {
+  padding: 2px var(--space-2);
+}
+
+.dbg-bp-row:hover {
+  background: var(--hover);
+}
+
+.dbg-bp-main {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-xs);
+}
+
+.dbg-bp-dot {
+  color: var(--error-text);
+  flex: none;
+}
+
+/* A breakpoint that is set but not yet bound is drawn hollow, the way every
+   other debugger does it — the gutter cannot show the difference. */
+.dbg-bp-dot--pending {
+  opacity: 0.45;
+}
+
+.dbg-bp-location {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: inherit;
+}
+
+.dbg-bp-location:hover {
+  color: var(--accent);
+}
+
+.dbg-bp-edit,
+.dbg-bp-remove {
+  flex: none;
+  display: flex;
+  align-items: center;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: var(--text-xs);
+  padding: 0 2px;
+}
+
+.dbg-bp-edit:hover,
+.dbg-bp-remove:hover {
+  color: var(--text-primary);
+}
+
+.dbg-bp-note {
+  padding-left: 20px;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  font-style: italic;
+}
+
+.dbg-bp-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-1) 0 var(--space-1) 20px;
+}
+
+.dbg-bp-editor label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+
+.dbg-bp-editor input {
+  padding: 2px var(--space-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font-family: var(--font-mono, monospace);
+  font-size: var(--text-xs);
+}
+
+.dbg-bp-editor input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* -- Inline values ------------------------------------------------------- */
+
+/*
+ * Values rendered at the end of the line they belong to, while paused. Dimmed
+ * and italic so they read as annotation rather than as code — the same
+ * treatment the git inline blame uses, for the same reason.
+ */
+.dbg-inline-value {
+  color: var(--text-secondary);
+  font-style: italic;
+  opacity: 0.85;
+  /* Never let a long value push the real code around. */
+  white-space: pre;
+}
+
+/* -- Target picker ------------------------------------------------------- */
+
+.dbg-targets {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  border-bottom: 1px solid var(--border);
+}
+
+.dbg-targets label {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+
+.dbg-targets select {
+  min-width: 0;
+  padding: 2px var(--space-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font-size: var(--text-xs);
+}
+
+.dbg-targets button {
+  flex: none;
+  padding: 3px var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: var(--text-xs);
+}
+
+.dbg-targets button:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.dbg-targets button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

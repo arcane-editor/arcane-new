@@ -6,6 +6,9 @@ import {
   sleep,
   raceWithTimeout,
   TimeoutRaceError,
+  parseRetryAfter,
+  rateLimitRetryPlan,
+  RATE_LIMIT_INLINE_RETRY_MAX_MS,
 } from './stream-retry';
 
 describe('isTransient', () => {
@@ -110,6 +113,100 @@ describe('sleep', () => {
     controller.abort();
     // No unhandled rejection / throw — the sleep already settled cleanly.
     expect(controller.signal.aborted).toBe(true);
+  });
+});
+
+describe('parseRetryAfter', () => {
+  it('a finite positive body number wins over the header', () => {
+    expect(parseRetryAfter('999', { retryAfterSeconds: 47 })).toBe(47);
+  });
+
+  it('falls back to the header when the body has no usable number', () => {
+    expect(parseRetryAfter('30', null)).toBe(30);
+    expect(parseRetryAfter('30', {})).toBe(30);
+    expect(parseRetryAfter('30', { retryAfterSeconds: 0 })).toBe(30);
+    expect(parseRetryAfter('30', { retryAfterSeconds: -5 })).toBe(30);
+    expect(parseRetryAfter('30', { retryAfterSeconds: NaN })).toBe(30);
+    expect(parseRetryAfter('30', { retryAfterSeconds: 'soon' })).toBe(30);
+  });
+
+  it('parses an integer-seconds header', () => {
+    expect(parseRetryAfter('120', null)).toBe(120);
+  });
+
+  it('converts an HTTP-date header to a delta, floored at 1', () => {
+    const future = new Date(Date.now() + 5_000).toUTCString();
+    const seconds = parseRetryAfter(future, null);
+    expect(seconds).toBeGreaterThanOrEqual(4);
+    expect(seconds).toBeLessThanOrEqual(6);
+  });
+
+  it('floors a past/now HTTP-date at 1 rather than 0 or negative', () => {
+    const past = new Date(Date.now() - 60_000).toUTCString();
+    expect(parseRetryAfter(past, null)).toBe(1);
+  });
+
+  it('returns undefined when neither the body nor the header carries a usable value', () => {
+    expect(parseRetryAfter(null, null)).toBeUndefined();
+    expect(parseRetryAfter('', null)).toBeUndefined();
+    expect(parseRetryAfter('not a date or a number', null)).toBeUndefined();
+    expect(parseRetryAfter(null, { retryAfterSeconds: 0 })).toBeUndefined();
+  });
+});
+
+describe('rateLimitRetryPlan', () => {
+  it('never retries once attempts are exhausted, regardless of retryAfterSeconds', () => {
+    expect(rateLimitRetryPlan({ retryAfterSeconds: 2, attempt: 3, maxAttempts: 3, baseDelayMs: 5_000 })).toEqual({
+      retry: false,
+    });
+    expect(
+      rateLimitRetryPlan({ retryAfterSeconds: undefined, attempt: 3, maxAttempts: 3, baseDelayMs: 5_000 }),
+    ).toEqual({ retry: false });
+  });
+
+  it('falls back to legacy linear backoff when retryAfterSeconds is unknown', () => {
+    expect(rateLimitRetryPlan({ retryAfterSeconds: undefined, attempt: 1, maxAttempts: 3, baseDelayMs: 5_000 })).toEqual({
+      retry: true,
+      delayMs: 5_000,
+    });
+    expect(rateLimitRetryPlan({ retryAfterSeconds: undefined, attempt: 2, maxAttempts: 3, baseDelayMs: 5_000 })).toEqual({
+      retry: true,
+      delayMs: 10_000,
+    });
+  });
+
+  it('never retries inline when retryAfterSeconds exceeds the inline cap (the hourly cap case)', () => {
+    expect(RATE_LIMIT_INLINE_RETRY_MAX_MS).toBe(20_000);
+    expect(
+      rateLimitRetryPlan({ retryAfterSeconds: 2820, attempt: 1, maxAttempts: 3, baseDelayMs: 5_000 }),
+    ).toEqual({ retry: false });
+    // Exactly at the boundary (20_000ms) is NOT "exceeds" — the cap is a
+    // strict `>`, so 20s still retries inline; 21s is the first value that
+    // doesn't.
+    expect(
+      rateLimitRetryPlan({ retryAfterSeconds: 20, attempt: 1, maxAttempts: 3, baseDelayMs: 5_000 }),
+    ).toEqual({ retry: true, delayMs: 20_000 });
+    expect(
+      rateLimitRetryPlan({ retryAfterSeconds: 21, attempt: 1, maxAttempts: 3, baseDelayMs: 5_000 }),
+    ).toEqual({ retry: false });
+  });
+
+  it('retries after retryAfterSeconds * 1000ms when within the inline cap', () => {
+    expect(rateLimitRetryPlan({ retryAfterSeconds: 2, attempt: 1, maxAttempts: 3, baseDelayMs: 5_000 })).toEqual({
+      retry: true,
+      delayMs: 2_000,
+    });
+    expect(rateLimitRetryPlan({ retryAfterSeconds: 19, attempt: 1, maxAttempts: 3, baseDelayMs: 5_000 })).toEqual({
+      retry: true,
+      delayMs: 19_000,
+    });
+  });
+
+  it('floors the delay at 1000ms for a near-zero retryAfterSeconds', () => {
+    expect(rateLimitRetryPlan({ retryAfterSeconds: 0.2, attempt: 1, maxAttempts: 3, baseDelayMs: 5_000 })).toEqual({
+      retry: true,
+      delayMs: 1_000,
+    });
   });
 });
 

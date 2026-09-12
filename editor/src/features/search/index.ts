@@ -51,3 +51,4 @@ export {
   type LineRange,
 } from './services/hidden-areas';
 export { hotSet } from './services/hot-blocks';
+export { openExcerptAt } from './services/open-excerpt';

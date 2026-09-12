@@ -16,26 +16,39 @@ import { classIsSerializable } from './fix-helpers';
 // We work purely off the syntactic scan — no type resolution — which is enough
 // for the FormerlySerializedAs feature and the serialization diagnostics.
 
-/** Is the given scanned field one Unity will serialize? */
-export function isSerializedField(scan: CSharpScan, field: FieldDecl): boolean {
+/**
+ * The FIELD-level half of the rule, for a caller that has already established
+ * the owning class is serializable.
+ *
+ * Split out because the base-class check is syntactic and only sees the
+ * immediate base list: `WeaponDef : BaseDef` where `BaseDef : ScriptableObject`
+ * lives in another file looks unserializable here. A caller that has proved
+ * serializability another way — e.g. an `.asset` on disk whose `m_Script`
+ * points at this class — needs the field rule without the class gate, and must
+ * not reimplement it. There are already two serialized-field heuristics in this
+ * codebase; this exists so there is never a third.
+ */
+export function isSerializedFieldDecl(field: FieldDecl): boolean {
   if (field.modifiers.includes('static')) return false;
   if (field.modifiers.includes('const')) return false;
   if (field.modifiers.includes('readonly')) return false;
   if (field.attributes.includes('NonSerialized')) return false;
 
+  // public => serialized (unless [NonSerialized], handled above).
+  // private/protected/internal => only serialized with [SerializeField].
+  if (field.modifiers.includes('public')) return true;
+  return field.attributes.includes('SerializeField');
+}
+
+/** Is the given scanned field one Unity will serialize? */
+export function isSerializedField(scan: CSharpScan, field: FieldDecl): boolean {
   // Must live in a serializable class.
   const owner = scan.classes.find(
     (c) => c.bodySpan && offsetInSpan(c.bodySpan, field.nameOffset),
   );
   if (!owner || !classIsSerializable(owner)) return false;
 
-  const isPublic = field.modifiers.includes('public');
-  const hasSerializeField = field.attributes.includes('SerializeField');
-
-  // public => serialized (unless [NonSerialized], handled above).
-  // private/protected/internal => only serialized with [SerializeField].
-  if (isPublic) return true;
-  return hasSerializeField;
+  return isSerializedFieldDecl(field);
 }
 
 /**

@@ -14,10 +14,17 @@
 const PLACEHOLDER_PUBKEYS = new Set(['', 'REPLACE_ME', 'TODO', 'CHANGEME']);
 
 /**
- * @param {{pkg: string, tauriConf: string, cargoToml: string, tauriDevConf?: string, claudeBackend?: string}} sources
+ * @param {{pkg: string, tauriConf: string, cargoToml: string, tauriDevConf?: string, claudeBackend?: string, channelWorkflows?: {name: string, source: string}[]}} sources
  * @returns {string[]} human-readable problems; empty means the tree is correct
  */
-export function checkVersionSync({ pkg, tauriConf, cargoToml, tauriDevConf, claudeBackend }) {
+export function checkVersionSync({
+  pkg,
+  tauriConf,
+  cargoToml,
+  tauriDevConf,
+  claudeBackend,
+  channelWorkflows,
+}) {
   const problems = [];
 
   const pkgVersion = JSON.parse(pkg).version;
@@ -71,6 +78,42 @@ export function checkVersionSync({ pkg, tauriConf, cargoToml, tauriDevConf, clau
     if (acpVersion !== pkgVersion) {
       problems.push(
         `claude-backend.ts APP_VERSION ${acpVersion} does not match package.json ${pkgVersion}`,
+      );
+    }
+  }
+
+  // A channel that builds installers but publishes no manifest is INERT, not
+  // broken: the app polls, gets a 404, logs one line to stderr and goes quiet
+  // for six hours. Nothing else ever surfaces it.
+  //
+  // The dev channel shipped exactly that. `tauri.dev.conf.json` named an
+  // endpoint from the start; `dev-build.yml` never wrote anything to it, so
+  // UnityIDE Dev sat on 0.3.2 while 0.3.3 shipped to the same bucket. The
+  // pubkey half of this failure was already guarded above — this is the half
+  // that was missing.
+  for (const { name, source } of channelWorkflows ?? []) {
+    // `dmg` is not an updater-enabled target. Building it ALONE logs "no
+    // updater-enabled targets were built" and produces no .app.tar.gz — the
+    // job still succeeds, and the manifest has nothing to point at.
+    for (const [, list] of source.matchAll(/^\s*bundles:\s*(\S+)/gm)) {
+      const targets = list.split(',').map((t) => t.trim());
+      if (targets.includes('dmg') && !targets.includes('app')) {
+        problems.push(
+          `${name}: macOS builds \`${list}\` — \`dmg\` is not an updater-enabled target, so no .app.tar.gz is produced and the job still passes. Use \`app,dmg\`.`,
+        );
+      }
+    }
+
+    if (!source.includes('write-update-manifest.mjs')) {
+      problems.push(
+        `${name}: publishes installers but never runs write-update-manifest.mjs — this channel's updater endpoint serves a 404 forever and every install fails to update silently`,
+      );
+    }
+
+    // Written to the runner and left there is the same 404 to a client.
+    if (!/r2 object put\s+"[^"]*\.json"/.test(source)) {
+      problems.push(
+        `${name}: writes an update manifest but never uploads a .json to R2 — clients still get a 404`,
       );
     }
   }

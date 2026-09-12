@@ -25,8 +25,9 @@ export async function openExcerptAt(
   filePath: string,
   lineNumber: number,
   column: number,
+  options: { highlight?: boolean } = {},
 ): Promise<void> {
   const fileName = filePath.split('/').pop() || '';
-  setPendingNavigation({ line: lineNumber, column });
+  setPendingNavigation({ line: lineNumber, column, highlight: options.highlight });
   await useWorkspaceStore.getState().openFile(filePath, fileName);
 }

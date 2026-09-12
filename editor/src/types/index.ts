@@ -47,11 +47,26 @@ export interface DiffInfo {
 }
 
 export interface OpenFile {
+  /** Last disk bytes read/saved; undefined means no known baseline. */
+  diskContent?: string;
+  saveConflict?: boolean;
+  isTooLarge?: boolean;
   path: string;
   name: string;
   content: string;
   isDirty: boolean;
   diff?: DiffInfo;
+  /**
+   * The file's bytes are not UTF-8, so `content` is empty and stands for
+   * nothing. Unity ships binary `.asset` files in every project (TerrainData,
+   * XRSettings, lightmaps) and writes them as binary even under Force Text.
+   *
+   * Every write path MUST refuse this tab: saving the empty buffer would
+   * truncate the asset.
+   */
+  isBinary?: boolean;
+  /** Byte length on disk, shown in place of content for a binary file. */
+  byteSize?: number;
 }
 
 export interface GitLogEntry {
@@ -160,6 +175,7 @@ export interface SettingsSchema {
   'editor.renderWhitespace': 'none' | 'boundary' | 'selection' | 'all';
   'editor.autoSave': 'off' | 'afterDelay' | 'onFocusChange';
   'editor.autoSaveDelay': number;
+  'editor.formatOnSave': boolean;
   'editor.betterComments': boolean;
   'terminal.fontSize': number;
   'terminal.fontFamily': string;
@@ -169,6 +185,8 @@ export interface SettingsSchema {
   'graphify.suppressFirstOpenToast': boolean;
   'ai.checkpoints.enabled': boolean;
   'ai.escalation.enabled': boolean;
+  'ai.specialists.enabled': boolean;
+  'ai.specialists.editableScenesVersion': number;
   'ai.memory.enabled': boolean;
   'ai.edits.applyMode': 'approve' | 'auto';
   'ai.edits.alwaysApproveUnityAssets': boolean;
@@ -178,16 +196,28 @@ export interface SettingsSchema {
   'unity.analyzers.enabled': boolean;
   'unity.compileGate.enabled': boolean;
   'unity.lspGate.enabled': boolean;
+  'unity.assetGate.enabled': boolean;
   'unity.verifiedPass.enabled': boolean;
+  'unity.consoleCheck.enabled': boolean;
+  'unity.consoleCheck.autoRepair': boolean;
   'unity.nearMissDiagnostics.enabled': boolean;
   'unity.rename.formerlySerializedAs': boolean;
   'unity.serializationDiagnostics.enabled': boolean;
+  'unity.projectSettingsDiagnostics.enabled': boolean;
+  'unity.inputDiagnostics.enabled': boolean;
+  'unity.uiDiagnostics.enabled': boolean;
+  'unity.uiToolkit.panel': boolean;
+  'lsp.solutionWideAnalysis': boolean;
+  'lsp.csharp.analyzers': boolean;
   'unity.asmdef.diagnostics': boolean;
   'unity.bridge.enabled': boolean;
   'unity.bridge.refreshOnSave': boolean;
   'unity.telemetry.enabled': boolean;
   'unity.hierarchyPanel.enabled': boolean;
   'unity.assetViewer.structuredDefault': boolean;
+  'unity.scriptableObjects.inspector': boolean;
+  'unity.scriptableObjects.browser': boolean;
+  'unity.codeLens.scriptableObjectInstances': boolean;
   'unity.sceneDiff.enabled': boolean;
   'unity.codeLens.assetUsages': boolean;
   'unity.templates.enabled': boolean;
@@ -201,6 +231,8 @@ export interface SettingsSchema {
   'unity.git.metaPairingChecks': boolean;
   'unity.git.yamlMergeIntegration': boolean;
   'unity.testRunner.enabled': boolean;
+  'unity.inputHub.enabled': boolean;
+  'debug.inlineValues': boolean;
   'unity.debugger.enabled': boolean;
   'unity.shader.completions': boolean;
   'unity.packages.manifestIntelligence': boolean;
@@ -228,6 +260,7 @@ export interface SettingsSchema {
  *   'unity-compiler'   – compilation errors forwarded from the Unity Editor bridge
  *   'asmdef'           – assembly-definition graph diagnostics
  *   'unity-packages'   – package manifest / UPM hint diagnostics
+ *   'unity-uitoolkit'  – UXML/USS reference + property diagnostics
  */
 export type DiagnosticSource =
   | 'lsp'
@@ -235,6 +268,7 @@ export type DiagnosticSource =
   | 'unity-compiler'
   | 'asmdef'
   | 'unity-packages'
+  | 'unity-uitoolkit'
   | (string & Record<never, never>); // allow arbitrary strings while keeping the named literals
 
 export interface DiagnosticItem {
@@ -245,6 +279,15 @@ export interface DiagnosticItem {
   message: string;
   severity: 'error' | 'warning' | 'info' | 'hint';
   source?: DiagnosticSource;
+  /**
+   * The diagnostic's own code — `CS0029`, `UNT0002`, `UNITY0201`.
+   *
+   * Four engines now write into this one panel (the C# compiler, Roslyn's
+   * Unity analyzers, this app's rules, and the asmdef checks), and the code is
+   * what tells a reader which of them produced a finding and what to search
+   * for. It is also what a suppression comment names.
+   */
+  code?: string;
 }
 
 export interface SearchMatch {
@@ -273,4 +316,32 @@ export interface FileSearchResult {
    * (`maxMatchesPerFile`) — more matches exist but were not returned.
    */
   truncated?: boolean;
+}
+
+/**
+ * A suggestion pinned to a plan document. The behaviour is documented where
+ * the anchoring lives (`markdown-preview/services/note-anchor.ts`, which
+ * re-exports this); the SHAPE lives here because `stores/ai.ts` holds these
+ * notes and `markdown-preview`'s barrel exports components that read that
+ * store. Importing the type across that barrel would close a runtime cycle —
+ * store → barrel → PlanDocumentView → store — which is the failure mode
+ * CLAUDE.md records for `acp`/`ai-panel`. `types/` imports nothing, so it
+ * cannot participate in one.
+ */
+export interface PlanNote {
+  id: string;
+  /** The exact text the user selected. */
+  quotedText: string;
+  /** What they want changed. */
+  body: string;
+  /** Nearest preceding heading, or the document title. */
+  headingPath: string;
+  /** False once the quoted text no longer appears in the document. */
+  anchored: boolean;
+}
+
+/** A checkbox line in a plan's `## Todos` section. */
+export interface PlanStep {
+  title: string;
+  done: boolean;
 }

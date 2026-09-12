@@ -1,0 +1,79 @@
+---
+import HeroEditor from './HeroEditor.tsx';
+import { DOWNLOAD_HREF } from '../../lib/site-nav';
+
+/**
+ * The hero opens on the product, not on a promise.
+ *
+ * Everything above the window is one sentence and two buttons; the window
+ * itself is the argument, and it is running the loop the whole page is about
+ * — an analyzer that knows Unity catching a per-frame GetComponent, and the
+ * quick fix that rewrites it. The chrome around it (connection state, the open
+ * tabs) is there because those four filenames are the four editors this IDE
+ * has that others do not.
+ */
+---
+
+<header class="lp-hero">
+  <div class="lp-hero-grid" aria-hidden="true"></div>
+
+  <div class="lp-hero-copy">
+    <h1 class="lp-h1 lp-in" style="animation-delay:0.1s">
+      The only IDE that <em class="lp-spectrum">speaks Unity.</em>
+    </h1>
+
+    <p class="lp-hero-sub lp-in" style="animation-delay:0.25s">
+      We've shipped games in Unity for years, and every editor we used treated it as just
+      another C# project. The prefabs, the assets, the Editor itself — all invisible to the
+      tool. We got tired of working around that gap. So we built the IDE that closes it.
+    </p>
+
+    <div class="lp-hero-actions lp-in" style="animation-delay:0.4s">
+      <a href={DOWNLOAD_HREF} class="lp-btn lp-btn-solid">Download for free</a>
+      <a href="/docs/" class="lp-btn lp-btn-ghost">Read the docs</a>
+    </div>
+
+    <p class="lp-hero-free">No licence to buy. Not now, not when you ship.</p>
+  </div>
+
+  <div class="lp-window lp-in-big">
+    <div class="lp-window-frame">
+      <div class="lp-titlebar">
+        <span style="display:flex;gap:6px;flex:none" aria-hidden="true">
+          <span style="width:10px;height:10px;border-radius:50%;background:#2a2f37"></span>
+          <span style="width:10px;height:10px;border-radius:50%;background:#2a2f37"></span>
+          <span style="width:10px;height:10px;border-radius:50%;background:#2a2f37"></span>
+        </span>
+        <span style="color:#e8e6e1;font-weight:500;flex:none">UNITYIDE</span>
+        <span class="lp-titlebar-sep" aria-hidden="true">·</span>
+        <span class="lp-titlebar-path">NeonDrift — Assets/Scripts/PlayerController.cs</span>
+        <span style="margin-left:auto;display:flex;align-items:center;gap:14px;flex:none">
+          <span class="lp-titlebar-transport" aria-hidden="true">
+            <span style="padding:2px 8px;border:1px solid #262b33;border-radius:4px;color:#e8e6e1">▶</span>
+            <span style="padding:2px 8px;border:1px solid #262b33;border-radius:4px">❙❙</span>
+            <span style="padding:2px 8px;border:1px solid #262b33;border-radius:4px">■</span>
+          </span>
+          <span style="display:flex;align-items:center;gap:6px;color:#6fe3a5;white-space:nowrap">
+            <span style="width:6px;height:6px;border-radius:50%;background:#6fe3a5"></span>Connected
+          </span>
+        </span>
+      </div>
+
+      <div
+        style="display:flex;gap:2px;padding:8px 10px 0;border-bottom:1px solid #1a1e24;font-family:var(--mono);font-size:11.5px;color:#8a8f98;overflow:hidden;white-space:nowrap"
+      >
+        <span
+          style="padding:7px 12px;border-radius:6px 6px 0 0;background:#151821;color:#e8e6e1;border:1px solid #1f2329;border-bottom:none"
+          >PlayerController.cs <span style="color:#f5c26b">●</span></span
+        >
+        <span style="padding:7px 12px">Player.prefab</span>
+        <span style="padding:7px 12px">MainMenu.uxml</span>
+        <span style="padding:7px 12px">Gameplay.inputactions</span>
+      </div>
+
+      <HeroEditor client:load />
+    </div>
+  </div>
+
+  <div style="padding-bottom:24px"></div>
+</header>

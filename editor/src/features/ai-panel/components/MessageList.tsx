@@ -1,3 +1,4 @@
+import { ErrorBoundary } from '../../../components/ErrorBoundary';
 /**
  * MessageList — scrollable container that renders the conversation messages.
  *
@@ -18,6 +19,13 @@
  *    a `ResizeObserver` on the inner content wrapper, since content can now
  *    grow without a MessageList render at all (e.g. a `ToolCallBlock`
  *    expanding when its diffs arrive).
+ *
+ * This list also owns WHERE the "agent is working" dots go. They belong at the
+ * tail of the transcript: a streaming assistant bubble carries them inline
+ * while it is the last block (`isLast`, threaded through `MessageRow`), and
+ * every other running state gets the standalone `.ai-panel-working` row after
+ * the last message. `services/working-indicator.ts` holds the rule and the
+ * reason it is not simply `isStreaming`.
  */
 
 import { useRef, useEffect, useCallback, useState, memo } from 'react';
@@ -25,13 +33,17 @@ import { ArrowDown } from 'lucide-react';
 import { useAiStore, type AiMessage } from '../../../stores/ai';
 import UserMessage from './UserMessage';
 import AssistantMessage from './AssistantMessage';
+import SpecialistActivity from './SpecialistActivity';
 import PlanActions from './PlanActions';
 import PermissionRequestBlock from './PermissionRequestBlock';
 import QuestionBlock from './QuestionBlock';
 import VerifiedCard from './VerifiedCard';
 import CheckpointRow from './CheckpointRow';
 import ErrorBlock from './ErrorBlock';
+import StoppedBlock from './StoppedBlock';
 import EmptyState from './EmptyState';
+import StreamingIndicator from './StreamingIndicator';
+import { showsTailIndicator, showsModelCallCount, modelCallLabel } from '../services/working-indicator';
 
 // Matches UnityConsolePanel's "close enough to the bottom" threshold shape
 // (that one uses 30px); a slightly wider 40px band here since chat bubbles
@@ -45,10 +57,13 @@ interface MessageRowProps {
   turnUserMessageId: string | null;
   /**
    * Whether to render `PlanActions` immediately after this row — true for
-   * exactly the last assistant message while `planPhase === 'awaiting-execute'`
-   * (computed by the parent; see `MessageList`'s `lastAssistantIdx`).
+   * exactly the last assistant message while the plan phase is one the card
+   * belongs under (computed by the parent; see `MessageList`'s
+   * `showPlanActions` / `lastAssistantIdx`).
    */
   withPlanActions: boolean;
+  /** Passed through to `AssistantMessage` to gate its streaming dots. */
+  isLast: boolean;
 }
 
 /**
@@ -64,6 +79,7 @@ const MessageRow = memo(function MessageRow({
   message,
   turnUserMessageId,
   withPlanActions,
+  isLast,
 }: MessageRowProps) {
   let node: React.ReactNode;
 
@@ -77,7 +93,13 @@ const MessageRow = memo(function MessageRow({
       );
       break;
     case 'assistant':
-      node = <AssistantMessage message={message} turnUserMessageId={turnUserMessageId} />;
+      node = (
+        <AssistantMessage
+          message={message}
+          turnUserMessageId={turnUserMessageId}
+          isLast={isLast}
+        />
+      );
       break;
     case 'permissionRequest':
       node = <PermissionRequestBlock message={message} />;
@@ -91,8 +113,11 @@ const MessageRow = memo(function MessageRow({
     case 'error':
       node = <ErrorBlock message={message} />;
       break;
+    case 'stopped':
+      node = <StoppedBlock message={message} />;
+      break;
     case 'system':
-      node = <div className="ai-panel-system-message">{message.text}</div>;
+      node = message.specialistRun ? <SpecialistActivity run={message.specialistRun} /> : <div className="ai-panel-system-message">{message.text}</div>;
       break;
     // toolResult messages are rendered inline via ToolCallBlock
     default:
@@ -114,6 +139,9 @@ function MessageList() {
   const messages = useAiStore((s) => s.messages);
   const planPhase = useAiStore((s) => s.planPhase);
   const selectedAgent = useAiStore((s) => s.selectedAgent);
+  const mode = useAiStore((s) => s.mode);
+  const isAgentRunning = useAiStore((s) => s.isAgentRunning);
+  const modelCallBudget = useAiStore((s) => s.modelCallBudget);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -153,7 +181,7 @@ function MessageList() {
   // the bottom if the user was already there.
   useEffect(() => {
     scheduleStick();
-  }, [messages, planPhase, scheduleStick]);
+  }, [messages, planPhase, isAgentRunning, scheduleStick]);
 
   // Content can grow WITHOUT a MessageList render at all — e.g. a
   // ToolCallBlock expanding when its diffs arrive, or a CheckpointRow's
@@ -198,13 +226,37 @@ function MessageList() {
   // them. Without this check, switching agents mid-thread left UnityIDE's
   // Execute / Regenerate / Open card sitting under a "Claude Code" header,
   // offering to execute a plan the selected agent did not write and cannot run.
-  const showPlanActions = planPhase === 'awaiting-execute' && selectedAgent === 'hosted';
+  //
+  // Also gated on `mode === 'plan'`: `setMode` (mode-transition.ts) PARKS a
+  // live plan phase when the user switches away from plan mode rather than
+  // clearing it, so the card stays reachable on switching back — but that
+  // means the phase alone is no longer proof the user is looking at plan
+  // mode. Without this, a parked plan's card would render under the ask/agent
+  // composer it was just parked out of.
+  // `completed` is in the list so the finished plan stays reachable (Open /
+  // Run again) rather than vanishing the moment the last step ticks —
+  // `PlanActions` is what makes it read as finished instead of re-offering
+  // Execute, which is what a finished run used to get when it landed back on
+  // `awaiting-execute`.
+  const showPlanActions =
+    (planPhase === 'awaiting-execute' ||
+      planPhase === 'interrupted' ||
+      planPhase === 'completed') &&
+    selectedAgent === 'hosted' &&
+    mode === 'plan';
 
   // P5.1: track the most recent preceding user message id so ToolCallBlock's
   // per-file Revert can look up the right checkpoint turn
   // (`findCheckpointTurnForPath` matches by (userMessageId, path) — see that
   // function's header for why toolCallId isn't available instead).
   let currentUserMessageId: string | null = null;
+
+  // The "agent is working" dots live at the TAIL of the transcript. A
+  // streaming assistant bubble carries them inline while it is last; every
+  // other running state gets the standalone row below. See
+  // `services/working-indicator.ts` for why this is not just `isStreaming`.
+  const lastMessage = messages.length > 0 ? messages[messages.length - 1] : null;
+  const showWorking = showsTailIndicator({ isAgentRunning, last: lastMessage });
 
   return (
     <div className="ai-panel-messages-wrap">
@@ -223,14 +275,24 @@ function MessageList() {
           {messages.map((msg, idx) => {
             if (msg.role === 'user') currentUserMessageId = msg.id;
             return (
+              <ErrorBoundary key={msg.id} resetKey={msg} fallback="This message could not be displayed.">
               <MessageRow
-                key={msg.id}
                 message={msg}
                 turnUserMessageId={currentUserMessageId}
                 withPlanActions={idx === lastAssistantIdx && showPlanActions}
+                isLast={idx === messages.length - 1}
               />
+              </ErrorBoundary>
             );
           })}
+          {showWorking && (
+            <div className="ai-panel-working">
+              <StreamingIndicator />
+              {modelCallBudget && showsModelCallCount(isAgentRunning, modelCallBudget) && (
+                <span className="ai-panel-working-count">{modelCallLabel(modelCallBudget.used)}</span>
+              )}
+            </div>
+          )}
         </div>
       </div>
 

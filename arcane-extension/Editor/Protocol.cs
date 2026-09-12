@@ -34,14 +34,55 @@ namespace UnityIDE.Bridge
         public const string Log = "log";
         public const string LogBatch = "log_batch";
         public const string PlaystateChanged = "playstate_changed";
+        /// <summary>
+        /// A queued asset refresh (or compile request) has actually RUN on the
+        /// main thread. Payload: { compileRequested: bool }.
+        ///
+        /// Queued commands answer their rpc_response the moment they are
+        /// accepted, which is deliberately not the same as done — the editor may
+        /// be asleep and the work may not run for a while. Without a real
+        /// completion signal the IDE has to guess, and it used to guess wrong in
+        /// the worst direction: it started a "nothing needed compiling" timer
+        /// from the ACK, so an unfocused Unity reported a clean no-op compile for
+        /// a file it had not looked at yet.
+        ///
+        /// Additive — an IDE that does not know this type ignores it.
+        /// </summary>
+        public const string RefreshCompleted = "refresh_completed";
         public const string CompilationStarted = "compilation_started";
         public const string CompilationFinished = "compilation_finished";
+        /// <summary>
+        /// Open a script in the IDE that has this project open. Payload:
+        /// { path: string, line?: number, column?: number } — 1-based, and both
+        /// positions optional so an IDE older than the package that started
+        /// sending them still opens the file.
+        ///
+        /// This is the warm half of double-clicking a script in Unity's Project
+        /// window: when the IDE is already up on this project, sending it here
+        /// beats relaunching the executable — no throwaway process, no dock
+        /// bounce, and no need to know where the app is installed.
+        /// </summary>
         public const string OpenFile = "open_file";
+        /// <summary>
+        /// Ask the IDE to bring itself to the front. Sent alongside OpenFile,
+        /// because nothing else will: on the warm path no process is launched,
+        /// so without this the file opens in a window that stays behind Unity.
+        /// Payload is empty.
+        /// </summary>
+        public const string FocusWindow = "focus_window";
         public const string RpcResponse = "rpc_response";
         public const string SelectionChanged = "selection_changed";
         public const string HierarchyChanged = "hierarchy_changed";
         public const string TestEvent = "test_event";
         public const string PlayModeStats = "playmode_stats";
+        /// <summary>
+        /// A queued `runTests` run has actually finished. Payload carries the
+        /// run's outcome, mirroring the `refresh_completed` pattern: the
+        /// rpc_response to a queued runTests only ever means "accepted", never
+        /// "done" — the editor may be asleep and the run may not start for a
+        /// while. Additive — an IDE that does not know this type ignores it.
+        /// </summary>
+        public const string TestRunCompleted = "test_run_completed";
 
         // ── IDE → C# (we receive) ────────────────────────────────────────────
         public const string HeartbeatAck = "heartbeat_ack";

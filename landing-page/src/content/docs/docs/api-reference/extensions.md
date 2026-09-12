@@ -39,10 +39,10 @@ description: Common issues and how to fix them.
 **Symptom:** Sending a message does nothing, or the chat spins indefinitely.
 
 **Fixes:**
-1. Open **UnityIDE: Settings** and confirm your API key is entered correctly
-2. Check you have credits remaining with your provider (OpenAI / Anthropic)
-3. If using a custom server URL, make sure the server at that address is running
-4. Check the browser developer tools console (Help → Toggle Developer Tools) for network errors
+1. Open **Settings** (`Cmd+,` / `Ctrl+,`) → **Account** and confirm you are signed in
+2. Check you have AI usage remaining on your plan — your [account page](/account) shows what is left
+3. Check you are online; the AI runs server-side, so it needs a connection
+4. Check the developer tools console (Help → Toggle Developer Tools) for network errors
 
 ---
 

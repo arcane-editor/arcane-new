@@ -1,0 +1,73 @@
+---
+/**
+ * The comparison table.
+ *
+ * Two rules keep this honest, and both are visible in the data below: rows
+ * where a competitor is genuinely equal say so (`Y` in all three columns), and
+ * the last row prices the IDE without spinning it. A table where one product
+ * wins every line is a table nobody believes.
+ */
+const Y = { v: '✓', c: '#6fe3a5' };
+const N = { v: '—', c: '#3a4150' };
+const t = (v: string) => ({ v, c: '#8a8f98' });
+
+const rows = [
+  ['Built only for Unity', 'Every panel exists for a Unity workflow', Y, t('general .NET'), t('general')],
+  ['Scenes & prefabs as structure', 'GameObjects and components instead of YAML text', Y, t('YAML text'), t('YAML text')],
+  ['ScriptableObjects as typed forms', 'Real fields, drift detection against the class', Y, N, N],
+  ['UI Toolkit live canvas', 'UXML rendered beside source; unresolvable queries flagged', Y, t('syntax only'), N],
+  ['Input actions as a table', 'Action names validated against .inputactions', Y, t('references'), N],
+  ['Unity-specific analyzers', 'Allocations in Update, GetComponent in hot paths…', Y, Y, Y],
+  ['Live link to the running Editor', 'Play / pause, streaming console, tests', Y, Y, N],
+  ['Debugger attached to the Editor', 'Call stack, variables, watch', Y, Y, Y],
+  ['AI checked against the Editor', 'Recompiles and re-verifies every file it touched', Y, t('generic AI'), t('generic AI')],
+  ['UnityYAMLMerge as merge driver', "Scene and prefab conflicts merge with Unity's tool", Y, Y, N],
+  ['Price for the IDE', '', t('Free'), t('Paid · free non-commercial'), t('Community free')],
+] as const;
+---
+
+<section class="lp-shell" style="padding-bottom:120px">
+  <p class="lp-eyebrow" style="margin-bottom:16px">Why choose UnityIDE</p>
+  <h2 class="lp-h2" style="margin-bottom:40px;max-width:22ch">
+    General-purpose IDEs treat Unity as a C# project. We don't.
+  </h2>
+
+  <div
+    class="lp-cmp-scroll"
+    style="border:1px solid #1f2329;border-radius:16px;background:#0f1114;overflow-y:hidden"
+  >
+    <div>
+      <div class="lp-cmp-row" style="background:#0b0d10;font-family:var(--mono);font-size:12px">
+        <div style="padding:14px 20px;color:#6f747d">Capability</div>
+        <div
+          class="lp-cmp-cell lp-cmp-ours"
+          style="color:#e8e6e1;background:rgba(124,183,255,0.06);display:flex;align-items:center;justify-content:center;gap:6px"
+        >
+          <img src="/icon.png" alt="" width="14" height="14" style="border-radius:4px" />UnityIDE
+        </div>
+        <div class="lp-cmp-cell" style="color:#8a8f98">Rider</div>
+        <div class="lp-cmp-cell" style="color:#8a8f98">Visual Studio</div>
+      </div>
+
+      {
+        rows.map(([name, sub, a, b, c]) => (
+          <div class="lp-cmp-row lp-cmp-body">
+            <div style="padding:14px 20px;display:grid;gap:3px;align-content:center">
+              <span style="font-size:14.5px;color:#e8e6e1">{name}</span>
+              {sub && <span style="font-size:12px;color:#6f747d;text-wrap:pretty">{sub}</span>}
+            </div>
+            <div class="lp-cmp-cell lp-cmp-ours" style={`color:${a.c}`}>{a.v}</div>
+            <div class="lp-cmp-cell" style={`color:${b.c}`}>{b.v}</div>
+            <div class="lp-cmp-cell" style={`color:${c.c}`}>{c.v}</div>
+          </div>
+        ))
+      }
+    </div>
+  </div>
+
+  <p style="margin:16px 0 0;font-size:12.5px;color:#4a515c;max-width:80ch;text-wrap:pretty">
+    Based on publicly documented features of each product at time of writing. Rider and Visual
+    Studio are trademarks of their respective owners. Spotted a mistake?
+    <a href="/feedback" style="color:#6f747d;border-bottom:1px solid #2a2f37">Tell us</a>.
+  </p>
+</section>

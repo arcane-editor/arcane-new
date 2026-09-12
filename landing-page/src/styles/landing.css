@@ -1,0 +1,521 @@
+/**
+ * The landing page, and only the landing page.
+ *
+ * Every rule here is scoped under `.lp`. The palette itself lives in
+ * `lp-tokens.css`, which the Starlight docs import too — so this page and
+ * /docs/** are one visual system now. /features, /pricing, /auth and /admin
+ * still read the shadcn tokens in global.css; those are the remaining
+ * holdouts.
+ *
+ * The palette is neutral, not tinted. Colour on this page is never decoration;
+ * each of the five hues below means exactly one thing, and they are the same
+ * five the editor paints in its own gutter:
+ *
+ *   blue    a type, a link, a reference the tool resolved
+ *   green   verified — it compiled, it passed, the Editor confirmed it
+ *   gold    modified, or a warning Unity itself would never raise
+ *   red     an error, or a value that silently reset
+ *   violet  a C# keyword
+ *
+ * Anything grey is something the tool has not been asked to understand yet.
+ */
+
+@import './lp-tokens.css';
+
+.lp {
+  /* Tokens come from `lp-tokens.css` above, shared with the Starlight docs.
+     What is left here is what makes an element THE landing surface rather
+     than merely a consumer of the palette. */
+  position: relative;
+  min-height: 100vh;
+  overflow-x: clip;
+  background: var(--ink);
+  color: var(--text);
+  font-family: var(--sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+@media (max-width: 640px) {
+  .lp { --gut: 20px; }
+}
+
+/* :where(), not a bare `a`. As `.lp a` this sits at specificity (0,1,1) and
+   silently beat every single-class button rule below it — which painted the
+   solid CTA's label in the inherited off-white, on an off-white pill. */
+.lp :where(a) { color: inherit; text-decoration: none; }
+
+/* global.css sets `font-family` on the heading ELEMENTS, which beats anything
+   inherited from `.lp`. Restated here so the display face actually reaches the
+   headings on this page. */
+.lp :is(h1, h2, h3, h4, h5, h6) { font-family: var(--sans); }
+
+/* ── Ambient ground ─────────────────────────────────────────────────────── */
+
+.lp-atmos { position: fixed; inset: 0; pointer-events: none; z-index: 0; }
+.lp-atmos-base { background: linear-gradient(180deg, #0b0d11 0%, #0a0b0d 40%, #0c0e13 100%); }
+.lp-atmos-a {
+  opacity: var(--lp-glow-a);
+  background: radial-gradient(ellipse 55% 45% at 22% 18%, var(--lp-tint-a) 0%, transparent 70%);
+  transition: opacity 0.5s linear, background 0.6s linear;
+}
+.lp-atmos-b {
+  opacity: var(--lp-glow-b);
+  background: radial-gradient(ellipse 50% 50% at 82% 78%, var(--lp-tint-b) 0%, transparent 70%);
+  transition: opacity 0.5s linear, background 0.6s linear;
+}
+.lp-atmos-grain {
+  opacity: 0.05;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='160' height='160' filter='url(%23n)' opacity='0.6'/></svg>");
+}
+.lp-atmos-vignette { background: radial-gradient(ellipse 90% 80% at 50% 50%, transparent 55%, rgba(5, 6, 8, 0.7) 100%); }
+.lp-body { position: relative; z-index: 1; }
+
+/* ── Type ───────────────────────────────────────────────────────────────── */
+
+.lp-eyebrow {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--mute);
+}
+
+.lp-h1 {
+  margin: 0;
+  font-size: clamp(42px, 7.2vw, 104px);
+  line-height: 0.96;
+  letter-spacing: -0.04em;
+  font-weight: 500;
+  max-width: 15ch;
+  text-wrap: balance;
+}
+
+.lp-h2 {
+  margin: 0;
+  font-size: clamp(30px, 3.6vw, 48px);
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+  font-weight: 500;
+  text-wrap: balance;
+}
+
+.lp-h2-quiet {
+  font-size: clamp(28px, 3.4vw, 44px);
+  line-height: 1.1;
+}
+
+.lp-h3 {
+  margin: 0;
+  font-size: clamp(28px, 3.2vw, 42px);
+  line-height: 1.08;
+  letter-spacing: -0.03em;
+  font-weight: 500;
+  text-wrap: balance;
+}
+
+.lp-lede {
+  margin: 20px 0 0;
+  font-size: 17px;
+  line-height: 1.55;
+  color: var(--dim);
+  max-width: 46ch;
+  text-wrap: pretty;
+}
+
+.lp-mono { font-family: var(--mono); }
+
+/* ── Chrome ─────────────────────────────────────────────────────────────── */
+
+.lp-shell { max-width: var(--measure); margin: 0 auto; padding-inline: var(--gut); min-width: 0; }
+
+.lp-panel {
+  min-width: 0;
+  border: 1px solid var(--rule);
+  border-radius: 14px;
+  background: var(--plate);
+  overflow: hidden;
+}
+
+.lp-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--rule);
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--mute);
+}
+
+.lp-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 14px 26px;
+  border-radius: 999px;
+  font-size: 15px;
+  font-weight: 600;
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+.lp-btn-solid {
+  background: var(--text);
+  color: var(--ink);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1), 0 12px 40px -12px rgba(232, 230, 225, 0.45);
+}
+.lp-btn-solid:hover { background: #ffffff; }
+.lp-btn-ghost {
+  border: 1px solid var(--edge-mid);
+  background: rgba(15, 17, 20, 0.6);
+  color: var(--text);
+  font-weight: 500;
+}
+.lp-btn-ghost:hover { border-color: var(--edge-hi); }
+
+/* ── Hero ───────────────────────────────────────────────────────────────── */
+
+/* `minmax(0, 1fr)`, not the implicit `auto`. An auto track is floored by its
+   widest item's MIN-content — here the IDE window's title bar — so on a phone
+   the whole column laid out ~700px wide and everything centred inside it
+   drifted off screen. Every grid on this page that holds a panel needs this. */
+.lp-hero {
+  position: relative;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 128px var(--gut) 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 56px;
+}
+
+.lp-hero-grid {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: linear-gradient(#141720 1px, transparent 1px),
+    linear-gradient(90deg, #141720 1px, transparent 1px);
+  background-size: 64px 64px;
+  mask-image: radial-gradient(ellipse 60% 55% at 50% 30%, #000 30%, transparent 100%);
+  -webkit-mask-image: radial-gradient(ellipse 60% 55% at 50% 30%, #000 30%, transparent 100%);
+  opacity: 0.7;
+}
+
+.lp-hero-copy { position: relative; display: grid; justify-items: center; text-align: center; }
+
+.lp-hero-sub {
+  margin: 28px 0 0;
+  font-size: clamp(17px, 1.6vw, 21px);
+  line-height: 1.5;
+  color: var(--dim);
+  max-width: 58ch;
+  text-wrap: pretty;
+}
+
+.lp-hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 36px;
+}
+
+.lp-hero-free {
+  margin: 18px 0 0;
+  font-family: var(--mono);
+  font-size: 13.5px;
+  background: linear-gradient(90deg, #8a8f98 0%, #8a8f98 40%, #ffffff 50%, #8a8f98 60%, #8a8f98 100%);
+  background-size: 250% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* The one gradient on the page, and it is doing a job: three hues meeting
+   inside two words is the whole product thesis in one glyph run. */
+.lp-spectrum {
+  font-style: normal;
+  background: linear-gradient(92deg, var(--blue), var(--green) 55%, var(--gold));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.lp-editor {
+  display: grid;
+  grid-template-columns: minmax(0, 2.2fr) minmax(0, 0.8fr);
+  min-height: 360px;
+}
+.lp-editor-code {
+  min-width: 0;
+  padding: 14px 0 16px;
+  border-right: 1px solid #1a1e24;
+  font-family: var(--mono);
+  font-size: clamp(10.5px, 1.15vw, 12.5px);
+  line-height: 1.75;
+  overflow: hidden;
+}
+/* Column, not grid: the status footer pins to the bottom with `margin-top:auto`,
+   which does nothing to a grid item. */
+.lp-editor-problems {
+  min-width: 0;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-family: var(--mono);
+  font-size: 12px;
+  background: linear-gradient(180deg, #0e1013, #0c0e12);
+}
+
+/* Under ~720px the Problems column would be four words wide. The code pane is
+   the half that carries the demonstration, so it takes the whole window. */
+@media (max-width: 719px) {
+  .lp-editor { grid-template-columns: minmax(0, 1fr); min-height: 300px; }
+  .lp-editor-code { border-right: none; }
+  .lp-editor-problems { display: none; }
+}
+
+.lp-window { position: relative; }
+.lp-window::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(124, 183, 255, 0.25), rgba(111, 227, 165, 0.08) 40%, transparent 75%);
+  pointer-events: none;
+}
+.lp-titlebar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 10px 14px;
+  border-bottom: 1px solid #1a1e24;
+  background: var(--ink-2);
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--mute);
+}
+.lp-titlebar > * { min-width: 0; }
+.lp-titlebar-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lp-titlebar-transport { display: flex; gap: 6px; }
+@media (max-width: 899px) {
+  .lp-titlebar-path,
+  .lp-titlebar-sep,
+  .lp-titlebar-transport { display: none; }
+}
+
+.lp-window-frame {
+  position: relative;
+  border: 1px solid #232830;
+  border-radius: 16px;
+  background: var(--plate-hi);
+  overflow: hidden;
+  box-shadow: 0 40px 120px -40px rgba(0, 0, 0, 0.9), 0 0 80px -30px rgba(124, 183, 255, 0.25);
+}
+
+/* ── Chapters ───────────────────────────────────────────────────────────── */
+
+.lp-chapter { position: relative; }
+.lp-stage {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: center;
+  padding: 64px var(--gut) 24px;
+  max-width: var(--measure);
+  margin: 0 auto;
+}
+.lp-pair {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr));
+  gap: 48px;
+  align-items: center;
+}
+.lp-aside {
+  margin: 28px 0 0;
+  font-size: 14px;
+  color: var(--faint);
+  font-style: italic;
+}
+
+/* Scroll-driven mode. Applied by the island only when it is actually driving:
+   wide viewport, motion allowed, JS alive. Without it a chapter is an ordinary
+   block that has already finished animating, which is also the no-JS state. */
+.lp-chapter[data-driven='true'] .lp-stage { position: sticky; top: 0; height: 100vh; }
+.lp-chapter[data-driven='false'] { height: auto !important; padding-block: 56px; }
+
+@media (max-width: 1023px) {
+  .lp-chapter { height: auto !important; padding-block: 40px; }
+  .lp-chapter .lp-stage { position: static !important; height: auto !important; padding-block: 24px; }
+}
+
+/* ── Horizontal band ────────────────────────────────────────────────────── */
+
+.lp-band { position: relative; }
+.lp-band-stage {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  padding: 84px 0 24px;
+  overflow: hidden;
+}
+.lp-band[data-driven='true'] .lp-band-stage { position: sticky; top: 0; height: 100vh; }
+.lp-band-rail { display: flex; width: 100%; will-change: transform; }
+.lp-band-slide {
+  width: 100%;
+  flex: none;
+  padding-inline: var(--gut);
+  display: grid;
+  align-content: center;
+  transition: opacity 0.5s ease;
+}
+.lp-band-pair {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr));
+  gap: 48px;
+  align-items: center;
+  max-width: 1056px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+/* Off the rails: four stacked sections, no transform, no dot row. This is the
+   narrow-screen layout — a horizontal scroll hijack on a phone is a trap — and
+   it is also the layout whenever the island is not driving, which covers
+   reduced motion and no JavaScript. Without the `data-driven` half, a
+   reduced-motion reader on a desktop got the rail parked at slide four with
+   the other three still translated off screen. */
+@media (max-width: 1023px) {
+  .lp-band { height: auto !important; }
+  .lp-band-stage { position: static !important; height: auto !important; padding: 40px 0; overflow: visible; }
+  .lp-band-viewport { overflow: visible !important; }
+  .lp-band-rail { display: grid; transform: none !important; gap: 72px; }
+  .lp-band-slide { opacity: 1 !important; }
+  .lp-band-dots { display: none !important; }
+}
+
+.lp-band[data-driven='false'] { height: auto !important; }
+.lp-band[data-driven='false'] .lp-band-stage {
+  position: static !important;
+  height: auto !important;
+  padding: 40px 0;
+  overflow: visible;
+}
+.lp-band[data-driven='false'] .lp-band-viewport { overflow: visible !important; }
+.lp-band[data-driven='false'] .lp-band-rail { display: grid; transform: none !important; gap: 72px; }
+.lp-band[data-driven='false'] .lp-band-slide { opacity: 1 !important; }
+.lp-band[data-driven='false'] .lp-band-dots { display: none !important; }
+
+/* ── Feature grid ───────────────────────────────────────────────────────── */
+
+.lp-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1px;
+  background: var(--rule);
+  border: 1px solid var(--rule);
+  border-radius: 14px;
+  overflow: hidden;
+}
+.lp-grid-cell {
+  background: var(--plate);
+  padding: 26px 24px;
+  display: grid;
+  gap: 10px;
+  align-content: start;
+  transition: background-color 0.2s ease;
+}
+.lp-grid-cell:hover { background: #121519; }
+
+/* ── Comparison ─────────────────────────────────────────────────────────── */
+
+.lp-cmp-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) repeat(3, minmax(84px, 1fr));
+  border-bottom: 1px solid var(--rule-soft);
+  align-items: stretch;
+}
+.lp-cmp-row:last-child { border-bottom: none; }
+.lp-cmp-body:hover { background: #111317; }
+.lp-cmp-cell {
+  padding: 14px 12px;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  font-family: var(--mono);
+  font-size: 12.5px;
+}
+.lp-cmp-ours {
+  background: rgba(124, 183, 255, 0.04);
+  border-left: 1px solid var(--rule);
+  border-right: 1px solid var(--rule);
+}
+.lp-cmp-scroll { overflow-x: auto; }
+.lp-cmp-scroll > div { min-width: 640px; }
+
+/* ── Download ───────────────────────────────────────────────────────────── */
+
+.lp-dl {
+  position: relative;
+  border: 1px solid var(--rule);
+  border-radius: 20px;
+  background: var(--plate);
+  padding: clamp(28px, 4vw, 56px);
+  display: grid;
+  gap: 40px;
+  overflow: hidden;
+}
+.lp-dl::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(ellipse 60% 70% at 100% 0%, rgba(124, 183, 255, 0.12), transparent 60%);
+}
+.lp-dl-card {
+  display: grid;
+  gap: 6px;
+  padding: 18px;
+  border: 1px solid var(--edge);
+  border-radius: 14px;
+  background: var(--ink);
+  transition: border-color 0.2s ease;
+}
+.lp-dl-card:hover { border-color: var(--edge-hi); }
+.lp-dl-step2 { padding-left: 20px; border-left: 1px solid var(--rule); }
+@media (max-width: 719px) {
+  .lp-dl-step2 { padding-left: 0; border-left: none; border-top: 1px solid var(--rule); padding-top: 24px; }
+}
+
+.lp-pill {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--mono);
+  font-size: 13px;
+  padding: 9px 14px;
+  border-radius: 999px;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+/* ── Motion ─────────────────────────────────────────────────────────────── */
+
+@keyframes lp-rise { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: none; } }
+@keyframes lp-rise-big { from { opacity: 0; transform: translateY(40px) scale(0.98); } to { opacity: 1; transform: none; } }
+@keyframes lp-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+@keyframes lp-sheen { 0% { background-position: 100% 0; } 45%, 100% { background-position: -100% 0; } }
+
+.lp-in { animation: lp-rise 0.9s ease-out both; }
+.lp-in-big { animation: lp-rise-big 1.1s cubic-bezier(0.2, 0.7, 0.2, 1) 0.35s both; }
+.lp-hero-free { animation: lp-rise 0.9s ease-out 0.5s both, lp-sheen 5s ease-in-out 1.4s infinite; }
+.lp-caret { animation: lp-blink 1s step-end infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .lp *,
+  .lp *::before,
+  .lp *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+  .lp-hero-free { color: var(--dim); -webkit-text-fill-color: var(--dim); }
+}

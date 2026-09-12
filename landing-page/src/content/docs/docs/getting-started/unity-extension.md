@@ -37,24 +37,66 @@ Save the file. Unity will download and install the package automatically.
 
 ## Setup
 
-After installing the package:
+The first time Unity loads the package on a machine with UnityIDE installed, it
+offers to make UnityIDE the editor that opens your scripts. Choose **Use
+UnityIDE** and you are done — the offer is made once, and declining it changes
+nothing.
+
+To set it yourself, or to change it later:
 
 1. Go to **Edit > Preferences > External Tools**
 2. Set **External Script Editor** to **UnityIDE**
-3. If UnityIDE is not auto-detected, open **UnityIDE > Settings** in the Unity menu bar and set the path manually
 
-The extension auto-detects UnityIDE from these default install locations:
+That panel also reports where UnityIDE was found and whether it currently has
+this project open, and lets you point it at a copy in a non-default location.
+
+### Release and dev builds
+
+The package ships twice, and the two are not interchangeable: `com.unityide.editor`
+opens UnityIDE, and `com.unityide.editor.dev` opens UnityIDE Dev. Install the one
+that matches the application you are running — installing either removes the
+other, so a project always has exactly one.
+
+Unless you are testing a dev build of UnityIDE itself, you want the release
+package, which is what every link on this page points at. The dev package lives
+at
+`https://releases.unityide.app/unity-extension-releases/dev/latest/com.unityide.editor.dev.tgz`
+and installs the same three ways.
+
+### How UnityIDE is opened
+
+Wherever possible the extension hands the request to your operating system as a
+`unityide://open` link, rather than going looking for the application itself.
+The OS already knows where UnityIDE is installed and how to bring it forward, so
+this works for a copy in any location.
+
+If no handler is registered — on Windows the link is registered the first time
+you run UnityIDE, so a fresh install that has never been opened has none yet —
+the extension falls back to launching the application directly. UnityIDE writes
+its own location to `~/.unityide/install.json` every time it runs, so a copy
+installed anywhere is found as soon as you have launched it once.
+
+Failing that, these default install locations are checked:
 
 | Platform | Default Paths |
 |----------|--------------|
 | macOS | `/Applications/UnityIDE.app`, `~/Applications/UnityIDE.app` |
-| Windows | `C:\Program Files\UnityIDE\UnityIDE.exe`, `%LOCALAPPDATA%\Programs\UnityIDE\UnityIDE.exe` |
+| Windows | `%LOCALAPPDATA%\UnityIDE\UnityIDE.exe`, `C:\Program Files\UnityIDE\UnityIDE.exe` |
 | Linux | `/usr/bin/unityide`, `/usr/local/bin/unityide`, `~/.local/bin/unityide` |
 
 ## Features
 
+### Opening your project
+**Window > UnityIDE > Open Project in UnityIDE** opens the current project in
+UnityIDE, launching it if it is not already running and bringing it to the front
+if it is. Unity's own **Assets > Open C# Project** does the same thing once
+UnityIDE is your external script editor.
+
 ### Script Editing
-Double-click any `.cs` file in Unity to open it in UnityIDE. If the IDE is already running and connected, the file opens instantly via IPC. Otherwise, UnityIDE launches with the file and line number.
+Double-click any `.cs` file in Unity to open it in UnityIDE, at the right line
+and in a focused tab. If the IDE already has the project open the file is sent
+over the existing IPC connection — no second process, no window flash.
+Otherwise UnityIDE is launched with the file and position.
 
 ### Console Streaming
 Unity console logs (messages, warnings, errors) are streamed to the IDE's console panel in real-time. Logs are batched and deduplicated. Stack traces are parsed with clickable file references.

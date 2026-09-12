@@ -1,6 +1,12 @@
 // The AI-access budget gate, called at the top of every AI route. Two checks:
 //   1. Credit balance (with lazy comp-plan expiry) → 402 when empty.
-//   2. The $1/hr soft spend cap (anti-abuse backstop, unchanged) → 429.
+//   2. The $1/hr soft spend cap (anti-abuse backstop) → 429, FREE PLAN ONLY.
+//      Paid plans are bounded by their own credit balance (check 1 already
+//      caps their spend at what they bought/topped up), so the hourly cap
+//      would only throttle a paying customer's legitimate burst; free has no
+//      such ceiling of its own, so it keeps the backstop. Paid plans skip the
+//      getHourlyCost query entirely — not just the comparison — so a paying
+//      user's request never pays for a D1 round trip that can't reject them.
 // Debiting happens AFTER the model call, inside recordUsage (src/lib/usage.ts).
 import { getHourlyCost, getUserBillingRow, findSubscriptionByUser, expireCompPlan } from './db.ts';
 import { isPaidPlan, microToCredits } from '../config/tiers.ts';
@@ -9,7 +15,14 @@ const HOURLY_LIMIT_USD = 1.0;
 
 export type BudgetResult =
     | { ok: true; plan: string; balanceMicro: number }
-    | { ok: false; status: 402 | 429; code: 'credits_exhausted' | 'rate_limited'; error: string; balanceMicro: number };
+    | {
+          ok: false; status: 402 | 429; code: 'credits_exhausted' | 'hourly_cap'; error: string; balanceMicro: number;
+          // Present only on the 429 (hourly_cap) — seconds until the oldest
+          // request in the current 1h window ages out. Consumed by callers to
+          // set the Retry-After header + body field (see routes/chat.ts and
+          // its siblings) and, downstream, by the editor's retry logic.
+          retryAfterSeconds?: number;
+      };
 
 /**
  * Resolve a user's spendable balance, lazily expiring a comp/lapsed-paid plan
@@ -50,15 +63,19 @@ export async function checkAiBudget(db: D1Database, userId: number): Promise<Bud
         };
     }
 
-    // Anti-abuse hourly spend cap (defense in depth; behavior unchanged).
-    const { totalCost, oldestTimestamp } = await getHourlyCost(db, userId);
-    if (totalCost >= HOURLY_LIMIT_USD) {
-        const resetMs = (oldestTimestamp ? new Date(oldestTimestamp).getTime() : Date.now()) + 60 * 60 * 1000;
-        const mins = Math.max(1, Math.ceil((resetMs - Date.now()) / 60000));
-        return {
-            ok: false, status: 429, code: 'rate_limited', balanceMicro,
-            error: `Too many AI requests in a short window. Try again in ~${mins} minute(s).`,
-        };
+    // Anti-abuse hourly spend cap — free plan only (see header comment). Paid
+    // plans skip the getHourlyCost query, not just the comparison.
+    if (!isPaidPlan(plan)) {
+        const { totalCost, oldestTimestamp } = await getHourlyCost(db, userId);
+        if (totalCost >= HOURLY_LIMIT_USD) {
+            const resetMs = (oldestTimestamp ? new Date(oldestTimestamp).getTime() : Date.now()) + 60 * 60 * 1000;
+            const mins = Math.max(1, Math.ceil((resetMs - Date.now()) / 60000));
+            const retryAfterSeconds = Math.max(60, Math.ceil((resetMs - Date.now()) / 1000));
+            return {
+                ok: false, status: 429, code: 'hourly_cap', balanceMicro, retryAfterSeconds,
+                error: `Too many AI requests in a short window. Try again in ~${mins} minute(s).`,
+            };
+        }
     }
 
     return { ok: true, plan, balanceMicro };
@@ -67,4 +84,20 @@ export async function checkAiBudget(db: D1Database, userId: number): Promise<Bud
 /** Convenience for surfaces that show a whole-number-ish credit balance. */
 export function balanceToCredits(planMicro: number, topupMicro: number): number {
     return microToCredits(planMicro + topupMicro);
+}
+
+/**
+ * JSON body for a checkAiBudget failure — shared by every AI route's 402/429
+ * response so the shape can't drift between call sites. `retryAfterSeconds`
+ * is spread in only when the result carries one (the hourly_cap 429); an
+ * older editor reading just `error`/`code` is unaffected either way. Callers
+ * still set the `Retry-After` header themselves (a Hono `Context` concern,
+ * kept out of this lib file).
+ */
+export function budgetErrorBody(budget: Extract<BudgetResult, { ok: false }>) {
+    return {
+        error: budget.error,
+        code: budget.code,
+        ...(budget.retryAfterSeconds !== undefined ? { retryAfterSeconds: budget.retryAfterSeconds } : {}),
+    };
 }

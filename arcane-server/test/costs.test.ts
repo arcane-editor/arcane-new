@@ -24,6 +24,19 @@ describe('MODEL_CATALOG verified rates', () => {
         expect(m.longContext).toBeUndefined();
     });
 
+    // Verbatim vendor rates from the CF model page (verified 2026-08-30).
+    // Same price as glm-5.2 with 4x the context and no cliff.
+    it('glm-5.3 has no long-context cliff', () => {
+        const m = MODEL_CATALOG['@cf/zai-org/glm-5.3']!;
+        expect(m.inputCostPer1M).toBe(1.40);
+        expect(m.outputCostPer1M).toBe(4.40);
+        expect(m.cachedInputCostPer1M).toBe(0.26);
+        expect(m.contextWindow).toBe(1_048_576);
+        expect(m.maxOutput).toBe(32_000);
+        expect(m.route).toBe('workers-ai');
+        expect(m.longContext).toBeUndefined();
+    });
+
     it('grok-4.6', () => {
         const m = MODEL_CATALOG['xai/grok-4.6']!;
         expect(m.inputCostPer1M).toBe(2.00);

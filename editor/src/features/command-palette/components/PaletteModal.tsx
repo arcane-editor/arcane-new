@@ -9,6 +9,12 @@ import { useProjectContextStore } from '../../../stores/project-context';
 import { formatKeybinding } from '../../../utils/format-keybinding';
 import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
 import { useDelayedTrue } from '../../../hooks/useDelayedTrue';
+import {
+  queryWorkspaceSymbols,
+  MIN_SYMBOL_QUERY_LENGTH,
+  type WorkspaceSymbolHit,
+} from '../../lsp';
+import { setPendingNavigation } from '../../../utils/editor-navigation';
 
 // The indeterminate loading bar only appears once a file search has been
 // running continuously for this long, so the index-backed search (usually
@@ -16,7 +22,7 @@ import { useDelayedTrue } from '../../../hooks/useDelayedTrue';
 const LOADING_BAR_DELAY_MS = 100;
 
 interface PaletteModalProps {
-  initialMode: 'commands' | 'files';
+  initialMode: 'commands' | 'files' | 'symbols' | 'recent';
   onClose: () => void;
 }
 
@@ -53,18 +59,31 @@ function PaletteModal({ initialMode, onClose }: PaletteModalProps) {
   const isUnityProject = useProjectContextStore((s) => s.isUnityProject);
 
   const [inputValue, setInputValue] = useState(() =>
-    initialMode === 'commands' ? '> ' : '',
+    initialMode === 'commands' ? '> ' : initialMode === 'symbols' ? '#' : '',
   );
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [fileResults, setFileResults] = useState<FuzzyFileResult[]>([]);
+  const [symbolResults, setSymbolResults] = useState<WorkspaceSymbolHit[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const searchGenRef = useRef(0); // prevent stale results
 
-  // Determine current mode from input value
-  const isCommandMode = inputValue.startsWith('>');
-  const query = isCommandMode ? inputValue.slice(1).trimStart() : inputValue.trim();
+  // Determine current mode from input value. `#` follows the VS Code
+  // convention for project-wide symbols; `>` is commands; bare text is files.
+  //
+  // Recent Files is the exception: it is NOT a fourth sigil. The sigils exist
+  // so one textbox can serve three searches the user types their way into, and
+  // "the files I was just in" is a fixed list you arrive at by chord, not a
+  // query you compose. So it is sticky for the life of the modal (which App
+  // remounts on every open) and suppresses the sigils, leaving the typed text
+  // free to filter the list.
+  const isRecentMode = initialMode === 'recent';
+  const isCommandMode = !isRecentMode && inputValue.startsWith('>');
+  const isSymbolMode = !isRecentMode && inputValue.startsWith('#');
+  const query = isCommandMode || isSymbolMode
+    ? inputValue.slice(1).trimStart()
+    : inputValue.trim();
   const debouncedFileQuery = useDebouncedValue(query, 150);
 
   // Build command results (local, synchronous — commands are few)
@@ -94,8 +113,38 @@ function PaletteModal({ initialMode, onClose }: PaletteModalProps) {
     // cannot clobber the cleared or recent-files list.
     searchGenRef.current++;
 
-    if (isCommandMode) {
+    if (isCommandMode || isSymbolMode) {
       setFileResults([]);
+      setIsSearching(false);
+      return;
+    }
+
+    const prefix = workspacePath ? workspacePath + '/' : '';
+
+    if (isRecentMode) {
+      // The real MRU: paths the user has VISITED, newest first, surviving the
+      // tab being closed. The `openFiles` list below is tab-bar order and
+      // cannot answer this.
+      const { recentFiles } = useWorkspaceStore.getState();
+      const rows: FuzzyFileResult[] = recentFiles.map((path) => ({
+        path,
+        relative_path: prefix ? path.replace(prefix, '') : path,
+        file_name: path.split('/').pop() || path,
+        score: 0,
+        match_indices: [],
+      }));
+      // Filter locally: the list is capped at RECENT_FILES_LIMIT, so there is
+      // nothing to gain from a round trip to the Rust index.
+      const filtered = debouncedFileQuery
+        ? rows
+            .map((row) => {
+              const m = fuzzyMatch(debouncedFileQuery, row.relative_path);
+              return m ? { ...row, score: m.score, match_indices: m.matches } : null;
+            })
+            .filter((r): r is FuzzyFileResult => r !== null)
+            .sort((a, b) => b.score - a.score)
+        : rows;
+      setFileResults(filtered);
       setIsSearching(false);
       return;
     }
@@ -103,7 +152,6 @@ function PaletteModal({ initialMode, onClose }: PaletteModalProps) {
     if (debouncedFileQuery) return; // handled by the search effect below
 
     const { openFiles } = useWorkspaceStore.getState();
-    const prefix = workspacePath ? workspacePath + '/' : '';
     const seen = new Set<string>();
     const recentFiles: FuzzyFileResult[] = openFiles
       .filter((f) => {
@@ -123,7 +171,7 @@ function PaletteModal({ initialMode, onClose }: PaletteModalProps) {
       }));
     setFileResults(recentFiles);
     setIsSearching(false);
-  }, [isCommandMode, debouncedFileQuery, workspacePath, isUnityProject]);
+  }, [isCommandMode, isSymbolMode, isRecentMode, debouncedFileQuery, workspacePath, isUnityProject]);
 
   // File search: async, Rust-backed; debounce comes from useDebouncedValue
   // above. Stale results are intentionally kept on the screen while a new
@@ -131,7 +179,8 @@ function PaletteModal({ initialMode, onClose }: PaletteModalProps) {
   // command-mode cases above replace `fileResults` wholesale. This avoids
   // the list flickering to a loading/empty state on every keystroke.
   useEffect(() => {
-    if (isCommandMode) return;
+    if (isCommandMode || isSymbolMode) return;
+    if (isRecentMode) return; // recent files are filtered locally, above
     if (!debouncedFileQuery) return; // handled by the recent-files effect above
 
     setIsSearching(true);
@@ -165,9 +214,36 @@ function PaletteModal({ initialMode, onClose }: PaletteModalProps) {
         }
       }
     })();
-  }, [isCommandMode, debouncedFileQuery, workspacePath, isUnityProject]);
+  }, [isCommandMode, isSymbolMode, isRecentMode, debouncedFileQuery, workspacePath, isUnityProject]);
 
-  const totalResults = isCommandMode ? commandResults.length : fileResults.length;
+  // Symbol search. Mirrors the file-search effect's generation guard so a
+  // slow server cannot land results for a query the user has moved past.
+  useEffect(() => {
+    if (!isSymbolMode) {
+      setSymbolResults([]);
+      return;
+    }
+    if (!debouncedFileQuery) {
+      setSymbolResults([]);
+      setIsSearching(false);
+      return;
+    }
+    setIsSearching(true);
+    const gen = ++searchGenRef.current;
+    (async () => {
+      const hits = await queryWorkspaceSymbols(debouncedFileQuery);
+      if (gen === searchGenRef.current) {
+        setSymbolResults(hits);
+        setIsSearching(false);
+      }
+    })();
+  }, [isSymbolMode, debouncedFileQuery]);
+
+  const totalResults = isCommandMode
+    ? commandResults.length
+    : isSymbolMode
+      ? symbolResults.length
+      : fileResults.length;
   const showLoadingBar = useDelayedTrue(isSearching, LOADING_BAR_DELAY_MS);
 
   // Reset selection when results change. `query` (not debounced) changes on
@@ -177,7 +253,7 @@ function PaletteModal({ initialMode, onClose }: PaletteModalProps) {
   // the (intentionally stale-tolerant) results array itself.
   useEffect(() => {
     setSelectedIndex(0);
-  }, [totalResults, query, isCommandMode]);
+  }, [totalResults, query, isCommandMode, isSymbolMode]);
 
   // Auto-focus input
   useEffect(() => {
@@ -229,6 +305,16 @@ function PaletteModal({ initialMode, onClose }: PaletteModalProps) {
           result.cmd.handler();
           onClose();
         }
+      } else if (isSymbolMode) {
+        const hit = symbolResults[index];
+        if (hit) {
+          // Queue the jump BEFORE opening: EditorPanel consumes the pending
+          // navigation in an effect keyed on activeFilePath, so setting it
+          // after openFile would race the mount for an unopened file.
+          setPendingNavigation({ line: hit.line, column: hit.column });
+          openFile(hit.path, hit.path.split('/').pop() || hit.path);
+          onClose();
+        }
       } else {
         const result = fileResults[index];
         if (result) {
@@ -237,7 +323,7 @@ function PaletteModal({ initialMode, onClose }: PaletteModalProps) {
         }
       }
     },
-    [isCommandMode, commandResults, fileResults, openFile, onClose],
+    [isCommandMode, isSymbolMode, commandResults, symbolResults, fileResults, openFile, onClose],
   );
 
   const handleKeyDown = useCallback(
@@ -271,9 +357,19 @@ function PaletteModal({ initialMode, onClose }: PaletteModalProps) {
     setSelectedIndex(0);
   }, []);
 
+  // A one-character symbol query would ask the server for essentially every
+  // symbol in the solution, so it is refused — say so rather than rendering an
+  // empty list that looks like "no results".
+  const symbolQueryTooShort =
+    isSymbolMode && query.length > 0 && query.length < MIN_SYMBOL_QUERY_LENGTH;
+
   const placeholder = isCommandMode
     ? 'Type a command name...'
-    : 'Search files by name...';
+    : isSymbolMode
+      ? `Search symbols — type at least ${MIN_SYMBOL_QUERY_LENGTH} characters`
+      : isRecentMode
+        ? 'Recently visited files — type to filter'
+        : 'Search files by name...';
 
   return (
     <div
@@ -411,6 +507,64 @@ function PaletteModal({ initialMode, onClose }: PaletteModalProps) {
                   );
                 }
 
+                if (isSymbolMode) {
+                  const hit = symbolResults[index];
+                  if (!hit) return null;
+                  const rel = workspacePath
+                    ? hit.path.replace(workspacePath + '/', '')
+                    : hit.path;
+                  return (
+                    <div
+                      key={`${hit.path}:${hit.line}:${hit.column}:${hit.name}`}
+                      data-index={index}
+                      ref={rowVirtualizer.measureElement}
+                      className={`palette-item${index === selectedIndex ? ' palette-item-selected' : ''}`}
+                      onMouseEnter={() => handleHover(index)}
+                      onClick={() => handleSelect(index)}
+                      style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        width: '100%',
+                        transform: `translateY(${virtualItem.start}px)`,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: 12,
+                      }}
+                    >
+                      <span style={{ display: 'flex', alignItems: 'baseline', gap: 8, minWidth: 0 }}>
+                        <span style={{ whiteSpace: 'nowrap' }}>{hit.name}</span>
+                        {hit.containerName && (
+                          <span
+                            style={{
+                              color: 'var(--text-secondary)',
+                              fontSize: 12,
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            {hit.containerName}
+                          </span>
+                        )}
+                      </span>
+                      <span
+                        style={{
+                          color: 'var(--text-secondary)',
+                          fontSize: 12,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                          direction: 'rtl',
+                          textAlign: 'right',
+                        }}
+                        title={`${rel}:${hit.line}`}
+                      >
+                        {rel}:{hit.line}
+                      </span>
+                    </div>
+                  );
+                }
+
                 // File mode
                 const result = fileResults[index];
                 if (!result) return null;
@@ -461,7 +615,22 @@ function PaletteModal({ initialMode, onClose }: PaletteModalProps) {
             </div>
           )}
 
-          {isCommandMode
+          {isSymbolMode
+            ? (symbolQueryTooShort || (!isSearching && query && symbolResults.length === 0)) && (
+                <div
+                  style={{
+                    padding: '12px 14px',
+                    color: 'var(--text-secondary)',
+                    fontSize: 13,
+                    textAlign: 'center',
+                  }}
+                >
+                  {symbolQueryTooShort
+                    ? `Type at least ${MIN_SYMBOL_QUERY_LENGTH} characters to search symbols`
+                    : 'No matching symbols'}
+                </div>
+              )
+            : isCommandMode
             ? totalResults === 0 && (
                 <div
                   style={{
@@ -474,7 +643,7 @@ function PaletteModal({ initialMode, onClose }: PaletteModalProps) {
                   No matching commands
                 </div>
               )
-            : !isSearching && query && fileResults.length === 0 && (
+            : !isSearching && (query || isRecentMode) && fileResults.length === 0 && (
                 <div
                   style={{
                     padding: '12px 14px',
@@ -483,7 +652,11 @@ function PaletteModal({ initialMode, onClose }: PaletteModalProps) {
                     textAlign: 'center',
                   }}
                 >
-                  No matching files
+                  {isRecentMode
+                    ? query
+                      ? 'No matching recent files'
+                      : 'No files visited yet'
+                    : 'No matching files'}
                 </div>
               )}
         </div>

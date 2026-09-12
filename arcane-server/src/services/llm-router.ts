@@ -5,6 +5,7 @@ import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import type { ModelMessage, ToolSet } from 'ai';
 import type { ChatCompletionRequest, ChatMessage, StreamEvent, ToolDefinition } from '../types.ts';
 import { getMaxOutput, wireFormatForNativeId, MODEL_CATALOG, type ModelInfo } from '../lib/costs.ts';
+import type { EffortLevel } from '../config/routing.ts';
 
 // All models — Workers AI catalog ids and unified-billing third-party ids
 // alike — route through Cloudflare Workers AI via the AI Gateway (the `AI`
@@ -69,7 +70,12 @@ export type LlmEnv = WorkersAiEnv & SparkEnv;
 /** Configuration (not model) failure: a required binding/secret is unset. */
 export class LlmConfigError extends Error {}
 
-const SPARK_PREFIX = 'spark/';
+/** The `name` passed to createOpenAICompatible below AND the id prefix that
+ *  selects that route — @ai-sdk/openai-compatible derives its
+ *  providerOptions key from the provider name, so the two must stay equal or
+ *  `providerOptions.spark` silently stops being read. */
+const SPARK_PROVIDER = 'spark';
+const SPARK_PREFIX = `${SPARK_PROVIDER}/`;
 
 export function resolveModel(
     modelId: string,
@@ -101,7 +107,7 @@ export function resolveModel(
         // with a usage chunk — without it, streaming responses carry no
         // usage at all and the `finish` event below would see zeroes.
         const provider = createOpenAICompatible({
-            name: 'spark',
+            name: SPARK_PROVIDER,
             baseURL: env.SPARK_BASE_URL,
             apiKey: env.SPARK_API_KEY,
             includeUsage: true,
@@ -266,6 +272,69 @@ export function isToolChoiceRejection(error: unknown): boolean {
     return /tool_?choice/i.test(describeStreamError(error));
 }
 
+/**
+ * Did the provider reject `reasoning_effort` outright?
+ *
+ * Exactly the `tool_choice` hazard one field over: a provider that has not
+ * implemented the field 400s the WHOLE request instead of ignoring it, which
+ * would turn "think harder" into "every send on this model fails". Matched on
+ * the FIELD NAME, in both spellings that reach us — `reasoning_effort` on the
+ * chat wire, `reasoning.effort` on OpenAI's Responses wire.
+ */
+export function isEffortRejection(error: unknown): boolean {
+    return /reasoning[_.]effort/i.test(describeStreamError(error));
+}
+
+/** Workers AI publishes no level above 'high'. 'xhigh'/'max' exist on the
+ *  spark and OpenAI wires only, so this is where the ladder is flattened —
+ *  inventing a value a provider never documented is what made every
+ *  gpt-5.6-luna request 400 in 2026-08. */
+const WORKERS_AI_MAX_EFFORT = 'high';
+
+/**
+ * The resolved effort level in the shape the target provider actually reads.
+ * Three wires, three shapes, each verified against the installed package:
+ *
+ *   `spark/`  → openai-compatible spreads `providerOptions[<name>]` into the
+ *               request body and reads `reasoningEffort` as `reasoning_effort`.
+ *   `@cf/`    → workers-ai-provider reads `providerOptions['workers-ai']
+ *               .reasoning_effort` onto the run INPUTS (not the options arg).
+ *   otherwise → every unified-billing id resolves through @ai-sdk/openai,
+ *               whose `reasoningEffort` enum includes both of our levels.
+ *
+ * Returns undefined when there is no effort to send, which keeps
+ * `providerOptions` off the request entirely rather than sending an empty one.
+ */
+export function effortProviderOptions(
+    model: string, effort: EffortLevel | undefined,
+): Record<string, Record<string, string>> | undefined {
+    if (!effort) return undefined;
+    if (model.startsWith(SPARK_PREFIX)) return { [SPARK_PROVIDER]: { reasoningEffort: effort } };
+    if (model.startsWith('@cf/')) return { 'workers-ai': { reasoning_effort: WORKERS_AI_MAX_EFFORT } };
+    return { openai: { reasoningEffort: effort } };
+}
+
+/** One-level merge of provider-options fragments. Fragments that name the
+ *  SAME provider (prompt-cache key and reasoning effort both live under
+ *  `openai`) merge their inner objects instead of one replacing the other —
+ *  a plain spread would drop promptCacheKey silently, costing every
+ *  prompt-cache discount on the Max tier's planner with no error to show for
+ *  it. Undefined when nothing was contributed. */
+function mergeProviderOptions(
+    ...parts: Array<Record<string, Record<string, string>> | undefined>
+): Record<string, Record<string, string>> | undefined {
+    const merged: Record<string, Record<string, string>> = {};
+    let contributed = false;
+    for (const part of parts) {
+        if (!part) continue;
+        contributed = true;
+        for (const [provider, options] of Object.entries(part)) {
+            merged[provider] = { ...merged[provider], ...options };
+        }
+    }
+    return contributed ? merged : undefined;
+}
+
 // Workers AI binding errors are normalized by workers-ai-provider into an
 // APICallError whose `statusCode` carries the mapped HTTP status (internal
 // codes 3036/3040 -> 429), so check that first — the stringified message
@@ -278,11 +347,48 @@ export function classifyStreamError(error: unknown): StreamErrorCode {
     return /rate limit|\b3036\b|\b3040\b|capacity/i.test(String(error)) ? 'rate_limit' : 'model_error';
 }
 
+/**
+ * Structured retry-after for a provider error, read off the AI SDK's
+ * `APICallError.responseHeaders` (`Record<string, string> | undefined`, see
+ * @ai-sdk/provider's index.d.ts). RFC 7231 allows either an integer seconds
+ * count or an HTTP-date for `Retry-After`; header casing is not guaranteed to
+ * survive whatever fetch/Headers normalization ran upstream, so the lookup is
+ * case-insensitive. Clamped to [1, 3600] so a provider's second-off or
+ * day-off value can never turn into a near-instant or near-infinite editor
+ * retry. Undefined when the header is absent or neither shape parses — the
+ * SSE error event then omits `retryAfterSeconds` entirely (see the `error`
+ * case in streamCompletion below).
+ */
+export function retryAfterSecondsFrom(error: unknown): number | undefined {
+    const headers = typeof error === 'object' && error !== null
+        ? (error as { responseHeaders?: Record<string, string> }).responseHeaders
+        : undefined;
+    if (!headers) return undefined;
+    const key = Object.keys(headers).find((k) => k.toLowerCase() === 'retry-after');
+    const raw = key ? headers[key]?.trim() : undefined;
+    if (!raw) return undefined;
+
+    let seconds: number | undefined;
+    if (/^\d+$/.test(raw)) {
+        seconds = parseInt(raw, 10);
+    } else {
+        const deltaMs = Date.parse(raw) - Date.now();
+        if (!Number.isNaN(deltaMs)) seconds = Math.ceil(deltaMs / 1000);
+    }
+    if (seconds === undefined || !Number.isFinite(seconds)) return undefined;
+    return Math.min(3600, Math.max(1, seconds));
+}
+
 type StreamTextFn = typeof streamText;
 
 export async function* streamCompletion(
     req: ChatCompletionRequest, env: LlmEnv, streamTextImpl: StreamTextFn = streamText,
     signal?: AbortSignal, catalog: Record<string, ModelInfo> = MODEL_CATALOG,
+    // Reasoning effort is a PARAMETER, deliberately not a field on `req`:
+    // config/routing.ts resolves it server-side from the already-gated tier,
+    // and keeping it off the request body means an editor that sends its own
+    // `effort` cannot reach the provider with it. Undefined sends none.
+    effort?: EffortLevel,
 ): AsyncGenerator<StreamEvent> {
     // `skipCache` disables the AI GATEWAY's exact-match response-replay cache
     // (a cached replay of a temperature-sampled completion is semantically
@@ -306,18 +412,19 @@ export async function* streamCompletion(
     const maxOutputTokens = Math.min(req.max_tokens ?? 8192, getMaxOutput(req.model, catalog));
 
     const forbidTools = req.tool_choice === 'none';
+    const cacheOptions = cacheKey && req.model.startsWith('openai/')
+        ? { openai: { promptCacheKey: cacheKey } }
+        : undefined;
+    const effortOptions = effortProviderOptions(req.model, effort);
     const baseArgs = {
         model, messages,
-        ...(cacheKey && req.model.startsWith('openai/')
-            ? { providerOptions: { openai: { promptCacheKey: cacheKey } } }
-            : {}),
         // Client Stop/disconnect: without this the provider drained (and
         // billed) the full generation after the user stopped reading.
         ...(signal ? { abortSignal: signal } : {}),
         maxOutputTokens, temperature: req.temperature,
     };
 
-    // At most two passes. The first sends what the caller asked for: with
+    // At most three passes. The first sends what the caller asked for: with
     // `tool_choice: 'none'` the tools block stays in the prompt (heading the
     // provider's cached prefix) while tool calls are forbidden — the editor's
     // turn governor sends exactly that at the per-send call cap.
@@ -330,27 +437,49 @@ export async function* streamCompletion(
     // `tools`. That forfeits the cached prefix — the exact cost
     // `tool_choice: 'none'` exists to avoid — so it runs only after the
     // provider has actually refused the field, never speculatively.
+    //
+    // The same shape covers `reasoning_effort`, which is rejected the same way
+    // by providers that don't implement it. The two fallbacks are independent
+    // and compose: each rejection drops exactly the field it named and retries,
+    // so a provider that implements neither still completes the turn on the
+    // third pass. Hence three attempts, not two — and since every retry both
+    // consumes an attempt and sets one drop flag, the last attempt is
+    // guaranteed to be sending neither field, so the loop can never fall out
+    // of its final pass still holding a rejection.
     let emitted = false;
-    for (let attempt = 0; attempt < 2; attempt++) {
-        const sendToolChoice = attempt === 0;
-        const result = streamTextImpl(sendToolChoice
-            ? {
-                ...baseArgs,
-                ...(tools ? { tools } : {}),
-                ...(forbidTools ? { toolChoice: 'none' as const } : {}),
-            }
-            : baseArgs);
+    let dropToolChoice = false;
+    let dropEffort = false;
+    for (let attempt = 0; attempt < 3; attempt++) {
+        const sendToolChoice = !dropToolChoice;
+        const providerOptions = mergeProviderOptions(cacheOptions, dropEffort ? undefined : effortOptions);
+        const result = streamTextImpl({
+            ...baseArgs,
+            ...(providerOptions ? { providerOptions } : {}),
+            ...(sendToolChoice
+                ? {
+                    ...(tools ? { tools } : {}),
+                    ...(forbidTools ? { toolChoice: 'none' as const } : {}),
+                }
+                : {}),
+        });
         let rejected = false;
 
         for await (const part of result.fullStream) {
-            // A provider that refuses `tool_choice` refuses it at request
+            // A provider that refuses one of these fields refuses it at request
             // validation, so this lands before the first token and `emitted` is
             // false. Check it anyway: retrying a half-delivered turn would replay
             // text the client has already rendered.
-            if (part.type === 'error' && sendToolChoice && forbidTools && !emitted
-                && isToolChoiceRejection(part.error)) {
-                rejected = true;
-                break;
+            if (part.type === 'error' && !emitted) {
+                if (sendToolChoice && forbidTools && isToolChoiceRejection(part.error)) {
+                    dropToolChoice = true;
+                    rejected = true;
+                    break;
+                }
+                if (!dropEffort && effortOptions && isEffortRejection(part.error)) {
+                    dropEffort = true;
+                    rejected = true;
+                    break;
+                }
             }
             switch (part.type) {
                 case 'text-delta':
@@ -386,10 +515,15 @@ export async function* streamCompletion(
                     emitted = true;
                     yield { type: 'thinking', thought: part.text, signature: '' };
                     break;
-                case 'error':
+                case 'error': {
                     emitted = true;
-                    yield { type: 'error', code: classifyStreamError(part.error), message: describeStreamError(part.error) };
+                    const retryAfterSeconds = retryAfterSecondsFrom(part.error);
+                    yield {
+                        type: 'error', code: classifyStreamError(part.error), message: describeStreamError(part.error),
+                        ...(retryAfterSeconds !== undefined ? { retryAfterSeconds } : {}),
+                    };
                     break;
+                }
             }
         }
         if (!rejected) return;

@@ -3,7 +3,7 @@ import { authMiddleware } from '../middleware/auth.ts';
 import type { AuthPayload } from '../middleware/auth.ts';
 import type { AppEnv } from '../types.ts';
 import { getUserBillingRow } from '../lib/db.ts';
-import { getModelRouting, getEffectivePricing } from '../lib/app-config.ts';
+import { getModelRouting, getEffectivePricing, getHarnessLimits } from '../lib/app-config.ts';
 import type { TierRouting } from '../lib/app-config.ts';
 import type { ModelInfo } from '../lib/costs.ts';
 import { getContextWindow } from '../lib/costs.ts';
@@ -49,6 +49,7 @@ configRouter.get('/v1/config', authMiddleware(), async (c) => {
 
     const routing = await getModelRouting(db);
     const pricing = await getEffectivePricing(db);
+    const limits = await getHarnessLimits(db);
 
     return c.json({
         plan,
@@ -68,6 +69,7 @@ configRouter.get('/v1/config', authMiddleware(), async (c) => {
                 hasPreplanning: tierRouting.planner !== tierRouting.executor,
                 contextWindow: minContextWindow(tierRouting, pricing.catalog),
                 pricingCliffTokens: minPricingCliffTokens(tierRouting, pricing.catalog),
+                maxModelCalls: limits.tiers[t].maxModelCalls,
             };
         }),
     });

@@ -13,6 +13,15 @@ export type {
   SelectionObject,
   ProjectAsset,
   DebuggerEndpoint,
+  RpcRefusal,
+  SceneTarget,
+  AttachUiDocumentParams,
+  AttachUiDocumentResult,
+  SetSerializedPropertyParams,
+  SetSerializedPropertyResult,
+  SerializedValue,
+  SerializedValueKind,
+  SerializedObjectRef,
 } from './services/bridge-rpc';
 export { isBridgeInstalled, installBridge, BRIDGE_DOCS_URL } from './services/bridge-installer';
 export { maybeRefreshUnityAfterSave } from './services/refresh-on-save';

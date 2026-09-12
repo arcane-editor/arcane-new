@@ -3,14 +3,19 @@
  * chevron, opening a popover menu for ASK / AGENT / PLAN. Replaces the prior
  * three-segment control to free up horizontal space in the composer toolbar
  * and to match the user's reference design.
+ *
+ * DESIGN is shown but never listed: the design dock on a `.uxml` canvas is the
+ * only way in, so the pill reports it (`modeOptionFor`) and the menu offers the
+ * three modes you can leave it for.
  */
 
 import { useEffect, useRef, useState } from 'react';
+import { useAriaKeyshortcuts } from '../../../hooks/useAriaKeyshortcuts';
 import { createPortal } from 'react-dom';
 import { ChevronDown, Check } from 'lucide-react';
 import { useAiStore } from '../../../stores/ai';
 import type { ChatMode } from '../services/types';
-import { MODES } from '../data/modes';
+import { MODES, modeOptionFor } from '../data/modes';
 import Tooltip from '../../../components/Tooltip';
 
 const POPOVER_WIDTH = 240;
@@ -25,7 +30,8 @@ function ModeSelector() {
   const popoverRef = useRef<HTMLDivElement>(null);
   const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
 
-  const active = MODES.find((m) => m.value === mode) ?? MODES[1];
+  const modeChord = useAriaKeyshortcuts('ai.cycleMode');
+  const active = modeOptionFor(mode);
   const ActiveIcon = active.Icon;
 
   function toggle() {
@@ -98,7 +104,7 @@ function ModeSelector() {
         aria-expanded={open}
         // Permanent, non-visual counterpart to the ChordHint keycap beside
         // this pill — see EffortSelector for the same pairing.
-        aria-keyshortcuts="Meta+M"
+        aria-keyshortcuts={modeChord}
       >
         <ActiveIcon size={12} className="ai-panel-mode-pill-icon" strokeWidth={2.25} />
         <span className="ai-panel-mode-pill-label">{active.label}</span>

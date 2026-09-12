@@ -1,14 +1,28 @@
 import { useEffect } from 'react';
 import { ShieldAlert } from 'lucide-react';
 import { openUrl } from '@tauri-apps/plugin-opener';
+import type { DotnetBlock } from '../../lsp';
 
 interface DotnetMissingModalProps {
+  /** Which prerequisite is missing, and the sentence describing it. */
+  block: DotnetBlock;
   onClose: () => void;
 }
 
 const DOTNET_DOWNLOAD_URL = 'https://dotnet.microsoft.com/download';
 
-function DotnetMissingModal({ onClose }: DotnetMissingModalProps) {
+/**
+ * Titles differ per reason because the fix differs. Telling someone whose
+ * .NET is merely too old to "install the .NET SDK" invites them to install
+ * the same version again and see the same modal.
+ */
+const TITLES: Record<DotnetBlock['reason'], string> = {
+  missing: '.NET SDK required',
+  'sdk-missing': '.NET SDK required',
+  'runtime-too-old': 'A newer .NET is required',
+};
+
+function DotnetMissingModal({ block, onClose }: DotnetMissingModalProps) {
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === 'Escape') onClose();
@@ -34,12 +48,11 @@ function DotnetMissingModal({ onClose }: DotnetMissingModalProps) {
           <ShieldAlert size={22} />
         </div>
         <h2 id="dotnet-missing-title" className="app-modal-title">
-          .NET SDK required
+          {TITLES[block.reason]}
         </h2>
         <p className="app-modal-body">
-          This Unity project needs the .NET SDK for C# IntelliSense, diagnostics,
-          and code navigation. Install it once and reopen the workspace — the
-          editor will pick it up automatically.
+          {block.detail} Install it once and reopen the workspace — the editor
+          sets up the C# language server itself from there.
         </p>
         <div className="app-modal-actions">
           <button

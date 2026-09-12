@@ -42,12 +42,58 @@ export interface MethodDecl {
   bodySpan: SourceSpan | null;
 }
 
+/** One argument of an attribute use, e.g. `menuName = "Game/Weapon"` or `0f`. */
+export interface AttributeArg {
+  /** Verbatim source text of the argument, trimmed. Read from the ORIGINAL text. */
+  raw: string;
+  /** Named-argument name (`menuName = …` → `menuName`), else null. */
+  name: string | null;
+  /** Decoded string-literal value, else null. */
+  text: string | null;
+  /** Decoded numeric-literal value (`0.5f` → 0.5, `0x10` → 16), else null. */
+  number: number | null;
+}
+
+/**
+ * An attribute use WITH its arguments — the structured companion to the
+ * name-only `attributes` list, which stays as-is for its existing consumers.
+ */
+export interface AttributeUse {
+  /** Short name, namespace-stripped (`UnityEngine.Range` → `Range`). */
+  name: string;
+  args: AttributeArg[];
+  /** Span of this attribute inside its `[...]` block. */
+  span: SourceSpan;
+}
+
+export interface EnumMember {
+  name: string;
+  /** Resolved value: explicit, `1 << n`, hex, or previous + 1. Null if unresolvable. */
+  value: number | null;
+  nameOffset: number;
+}
+
+export interface EnumDecl {
+  name: string;
+  members: EnumMember[];
+  /** True when the declaration carries `[Flags]`. */
+  isFlags: boolean;
+  /** `enum E : byte` → `byte`, else null. */
+  underlyingType: string | null;
+  /** Span of the enum body including braces. */
+  bodySpan: SourceSpan | null;
+  nameOffset: number;
+  attributes: string[];
+}
+
 export interface FieldDecl {
   name: string;
   type: string;
   modifiers: string[];
   /** Attribute names attached to the field, e.g. `SerializeField`. */
   attributes: string[];
+  /** The same attributes with their arguments parsed. */
+  attributeUses: AttributeUse[];
   /** Offset of the field identifier. */
   nameOffset: number;
   /** Span of the whole declaration line(s) (start of modifiers..trailing ;). */
@@ -63,6 +109,12 @@ export interface ClassDecl {
   /** Span of the class body including braces. */
   bodySpan: SourceSpan | null;
   nameOffset: number;
+  /** Attribute names on the declaration, e.g. `CreateAssetMenu`. */
+  attributes: string[];
+  /** The same attributes with their arguments parsed. */
+  attributeUses: AttributeUse[];
+  /** True for `struct`, false for `class`. */
+  isStruct: boolean;
 }
 
 export interface UsingDirective {
@@ -82,6 +134,8 @@ export interface CSharpScan {
   classes: ClassDecl[];
   methods: MethodDecl[];
   fields: FieldDecl[];
+  /** Enum declarations, needed to render a typed enum field as its members. */
+  enums: EnumDecl[];
   /** Cumulative line-start offsets for offset↔line/col mapping. */
   lineStarts: number[];
 }
@@ -99,7 +153,7 @@ function escapeRegExp(s: string): string {
  * false matches inside literals, while still being able to read the real text
  * (e.g. the literal value) from the original at the same offsets.
  */
-function blankStringsAndComments(text: string): string {
+export function blankStringsAndComments(text: string): string {
   const out = text.split('');
   const n = text.length;
   let i = 0;
@@ -318,6 +372,37 @@ function splitParams(inner: string): string[] {
   return parts;
 }
 
+/**
+ * Split on top-level commas respecting `()`, `[]` and `{}` but NOT `<>`.
+ *
+ * `splitParams` treats angle brackets as generic-argument depth, which is right
+ * for a parameter list and wrong anywhere an operator can appear — `1 << 0`
+ * reads as two opening brackets that never close.
+ */
+function splitTopLevel(inner: string): string[] {
+  const parts: string[] = [];
+  let paren = 0;
+  let bracket = 0;
+  let brace = 0;
+  let cur = '';
+  for (const ch of inner) {
+    if (ch === '(') paren++;
+    else if (ch === ')') paren = Math.max(0, paren - 1);
+    else if (ch === '[') bracket++;
+    else if (ch === ']') bracket = Math.max(0, bracket - 1);
+    else if (ch === '{') brace++;
+    else if (ch === '}') brace = Math.max(0, brace - 1);
+    if (ch === ',' && paren === 0 && bracket === 0 && brace === 0) {
+      parts.push(cur);
+      cur = '';
+      continue;
+    }
+    cur += ch;
+  }
+  if (cur.trim().length > 0) parts.push(cur);
+  return parts;
+}
+
 /** Parse a single parameter token like `[In] ref Collision other = null`. */
 function parseParam(raw: string): ParamInfo | null {
   let s = raw.trim();
@@ -351,15 +436,21 @@ function parseParamList(inner: string): ParamInfo[] {
 const ATTR_NAMES_RE = /\[\s*([^\]]*)\]/g;
 
 /**
- * Walk backwards from a declaration start, collecting attribute names that sit
- * immediately above it (possibly several `[...]` blocks across lines). Reads
- * the blanked `code` so strings inside attribute args are ignored.
+ * Walk backwards from a declaration start, collecting the attribute blocks that
+ * sit immediately above it (possibly several `[...]` blocks across lines).
+ *
+ * Walks the blanked `code` so a `]` or `,` inside a string literal cannot end a
+ * block or split an argument list. `blocks` are returned in source order and
+ * span the brackets inclusively, so callers that need the ARGUMENTS can slice
+ * them out of the original `text` at the same offsets (see `parseAttributeUses`).
  */
 function collectLeadingAttributes(code: string, declStart: number): {
   names: string[];
   attrStart: number;
+  blocks: SourceSpan[];
 } {
   const names: string[] = [];
+  const blocks: SourceSpan[] = [];
   let cursor = declStart;
   // Skip whitespace immediately preceding.
   let i = cursor - 1;
@@ -378,6 +469,12 @@ function collectLeadingAttributes(code: string, declStart: number): {
     }
     if (j < 0) break;
     const block = code.slice(j, i + 1);
+    // Names within ONE block are already in source order, so collect them into
+    // a local list and prepend the whole block. Pushing into a shared list and
+    // reversing at the end (as this used to) also reverses the within-block
+    // order, so `[A, B]` came back as `["B", "A"]`. Every consumer uses
+    // `.includes()`, which is why that went unnoticed.
+    const blockNames: string[] = [];
     for (const m of block.matchAll(ATTR_NAMES_RE)) {
       const body = m[1];
       // Split multiple attributes in one block: [A, B(...)]
@@ -386,20 +483,218 @@ function collectLeadingAttributes(code: string, declStart: number): {
         if (nameMatch) {
           // Normalise `UnityEngine.SerializeField` → `SerializeField`.
           const parts = nameMatch[1].split('.');
-          names.push(parts[parts.length - 1]);
+          blockNames.push(parts[parts.length - 1]);
         }
       }
     }
+    names.unshift(...blockNames);
+    blocks.unshift({ start: j, end: i + 1 });
     cursor = j;
     i = j - 1;
   }
-  return { names: names.reverse(), attrStart: cursor };
+  return { names, attrStart: cursor, blocks };
+}
+
+/** Decode a C# string literal body (the text between the quotes). */
+function decodeCSharpString(raw: string): string {
+  return raw.replace(/\\(u[0-9a-fA-F]{4}|x[0-9a-fA-F]{1,4}|.)/g, (_full, esc: string) => {
+    switch (esc[0]) {
+      case 'n': return '\n';
+      case 't': return '\t';
+      case 'r': return '\r';
+      case '0': return '\0';
+      case 'u':
+      case 'x': return String.fromCharCode(parseInt(esc.slice(1), 16));
+      default: return esc;
+    }
+  });
+}
+
+/** Parse one attribute argument, e.g. `menuName = "Game/Weapon"` or `0f`. */
+function parseAttributeArg(raw: string): AttributeArg {
+  const trimmed = raw.trim();
+  let name: string | null = null;
+  let rest = trimmed;
+
+  // Named argument: `foo = value` / `foo: value`. Guard against `==`.
+  const named = /^([A-Za-z_]\w*)\s*(?:=(?!=)|:)\s*([\s\S]*)$/.exec(trimmed);
+  if (named) {
+    name = named[1];
+    rest = named[2].trim();
+  }
+
+  let text: string | null = null;
+  const str = /^@?"([\s\S]*)"$/.exec(rest);
+  if (str) text = rest.startsWith('@') ? str[1] : decodeCSharpString(str[1]);
+
+  let num: number | null = null;
+  // Numeric literal with an optional C# suffix (f/d/m/u/l).
+  const numMatch = /^[-+]?(?:0[xX][0-9a-fA-F]+|\d[\d_]*\.?\d*(?:[eE][-+]?\d+)?)[fFdDmMuUlL]*$/.exec(rest);
+  if (numMatch) {
+    const cleaned = rest.replace(/[fFdDmMuUlL]+$/, '').replace(/_/g, '');
+    const parsed = /^[-+]?0[xX]/.test(cleaned) ? parseInt(cleaned, 16) : Number(cleaned);
+    if (Number.isFinite(parsed)) num = parsed;
+  }
+
+  return { raw: trimmed, name, text, number: num };
+}
+
+/**
+ * Turn attribute blocks into structured uses WITH their arguments.
+ *
+ * The split runs over `code` (blanked) so a comma or paren inside a string
+ * literal cannot break the argument list, but every value is sliced out of
+ * `text` — `blankStringsAndComments` preserves length exactly, so the offsets
+ * agree by construction. Reading args from `code` would yield only spaces,
+ * which is the single easiest mistake to make here.
+ */
+function parseAttributeUses(
+  text: string,
+  code: string,
+  blocks: SourceSpan[],
+): AttributeUse[] {
+  const uses: AttributeUse[] = [];
+  for (const block of blocks) {
+    // Strip the outer brackets.
+    const innerStart = block.start + 1;
+    const innerEnd = block.end - 1;
+    if (innerEnd <= innerStart) continue;
+    const codeInner = code.slice(innerStart, innerEnd);
+
+    let offset = innerStart;
+    for (const piece of splitParams(codeInner)) {
+      const pieceStart = offset;
+      offset += piece.length + 1; // +1 for the comma splitParams consumed
+      const trimmedLead = piece.length - piece.trimStart().length;
+      const nameMatch = piece.trim().match(/^([A-Za-z_][A-Za-z0-9_.]*)/);
+      if (!nameMatch) continue;
+      const parts = nameMatch[1].split('.');
+      const name = parts[parts.length - 1];
+
+      const useStart = pieceStart + trimmedLead;
+      const useEnd = useStart + piece.trim().length;
+
+      // Argument list, if any.
+      const args: AttributeArg[] = [];
+      const parenIdx = piece.indexOf('(');
+      if (parenIdx >= 0) {
+        const close = piece.lastIndexOf(')');
+        if (close > parenIdx) {
+          const argsStart = pieceStart + parenIdx + 1;
+          const argsCode = piece.slice(parenIdx + 1, close);
+          let argOffset = argsStart;
+          for (const argPiece of splitParams(argsCode)) {
+            const argStart = argOffset;
+            argOffset += argPiece.length + 1;
+            const argEnd = argStart + argPiece.length;
+            // Slice the REAL text, not the blanked view.
+            const realArg = text.slice(argStart, argEnd);
+            if (realArg.trim().length === 0) continue;
+            args.push(parseAttributeArg(realArg));
+          }
+        }
+      }
+      uses.push({ name, args, span: { start: useStart, end: useEnd } });
+    }
+  }
+  return uses;
 }
 
 // ── Main scan ────────────────────────────────────────────────────────────────
 
 const USING_RE = /(^|\n)\s*using\s+(?:static\s+)?([A-Za-z_][\w.]*(?:\s*=\s*[A-Za-z_][\w.<>,\s]*)?)\s*;/g;
 const CLASS_RE = /\b(?:class|struct)\s+([A-Za-z_]\w*)(?:\s*<[^>{]*>)?\s*(?::\s*([^{]+?))?\s*\{/g;
+const ENUM_RE = /\benum\s+([A-Za-z_]\w*)\s*(?::\s*([A-Za-z_]\w*))?\s*\{/g;
+
+/**
+ * Blank the INTERIOR of every enum body (braces kept, newlines preserved) so a
+ * regex scanning for declarations cannot match inside one. Length and offsets
+ * are preserved exactly, like `blankStringsAndComments`.
+ */
+function blankEnumBodies(code: string, enums: EnumDecl[]): string {
+  if (enums.length === 0) return code;
+  const out = code.split('');
+  for (const e of enums) {
+    if (!e.bodySpan) continue;
+    for (let k = e.bodySpan.start + 1; k < e.bodySpan.end - 1 && k < out.length; k++) {
+      if (out[k] !== '\n' && out[k] !== '\r') out[k] = ' ';
+    }
+  }
+  return out.join('');
+}
+
+/**
+ * Walk back over any declaration modifiers (`public sealed partial …`) so
+ * attribute collection starts above them rather than stopping on the first
+ * identifier character. `collectLeadingAttributes` expects to find a `]`.
+ */
+function skipModifiersBackwards(code: string, declStart: number): number {
+  let i = declStart;
+  for (;;) {
+    let j = i - 1;
+    while (j >= 0 && /[ \t\r\n]/.test(code[j])) j--;
+    if (j < 0) return i;
+    let end = j + 1;
+    while (j >= 0 && /[A-Za-z_]/.test(code[j])) j--;
+    const word = code.slice(j + 1, end);
+    if (!word || !MODIFIER_WORDS.has(word)) return i;
+    i = j + 1;
+  }
+}
+
+/**
+ * Parse enum members out of a body, resolving values the way C# does:
+ * explicit assignment wins, `1 << n` and hex are understood (both are the norm
+ * in `[Flags]` enums), and anything else continues from the previous member.
+ *
+ * Values matter because Unity serializes an enum as its NUMBER, never its name
+ * — a widget that offers member names has to map them back to these.
+ */
+function parseEnumMembers(code: string, text: string, body: SourceSpan): EnumMember[] {
+  const inner = code.slice(body.start + 1, body.end - 1);
+  const members: EnumMember[] = [];
+  const byName = new Map<string, number>();
+  let next = 0;
+  let offset = body.start + 1;
+
+  // NOT splitParams: it tracks `<`/`>` as generic-argument depth, so the `<<`
+  // in `Kinetic = 1 << 0` opens a depth of two that never closes and swallows
+  // every member after it. Shift expressions are the norm in [Flags] enums.
+  for (const piece of splitTopLevel(inner)) {
+    const pieceStart = offset;
+    offset += piece.length + 1;
+    const trimmed = piece.trim();
+    if (!trimmed) continue;
+    const m = /^([A-Za-z_]\w*)\s*(?:=\s*([\s\S]+))?$/.exec(trimmed);
+    if (!m) continue;
+    const name = m[1];
+    const nameOffset = pieceStart + piece.indexOf(name);
+
+    let value: number | null = null;
+    if (m[2] === undefined) {
+      value = next;
+    } else {
+      // Read the expression from the ORIGINAL text — a member initialised from
+      // a const string would otherwise come back blanked.
+      const expr = text.slice(nameOffset + name.length, pieceStart + piece.length)
+        .replace(/^\s*=\s*/, '')
+        .trim();
+      const shift = /^([0-9]+)\s*<<\s*([0-9]+)$/.exec(expr);
+      const hex = /^0[xX]([0-9a-fA-F]+)$/.exec(expr);
+      if (shift) value = Number(shift[1]) << Number(shift[2]);
+      else if (hex) value = parseInt(hex[1], 16);
+      else if (/^[-+]?\d+$/.test(expr)) value = Number(expr);
+      else if (byName.has(expr)) value = byName.get(expr)!;
+    }
+
+    if (value !== null) {
+      byName.set(name, value);
+      next = value + 1;
+    }
+    members.push({ name, value, nameOffset });
+  }
+  return members;
+}
 
 // A method declaration head: optional modifiers, return type, name, (params).
 // We deliberately keep this permissive; downstream rules add their own checks.
@@ -441,6 +736,7 @@ export function scanCSharp(text: string): CSharpScan {
     classes: [],
     methods: [],
     fields: [],
+    enums: [],
     lineStarts,
   };
 
@@ -472,11 +768,37 @@ export function scanCSharp(text: string): CSharpScan {
         .filter(Boolean);
       const braceOffset = (m.index ?? 0) + m[0].length - 1; // position of '{'
       const close = matchBrace(code, braceOffset);
+      const declStart = skipModifiersBackwards(code, m.index ?? 0);
+      const { names: attributes, blocks } = collectLeadingAttributes(code, declStart);
       scan.classes.push({
         name,
         baseTypes,
         nameOffset,
         bodySpan: close >= 0 ? { start: braceOffset, end: close + 1 } : null,
+        attributes,
+        attributeUses: parseAttributeUses(text, code, blocks),
+        isStruct: m[0].trimStart().startsWith('struct'),
+      });
+    }
+
+    // Enums — needed to resolve an enum-typed serialized field to its members.
+    ENUM_RE.lastIndex = 0;
+    for (const m of code.matchAll(ENUM_RE)) {
+      const name = m[1];
+      const nameOffset = (m.index ?? 0) + m[0].indexOf(name);
+      const braceOffset = (m.index ?? 0) + m[0].length - 1;
+      const close = matchBrace(code, braceOffset);
+      const bodySpan = close >= 0 ? { start: braceOffset, end: close + 1 } : null;
+      const declStart = skipModifiersBackwards(code, m.index ?? 0);
+      const { names: attributes } = collectLeadingAttributes(code, declStart);
+      scan.enums.push({
+        name,
+        members: bodySpan ? parseEnumMembers(code, text, bodySpan) : [],
+        isFlags: attributes.includes('Flags'),
+        underlyingType: m[2] ?? null,
+        bodySpan,
+        nameOffset,
+        attributes,
       });
     }
 
@@ -530,8 +852,18 @@ export function scanCSharp(text: string): CSharpScan {
     }
 
     // Fields
+    //
+    // Scanned over a view with enum BODIES blanked. FIELD_RE's trailing
+    // `(?:=\s*[^;]*)?;` can start at an `=` inside an enum body and run across
+    // many lines to the next `;` — which is the first real field below the
+    // enum — consuming it. `enum Tier { Low = 3, Mid }` above
+    // `private Rarity rarity;` made `rarity` vanish and produced a bogus field
+    // named `High` in its place. Pre-existing, and only reachable when an enum
+    // is declared above a field: exactly the shape of a ScriptableObject with
+    // an enum-typed serialized field.
+    const fieldCode = blankEnumBodies(code, scan.enums);
     FIELD_RE.lastIndex = 0;
-    for (const m of code.matchAll(FIELD_RE)) {
+    for (const m of fieldCode.matchAll(FIELD_RE)) {
       const modifiersRaw = m[1] ?? '';
       const type = (m[2] ?? '').replace(/\s+/g, ' ').trim();
       const name = m[3];
@@ -548,13 +880,17 @@ export function scanCSharp(text: string): CSharpScan {
       // so we don't land on an identical token inside the type.
       const nameTermIdx = m[0].search(new RegExp(`\\b${escapeRegExp(name)}\\s*(?:=|;)`));
       const nameOffset = nameTermIdx >= 0 ? matchStart + nameTermIdx : matchStart;
-      const { names: attributes, attrStart } = collectLeadingAttributes(code, declContentStart);
+      const { names: attributes, attrStart, blocks } = collectLeadingAttributes(
+        code,
+        declContentStart,
+      );
 
       scan.fields.push({
         name,
         type,
         modifiers: parseModifiers(modifiersRaw),
         attributes,
+        attributeUses: parseAttributeUses(text, code, blocks),
         nameOffset: nameOffset >= 0 ? nameOffset : matchStart,
         declSpan: { start: attrStart, end: matchStart + m[0].length },
         indent: indentAt(text, lineStarts, declContentStart),

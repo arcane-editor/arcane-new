@@ -1,0 +1,23 @@
+---
+import LandingLayout from '../layouts/LandingLayout.astro';
+import Navbar from '../components/Navbar.tsx';
+import FeedbackSection from '../components/FeedbackSection.astro';
+import Footer from '../components/Footer.astro';
+
+/**
+ * The feedback form used to sit in the middle of the home page, between the
+ * pricing table and the docs grid. It is a five-field form on a page whose job
+ * is to get someone to download the app, so it moved here and the footer links
+ * to it.
+ */
+---
+
+<LandingLayout
+  title="Send feedback — UnityIDE"
+  description="Tell us what works in UnityIDE, what doesn't, and what you want next."
+>
+  <Navbar client:load />
+  <div class="pt-24"></div>
+  <FeedbackSection />
+  <Footer />
+</LandingLayout>

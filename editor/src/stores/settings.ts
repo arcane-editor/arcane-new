@@ -13,6 +13,7 @@ const DEFAULT_SETTINGS: SettingsSchema = {
   'editor.renderWhitespace': 'none',
   'editor.autoSave': 'off',
   'editor.autoSaveDelay': 1000,
+  'editor.formatOnSave': false,
   'editor.betterComments': true,
   'terminal.fontSize': 13,
   'terminal.fontFamily': "ui-monospace, SFMono-Regular, Menlo, Monaco, 'Cascadia Mono', 'Courier New', monospace",
@@ -22,6 +23,8 @@ const DEFAULT_SETTINGS: SettingsSchema = {
   'graphify.suppressFirstOpenToast': false,
   'ai.checkpoints.enabled': true,
   'ai.escalation.enabled': true,
+  'ai.specialists.enabled': true,
+  'ai.specialists.editableScenesVersion': 1,
   'ai.memory.enabled': true,
   'ai.edits.applyMode': 'auto',
   'ai.edits.alwaysApproveUnityAssets': true,
@@ -30,16 +33,28 @@ const DEFAULT_SETTINGS: SettingsSchema = {
   'unity.analyzers.enabled': true,
   'unity.compileGate.enabled': true,
   'unity.lspGate.enabled': true,
+  'unity.assetGate.enabled': true,
   'unity.verifiedPass.enabled': true,
+  'unity.consoleCheck.enabled': true,
+  'unity.consoleCheck.autoRepair': true,
   'unity.nearMissDiagnostics.enabled': true,
   'unity.rename.formerlySerializedAs': true,
   'unity.serializationDiagnostics.enabled': true,
+  'unity.projectSettingsDiagnostics.enabled': true,
+  'unity.inputDiagnostics.enabled': true,
+  'unity.uiDiagnostics.enabled': true,
+  'unity.uiToolkit.panel': true,
+  'lsp.solutionWideAnalysis': true,
+  'lsp.csharp.analyzers': true,
   'unity.asmdef.diagnostics': true,
   'unity.bridge.enabled': true,
   'unity.bridge.refreshOnSave': true,
   'unity.telemetry.enabled': false,
   'unity.hierarchyPanel.enabled': true,
   'unity.assetViewer.structuredDefault': true,
+  'unity.scriptableObjects.inspector': true,
+  'unity.scriptableObjects.browser': true,
+  'unity.codeLens.scriptableObjectInstances': true,
   'unity.sceneDiff.enabled': true,
   'unity.codeLens.assetUsages': true,
   'unity.templates.enabled': true,
@@ -51,6 +66,8 @@ const DEFAULT_SETTINGS: SettingsSchema = {
   'unity.git.metaPairingChecks': true,
   'unity.git.yamlMergeIntegration': true,
   'unity.testRunner.enabled': true,
+  'unity.inputHub.enabled': true,
+  'debug.inlineValues': true,
   'unity.debugger.enabled': true,
   'unity.shader.completions': true,
   'unity.packages.manifestIntelligence': true,
@@ -61,6 +78,43 @@ const DEFAULT_SETTINGS: SettingsSchema = {
   'window.zoomLevel': 0,
   'updates.autoInstall': true,
 };
+
+/**
+ * Merge persisted settings while applying one-time migrations.
+ *
+ * Specialist routing used to ship disabled. Existing installations therefore
+ * commonly contain `false` even though the user never opted out. The rollout
+ * marker enables the new Unity studio workflow once, while preserving every
+ * explicit opt-out made after that migration.
+ */
+export function mergeStoredSettings(stored: Record<string, unknown>): SettingsSchema {
+  const merged = { ...DEFAULT_SETTINGS } as Record<string, unknown>;
+  for (const [key, value] of Object.entries(stored)) {
+    if (key in DEFAULT_SETTINGS) merged[key] = value;
+  }
+
+  if (stored['ai.specialists.editableScenesVersion'] !== 1) {
+    merged['ai.specialists.enabled'] = true;
+    merged['ai.specialists.editableScenesVersion'] = 1;
+  }
+
+  // Migration: any stored value referencing a font that's a webfont
+  // (Geist Mono Variable) or commonly missing on macOS (Cascadia Code,
+  // Source Code Pro, JetBrains Mono) makes xterm measure the wrong cell
+  // width and renders the prompt as "c o n t e n t". Force-reset to the
+  // system default in those cases.
+  const storedFont = (merged['terminal.fontFamily'] as string) ?? '';
+  const looksProblematic =
+    storedFont === '' ||
+    /Geist/i.test(storedFont) ||
+    /Cascadia Code\b/i.test(storedFont) ||
+    /Source Code Pro/i.test(storedFont) ||
+    /JetBrains Mono/i.test(storedFont) ||
+    /Fira Code/i.test(storedFont);
+  if (looksProblematic) merged['terminal.fontFamily'] = DEFAULT_SETTINGS['terminal.fontFamily'];
+
+  return merged as unknown as SettingsSchema;
+}
 
 interface SettingsState {
   settings: SettingsSchema;
@@ -79,28 +133,14 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   loadSettings: async () => {
     try {
       const stored = await invoke<Record<string, unknown>>('read_settings');
-      const merged = { ...DEFAULT_SETTINGS } as Record<string, unknown>;
-      for (const [key, value] of Object.entries(stored)) {
-        if (key in DEFAULT_SETTINGS) merged[key] = value;
-      }
-      // Migration: any stored value referencing a font that's a webfont
-      // (Geist Mono Variable) or commonly missing on macOS (Cascadia Code,
-      // Source Code Pro, JetBrains Mono) makes xterm measure the wrong cell
-      // width and renders the prompt as "c o n t e n t". Force-reset to the
-      // system default in those cases.
-      const storedFont = (merged['terminal.fontFamily'] as string) ?? '';
-      const looksProblematic =
-        storedFont === '' ||
-        /Geist/i.test(storedFont) ||
-        /Cascadia Code\b/i.test(storedFont) ||
-        /Source Code Pro/i.test(storedFont) ||
-        /JetBrains Mono/i.test(storedFont) ||
-        /Fira Code/i.test(storedFont);
-      if (looksProblematic) {
-        merged['terminal.fontFamily'] = DEFAULT_SETTINGS['terminal.fontFamily'];
+      const merged = mergeStoredSettings(stored);
+      if (
+        stored['ai.specialists.editableScenesVersion'] !== 1 ||
+        ('terminal.fontFamily' in stored && stored['terminal.fontFamily'] !== merged['terminal.fontFamily'])
+      ) {
         invoke('write_settings', { settings: merged }).catch(() => {});
       }
-      set({ settings: merged as unknown as SettingsSchema, isLoaded: true });
+      set({ settings: merged, isLoaded: true });
     } catch {
       set({ isLoaded: true });
     }

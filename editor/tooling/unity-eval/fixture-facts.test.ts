@@ -2,9 +2,10 @@ import { describe, it, expect } from 'bun:test';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { buildFixtureFacts, buildFixtureGroundingContext } from './fixture-facts';
 
-const FIXTURES = new URL('./fixtures/', import.meta.url).pathname;
+const FIXTURES = fileURLToPath(new URL('./fixtures/', import.meta.url));
 
 describe('buildFixtureFacts', () => {
   // Regression: builtin-legacy and urp-newinput ship no ProjectSettings.asset,
@@ -121,6 +122,51 @@ describe('activeInputHandler parsing (ProjectSettings.asset authoritative over p
   });
 });
 
+// Task 16 (B9): `uiDesignFactLines` is correctly absent from every eval fixture
+// prompt, for the same reason the ScriptableObject/UI Toolkit/Input DETAIL
+// blocks are (see the comment in `buildFixtureFacts` next to `inventory`) —
+// production only appends it when `selectSubsystems` picks `uiToolkit`, which
+// requires an active file the headless eval never has. This fixture ships a
+// `.uxml`, a `.uss` with a `--color-bg` custom property, and a `.asset` that
+// serializes a `PanelSettings` — exactly the inputs that would make production
+// render "USS variables"/"Panel:" lines — to prove the absence is deliberate,
+// not an oversight that happens not to be exercised by the other fixtures.
+describe('buildFixtureFacts — uiDesign facts stay absent even when the project has UI Toolkit content (Task 16 parity)', () => {
+  it('never mentions USS variables or a Panel:, even with a themed .uss and a PanelSettings asset', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'eval-ui-design-'));
+    try {
+      await mkdir(join(dir, 'ProjectSettings'), { recursive: true });
+      await mkdir(join(dir, 'Packages'), { recursive: true });
+      await mkdir(join(dir, 'Assets', 'UI'), { recursive: true });
+      await writeFile(
+        join(dir, 'ProjectSettings', 'ProjectVersion.txt'),
+        'm_EditorVersion: 6000.3.5f2\n',
+      );
+      await writeFile(join(dir, 'Packages', 'manifest.json'), JSON.stringify({ dependencies: {} }));
+      await writeFile(
+        join(dir, 'Assets', 'UI', 'Hud.uxml'),
+        '<UXML><VisualElement name="root" /></UXML>',
+      );
+      await writeFile(
+        join(dir, 'Assets', 'UI', 'Theme.uss'),
+        ':root { --color-bg: #1b1726; }',
+      );
+      await writeFile(
+        join(dir, 'Assets', 'UI', 'GamePanel.asset'),
+        'MonoBehaviour:\n  m_Script: {...}\n  ...UnityEngine.UIElements.PanelSettings...\n  m_Name: GamePanel\n',
+      );
+
+      const facts = await buildFixtureFacts(dir);
+      expect(facts).toContain('UI Toolkit (1 .uxml, 1 .uss)');
+      expect(facts).not.toContain('USS variables');
+      expect(facts).not.toContain('Panel:');
+      expect(facts).not.toContain('--color-bg');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 // P2.1: contrastive anti-default facts (`unity-contrast.ts`) are appended as
 // ADDITIONS at the end of `buildFixtureFacts`'s output, derived from the same
 // pipeline/inputSystem values detected above. Full-string assertions here
@@ -154,6 +200,29 @@ describe('contrast facts integration (P2.1)', () => {
         '- Unity version: 6000.3.5f2',
         '- Render pipeline: URP',
         '- Input system: Input System (new)',
+        '- Shader color property is `_BaseColor` (texture: `_BaseMap`). `_Color`/`_MainTex` are WRONG in this project (Built-in names).',
+        '- Full-screen effects: `OnRenderImage` does NOT run under URP — use a ScriptableRenderPass / Renderer Feature.',
+        '- New Input System is active: `Input.GetAxis/GetKey/GetButton/GetMouseButton` are WRONG here — use InputAction/PlayerInput.',
+        '- `WWW` is deprecated — use `UnityWebRequest` for networking/file loads instead.',
+        '- `Application.LoadLevel` is deprecated — use `SceneManager.LoadScene` instead.',
+      ].join('\n'),
+    );
+  });
+
+  // Task 18 (B11), review finding R15: `codegen-ui-hud`'s seeded HUD
+  // (Assets/UI/HUD.uxml + Theme.uss) lives ONLY in this isolated
+  // `urp-newinput-uitoolkit` fixture, precisely so the shared `urp-newinput`
+  // fixture's facts block (asserted immediately above) stays byte-identical
+  // for the nine other tasks that already run on it.
+  it('urp-newinput-uitoolkit (urp-newinput + a seeded UI Toolkit HUD): gains the subsystem-inventory line', async () => {
+    const facts = await buildFixtureFacts(FIXTURES + 'urp-newinput-uitoolkit');
+    expect(facts).toBe(
+      [
+        '## Unity project facts (authoritative — match these)',
+        '- Unity version: 6000.3.5f2',
+        '- Render pipeline: URP',
+        '- Input system: Input System (new)',
+        '- Unity subsystems in use: UI Toolkit (1 .uxml, 1 .uss)',
         '- Shader color property is `_BaseColor` (texture: `_BaseMap`). `_Color`/`_MainTex` are WRONG in this project (Built-in names).',
         '- Full-screen effects: `OnRenderImage` does NOT run under URP — use a ScriptableRenderPass / Renderer Feature.',
         '- New Input System is active: `Input.GetAxis/GetKey/GetButton/GetMouseButton` are WRONG here — use InputAction/PlayerInput.',

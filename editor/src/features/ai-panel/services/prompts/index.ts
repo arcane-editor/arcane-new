@@ -14,6 +14,7 @@ import {
   buildPlanExecutionPrompt,
   type PlanExecutionPromptArgs,
 } from './plan-execution';
+import { buildUiDesignPrompt, type UiDesignPromptArgs } from './ui-design';
 import type { ChatMode, Effort } from '../types';
 import { buildGraphSnapshot, graphSnapshotBudget } from '../../../graphify';
 import { useGraphifyStore } from '../../../../stores/graphify';
@@ -21,6 +22,7 @@ import { useAsmdefStore } from '../../../../stores/asmdef';
 import { useWorkspaceStore } from '../../../../stores/workspace';
 import { getMemoryDigestSync } from '../memory/memory-cache';
 import { getUnityFactsBlock } from './unity-facts';
+import type { Subsystem } from './subsystem-facts';
 import { getFrozenDecoration, type FrozenBlocks } from './frozen-context';
 import { buildContextPackText, CONTEXT_PACK_BUDGETS } from './context-pack';
 
@@ -38,14 +40,36 @@ import { buildContextPackText, CONTEXT_PACK_BUDGETS } from './context-pack';
  *
  * The graph snapshot's char budget scales with the effort of the send that
  * captures it (see graphSnapshotBudget).
+ *
+ * **`codeContext: false` drops the last two blocks**, and design mode is the
+ * one caller that sets it. Both blocks are C#-only by construction — the
+ * graphify graph is built with `includeExt: ['.cs']`, so its god nodes can only
+ * ever be scripts — and the context pack renders them under the heading
+ * "Key files (structurally central — **read these first**)". A design turn was
+ * therefore opening with a literal instruction to go read up to twelve C#
+ * files, which is most of why it kept doing exactly that. The facts block
+ * stays: it is where the project's USS variables and PanelSettings live.
+ *
+ * Filtering happens HERE rather than in `captureDecoration` on purpose — the
+ * frozen blocks stay byte-identical whatever mode reads them, so
+ * `graphChangedSinceFreeze`'s drift comparison keeps working and a conversation
+ * that switches modes cannot invalidate its own prefix cache.
  */
-function decorate(base: string, effort: Effort, conversationId?: string | null): string {
-  const blocks = getFrozenDecoration(conversationId, () => captureDecoration(effort));
+function decorate(
+  base: string,
+  effort: Effort,
+  conversationId?: string | null,
+  opts?: { codeContext?: boolean; forceSubsystems?: readonly Subsystem[] },
+): string {
+  const blocks = getFrozenDecoration(conversationId, () =>
+    captureDecoration(effort, { forceSubsystems: opts?.forceSubsystems }),
+  );
+  const codeContext = opts?.codeContext ?? true;
 
   const parts: string[] = [base];
   if (blocks.factsBlock) parts.push(blocks.factsBlock);
-  if (blocks.contextPack) parts.push(blocks.contextPack);
-  if (blocks.graphSnapshot) parts.push(blocks.graphSnapshot);
+  if (codeContext && blocks.contextPack) parts.push(blocks.contextPack);
+  if (codeContext && blocks.graphSnapshot) parts.push(blocks.graphSnapshot);
   return parts.join('\n\n');
 }
 
@@ -54,7 +78,10 @@ function decorate(base: string, effort: Effort, conversationId?: string | null):
  * drift detection (`graphChangedSinceFreeze` compares a fresh capture's
  * snapshot against the frozen one).
  */
-export function captureDecoration(effort: Effort): FrozenBlocks {
+export function captureDecoration(
+  effort: Effort,
+  opts?: { forceSubsystems?: readonly Subsystem[] },
+): FrozenBlocks {
   // Context pack inputs (spec §3): the asmdef graph and graphify god-node
   // files the editor already maintains, condensed deterministically.
   const assemblies = useAsmdefStore.getState().graph.map((n) => ({
@@ -69,7 +96,7 @@ export function captureDecoration(effort: Effort): FrozenBlocks {
   const workspacePath = useWorkspaceStore.getState().workspacePath ?? '';
 
   return {
-    factsBlock: getUnityFactsBlock(),
+    factsBlock: getUnityFactsBlock({ forceSubsystems: opts?.forceSubsystems }),
     contextPack: buildContextPackText(
       { assemblies, keyFiles, memoryDigest: getMemoryDigestSync(workspacePath) },
       CONTEXT_PACK_BUDGETS[effort],
@@ -84,13 +111,25 @@ export function captureDecoration(effort: Effort): FrozenBlocks {
  * about this; they pass `mode` (ask/agent/plan), and the agent service maps
  * to the right phase based on planPhase state.
  */
-export type PromptMode = 'ask' | 'agent' | 'preplanning' | 'plan-planning' | 'plan-execution';
+export type PromptMode =
+  | 'ask'
+  | 'agent'
+  | 'preplanning'
+  | 'plan-planning'
+  | 'plan-execution'
+  | 'ui-design';
 
 export interface BuildSystemPromptOpts {
   /** Drives the graph-snapshot char budget. Defaults to 'mid'. */
   effort?: Effort;
   /** Required when mode === 'plan-execution'. */
   planExecution?: Omit<PlanExecutionPromptArgs, 'workspacePath'>;
+  /**
+   * Required when mode === 'ui-design'. Names the one document that session is
+   * scoped to — the prompt is written around it, so there is no useful
+   * document-less form of this mode.
+   */
+  uiDesign?: UiDesignPromptArgs;
   /**
    * The conversation (ai-store session) id. When set, the volatile decoration
    * blocks are frozen per conversation (see frozen-context.ts) so the system
@@ -132,6 +171,16 @@ export function buildSystemPrompt(
         effort,
         conversationId,
       );
+    case 'ui-design':
+      if (!opts?.uiDesign) {
+        throw new Error('ui-design prompt requires the document it is scoped to');
+      }
+      return decorate(buildUiDesignPrompt(workspacePath, opts.uiDesign), effort, conversationId, {
+        codeContext: false,
+        // The session IS a `.uxml`, so the subsystem is known without guessing
+        // from whichever tab happened to be focused when the decoration froze.
+        forceSubsystems: ['uiToolkit'],
+      });
   }
 }
 
@@ -148,5 +197,7 @@ export function defaultPromptModeFor(mode: ChatMode): PromptMode {
       return 'agent';
     case 'plan':
       return 'plan-planning';
+    case 'design':
+      return 'ui-design';
   }
 }

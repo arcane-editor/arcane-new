@@ -10,12 +10,12 @@ import remarkGfm from 'remark-gfm';
 import type { AiMessage } from '../../../stores/ai';
 import type { TextContent, ThinkingContent, ToolCall } from '../services/vendor/types';
 import { hasRenderableContent } from '../services/turn-errors';
-import { modelShortName } from '../data/served-model';
 import { parseFileRef } from '../data/file-ref';
 import FilePathChip from './FilePathChip';
 import ThinkingBlock from './ThinkingBlock';
 import ToolCallBlock from './ToolCallBlock';
 import StreamingIndicator from './StreamingIndicator';
+import { showsInlineIndicator } from '../services/working-indicator';
 
 // R2-T4: module-level constant so the plugins array is referentially stable
 // across renders — react-markdown otherwise sees a "new" remarkPlugins array
@@ -73,9 +73,17 @@ interface AssistantMessageProps {
    * normally happen, but session-restore edge cases are defensive here).
    */
   turnUserMessageId: string | null;
+  /**
+   * Whether this bubble is the last block in the transcript. Gates the
+   * streaming dots: they mean "more is coming", so they belong at the tail and
+   * nowhere else. When something has been appended after this message (a
+   * question card, a permission request), `MessageList` renders the dots as
+   * their own row down there instead — see `services/working-indicator.ts`.
+   */
+  isLast: boolean;
 }
 
-function AssistantMessage({ message, turnUserMessageId }: AssistantMessageProps) {
+function AssistantMessage({ message, turnUserMessageId, isLast }: AssistantMessageProps) {
   // T5/R2-T3: a turn with no renderable content (no text/thinking/tool call —
   // just the bare stopReason/errorMessage T4 preserves) would otherwise
   // render as an empty bubble. This covers both an error tail (the
@@ -126,17 +134,12 @@ function AssistantMessage({ message, turnUserMessageId }: AssistantMessageProps)
               return null;
           }
         })}
-        {message.isStreaming && <StreamingIndicator />}
-        {/* Turn-final only: streaming not yet finished, or a stopReason other
-            than 'stop' (e.g. 'toolUse'), means there's another assistant
-            message still coming in this turn — showing the served model on an
-            intermediate tool-call step would misattribute whichever model
-            happens to be stamped mid-turn (`pendingServedModel` is only
-            captured once, at `message_end`) to a bubble that isn't the turn's
-            actual answer. */}
-        {!message.isStreaming && message.stopReason === 'stop' && message.servedModel && (
-          <div className="ai-message-served-model">{modelShortName(message.servedModel)}</div>
-        )}
+        {showsInlineIndicator(message, isLast) && <StreamingIndicator />}
+        {/* No served-model footer. `message.servedModel` is still recorded —
+            it is the only record of which model answered a turn, and it is
+            worth having in a bug report — but the underlying model id is not
+            something to put in front of a user. `AssistantMessage.test.ts`
+            pins that it stays unrendered. */}
       </div>
     </div>
   );

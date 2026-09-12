@@ -94,6 +94,18 @@ function argPath(args: Record<string, unknown>, workspacePath?: string): string 
 }
 
 /**
+ * A non-blank string arg, or `undefined` — the shared "do I have enough to
+ * build a specific label" check the Unity subsystem/scene/UI-generation
+ * cases below all need, since every one of them falls back to a generic
+ * label (e.g. "Wrote a UI file") when the model's call didn't carry a usable
+ * value for the field that label is built from.
+ */
+function strArg(args: Record<string, unknown>, key: string): string | undefined {
+  const v = args[key];
+  return typeof v === 'string' && v.trim() !== '' ? v : undefined;
+}
+
+/**
  * Line-arithmetic +/- count via `structuredPatch`'s hunks — each hunk line
  * has an unambiguous single-char prefix (index 0 is ' '/'+'/'-'), so this
  * can't misread an added/removed line whose own content happens to start
@@ -168,13 +180,23 @@ const UNITY_STATIC_LABELS: Record<string, string> = {
   unity_play: 'Entered Play Mode',
   unity_stop: 'Exited Play Mode',
   unity_refresh: 'Refreshed Unity assets',
+  unity_console_clear: 'Cleared Unity console',
   // Bridge/index-backed read tools (unity-tools/read-tools.ts, script-map-tool.ts)
   get_console_errors: 'Checked Unity console',
+  get_compile_errors: 'Checked Unity compile status',
   get_editor_state: 'Checked Unity editor state',
   get_scene_hierarchy: 'Read Unity scene hierarchy',
   get_game_object: 'Inspected a Unity GameObject',
   find_asset_references: 'Searched asset references',
   get_unity_script_map: 'Mapped Unity scripts',
+  // Subsystem tools (scriptable-objects-tool.ts, ui-toolkit-tool.ts,
+  // input-actions-tool.ts, so-drift-tool.ts, input-edit-tool.ts) — read/write
+  // an asset format the generic read/write tools do not understand.
+  unity_scriptable_objects: 'Read ScriptableObjects',
+  unity_ui_toolkit: 'Read UI Toolkit setup',
+  unity_input_actions: 'Read input actions',
+  unity_fix_so_drift: 'Repaired ScriptableObject drift',
+  unity_input_edit: 'Edited input actions',
 };
 
 function humanizeUnity(name: string, args: Record<string, unknown>): HumanizedToolCall {
@@ -208,6 +230,31 @@ function humanizeUnity(name: string, args: Record<string, unknown>): HumanizedTo
       const kind = typeof args.kind === 'string' ? args.kind : '';
       return { title: `Planned Unity migration${kind ? ` (${kind})` : ''}` };
     }
+    case 'unity_attach_ui_document': {
+      const gameObject = strArg(args, 'gameObject');
+      return { title: gameObject ? `Attached UIDocument to "${truncate(gameObject, 40)}"` : 'Attached a UIDocument' };
+    }
+    case 'unity_set_property': {
+      const property = strArg(args, 'property');
+      const component = strArg(args, 'component');
+      return { title: property ? `Set ${component ? `${component}.` : ''}${property}` : 'Set a Unity property' };
+    }
+    case 'unity_ui_write': {
+      const path = strArg(args, 'path');
+      return { title: path ? `Wrote UI file ${basename(path)}` : 'Wrote a UI file' };
+    }
+    case 'unity_ui_layout': {
+      const document = strArg(args, 'document');
+      return { title: document ? `Previewed layout of ${basename(document)}` : 'Previewed a UI layout' };
+    }
+    case 'unity_ui_scaffold': {
+      const screen = strArg(args, 'screen');
+      return { title: screen ? `Drafted a ${screen} screen` : 'Drafted a UI screen' };
+    }
+    case 'unity_asset_edit': {
+      const path = strArg(args, 'path');
+      return { title: path ? `Edited Unity asset ${basename(path)}` : 'Edited a Unity asset' };
+    }
     default:
       return { title: name };
   }
@@ -220,6 +267,12 @@ const UNITY_TOOL_NAMES = new Set([
   'unity_api_search',
   'get_unity_docs',
   'unity_plan_migration',
+  'unity_attach_ui_document',
+  'unity_set_property',
+  'unity_ui_write',
+  'unity_ui_layout',
+  'unity_ui_scaffold',
+  'unity_asset_edit',
 ]);
 
 /**

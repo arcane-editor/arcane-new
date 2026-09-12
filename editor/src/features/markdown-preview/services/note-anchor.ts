@@ -9,22 +9,12 @@
  * changed, so dropping it silently would be the worst outcome.
  */
 
-export interface PlanNote {
-  id: string;
-  /** The exact text the user selected. */
-  quotedText: string;
-  /** What they want changed. */
-  body: string;
-  /** Nearest preceding heading, or the document title. */
-  headingPath: string;
-  /** False once the quoted text no longer appears in the document. */
-  anchored: boolean;
-}
+// The shapes live in `types/` so `stores/ai.ts` can hold notes without
+// importing this feature's barrel (which exports components that read that
+// store — a cycle). The behaviour they describe is documented above.
+export type { PlanNote, PlanStep } from '../../../types';
 
-export interface PlanStep {
-  title: string;
-  done: boolean;
-}
+import type { PlanNote, PlanStep } from '../../../types';
 
 let seq = 0;
 

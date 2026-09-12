@@ -1,10 +1,12 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
 import {
   isRepairNote,
+  createTurnTelemetry,
   resetTurnTelemetry,
   nextTurnTelemetry,
   recordTelemetryEvent,
   recordGroundingLintHit,
+  recordConsoleRepair,
   recordLoopGuardHit,
   getRepairCount,
   recordEscalation,
@@ -235,4 +237,49 @@ describe('isRepairNote', () => {
     expect(isRepairNote('Successfully wrote 120 bytes (2 lines) to Assets/A.cs')).toBe(false);
     expect(isRepairNote('found 3 error(s) in the log')).toBe(false);
   });
+});
+
+// Global Constraint 8 (escalation integrity). `repairCount` is what
+// `send-escalation.ts` latches a whole conversation onto a costlier tier on;
+// the post-turn console check runs ONCE, after the loop, on evidence the
+// in-loop gates never saw. Counting it there would escalate the next send on
+// the strength of a pass that already fixed the problem.
+describe('console-check repairs (Task 13) never inflate repairCount', () => {
+  beforeEach(() => resetTurnTelemetry());
+
+  it('counts on its own field and leaves repairCount alone', () => {
+    recordConsoleRepair();
+    const t = nextTurnTelemetry();
+    expect(t.consoleRepairs).toBe(1);
+    expect(t.repairCount).toBe(0);
+    expect(getRepairCount()).toBe(0);
+  });
+
+  it('does not disturb a repairCount the in-loop gates earned', () => {
+    recordTelemetryEvent(repairResult('[Unity compile] 2 compiler error(s) after writing X'));
+    recordConsoleRepair();
+    const t = nextTurnTelemetry();
+    expect(t.repairCount).toBe(1);
+    expect(t.consoleRepairs).toBe(1);
+  });
+
+  it('resets to 0 per send', () => {
+    recordConsoleRepair();
+    resetTurnTelemetry();
+    expect(nextTurnTelemetry().consoleRepairs).toBe(0);
+  });
+
+  it("the console check's own prompt marker is not a repair note", () => {
+    // `[Console check]` carries no `N error(s)` count and no gate marker, so
+    // `isRepairNote` must stay false for it however it is worded.
+    expect(isRepairNote('[Console check] Your last turn left problems behind.')).toBe(false);
+    expect(isRepairNote('[Console check] 3 compiler error(s) remain after this turn.')).toBe(false);
+  });
+});
+
+it('isolates telemetry across concurrent specialists', () => {
+  const a = createTurnTelemetry(), b = createTurnTelemetry();
+  a.recordTelemetryEvent(toolEnd(true)); a.recordLoopGuardHit(); a.nextTurnTelemetry();
+  const independent = b.nextTurnTelemetry();
+  expect(independent.toolErrorCount).toBe(0); expect(independent.loopGuardHits).toBe(0); expect(independent.turnIndex).toBe(1);
 });

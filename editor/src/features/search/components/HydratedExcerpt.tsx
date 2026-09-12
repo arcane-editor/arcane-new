@@ -33,7 +33,7 @@ interface HydratedExcerptProps {
   excerpt: Excerpt;
   registry: SearchModelRegistry;
   lineHeight: number;
-  onFirstEdit: (filePath: string, content: string) => void;
+  onFirstEdit: (filePath: string, content: string, diskContent?: string) => void;
   /** Called when this excerpt cannot be hydrated — the internal hidden-areas
    *  API is gone, the range isn't sane against the model, or the backing
    *  model got disposed out from under it. The parent falls back to the
@@ -285,6 +285,7 @@ function HydratedExcerpt({
         setHeight(editor!.getContentHeight());
       });
 
+      const diskContent = model.getValue();
       editor.onDidChangeModelContent(() => {
         // Fires for every writer of this model, and every excerpt of this
         // file has its own listener on the SAME shared model — without this
@@ -302,7 +303,7 @@ function HydratedExcerpt({
         // false for every OTHER excerpt's editor on the same shared model —
         // which is all the dedup above actually needs.
         if (!editor!.hasWidgetFocus()) return;
-        onFirstEdit(filePath, model!.getValue());
+        onFirstEdit(filePath, model!.getValue(), diskContent);
       });
     }
 

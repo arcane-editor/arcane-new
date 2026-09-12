@@ -1,0 +1,13 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements" editor-extension-mode="False">
+    <Style src="project://database/Assets/UI/Theme.uss?fileID=7433441132597879392&amp;guid=8f2a1c9d4b6e47a1b0c3d5e7f9a1b2c3&amp;type=3" />
+    <ui:VisualElement name="hud-root" class="hud">
+        <ui:VisualElement name="health" class="hud__panel hud__panel--left">
+            <ui:Label name="hp-label" text="HP" class="hud__label" />
+            <ui:ProgressBar name="hp-bar" low-value="0" high-value="100" class="hud__bar" />
+        </ui:VisualElement>
+        <ui:VisualElement name="ammo" class="hud__panel">
+            <ui:Label name="ammo-count" text="0" class="hud__label hud__label--big" />
+        </ui:VisualElement>
+        <ui:Button name="pause-button" text="II" class="hud__button hud__button--ghost" />
+    </ui:VisualElement>
+</ui:UXML>

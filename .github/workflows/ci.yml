@@ -54,6 +54,16 @@ jobs:
       - name: Invoke arguments
         run: cd editor && bun run check:invoke
 
+      # `bun run verify` has run this locally since it was written; CI never
+      # did. That gap let a half-landed change through: the guard that fails on
+      # a channel publishing no update manifest was merged to `dev` while the
+      # workflow fix it guards was left uncommitted, and CI stayed green because
+      # nothing here ever invoked it. The JS-test step below does exercise
+      # version-sync.test.ts, but against FIXTURES — this is the step that reads
+      # the real configs and the real workflows.
+      - name: Version and updater configuration
+        run: cd editor && bun run check:version
+
       - name: JS tests
         run: cd editor && bun test src scripts
 

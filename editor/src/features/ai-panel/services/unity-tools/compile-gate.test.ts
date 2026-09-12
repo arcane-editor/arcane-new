@@ -124,6 +124,55 @@ describe('withUnityCompileGate', () => {
     expect(textOf(res)).toContain('continue with the remaining file work');
   });
 
+  it('names the parked editor instead of calling it a timeout', async () => {
+    resetCompileGate();
+    const { deps } = makeDeps({ status: 'unknown', reason: 'editor-asleep' });
+    const gate = createCompileGate(fakeTool(OK_WRITE), CWD, idleClient, deps);
+    const res = await gate.execute('id', { path: 'Assets/Foo.cs' }, undefined, undefined);
+    const text = textOf(res);
+    // "Timed out" reads as a broken bridge and invites the model to retry the
+    // write. A backgrounded Unity is neither broken nor worth retrying: the
+    // import is queued and the write already landed.
+    expect(text).not.toContain('timed out');
+    expect(text).toContain('background');
+    expect(text).toContain('NOT a failure');
+    expect(text).toContain('continue with the remaining file work');
+  });
+
+  it('tells the model to focus Unity when the bridge cannot wake it', async () => {
+    resetCompileGate();
+    // Linux, or a P/Invoke that latched off: no focus-free wake exists, so
+    // "the import runs as soon as Unity ticks" would be advice to wait forever.
+    const { deps } = makeDeps({ status: 'unknown', reason: 'editor-asleep', canWake: false });
+    const gate = createCompileGate(fakeTool(OK_WRITE), CWD, idleClient, deps);
+    const res = await gate.execute('id', { path: 'Assets/Foo.cs' }, undefined, undefined);
+    const text = textOf(res);
+    expect(text).toContain('focuses the Unity window');
+    expect(text).not.toContain('as soon as Unity ticks');
+    expect(text).toContain('NOT a failure');
+  });
+
+  it('keeps the wait-it-out wording when Unity CAN be woken without focus', async () => {
+    resetCompileGate();
+    const { deps } = makeDeps({ status: 'unknown', reason: 'editor-asleep', canWake: true });
+    const gate = createCompileGate(fakeTool(OK_WRITE), CWD, idleClient, deps);
+    const text = textOf(await gate.execute('id', { path: 'Assets/Foo.cs' }, undefined, undefined));
+    expect(text).toContain('as soon as Unity ticks');
+    expect(text).not.toContain('focuses the Unity window');
+  });
+
+  it('does not burn a repair attempt on a parked editor', async () => {
+    resetCompileGate();
+    const { deps } = makeDeps({ status: 'unknown', reason: 'editor-asleep' });
+    const gate = createCompileGate(fakeTool(OK_WRITE), CWD, idleClient, deps);
+    for (let i = 0; i < 6; i++) {
+      const res = await gate.execute('id', { path: 'Assets/Foo.cs' }, undefined, undefined);
+      // An unverifiable compile is not a failed one; the attempt cap exists for
+      // real compiler errors the model keeps failing to fix.
+      expect(textOf(res)).not.toContain('attempts');
+    }
+  });
+
   it('returns the result unchanged on unknown/aborted', async () => {
     resetCompileGate();
     const { deps } = makeDeps({ status: 'unknown', reason: 'aborted' });

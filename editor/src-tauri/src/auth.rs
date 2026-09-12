@@ -302,6 +302,56 @@ mod tests {
     /// different tooling, so nothing but a test stops them drifting apart. This
     /// is what caught `tauri dev` shipping dev endpoints under the production
     /// identifier — i.e. writing dev tokens into the real app's config dir.
+    /// `tauri.local.conf.json` renames the from-source build to "Unity Local" so
+    /// it is distinguishable from the installed dev build in the dock and the
+    /// Window menu. It is layered ON TOP of `tauri.dev.conf.json`, which is what
+    /// supplies the `.dev` identifier.
+    ///
+    /// The trap this guards: `config_dir_name` and `channel_for_identifier` both
+    /// key on a `.dev` SUFFIX, and everything else is treated as production. So
+    /// giving the local overlay its own identifier — say `…desktop.local`, which
+    /// is the obvious thing to reach for when you want both builds running at
+    /// once — would silently classify a build that talks to the dev API as
+    /// production, and write its tokens into `~/.unityide`. That is the exact
+    /// failure the wrapper script was written to prevent, reintroduced through a
+    /// different door.
+    #[test]
+    fn the_local_overlay_never_escapes_the_dev_channel() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let conf: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(root.join("tauri.local.conf.json")).unwrap(),
+        )
+        .unwrap();
+
+        // Renaming is the whole job.
+        assert_eq!(conf["productName"].as_str(), Some("Unity Local"));
+
+        // It may stay silent on the identifier (inheriting the dev one), but if
+        // it ever declares one, that one has to keep the `.dev` suffix.
+        if let Some(identifier) = conf["identifier"].as_str() {
+            assert_eq!(
+                channel_for_identifier(identifier),
+                "dev",
+                "tauri.local.conf.json declares identifier `{identifier}`, which does not \
+                 end in `.dev` — so config_dir_name() would send this build's dev-API \
+                 tokens into ~/.unityide, the production config dir"
+            );
+        }
+
+        // Same for the deep-link scheme: the sign-in callback must not land in
+        // the production app.
+        if let Some(plugins) = conf.get("plugins") {
+            if let Some(deep_link) = plugins.get("deep-link") {
+                assert_eq!(
+                    scheme_from_plugin_config(Some(deep_link)),
+                    "unityide-dev",
+                    "a local overlay that overrides the deep-link scheme must keep \
+                     the dev scheme"
+                );
+            }
+        }
+    }
+
     #[test]
     fn the_dev_build_config_and_the_dev_env_file_agree_on_the_channel() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));

@@ -1,6 +1,6 @@
 [package]
 name = "editor"
-version = "0.3.2"
+version = "0.3.3"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -27,6 +27,10 @@ tauri-plugin-store = "2"
 tauri-plugin-shell = "2"
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 tauri-plugin-deep-link = "2"
+# Deep-link URL parsing. `on_open_url` already hands us `url::Url`, so this is
+# the type we have to speak anyway; it was already resolved at this version
+# transitively (via the deep-link plugin), so naming it adds no resolution.
+url = "2"
 tauri-plugin-updater = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -44,6 +48,15 @@ globset = "0.4"
 notify = { version = "7", features = ["macos_fsevent"] }
 nucleo-matcher = "0.3"
 sha1 = "0.10"
+# Unpacking the bundled csharp-ls tool package. A nupkg is a plain zip, and
+# unzipping it ourselves is what removes NuGet — and NuGet's inability to read
+# the Windows `\\?\` resource path — from the C# provisioning path entirely.
+# Already resolved at this version transitively, so naming it adds nothing to
+# the build; same reasoning as the `png` and `url` entries.
+# `default-features = false` deliberately: the defaults drag in the AES /
+# zeroize stack for encrypted archives, which a nupkg never uses and which
+# does not even resolve here. Deflate is the only codec in play.
+zip = { version = "4", default-features = false, features = ["deflate-flate2"] }
 tauri-plugin-clipboard-manager = "2.3.2"
 # Terminal image paste. The clipboard hands back raw RGBA, not an encoded
 # image, and a terminal can only carry a file path — so the RGBA has to be
@@ -52,6 +65,8 @@ tauri-plugin-clipboard-manager = "2.3.2"
 # already resolved transitively at this version, so this adds no new
 # resolution — same reasoning as the objc2 block below.
 png = "0.17"
+rusqlite = { version = "0.37", features = ["bundled"] }
+flate2 = "1"
 
 # macOS-only: objc2 shim for the dock right-click menu ("New Window"). tao's
 # NSApplication delegate does not implement `applicationDockMenu:`, and neither
@@ -63,6 +78,9 @@ png = "0.17"
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSResponder", "NSMenu", "NSMenuItem"] }
 objc2-foundation = { version = "0.3", features = ["NSString"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_System_Diagnostics_ToolHelp"] }
 
 [dev-dependencies]
 tempfile = "3"

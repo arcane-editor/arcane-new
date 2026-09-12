@@ -6,6 +6,7 @@ import {
   disposeExtraLibs,
 } from './monaco-typescript';
 import { getMonacoInstance, setMonacoInstance } from '../../../utils/monaco-instance';
+import { browserUrlFor, isExternalUrl, openExternal } from '../../../utils/external-link';
 
 let loaderConfigured = false;
 
@@ -23,6 +24,26 @@ export async function initMonaco(): Promise<Monaco> {
   ensureLoaderConfigured();
   const monacoInstance = await loader.init();
   setMonacoInstance(monacoInstance);
+
+  // A URL in a comment is a link Monaco detects and opens itself, through its
+  // own opener service — it never becomes a DOM anchor, so the document-level
+  // handler in main.tsx cannot see it. Standalone Monaco's default opener is
+  // `window.open`, which does nothing in a webview.
+  //
+  // Returning false for anything else is what leaves `file:` links to
+  // `registerEditorOpener` (cross-file Go to Definition, providers.ts).
+  monacoInstance.editor.registerLinkOpener({
+    open(resource) {
+      // `browserUrlFor`, never the Uri's own default spelling — see the
+      // note on that function:
+      // Monaco's default spelling percent-escapes `=` and `&`, which turns
+      // every query string into one key by the time it reaches the browser.
+      const url = browserUrlFor(resource);
+      if (!isExternalUrl(url)) return false;
+      void openExternal(url);
+      return true;
+    },
+  });
 
   // Disable Monaco's built-in TypeScript semantic + suggestion diagnostics
   // immediately on Monaco init. Without this, Monaco's bundled TS worker

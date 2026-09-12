@@ -30,6 +30,30 @@ describe('prompt personas (anti-terseness regression)', () => {
   });
 });
 
+describe('editable Unity scene contract', () => {
+  const agent = buildAgentPrompt('/proj');
+  const planning = buildPlanPlanningPrompt('/proj', { difficultyTags: false });
+  const execution = buildPlanExecutionPrompt({ workspacePath: '/proj', planPath: '/proj/.unityide/plans/p.md' });
+
+  it('keeps authored level content visible before Play in every mutating workflow', () => {
+    for (const prompt of [agent, planning, execution]) {
+      expect(prompt).toContain('Scene view');
+      expect(prompt).toContain('before Play');
+      expect(prompt).toContain('runtime-only');
+    }
+  });
+
+  it('requires conversion to remove the runtime construction trigger', () => {
+    expect(agent).toContain('remove the runtime construction trigger');
+    expect(execution).toContain('remove the runtime construction trigger');
+  });
+
+  it('does not hand routine scene wiring back to the user', () => {
+    expect(execution).toContain('Do not leave routine scene wiring to the user');
+    expect(execution).not.toContain('user must drag');
+  });
+});
+
 describe('todo_update instructions (T9)', () => {
   const agent = buildAgentPrompt('/proj');
   const planExecution = buildPlanExecutionPrompt({
@@ -190,10 +214,11 @@ describe('plan-execution tag-preservation instruction (Task 12)', () => {
     expect(execution).toContain('todo_update');
   });
 
-  it('instructs preserving the T<n> [easy|hard] prefix verbatim when ticking a checkbox', () => {
+  it('uses host-owned plan progress while preserving the T<n> [easy|hard] prefix', () => {
+    expect(execution).toContain('plan_progress');
+    expect(execution.toLowerCase()).toContain('atomically');
     expect(execution).toContain('T<n>');
     expect(execution.toLowerCase()).toContain('verbatim');
-    expect(execution).toContain('T2 [hard] Refactor NavMeshAgent wiring');
   });
 });
 

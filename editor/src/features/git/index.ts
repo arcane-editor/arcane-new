@@ -1,6 +1,8 @@
+import './styles/inline-blame.css';
+
 export { default as SourceControlPanel } from './components/SourceControlPanel';
 export { default as BranchPicker } from './components/BranchPicker';
-export { registerBlameHoverProvider } from './services/blame-provider';
+export { attachInlineBlame } from './services/inline-blame';
 export { runGitignoreDoctor } from './services/unity-git';
 export { attachGitGutter, type GutterRanges } from './services/gutter-decorations';
 export {

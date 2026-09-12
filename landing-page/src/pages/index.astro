@@ -1,30 +1,78 @@
 ---
 import LandingLayout from '../layouts/LandingLayout.astro';
 import Navbar from '../components/Navbar.tsx';
-import HeroSection from '../components/HeroSection.astro';
-import StatsBar from '../components/StatsBar.tsx';
-import FeaturesSection from '../components/FeaturesSection.astro';
-import HowItWorksSection from '../components/HowItWorksSection.astro';
+import Hero from '../components/home/Hero.astro';
+import ScrollStory from '../components/home/ScrollStory.tsx';
+import EverythingElse from '../components/home/EverythingElse.astro';
+import Comparison from '../components/home/Comparison.astro';
 import DownloadSection from '../components/DownloadSection.astro';
-import PricingTable from '../components/billing/PricingTable.tsx';
-import FeedbackSection from '../components/FeedbackSection.astro';
-import DocsSection from '../components/DocsSection.astro';
 import Footer from '../components/Footer.astro';
+import '../styles/landing.css';
+
+/**
+ * The landing page is one argument told in order, and the order is the point:
+ *
+ *   Hero            the product, running the loop the rest of the page explains
+ *   Why we built it names the shape of everything below — five problems
+ *   01 … 05         one Unity failure per chapter, and the panel that catches it
+ *   Also wired      four more panels, panned through horizontally
+ *   And the rest    the tail, four cells, no motion
+ *   Comparison      the same claims measured against Rider and Visual Studio
+ *   Download        two steps, because the bridge package is not optional
+ *
+ * Chapters 01–05 and the horizontal band animate on scroll POSITION, so the
+ * reader scrubs them rather than being played at. Below 1024px, or with
+ * reduced motion, or with no JavaScript at all, every one of them renders at
+ * its finished state — the state that carries the information.
+ *
+ * Pricing is a link from the download card, not a band on this page. Someone
+ * who has read this far is deciding whether to install, and the answer to
+ * "what does it cost" is "the IDE is free", which fits in a sentence.
+ */
 ---
 
 <LandingLayout>
+  {/* Bricolage Grotesque sets the structure; IBM Plex Mono is reserved for
+      text that IS machine output — paths, identifiers, log levels, statuses.
+      Loaded here rather than in the layout so no other page pays for them. */}
+  <link
+    slot="head"
+    rel="stylesheet"
+    href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,300..800&family=IBM+Plex+Mono:ital,wght@0,400;0,500;1,400&display=swap"
+  />
+
   <Navbar client:load />
-  <HeroSection />
-  <StatsBar client:visible />
-  <FeaturesSection />
-  <HowItWorksSection />
-  <DownloadSection />
-  {/* Same component as /pricing, in `section` form. Sharing it keeps prices
-      sourced from the server's config/tiers.ts instead of a hardcoded copy
-      that would silently drift. `client:visible` defers the
-      /v1/billing/plans fetch until the band is actually scrolled to. */}
-  <PricingTable client:visible variant="section" />
-  <FeedbackSection />
-  <DocsSection />
+
+  <div class="lp">
+    {/* Four fixed layers, none of them interactive: the base wash, two glows
+        that pick up the colour of the chapter you are in, a grain that keeps
+        the large flat areas from banding, and a vignette. */}
+    <div class="lp-atmos lp-atmos-base" aria-hidden="true"></div>
+    <div class="lp-atmos lp-atmos-a" aria-hidden="true"></div>
+    <div class="lp-atmos lp-atmos-b" aria-hidden="true"></div>
+    <div class="lp-atmos lp-atmos-grain" aria-hidden="true"></div>
+    <div class="lp-atmos lp-atmos-vignette" aria-hidden="true"></div>
+
+    <div class="lp-body">
+      <Hero />
+
+      <section class="lp-shell" style="padding-block:120px 40px;text-align:center">
+        <p class="lp-eyebrow">Why we built it</p>
+        <h2 class="lp-h2 lp-h2-quiet" style="margin:20px auto 0;max-width:24ch">
+          Every panel here exists because something in Unity cost us a day.
+        </h2>
+        <p style="margin:18px auto 0;font-size:16px;color:#8a8f98;max-width:52ch;text-wrap:pretty">
+          Five of those problems, and what this editor does about each one. Keep scrolling.
+        </p>
+      </section>
+
+      <ScrollStory client:load />
+
+      <EverythingElse />
+      <Comparison />
+      <DownloadSection />
+    </div>
+  </div>
+
   <Footer />
 </LandingLayout>

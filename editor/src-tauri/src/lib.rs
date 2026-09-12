@@ -1,3 +1,4 @@
+mod csharp_ls;
 mod git;
 mod lsp;
 mod terminal;
@@ -7,22 +8,29 @@ mod search;
 mod file_scanner;
 mod file_index;
 mod unity;
+mod unity_analyzers;
 mod asmdef;
+mod unity_asset_edit;
 mod unity_yaml;
 mod unity_index;
 mod unity_diff;
 mod unity_tests;
 mod unity_ipc;
 mod unity_journal;
-mod dap;
+mod debug;
+mod unity_profiler;
 mod acp;
 mod auth;
 mod auth_loopback;
 mod graphify;
+mod fs_atomic;
 mod fs_copy;
 mod cli;
+mod window_registry;
 mod path_util;
+mod project_settings;
 mod process_util;
+mod process_tree;
 mod sync_util;
 mod walk_policy;
 #[cfg(target_os = "macos")]
@@ -113,15 +121,20 @@ pub struct FileContent {
     pub content: String,
 }
 
-/// Stays `sync` (not converted for C8): a single non-recursive `fs::read_dir`
-/// call plus one short-lived `git check-ignore` batch — no walk, bounded by
-/// one directory's entry count — invoked on every lazy file-tree expand.
-/// Cheap enough that main-thread dispatch is the right tradeoff (an `async`
-/// command still pays IPC/task scheduling overhead), and every fallible
-/// operation is funneled through `?`/`Result` or degrades (ignore status),
-/// not a panic path.
+// Limit concurrent filesystem jobs, including queued large-file opens.
+async fn blocking_fs<T: Send + 'static>(work: impl FnOnce() -> Result<T, String> + Send + 'static) -> Result<T, String> {
+    static LIMIT: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(4);
+    let permit = LIMIT.acquire().await.map_err(|e| e.to_string())?;
+    let result = tauri::async_runtime::spawn_blocking(move || { let _permit = permit; work() }).await.map_err(|e| e.to_string())?;
+    result
+}
+
 #[tauri::command]
-fn read_directory(path: String) -> Result<Vec<FileEntry>, String> {
+async fn read_directory(path: String) -> Result<Vec<FileEntry>, String> {
+    blocking_fs(move || read_directory_sync(path)).await
+}
+
+fn read_directory_sync(path: String) -> Result<Vec<FileEntry>, String> {
     let entries = fs::read_dir(&path).map_err(|e| e.to_string())?;
 
     let skip_dirs = ["node_modules", "target", ".git", "dist", "build"];
@@ -176,13 +189,156 @@ fn read_directory(path: String) -> Result<Vec<FileEntry>, String> {
 }
 
 #[tauri::command]
-fn read_file(path: String) -> Result<String, String> {
-    fs::read_to_string(&path).map_err(|e| e.to_string())
+async fn read_file(path: String) -> Result<String, String> {
+    blocking_fs(move || fs::read_to_string(&path).map_err(|e| e.to_string())).await
+}
+
+/// Byte-exact authoring checkpoints, including generated meshes and textures.
+#[tauri::command]
+fn read_file_bytes(path: String) -> Result<Vec<u8>, String> {
+    let size = fs::metadata(&path).map_err(|e| e.to_string())?.len();
+    if size > 2 * 1024 * 1024 { return Err("Asset exceeds the 2 MiB checkpoint limit; authoring was not started.".into()); }
+    fs::read(&path).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn write_file(path: String, contents: String) -> Result<(), String> {
-    fs::write(&path, &contents).map_err(|e| e.to_string())
+async fn write_file_bytes(path: String, contents: Vec<u8>) -> Result<(), String> {
+    blocking_fs(move || fs_atomic::write_atomic(Path::new(&path), &contents).map_err(|e| e.to_string())).await
+}
+
+/// What a read found, distinguishing "binary" from "failed".
+///
+/// `read_file` cannot express that difference: `read_to_string` returns the
+/// same `io::Error` for a missing file and for one whose bytes are not UTF-8,
+/// so a binary asset surfaced to the user as the raw OS string "stream did not
+/// contain valid UTF-8". Unity ships several such files in every project
+/// (TerrainData, XRSettings, lightmaps) and writes them as binary even when
+/// the project is set to Force Text, so opening one is ordinary, not an error.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileRead {
+    /// `None` exactly when the bytes are not valid UTF-8.
+    text: Option<String>,
+    is_binary: bool,
+    is_too_large: bool,
+    size: u64,
+}
+
+/// Read a file, reporting binary content instead of failing on it.
+///
+/// Deliberately NOT `from_utf8_lossy`: a lossy decode produces a string that
+/// looks editable and silently destroys the file the moment it is saved.
+/// Callers get `text: None` and must refuse to write.
+#[tauri::command]
+async fn read_file_checked(path: String) -> Result<FileRead, String> {
+    blocking_fs(move || read_file_checked_sync(path)).await
+}
+
+const MAX_EDITOR_FILE_BYTES: u64 = 20 * 1024 * 1024;
+
+fn read_file_checked_sync(path: String) -> Result<FileRead, String> {
+    use std::io::Read;
+    let mut file = fs::File::open(&path).map_err(|e| e.to_string())?;
+    let size = file.metadata().map_err(|e| e.to_string())?.len();
+    // Detect common binary assets with a bounded prefix; a huge text file also
+    // stays out of IPC and Monaco. A UTF-8 character split at the prefix edge
+    // is not a binary marker.
+    let mut prefix = vec![0; 8192];
+    // Read through one bounded stream, so non-seekable or growing files cannot
+    // bypass the size cap.
+    let n = file.read(&mut prefix).map_err(|e| e.to_string())?;
+    prefix.truncate(n);
+    let is_binary = prefix.contains(&0) || std::str::from_utf8(&prefix).is_err_and(|e| e.error_len().is_some());
+    if is_binary || size > MAX_EDITOR_FILE_BYTES {
+        return Ok(FileRead { text: None, is_binary, is_too_large: size > MAX_EDITOR_FILE_BYTES, size });
+    }
+    let mut bytes = prefix;
+    file.take(MAX_EDITOR_FILE_BYTES + 1 - bytes.len() as u64).read_to_end(&mut bytes).map_err(|e| e.to_string())?;
+    let size = bytes.len() as u64;
+    if size > MAX_EDITOR_FILE_BYTES {
+        return Ok(FileRead { text: None, is_binary: false, is_too_large: true, size });
+    }
+    if bytes.contains(&0) { return Ok(FileRead { text: None, is_binary: true, is_too_large: false, size }); }
+    match String::from_utf8(bytes) {
+        Ok(text) => Ok(FileRead { text: Some(text), is_binary: false, is_too_large: false, size }),
+        Err(_) => Ok(FileRead { text: None, is_binary: true, is_too_large: false, size }),
+    }
+}
+
+#[cfg(test)]
+mod read_file_checked_tests {
+    use super::read_file_checked_sync as read_file_checked;
+
+    #[test]
+    fn utf8_file_reads_as_text() {
+        let dir = std::env::temp_dir().join("uid_rfc_text");
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("a.txt");
+        std::fs::write(&f, "hello").unwrap();
+        let got = read_file_checked(f.to_string_lossy().into()).unwrap();
+        assert_eq!(got.text.as_deref(), Some("hello"));
+        assert!(!got.is_binary);
+        assert_eq!(got.size, 5);
+    }
+
+    #[test]
+    fn non_utf8_file_reads_as_binary_rather_than_erroring() {
+        // Unity's TerrainData and XRSettings assets look exactly like this:
+        // a `.asset` extension over bytes that are not text. Before this
+        // command they surfaced as "stream did not contain valid UTF-8".
+        let dir = std::env::temp_dir().join("uid_rfc_bin");
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("TerrainData.asset");
+        std::fs::write(&f, [0x00u8, 0xFF, 0xFE, 0x80, 0x01]).unwrap();
+        let got = read_file_checked(f.to_string_lossy().into()).unwrap();
+        assert!(got.is_binary);
+        // No lossy text: a caller that saved it would corrupt the asset.
+        assert!(got.text.is_none());
+        assert_eq!(got.size, 5);
+    }
+
+    #[test]
+    fn huge_sparse_file_never_materializes_in_memory_or_ipc() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("huge.asset");
+        let file = std::fs::File::create(&path).unwrap();
+        file.set_len(4 * 1024 * 1024 * 1024).unwrap();
+        let read = read_file_checked(path.to_string_lossy().into()).unwrap();
+        assert!(read.is_too_large);
+        assert!(read.text.is_none());
+    }
+
+    #[test]
+    fn nul_is_binary_even_when_utf8_decoding_would_succeed() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("binary.asset");
+        std::fs::write(&path, b"abc\0def").unwrap();
+        assert!(read_file_checked(path.to_string_lossy().into()).unwrap().is_binary);
+    }
+
+    #[test]
+    fn multibyte_character_at_prefix_edge_is_text() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("text.cs");
+        let text = "a".repeat(8191) + "日本語";
+        std::fs::write(&path, &text).unwrap();
+        assert_eq!(read_file_checked(path.to_string_lossy().into()).unwrap().text, Some(text));
+    }
+
+    #[test]
+    fn a_missing_file_is_still_an_error() {
+        assert!(read_file_checked("/no/such/file/at/all".into()).is_err());
+    }
+}
+
+#[tauri::command]
+async fn write_file(path: String, contents: String) -> Result<(), String> {
+    blocking_fs(move || fs_atomic::write_atomic(Path::new(&path), contents.as_bytes()).map_err(|e| e.to_string())).await
+}
+
+#[tauri::command]
+async fn write_file_if_unchanged(path: String, contents: String, expected_content: Option<String>) -> Result<bool, String> {
+    blocking_fs(move || fs_atomic::write_if_unchanged(Path::new(&path), contents.as_bytes(), expected_content.as_deref()).map_err(|e| e.to_string())).await
 }
 
 /// Cheap existence check for a single candidate file path — no content read,
@@ -358,7 +514,11 @@ fn rename_path(old_path: String, new_path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn delete_path(path: String) -> Result<(), String> {
+async fn delete_path(path: String) -> Result<(), String> {
+    blocking_fs(move || delete_path_sync(path)).await
+}
+
+fn delete_path_sync(path: String) -> Result<(), String> {
     let p = Path::new(&path);
     if p.is_dir() {
         fs::remove_dir_all(p).map_err(|e| e.to_string())
@@ -385,6 +545,73 @@ fn read_files_bulk(paths: Vec<String>) -> Result<Vec<FileContent>, String> {
         .collect();
 
     Ok(results)
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct FileSizeEntry {
+    pub path: String,
+    pub size: u64,
+}
+
+/// A cheap size probe for a batch of paths, so a caller that only needs to
+/// bound WORK by size — `unity-facts.ts`'s Canvas-scene scan, which must
+/// never pull a multi-hundred-MB baked scene through `read_files_bulk` just
+/// to find out afterward that it was too big to bother with — never pays for
+/// the read. `fs::metadata` alone (no `read_to_string`), same `filter_map`
+/// skip-on-error shape as `read_files_bulk`: a path that vanished or is
+/// unreadable narrows the answer, it does not fail the whole batch.
+#[tauri::command(async)]
+fn file_sizes_bulk(paths: Vec<String>) -> Vec<FileSizeEntry> {
+    paths
+        .into_iter()
+        .filter_map(|path| {
+            let size = fs::metadata(&path).ok()?.len();
+            Some(FileSizeEntry { path, size })
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod file_sizes_bulk_tests {
+    use super::file_sizes_bulk;
+
+    #[test]
+    fn reports_each_readable_path_s_size() {
+        let dir = std::env::temp_dir().join("uid_fsb_sizes");
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("five_bytes.txt");
+        std::fs::write(&f, "hello").unwrap();
+        let got = file_sizes_bulk(vec![f.to_string_lossy().into_owned()]);
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].size, 5);
+    }
+
+    #[test]
+    fn a_missing_path_is_omitted_rather_than_failing_the_batch() {
+        let dir = std::env::temp_dir().join("uid_fsb_missing");
+        std::fs::create_dir_all(&dir).unwrap();
+        let present = dir.join("present.txt");
+        std::fs::write(&present, "hi").unwrap();
+        let got = file_sizes_bulk(vec![
+            present.to_string_lossy().into_owned(),
+            "/no/such/path/at/all".into(),
+        ]);
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].path, present.to_string_lossy());
+    }
+
+    #[test]
+    fn does_not_read_file_content_just_its_size() {
+        // A 3 MB file would be expensive to read but cheap to stat — this is
+        // the whole point of the command existing separately from
+        // `read_files_bulk`.
+        let dir = std::env::temp_dir().join("uid_fsb_large");
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("large.bin");
+        std::fs::write(&f, vec![0u8; 3 * 1024 * 1024]).unwrap();
+        let got = file_sizes_bulk(vec![f.to_string_lossy().into_owned()]);
+        assert_eq!(got[0].size, 3 * 1024 * 1024);
+    }
 }
 
 /// Scans ALL .d.ts files in node_modules — this is how VS Code resolves
@@ -504,8 +731,15 @@ async fn execute_command(
 
     let mut cmd =
         crate::process_util::async_command(if cfg!(target_os = "windows") { "cmd" } else { "sh" });
-    cmd.args(if cfg!(target_os = "windows") { vec!["/C", &command] } else { vec!["-c", &command] })
-        .current_dir(&cwd)
+    // `cmd.exe` has no backslash escape, so the `\"` that `Command::arg` writes
+    // for an embedded quote reaches the child verbatim and corrupts whatever it
+    // was quoting. Build the command line here instead: `/S` makes cmd strip
+    // exactly the one pair added here and run the remainder unaltered.
+    #[cfg(windows)]
+    cmd.raw_arg(format!("/S /C \"{}\"", command));
+    #[cfg(not(windows))]
+    cmd.args(["-c", command.as_str()]);
+    cmd.current_dir(&cwd)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         // Dropping the timed-out future must not leave the shell running. This
@@ -514,25 +748,10 @@ async fn execute_command(
         // detached process that kept burning CPU — and turns stacked them up.
         .kill_on_drop(true);
 
-    // `kill_on_drop` only reaches the `sh` leader. The commands the agent runs
-    // spawn their own children, which outlive it. Putting the shell in its own
-    // process group lets the timeout path below kill the whole tree.
-    #[cfg(unix)]
-    unsafe {
-        cmd.pre_exec(|| {
-            libc::setpgid(0, 0);
-            Ok(())
-        });
-    }
-
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| format!("Failed to spawn command: {}", e))?;
-
-    // Captured BEFORE the child moves into the future below, so the timeout arm
-    // can still address the group after the future (and the child) is dropped.
-    #[cfg(unix)]
-    let pgid = child.id().map(|id| id as i32);
+    process_tree::ProcessTree::prepare(&mut cmd);
+    let mut child = cmd.spawn().map_err(|e| format!("Failed to spawn command: {}", e))?;
+    let _tree = process_tree::ProcessTree::attach(&child)
+        .map_err(|e| format!("Failed to own command process tree: {}", e))?;
 
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
@@ -560,15 +779,6 @@ async fn execute_command(
         match tokio::time::timeout(timeout, run).await {
             Ok(v) => v,
             Err(_) => {
-                // The future (and with it the child) has been dropped, so
-                // `kill_on_drop` has already signalled the leader. Take out any
-                // grandchildren it left behind.
-                #[cfg(unix)]
-                if let Some(pgid) = pgid {
-                    unsafe {
-                        libc::killpg(pgid, libc::SIGKILL);
-                    }
-                }
                 return Err(format!("Command timed out after {}ms", timeout.as_millis()));
             }
         };
@@ -741,26 +951,111 @@ pub(crate) fn window_title(product_name: Option<&str>) -> String {
         .to_string()
 }
 
-pub(crate) fn open_or_focus_welcome(app: &tauri::AppHandle) {
-    if let Some(w) = app.webview_windows().get("welcome") {
-        let _ = w.show();
-        let _ = w.set_focus();
-    } else {
-        let app = app.clone();
-        tauri::async_runtime::spawn(async move {
-            let title = window_title(app.config().product_name.as_deref());
-            let _ = tauri::WebviewWindowBuilder::new(
-                &app,
-                "welcome",
-                tauri::WebviewUrl::App("index.html?view=welcome".into()),
-            )
-            .title(&title)
-            .inner_size(720.0, 480.0)
-            .min_inner_size(600.0, 360.0)
-            .resizable(true)
-            .build();
-        });
+/// How long to give the frontend to put *something* on screen before we do.
+const WELCOME_WATCHDOG: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// Never leave the app running with nothing visible.
+///
+/// The welcome window starts hidden (`"visible": false`) and normally shows
+/// itself as soon as WelcomeApp mounts and finds nothing to route — which is
+/// what keeps a launch from Unity from flashing a 720x480 panel on its way to
+/// the project window. That leaves exactly one bad outcome: a webview that
+/// never boots, and a process alive with an invisible window and no way to
+/// reach it.
+///
+/// So this is a net, not a mechanism. It fires once, late, and only when
+/// nothing at all made it to the screen.
+fn arm_welcome_watchdog(app: &tauri::AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(WELCOME_WATCHDOG).await;
+
+        let nothing_visible = app
+            .webview_windows()
+            .values()
+            .all(|w| !w.is_visible().unwrap_or(false));
+        if nothing_visible {
+            eprintln!("[UnityIDE] no window became visible; showing the welcome window");
+            open_or_focus_welcome(&app);
+        }
+    });
+}
+
+/// Act on an open request, wherever it came from.
+///
+/// Three callers, one behaviour: the single-instance callback (argv from a
+/// second launch), the deep-link handler (`unityide://open?…`), and the
+/// cold-start read in `setup`. They differ only in how the request was spelled.
+fn dispatch_open_request(app: &tauri::AppHandle, request: cli::OpenRequest) {
+    use tauri::{Emitter, Manager};
+
+    let project = request.project.clone();
+    cli::set_pending(&app.state::<cli::PendingOpen>(), request);
+
+    // Route to the window that already owns this project, if there is one, and
+    // raise THAT window. Falling through to the welcome window here is what
+    // used to drop a 720x480 panel on top of the project window that was busy
+    // opening the file.
+    if let Some(target) = project
+        .as_deref()
+        .and_then(|p| window_registry::find_window_for_project(app, p))
+    {
+        let _ = app.emit_to(target.label(), "unityide-open-pending", ());
+        window_registry::raise(&target);
+        return;
     }
+
+    // Nobody owns it. Nudge every window — a request with no project belongs to
+    // whoever asks first — and make sure the welcome window exists, because it
+    // is what turns a project path into a window.
+    //
+    // Hidden when a project was named: it is acting as a router, and showing it
+    // would put it right back on top of the project window it is about to open.
+    // Visible otherwise, since a request we cannot route needs a surface the
+    // user can act on.
+    ensure_welcome_window(app, project.is_none());
+    let _ = app.emit("unityide-open-pending", ());
+}
+
+pub(crate) fn open_or_focus_welcome(app: &tauri::AppHandle) {
+    ensure_welcome_window(app, true);
+}
+
+/// Make sure the welcome window exists, and optionally bring it forward.
+///
+/// `visible: false` is the router case. The welcome window is the only surface
+/// that knows how to turn "open this project" into a project window, but when
+/// Unity is the one asking, the user wants the project — not a 720x480 panel
+/// landing in front of it. So it is brought into existence to do the routing
+/// and left hidden.
+///
+/// An already-open welcome window is never hidden by this: the user may have
+/// put it there themselves.
+fn ensure_welcome_window(app: &tauri::AppHandle, visible: bool) {
+    if let Some(w) = app.webview_windows().get("welcome") {
+        if visible {
+            // unminimize -> show -> focus, in that order: tao's macOS set_focus
+            // returns early on a miniaturized window, so focusing alone left a
+            // minimized welcome window exactly where it was.
+            window_registry::raise(w);
+        }
+        return;
+    }
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let title = window_title(app.config().product_name.as_deref());
+        let _ = tauri::WebviewWindowBuilder::new(
+            &app,
+            "welcome",
+            tauri::WebviewUrl::App("index.html?view=welcome".into()),
+        )
+        .title(&title)
+        .inner_size(720.0, 480.0)
+        .min_inner_size(600.0, 360.0)
+        .resizable(true)
+        .visible(visible)
+        .build();
+    });
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -800,17 +1095,19 @@ pub fn run() {
         if has_deep_link {
             return;
         }
-        // Unity launches the external script editor as
-        // `UnityIDE.exe --goto <file>:<line>:<col> <project>`. argv was never
-        // read, so double-clicking a script in Unity's Project window showed
-        // the Welcome window instead of the file.
-        if let Some(target) = cli::parse_goto(argv.as_slice()) {
-            use tauri::{Emitter, Manager};
-            cli::set_pending(&app.state::<cli::PendingGoto>(), target);
-            // Nudge every live window: one of them may already have this
-            // project open and can act immediately. The welcome window is the
-            // fallback surface when none can.
-            let _ = app.emit("unityide-goto-pending", ());
+        // Unity launches us as `UnityIDE --goto <file>:<line>:<col> <project>`
+        // (double-clicking a script) or `UnityIDE --project <project>` /
+        // `UnityIDE <project>` (its Open C# Project menu item, and ours).
+        // argv was never read, so both showed the Welcome window instead.
+        //
+        // This is the fallback route now — Unity prefers the `unityide://open`
+        // deep link, which never reaches argv on macOS and is intercepted above
+        // on Windows. It still has to work: a Windows install that has never
+        // been launched has no scheme registered yet, and `tauri dev` on macOS
+        // can never have one.
+        if let Some(request) = cli::parse_open(argv.as_slice()) {
+            dispatch_open_request(app, request);
+            return;
         }
         open_or_focus_welcome(app);
     }));
@@ -818,7 +1115,24 @@ pub fn run() {
     let builder = builder.plugin(tauri_plugin_deep_link::init());
 
     builder
-        .plugin(tauri_plugin_window_state::Builder::default().build())
+        // Everything EXCEPT visibility. The plugin defaults to StateFlags::all(),
+        // and its VISIBLE flag makes it `show()` + `set_focus()` a window on
+        // creation whenever the last session left it visible — which for the
+        // welcome window is always. That runs during `build()`, before `setup()`
+        // gets a say, so it would put the 720x480 panel on screen (and in front)
+        // on a launch from Unity no matter what `"visible": false` says.
+        //
+        // Nothing in this app is deliberately left hidden across a restart, so
+        // giving up visibility restore costs nothing: who is on screen is a
+        // decision this process makes at launch, from argv.
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(
+                    tauri_plugin_window_state::StateFlags::all()
+                        - tauri_plugin_window_state::StateFlags::VISIBLE,
+                )
+                .build(),
+        )
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
@@ -826,20 +1140,25 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .manage(cli::PendingGoto::default())
+        .manage(cli::PendingOpen::default())
+        .manage(window_registry::WindowWorkspaces::default())
         .manage(lsp::LspState::new())
+        .manage(csharp_ls::CsharpLsState::new())
         .manage(terminal::TerminalState::new())
         .manage(file_scanner::FileWatcherState::new())
         .manage(file_index::FileIndexState::new())
         .manage(unity_ipc::UnityIpcState::new())
-        .manage(dap::DapState::new())
+        .manage(debug::host::DebugState::new())
         .manage(acp::AcpState::new())
         .manage(search::ContentSearchState::new())
         .manage(auth_loopback::LoopbackState::new())
         .invoke_handler(tauri::generate_handler![
             read_directory,
             read_file,
+            read_file_bytes,
+            write_file_bytes,
             write_file,
+            write_file_if_unchanged,
             path_exists,
             dir_exists,
             canonicalize_path,
@@ -851,6 +1170,8 @@ pub fn run() {
             delete_path,
             fs_copy::copy_path,
             read_files_bulk,
+            file_sizes_bulk,
+            read_file_checked,
             scan_node_modules_types,
             #[cfg(debug_assertions)]
             debug_panic_sync,
@@ -867,6 +1188,8 @@ pub fn run() {
             lsp::lsp_stop_all,
             lsp::lsp_trace_path,
             lsp::check_dotnet_installed,
+            csharp_ls::csharp_ls_status,
+            csharp_ls::csharp_ls_install,
             git::git_status,
             git::git_repo_root,
             git::git_list_branches,
@@ -926,20 +1249,27 @@ pub fn run() {
             file_index::build_file_index,
             unity::detect_unity_project,
             unity::scan_meta_files,
+            project_settings::unity_project_settings,
             unity::unity_setup_lsp,
             unity::resolve_unity_editor,
             unity::unity_fetch_registry_index,
             unity::unity_install_bridge,
+            unity::unity_bridge_package_id,
             asmdef::asmdef_build_graph,
             asmdef::asmdef_graph_get,
             asmdef::asmdef_owning_assembly,
             asmdef::unity_classify_scripts,
             unity_yaml::unity_parse_asset,
+            unity_asset_edit::unity_asset_read_fields,
+            unity_asset_edit::unity_asset_apply_edits,
+            unity_asset_edit::unity_scriptable_object_types,
+            unity_asset_edit::unity_asset_read_many,
             unity_diff::unity_scene_diff,
             unity_diff::unity_scene_diff_revs,
             unity_index::unity_index_build,
             unity_index::unity_index_guid_map,
             unity_index::unity_index_find_references,
+            unity_index::unity_method_usages,
             unity_index::unity_index_hygiene,
             unity_index::unity_index_apply_delta,
             unity_tests::unity_tests_discover,
@@ -958,10 +1288,19 @@ pub fn run() {
             unity_ipc::unity_ipc_request,
             unity_ipc::unity_ipc_reconnect,
             unity_ipc::unity_ipc_status,
-            dap::dap_start,
-            dap::dap_send,
-            dap::dap_stop,
-            dap::check_mono_installed,
+            debug::host::dap_start,
+            debug::host::dap_send,
+            debug::host::dap_stop,
+            unity_profiler::profiler_create,
+            unity_profiler::profiler_ingest,
+            unity_profiler::profiler_list,
+            unity_profiler::profiler_frames,
+            unity_profiler::profiler_query,
+            unity_profiler::profiler_export,
+            unity_profiler::profiler_import,
+            debug::host::debug_targets,
+            debug::host::debug_scan_targets,
+            debug::host::debug_trace_path,
             acp::acp_probe,
             acp::acp_install,
             acp::acp_start,
@@ -979,8 +1318,10 @@ pub fn run() {
             graphify::graphify_symbols,
             create_directory_recursive,
             execute_command,
-            cli::peek_pending_goto,
-            cli::claim_pending_goto,
+            cli::peek_pending_open,
+            cli::claim_pending_open,
+            window_registry::register_window_workspace,
+            window_registry::raise_current_window,
         ])
         .setup(|_app| {
             // FIRST, before anything reads the config dir — the update watcher
@@ -1000,17 +1341,70 @@ pub fn run() {
             // from the frontend would check (and download) once per window.
             updates::spawn_watcher(_app.handle());
 
-            // Cold start: the same `--goto` Unity passes on a second launch
-            // also arrives on the first one, and is likewise ignored unless
-            // read here. Stored rather than emitted — no window is listening
-            // yet at this point in boot.
+            // Deep links: `unityide://open?project=…&file=…&line=…&column=…`.
+            //
+            // This is the route Unity takes first, because it needs no idea
+            // where the app is installed — the OS already knows. One handler
+            // covers every warm case on every platform: the plugin emits
+            // `deep-link://new-url` both from macOS's RunEvent::Opened and from
+            // the argv it is handed by the single-instance plugin on
+            // Windows/Linux, and `on_open_url` listens to that event.
+            //
+            // Auth callbacks (`unityide://auth/callback?…`) fall straight
+            // through — `parse_deep_link` discriminates on the host — and are
+            // still handled by the frontend's own `onOpenUrl`.
             {
-                use tauri::Manager;
-                let argv: Vec<String> = std::env::args().collect();
-                if let Some(target) = cli::parse_goto(&argv) {
-                    cli::set_pending(&_app.state::<cli::PendingGoto>(), target);
-                }
+                use tauri_plugin_deep_link::DeepLinkExt;
+                let handle = _app.handle().clone();
+                _app.deep_link().on_open_url(move |event| {
+                    for url in event.urls() {
+                        if let Some(request) = cli::parse_deep_link(&url) {
+                            dispatch_open_request(&handle, request);
+                        }
+                    }
+                });
             }
+
+            // Cold start. Three shapes reach us here and all end in the same
+            // pending slot:
+            //
+            //  * argv — `--goto` / `--project` / a bare path. Unity's fallback
+            //    route, and what an already-installed older package still uses.
+            //  * a deep link on Windows/Linux, which arrives as the process's
+            //    single argument and is parsed by the deep-link plugin's own
+            //    setup — BEFORE the handler above exists, so its event is
+            //    missed and `get_current()` is the only way to see it.
+            //  * a deep link on macOS, which arrives later as RunEvent::Opened
+            //    and IS caught by the handler above. Nothing to do here.
+            //
+            // Stored rather than emitted — no window is listening yet.
+            let launched_with_a_project = {
+                use tauri::Manager;
+                use tauri_plugin_deep_link::DeepLinkExt;
+
+                let from_deep_link = _app
+                    .deep_link()
+                    .get_current()
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default()
+                    .iter()
+                    .find_map(cli::parse_deep_link);
+
+                let argv: Vec<String> = std::env::args().collect();
+                match from_deep_link.or_else(|| cli::parse_open(&argv)) {
+                    Some(request) => {
+                        let has_project = request.project.is_some();
+                        cli::set_pending(&_app.state::<cli::PendingOpen>(), request);
+                        has_project
+                    }
+                    None => false,
+                }
+            };
+
+            // Record where this build is installed so the Unity package can
+            // find it without guessing at platform install paths.
+            unity::write_install_record(_app.handle());
 
             // The welcome window is declared in tauri.conf.json, so it is built
             // before any of this runs and carries that file's literal title.
@@ -1028,8 +1422,32 @@ pub fn run() {
                     // macOS to make up for turning them off here.
                     #[cfg(not(target_os = "macos"))]
                     let _ = w.set_decorations(false);
+
+                    // It is declared `"visible": false` so that a launch from
+                    // Unity does not flash a 720x480 panel on its way to the
+                    // project window. Show it here for every other launch —
+                    // from Rust rather than from the frontend, so a webview
+                    // that fails to boot still leaves the user with a window.
+                    // WelcomeApp shows itself in the remaining case: it was
+                    // handed a project and could not route it anywhere.
+                    // Deliberately not shown here, even when argv named no
+                    // project. On macOS a deep link arrives as
+                    // RunEvent::Opened — AFTER this runs — so showing eagerly
+                    // would put the panel on screen milliseconds before the
+                    // deep link asked for a project window, and leave it
+                    // sitting in front of one. WelcomeApp shows itself the
+                    // moment it knows there is nothing to route, which is the
+                    // same instant either way. `arm_welcome_watchdog` below is
+                    // the net for the case where it never gets that far.
+                    if launched_with_a_project {
+                        // Belt and braces: a no-op unless something showed it
+                        // behind our back.
+                        let _ = w.hide();
+                    }
                 }
             }
+
+            arm_welcome_watchdog(_app.handle());
 
             // Runtime deep-link registration for unbundled runs (`tauri dev`,
             // portable exe) — writes the registry/desktop-file entries the
@@ -1091,12 +1509,14 @@ pub fn run() {
                         dummy.drop_window(&label_clone).await;
                     });
                 }
-                // Per-window DAP session cleanup
-                if let Some(state) = window.try_state::<dap::DapState>() {
+                // Per-window debug session cleanup. Dropping the session ends
+                // its router task, which detaches from the runtime cleanly —
+                // abandoning the socket instead is what kills a Unity editor.
+                if let Some(state) = window.try_state::<debug::host::DebugState>() {
                     let inner = state.0.clone();
                     let label_clone = label.clone();
                     tauri::async_runtime::spawn(async move {
-                        let dummy = dap::DapState(inner);
+                        let dummy = debug::host::DebugState(inner);
                         dummy.drop_window(&label_clone).await;
                     });
                 }
@@ -1200,7 +1620,7 @@ mod path_exists_tests {
 
 #[cfg(test)]
 mod read_directory_ignore_tests {
-    use super::{read_directory, FileEntry};
+    use super::{read_directory_sync, FileEntry};
     use std::process::Command;
 
     /// Setup git commands isolate host gitconfig, mirroring git.rs's test
@@ -1239,7 +1659,7 @@ mod read_directory_ignore_tests {
         std::fs::write(tmp.path().join("a.log"), "l").unwrap();
         std::fs::create_dir(tmp.path().join("ignored-dir")).unwrap();
 
-        let entries = read_directory(root).unwrap();
+        let entries = read_directory_sync(root).unwrap();
         assert!(entry(&entries, "a.log").ignored);
         assert!(entry(&entries, "ignored-dir").ignored);
         assert!(!entry(&entries, "kept.txt").ignored);
@@ -1252,7 +1672,7 @@ mod read_directory_ignore_tests {
         std::fs::write(tmp.path().join("a.log"), "l").unwrap();
         std::fs::write(tmp.path().join("kept.txt"), "k").unwrap();
 
-        let entries = read_directory(tmp.path().to_str().unwrap().to_string()).unwrap();
+        let entries = read_directory_sync(tmp.path().to_str().unwrap().to_string()).unwrap();
         assert!(entries.iter().all(|e| !e.ignored));
     }
 
@@ -1267,7 +1687,7 @@ mod read_directory_ignore_tests {
         std::fs::write(sub.join("local.txt"), "x").unwrap();
         std::fs::write(sub.join("other.txt"), "y").unwrap();
 
-        let entries = read_directory(sub.to_str().unwrap().to_string()).unwrap();
+        let entries = read_directory_sync(sub.to_str().unwrap().to_string()).unwrap();
         assert!(entry(&entries, "local.txt").ignored);
         assert!(!entry(&entries, "other.txt").ignored);
     }
@@ -1407,6 +1827,32 @@ mod execute_command_tests {
         .expect_err("should time out");
 
         assert!(err.contains("timed out"), "unexpected error: {}", err);
+    }
+
+    /// Windows only, and the whole bug is in the escaping. `Command::arg`
+    /// escapes an embedded `"` as `\"`, but `cmd.exe` has no backslash escape:
+    /// it strips the wrapping pair and passes the backslashes through, so a
+    /// quoted path reached the child with literal quote characters inside it.
+    /// Every agent command carrying a quoted argument — a path with a space,
+    /// `git commit -m "…"` — failed on Windows alone, with a syntax error from
+    /// the shell rather than anything naming the cause.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn a_quoted_argument_reaches_the_child_intact() {
+        let dir = tmpdir();
+        let file = dir.path().join("hello world.txt");
+        std::fs::write(&file, "quoted-ok").expect("fixture should be written");
+
+        let out = execute_command(
+            format!("type \"{}\"", file.display()),
+            dir.path().to_string_lossy().to_string(),
+            Some(10_000),
+        )
+        .await
+        .expect("command should run");
+
+        assert_eq!(out.stdout.trim(), "quoted-ok");
+        assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
     }
 
     /// The regression this whole rewrite exists for. `kill_on_drop` was absent

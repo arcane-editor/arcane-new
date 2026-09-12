@@ -36,6 +36,95 @@ export function isTransient(status: number): boolean {
 }
 
 // =========================================================================
+// 429 retry-after handling
+// =========================================================================
+
+/**
+ * Resolves how long to wait before a retryable request, from whichever
+ * source actually has a real number: a structured `retryAfterSeconds` field
+ * on the JSON body (the server's own computed reset time — the hourly cap's
+ * `checkAiBudget`, or a mid-stream provider 429 relayed as an SSE error
+ * event) wins over the raw `Retry-After` HTTP header, which in turn can be
+ * either an integer-seconds count or an RFC 7231 HTTP-date (converted to a
+ * delta from now, floored at 1s so a date in the past/now never produces a
+ * non-positive or undefined result). Returns `undefined` when neither source
+ * yields a usable number, so callers fall back to their own default backoff.
+ */
+export function parseRetryAfter(
+  header: string | null,
+  body: { retryAfterSeconds?: unknown } | null,
+): number | undefined {
+  const bodySeconds = body?.retryAfterSeconds;
+  if (typeof bodySeconds === 'number' && Number.isFinite(bodySeconds) && bodySeconds > 0) {
+    return bodySeconds;
+  }
+
+  if (!header) return undefined;
+  const trimmed = header.trim();
+  if (!trimmed) return undefined;
+
+  if (/^\d+$/.test(trimmed)) {
+    return parseInt(trimmed, 10);
+  }
+
+  const deltaMs = Date.parse(trimmed) - Date.now();
+  if (!Number.isNaN(deltaMs)) {
+    return Math.max(1, Math.ceil(deltaMs / 1000));
+  }
+
+  return undefined;
+}
+
+/**
+ * Ceiling on how long a 429 retry is worth waiting out INLINE (i.e. keeping
+ * the connect-phase loop open and the caller staring at a spinner) rather
+ * than surfacing as an error with an `ErrorBlock` countdown the user can walk
+ * away from. The hourly spend cap's `retryAfterSeconds` is minutes-to-an-hour
+ * — nowhere close to this — so it always falls through to the error path;
+ * a short provider-side "slow down" 429 with a small `Retry-After` stays
+ * inline like the legacy linear backoff did.
+ */
+export const RATE_LIMIT_INLINE_RETRY_MAX_MS = 20_000;
+
+/**
+ * Decides whether a 429 connect-phase attempt should retry inline, and if so
+ * with what delay. `attempt` is 1-indexed (matches `computeBackoffMs`).
+ *
+ * - Out of attempts (`attempt >= maxAttempts`): never retry — the caller
+ *   surfaces the error on this attempt regardless of the delay math below.
+ * - No known `retryAfterSeconds` (neither the body nor the header carried a
+ *   usable one): fall back to the pre-existing legacy linear backoff, so a
+ *   429 with no structured hint behaves exactly as it did before this task.
+ * - A known `retryAfterSeconds` that exceeds `RATE_LIMIT_INLINE_RETRY_MAX_MS`
+ *   once converted to ms (the hourly cap's case): never retry inline — the
+ *   caller throws a classified, countdown-carrying error instead of blocking
+ *   the send for up to an hour.
+ * - Otherwise: retry after `retryAfterSeconds * 1000`, floored at 1000ms so a
+ *   server-reported near-zero wait still yields a real pause rather than a
+ *   busy-loop retry.
+ */
+export function rateLimitRetryPlan(input: {
+  retryAfterSeconds: number | undefined;
+  attempt: number;
+  maxAttempts: number;
+  baseDelayMs: number;
+}): { retry: true; delayMs: number } | { retry: false } {
+  const { retryAfterSeconds, attempt, maxAttempts, baseDelayMs } = input;
+
+  if (attempt >= maxAttempts) return { retry: false };
+
+  if (retryAfterSeconds === undefined) {
+    return { retry: true, delayMs: baseDelayMs * attempt };
+  }
+
+  if (retryAfterSeconds * 1000 > RATE_LIMIT_INLINE_RETRY_MAX_MS) {
+    return { retry: false };
+  }
+
+  return { retry: true, delayMs: Math.max(retryAfterSeconds * 1000, 1000) };
+}
+
+// =========================================================================
 // Backoff
 // =========================================================================
 

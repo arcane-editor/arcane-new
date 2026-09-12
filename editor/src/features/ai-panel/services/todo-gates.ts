@@ -16,12 +16,13 @@ import type { Effort } from './types';
  * Whether `createTodoTool()` joins the toolset for this (mode, effort) combo.
  * - `'preplanning'`: always — its one required final action IS a `todo_update` call.
  * - `'plan-execution'`: always, any effort — mirrors the approved plan's checkboxes.
- * - `'agent'`: every tier EXCEPT `'low'` — Standard has no todo machinery, guaranteed.
+ * - `'agent'` / `'ui-design'`: every tier EXCEPT `'low'` — Standard has no todo
+ *   machinery, guaranteed.
  * - `'ask'` / `'plan-planning'`: never — read-only conversations with nothing to track.
  */
 export function includesTodoTool(mode: PromptMode, effort: Effort): boolean {
   if (mode === 'ask' || mode === 'plan-planning') return false;
-  if (mode === 'agent') return effort !== 'low';
+  if (mode === 'agent' || mode === 'ui-design') return effort !== 'low';
   return true; // 'preplanning' | 'plan-execution'
 }
 

@@ -23,6 +23,7 @@
 
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
+import ts from 'typescript';
 
 // Parameters Tauri injects rather than reading from the JS payload.
 const INJECTED_TYPE_PREFIXES = ['tauri::', 'AppHandle', 'Window', 'State', 'WebviewWindow'];
@@ -188,10 +189,19 @@ function topLevelKeys(body) {
  */
 export function parseInvokeCalls(source, file) {
   const calls = [];
+  // Regex alone sees examples in comments and strings as executable calls.
+  const parsed = ts.createSourceFile(file ?? 'source.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const realCalls = new Set();
+  const visit = (node) => {
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'invoke') realCalls.add(node.expression.getStart(parsed));
+    ts.forEachChild(node, visit);
+  };
+  visit(parsed);
   // `invoke` / `invoke<T>` / `await invoke` — but not `.invoke` on some object.
   const re = /(?<![.\w])invoke\s*(?:<[^>(]*>)?\s*\(/g;
   let m;
   while ((m = re.exec(source)) !== null) {
+    if (!realCalls.has(m.index)) continue;
     const parenIndex = m.index + m[0].length - 1;
     const span = balancedSpan(source, parenIndex, '(', ')');
     if (!span) continue;

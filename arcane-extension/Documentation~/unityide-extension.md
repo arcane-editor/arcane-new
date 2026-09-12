@@ -6,6 +6,12 @@ Unity Editor extension that connects your Unity project to UnityIDE. Provides re
 
 - Unity 2021.3 or later (LTS recommended)
 - UnityIDE installed ([download](https://unityide.app))
+- Package 0.2.0 speaks bridge protocol 4 — pair it with a UnityIDE build that
+  speaks protocol 4 too (0.3.3+). An older pairing still connects (with a
+  protocol-mismatch banner) but the protocol-4 features — console
+  snapshot/clear and the UI-write RPCs — report they need an update instead
+  of running; the test runner falls back to its older, blocking behavior
+  rather than the queued one.
 
 ## Installation
 
@@ -56,6 +62,8 @@ Real-time bidirectional messaging between Unity and the IDE over Unix domain soc
 ### Console Streaming
 Unity console logs (messages, warnings, errors) are streamed to the IDE's console panel in real-time. Logs are batched (100ms debounce) and deduplicated. Stack traces are parsed with clickable file references.
 
+Two additional RPCs (protocol 4+) back the IDE's own post-turn console check rather than the live panel: `getConsoleSnapshot`, a point-in-time read of the console the IDE merges against what it already streamed, and `clearConsole`. Both are served from a bounded, persisted "hook ring" of recent entries, so a script recompile does not reset what the IDE has already seen.
+
 ### Play Controls
 Control Unity's play mode directly from the IDE:
 - **Play** — Enter play mode
@@ -85,10 +93,14 @@ Build progress and results (including errors) are streamed back to the IDE.
 ### Inspector Field Sync
 Changes to component fields in Unity's Inspector are detected and reported to the IDE. The IDE can also edit field values remotely — supporting scenes and prefabs, with type-safe handling of int, float, bool, string, enum, Vector2/3/4, Color, and Quaternion.
 
+### UI Generation
+Two write RPCs (protocol 4+) let the IDE build UI Toolkit screens directly in the open scene: `attachUiDocument` wires a `UIDocument` to a GameObject — a `.uxml`, a `PanelSettings`, and a theme, creating whichever of those is missing — and `setSerializedProperty` sets one serialized value on a component, a GameObject, or an asset. Both refuse to run while Play Mode, a domain reload, or Prefab Mode would make the write unsafe.
+
 ### Test Runner
 Run Unity tests from the IDE (requires `com.unity.test-framework` package):
 - EditMode and PlayMode tests
 - Optional name filter
+- `runTests` is queued rather than blocking — a second call while a run is in progress joins it instead of starting a duplicate
 - Individual test results streamed as they complete
 - Aggregate summary on completion
 

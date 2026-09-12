@@ -4,8 +4,9 @@ import { composerPlaceholder, type PlaceholderInput } from './composer-copy';
 const base: PlaceholderInput = {
   agent: 'hosted',
   mode: 'agent',
-  planResumePending: false,
+  planRoute: 'plan',
   pendingQuestion: false,
+  errorAttachmentCount: 0,
 };
 const p = (o: Partial<PlaceholderInput> = {}) => composerPlaceholder({ ...base, ...o });
 
@@ -16,8 +17,23 @@ describe('composerPlaceholder — UnityIDE', () => {
     expect(p({ mode: 'agent' })).toBe('Plan, build, edit. @ for context, ⏎ to send.');
   });
 
-  it('says a message continues an unfinished plan', () => {
-    expect(p({ mode: 'plan', planResumePending: true })).toContain('continues the current plan');
+  // The placeholder is a promise about what Enter does, and Enter's behaviour
+  // on a written-but-unstarted plan changed: it revises rather than builds.
+  // Copy that still said "continues the current plan" would be describing the
+  // bug this replaced.
+  it('promises revision while a plan is waiting to be executed', () => {
+    const text = p({ mode: 'plan', planRoute: 'revise' });
+    expect(text).toContain('revises the plan');
+    expect(text).not.toContain('continues the current plan');
+  });
+
+  // The wrap-up text after a stopped run tells the user to reply "continue"
+  // to pick it back up (StoppedBlock's Resume button sends that literal
+  // text). The placeholder has to promise the same thing, not "guides the
+  // run in progress" — there is no run in progress once the phase is
+  // 'interrupted', only a plan file with [x] ticks to continue from.
+  it('promises resuming from where the plan stopped', () => {
+    expect(p({ mode: 'plan', planRoute: 'resume' })).toContain('resumes the plan from where it stopped');
   });
 });
 
@@ -30,7 +46,7 @@ describe('composerPlaceholder — external agent', () => {
    */
   it('never promises UnityIDE plan-mode behaviour', () => {
     for (const mode of ['ask', 'plan', 'agent'] as const) {
-      const text = p({ agent: 'claude', mode, planResumePending: true });
+      const text = p({ agent: 'claude', mode, planRoute: 'revise' });
       expect(text.toLowerCase()).not.toContain('plan');
     }
   });
@@ -52,5 +68,24 @@ describe('composerPlaceholder — pending question', () => {
     for (const agent of ['hosted', 'claude'] as const) {
       expect(p({ agent, pendingQuestion: true })).toContain("Answer the agent's question");
     }
+  });
+});
+
+describe('composerPlaceholder — staged errors', () => {
+  /**
+   * "Ask AI" on an error row stages a chip and focuses the composer without
+   * sending. The placeholder is what tells the user the next Enter is theirs
+   * to compose — and it says nothing about the agent or the mode, so it stays
+   * true on both backends.
+   */
+  it('names the staged errors, singular and plural', () => {
+    expect(p({ errorAttachmentCount: 1 })).toBe('Ask about this error. @ for more context, ⏎ to send.');
+    expect(p({ errorAttachmentCount: 3 })).toBe('Ask about these 3 errors. @ for more context, ⏎ to send.');
+  });
+
+  it('outranks the agent and mode copy, but not a pending question', () => {
+    expect(p({ errorAttachmentCount: 2, agent: 'claude' })).toContain('these 2 errors');
+    expect(p({ errorAttachmentCount: 2, mode: 'ask' })).toContain('these 2 errors');
+    expect(p({ errorAttachmentCount: 2, pendingQuestion: true })).toContain("Answer the agent's question");
   });
 });

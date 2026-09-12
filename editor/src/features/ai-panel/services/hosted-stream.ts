@@ -31,7 +31,16 @@ import { convertToOpenAI } from './openai-format';
 import { getStreamExtras } from './stream-extras';
 import { getSendPlanPhase, getSendPromptMode } from './send-context';
 import { difficultyForRequest } from './difficulty';
-import { combineSignals, computeBackoffMs, isTransient, raceWithTimeout, sleep, TimeoutRaceError } from './stream-retry';
+import {
+  combineSignals,
+  computeBackoffMs,
+  isTransient,
+  parseRetryAfter,
+  raceWithTimeout,
+  rateLimitRetryPlan,
+  sleep,
+  TimeoutRaceError,
+} from './stream-retry';
 import { API_URL } from '../../../config/api';
 
 const HOSTED_SERVER_URL = API_URL;
@@ -40,11 +49,27 @@ const HOSTED_SERVER_URL = API_URL;
  * First-token watchdog default: abort if no SSE chunk arrives at all within
  * this window of the very first `reader.read()` call (before any content has
  * streamed). A hung-but-open connect otherwise looks identical to "nothing
- * happening" for the full 90s idle-gap window below — this bounds it much
- * tighter since a healthy stream should produce SOMETHING quickly. Every
- * read after the first keeps falling under the (longer) idle-gap watchdog.
+ * happening" for the full 90s idle-gap window below — this bounds it tighter
+ * since a healthy stream should produce SOMETHING quickly. Every read after
+ * the first keeps falling under the (longer) idle-gap watchdog.
+ *
+ * RAISED FROM 25s: at 25s this watchdog was not measuring what its name
+ * says. The server writes nothing between handing over response headers and
+ * the model's first token, so the window covered gateway connect + prefill +
+ * (on a reasoning model) the entire think-before-answering phase. Slow turns
+ * died as "Stream stalled before the first token" — reported mostly from
+ * Windows, where slower machines and TLS-inspecting security software add
+ * just enough latency to lose the race.
+ *
+ * The actual fix is server-side (`lib/sse-heartbeat.ts` writes a keepalive
+ * comment immediately and every 10s thereafter, which resolves this read and
+ * hands every later read to the idle-gap watchdog) — deliberately there,
+ * because it reaches already-installed editors without an app update. This
+ * value is the client's half: margin for the case where the keepalive itself
+ * is delayed by a buffering intermediary, and a real bound on a genuinely
+ * dead connect for anyone talking to a server that predates the keepalive.
  */
-const FIRST_TOKEN_TIMEOUT_MS = 25_000;
+const FIRST_TOKEN_TIMEOUT_MS = 60_000;
 
 interface HostedStreamEvent {
   type: 'text' | 'tool_call' | 'thinking' | 'usage' | 'error';
@@ -79,9 +104,25 @@ interface HostedStreamEvent {
    * than substring-matching `message`).
    */
   code?: 'model_error' | 'rate_limit' | 'server_error';
+  /**
+   * Seconds until a provider-side rate limit clears, read off the provider's
+   * own `Retry-After` (server's `retryAfterSecondsFrom`, `llm-router.ts`).
+   * Present only when the provider actually sent one — undefined is the
+   * common case (most provider 429s carry no such header). Folded into the
+   * same `[code:<x> retryAfter:<n>]` marker the 429 connect-phase path uses.
+   */
+  retryAfterSeconds?: number;
 }
 
 export interface HostedStreamHardeningConfig {
+  /** Explicit caller identity for isolated specialists. Legacy callers use the UI store. */
+  execution?: {
+    sessionId: string;
+    mode: 'agent' | 'plan';
+    planPhase: 'executing';
+    onUsage: (input: number, output: number) => void;
+    nextTelemetry: typeof nextTurnTelemetry;
+  };
   /** Injectable for tests; defaults to global `fetch`. Production call sites never pass this. */
   fetchImpl?: typeof fetch;
   /** Total attempts (including the first) for the initial connect phase, before any SSE byte is read. Default 3. */
@@ -96,14 +137,16 @@ export interface HostedStreamHardeningConfig {
    * First-token watchdog: governs ONLY the very first `reader.read()` call
    * (before any chunk has arrived at all). Injectable/overridable the same
    * way `idleTimeoutMs` is, for tests. Default `FIRST_TOKEN_TIMEOUT_MS`
-   * (25s) — much tighter than the 90s idle-gap window, since a hung connect
-   * with zero bytes ever sent should be surfaced far sooner than a stall
-   * mid-stream.
+   * (60s) — tighter than the 90s idle-gap window, since a hung connect with
+   * zero bytes ever sent should be surfaced sooner than a stall mid-stream,
+   * but no longer tight enough to mistake model latency for a dead socket
+   * (see that constant for the full history).
    */
   firstTokenTimeoutMs?: number;
 }
 
 interface ResolvedHostedStreamConfig {
+  execution?: HostedStreamHardeningConfig['execution'];
   fetchImpl: typeof fetch;
   maxAttempts: number;
   retryBaseDelayMs: number;
@@ -152,6 +195,7 @@ function corruptionErrorEvent(
  */
 export function createHostedStreamFn(config: HostedStreamHardeningConfig = {}): StreamFn {
   const resolved: ResolvedHostedStreamConfig = {
+    execution: config.execution,
     // Bound to the global on the way in. This lands on a config object and is
     // then invoked as `cfg.fetchImpl(...)` below — a method call, so an unbound
     // `fetch` would receive `cfg` as its `this`. WKWebView (Tauri's macOS
@@ -193,6 +237,9 @@ async function doStream(
   // covers the full request including any connect retries, since a retried
   // attempt is still logically the same outgoing turn.
   const requestStartTime = Date.now();
+  const generation = useAiStore.getState().conversationGeneration;
+  const current = () => !options.signal?.aborted
+    && useAiStore.getState().conversationGeneration === generation;
 
   const token = useAuthStore.getState().token;
   if (!token) {
@@ -227,7 +274,7 @@ async function doStream(
     },
   }));
 
-  const currentMode = useAiStore.getState().mode;
+  const currentMode = cfg.execution?.mode ?? useAiStore.getState().mode;
   // Task-aware routing signals (server config/routing.ts), derived from the
   // conversation's FIRST user message so every send of a conversation routes
   // identically — provider prompt caches are per-model, so the routed model
@@ -286,19 +333,19 @@ async function doStream(
       reasoningLevel: options.reasoning ?? 'low',
       // Conversation id — the server derives provider prompt-cache routing
       // hints from it (prompt_cache_key / x-session-affinity).
-      sessionId: useAiStore.getState().sessionId ?? undefined,
+      sessionId: cfg.execution?.sessionId ?? useAiStore.getState().sessionId ?? undefined,
       // Plan-mode phase FACT (send-context.ts) — the server's routing layer
       // maps low-tier planning sends to the mid model; the editor never
       // chooses models.
-      planPhase: getSendPlanPhase(),
+      planPhase: cfg.execution?.planPhase ?? getSendPlanPhase(),
       // Difficulty FACT (difficulty.ts) — undefined outside high-tier
       // agent/plan-execution sends, or when the current in_progress/pending
       // todo carries no tag. `JSON.stringify` drops the key entirely when
       // undefined, same as `planPhase` above — the server sees no key at all
       // rather than a literal `"difficulty": null`.
-      difficulty: difficultyForRequest(options.reasoning, getSendPromptMode(), useAiStore.getState().hostedPlan),
+      difficulty: cfg.execution ? undefined : difficultyForRequest(options.reasoning, getSendPromptMode(), useAiStore.getState().hostedPlan),
       routing,
-      telemetry: nextTurnTelemetry(),
+      telemetry: (cfg.execution?.nextTelemetry ?? nextTurnTelemetry)(),
     },
   });
 
@@ -381,7 +428,7 @@ async function doStream(
       if (attemptResponse.status === 403) {
         const body = (await attemptResponse.json().catch(() => ({}))) as { error?: string; code?: string };
         if (body.error === 'email_unverified') {
-          useAiStore.getState().setVerificationRequired(true);
+          if (current()) useAiStore.getState().setVerificationRequired(true);
           throw new Error(
             'Verify your email address to use AI features. Check your inbox for the verification link.',
           );
@@ -406,10 +453,10 @@ async function doStream(
         // Never retried — a retry would just repeat the same 401.
         // Set BEFORE logout() so the notice is already in the store by the
         // time the sign-in gate replaces the timeline.
-        useAiStore
-          .getState()
-          .setAuthNotice('Your session expired and you were signed out. Sign in again to continue.');
-        await useAuthStore.getState().logout().catch(() => {});
+        if (useAuthStore.getState().token === token) {
+          if (current()) useAiStore.getState().setAuthNotice('Your session expired and you were signed out. Sign in again to continue.');
+          await useAuthStore.getState().logout().catch(() => {});
+        }
         throw new Error('Authentication expired. Please log in again.');
       }
 
@@ -420,6 +467,54 @@ async function doStream(
         void useAuthStore.getState().refreshUsage();
         const body = (await attemptResponse.json().catch(() => ({}))) as { error?: string };
         throw new Error(body.error ?? 'You are out of AI credits. Open Account to upgrade or buy credits.');
+      }
+
+      if (attemptResponse.status === 429) {
+        // Split out of the generic isTransient branch below: a 429 needs its
+        // own retry decision (rateLimitRetryPlan) driven by the server's
+        // actual `retryAfterSeconds` — the account hourly cap (free plan
+        // only, T7) reports a real reset time up to an hour out, which the
+        // OLD flat linear backoff threw away in favour of "wait a moment,"
+        // sending the user straight back into another 429. Read the body
+        // ONCE (both the retry decision and the eventual error message need
+        // it) alongside the `Retry-After` header.
+        const bodyText = await attemptResponse.text().catch(() => '');
+        let parsedBody: { error?: string; code?: string; retryAfterSeconds?: unknown } | null = null;
+        if (bodyText) {
+          try {
+            parsedBody = JSON.parse(bodyText) as { error?: string; code?: string; retryAfterSeconds?: unknown };
+          } catch {
+            // Not JSON (a proxy or gateway 429) — fall back to the generic message below.
+          }
+        }
+        const retryAfterSeconds = parseRetryAfter(attemptResponse.headers.get('Retry-After'), parsedBody);
+        const plan = rateLimitRetryPlan({
+          retryAfterSeconds,
+          attempt,
+          maxAttempts: cfg.maxAttempts,
+          baseDelayMs: cfg.retryBaseDelayMs,
+        });
+        if (plan.retry) {
+          try {
+            await sleep(plan.delayMs, options.signal);
+          } catch {
+            stream.push({ type: 'done', message: abortedMessage() });
+            return;
+          }
+          continue;
+        }
+        // Terminal: either attempts are exhausted, or retryAfterSeconds is
+        // long enough (the hourly cap) that blocking the send inline would
+        // be wrong — surface a classified, countdown-carrying error instead.
+        // `classifyTurnError` (turn-errors.ts) strips the marker and maps
+        // `code` precisely; an absent `code` (a bare gateway/proxy 429) falls
+        // back to 'rate_limit' so the marker is always well-formed.
+        const marker = `[code:${parsedBody?.code ?? 'rate_limit'}${
+          retryAfterSeconds !== undefined ? ` retryAfter:${Math.round(retryAfterSeconds)}` : ''
+        }]`;
+        throw new Error(
+          `${marker} Rate limit exceeded. ${parsedBody?.error ?? 'Please wait a moment and try again.'}`,
+        );
       }
 
       if (isTransient(attemptResponse.status) && attempt < cfg.maxAttempts) {
@@ -434,24 +529,6 @@ async function doStream(
       }
 
       const errorText = await attemptResponse.text().catch(() => 'Unknown error');
-      if (attemptResponse.status === 429) {
-        // The server computes an actual reset time for the hourly spend cap
-        // ("Try again in ~47 minute(s)") and this threw it away in favour of
-        // "wait a moment" — which is wrong by up to an hour and sends the user
-        // back to retry immediately. Keep the "Rate limit exceeded." prefix:
-        // `classifyTurnError` substring-matches it to route the rate_limit kind.
-        let detail: string | undefined;
-        try {
-          detail = (JSON.parse(errorText) as { error?: string }).error;
-        } catch {
-          // Not JSON (a proxy or gateway 429) — fall back to the generic text.
-        }
-        throw new Error(
-          detail
-            ? `Rate limit exceeded. ${detail}`
-            : 'Rate limit exceeded. Please wait a moment and try again.',
-        );
-      }
       throw new Error(`Server error (${attemptResponse.status}): ${errorText}`);
     }
 
@@ -641,9 +718,17 @@ async function doStream(
             // A structured `code` (T1's gateway work) takes precedence: fold
             // it into a leading `[code:<x>]` marker that `classifyTurnError`
             // strips and maps precisely, instead of substring-matching
-            // `message` alone.
+            // `message` alone. `retryAfterSeconds` (present only when the
+            // provider itself sent a `Retry-After`) folds into the same
+            // marker as `retryAfter:<n>`, the same shape the 429 connect-phase
+            // path above produces, so both reach `classifyTurnError` through
+            // one marker grammar.
+            const retryAfterPart =
+              event.code && event.retryAfterSeconds !== undefined
+                ? ` retryAfter:${Math.round(event.retryAfterSeconds)}`
+                : '';
             const message = event.code
-              ? `[code:${event.code}] ${event.message ?? 'Unknown server error'}`
+              ? `[code:${event.code}${retryAfterPart}] ${event.message ?? 'Unknown server error'}`
               : (event.message ?? 'Unknown server error');
             stream.push({
               type: 'error',
@@ -665,9 +750,12 @@ async function doStream(
             // (surfaced to the server on the NEXT request, P4) and a session-
             // cumulative counter into the ai store (for later UI surfacing;
             // nothing renders it yet).
-            recordTurnLatency(Date.now() - requestStartTime);
-            useAiStore.getState().recordSessionUsage(event.input_tokens ?? 0, event.output_tokens ?? 0);
-            if (event.model) {
+            if (current()) {
+              if (!cfg.execution) recordTurnLatency(Date.now() - requestStartTime);
+              useAiStore.getState().recordSessionUsage(event.input_tokens ?? 0, event.output_tokens ?? 0);
+            }
+            cfg.execution?.onUsage(event.input_tokens ?? 0, event.output_tokens ?? 0);
+            if (event.model && !cfg.execution && current()) {
               useAiStore.getState().recordServedModel(event.model);
             }
             break;

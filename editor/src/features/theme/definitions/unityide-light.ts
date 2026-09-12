@@ -34,7 +34,13 @@ const unityideLight: ThemeDefinition = {
     // on #EBE4D3 vellum
     'statusbar-fg': '#2A2622',
     'border': 'rgba(42, 38, 34, 0.08)',
-    'accent': '#A8632A',
+    // One step darker than the #A8632A it shipped as: that sat at 4.485:1
+    // against `button-primary-text`, so every control that fills with the
+    // accent and labels itself with the button foreground — the send button,
+    // the avatar, both Execute buttons, the activity-bar badge — missed AA by
+    // 0.015. Imperceptible as a colour change, and it lifts the accent as a
+    // foreground on `bg-primary` too (4.566 → 4.629).
+    'accent': '#A76229',
     'accent-secondary': '#7A4318',
     // AI composer mode accents (CONTENT class).
     'mode-ask': '#3A6680',

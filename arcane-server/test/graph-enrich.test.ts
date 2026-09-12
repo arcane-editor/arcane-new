@@ -7,19 +7,20 @@ import { clearConfigCache } from '../src/lib/app-config.ts';
 
 // Finding 1 (2026-08-22 final-review fix wave): /v1/graph/enrich used to hand
 // `routing.tiers.mid.executor` straight to `workersAiProvider`, which only
-// knows the Workers AI binding's own catalog — under the shipped default
-// routing that executor is SPARK_MODEL (a 'direct'-route id), so every call
-// 500'd. The fix serves via `resolveModel` (services/llm-router.ts) instead,
-// and adds the same effective-catalog serve guard chat.ts already has.
+// knows the Workers AI binding's own catalog — the shipped default executor
+// was SPARK_MODEL then (a 'direct'-route id), so every call 500'd. The fix
+// serves via `resolveModel` (services/llm-router.ts) instead, and adds the
+// same effective-catalog serve guard chat.ts already has. The default is a
+// @cf/ id again since 2026-08-27, but an admin can still route this tier at a
+// direct-route model, so both halves of the fix still earn their keep.
 //
 // This suite exercises the NEW guard end-to-end (no real network — the guard
 // returns before ever resolving a model). The "resolveModel can actually
 // serve the default mid.executor" half of the regression is covered at the
-// unit level in llm-router.test.ts (DEFAULT_MODEL_ROUTING ties to the spark
-// direct provider there) rather than here, matching this codebase's existing
-// convention (see chat-metering.test.ts / tier-gate.test.ts): a route-level
-// e2e request that actually reaches generateText for a spark/… id makes a
-// REAL fetch to the RFC-2606 spark.invalid host, which still errors
+// unit level in llm-router.test.ts ("graph enrich's default model") rather
+// than here, matching this codebase's existing convention (see
+// chat-metering.test.ts / tier-gate.test.ts): a route-level e2e request that
+// actually reaches generateText hits a real provider call, which still errors
 // correctly but logs a spurious Miniflare "uncaught exception" line.
 
 async function post(path: string, token: string, body: unknown): Promise<Response> {

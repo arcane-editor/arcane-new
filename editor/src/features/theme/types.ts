@@ -133,6 +133,13 @@ export interface UiColors {
 export interface MonacoThemeData {
   base: 'vs' | 'vs-dark' | 'hc-black';
   inherit: boolean;
+  /**
+   * Opt a theme into semantic highlighting. Monaco discards every token a
+   * DocumentSemanticTokensProvider returns unless this is true, so the LSP
+   * provider alone is not enough. Set centrally in `monacoThemeFor`, which is
+   * why no individual theme definition declares it.
+   */
+  semanticHighlighting?: boolean;
   rules: Array<{
     token: string;
     foreground?: string;

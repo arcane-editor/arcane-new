@@ -22,6 +22,10 @@ export function getSendPlanPhase(): 'preplanning' | 'planning' | 'executing' | u
   if (currentPromptMode === 'preplanning') return 'preplanning';
   if (currentPromptMode === 'plan-planning') return 'planning';
   if (currentPromptMode === 'plan-execution') return 'executing';
+  // Design work IS execution: it reads, writes and verifies in one turn. Calling
+  // it 'planning' would route every send to the tier's planner model, which is
+  // the expensive one, for no gain the loop actually uses.
+  if (currentPromptMode === 'ui-design') return 'executing';
   return undefined;
 }
 

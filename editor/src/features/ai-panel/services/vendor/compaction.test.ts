@@ -178,3 +178,55 @@ describe('reserved tokens (system prompt + tool schemas)', () => {
     expect(estimateTokens(out)).toBeGreaterThan(0);
   });
 });
+
+// A repair instruction elided under compaction is a repair that never happens.
+// These markers are the only thing keeping an open task's text verbatim while
+// every other tool result around it is cleared.
+describe('repair sentinels', () => {
+  const WINDOW = 8_000;
+
+  function conversationCarrying(text: string): AgentMessage[] {
+    const messages: AgentMessage[] = [];
+    for (let i = 0; i < 20; i++) {
+      messages.push({ role: 'user', content: 'u'.repeat(4_000), timestamp: i * 3 } as never);
+      messages.push({
+        role: 'assistant',
+        content: [{ type: 'toolCall', id: `c${i}`, name: 'edit', arguments: { path: `${i}.cs` } }],
+        stopReason: 'toolUse',
+        timestamp: i * 3 + 1,
+      } as never);
+      messages.push({
+        role: 'toolResult',
+        toolCallId: `c${i}`,
+        toolName: 'edit',
+        content: i === 0 ? text : 'r'.repeat(4_000),
+        isError: false,
+        timestamp: i * 3 + 2,
+      } as never);
+    }
+    return messages;
+  }
+
+  const contentOfFirstToolResult = (out: AgentMessage[]) =>
+    (out.find((m) => m.role === 'toolResult') as { content: string }).content;
+
+  it.each([
+    '[Unity compile] 2 compiler error(s) after writing Foo.cs',
+    '[Unity analyzers] 1 error-severity issue(s)',
+    '[Unity UXML] malformed document',
+    '[Unity USS] unknown property',
+    '[Unity input actions] asset no longer parses',
+    '[Unity asset] broken script link',
+    '[Console check] Your last turn left problems behind that were not there when it started.',
+  ])('keeps %p verbatim while the tool results around it are cleared', (marker) => {
+    const out = compactMessages(conversationCarrying(marker), { contextWindow: WINDOW });
+    expect(contentOfFirstToolResult(out)).toBe(marker);
+  });
+
+  it('clears an ordinary old tool result in exactly the same conversation', () => {
+    const out = compactMessages(conversationCarrying('an ordinary result'), {
+      contextWindow: WINDOW,
+    });
+    expect(contentOfFirstToolResult(out)).not.toBe('an ordinary result');
+  });
+});

@@ -6,6 +6,7 @@
 import { cp, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { Agent } from '../../src/features/ai-panel/services/vendor/agent';
 import { convertToLlm } from '../../src/features/ai-panel/services/vendor/messages';
 import { createReadTool } from '../../src/features/ai-panel/services/vendor/tools/read';
@@ -17,6 +18,8 @@ import { createTodoTool, type TodoItem } from '../../src/features/ai-panel/servi
 import type { AgentTool, StreamFn } from '../../src/features/ai-panel/services/vendor/types';
 import { buildAskPrompt } from '../../src/features/ai-panel/services/prompts/ask';
 import { buildAgentPrompt } from '../../src/features/ai-panel/services/prompts/agent';
+import { buildPlanPlanningPrompt } from '../../src/features/ai-panel/services/prompts/plan-planning';
+import { unityRecipesFor } from '../../src/features/ai-panel/services/prompts/unity-recipes';
 import { createUnityApiSearchTool } from '../../src/features/ai-panel/services/unity-tools/api-search-tool';
 import type { UnityApiClient } from '../../src/features/ai-panel/services/unity-tools/api-search-tool';
 import { createGetUnityDocsTool } from '../../src/features/ai-panel/services/unity-tools/docs-tool';
@@ -37,12 +40,14 @@ import { withEvalAnalyzerGate } from './eval-gates';
 import type { EvalTask, TaskResult } from './eval-types';
 import type { UsageTotals, EvalRequestState } from './eval-stream';
 
-const FIXTURES_DIR = new URL('./fixtures/', import.meta.url).pathname;
+const FIXTURES_DIR = fileURLToPath(new URL('./fixtures/', import.meta.url));
 const DEFAULT_MAX_TURNS = 12;
 
 // Committed replay recordings live here by default; `--record` may point
 // elsewhere via `--recordings-dir` (see `run-eval.ts`).
-export const DEFAULT_RECORDINGS_DIR = new URL('./fixtures/api-recordings/', import.meta.url).pathname;
+export const DEFAULT_RECORDINGS_DIR = fileURLToPath(
+  new URL('./fixtures/api-recordings/', import.meta.url),
+);
 
 /**
  * Grounding client wiring for a task run. Defaults to replay (the offline,
@@ -57,11 +62,9 @@ export interface GroundingConfig {
 }
 
 // Mirrors production's per-task-type output ceiling (`hosted-stream.ts`'s
-// `maxTokensByTask`: chat 16384 / plan 24576 / edit 24576). The eval only has
-// two task modes (`ask` | `agent` — see `eval-types.ts`), so this collapses
-// prod's three-way split to two: `ask` maps to prod's chat/Q&A cap, `agent`
-// (which covers both plan-shaped and edit-shaped agentic work here) maps to
-// prod's higher agentic cap.
+// `maxTokensByTask`: chat 16384 / plan 24576 / edit 24576). `ask` maps to
+// prod's chat/Q&A cap; `agent` and `plan` both map to prod's higher cap, which
+// is the one prod actually sends for a planning turn.
 export const ASK_MAX_TOKENS = 16384;
 export const AGENT_MAX_TOKENS = 24576;
 
@@ -79,11 +82,36 @@ export function buildTools(
   const list = createListTool(workDir, { operations: localListOperations });
   // Unity read tools join every mode, matching prod's mode→tool map
   // (`agent-service.ts` — unity read tools are available in 'ask' too).
+  //
+  // Deliberately ABSENT, and this is the list to check when a run diverges from
+  // prod: `unity_input_actions`, `unity_scriptable_objects`, `unity_ui_toolkit`,
+  // `get_unity_script_map`, the bridge read tools (including `get_compile_errors`
+  // and `get_console_errors`), the three asset-mutate tools, the engine-mutate
+  // tools (`unity_play`/`unity_stop`/`unity_refresh`/`unity_run_tests`/
+  // `unity_console_clear` — the console tools), the scene-mutate tools
+  // (`unity_attach_ui_document`/`unity_set_property`), and the UI-generation
+  // trio (`unity_ui_write`/`unity_ui_layout`/`unity_ui_scaffold`). Every one of
+  // them answers from a snapshot the editor maintains, a live Unity console/
+  // compile report, or a live scene (the analyzers' `.inputactions`/UI Toolkit
+  // caches, the Rust GUID index, a connected Unity bridge) that a headless run
+  // does not have — `unity_ui_layout` additionally renders through the editor
+  // feature's own DOM pipeline (Global Constraint 4), and `unity_ui_scaffold`
+  // needs the store-backed project facts the other two feed. A stub that
+  // answered "no snapshot"/"no bridge" would be worse than the omission: the
+  // model would learn to stop calling tools that work in production. Codegen
+  // tasks that exercise UI Toolkit output (`codegen-ui-hud`) go through the
+  // generic `write` tool instead, same as every other codegen task.
   const unityTools: AgentTool[] = [
     createUnityApiSearchTool(groundingClient),
     createGetUnityDocsTool(() => unityVersion),
   ];
-  if (task.mode === 'ask') return [read, list, ...unityTools].map((t) => withRepeatCallGuard(t, workDir));
+  // Plan mode gets the same read-only set as ask, because that is exactly what
+  // prod's planning phase gets (`agent-service.ts`'s `createToolsForPromptMode`
+  // for 'plan-planning': read/list/unity reads, no write/edit/bash). A plan
+  // task that could write files would not be measuring planning.
+  if (task.mode === 'ask' || task.mode === 'plan') {
+    return [read, list, ...unityTools].map((t) => withRepeatCallGuard(t, workDir));
+  }
   // Analyzer gate (eval analog of prod's F-5.3 `withUnityAnalyzerGate` /
   // `wrapCs` in `agent-service.ts`) wraps write/edit only — same tools prod
   // wraps, in the same order (gate applied first, closest to the raw tool).
@@ -134,7 +162,15 @@ export async function runTask(
   const workDir = await mkdtemp(join(tmpdir(), `unity-eval-${task.id}-`));
   await cp(join(FIXTURES_DIR, task.fixture), workDir, { recursive: true });
 
-  const base = task.mode === 'ask' ? buildAskPrompt(workDir) : buildAgentPrompt(workDir);
+  // `difficultyTags: false` matches the low/mid tiers — the ones the README
+  // requires a prompt change to be validated against, and the ones where a
+  // weak plan actually shows up.
+  const base =
+    task.mode === 'plan'
+      ? buildPlanPlanningPrompt(workDir, { difficultyTags: false })
+      : task.mode === 'ask'
+        ? buildAskPrompt(workDir)
+        : buildAgentPrompt(workDir);
   const facts = await buildFixtureFacts(workDir);
   const systemPrompt = `${base}\n\n${facts}`;
 
@@ -160,14 +196,16 @@ export async function runTask(
   // `setReasoning` (no `reasoning` option passed above), so `options.
   // reasoning` is always undefined and the governor normalizes that to
   // 'mid' — overriding all four keeps this robust even if that changes.
-  // `onCapReached` is a no-op: there's no ai-store to notify in the eval
-  // harness (mirrors the Bun-safe DI seam `lsp-gate.ts`/`compile-gate.ts` use
-  // for their own store-backed defaults).
+  // `onCapReached`/`onSoftLimit` are no-ops: there's no ai-store to notify in
+  // the eval harness (mirrors the Bun-safe DI seam `lsp-gate.ts`/
+  // `compile-gate.ts` use for their own store-backed defaults) — both
+  // defaults would otherwise dynamic-import `stores/ai`.
   resetTurnGovernor();
   resetRepeatCallGuard();
   const governedStreamFn = withTurnGovernor(streamFn, () => ({
     caps: { low: maxTurns, mid: maxTurns, high: maxTurns, super: maxTurns },
     onCapReached: () => {},
+    onSoftLimit: () => {},
   }));
 
   const agent = new Agent({
@@ -205,7 +243,12 @@ export async function runTask(
   let finalAnswer = '';
   let groundingLintHits = 0;
   try {
-    const messages = await agent.prompt(task.prompt);
+    // Prod puts the task-class recipes on the USER message for planning sends
+    // (`plan-controller.ts`'s `startPlanning`, which keeps the cached system
+    // prefix stable). Reproduce that here or the eval would be grading a
+    // different prompt than the one that ships.
+    const recipes = task.mode === 'plan' ? unityRecipesFor(task.prompt) : '';
+    const messages = await agent.prompt(recipes ? `${task.prompt}\n${recipes}` : task.prompt);
     const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
     if (lastAssistant && lastAssistant.role === 'assistant') {
       finalAnswer = lastAssistant.content

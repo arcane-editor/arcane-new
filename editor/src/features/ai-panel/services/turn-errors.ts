@@ -18,6 +18,7 @@ export type TurnErrorKind =
   | 'credits'
   | 'tier_gated'
   | 'rate_limit'
+  | 'hourly_cap'
   | 'server'
   | 'network'
   | 'timeout'
@@ -33,6 +34,17 @@ export interface TurnError {
   detail?: string; // one-line guidance, e.g. "This is usually temporary — try again in a moment."
   raw: string; // full original message (expandable section in the UI)
   retriable: boolean;
+  /**
+   * Epoch ms at which a retry is expected to succeed — set only when the
+   * server sent a `retryAfter:<seconds>` marker (the account hourly cap, or a
+   * mid-stream provider 429 that carried a `Retry-After`), computed once at
+   * classification time (`Date.now() + seconds * 1000`). Persisted with the
+   * rest of the error (session files serialize the whole message, `turnError`
+   * included), so a restored session still shows a correct countdown.
+   * `ErrorBlock` gates its Retry button on this and ticks a live countdown;
+   * `detail` may carry a literal `{countdown}` placeholder for it to fill in.
+   */
+  retryAt?: number;
 }
 
 const NETWORK_SUBSTRINGS = [
@@ -44,9 +56,11 @@ const NETWORK_SUBSTRINGS = [
   'no response body',
 ];
 
-/** Matches a leading `[code:<x>]` marker (server-side SSE error code, T4's
- * `hosted-stream.ts`), e.g. `[code:rate_limit] slow down`. */
-const CODE_MARKER = /^\[code:([a-z_]+)\]\s*/;
+/** Matches a leading `[code:<x>]` marker (server-side SSE error code /
+ * hourly-cap 429, `hosted-stream.ts`), optionally carrying a `retryAfter:<seconds>`
+ * hint, e.g. `[code:rate_limit] slow down` or
+ * `[code:hourly_cap retryAfter:2820] Too many AI requests...`. */
+const CODE_MARKER = /^\[code:([a-z_]+)(?:\s+retryAfter:(\d+))?\]\s*/;
 
 /**
  * Classifies a raw error message (from `AssistantMessage.errorMessage` or a
@@ -95,18 +109,43 @@ export function classifyTurnError(raw: string): TurnError {
   const codeMatch = CODE_MARKER.exec(raw);
   if (codeMatch) {
     const stripped = raw.slice(codeMatch[0].length);
+    // Present only when the server sent a `retryAfter:<seconds>` hint
+    // (the hourly cap always does; a mid-stream provider rate_limit only
+    // when the provider itself sent a `Retry-After`). Computed once, here,
+    // at classification time — NOT re-derived on every render — so a
+    // restored session's countdown is anchored to when the error actually
+    // happened, not when the transcript was reopened.
+    const retryAfterSeconds = codeMatch[2] !== undefined ? parseInt(codeMatch[2], 10) : undefined;
+    const retryAt = retryAfterSeconds !== undefined ? Date.now() + retryAfterSeconds * 1000 : undefined;
     // Before the code mapping: a context overflow arrives tagged `model_error`,
     // which would otherwise return the retriable 'server' branch below.
     const overflow = contextOverflowError(stripped);
     if (overflow) return overflow;
     const kind = classifyServerCode(codeMatch[1]);
+    if (kind === 'hourly_cap') {
+      return {
+        kind: 'hourly_cap',
+        title: 'Hourly usage limit reached',
+        detail:
+          retryAt !== undefined
+            ? "You have used this hour's AI spend allowance. Retry unlocks in {countdown}."
+            : 'Try again in about an hour.',
+        raw: stripped,
+        retriable: true,
+        ...(retryAt !== undefined ? { retryAt } : {}),
+      };
+    }
     if (kind === 'rate_limit') {
       return {
         kind: 'rate_limit',
         title: 'Rate limited',
-        detail: 'Too many requests — wait a moment and try again.',
+        detail:
+          retryAt !== undefined
+            ? 'The model provider is busy. Retry unlocks in {countdown}.'
+            : 'Too many requests — wait a moment and try again.',
         raw: stripped,
         retriable: true,
+        ...(retryAt !== undefined ? { retryAt } : {}),
       };
     }
     if (kind === 'server') {
@@ -203,6 +242,22 @@ function classifyTurnErrorTable(raw: string): TurnError {
     };
   }
 
+  // Distinct from 'stream stalled' above: this fires when the connection
+  // dropped mid-response AFTER content had already started (hosted-stream.ts's
+  // reader-end-without-[DONE] fallthrough), not before any byte arrived. The
+  // partial reply is still on screen, so the copy calls that out explicitly
+  // rather than reusing the generic network wording below.
+  if (lower.includes('stream ended unexpectedly')) {
+    return {
+      kind: 'network',
+      title: 'Response cut off',
+      detail:
+        'The connection dropped before the reply finished. Retry sends this message again and replaces the partial reply above.',
+      raw,
+      retriable: true,
+    };
+  }
+
   if (lower.includes("you're offline") || lower.includes('you are offline')) {
     return {
       kind: 'network',
@@ -252,10 +307,12 @@ function classifyTurnErrorTable(raw: string): TurnError {
 /**
  * Maps a structured error code to a `TurnErrorKind`, for callers that have a
  * code available (rather than substring-matching a message) — the SSE
- * `{type:'error', code?, message}` event (T4's `hosted-stream.ts`) for
- * `rate_limit`/`model_error`/`server_error`, and the pre-flight 403
- * `tier_not_available` gate (also folded into a `[code:<x>]` marker by
- * `hosted-stream.ts` before reaching here). Returns `null` for an
+ * `{type:'error', code?, message, retryAfterSeconds?}` event (`hosted-stream.ts`)
+ * for `rate_limit`/`model_error`/`server_error`, the pre-flight 403
+ * `tier_not_available` gate, and the pre-flight 429 `hourly_cap` (account
+ * spend cap, free plan only) — all folded into a `[code:<x>]` marker (with an
+ * optional `retryAfter:<seconds>` for the last two) by `hosted-stream.ts`
+ * before reaching here. Returns `null` for an
  * absent/unrecognized code, so the caller falls back to
  * `classifyTurnError(message)`.
  *
@@ -275,6 +332,8 @@ export function classifyServerCode(code: string | undefined): TurnErrorKind | nu
       return 'server';
     case 'tier_not_available':
       return 'tier_gated';
+    case 'hourly_cap':
+      return 'hourly_cap';
     default:
       return null;
   }
@@ -315,12 +374,23 @@ function turnHasToolCall(newMessages: AgentMessage[]): boolean {
 /**
  * Determines how a send ended, given ONLY the messages appended during this
  * send (not the full conversation history). Rules (exact, in order):
+ *  0. `abortRequested` -> aborted, unconditionally, before anything else
+ *     inspects the tail. A user Stop can leave the vendor loop's tail in
+ *     almost any shape — an aborted `fetch` rejects `reader.read()`, so
+ *     `hosted-stream.ts` pushes an `'error'` event rather than a clean
+ *     `'aborted'` done, and an abort mid-tool-execution never gets a chance
+ *     to reach `'aborted'` at all (the tail stays `stopReason: 'toolUse'`,
+ *     or there's no assistant message yet). Rather than caller-side
+ *     suppression (T5's original approach — `agent-service.ts` skipped this
+ *     whole function when `abortRequested`), abort wins as the very first
+ *     check: a user-initiated Stop is authoritative over whatever the tail
+ *     happens to look like, no matter which rule below would otherwise fire.
  *  1. No assistant message at all -> crash.
  *  2. Last assistant message has `stopReason === 'error'` -> error, with its
  *     `errorMessage` (or a fallback) as `raw`.
- *  3. `stopReason === 'aborted'` OR `abortRequested` -> aborted (abortRequested
- *     wins over a toolUse tail: an abort mid-tool-execution still leaves
- *     `stopReason: 'toolUse'`).
+ *  3. `stopReason === 'aborted'` -> aborted (kept for the vendor loop's own
+ *     clean-abort tail; rule 0 above already covers the caller-reported case,
+ *     including when it wins over a toolUse tail).
  *  4. `stopReason === 'toolUse'` (and not aborted) -> crash (the loop's only
  *     legal exits are error/aborted/end-turn; a toolUse tail means it died
  *     mid-turn).
@@ -342,6 +412,8 @@ function turnHasToolCall(newMessages: AgentMessage[]): boolean {
  *  6. Otherwise -> clean.
  */
 export function detectTurnOutcome(newMessages: AgentMessage[], abortRequested: boolean): TurnOutcome {
+  if (abortRequested) return { type: 'aborted' };
+
   let lastAssistant: AssistantMessage | undefined;
   for (let i = newMessages.length - 1; i >= 0; i--) {
     const m = newMessages[i];
@@ -357,7 +429,7 @@ export function detectTurnOutcome(newMessages: AgentMessage[], abortRequested: b
     return { type: 'error', raw: lastAssistant.errorMessage ?? 'Unknown error' };
   }
 
-  if (lastAssistant.stopReason === 'aborted' || abortRequested) {
+  if (lastAssistant.stopReason === 'aborted') {
     return { type: 'aborted' };
   }
 

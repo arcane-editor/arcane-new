@@ -1,13 +1,49 @@
 ---
 /**
- * Custom Starlight SiteTitle override — shows UnityIDE logo linking back to the landing page.
+ * Starlight's site title, wearing the landing page's face.
+ *
+ * It used to inline `'Space Grotesk'` and `var(--sl-color-accent)` — a typeface
+ * and an accent that exist nowhere else on the site. Both now come from the
+ * shared tokens, so the wordmark here and the wordmark in the Navbar are the
+ * same mark.
  */
 ---
 
-<a href="/" class="site-title sl-flex" style="text-decoration: none; align-items: center; gap: 0.5rem;">
-  <img src="/icon.png" alt="" style="height: 1.5rem; width: 1.5rem; border-radius: 4px;" />
-  <span style="font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 1rem;">
-    UnityIDE<span style="color: var(--sl-color-accent);">IDE</span>
-    <span style="opacity: 0.5; margin-left: 0.25rem; font-weight: 400; font-size: 0.85rem;">Docs</span>
-  </span>
+<a href="/" class="site-title sl-flex">
+  <img src="/icon.png" alt="" width="24" height="24" />
+  <span class="wordmark">Unity<b>IDE</b></span>
+  <span class="section">Docs</span>
 </a>
+
+<style>
+  .site-title {
+    align-items: center;
+    gap: 0.5rem;
+    text-decoration: none;
+    font-family: var(--sans);
+    color: var(--text);
+  }
+
+  img {
+    border-radius: 4px;
+  }
+
+  .wordmark {
+    font-size: 1rem;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+  }
+
+  .wordmark b {
+    font-weight: 600;
+    color: var(--blue);
+  }
+
+  /* Mono, because it names the section you are standing in — the same job the
+     breadcrumb under the title does. */
+  .section {
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    color: var(--mute);
+  }
+</style>

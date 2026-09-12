@@ -13,7 +13,7 @@ interface FuzzyFileResult {
 
 const EXTENSIONS: Record<UnityPickerMode, string[]> = {
   scene: ['unity'],
-  asset: ['prefab', 'asset', 'mat', 'controller', 'anim', 'unity'],
+  asset: ['prefab', 'asset', 'mat', 'controller', 'anim', 'unity', 'inputactions'],
 };
 
 const TITLES: Record<UnityPickerMode, string> = {

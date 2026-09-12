@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import { useHotkeys } from 'react-hotkeys-hook';
 import { useCommandsStore } from '../../../stores/commands';
 import { isMac } from '../../../utils/platform';
@@ -46,6 +46,13 @@ function HotkeyBinding({
     // that key. A composer-scoped chord must be one no text field owns.
     if (!enabled()) return;
 
+    // AltGr reports itself as Ctrl+Alt, so on every non-US Windows layout a
+    // `mod+alt+*` chord matches the keystrokes that type @ \ { } ~ | — and
+    // the preventDefault below then swallows the character. No such chord is
+    // registered any more (they moved to bare alt+<letter> and mod+PgUp/PgDn),
+    // but this makes the class of bug unreachable rather than merely absent.
+    if (e.getModifierState?.('AltGraph')) return;
+
     e.preventDefault();
     handler();
     // enableOnFormTags covers <input>/<textarea>/<select>, but v5 gates
@@ -57,9 +64,35 @@ function HotkeyBinding({
   return null;
 }
 
+/**
+ * True for the chords the webview reloads on: F5, Ctrl+R, Ctrl+Shift+R.
+ *
+ * Nothing in the registry binds these, so today they reach WebView2 and
+ * reload the whole app — losing every unsaved buffer, the terminal sessions
+ * and the AI thread. That is bad on its own, and it becomes load-bearing
+ * with `unity.play` on F5: that command is `when`-gated to Unity projects,
+ * so in any other project the key would fall straight through to a reload.
+ */
+export function isWebviewReloadChord(e: KeyboardEvent): boolean {
+  if (e.code === 'F5' && !e.ctrlKey && !e.altKey && !e.metaKey) return true;
+  return e.code === 'KeyR' && (e.ctrlKey || e.metaKey) && !e.altKey;
+}
+
 function KeyboardShortcutManager() {
   // Select the commands Map directly (stable reference when unchanged)
   const commands = useCommandsStore((s) => s.commands);
+
+  // Bound once, outside the registry, because it is a suppression rather
+  // than a command: there is nothing to run, the key just must not reach the
+  // webview. Capture phase so it lands before Monaco's and xterm's own
+  // handlers, which sit on their elements.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (isWebviewReloadChord(e)) e.preventDefault();
+    };
+    document.addEventListener('keydown', onKeyDown, true);
+    return () => document.removeEventListener('keydown', onKeyDown, true);
+  }, []);
 
   // Derive keybindings from the Map in a memo
   const keybindings = useMemo(() => {

@@ -7,6 +7,9 @@ import { SceneContextPanel } from '../../unity-context';
 import { HierarchyPanel } from '../../unity-hierarchy';
 import { TestPanel } from '../../unity-test-runner';
 import { DebugPanel } from '../../debugger';
+import { InputHubPanel } from '../../unity-input';
+import { ScriptableObjectsPanel } from '../../unity-scriptable-objects';
+import { UnityUiPanel } from '../../uitoolkit';
 import { ErrorBoundary } from '../../../components/ErrorBoundary';
 
 function SidebarPanel() {
@@ -34,6 +37,30 @@ function SidebarPanel() {
       return isUnityProject ? (
         <ErrorBoundary fallback={<div className="sidebar-empty">Test runner unavailable.</div>}>
           <TestPanel />
+        </ErrorBoundary>
+      ) : (
+        <ExplorerPanel />
+      );
+    case 'scriptable-objects':
+      return isUnityProject ? (
+        <ErrorBoundary fallback={<div className="sidebar-empty">ScriptableObjects unavailable.</div>}>
+          <ScriptableObjectsPanel />
+        </ErrorBoundary>
+      ) : (
+        <ExplorerPanel />
+      );
+    case 'input':
+      return isUnityProject ? (
+        <ErrorBoundary fallback={<div className="sidebar-empty">Input Hub unavailable.</div>}>
+          <InputHubPanel />
+        </ErrorBoundary>
+      ) : (
+        <ExplorerPanel />
+      );
+    case 'unity-ui':
+      return isUnityProject ? (
+        <ErrorBoundary fallback={<div className="sidebar-empty">Unity UI unavailable.</div>}>
+          <UnityUiPanel />
         </ErrorBoundary>
       ) : (
         <ExplorerPanel />

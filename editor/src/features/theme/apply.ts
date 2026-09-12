@@ -90,6 +90,12 @@ function diagnosticColorDefaults(theme: ThemeDefinition): Record<string, string>
 export function monacoThemeFor(theme: ThemeDefinition): ThemeDefinition['monaco'] {
   return {
     ...theme.monaco,
+    // Without this flag Monaco accepts a DocumentSemanticTokensProvider and
+    // then discards every token it returns — semantic highlighting is opt-in
+    // per theme, not per provider. Monaco maps each legend token type onto the
+    // theme's existing TextMate rules, so no per-theme colour table is needed
+    // for it to be an improvement over the regex tokenizer.
+    semanticHighlighting: true,
     colors: { ...diagnosticColorDefaults(theme), ...(theme.monaco.colors ?? {}) },
   };
 }

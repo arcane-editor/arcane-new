@@ -34,6 +34,13 @@ export const STARTERS: Record<ChatMode, string[]> = {
     'Add a dash ability with a cooldown.',
     'Write EditMode tests for the damage math.',
   ],
+  // Design mode always has a document open beside it, so these are phrased as
+  // things to do TO that screen rather than screens to build.
+  design: [
+    'Give the buttons a pressed and a focused state.',
+    'Make this readable on a controller from across the room.',
+    'Tighten the spacing and commit to one radius.',
+  ],
 };
 
 /**

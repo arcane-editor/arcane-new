@@ -19,10 +19,23 @@ export interface PlaceholderInput {
   agent: AgentKind;
   /** UnityIDE's chat mode. Meaningless — and unread — for an external agent. */
   mode: ChatMode;
-  /** Plan mode with a plan already written and awaiting (or mid-) execution. */
-  planResumePending: boolean;
+  /**
+   * What Enter will actually do in plan mode — taken straight from
+   * `routePlanSend` rather than re-derived from the phase, so the promise the
+   * placeholder makes cannot drift from the routing that keeps it. Ignored
+   * outside plan mode.
+   */
+  planRoute: 'revise' | 'resume' | 'plan';
   /** The agent is blocked on an `ask_user` question, so typing answers it. */
   pendingQuestion: boolean;
+  /**
+   * How many errors are staged as context right now — from "Ask AI" on the
+   * Problems panel or the Unity Console. A placeholder, never a prefill:
+   * `ai-compose-prefill` REPLACES the composer's text, which would destroy a
+   * half-typed message, and a prefilled sentence is one the user has to
+   * delete.
+   */
+  errorAttachmentCount: number;
 }
 
 /** Shown in place of the agent's name when we have nothing better. */
@@ -37,6 +50,15 @@ export function composerPlaceholder(input: PlaceholderInput): string {
     return "Answer the agent's question — or click an option above.";
   }
 
+  // Ranked above the agent/mode branches: the errors just staged are the most
+  // specific and most recent fact about this send. The sentence deliberately
+  // claims nothing about which agent or mode receives it, so it stays true for
+  // both backends.
+  if (input.errorAttachmentCount > 0) {
+    const n = input.errorAttachmentCount;
+    return `Ask about ${n === 1 ? 'this error' : `these ${n} errors`}. @ for more context, ⏎ to send.`;
+  }
+
   if (isExternalAgent(input.agent)) {
     return `Ask ${AGENT_LABEL[input.agent]} to build, edit, or explain. @ for context, ⏎ to send.`;
   }
@@ -46,9 +68,17 @@ export function composerPlaceholder(input: PlaceholderInput): string {
   }
 
   if (input.mode === 'plan') {
-    return input.planResumePending
-      ? 'Message continues the current plan — Regenerate to re-plan. ⏎ to send.'
-      : 'Describe what you want to build. @ for context, ⏎ to plan.';
+    if (input.planRoute === 'revise') {
+      return 'Message revises the plan — Execute when it looks right. ⏎ to send.';
+    }
+    if (input.planRoute === 'resume') {
+      return 'Message resumes the plan from where it stopped. ⏎ to send.';
+    }
+    return 'Describe what you want to build. @ for context, ⏎ to plan.';
+  }
+
+  if (input.mode === 'design') {
+    return 'Describe the screen — or what to change about it. ⏎ to send.';
   }
 
   return 'Plan, build, edit. @ for context, ⏎ to send.';

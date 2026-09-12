@@ -37,7 +37,7 @@ const KNOWN_EXTENSIONS = new Set([
   'zsh', 'sql', 'lua',
   // shaders / Unity
   'shader', 'cginc', 'hlsl', 'compute', 'prefab', 'unity', 'asset', 'mat',
-  'anim', 'controller', 'meta', 'asmdef',
+  'anim', 'controller', 'meta', 'asmdef', 'inputactions', 'uxml', 'uss',
   // web / markup / config
   'css', 'scss', 'sass', 'less', 'html', 'htm', 'vue', 'svelte', 'json', 'jsonc',
   'md', 'mdx', 'yml', 'yaml', 'toml', 'ini', 'env', 'xml', 'svg', 'csproj',

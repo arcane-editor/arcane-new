@@ -1,0 +1,149 @@
+/**
+ * The hover popover.
+ *
+ * Monaco ships this widget as a tooltip: 4px of padding, one line-height for
+ * every kind of content, and full-bleed `hr`s pulled out to the edges with a
+ * negative margin. That is survivable with one provider. This editor stacks
+ * FOUR on the same word — the language server's signature, Unity docs, usage
+ * counts, and (until now) git blame — so what the reader actually got was a
+ * run of undifferentiated slabs with rules between them, at the same size and
+ * weight, and no way to tell the answer from the footnotes.
+ *
+ * The rebuild treats it as a reading surface rather than a tooltip:
+ *
+ *   ┌──────────────────────────────────────────┐
+ *   │  Vector3 Transform.position { get; set; }│  signature: mono, recessed
+ *   ├──────────────────────────────────────────┤
+ *   │  The world space position of the         │  prose: 12px / 1.5
+ *   │  Transform.                              │
+ *   │                                          │
+ *   │  Unity Docs                              │  the only saturated colour
+ *   └──────────────────────────────────────────┘
+ *
+ * Colour comes entirely from the theme contract (`editorHoverWidget.*` and the
+ * CSS custom properties in tokens.css) — nothing here hardcodes a hex, so a
+ * custom theme restyles the hover for free. Geometry comes from tokens.css for
+ * the same reason the rest of the app does: the hover should sit on the same
+ * 4px rhythm as every other floating surface.
+ */
+
+.monaco-editor .monaco-hover {
+  border-radius: var(--radius-md);
+  /* Lifted, not outlined — matches every other floating surface in the app.
+     Monaco already draws the 1px `editorHoverWidget.border`. */
+  box-shadow: var(--shadow-2);
+  /* 460px keeps prose near 70 characters at 12px, which is the point below
+     which a reader stops having to track back across the line. */
+  max-width: 460px;
+  /* Long C# doc comments used to run off the bottom of the screen. */
+  max-height: 320px;
+  line-height: var(--text-sm-lh);
+}
+
+.monaco-editor .monaco-hover .monaco-scrollable-element {
+  max-height: 320px;
+}
+
+/* Monaco's own rule is `padding: 4px 8px`, which puts the text hard against
+   the border on all four sides. */
+.monaco-editor .monaco-hover .hover-contents:not(.html-hover-contents) {
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
+}
+
+/* One tier per provider. The gap is what separates them; the hairline only
+   confirms it. Monaco's default pulls its `hr` out to the widget edge with a
+   negative margin, so the rules read as slab dividers rather than as the
+   quiet break between two related answers. */
+.monaco-editor .monaco-hover hr {
+  margin: var(--space-2) 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+  height: 0;
+  min-width: 0;
+  opacity: 1;
+}
+
+/* The signature — the reason the hover was opened. It is the one element
+   allowed to look different from the prose around it: mono, full-strength
+   text, on a surface a step above the widget's own. */
+.monaco-editor .monaco-hover .monaco-tokenized-source,
+.monaco-editor .monaco-hover pre {
+  display: block;
+  margin: 0 0 var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  /* Cancels the contents padding so the tier spans the full width. */
+  margin-inline: calc(var(--space-3) * -1);
+  background: var(--hover-overlay);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-primary);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+/* A hover whose ONLY content is the signature should not end with a rule
+   hanging under it. */
+.monaco-editor .monaco-hover .monaco-tokenized-source:last-child,
+.monaco-editor .monaco-hover pre:last-child {
+  margin-bottom: calc(var(--space-2) * -1);
+  border-bottom: 0;
+}
+
+.monaco-editor .monaco-hover p,
+.monaco-editor .monaco-hover ul,
+.monaco-editor .monaco-hover ol {
+  margin: var(--space-2) 0;
+  color: var(--text-primary);
+}
+
+.monaco-editor .monaco-hover ul,
+.monaco-editor .monaco-hover ol {
+  /* Monaco's 20px indent is wider than the widget's own padding, so bullets
+     hung out past the prose they belonged to. */
+  padding-left: var(--space-4);
+}
+
+.monaco-editor .monaco-hover li {
+  margin: var(--space-1) 0;
+}
+
+/* Inline `code` inside prose is a reference, not a block — it gets a tint and
+   a chip, never the signature tier's full-width treatment. */
+.monaco-editor .monaco-hover code {
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+  background: var(--hover-overlay);
+  font-size: 0.92em;
+}
+
+.monaco-editor .monaco-hover .monaco-tokenized-source code,
+.monaco-editor .monaco-hover pre code {
+  padding: 0;
+  background: none;
+  font-size: inherit;
+}
+
+/* The only saturated colour in the widget. */
+.monaco-editor .monaco-hover a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.monaco-editor .monaco-hover a:hover {
+  text-decoration: underline;
+}
+
+/* Monaco renders the "hold Alt to..." affordances in an italic status row.
+   Left at its default 22px line-height it was taller than the prose above it. */
+.monaco-editor .monaco-hover .hover-row.status-bar {
+  padding: var(--space-1) 0;
+  border-top: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  line-height: 1.6;
+}
+
+.monaco-editor .monaco-hover .hover-row.status-bar .info {
+  padding: 0 var(--space-3);
+  font-style: normal;
+}

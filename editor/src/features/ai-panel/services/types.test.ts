@@ -2,13 +2,25 @@ import { describe, it, expect } from 'bun:test';
 import { TIER_CONTEXT_WINDOWS, coerceAgentKind, coerceEffort, isExternalAgent } from './types';
 
 describe('TIER_CONTEXT_WINDOWS', () => {
-  // Offline fallback only — mirrors /v1/config's per-tier contextWindow
-  // (min across planner/executor/executorHard). All three sit at spark's
-  // conservative 131k seed window today.
+  // Offline fallback only — mirrors /v1/config's per-tier contextWindow (min
+  // across planner/executor/executorHard). This has flipped twice: spark's
+  // conservative 131k executor seed bound every tier until 2026-08-27, when
+  // glm-5.3-flash lifted it; spark 1.3 took those slots back on 2026-09-03
+  // and the seed binds every tier again.
   it('encodes each tier usable window', () => {
     expect(TIER_CONTEXT_WINDOWS.low).toBe(131_072);
     expect(TIER_CONTEXT_WINDOWS.mid).toBe(131_072);
     expect(TIER_CONTEXT_WINDOWS.high).toBe(131_072);
+  });
+
+  // Identical across tiers is a FACT about the current lineup, not a rule:
+  // one model (spark) serves an executor slot on all three tiers and has the
+  // smallest window in each, so its seed is what every tier reports. A
+  // routing change that silently drops a tier's usable context is worth
+  // failing on — under-compacting builds requests the provider rejects.
+  it('is pinned to the one model that serves every tier', () => {
+    expect(TIER_CONTEXT_WINDOWS.low).toBe(TIER_CONTEXT_WINDOWS.mid);
+    expect(TIER_CONTEXT_WINDOWS.mid).toBe(TIER_CONTEXT_WINDOWS.high);
   });
 
   it('has no super tier', () => {

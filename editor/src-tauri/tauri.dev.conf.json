@@ -3,7 +3,7 @@
   "productName": "UnityIDE Dev",
   "identifier": "app.unityide.desktop.dev",
   "build": {
-    "beforeBuildCommand": "bun run sync:bridge && bun run build:dev-env"
+    "beforeBuildCommand": "bun run sync:bridge --channel dev && bun run build:dev-env"
   },
   "plugins": {
     "deep-link": {

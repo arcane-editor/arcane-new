@@ -2,7 +2,9 @@
  * Shared AI panel types: chat mode, effort level, attachment kinds.
  */
 
-export type ChatMode = 'ask' | 'agent' | 'plan';
+import type { ErrorReportEntry, ErrorReportSource } from '../data/error-report';
+
+export type ChatMode = 'ask' | 'agent' | 'plan' | 'design';
 
 // Maps 1:1 to the server's `reasoningLevel` (low|mid|high). The backend
 // alone decides which concrete model each level uses — the editor never sends a
@@ -63,6 +65,7 @@ export function coerceEffort(value: unknown): Effort {
 }
 
 export type Attachment =
+  | { kind: 'unity-evidence'; id: string; evidence: import('../../../types/unity-evidence').UnityEvidence }
   | {
       kind: 'file';
       id: string;
@@ -114,6 +117,22 @@ export type Attachment =
       guid: string;
       path: string;
       relPath: string;
+    }
+  | {
+      /**
+       * A frozen snapshot of errors pinned from the Unity Console or the
+       * Problems panel. Unlike `unity-context`'s `console` verb this is NOT
+       * re-read at send time: both surfaces are volatile (a clear, a ring
+       * eviction, the next LSP pull) and neither has a stable id, so a lazy
+       * chip would send different errors than the ones that were on screen.
+       * `entries` stay structured rather than pre-rendered so a second
+       * "Ask AI" click can merge into this same chip. See `data/error-report.ts`.
+       */
+      kind: 'error-report';
+      id: string;
+      source: ErrorReportSource;
+      entries: ErrorReportEntry[];
+      capturedAt: number;
     };
 
 /**
@@ -129,16 +148,23 @@ export type Attachment =
  * the server hands it. These constants below are what the editor falls back
  * to before the first successful `/v1/config` round-trip, and after one
  * fails, and mirror that same per-tier-minimum rule for today's lineup:
- *   low  → min(spark 131,072)                              = 131,072
- *   mid  → min(grok 500,000, spark 131,072)                 = 131,072
- *   high → min(sol 400,000, spark 131,072, grok 500,000)    = 131,072
+ *   low  → min(spark 131,072)                                  = 131,072
+ *   mid  → min(glm-5.3 1,048,576, spark 131,072)               = 131,072
+ *   high → min(sol 400,000, spark 131,072, glm-5.3 1,048,576)  = 131,072
  *
- * spark's 131k is a conservative seed window until the owner configures its
- * real context size — every tier is bottlenecked on it today, which is why
- * all three fallback values are currently identical. Update alongside
- * `stores/server-config.ts`'s `FALLBACK_CONTEXT_WINDOW`, which duplicates
- * these same three numbers (see that file's header for why it's a duplicate
- * rather than an import of this constant).
+ * All three are equal again as of 2026-09-03, for the same reason they were
+ * equal before 2026-08-27: one model (the owner's direct-route Spark
+ * endpoint) serves an executor slot on every tier, and its deliberately
+ * conservative 131,072 catalog seed is the smallest window in each tier's
+ * lineup. Between those dates glm-5.3-flash held those slots and each tier
+ * reported its own planner's window instead (1,048,576 / 1,048,576 /
+ * 400,000). Raising spark's seed in the server catalog — or rolling the
+ * executor slots back to glm-5.3-flash — is what moves these numbers.
+ *
+ * Update alongside `stores/server-config.ts`'s `FALLBACK_CONTEXT_WINDOW`,
+ * which duplicates these same three numbers (see that file's header for why
+ * it's a duplicate rather than an import of this constant), and alongside the
+ * server's `DEFAULT_MODEL_ROUTING`, which is what they mirror.
  */
 export const TIER_CONTEXT_WINDOWS: Record<Effort, number> = {
   low: 131_072,

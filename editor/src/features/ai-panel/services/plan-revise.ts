@@ -25,6 +25,13 @@ export function buildReviseNotesPrompt(
   planPath: string,
   planContent: string,
   notes: PlanNote[],
+  /**
+   * What the user typed in the composer, when the revision came from there
+   * rather than from the Revise button. Feedback about the plan as a whole has
+   * no passage to pin itself to, so it is stated separately instead of being
+   * forced through the anchored-note shape.
+   */
+  freeText?: string,
 ): string {
   const body = notes
     .map((n, i) => {
@@ -35,13 +42,19 @@ export function buildReviseNotesPrompt(
     })
     .join('\n\n');
 
+  const typed = freeText?.trim();
+  const sections = [
+    ...(typed ? [`Feedback on the plan as a whole:\n${typed}`] : []),
+    ...(notes.length > 0 ? [`Suggestions pinned to specific passages:\n${body}`] : []),
+  ].join('\n\n');
+
   return (
-    `Revise the plan below to address these suggestions. Reply with the FULL ` +
+    `Revise the plan below to address the feedback. Reply with the FULL ` +
     `revised plan in the same markdown format — your reply becomes the new ` +
     `content of ${planPath}, so include every part of the plan (updated), ` +
     `with no commentary before or after it. Leave already-checked \`- [x]\` todos ` +
     `checked, and carry forward each kept todo's \`T<n>\` id and \`[easy]\`/\`[hard]\` ` +
     `difficulty tag unchanged.\n\n` +
-    `Suggestions:\n${body}\n\n--- Current plan (${planPath}) ---\n${planContent}`
+    `${sections}\n\n--- Current plan (${planPath}) ---\n${planContent}`
   );
 }

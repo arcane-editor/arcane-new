@@ -6,7 +6,7 @@ import { SPARK_MODEL } from '../src/config/plans.ts';
 import { clearConfigCache, putConfigDoc } from '../src/lib/app-config.ts';
 import type { ModelRoutingDoc } from '../src/lib/app-config.ts';
 
-// DEFAULT_MODEL_ROUTING's low tier resolves to SPARK_MODEL (Task 4), whose
+// DEFAULT_MODEL_ROUTING's low tier resolves to SPARK_MODEL, whose
 // 'direct' route calls a real OpenAI-compatible endpoint — the test env now
 // has valid-shaped SPARK_BASE_URL/SPARK_API_KEY (wrangler.test.toml), so an
 // unmocked streamText for that model would attempt REAL network egress

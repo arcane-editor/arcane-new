@@ -1,5 +1,16 @@
 import { useState, useRef, useEffect, useCallback, useMemo, useDeferredValue } from 'react';
-import { Search, Trash2, ArrowDown, ArrowUpRight, Sparkles } from 'lucide-react';
+import {
+  Search,
+  Trash2,
+  ArrowDown,
+  ArrowUpRight,
+  Sparkles,
+  ChevronDown,
+  Copy,
+  Check,
+  X,
+  MessageSquarePlus,
+} from 'lucide-react';
 import { useVirtualizer, type Virtualizer } from '@tanstack/react-virtual';
 import { useUnityStore } from '../../../stores/unity';
 import { useWorkspaceStore } from '../../../stores/workspace';
@@ -8,7 +19,13 @@ import { useProjectContextStore } from '../../../stores/project-context';
 import { classifyFile, FilePriority } from '../../csharp';
 import { useSceneUsageStore } from '../../unity-context';
 import { BridgeInstallBanner } from '../../unity-bridge';
-import { fixConsoleError } from '../../ai-panel';
+import {
+  fixConsoleError,
+  attachErrorReport,
+  copyErrorReport,
+  isAskableConsoleEntry,
+} from '../../ai-panel';
+import { describeClearOutcome } from '../services/clear-outcome';
 import type { UnityLogEntry, UnityLogType } from '../../../types/unity';
 
 const ERROR_TYPES: UnityLogType[] = ['Error', 'Exception', 'Assert'];
@@ -19,6 +36,8 @@ const LOG_TYPE_COLORS: Record<UnityLogType, string> = {
   Error: 'var(--error-text)',
   Assert: 'var(--error-text)',
   Exception: 'var(--error-text)',
+  CompileError: 'var(--error-text)',
+  CompileWarning: 'var(--warning)',
 };
 
 const LOG_TYPE_LABELS: Record<UnityLogType, string> = {
@@ -27,6 +46,8 @@ const LOG_TYPE_LABELS: Record<UnityLogType, string> = {
   Error: 'ERR',
   Assert: 'AST',
   Exception: 'EXC',
+  CompileError: 'CER',
+  CompileWarning: 'CWR',
 };
 
 interface CollapsedEntry {
@@ -38,7 +59,15 @@ function collapseEntries(logs: UnityLogEntry[]): CollapsedEntry[] {
   const collapsed: CollapsedEntry[] = [];
   for (const entry of logs) {
     const last = collapsed[collapsed.length - 1];
-    if (last && last.entry.message === entry.message && last.entry.logType === entry.logType) {
+    // `historical` is part of the identity too: a backfilled entry and a
+    // live-streamed one with the same message must never merge into one row —
+    // that would silently drop the boundary the "Earlier" divider depends on.
+    if (
+      last &&
+      last.entry.message === entry.message &&
+      last.entry.logType === entry.logType &&
+      !last.entry.historical === !entry.historical
+    ) {
       last.count++;
     } else {
       collapsed.push({ entry, count: 1 });
@@ -58,6 +87,7 @@ function isMonoBehaviourFrame(filePath: string, workspacePath: string | null): b
 function UnityConsolePanel() {
   const logs = useUnityStore((s) => s.logs);
   const clearLogs = useUnityStore((s) => s.clearLogs);
+  const bridgeProtocol = useUnityStore((s) => s.bridgeProtocol);
   const openFile = useWorkspaceStore((s) => s.openFile);
   const workspacePath = useWorkspaceStore((s) => s.workspacePath);
   const isUnityProject = useProjectContextStore((s) => s.isUnityProject);
@@ -68,6 +98,21 @@ function UnityConsolePanel() {
   const [showError, setShowError] = useState(true);
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
   const [autoScroll, setAutoScroll] = useState(true);
+  // Play/edit mode filter. `UnityLogEntry.mode` has always carried this; the
+  // panel just never used it. Chasing a runtime bug means ignoring the
+  // hundreds of import and compile messages Unity logs in edit mode.
+  const [modeFilter, setModeFilter] = useState<'all' | 'PlayMode' | 'EditMode'>('all');
+  const [clearMenuOpen, setClearMenuOpen] = useState(false);
+  // What the last "Clear here and in Unity" actually managed. `null` on
+  // success — the emptied panel is the confirmation; a sentence otherwise,
+  // because the local ring empties either way and a silent failure reads as
+  // though both consoles were cleared.
+  const [clearNotice, setClearNotice] = useState<string | null>(null);
+  // Keyed on the store's monotonic `seq`, never on the collapsed index — that
+  // shifts every time a batch arrives. One scalar, so a copy costs one render;
+  // a per-row map would cost one per row.
+  const [copyFlash, setCopyFlash] = useState<{ key: number | 'all'; ok: boolean } | null>(null);
+  const clearMenuRef = useRef<HTMLDivElement>(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   // The auto-scroll effect runs before `virtualizer`/`collapsed` are in scope
@@ -91,6 +136,27 @@ function UnityConsolePanel() {
     setAutoScroll(isAtBottom);
   }, []);
 
+  // Protocol 4+ can also clear Unity's own console — below that, Clear stays
+  // the single "clear here" button it always was (`clearConsole` is not an
+  // RPC the bridge understands yet).
+  const canClearUnity = (bridgeProtocol ?? 0) >= 4;
+
+  useEffect(() => {
+    if (!clearMenuOpen) return;
+    function onDown(e: MouseEvent) {
+      if (!clearMenuRef.current?.contains(e.target as Node)) setClearMenuOpen(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setClearMenuOpen(false);
+    }
+    window.addEventListener('mousedown', onDown);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('mousedown', onDown);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [clearMenuOpen]);
+
   // Filter logs — defer the text filter so rapid typing doesn't block reconciliation
   const deferredFilter = useDeferredValue(filter);
   const needle = deferredFilter.toLowerCase();
@@ -103,13 +169,71 @@ function UnityConsolePanel() {
   const collapsed = useMemo(() => {
     const filteredLogs = logs.filter((entry) => {
       if (!showLog && entry.logType === 'Log') return false;
-      if (!showWarning && entry.logType === 'Warning') return false;
-      if (!showError && (entry.logType === 'Error' || entry.logType === 'Assert' || entry.logType === 'Exception')) return false;
+      if (!showWarning && (entry.logType === 'Warning' || entry.logType === 'CompileWarning')) return false;
+      if (
+        !showError &&
+        (entry.logType === 'Error' ||
+          entry.logType === 'Assert' ||
+          entry.logType === 'Exception' ||
+          entry.logType === 'CompileError')
+      )
+        return false;
+      // `mode: 'Unknown'` (a getConsoleSnapshot/logEntries row — LogEntries
+      // does not record play/edit mode) is shown under EITHER filter, not
+      // hidden by one and not asserted into the other.
+      if (modeFilter !== 'all' && entry.mode !== 'Unknown' && entry.mode !== modeFilter) return false;
       if (needle && !entry.message.toLowerCase().includes(needle)) return false;
       return true;
     });
     return collapseEntries(filteredLogs);
-  }, [logs, showLog, showWarning, showError, needle]);
+  }, [logs, showLog, showWarning, showError, needle, modeFilter]);
+
+  // What the two bulk buttons act on. Copy transcribes exactly what is on
+  // screen; Ask AI drops the `Log` tier and the bridge's own chatter, because
+  // a play session's Debug.Log output is mostly noise that dilutes the
+  // question and costs tokens. The two counts are printed on the buttons, so
+  // the divergence is visible rather than silent.
+  const copySet = useMemo(() => collapsed.map((c) => c.entry), [collapsed]);
+  const askSet = useMemo(() => copySet.filter(isAskableConsoleEntry), [copySet]);
+
+  const runCopy = useCallback(async (key: number | 'all', entries: UnityLogEntry[]) => {
+    const ok = await copyErrorReport({ source: 'unity-console', entries });
+    setCopyFlash({ key, ok });
+    setTimeout(() => setCopyFlash(null), ok ? 1200 : 2000);
+  }, []);
+
+  const runAsk = useCallback((entries: UnityLogEntry[]) => {
+    void attachErrorReport({ source: 'unity-console', entries });
+  }, []);
+
+  // The palette commands act on what the panel is showing, which is filter
+  // state only the panel owns — hence the event hop (same shape as
+  // `ai.newChat`), and the same handlers the toolbar buttons call so the two
+  // paths cannot diverge.
+  useEffect(() => {
+    const onCopyAll = () => void runCopy('all', copySet);
+    const onAskAi = () => runAsk(askSet);
+    window.addEventListener('unity-console-copy-all', onCopyAll);
+    window.addEventListener('unity-console-ask-ai', onAskAi);
+    return () => {
+      window.removeEventListener('unity-console-copy-all', onCopyAll);
+      window.removeEventListener('unity-console-ask-ai', onAskAi);
+    };
+  }, [copySet, askSet, runCopy, runAsk]);
+
+  // Historical entries (`backfillConsoleHistory`) are always prepended as a
+  // leading run, so "how many at the front are historical" is enough to know
+  // where to render the "Earlier — from Unity's console" divider.
+  const historicalCount = useMemo(() => {
+    let n = 0;
+    while (n < collapsed.length && collapsed[n]!.entry.historical) n++;
+    return n;
+  }, [collapsed]);
+  const hasDivider = historicalCount > 0;
+  // The divider is a real virtualized row (index 0) so scroll offsets/heights
+  // stay correct; every other row shifts down by one when it is present.
+  const rowOffset = hasDivider ? 1 : 0;
+  const virtualCount = collapsed.length + rowOffset;
 
   // Virtualized: Unity emits thousands of lines in a play session and the
   // store caps at 10,000. Rendering every row built ~10k DOM subtrees, each
@@ -119,14 +243,14 @@ function UnityConsolePanel() {
   // Dynamic measurement rather than a fixed row height: a row expands to show
   // parsed stack frames, so its height is not knowable up front.
   const virtualizer = useVirtualizer({
-    count: collapsed.length,
+    count: virtualCount,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => 20,
     overscan: 12,
   });
 
   virtualizerRef.current = virtualizer;
-  collapsedCountRef.current = collapsed.length;
+  collapsedCountRef.current = virtualCount;
 
   // Counts are over the unfiltered list, so they depend only on `logs` —
   // typing in the filter box must not re-count.
@@ -137,8 +261,14 @@ function UnityConsolePanel() {
     // One pass instead of three.
     for (const entry of logs) {
       if (entry.logType === 'Log') l++;
-      else if (entry.logType === 'Warning') w++;
-      else if (entry.logType === 'Error' || entry.logType === 'Assert' || entry.logType === 'Exception') e++;
+      else if (entry.logType === 'Warning' || entry.logType === 'CompileWarning') w++;
+      else if (
+        entry.logType === 'Error' ||
+        entry.logType === 'Assert' ||
+        entry.logType === 'Exception' ||
+        entry.logType === 'CompileError'
+      )
+        e++;
     }
     return { logCount: l, warnCount: w, errCount: e };
   }, [logs]);
@@ -167,13 +297,101 @@ function UnityConsolePanel() {
         borderBottom: '1px solid var(--border)',
         flexShrink: 0,
       }}>
-        <button
-          title="Clear Console"
-          onClick={clearLogs}
-          style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: 2 }}
-        >
-          <Trash2 size={14} />
-        </button>
+        {canClearUnity ? (
+          <div ref={clearMenuRef} style={{ position: 'relative' }}>
+            <button
+              title="Clear Console"
+              onClick={() => setClearMenuOpen((o) => !o)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 1,
+                background: 'none',
+                border: 'none',
+                color: 'var(--text-secondary)',
+                cursor: 'pointer',
+                padding: 2,
+              }}
+            >
+              <Trash2 size={14} />
+              <ChevronDown size={10} />
+            </button>
+            {clearMenuOpen && (
+              <div
+                role="menu"
+                style={{
+                  position: 'absolute',
+                  top: '100%',
+                  left: 0,
+                  marginTop: 2,
+                  background: 'var(--bg-input)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 4,
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.25)',
+                  zIndex: 20,
+                  minWidth: 190,
+                  overflow: 'hidden',
+                }}
+              >
+                <button
+                  role="menuitem"
+                  onClick={() => {
+                    setClearMenuOpen(false);
+                    setClearNotice(null);
+                    void clearLogs();
+                  }}
+                  style={{
+                    display: 'block',
+                    width: '100%',
+                    textAlign: 'left',
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--text-primary)',
+                    fontSize: 12,
+                    padding: '6px 10px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Clear here
+                </button>
+                <button
+                  role="menuitem"
+                  onClick={() => {
+                    setClearMenuOpen(false);
+                    setClearNotice(null);
+                    void clearLogs({ unity: true }).then((outcome) => {
+                      setClearNotice(describeClearOutcome(outcome));
+                    });
+                  }}
+                  style={{
+                    display: 'block',
+                    width: '100%',
+                    textAlign: 'left',
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--text-primary)',
+                    fontSize: 12,
+                    padding: '6px 10px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Clear here and in Unity
+                </button>
+              </div>
+            )}
+          </div>
+        ) : (
+          <button
+            title="Clear Console"
+            onClick={() => {
+              setClearNotice(null);
+              void clearLogs();
+            }}
+            style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: 2 }}
+          >
+            <Trash2 size={14} />
+          </button>
+        )}
 
         <div style={{ position: 'relative', flex: 1, maxWidth: 200 }}>
           <Search size={12} style={{ position: 'absolute', left: 6, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-secondary)' }} />
@@ -240,6 +458,66 @@ function UnityConsolePanel() {
           Error ({errCount})
         </button>
 
+        {/* Play/edit mode. A three-state cycle rather than two toggles: the
+            useful states are "everything", "only this play session" and "only
+            edit-time", and two independent toggles allow a fourth state that
+            shows nothing at all. */}
+        <button
+          title="Filter by play mode"
+          onClick={() =>
+            setModeFilter((m) => (m === 'all' ? 'PlayMode' : m === 'PlayMode' ? 'EditMode' : 'all'))
+          }
+          style={{
+            background: modeFilter === 'all' ? 'transparent' : 'var(--hover)',
+            border: '1px solid var(--border)',
+            borderRadius: 3,
+            color: 'var(--text-secondary)',
+            fontSize: 11,
+            padding: '2px 6px',
+            cursor: 'pointer',
+          }}
+        >
+          {modeFilter === 'all' ? 'All modes' : modeFilter === 'PlayMode' ? 'Play only' : 'Edit only'}
+        </button>
+
+        {/* The filter chips to the left ARE the selector for these two: what
+            is on screen is what gets copied or asked about. */}
+        <span className="unity-console-bar-spacer" />
+        <button
+          className="unity-console-bar-action"
+          disabled={copySet.length === 0}
+          title={
+            copyFlash?.key === 'all' && !copyFlash.ok
+              ? "Couldn't copy — clipboard unavailable"
+              : `Copy the ${copySet.length} entries currently shown`
+          }
+          onClick={() => void runCopy('all', copySet)}
+        >
+          {copyFlash?.key === 'all' ? (
+            copyFlash.ok ? (
+              <Check size={12} style={{ color: 'var(--success)' }} />
+            ) : (
+              <X size={12} style={{ color: 'var(--error-text)' }} />
+            )
+          ) : (
+            <Copy size={12} />
+          )}
+          Copy ({copySet.length})
+        </button>
+        <button
+          className="unity-console-bar-action"
+          disabled={askSet.length === 0}
+          title={
+            askSet.length === 0
+              ? 'No errors in the current filter'
+              : `Add the ${askSet.length} errors currently shown to the AI chat as context`
+          }
+          onClick={() => runAsk(askSet)}
+        >
+          <MessageSquarePlus size={12} />
+          Ask AI ({askSet.length})
+        </button>
+
         {!autoScroll && (
           <button
             title="Scroll to Bottom"
@@ -254,6 +532,43 @@ function UnityConsolePanel() {
         )}
       </div>
 
+      {/* Why Unity's console survived a "Clear here and in Unity". Sits under
+          the toolbar rather than in a toast: the state it describes is about
+          this panel, and it stays until the next clear. */}
+      {clearNotice && (
+        <div
+          role="status"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 8,
+            padding: '4px 8px',
+            borderBottom: '1px solid var(--border)',
+            background: 'var(--bg-input)',
+            color: 'var(--warning)',
+            fontSize: 11,
+            flexShrink: 0,
+          }}
+        >
+          <span>{clearNotice}</span>
+          <button
+            title="Dismiss"
+            onClick={() => setClearNotice(null)}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: 'var(--text-secondary)',
+              cursor: 'pointer',
+              padding: 0,
+              fontSize: 11,
+            }}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
       {/* Log entries */}
       <div
         ref={scrollRef}
@@ -262,8 +577,44 @@ function UnityConsolePanel() {
       >
         <div style={{ height: virtualizer.getTotalSize(), position: 'relative', width: '100%' }}>
         {virtualizer.getVirtualItems().map((virtualRow) => {
-          const item = collapsed[virtualRow.index];
-          const idx = virtualRow.index;
+          if (hasDivider && virtualRow.index === 0) {
+            return (
+              <div
+                key={virtualRow.key}
+                data-index={virtualRow.index}
+                ref={virtualizer.measureElement}
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  width: '100%',
+                  transform: `translateY(${virtualRow.start}px)`,
+                }}
+              >
+                <div
+                  style={{
+                    padding: '4px 8px',
+                    fontSize: 10,
+                    fontWeight: 600,
+                    letterSpacing: 0.4,
+                    textTransform: 'uppercase',
+                    color: 'var(--text-secondary)',
+                    background: 'var(--bg-input)',
+                    borderBottom: '1px solid var(--border)',
+                  }}
+                >
+                  Earlier — from Unity's console
+                </div>
+              </div>
+            );
+          }
+          const idx = virtualRow.index - rowOffset;
+          const item = collapsed[idx];
+          if (!item) return null;
+          // `seq` is assigned on ingest for every entry, streamed or backfilled;
+          // the fallback only keeps the key and the lookup using one value.
+          const rowSeq = item.entry.seq ?? -1;
+          const rowFlash = copyFlash && copyFlash.key === rowSeq ? copyFlash : null;
           return (
           <div
             key={virtualRow.key}
@@ -278,6 +629,7 @@ function UnityConsolePanel() {
             }}
           >
             <div
+              className="unity-console-row"
               onClick={() => setExpandedIdx(expandedIdx === idx ? null : idx)}
               style={{
                 display: 'flex',
@@ -319,6 +671,45 @@ function UnityConsolePanel() {
                   {item.count}
                 </span>
               )}
+              {/* Width is reserved at rest and only `opacity` animates. The
+                  rows are measured by `virtualizer.measureElement` and the
+                  message is `pre-wrap`, so a group that appeared on hover would
+                  narrow the message column, wrap a line, regrow the row and
+                  make every row below jump under the pointer. */}
+              <div className="unity-console-row-actions">
+                <button
+                  className="unity-console-row-action"
+                  title={
+                    rowFlash && !rowFlash.ok
+                      ? "Couldn't copy — clipboard unavailable"
+                      : 'Copy message and stack trace'
+                  }
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void runCopy(rowSeq, [item.entry]);
+                  }}
+                >
+                  {rowFlash ? (
+                    rowFlash.ok ? (
+                      <Check size={11} style={{ color: 'var(--success)' }} />
+                    ) : (
+                      <X size={11} style={{ color: 'var(--error-text)' }} />
+                    )
+                  ) : (
+                    <Copy size={11} />
+                  )}
+                </button>
+                <button
+                  className="unity-console-row-action"
+                  title="Add this entry to the AI chat as context"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    runAsk([item.entry]);
+                  }}
+                >
+                  <MessageSquarePlus size={11} />
+                </button>
+              </div>
               {isUnityProject && ERROR_TYPES.includes(item.entry.logType) && (
                 <button
                   title="Fix this error with AI"

@@ -299,6 +299,68 @@ describe('withWriteApproval', () => {
       expect(text).toContain('does not match');
     });
 
+    // I5. `unity_ui_write` declares a top-level `content` exactly like `write`
+    // does, but `computePendingNewText` special-cased the tool NAME, so under
+    // `applyMode: 'approve'` every call was refused outright — "could not
+    // preview this unity_ui_write … The change was NOT applied" — and the tool
+    // was unusable in that mode.
+    it('a non-write tool carrying a top-level string `content` previews like write does', async () => {
+      let calls = 0;
+      const tool: AgentTool = {
+        name: 'unity_ui_write',
+        label: 'unity ui write',
+        description: 'fake',
+        parameters: Type.Object({}),
+        async execute(): Promise<AgentToolResult> {
+          calls++;
+          return { content: [{ type: 'text', text: 'wrote it' }] };
+        },
+      };
+      const { deps, requests } = fakeApprovalDeps('apply', { readFile: async () => '<old/>\n' });
+
+      const res = await withWriteApproval(tool, CWD, { deps }).execute('call-1', {
+        path: 'Assets/UI/HUD.uxml',
+        content: '<new/>\n',
+      });
+
+      expect(requests).toHaveLength(1);
+      expect(requests[0].toolName).toBe('unity_ui_write');
+      expect(requests[0].diff).toEqual({
+        path: '/proj/Assets/UI/HUD.uxml',
+        oldText: '<old/>\n',
+        newText: '<new/>\n',
+      });
+      expect(calls).toBe(1);
+      const text = res.content[0].type === 'text' ? res.content[0].text : '';
+      expect(text).not.toContain('could not preview');
+    });
+
+    it('a field-based Unity tool with no `content` is still refused — the documented known gap', async () => {
+      let calls = 0;
+      const tool: AgentTool = {
+        name: 'unity_asset_edit',
+        label: 'unity asset edit',
+        description: 'fake',
+        parameters: Type.Object({}),
+        async execute(): Promise<AgentToolResult> {
+          calls++;
+          return { content: [{ type: 'text', text: 'edited it' }] };
+        },
+      };
+      const { deps, requests } = fakeApprovalDeps('apply', { readFile: async () => 'yaml\n' });
+
+      const res = await withWriteApproval(tool, CWD, { deps }).execute('call-1', {
+        path: 'Assets/Data/Enemy.asset',
+        fields: { speed: 7 },
+      });
+
+      expect(requests).toHaveLength(0);
+      expect(calls).toBe(0);
+      const text = res.content[0].type === 'text' ? res.content[0].text : '';
+      expect(text).toContain('could not preview this unity_asset_edit');
+      expect(text).toContain('NOT applied');
+    });
+
     it('edit: an unreadable pre-read on a serialized asset in auto mode refuses instead of writing unprompted', async () => {
       const { tool, calls } = fakeWriteTool('edit');
       const { deps, requests } = fakeApprovalDeps('apply', {

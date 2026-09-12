@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { configurationForItem } from './csharp-configuration';
 import { safeUnlisten, listenScoped } from '../../../utils/tauri-listener';
 import { fileUri } from './document-sync';
 
@@ -56,6 +57,17 @@ interface LspEventPayload {
 }
 
 const REQUEST_TIMEOUT_MS = 180_000;
+
+/**
+ * Per-request overrides. Interactive requests (completion, hover, signature
+ * help) set both: a short deadline, because an answer the user has already
+ * typed past is worthless, and the `AbortSignal` Monaco's cancellation token
+ * is bridged onto.
+ */
+export interface RequestOptions {
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}
 const STDERR_RING_SIZE = 50;
 
 // ── workspace/applyEdit handler injection ───────────────────────
@@ -101,6 +113,19 @@ export class LspClient {
   private running = false;
   private stderrRing: string[] = [];
   private serverCapabilities: Record<string, unknown> | null = null;
+  /**
+   * The most recent `notify` send, so `request` can wait for it.
+   *
+   * `notify` and `request` each cross to Rust as their own `invoke('lsp_send')`
+   * call, and `lsp_send` awaits a per-window mutex before writing to the
+   * server's stdin. Two concurrently-spawned Tauri command tasks have no
+   * guaranteed lock order, so a `didChange` and the completion that depends on
+   * it could reach the server in either order — and a completion evaluated
+   * against the previous revision of the buffer is indistinguishable from a
+   * server that simply has nothing to offer. Chaining request sends behind the
+   * last notification costs one IPC round trip and removes the race.
+   */
+  private lastNotifySent: Promise<unknown> = Promise.resolve();
 
   constructor(public readonly languageId: string) {}
 
@@ -244,6 +269,50 @@ export class LspClient {
           documentHighlight: {
             dynamicRegistration: false,
           },
+          // Declared because a server may gate its own capability on the
+          // client asking for it — csharp-ls advertises all of these, and
+          // `verify:intellisense` fails if any of them stops coming back.
+          documentSymbol: {
+            dynamicRegistration: false,
+            hierarchicalDocumentSymbolSupport: true,
+            symbolKind: {
+              valueSet: [
+                1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
+                19, 20, 21, 22, 23, 24, 25, 26,
+              ],
+            },
+            labelSupport: true,
+          },
+          semanticTokens: {
+            dynamicRegistration: false,
+            requests: { range: true, full: { delta: false } },
+            formats: ['relative'],
+            tokenTypes: [
+              'namespace', 'type', 'class', 'enum', 'interface', 'struct',
+              'typeParameter', 'parameter', 'variable', 'property',
+              'enumMember', 'event', 'function', 'method', 'macro', 'keyword',
+              'modifier', 'comment', 'string', 'number', 'regexp', 'operator',
+              'decorator',
+            ],
+            tokenModifiers: [
+              'declaration', 'definition', 'readonly', 'static', 'deprecated',
+              'abstract', 'async', 'modification', 'documentation',
+              'defaultLibrary',
+            ],
+            overlappingTokenSupport: false,
+            multilineTokenSupport: false,
+            serverCancelSupport: false,
+            augmentsSyntaxTokens: true,
+          },
+          formatting: { dynamicRegistration: false },
+          rangeFormatting: { dynamicRegistration: false },
+          onTypeFormatting: { dynamicRegistration: false },
+          callHierarchy: { dynamicRegistration: false },
+          typeHierarchy: { dynamicRegistration: false },
+          inlayHint: {
+            dynamicRegistration: false,
+            resolveSupport: { properties: ['tooltip', 'label.tooltip'] },
+          },
           rename: { prepareSupport: true, dynamicRegistration: false },
           publishDiagnostics: { relatedInformation: true, versionSupport: true },
           diagnostic: { dynamicRegistration: false, relatedDocumentSupport: false },
@@ -305,7 +374,11 @@ export class LspClient {
   /**
    * Send a JSON-RPC request and wait for the response.
    */
-  async request<T = unknown>(method: string, params: unknown): Promise<T> {
+  async request<T = unknown>(
+    method: string,
+    params: unknown,
+    options?: RequestOptions,
+  ): Promise<T> {
     if (!this.running && method !== 'initialize') {
       throw new Error(
         `LSP client (${this.languageId}) is not running (attempted '${method}')`,
@@ -313,6 +386,9 @@ export class LspClient {
     }
 
     const id = this.nextId++;
+    const timeoutMs = options?.timeoutMs ?? REQUEST_TIMEOUT_MS;
+    /** Has this request reached the server? Gates `$/cancelRequest`. */
+    let sent = false;
 
     const promise = new Promise<T>((resolve, reject) => {
       this.pendingRequests.set(id, {
@@ -321,17 +397,43 @@ export class LspClient {
         method,
       });
 
+      // Abandon a superseded interactive request. Monaco cancels the previous
+      // completion the moment the next keystroke arrives, and without this the
+      // server keeps computing an answer nobody will read while the reply this
+      // client IS waiting for queues behind it.
+      if (options?.signal) {
+        const onAbort = () => {
+          const pending = this.pendingRequests.get(id);
+          if (!pending) return;
+          this.pendingRequests.delete(id);
+          this.clearPendingTimeout(id, pending);
+          // Only worth telling the server about a request it has actually
+          // been sent. Cancelling an id that never left would arrive first
+          // and be discarded as unknown, and the request would then run to
+          // completion anyway — the opposite of the intent.
+          if (sent) this.notify('$/cancelRequest', { id });
+          pending.reject(new LspRequestCanceledError(method, this.languageId, -32800));
+        };
+        // Already cancelled before we even got here: reject without sending
+        // anything at all.
+        if (options.signal.aborted) queueMicrotask(onAbort);
+        else options.signal.addEventListener('abort', onAbort, { once: true });
+      }
+
       const timeoutId = setTimeout(() => {
         const pending = this.pendingRequests.get(id);
         if (pending) {
           this.pendingRequests.delete(id);
+          // Tell the server to stop too — a timeout that leaves the work
+          // running just moves the cost, it does not remove it.
+          if (sent) this.notify('$/cancelRequest', { id });
           pending.reject(
             new Error(
-              `LSP request '${method}' (id=${id}, lang=${this.languageId}) timed out after ${REQUEST_TIMEOUT_MS}ms`,
+              `LSP request '${method}' (id=${id}, lang=${this.languageId}) timed out after ${timeoutMs}ms`,
             ),
           );
         }
-      }, REQUEST_TIMEOUT_MS);
+      }, timeoutMs);
 
       (
         this.pendingRequests.get(id) as PendingRequest & {
@@ -343,10 +445,18 @@ export class LspClient {
     const msg: JsonRpcRequest = { jsonrpc: '2.0', id, method, params };
 
     try {
+      // Ordering, not error handling: a failed notification is reported by
+      // `notify` itself, and must not fail the request that follows it.
+      await this.lastNotifySent.catch(() => {});
+      // Aborted while waiting for the notification to land: the rejection has
+      // already been delivered, so sending the request now would leave the
+      // server computing an answer nobody is waiting for.
+      if (options?.signal?.aborted) return promise;
       await invoke('lsp_send', {
         language: this.languageId,
         message: JSON.stringify(msg),
       });
+      sent = true;
     } catch (err) {
       const pending = this.pendingRequests.get(id);
       if (pending) {
@@ -366,10 +476,34 @@ export class LspClient {
    */
   notify(method: string, params: unknown): void {
     const msg: JsonRpcNotification = { jsonrpc: '2.0', method, params };
-    invoke('lsp_send', {
-      language: this.languageId,
-      message: JSON.stringify(msg),
-    }).catch((err) => {
+
+    // Notifications are CHAINED, not fired in parallel.
+    //
+    // LSP is an ordered stream, and `syncDocumentChange` sends full document
+    // text — so if two `didChange`s race and v3 reaches the server before v2,
+    // the server's copy of the buffer ends up as the OLDER text and stays
+    // wrong until the next edit. Every completion, hover and diagnostic after
+    // that is computed against a file the user is not looking at.
+    //
+    // They could race because each `invoke` is its own Tauri command task and
+    // `lsp_send` awaits a shared mutex, so the order tasks acquire it is not
+    // the order they were spawned in. Chaining costs one IPC round trip per
+    // notification and removes the question.
+    const sent = this.lastNotifySent
+      .catch(() => {})
+      .then(() =>
+        invoke('lsp_send', {
+          language: this.languageId,
+          message: JSON.stringify(msg),
+        }),
+      );
+
+    // Requests issued after this notification wait on it — see
+    // `lastNotifySent`. The rejection is handled here and again by the
+    // awaiting request, so a failed send cannot leave an unhandled rejection
+    // or wedge the chain.
+    this.lastNotifySent = sent;
+    sent.catch((err) => {
       console.error(`[LSP ${this.languageId}] Failed to send notification '${method}':`, err);
     });
   }
@@ -531,8 +665,13 @@ export class LspClient {
           break;
 
         case 'workspace/configuration': {
-          const items = (msg.params as { items?: unknown[] })?.items ?? [];
-          result = items.map(() => ({}));
+          // One result per item, in order. Answering `{}` for everything —
+          // which this did — leaves every server option at its default, and
+          // csharp-ls defaults `analyzersEnabled` to OFF. The Unity analyzers
+          // would then be referenced by the project, loaded by Roslyn, and
+          // never run, with only a log line to say so.
+          const items = (msg.params as { items?: { section?: string }[] })?.items ?? [];
+          result = items.map((item) => configurationForItem(this.languageId, item?.section));
           break;
         }
 
@@ -627,6 +766,11 @@ export class LspClient {
   }
 
   private cleanup(): void {
+    // Drop the previous session's send chain. Without this the next
+    // `initialize` waits on the `exit` notification of the server that just
+    // died — a promise belonging to a process that no longer exists.
+    this.lastNotifySent = Promise.resolve();
+
     if (this.unlisten) {
       safeUnlisten(this.unlisten);
       this.unlisten = null;

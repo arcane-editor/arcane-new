@@ -1,0 +1,4 @@
+# Unity assets are byte-exactness fixtures: never normalise their line endings.
+*.asset -text
+*.prefab -text
+*.unity -text

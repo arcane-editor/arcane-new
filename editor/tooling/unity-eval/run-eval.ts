@@ -42,6 +42,7 @@
 
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { createEvalStreamFn, type EvalRequestState } from './eval-stream';
 import { runTask, type GroundingConfig } from './run-task';
@@ -167,7 +168,7 @@ const groundingLintHits = aggregated.reduce(
   0,
 );
 
-const resultsDir = new URL('./results/', import.meta.url).pathname;
+const resultsDir = fileURLToPath(new URL('./results/', import.meta.url));
 await mkdir(resultsDir, { recursive: true });
 const stamp = new Date().toISOString().replace(/[:.]/g, '-');
 const outPath = join(resultsDir, `${stamp}-${label}.json`);

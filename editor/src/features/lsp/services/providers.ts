@@ -1,27 +1,53 @@
 import type { Monaco } from '@monaco-editor/react';
 import type { editor, Position } from 'monaco-editor';
-import type { LspClient } from './client';
+import { LspRequestCanceledError, type LspClient } from './client';
 import {
   getLspContextForModel,
   toMonacoRange,
   buildTextDocumentPositionParams,
+  lspDocumentUri,
+  modelFilePath,
   type LspRange,
 } from './model-context';
+import {
+  filterStaticSuggestions,
+  isAfterDot,
+  labelText,
+  mapCompletionList,
+  mergeResolvedItem,
+  shouldOfferLifecycleSnippets,
+  toLspCompletionTriggerKind,
+  type LspCompletionItem,
+  type LspCompletionList,
+  type MonacoCompletionEnums,
+  type MonacoRange,
+  type MonacoSuggestion,
+} from './completion-mapping';
+import { serverProfile } from './server-profiles';
 import { registerApplyEditHandler } from './workspace-edit';
 import { registerLspCodeActionProviders } from './code-actions';
 import { registerLspRenameProviders } from './rename-provider';
+import {
+  registerLspSymbolProviders,
+  registerSemanticTokensForClient,
+  disposeSemanticTokenProviders,
+} from './symbol-providers';
 import { useWorkspaceStore } from '../../../stores/workspace';
 import { useUiStore } from '../../../stores/ui';
 import { useProjectContextStore } from '../../../stores/project-context';
 import { useSettingsStore } from '../../../stores/settings';
 import { UNITY_LIFECYCLE_METHODS } from '../data/unity-lifecycle-snippets';
+import { UNITY_LIVE_TEMPLATES } from '../data/unity-live-templates';
 import { CSHARP_KEYWORDS } from '../data/csharp-keywords';
 import { UNITY_API_NAMES } from '../data/unity-api-names';
-import { getOpenDocumentUris, pathFromFileUri, syncDocumentOpen } from './document-sync';
+import { pathFromFileUri } from './document-sync';
 import { lspManager } from './manager';
 import { isCsharpProjectLoaded, onCsharpProjectLoaded } from './project-readiness';
 import { LSP_BACKED_MONACO_LANGUAGES } from '../../../utils/language-detect';
 import { setPendingNavigation } from '../../../utils/editor-navigation';
+import { getMonacoInstance } from '../../../utils/monaco-instance';
+import { resetWorkspaceDiagnostics, runWorkspaceDiagnostics } from './workspace-diagnostics';
+import { csharpConfigurationChange } from './csharp-configuration';
 
 // ── LSP type aliases (structural, not imported) ─────────────────
 // LspPosition/LspRange come from ./model-context (canonical home).
@@ -48,24 +74,31 @@ function isLocationLink(loc: LspLocation | LspLocationLink): loc is LspLocationL
   return (loc as LspLocationLink).targetUri !== undefined;
 }
 
-interface LspCompletionItem {
-  label: string | { label: string; detail?: string; description?: string };
-  kind?: number;
-  detail?: string;
-  documentation?: string | { kind: string; value: string };
-  sortText?: string;
-  filterText?: string;
-  insertText?: string;
-  insertTextFormat?: number; // 1 = PlainText, 2 = Snippet
-  textEdit?:
-    | { range: LspRange; newText: string }
-    | { insert: LspRange; replace: LspRange; newText: string };
+/**
+ * Monaco's cancellation token, structurally. Typed here rather than imported
+ * so the providers below can take it without widening their signatures to
+ * Monaco's full provider interfaces.
+ */
+interface MonacoCancellationToken {
+  isCancellationRequested: boolean;
+  onCancellationRequested(listener: () => void): { dispose(): void };
 }
 
-interface LspCompletionList {
-  isIncomplete: boolean;
-  items: LspCompletionItem[];
+/**
+ * Bridge Monaco's cancellation token onto the `AbortSignal` the LSP client
+ * speaks. Monaco cancels the previous completion, hover or signature-help
+ * request as soon as the next keystroke arrives; without this the request runs
+ * to completion server-side and the answer nobody wants is still queued ahead
+ * of the one they do.
+ */
+function abortSignalFor(token: MonacoCancellationToken | undefined): AbortSignal | undefined {
+  if (!token) return undefined;
+  const controller = new AbortController();
+  if (token.isCancellationRequested) controller.abort();
+  else token.onCancellationRequested(() => controller.abort());
+  return controller.signal;
 }
+
 
 interface LspHover {
   contents:
@@ -93,6 +126,12 @@ interface LspDiagnostic {
   range: LspRange;
   severity?: number;
   code?: number | string;
+  /**
+   * Where the rule is documented. The Unity analyzers fill this in for every
+   * UNT diagnostic, which is the difference between a four-character code and
+   * an explanation of why the pattern is wrong.
+   */
+  codeDescription?: { href?: string };
   source?: string;
   message: string;
 }
@@ -108,24 +147,8 @@ interface LspPublishDiagnosticsParams {
 // rename-provider.ts). The rename provider + its post-processor
 // registry live in ./rename-provider.
 
-// ── CompletionItemKind mapping ──────────────────────────────────
-
-function mapCompletionItemKind(
-  lspKind: number | undefined,
-  monacoLanguages: Monaco['languages'],
-): number {
-  const K = monacoLanguages.CompletionItemKind;
-
-  const map: Record<number, number> = {
-    1: K.Text, 2: K.Method, 3: K.Function, 4: K.Constructor, 5: K.Field,
-    6: K.Variable, 7: K.Class, 8: K.Interface, 9: K.Module, 10: K.Property,
-    11: K.Unit, 12: K.Value, 13: K.Enum, 14: K.Keyword, 15: K.Snippet,
-    16: K.Color, 17: K.File, 18: K.Reference, 19: K.Folder, 20: K.EnumMember,
-    21: K.Constant, 22: K.Struct, 23: K.Event, 24: K.Operator, 25: K.TypeParameter,
-  };
-
-  return lspKind != null && map[lspKind] != null ? map[lspKind] : K.Text;
-}
+// Completion item/kind/trigger mapping lives in ./completion-mapping (pure,
+// tested). It used to sit here, untested, beside the registration it feeds.
 
 // ── Provider registration ───────────────────────────────────────
 
@@ -142,19 +165,6 @@ const TARGET_LANGUAGES: readonly string[] = LSP_BACKED_MONACO_LANGUAGES;
  * never appear inside `.py`/`.ts` files.
  */
 const UNITY_ONLY_LANGUAGES: readonly string[] = ['csharp'];
-
-function toLspCompletionTriggerKind(monacoTriggerKind: number): 1 | 2 | 3 {
-  // Monaco: 0=Invoke, 1=TriggerCharacter, 2=TriggerForIncompleteCompletions
-  // LSP:    1=Invoked, 2=TriggerCharacter, 3=TriggerForIncompleteCompletions
-  switch (monacoTriggerKind) {
-    case 1:
-      return 2;
-    case 2:
-      return 3;
-    default:
-      return 1;
-  }
-}
 
 /**
  * Register Monaco language providers (completion, hover, …) for every
@@ -195,49 +205,86 @@ export function registerLspProviders(monaco: Monaco): () => void {
   }
 
   // ── a) CompletionItemProvider ─────────────────────────────────
+  //
+  // Mapping lives in `completion-mapping.ts` (pure, tested); this is the
+  // registration shell plus the plumbing Monaco owns — cancellation, the word
+  // range, and the labels the static providers below need in order to stay out
+  // of Roslyn's way.
+
+  const completionEnums: MonacoCompletionEnums = {
+    kinds: monaco.languages.CompletionItemKind as unknown as Record<string, number>,
+    insertAsSnippet: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+    deprecatedTag: monaco.languages.CompletionItemTag.Deprecated,
+  };
+
+  /**
+   * Labels the server returned for the most recent C# completion.
+   *
+   * The static Unity providers are separate Monaco providers, so they cannot
+   * see the LSP result directly — but Monaco queries every provider for the
+   * same position, so the latest answer is the right thing to deduplicate
+   * against.
+   *
+   * Only ever set from a successful response. A cancelled request — the common
+   * outcome while typing — leaves the previous set in place rather than
+   * clearing it, which is the safer stale state: the fallbacks are already
+   * gated on the project graph not being loaded, so at worst one keystroke
+   * hides a duplicate that Roslyn was about to offer anyway.
+   */
+  let lastCsharpLspLabels: ReadonlySet<string> = new Set();
+
+  function wordRangeAt(model: editor.ITextModel, position: Position): MonacoRange {
+    const word = model.getWordUntilPosition(position);
+    return {
+      startLineNumber: position.lineNumber,
+      startColumn: word.startColumn,
+      endLineNumber: position.lineNumber,
+      endColumn: word.endColumn,
+    };
+  }
+
+  function lineUntil(model: editor.ITextModel, position: Position): string {
+    return model.getValueInRange({
+      startLineNumber: position.lineNumber,
+      startColumn: 1,
+      endLineNumber: position.lineNumber,
+      endColumn: position.column,
+    });
+  }
+
   registerForLanguages(
     TARGET_LANGUAGES,
     (lang, p) => monaco.languages.registerCompletionItemProvider(lang, p),
     {
+      // Monaco fixes trigger characters at registration time, so these are
+      // the union we want across every LSP-backed language rather than
+      // whatever each server registers dynamically. csharp-ls also registers
+      // `'`; it is deliberately not here, because widening the set costs a
+      // provider re-registration dance and buys a Unity developer nothing.
       triggerCharacters: ['.', '<'],
 
       async provideCompletionItems(
         model: editor.ITextModel,
         position: Position,
-        completionContext?: { triggerKind: number; triggerCharacter?: string },
+        completionContext: { triggerKind: number; triggerCharacter?: string } | undefined,
+        token: MonacoCancellationToken | undefined,
       ) {
         const ctx = getLspContextForModel(model);
         if (!ctx) return { suggestions: [] };
-        const { client, lspLanguageId } = ctx;
+        const { client } = ctx;
 
-        const modelUri = model.uri.toString();
-        const openSet = getOpenDocumentUris();
-        const inOpenSet = openSet.has(modelUri);
+        // No "defensive didOpen" here. There used to be one, on the theory
+        // that a model missing from the open set meant a lost notification —
+        // but the set is keyed by `fileUri(path)` and the check compared
+        // `model.uri.toString()`, so on Windows it NEVER matched. Every
+        // completion re-opened the file under Monaco's `c%3A` spelling,
+        // registering a second, phantom document that no `didChange` ever
+        // reached. `buildTextDocumentPositionParams` now names the document
+        // exactly as `didOpen` did (see `lspDocumentUri`), which is what
+        // actually guarantees the server knows it.
 
-        console.info('[LSP] completion model URI', {
-          modelUri,
-          modelPath: model.uri.path,
-          inOpenSet,
-          languageId: lspLanguageId,
-          openSetSample: [...openSet].slice(0, 3),
-        });
-
-        // Defensive recovery: if Monaco's URI isn't in our didOpen set
-        // (race condition or URI normalization mismatch), open it now so
-        // the LSP server knows about the document before the request.
-        if (!inOpenSet && modelUri.startsWith('file://')) {
-          try {
-            const filePath = decodeURIComponent(modelUri.replace(/^file:\/\//, ''));
-            console.warn('[LSP] Defensive didOpen — model URI not in open set', {
-              modelUri,
-              filePath,
-              languageId: lspLanguageId,
-            });
-            syncDocumentOpen(client, filePath, model.getValue(), lspLanguageId);
-          } catch (err) {
-            console.warn('[LSP] Defensive didOpen failed:', err);
-          }
-        }
+        const isCsharp = model.getLanguageId() === 'csharp';
+        const profile = serverProfile(client.languageId);
 
         try {
           const params = {
@@ -254,118 +301,107 @@ export function registerLspProviders(monaco: Monaco): () => void {
               : {}),
           };
 
-          console.info('[LSP] Completion request', {
-            uri: modelUri,
-            line: position.lineNumber,
-            column: position.column,
-            triggerKind: completionContext?.triggerKind,
-            triggerCharacter: completionContext?.triggerCharacter,
-            lspTriggerKind: completionContext
-              ? toLspCompletionTriggerKind(completionContext.triggerKind)
-              : undefined,
-          });
-
           const result = await client.request<LspCompletionList | LspCompletionItem[] | null>(
             'textDocument/completion',
             params,
+            { signal: abortSignalFor(token), timeoutMs: profile.timeouts.completion },
           );
 
-          if (!result) {
-            console.warn('[LSP] Completion response: null/empty result', {
-              uri: model.uri.toString(),
-              line: position.lineNumber,
-              column: position.column,
-            });
-            return { suggestions: [] };
+          const { suggestions, incomplete } = mapCompletionList(
+            result,
+            wordRangeAt(model, position),
+            completionEnums,
+            profile,
+          );
+
+          // Which server answered, recorded per item: `resolveCompletionItem`
+          // is handed the item and nothing else, and this provider serves
+          // every LSP-backed language.
+          for (const suggestion of suggestions) suggestion._server = client.languageId;
+
+          if (isCsharp) {
+            lastCsharpLspLabels = new Set(suggestions.map((s) => labelText(s.label)));
           }
 
-          const items: LspCompletionItem[] = Array.isArray(result) ? result : result.items;
-
-          // Monaco requires a range on every suggestion — it decides what the
-          // item replaces. Servers routinely omit textEdit, so fall back to the
-          // word being typed, which is what VS Code's LSP client does too.
-          const word = model.getWordUntilPosition(position);
-          const wordRange = {
-            startLineNumber: position.lineNumber,
-            startColumn: word.startColumn,
-            endLineNumber: position.lineNumber,
-            endColumn: word.endColumn,
-          };
-
-          const suggestions = items.map((item) => {
-            const label =
-              typeof item.label === 'string' ? item.label : item.label.label;
-
-            let documentation: { value: string } | undefined;
-            if (item.documentation) {
-              documentation =
-                typeof item.documentation === 'string'
-                  ? { value: item.documentation }
-                  : { value: item.documentation.value };
-            }
-
-            const range = item.textEdit
-              ? ('range' in item.textEdit
-                  ? toMonacoRange(item.textEdit.range)
-                  : {
-                      insert: toMonacoRange(item.textEdit.insert),
-                      replace: toMonacoRange(item.textEdit.replace),
-                    })
-              : undefined;
-
-            return {
-              label,
-              kind: mapCompletionItemKind(item.kind, monaco.languages),
-              insertText: item.textEdit?.newText ?? item.insertText ?? label,
-              insertTextRules: item.insertTextFormat === 2
-                ? monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet
-                : undefined,
-              detail: item.detail,
-              documentation,
-              sortText: item.sortText,
-              filterText: item.filterText,
-              range: range ?? wordRange,
-            };
-          });
-
-          console.info('[LSP] Completion response mapped', {
-            uri: model.uri.toString(),
-            line: position.lineNumber,
-            column: position.column,
-            suggestionCount: suggestions.length,
-          });
-
           markLspReadyFromActivity();
-          return { suggestions };
+          return { suggestions, incomplete };
         } catch (err) {
-          console.error('[LSP] Completion error:', {
-            error: err,
-            uri: model.uri.toString(),
-            line: position.lineNumber,
-            column: position.column,
-            triggerKind: completionContext?.triggerKind,
-            triggerCharacter: completionContext?.triggerCharacter,
-          });
+          // A superseded request is the normal case while typing, not a fault.
+          if (!(err instanceof LspRequestCanceledError)) {
+            console.error('[LSP] Completion error:', err);
+          }
           return { suggestions: [] };
+        }
+      },
+
+      /**
+       * Fill in documentation and detail for the one item the user is looking
+       * at.
+       *
+       * csharp-ls advertises `resolveProvider: true` and deliberately sends
+       * items without documentation, computing it on demand. Without this the
+       * details pane is empty for every C# member, which reads as "this editor
+       * has no docs" rather than as a request the client never made.
+       */
+      async resolveCompletionItem(
+        item: MonacoSuggestion,
+        token: MonacoCancellationToken | undefined,
+      ) {
+        const lsp = item._lsp;
+        // No `_server` means this item did not come from a language server —
+        // one of the static Unity providers made it, and there is nothing to
+        // resolve it against.
+        if (!lsp || !item._server) return item;
+        // Nothing resolve could add. `additionalTextEdits` is deliberately not
+        // in this check: a server may send docs eagerly and the import edit
+        // only on resolve, and skipping it there would insert a name with no
+        // `using` for it.
+        if (item.documentation && item.detail && item.additionalTextEdits) return item;
+
+        // The item's OWN server. This provider is registered for every
+        // LSP-backed language, so resolving against a hardcoded `csharp`
+        // client would hand typescript-language-server's opaque `data` to
+        // csharp-ls — the `languageId === 'csharp'` scattering that
+        // `server-profiles.ts` exists to prevent.
+        const client = lspManager.client(item._server);
+        if (!client.isRunning()) return item;
+
+        try {
+          const resolved = await client.request<LspCompletionItem | null>(
+            'completionItem/resolve',
+            lsp,
+            {
+              signal: abortSignalFor(token),
+              timeoutMs: serverProfile(item._server).timeouts.completionResolve,
+            },
+          );
+          return mergeResolvedItem(item, resolved);
+        } catch {
+          // Details are an enhancement; a failed resolve must never blank an
+          // item that is already on screen.
+          return item;
         }
       },
     },
   );
 
   // ── a2) Unity Lifecycle Snippet CompletionItemProvider — C# only ─
+  //
+  // Offered only where a member declaration is legal. These expand to a whole
+  // method and sort above everything (`sortText: '0'…`), so the previous
+  // ungated version put 31 snippets on top of every completion list in the
+  // file — including immediately after a member-access dot, where a lifecycle
+  // method cannot go.
   registerForLanguages(
     UNITY_ONLY_LANGUAGES,
     (lang, p) => monaco.languages.registerCompletionItemProvider(lang, p),
     {
       provideCompletionItems(model: editor.ITextModel, position: Position) {
-        const word = model.getWordUntilPosition(position);
-        const range = {
-          startLineNumber: position.lineNumber,
-          startColumn: word.startColumn,
-          endLineNumber: position.lineNumber,
-          endColumn: word.endColumn,
-        };
+        if (!shouldOfferLifecycleSnippets(lineUntil(model, position))) {
+          return { suggestions: [] };
+        }
 
+        const range = wordRangeAt(model, position);
         const suggestions = UNITY_LIFECYCLE_METHODS.map((method) => ({
           label: method.name,
           kind: monaco.languages.CompletionItemKind.Snippet,
@@ -383,49 +419,79 @@ export function registerLspProviders(monaco: Monaco): () => void {
   );
 
   // ── a3) Fallback completions: Unity API names + C# keywords — C# only ─
-  // These are plain identifier suggestions so users see SOMETHING while
-  // Roslyn is indexing or if csharp-ls fails. They're suppressed after
-  // a `.` so member-access completions stay LSP-driven.
-
-  function isAfterDot(model: editor.ITextModel, position: Position): boolean {
-    const lineUntil = model.getValueInRange({
-      startLineNumber: position.lineNumber,
-      startColumn: 1,
-      endLineNumber: position.lineNumber,
-      endColumn: position.column,
-    });
-    return /\.\s*$/.test(lineUntil);
+  //
+  // These exist so the user sees SOMETHING in the seconds before Roslyn has a
+  // project graph, and if csharp-ls never starts at all. Once it answers they
+  // are strictly worse than what it returns — 173 hardcoded names against the
+  // real, scoped, typed API — so they stand down at that point instead of
+  // shipping a second row for every name Roslyn already offered.
+  //
+  // Not deleted: they are the only completions a user gets while the solution
+  // loads, and the difference between "indexing" and "broken" is exactly what
+  // this app has been bad at communicating.
+  function fallbacksActive(): boolean {
+    return !isCsharpProjectLoaded();
   }
+
+  // ── a4) Unity live templates (sfield / sprop / …) ─────────────
+  // Rider ships these as its Unity live templates; they are the abbreviations
+  // a Unity developer types dozens of times a day. Roslyn has no equivalent,
+  // so unlike the two lists below these stay on once the project loads.
+  registerForLanguages(
+    UNITY_ONLY_LANGUAGES,
+    (lang, p) => monaco.languages.registerCompletionItemProvider(lang, p),
+    {
+      provideCompletionItems(model: editor.ITextModel, position: Position) {
+        // A template expands to a declaration, so it is never valid directly
+        // after a `.` — offering it there would push real members down.
+        if (isAfterDot(lineUntil(model, position))) return { suggestions: [] };
+
+        const range = wordRangeAt(model, position);
+        return {
+          suggestions: UNITY_LIVE_TEMPLATES.map((tpl) => ({
+            label: tpl.name,
+            kind: monaco.languages.CompletionItemKind.Snippet,
+            insertText: tpl.body,
+            insertTextRules:
+              monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+            detail: tpl.detail,
+            documentation: { value: tpl.documentation },
+            // Sorted above the Unity API name list (8_) so typing `sf` offers
+            // the template before any member that happens to share a prefix.
+            sortText: '2_' + tpl.name,
+            range,
+          })),
+        };
+      },
+    },
+  );
 
   registerForLanguages(
     UNITY_ONLY_LANGUAGES,
     (lang, p) => monaco.languages.registerCompletionItemProvider(lang, p),
     {
       provideCompletionItems(model: editor.ITextModel, position: Position) {
-        if (isAfterDot(model, position)) return { suggestions: [] };
+        if (!fallbacksActive()) return { suggestions: [] };
+        if (isAfterDot(lineUntil(model, position))) return { suggestions: [] };
 
-        const word = model.getWordUntilPosition(position);
-        const range = {
-          startLineNumber: position.lineNumber,
-          startColumn: word.startColumn,
-          endLineNumber: position.lineNumber,
-          endColumn: word.endColumn,
-        };
-
+        const range = wordRangeAt(model, position);
         const kindMap = {
           type: monaco.languages.CompletionItemKind.Class,
           method: monaco.languages.CompletionItemKind.Method,
           property: monaco.languages.CompletionItemKind.Property,
         } as const;
 
-        const suggestions = UNITY_API_NAMES.map((api) => ({
-          label: api.name,
-          kind: kindMap[api.kind],
-          insertText: api.name,
-          detail: api.detail,
-          sortText: '8_' + api.name,
-          range,
-        }));
+        const suggestions = filterStaticSuggestions(
+          UNITY_API_NAMES.map((api) => ({
+            label: api.name,
+            kind: kindMap[api.kind],
+            insertText: api.name,
+            detail: api.detail,
+            sortText: '8_' + api.name,
+            range,
+          })),
+          lastCsharpLspLabels,
+        );
 
         return { suggestions };
       },
@@ -437,23 +503,20 @@ export function registerLspProviders(monaco: Monaco): () => void {
     (lang, p) => monaco.languages.registerCompletionItemProvider(lang, p),
     {
       provideCompletionItems(model: editor.ITextModel, position: Position) {
-        if (isAfterDot(model, position)) return { suggestions: [] };
+        if (!fallbacksActive()) return { suggestions: [] };
+        if (isAfterDot(lineUntil(model, position))) return { suggestions: [] };
 
-        const word = model.getWordUntilPosition(position);
-        const range = {
-          startLineNumber: position.lineNumber,
-          startColumn: word.startColumn,
-          endLineNumber: position.lineNumber,
-          endColumn: word.endColumn,
-        };
-
-        const suggestions = CSHARP_KEYWORDS.map((kw) => ({
-          label: kw,
-          kind: monaco.languages.CompletionItemKind.Keyword,
-          insertText: kw,
-          sortText: '9_' + kw,
-          range,
-        }));
+        const range = wordRangeAt(model, position);
+        const suggestions = filterStaticSuggestions(
+          CSHARP_KEYWORDS.map((kw) => ({
+            label: kw,
+            kind: monaco.languages.CompletionItemKind.Keyword,
+            insertText: kw,
+            sortText: '9_' + kw,
+            range,
+          })),
+          lastCsharpLspLabels,
+        );
 
         return { suggestions };
       },
@@ -465,7 +528,11 @@ export function registerLspProviders(monaco: Monaco): () => void {
     TARGET_LANGUAGES,
     (lang, p) => monaco.languages.registerHoverProvider(lang, p),
     {
-      async provideHover(model: editor.ITextModel, position: Position) {
+      async provideHover(
+        model: editor.ITextModel,
+        position: Position,
+        token: MonacoCancellationToken | undefined,
+      ) {
         const ctx = getLspContextForModel(model);
         if (!ctx) return null;
 
@@ -474,6 +541,10 @@ export function registerLspProviders(monaco: Monaco): () => void {
           const result = await ctx.client.request<LspHover | null>(
             'textDocument/hover',
             params,
+            {
+              signal: abortSignalFor(token),
+              timeoutMs: serverProfile(ctx.client.languageId).timeouts.hover,
+            },
           );
 
           if (!result) return null;
@@ -558,7 +629,11 @@ export function registerLspProviders(monaco: Monaco): () => void {
     {
       signatureHelpTriggerCharacters: ['(', ','],
 
-      async provideSignatureHelp(model: editor.ITextModel, position: Position) {
+      async provideSignatureHelp(
+        model: editor.ITextModel,
+        position: Position,
+        token: MonacoCancellationToken | undefined,
+      ) {
         const ctx = getLspContextForModel(model);
         if (!ctx) return null;
 
@@ -567,6 +642,10 @@ export function registerLspProviders(monaco: Monaco): () => void {
           const result = await ctx.client.request<LspSignatureHelp | null>(
             'textDocument/signatureHelp',
             params,
+            {
+              signal: abortSignalFor(token),
+              timeoutMs: serverProfile(ctx.client.languageId).timeouts.signatureHelp,
+            },
           );
 
           if (!result) return null;
@@ -704,6 +783,14 @@ export function registerLspProviders(monaco: Monaco): () => void {
   function applyDiagnostics(uri: string, diagnostics: LspDiagnostic[]): void {
     const model = monaco.editor.getModel(monaco.Uri.parse(uri));
     if (!model) return;
+    // Key everything that follows off the MODEL, not off the incoming uri.
+    // This function is reached from two directions — the pull path, which
+    // names documents the way `didOpen` does (`file:///C:/…`), and push
+    // notifications, which echo whatever spelling the server prefers — and
+    // both must land on the same entry as the Unity analyzer engine, which
+    // keys by `model.uri.toString()`. `Uri.parse` collapses the spellings, so
+    // the model is the one identity all three agree on.
+    const modelKey = model.uri.toString();
 
     // Filter Unity-used "unused symbol" diagnostics (no-op outside Unity).
     if (model.getLanguageId() === 'csharp' && unityAnalyzersActive()) {
@@ -730,14 +817,25 @@ export function registerLspProviders(monaco: Monaco): () => void {
         endColumn: diag.range.end.character + 1,
         message: diag.message,
         source: diag.source,
-        code: diag.code != null ? String(diag.code) : undefined,
+        // A plain string when there is nowhere to send the reader, and a
+        // linked code when there is. Every UNT diagnostic carries a doc URL,
+        // and `UNT0022` on its own explains nothing.
+        code:
+          diag.code == null
+            ? undefined
+            : diag.codeDescription?.href
+              ? {
+                  value: String(diag.code),
+                  target: monaco.Uri.parse(diag.codeDescription.href),
+                }
+              : String(diag.code),
       };
     });
 
     monaco.editor.setModelMarkers(model, 'lsp', markers);
     markLspReadyFromActivity();
 
-    const filePath = pathFromFileUri(uri);
+    const filePath = modelFilePath(model);
     const fileName = filePath.split('/').pop() || '';
     const severityMap: Record<number, 'error' | 'warning' | 'info' | 'hint'> = {
       1: 'error',
@@ -753,8 +851,9 @@ export function registerLspProviders(monaco: Monaco): () => void {
       message: diag.message,
       severity: severityMap[diag.severity ?? 3] ?? 'info',
       source: 'lsp',
+      code: diag.code != null ? String(diag.code) : undefined,
     }));
-    useUiStore.getState().setFileDiagnostics(uri, 'lsp', diagItems);
+    useUiStore.getState().setFileDiagnostics(modelKey, 'lsp', diagItems);
   }
 
   // Pull path — csharp-ls 0.22+ requires us to ask. Only csharp models
@@ -762,7 +861,14 @@ export function registerLspProviders(monaco: Monaco): () => void {
   const pullTimers = new Map<string, ReturnType<typeof setTimeout>>();
   const lastResultIds = new Map<string, string>();
 
-  async function pullDiagnostics(uri: string): Promise<void> {
+  /**
+   * `modelKey` is the Monaco `model.uri.toString()` spelling — the key the
+   * timer and resultId maps use. The REQUEST is named with
+   * `lspDocumentUri(model)`, the same URI `didOpen` used; asking under
+   * Monaco's spelling is what made every pull answer about a document
+   * csharp-ls had never heard of.
+   */
+  async function pullDiagnostics(modelKey: string): Promise<void> {
     const csharpClient = lspManager.client('csharp');
     if (!csharpClient.isRunning()) return;
 
@@ -772,8 +878,12 @@ export function registerLspProviders(monaco: Monaco): () => void {
     // the gate-opened handler below re-pulls every open C# model.
     if (!isCsharpProjectLoaded()) return;
 
+    const model = monaco.editor.getModel(monaco.Uri.parse(modelKey));
+    if (!model) return;
+    const uri = lspDocumentUri(model);
+
     try {
-      const previousResultId = lastResultIds.get(uri);
+      const previousResultId = lastResultIds.get(modelKey);
       const params: { textDocument: { uri: string }; previousResultId?: string } = {
         textDocument: { uri },
       };
@@ -783,10 +893,16 @@ export function registerLspProviders(monaco: Monaco): () => void {
         kind: 'full' | 'unchanged';
         resultId?: string;
         items?: LspDiagnostic[];
-      } | null>('textDocument/diagnostic', params);
+      } | null>('textDocument/diagnostic', params, {
+        // Bounded on purpose. Pulls are serialised (see `schedulePull`), so a
+        // request that hangs holds every other document's diagnostics behind
+        // it — at the client's 180s default that is three minutes with no
+        // squiggles anywhere and nothing to explain it.
+        timeoutMs: serverProfile('csharp').timeouts.diagnostics,
+      });
 
       if (!result) return;
-      if (result.resultId) lastResultIds.set(uri, result.resultId);
+      if (result.resultId) lastResultIds.set(modelKey, result.resultId);
       if (result.kind === 'unchanged') return;
       applyDiagnostics(uri, result.items ?? []);
     } catch (err) {
@@ -800,12 +916,72 @@ export function registerLspProviders(monaco: Monaco): () => void {
     }
   }
 
+  // Diagnostic pulls are SERIALISED, and paced off what the last one cost.
+  //
+  // With the Unity analyzers on, one `textDocument/diagnostic` runs every
+  // analyzer over the whole compilation — csharp-ls's
+  // `getDocumentDiagnosticsWithAnalyzers` asks Roslyn for
+  // `GetAllDiagnosticsAsync` and then filters by file. That is fast on a small
+  // project (~80ms measured on a real one) and will not stay that way as one
+  // grows.
+  //
+  // So: at most one pull in flight, and if edits arrive while it runs, exactly
+  // one more afterwards rather than one per keystroke. Without this, typing in
+  // a large project queues a sweep per debounce window and each one competes
+  // with the completion the user is actually waiting on.
+
+  /**
+   * How long to wait after the last per-document pull before sweeping the
+   * whole solution. Long enough that a burst of re-pulls has landed, short
+   * enough that the Problems panel fills while the user is still looking at
+   * the file they opened.
+   */
+  const WORKSPACE_SWEEP_IDLE_MS = 1500;
+  let workspaceSweepTimer: ReturnType<typeof setTimeout> | null = null;
+
+  let pullInFlight = false;
+  /** Set by the disposer, so a settling pull cannot reschedule after teardown. */
+  let pullsDisposed = false;
+  const pullAgainWhenIdle = new Set<string>();
+  /** How long the last pull took, used to pace the next debounce. */
+  let lastPullMs = 0;
+
+  /**
+   * Debounce for an edit-triggered pull. Long enough to outlast a burst of
+   * typing, and scaled up when the server is answering slowly so a project
+   * where each pull costs a second does not spend every second pulling.
+   */
+  function editPullDelay(): number {
+    const MIN = 500;
+    const MAX = 3000;
+    return Math.min(MAX, Math.max(MIN, Math.round(lastPullMs * 1.5)));
+  }
+
   function schedulePull(uri: string, delayMs: number): void {
     const existing = pullTimers.get(uri);
     if (existing) clearTimeout(existing);
     const t = setTimeout(() => {
       pullTimers.delete(uri);
-      pullDiagnostics(uri);
+      if (pullInFlight) {
+        // Coalesce rather than pile up: one catch-up pull once the current
+        // sweep lands, however many edits arrived in the meantime.
+        pullAgainWhenIdle.add(uri);
+        return;
+      }
+      pullInFlight = true;
+      const started = Date.now();
+      void pullDiagnostics(uri).finally(() => {
+        lastPullMs = Date.now() - started;
+        pullInFlight = false;
+        const pending = [...pullAgainWhenIdle];
+        pullAgainWhenIdle.clear();
+        // Not after teardown: this runs when the request settles, which can be
+        // long after the providers were disposed, and rescheduling then
+        // creates timers that nothing will ever clear and that write markers
+        // onto a provider set that is gone.
+        if (pullsDisposed) return;
+        for (const next of pending) schedulePull(next, 0);
+      });
     }, delayMs);
     pullTimers.set(uri, t);
   }
@@ -817,6 +993,7 @@ export function registerLspProviders(monaco: Monaco): () => void {
       clearTimeout(t);
       pullTimers.delete(uri);
     }
+    pullAgainWhenIdle.delete(uri);
     lastResultIds.delete(uri);
   }
 
@@ -830,7 +1007,7 @@ export function registerLspProviders(monaco: Monaco): () => void {
     schedulePull(uri, 300);
 
     const sub = model.onDidChangeContent(() => {
-      schedulePull(uri, 500);
+      schedulePull(uri, editPullDelay());
     });
     disposables.push(sub);
 
@@ -872,13 +1049,77 @@ export function registerLspProviders(monaco: Monaco): () => void {
   // issued by the old graph, and sending one back invites `kind: "unchanged"`,
   // which is exactly how a wrong report used to become permanent. Forcing a
   // full report costs one round trip per open file, once per server lifetime.
-  const readyUnsub = onCsharpProjectLoaded(() => {
+  /**
+   * Re-pull every open C# file, then sweep the solution.
+   *
+   * Order matters, and it is the opposite of what it used to be. The
+   * solution-wide pass is another whole-compilation analysis; running it at
+   * the same instant as the per-document re-pulls put both in flight while
+   * the user was looking at a file whose squiggles had just been cleared. The
+   * files on screen go first; the panel-filling sweep follows once they are
+   * done.
+   */
+  function repullAllCsharpDiagnostics(): void {
+    // The cached ids were issued by the previous graph, and sending one back
+    // invites `kind: "unchanged"` — which is exactly how a wrong report used
+    // to become permanent.
     lastResultIds.clear();
     for (const m of monaco.editor.getModels()) {
       if (m.getLanguageId() === 'csharp') schedulePull(m.uri.toString(), 300);
     }
-  });
+
+    if (useSettingsStore.getState().getSetting('lsp.solutionWideAnalysis') === false) return;
+    if (workspaceSweepTimer) clearTimeout(workspaceSweepTimer);
+    workspaceSweepTimer = setTimeout(() => {
+      workspaceSweepTimer = null;
+      if (pullInFlight || pullTimers.size > 0) {
+        // Still settling; try again rather than competing.
+        repullWorkspaceWhenIdle();
+        return;
+      }
+      // Failures are swallowed — this enriches the Problems panel, and a
+      // server that cannot answer must not break the per-document path.
+      void runWorkspaceDiagnostics().catch(() => {});
+    }, WORKSPACE_SWEEP_IDLE_MS);
+  }
+
+  function repullWorkspaceWhenIdle(): void {
+    if (workspaceSweepTimer) clearTimeout(workspaceSweepTimer);
+    workspaceSweepTimer = setTimeout(() => {
+      workspaceSweepTimer = null;
+      if (pullInFlight || pullTimers.size > 0) {
+        repullWorkspaceWhenIdle();
+        return;
+      }
+      void runWorkspaceDiagnostics().catch(() => {});
+    }, WORKSPACE_SWEEP_IDLE_MS);
+  }
+
+  const readyUnsub = onCsharpProjectLoaded(repullAllCsharpDiagnostics);
   disposables.push({ dispose: readyUnsub });
+  disposables.push({
+    dispose: () => {
+      if (workspaceSweepTimer) clearTimeout(workspaceSweepTimer);
+      workspaceSweepTimer = null;
+    },
+  });
+
+  /**
+   * Toggling the Unity analyzers changes what every diagnostic report
+   * contains, so the reports already on screen are stale the moment it flips.
+   *
+   * csharp-ls folds the flag into its `resultId`, so a cached id from before
+   * the change answers `unchanged` — which is why the re-pull clears them.
+   */
+  const analyzerSettingUnsub = useSettingsStore.subscribe((state, prev) => {
+    if (state.settings['lsp.csharp.analyzers'] === prev.settings['lsp.csharp.analyzers']) return;
+    const client = lspManager.client('csharp');
+    if (!client.isRunning()) return;
+    client.notify('workspace/didChangeConfiguration', csharpConfigurationChange());
+    resetWorkspaceDiagnostics();
+    repullAllCsharpDiagnostics();
+  });
+  disposables.push({ dispose: analyzerSettingUnsub });
 
   // Stash the diagnostic-application handle on the disposer closure so
   // `attachClientToProviders` (a sibling export, called per-client by the
@@ -927,6 +1168,15 @@ export function registerLspProviders(monaco: Monaco): () => void {
 
   // ── h) CodeActionProvider (LSP + local quick-fix sources) ─────
   disposables.push({ dispose: registerLspCodeActionProviders(monaco) });
+
+  // ── h3) Symbol / navigation / formatting providers ────────────
+  // documentSymbol (outline + Go to Symbol), implementation, typeDefinition,
+  // and document/range formatting. See symbol-providers.ts.
+  disposables.push({ dispose: registerLspSymbolProviders(monaco) });
+  // Semantic-token providers are registered per client (see
+  // attachClientToProviders), so they are torn down here rather than added
+  // to `disposables` one by one.
+  disposables.push({ dispose: disposeSemanticTokenProviders });
 
   // ── h2) workspace/applyEdit (server→client) handler ───────────
   // Routes server-initiated applyEdit requests through the same
@@ -982,8 +1232,10 @@ export function registerLspProviders(monaco: Monaco): () => void {
   return () => {
     console.info('[LSP] Disposing Monaco LSP providers', { count: disposables.length });
     for (const d of disposables) d.dispose();
+    pullsDisposed = true;
     for (const t of pullTimers.values()) clearTimeout(t);
     pullTimers.clear();
+    pullAgainWhenIdle.clear();
     lastResultIds.clear();
     pushDiagnosticsApplier = null;
   };
@@ -1002,6 +1254,19 @@ let pushDiagnosticsApplier:
   | null = null;
 
 export function attachClientToProviders(client: LspClient): () => void {
+  // A started server is the first moment its semantic-token legend exists, so
+  // this is where that provider gets registered — see the comment on
+  // `registerSemanticTokensForClient` for why it cannot happen at startup.
+  const monaco = getMonacoInstance();
+  if (monaco) {
+    registerSemanticTokensForClient(
+      monaco,
+      client.languageId,
+      client.getServerCapabilities(),
+      (method, params) => client.request(method, params),
+    );
+  }
+
   return client.onNotification(
     'textDocument/publishDiagnostics',
     (params: unknown) => {

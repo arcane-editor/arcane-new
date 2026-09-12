@@ -5,6 +5,7 @@ import {
   buildSessionData,
   parseSessionData,
   settleDanglingRequests,
+  backfillVerifiedCards,
   STALE_PERMISSION_OPTION_ID,
 } from './session-persistence';
 import type { SaveSessionInput, SessionData } from './session-persistence';
@@ -73,6 +74,25 @@ describe('buildSessionData / parseSessionData — hostedPlan round-trip (T9)', (
     expect(() => JSON.parse(json)).not.toThrow();
     expect(json).toContain('"hostedPlan"');
     expect(json).toContain('Add CoinPickup component');
+  });
+});
+
+// A `role: 'stopped'` message (T4's abort marker) is not treated specially by
+// either build or parse — messages persist generically as JSON, same as
+// `verifiedPass` (see the doc comment on `AiMessage.verifiedPass`) — so this
+// pins that the round-trip is not silently broken by field stripping.
+describe('buildSessionData / parseSessionData — stopped message round-trip (T4)', () => {
+  it('round-trips a role: stopped message, including its promptMode, through save + load', () => {
+    const stoppedMessages: AiMessage[] = [
+      { id: 'm1', role: 'user', text: 'hello', timestamp: 1000 },
+      { id: 'm2', role: 'stopped', stopped: { promptMode: 'agent' }, timestamp: 1001 },
+    ];
+    const data = buildSessionData({ ...INPUT, messages: stoppedMessages });
+    const json = JSON.stringify(data);
+    const parsed = parseSessionData(json);
+    const restored = parsed.messages.find((m) => m.id === 'm2');
+    expect(restored?.role).toBe('stopped');
+    expect(restored?.stopped).toEqual({ promptMode: 'agent' });
   });
 });
 
@@ -174,9 +194,25 @@ describe('normalizePlanRestore', () => {
     });
   });
 
-  it('normalizes a saved executing phase to awaiting-execute (no run is live after a reload)', () => {
+  // Reloading must not re-offer Execute for a plan that already ran to the
+  // end — the phase survives the restart exactly as it was written.
+  it('restores completed as-is', () => {
+    expect(normalizePlanRestore('completed', '/p.md')).toEqual({
+      planPhase: 'completed',
+      activePlanPath: '/p.md',
+    });
+  });
+
+  it('normalizes a saved executing phase to interrupted (the run died with the old process, resumable from the file)', () => {
     expect(normalizePlanRestore('executing', '/p.md')).toEqual({
-      planPhase: 'awaiting-execute',
+      planPhase: 'interrupted',
+      activePlanPath: '/p.md',
+    });
+  });
+
+  it('restores an interrupted phase as-is', () => {
+    expect(normalizePlanRestore('interrupted', '/p.md')).toEqual({
+      planPhase: 'interrupted',
       activePlanPath: '/p.md',
     });
   });
@@ -191,6 +227,7 @@ describe('normalizePlanRestore', () => {
 
   it('a pending phase with no path degrades to idle (nothing to resume)', () => {
     expect(normalizePlanRestore('awaiting-execute', null)).toEqual({ planPhase: 'idle', activePlanPath: null });
+    expect(normalizePlanRestore('interrupted', null)).toEqual({ planPhase: 'idle', activePlanPath: null });
   });
 });
 
@@ -314,5 +351,72 @@ describe('parseSessionData — pre-rename plan field', () => {
   it('leaves a session with no plan at all alone', () => {
     const data = parseSessionData(JSON.stringify({ messages: [] }));
     expect(data.hostedPlan ?? null).toBeNull();
+  });
+});
+
+// Regression: `Cannot read properties of undefined (reading 'problems')`.
+//
+// Verified cards are persisted with the session, and the card's fields have
+// been ADDED to over time — `uiToolkit`/`scriptableObjects`/`input` arrived
+// after sessions were already being written. `VerifiedCard` reads them as
+// `x === 'skipped' ? … : x === 'clean' ? … : x.problems`, so a card restored
+// from an older build hit `undefined.problems` and took the whole AI panel
+// down through its error boundary. `layout`/`console`/`tests` already had a
+// `= 'skipped'` default for exactly this reason; the older fields did not.
+describe('backfillVerifiedCards', () => {
+  function cardMessage(verifiedPass: Record<string, unknown>): AiMessage {
+    return {
+      id: 'v1',
+      role: 'verifiedPass',
+      text: '',
+      timestamp: 1,
+      verifiedPass,
+    } as unknown as AiMessage;
+  }
+
+  it("fills the three subsystem fields a pre-2026-09-03 card has never heard of", () => {
+    const [m] = backfillVerifiedCards([
+      cardMessage({ files: 1, touchedFiles: ['A.cs'], analyzers: 'skipped', compile: 'clean', guids: 'intact' }),
+    ]);
+    const card = (m as unknown as { verifiedPass: Record<string, unknown> }).verifiedPass;
+
+    expect(card.uiToolkit).toBe('skipped');
+    expect(card.scriptableObjects).toBe('skipped');
+    expect(card.input).toBe('skipped');
+  });
+
+  it('fills the original fields too, so an even older card cannot throw either', () => {
+    const [m] = backfillVerifiedCards([cardMessage({ files: 0, touchedFiles: [] })]);
+    const card = (m as unknown as { verifiedPass: Record<string, unknown> }).verifiedPass;
+
+    expect(card.analyzers).toBe('skipped');
+    expect(card.compile).toBe('skipped');
+    expect(card.guids).toBe('skipped');
+    expect(card.layout).toBe('skipped');
+  });
+
+  it('leaves a complete card exactly as it was', () => {
+    const complete = {
+      files: 2,
+      touchedFiles: ['A.uxml'],
+      analyzers: 'skipped',
+      compile: 'clean',
+      guids: 'intact',
+      uiToolkit: { queriesResolved: 3, queriesTotal: 3, problems: 0 },
+      scriptableObjects: 'clean',
+      input: { problems: 2 },
+      layout: { documents: 1, elements: 14, problems: 0 },
+      console: 'skipped',
+      tests: 'skipped',
+    };
+    const [m] = backfillVerifiedCards([cardMessage({ ...complete })]);
+    const card = (m as unknown as { verifiedPass: Record<string, unknown> }).verifiedPass;
+
+    expect(card).toEqual(complete);
+  });
+
+  it('leaves messages that carry no verified card untouched', () => {
+    const plain: AiMessage[] = [{ id: 'm1', role: 'user', text: 'hi', timestamp: 1 }];
+    expect(backfillVerifiedCards(plain)).toEqual(plain);
   });
 });

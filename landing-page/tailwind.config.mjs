@@ -5,16 +5,20 @@ export default {
   theme: {
     container: {
       center: true,
-      padding: '2rem',
+      padding: '1.5rem',
       screens: {
-        '2xl': '1400px',
+        '2xl': '1280px',
       },
     },
     extend: {
       fontFamily: {
-        sans: ['Inter', 'sans-serif'],
-        display: ['Space Grotesk', 'Inter', 'sans-serif'],
-        mono: ['JetBrains Mono', 'monospace'],
+        // The desktop app's own two faces. `display` is deliberately the same
+        // family as `sans`: this product's personality is carried by setting
+        // real Unity identifiers in `mono` at display size, not by a second
+        // sans shipped for headlines.
+        sans: ['Instrument Sans', 'ui-sans-serif', '-apple-system', 'Segoe UI', 'sans-serif'],
+        display: ['Instrument Sans', 'ui-sans-serif', '-apple-system', 'Segoe UI', 'sans-serif'],
+        mono: ['Geist Mono', 'ui-monospace', 'SF Mono', 'Menlo', 'Consolas', 'monospace'],
       },
       colors: {
         border: 'hsl(var(--border))',
@@ -25,6 +29,7 @@ export default {
         primary: {
           DEFAULT: 'hsl(var(--primary))',
           foreground: 'hsl(var(--primary-foreground))',
+          lit: 'hsl(var(--gold-lit))',
         },
         secondary: {
           DEFAULT: 'hsl(var(--secondary))',
@@ -38,6 +43,9 @@ export default {
           DEFAULT: 'hsl(var(--muted))',
           foreground: 'hsl(var(--muted-foreground))',
         },
+        // The quiet tier. Use this instead of an alpha on muted-foreground —
+        // see the note in global.css for what those composited to.
+        faint: 'hsl(var(--faint))',
         accent: {
           DEFAULT: 'hsl(var(--accent))',
           foreground: 'hsl(var(--accent-foreground))',
@@ -50,74 +58,86 @@ export default {
           DEFAULT: 'hsl(var(--card))',
           foreground: 'hsl(var(--card-foreground))',
         },
+
+        // The surface ramp, named for what it is rather than for a role.
+        void: 'hsl(var(--void))',
+        sunk: 'hsl(var(--sunk))',
+        panel: 'hsl(var(--panel))',
+        raised: 'hsl(var(--raised))',
+        selected: 'hsl(var(--selected))',
+        bright: 'hsl(var(--bright))',
+
+        // Semantic. Only ever used where the colour IS the meaning.
+        pass: 'hsl(var(--pass))',
+        warn: 'hsl(var(--warn))',
+        fail: {
+          DEFAULT: 'hsl(var(--fail))',
+          text: 'hsl(var(--fail-text))',
+        },
+        info: 'hsl(var(--info))',
+
+        // Syntax, for code surfaces only.
+        syn: {
+          keyword: 'hsl(var(--syn-keyword))',
+          string: 'hsl(var(--syn-string))',
+          number: 'hsl(var(--syn-number))',
+          type: 'hsl(var(--syn-type))',
+          func: 'hsl(var(--syn-func))',
+          comment: 'hsl(var(--syn-comment))',
+        },
+
         'navy-deep': 'hsl(var(--navy-deep))',
         'surface-elevated': 'hsl(var(--surface-elevated))',
       },
       borderRadius: {
+        // Differential, from the app: 3px chips, 6px panels, 10px large planes.
+        // The old config mapped everything off a single 12px `--radius`, which
+        // is what makes a page read as one rounded-card kit.
+        chip: 'var(--radius-chip)',
+        panel: 'var(--radius-panel)',
+        plane: 'var(--radius-plane)',
         lg: 'var(--radius)',
         md: 'calc(var(--radius) - 2px)',
-        sm: 'calc(var(--radius) - 4px)',
+        sm: 'calc(var(--radius) - 3px)',
+      },
+      fontSize: {
+        // A 1.5-ish scale off a 16px body, per Elements of Typographic Style.
+        micro: ['11px', { lineHeight: '1.45' }],
+        mini: ['13px', { lineHeight: '1.5' }],
+        base: ['16px', { lineHeight: '1.6' }],
+        step1: ['20px', { lineHeight: '1.45', letterSpacing: '-0.005em' }],
+        step2: ['28px', { lineHeight: '1.25', letterSpacing: '-0.015em' }],
+        step3: ['40px', { lineHeight: '1.12', letterSpacing: '-0.022em' }],
+        step4: ['60px', { lineHeight: '1.02', letterSpacing: '-0.03em' }],
+        step5: ['84px', { lineHeight: '0.97', letterSpacing: '-0.035em' }],
       },
       keyframes: {
-        float: {
-          '0%, 100%': { transform: 'translateY(0)' },
-          '50%': { transform: 'translateY(-10px)' },
-        },
-        'float-slow': {
-          '0%, 100%': { transform: 'translateY(0) rotate(0deg)' },
-          '50%': { transform: 'translateY(-20px) rotate(5deg)' },
-        },
-        drift: {
-          '0%': { transform: 'translateY(0) translateX(0) rotate(0deg)', opacity: '0' },
-          '10%': { opacity: '0.6' },
-          '90%': { opacity: '0.6' },
-          '100%': { transform: 'translateY(-100vh) translateX(50px) rotate(360deg)', opacity: '0' },
-        },
-        'typing-cursor': {
-          '0%, 100%': { opacity: '1' },
-          '50%': { opacity: '0' },
-        },
-        'slide-up': {
-          '0%': { transform: 'translateY(100%)', opacity: '0' },
-          '100%': { transform: 'translateY(0)', opacity: '1' },
-        },
-        'pulse-glow': {
-          '0%, 100%': { boxShadow: '0 0 20px -5px hsl(35 95% 55% / 0.3)' },
-          '50%': { boxShadow: '0 0 40px -5px hsl(35 95% 55% / 0.5)' },
-        },
-        'count-up': {
-          '0%': { transform: 'translateY(20px)', opacity: '0' },
-          '100%': { transform: 'translateY(0)', opacity: '1' },
-        },
+        // `float`, `float-slow`, `drift`, `typing-cursor`, `slide-up`,
+        // `pulse-glow` and `count-up` were removed: every one was either
+        // unreferenced config or belonged to the drifting-glyph hero that this
+        // redesign deletes. The fade-ins stay because /features still uses them.
         'fade-in-up': {
-          from: { opacity: '0', transform: 'translateY(20px)' },
+          from: { opacity: '0', transform: 'translateY(12px)' },
           to: { opacity: '1', transform: 'translateY(0)' },
         },
         'fade-in-left': {
-          from: { opacity: '0', transform: 'translateX(-40px)' },
+          from: { opacity: '0', transform: 'translateX(-20px)' },
           to: { opacity: '1', transform: 'translateX(0)' },
         },
         'fade-in-right': {
-          from: { opacity: '0', transform: 'translateX(40px)' },
+          from: { opacity: '0', transform: 'translateX(20px)' },
           to: { opacity: '1', transform: 'translateX(0)' },
         },
         'scale-in': {
-          from: { opacity: '0', transform: 'scale(0.95)' },
+          from: { opacity: '0', transform: 'scale(0.97)' },
           to: { opacity: '1', transform: 'scale(1)' },
         },
       },
       animation: {
-        float: 'float 6s ease-in-out infinite',
-        'float-slow': 'float-slow 8s ease-in-out infinite',
-        drift: 'drift 15s linear infinite',
-        'typing-cursor': 'typing-cursor 1s steps(1) infinite',
-        'slide-up': 'slide-up 0.6s ease-out',
-        'pulse-glow': 'pulse-glow 3s ease-in-out infinite',
-        'count-up': 'count-up 0.8s ease-out',
-        'fade-in-up': 'fade-in-up 0.8s ease-out both',
-        'fade-in-left': 'fade-in-left 0.8s ease-out both',
-        'fade-in-right': 'fade-in-right 0.8s ease-out both',
-        'scale-in': 'scale-in 0.6s ease-out both',
+        'fade-in-up': 'fade-in-up 0.55s cubic-bezier(0.16, 1, 0.3, 1) both',
+        'fade-in-left': 'fade-in-left 0.55s cubic-bezier(0.16, 1, 0.3, 1) both',
+        'fade-in-right': 'fade-in-right 0.55s cubic-bezier(0.16, 1, 0.3, 1) both',
+        'scale-in': 'scale-in 0.45s cubic-bezier(0.16, 1, 0.3, 1) both',
       },
     },
   },

@@ -357,6 +357,14 @@ export async function adminGetFeedback(token: string) {
     return res.json();
 }
 
+/** Desktop crash reports (POST /v1/client-error). The durable half — Workers
+ *  Logs holds the same rows for a few days, this outlives them. */
+export async function adminGetClientErrors(token: string) {
+    const res = await fetch(`${API_URL}/v1/admin/client-errors`, { headers: adminHeaders(token) });
+    if (!res.ok) throw new Error('Failed to fetch client errors');
+    return res.json();
+}
+
 // ─── Admin: model routing + pricing config ───────────────────
 // Shapes mirror arcane-server/src/lib/app-config.ts (ModelRoutingDoc /
 // ModelPricingDoc) — kept as a parallel client-side definition rather than a
@@ -406,6 +414,19 @@ export interface AdminConfigResponse<T> {
     updatedAt: string | null;
 }
 
+// ─── Admin: harness limits config ─────────────────────────────
+// Shape mirrors arcane-server/src/config/plans.ts (HarnessLimitsDoc) — same
+// parallel client-side re-declaration pattern as ModelRoutingDoc/ModelPricingDoc
+// above, not a shared package.
+
+export interface HarnessTierLimits {
+    maxModelCalls: number;
+}
+
+export interface HarnessLimitsDoc {
+    tiers: Record<'low' | 'mid' | 'high', HarnessTierLimits>;
+}
+
 export async function adminGetModelConfig(token: string): Promise<AdminConfigResponse<ModelRoutingDoc>> {
     const res = await fetch(`${API_URL}/v1/admin/config/models`, { headers: adminHeaders(token) });
     if (!res.ok) throw new Error(await readErrorMessage(res, 'Failed to fetch model config'));
@@ -437,6 +458,24 @@ export async function adminPutPricingConfig(token: string, doc: ModelPricingDoc)
         body: JSON.stringify(doc),
     });
     if (!res.ok) throw new Error(await readErrorMessage(res, 'Failed to save pricing config'));
+    return res.json();
+}
+
+export async function adminGetHarnessConfig(token: string): Promise<AdminConfigResponse<HarnessLimitsDoc>> {
+    const res = await fetch(`${API_URL}/v1/admin/config/harness`, { headers: adminHeaders(token) });
+    if (!res.ok) throw new Error(await readErrorMessage(res, 'Failed to fetch harness config'));
+    return res.json();
+}
+
+/** PUT validation failures return {error, code:'invalid_config'} naming the
+ *  offending tier/field — readErrorMessage surfaces that `error` verbatim. */
+export async function adminPutHarnessConfig(token: string, doc: HarnessLimitsDoc): Promise<{ ok: true }> {
+    const res = await fetch(`${API_URL}/v1/admin/config/harness`, {
+        method: 'PUT',
+        headers: adminHeaders(token),
+        body: JSON.stringify(doc),
+    });
+    if (!res.ok) throw new Error(await readErrorMessage(res, 'Failed to save harness config'));
     return res.json();
 }
 

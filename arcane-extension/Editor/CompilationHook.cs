@@ -33,6 +33,24 @@ namespace UnityIDE.Bridge
         /// </summary>
         internal const string PendingResultKey = "UnityIDE.Bridge.PendingCompileResult";
 
+        /// <summary>
+        /// How long to hold a backgrounded editor awake once a compile is under
+        /// way. An assembly build is not one tick: it needs the main thread
+        /// driven repeatedly, and an unfocused editor supplies none of its own.
+        /// Refreshed on every per-assembly callback, so a long multi-assembly
+        /// build keeps extending rather than expiring half-way.
+        /// </summary>
+        private const int CompileWakeMs = 120000;
+
+        /// <summary>
+        /// Kept awake after compilationFinished so the domain reload that
+        /// follows a successful compile actually gets to run. Deliberately much
+        /// shorter — RequestWake SETS the deadline, so this trims the long
+        /// compile window down rather than leaving the worker nudging for two
+        /// more minutes over nothing.
+        /// </summary>
+        private const int PostCompileWakeMs = 15000;
+
         private static BridgeClient _client;
         private static bool _installed;
 
@@ -64,6 +82,10 @@ namespace UnityIDE.Bridge
         private static void OnCompilationStarted(object context)
         {
             ResetAccumulator();
+            // The IDE is waiting on compilation_finished, and on a backgrounded
+            // editor that message only arrives if something keeps ticking the
+            // main thread. See MainThreadDispatcher.RequestWake.
+            MainThreadDispatcher.RequestWake(CompileWakeMs);
             // A new compile supersedes any pending post-reload replay.
             SessionState.EraseString(PendingResultKey);
             if (_client == null) return;
@@ -73,6 +95,8 @@ namespace UnityIDE.Bridge
         // Per-assembly results arrive here as we go.
         private static void OnAssemblyFinished(string assemblyPath, CompilerMessage[] messages)
         {
+            // Progress: keep the editor awake for the assemblies still to come.
+            MainThreadDispatcher.RequestWake(CompileWakeMs);
             if (messages == null) return;
             foreach (var m in messages)
             {
@@ -92,7 +116,12 @@ namespace UnityIDE.Bridge
 
         private static void OnCompilationFinished(object context)
         {
-            if (_client == null) { ResetAccumulator(); return; }
+            if (_client == null)
+            {
+                ResetAccumulator();
+                MainThreadDispatcher.RequestWake(PostCompileWakeMs);
+                return;
+            }
 
             var msgArray = JsonValue.NewArray();
             foreach (var m in Messages) msgArray.Add(m);
@@ -113,6 +142,8 @@ namespace UnityIDE.Bridge
 
             _client.Send(Protocol.Envelope(MsgType.CompilationFinished, payload));
             ResetAccumulator();
+            // Enough to carry the domain reload through, then stop nudging.
+            MainThreadDispatcher.RequestWake(PostCompileWakeMs);
         }
 
         private static void ResetAccumulator()

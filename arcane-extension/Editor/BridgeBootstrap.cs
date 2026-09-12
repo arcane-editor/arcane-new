@@ -50,10 +50,62 @@ namespace UnityIDE.Bridge
         /// Mirrors "version" in package.json. Reported in connection_init so the
         /// IDE can tell an outdated package from a missing one. Keep in lockstep.
         /// </summary>
-        private const string PackageVersion = "0.1.0";
+        private const string PackageVersion = "0.4.0";
 
         private static BridgeClient _client;
         private static bool _started;
+
+        /// <summary>
+        /// True when an IDE has this project open and the handshake has
+        /// completed.
+        ///
+        /// This is deliberately the client's live state, not "does
+        /// Library/UnityIDE/bridge.json exist". A crashed IDE leaves that file
+        /// behind, and trusting it would send an open_file into a journal
+        /// nobody is reading — the double-click would silently do nothing
+        /// instead of falling back to launching the app.
+        /// </summary>
+        internal static bool IsConnected
+        {
+            get { return _client != null && _client.IsConnected; }
+        }
+
+        /// <summary>
+        /// The pid of the IDE holding this project open, or 0 when unknown.
+        /// Windows needs it to hand foreground rights to a background process
+        /// (see UnityIDELauncher.AllowForeground).
+        /// </summary>
+        internal static int IdePid
+        {
+            get
+            {
+                BridgeDiscovery disc;
+                if (!Discovery.TryResolve(Discovery.ProjectRoot(Application.dataPath), out disc))
+                    return 0;
+                return disc.IdePid;
+            }
+        }
+
+        /// <summary>
+        /// Send an envelope to the connected IDE. False when there is no live
+        /// connection, which is the caller's signal to fall back to launching.
+        /// Never throws.
+        /// </summary>
+        internal static bool TrySend(JsonValue envelope)
+        {
+            var client = _client;
+            if (client == null || !client.IsConnected) return false;
+            try
+            {
+                client.Send(envelope);
+                return true;
+            }
+            catch (Exception e)
+            {
+                global::UnityIDE.Editor.UnityIDELog.Warn("could not reach the running IDE: " + e.Message);
+                return false;
+            }
+        }
 
         static BridgeBootstrap()
         {
@@ -82,6 +134,11 @@ namespace UnityIDE.Bridge
             _started = true;
 
             MainThreadDispatcher.CaptureMainThread();
+            // Must follow CaptureMainThread and must run ON the main thread:
+            // Windows needs the OS-level id of this very thread to post it a
+            // wake-up message later, from the worker.
+            EditorWakeup.Reset();
+            EditorWakeup.CaptureMainThread();
 
             string projectRoot = Discovery.ProjectRoot(Application.dataPath);
 
@@ -96,7 +153,12 @@ namespace UnityIDE.Bridge
             EditorStateHandlers.Register(_client);
             HierarchyHandlers.Register(_client);
             DebuggerHandlers.Register(_client);
+            ProfilerHandlers.Register(_client);
             TestRunnerHandlers.Register(_client);
+            ConsoleHandlers.Register(_client);
+            SceneMutationHandlers.Register(_client);
+            AuthoringHandlers.Register();
+            PlaytestHandlers.Register();
 
             // Main-thread pump: drains the dispatcher and ticks the timed flushers.
             EditorApplication.update += Pump;
@@ -165,6 +227,8 @@ namespace UnityIDE.Bridge
                 HierarchyHandlers.Tick();      // debounced hierarchy_changed
                 TestRunnerHandlers.Tick();     // (no-op; TestRunnerApi fires on the main thread)
                 PlayModeStatsHook.Tick();      // ≤4Hz play-mode telemetry
+                PlaytestHandlers.Tick();
+                ProfilerHandlers.Tick();
             }
             catch (Exception e)
             {
@@ -285,6 +349,7 @@ namespace UnityIDE.Bridge
                 PlayStateHook.Uninstall();
                 CompilationHook.Uninstall();
                 PlayModeStatsHook.Uninstall();
+                ProfilerHandlers.Uninstall();
                 EditorStateHandlers.UninstallSelectionHook();
                 HierarchyHandlers.UninstallHierarchyHook();
                 TestRunnerHandlers.Shutdown();

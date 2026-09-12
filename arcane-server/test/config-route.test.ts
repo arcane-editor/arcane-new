@@ -3,7 +3,9 @@ import { env, SELF } from 'cloudflare:test';
 import { seedPasswordUser, tokenFor } from './helpers.ts';
 import { putConfigDoc, clearConfigCache } from '../src/lib/app-config.ts';
 import { MODEL_CATALOG } from '../src/lib/costs.ts';
+import { SPARK_MODEL } from '../src/config/plans.ts';
 import type { ModelPricingDoc } from '../src/lib/app-config.ts';
+import type { HarnessLimitsDoc } from '../src/config/plans.ts';
 import type { UserRow } from '../src/lib/db.ts';
 
 interface ConfigTier {
@@ -14,6 +16,7 @@ interface ConfigTier {
     hasPreplanning: boolean;
     contextWindow: number;
     pricingCliffTokens: number | null;
+    maxModelCalls: number;
 }
 
 interface ConfigResponse {
@@ -91,7 +94,7 @@ describe('GET /v1/config', () => {
         expect(tierById(body, 'high').allowed).toBe(false);
     });
 
-    it('hasPreplanning follows DEFAULT_MODEL_ROUTING: low false (spark/spark), mid+high true', async () => {
+    it('hasPreplanning follows DEFAULT_MODEL_ROUTING: low false (same model both roles), mid+high true', async () => {
         const user = await seedPasswordUser('config-preplan@test.dev', 'password123');
         const token = await tokenFor(user);
         const res = await getConfig(token);
@@ -102,49 +105,102 @@ describe('GET /v1/config', () => {
         expect(tierById(body, 'high').hasPreplanning).toBe(true);
     });
 
-    it('contextWindow: high tier = min(sol 400_000, spark 131_072, grok 500_000) = 131_072 with seed catalog', async () => {
+    // This number has now flipped twice. Spark's conservative 131_072 seed was
+    // the smallest window on every tier until 2026-08-27, when glm-5.3-flash
+    // took the executor slots and each tier rose to its own planner's window
+    // (1,048,576 / 1,048,576 / 400,000). Spark 1.3 took those slots back on
+    // 2026-09-03, so its seed is the binding constraint everywhere again and
+    // all three tiers report the same number — including high, whose
+    // gpt-5.6-sol planner (400_000) is no longer the smallest.
+    //
+    // This is a real product consequence, not bookkeeping: the editor derives
+    // its compaction threshold from this value, so every tier compacts ~8x
+    // sooner than it did the day before. Raising spark's catalog window (or
+    // rolling back to FLASH_MODEL) is what moves it.
+    it('contextWindow: every tier = spark\'s 131_072 seed, the smallest in each tier\'s lineup', async () => {
         const user = await seedPasswordUser('config-ctxwin@test.dev', 'password123');
         const token = await tokenFor(user);
         const res = await getConfig(token);
         const body = await res.json<ConfigResponse>();
 
+        expect(tierById(body, 'low').contextWindow).toBe(131_072);
+        expect(tierById(body, 'mid').contextWindow).toBe(131_072);
         expect(tierById(body, 'high').contextWindow).toBe(131_072);
     });
 
-    it('contextWindow: a model_pricing override raising spark\'s window changes the derived high-tier value', async () => {
+    it('contextWindow: a model_pricing override lowering the executor\'s window changes the derived high-tier value', async () => {
         clearConfigCache();
         const user = await seedPasswordUser('config-ctxwin-override@test.dev', 'password123');
         const token = await tokenFor(user);
 
-        const sparkOverride: ModelPricingDoc = {
+        const executorOverride: ModelPricingDoc = {
             models: {
-                'spark/muse-spark-1.2-contributor': {
-                    ...MODEL_CATALOG['spark/muse-spark-1.2-contributor']!,
-                    contextWindow: 999_999,
+                [SPARK_MODEL]: {
+                    ...MODEL_CATALOG[SPARK_MODEL]!,
+                    contextWindow: 100_000,
                 },
             },
             gatewayFee: 1.05,
             margin: 1.0,
         };
-        await putConfigDoc(env.arcane_db, 'model_pricing', sparkOverride);
+        await putConfigDoc(env.arcane_db, 'model_pricing', executorOverride);
         clearConfigCache();
 
         const res = await getConfig(token);
         const body = await res.json<ConfigResponse>();
-        // Now the smallest of (sol 400_000, spark 999_999, grok 500_000) is sol.
-        expect(tierById(body, 'high').contextWindow).toBe(400_000);
+        // Now the smallest of (sol 400_000, executor 100_000, glm 1_048_576)
+        // is the overridden executor, below even spark's own 131_072 seed —
+        // the derived value follows the override, not the catalog.
+        expect(tierById(body, 'high').contextWindow).toBe(100_000);
 
         clearConfigCache(); // leave a clean cache for any test file sharing this isolate
     });
 
-    it('pricingCliffTokens: high tier = 200_000 (grok\'s cliff) with seed data; low tier (spark/spark, no cliffs) = null', async () => {
+    // Grok's 200k cliff was the ONLY repricing cliff in the routed lineup, and
+    // it sat on the high tier. Retiring grok on 2026-08-30 removed it: every
+    // routed model is now flat-priced, so no tier reports a cliff at all. The
+    // editor uses this to warn before a request gets suddenly more expensive —
+    // a null here means there is genuinely nothing to warn about.
+    it('pricingCliffTokens: null on every tier once grok (the only cliff model) is unrouted', async () => {
         const user = await seedPasswordUser('config-cliff@test.dev', 'password123');
         const token = await tokenFor(user);
         const res = await getConfig(token);
         const body = await res.json<ConfigResponse>();
 
-        expect(tierById(body, 'high').pricingCliffTokens).toBe(200_000);
+        expect(tierById(body, 'high').pricingCliffTokens).toBeNull();
+        expect(tierById(body, 'mid').pricingCliffTokens).toBeNull();
         expect(tierById(body, 'low').pricingCliffTokens).toBeNull();
+    });
+
+    it('maxModelCalls: defaults to {1000,1600,2000} (DEFAULT_HARNESS_LIMITS)', async () => {
+        const user = await seedPasswordUser('config-harness-default@test.dev', 'password123');
+        const token = await tokenFor(user);
+        const res = await getConfig(token);
+        const body = await res.json<ConfigResponse>();
+
+        expect(tierById(body, 'low').maxModelCalls).toBe(1000);
+        expect(tierById(body, 'mid').maxModelCalls).toBe(1600);
+        expect(tierById(body, 'high').maxModelCalls).toBe(2000);
+    });
+
+    it('maxModelCalls: a harness_limits override is served after clearConfigCache', async () => {
+        clearConfigCache();
+        const user = await seedPasswordUser('config-harness-override@test.dev', 'password123');
+        const token = await tokenFor(user);
+
+        const override: HarnessLimitsDoc = {
+            tiers: { low: { maxModelCalls: 42 }, mid: { maxModelCalls: 84 }, high: { maxModelCalls: 168 } },
+        };
+        await putConfigDoc(env.arcane_db, 'harness_limits', override);
+        clearConfigCache();
+
+        const res = await getConfig(token);
+        const body = await res.json<ConfigResponse>();
+        expect(tierById(body, 'low').maxModelCalls).toBe(42);
+        expect(tierById(body, 'mid').maxModelCalls).toBe(84);
+        expect(tierById(body, 'high').maxModelCalls).toBe(168);
+
+        clearConfigCache(); // leave a clean cache for any test file sharing this isolate
     });
 
     it('unverified-email user still gets 200 (auth only, no verified-email gate)', async () => {

@@ -473,7 +473,8 @@ fn format_symbols(
     if target_files.is_empty() {
         return match (file, type_name) {
             (None, None) => "project_symbols needs a `file` or `type` argument.".to_string(),
-            _ => "No symbols found — check the path/type name, or rebuild the graph if the file is new.".to_string(),
+            (Some(_), _) => "No symbols found for that path. The graph indexes source files only (a Unity project graph holds .cs scripts and nothing else), so data assets never appear here — read the file directly. If it is a new script, rebuild the graph.".to_string(),
+            _ => "No symbols found — check the type name, or rebuild the graph if the file is new.".to_string(),
         };
     }
 

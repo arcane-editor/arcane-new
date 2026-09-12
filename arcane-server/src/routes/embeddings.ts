@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { embedMany } from 'ai';
 import type { AppEnv } from '../types.ts';
 import type { AuthPayload } from '../middleware/auth.ts';
-import { checkAiBudget } from '../lib/credits.ts';
+import { checkAiBudget, budgetErrorBody } from '../lib/credits.ts';
 import { recordUsage } from '../lib/usage.ts';
 import { workersAiProvider } from '../services/llm-router.ts';
 
@@ -22,7 +22,10 @@ embeddingsRouter.post('/v1/embeddings', async (c) => {
     const user = c.get('user') as AuthPayload;
 
     const budget = await checkAiBudget(c.env.arcane_db, parseInt(user.sub));
-    if (!budget.ok) return c.json({ error: budget.error, code: budget.code }, budget.status);
+    if (!budget.ok) {
+        if (budget.retryAfterSeconds !== undefined) c.header('Retry-After', String(budget.retryAfterSeconds));
+        return c.json(budgetErrorBody(budget), budget.status);
+    }
 
     const body = await c.req.json<EmbeddingRequest>();
 

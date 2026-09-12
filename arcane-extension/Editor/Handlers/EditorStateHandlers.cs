@@ -5,14 +5,21 @@
 //
 // Methods:
 //   getEditorState, getSelection, getProjectAssets, refreshAssets,
-//   generateSolution, executeMenuItem, openAsset, focusUnity,
+//   requestCompile, generateSolution, executeMenuItem, openAsset, focusUnity,
 //   setExternalScriptEditor
+//
+// refreshAssets and requestCompile are registered QUEUED (see RpcDispatcher):
+// they are commands whose worth is the side effect, and making the caller
+// block on a main thread that Unity has parked is what turned "the AI wrote a
+// file" into an 8s RPC timeout. They report real completion with
+// `refresh_completed` instead.
 //
 // Also installs the Selection.selectionChanged hook to push `selection_changed`.
 
 using System;
 using System.Reflection;
 using UnityEditor;
+using UnityEditor.Compilation;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
@@ -22,6 +29,18 @@ namespace UnityIDE.Bridge
     {
         // EditorPrefs key Unity uses for the external script editor path.
         private const string ScriptEditorPrefKey = "kScriptsDefaultApp";
+
+        /// <summary>Shared coalescing key for the two import-triggering commands.</summary>
+        private const string AssetRefreshKey = "assetRefresh";
+
+        /// <summary>
+        /// How long to hold the editor awake after an import, so a compile the
+        /// importer scheduled actually gets to START. Unity does not begin
+        /// compiling inside Refresh(); it schedules the work for a later tick,
+        /// and a backgrounded editor has no later tick unless we supply one.
+        /// CompilationHook extends this once the compile is under way.
+        /// </summary>
+        private const int PostImportWakeMs = 20000;
 
         private static BridgeClient _client;
         private static bool _selectionHookInstalled;
@@ -33,7 +52,10 @@ namespace UnityIDE.Bridge
             RpcDispatcher.Register("getEditorState", GetEditorState);
             RpcDispatcher.Register("getSelection", GetSelection);
             RpcDispatcher.Register("getProjectAssets", GetProjectAssets);
-            RpcDispatcher.Register("refreshAssets", RefreshAssets);
+            // Both end in an AssetDatabase import, so they share a coalescing
+            // key: an agent writing ten scripts queues one refresh, not ten.
+            RpcDispatcher.RegisterQueued("refreshAssets", RefreshAssets, AssetRefreshKey);
+            RpcDispatcher.RegisterQueued("requestCompile", RequestCompile, AssetRefreshKey);
             RpcDispatcher.Register("generateSolution", GenerateSolution);
             RpcDispatcher.Register("executeMenuItem", ExecuteMenuItem);
             RpcDispatcher.Register("openAsset", OpenAsset);
@@ -144,12 +166,63 @@ namespace UnityIDE.Bridge
             return result;
         }
 
-        // ── refreshAssets ────────────────────────────────────────────────────
+        // ── refreshAssets / requestCompile (both QUEUED) ─────────────────────
 
         private static JsonValue RefreshAssets(JsonValue p)
         {
             AssetDatabase.Refresh();
+            MainThreadDispatcher.RequestWake(PostImportWakeMs);
+            AnnounceRefreshCompleted(false);
             return Ok();
+        }
+
+        /// <summary>
+        /// Import changed assets and, optionally, force a script compile.
+        ///
+        /// The plain import is the right default: if a .cs file really changed,
+        /// Unity schedules the compile itself, and if it did not, there is
+        /// genuinely nothing to build — which is a real answer the IDE knows how
+        /// to report. `force` exists for the case where the importer did not
+        /// notice; it is not the default because RequestScriptCompilation()
+        /// recompiles and reloads the domain unconditionally, and paying that on
+        /// every agent write would be worse than the problem being fixed.
+        /// </summary>
+        private static JsonValue RequestCompile(JsonValue p)
+        {
+            AssetDatabase.Refresh();
+
+            bool force = p != null && p["force"] != null && p["force"].AsBool;
+            if (force) CompilationPipeline.RequestScriptCompilation();
+
+            MainThreadDispatcher.RequestWake(PostImportWakeMs);
+            AnnounceRefreshCompleted(force);
+            return Ok();
+        }
+
+        /// <summary>
+        /// Tell the IDE the queued import actually ran. Runs on the main thread
+        /// (the dispatcher guarantees it), and Send only queues, so this is safe
+        /// even though a compile-triggered domain reload may be moments away.
+        ///
+        /// `compiling` is the part that keeps the IDE honest. Without it, the
+        /// IDE can only infer "nothing needed compiling" from silence, and
+        /// silence is also what a scheduled-but-not-yet-started compile looks
+        /// like on a backgrounded editor — so it would report a clean no-op
+        /// compile for a file that is about to fail to build. This is positive
+        /// evidence that a compile is already in flight. It is not a complete
+        /// answer on its own (Unity often schedules the compile for a later
+        /// tick, and this reads false then), which is why the IDE also refuses
+        /// to conclude anything while the editor is parked.
+        /// </summary>
+        private static void AnnounceRefreshCompleted(bool compileRequested)
+        {
+            if (_client == null) return;
+            var payload = JsonValue.NewObject();
+            payload["compileRequested"] = compileRequested;
+            // A forced request compiles unconditionally, so it counts as in
+            // flight even before Unity flips isCompiling.
+            payload["compiling"] = compileRequested || EditorApplication.isCompiling;
+            _client.Send(Protocol.Envelope(MsgType.RefreshCompleted, payload));
         }
 
         // ── generateSolution ─────────────────────────────────────────────────

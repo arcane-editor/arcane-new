@@ -389,6 +389,89 @@ describe('every custom-property reference resolves', () => {
   });
 });
 
+// ─── foreground/background pairings in the stylesheet ─────────────────
+//
+// The per-theme tests above check pairs someone thought to list — and the
+// pair a rule ACTUALLY uses is not necessarily one of them.
+// `.plan-doc-btn--primary` (the plan's Execute button) painted
+// `--text-on-dark` on `--accent`: cream on gold, 1.56:1, unreadable in three
+// of the six themes. Every listed pair still passed, because nobody had
+// listed that one. `--text-on-dark` is the TITLE-BAR foreground (see its doc
+// in types.ts) and clears 14.9:1 against the bar it was authored for, so no
+// test of the token on its own could have caught it either.
+//
+// So this reads the pairs out of App.css instead of out of a list: a block
+// that states BOTH its background and its foreground in theme tokens has
+// declared a pairing, and that pairing has to be legible in all six themes.
+//
+// Enforced for the UnityIDE themes only, for the same reason the syntax rule
+// above is (see CONTRAST_ENFORCED): the other four are faithful ports.
+//
+// Scope is FILLED CONTROLS: a block whose background is a FILL or CONTENT
+// token — a button, a badge, a marker. Text on a SURFACE is deliberately
+// excluded, because `text-secondary` on `bg-primary` is muted BY DESIGN and
+// already has its own, looser rule above ('secondary text and accents clear
+// the 3:1 UI-text floor'). Holding muted labels to 4.5:1 here would just
+// restate that rule with the wrong number and fail 69 legitimate places.
+//
+// Other limits, stated rather than hidden: only same-block pairings are seen.
+// A rule that sets a background and inherits its colour from a base rule is
+// invisible here, as is any value that is a `color-mix()` or a non-theme
+// custom property. Narrower than the real cascade — but it is exactly the
+// shape the Execute button bug had.
+describe('every foreground/background pairing in App.css is legible', () => {
+  const OVERLAY = new Set(CLASSES.OVERLAY);
+  const SURFACE = new Set(CLASSES.SURFACE);
+
+  /** Innermost declaration blocks — `[^{}]*` never matches a nested rule, so
+   *  `@media`/`@supports` wrappers fall out on their own. */
+  function declarationBlocks(css: string): Array<{ selector: string; body: string }> {
+    const out: Array<{ selector: string; body: string }> = [];
+    for (const m of css.matchAll(/\{([^{}]*)\}/g)) {
+      const before = css.slice(0, m.index);
+      const start = Math.max(before.lastIndexOf('}'), before.lastIndexOf('{')) + 1;
+      out.push({ selector: before.slice(start).trim().replace(/\s+/g, ' '), body: m[1] });
+    }
+    return out;
+  }
+
+  /** The token a property resolves to, or null when it is not a bare
+   *  `var(--theme-token)` — a literal, a `color-mix()`, or a CSS-only var. */
+  function tokenOf(body: string, property: RegExp): string | null {
+    const decl = body.match(property);
+    if (!decl) return null;
+    const ref = decl[1].trim().match(/^var\(\s*--([\w-]+)\s*\)$/);
+    if (!ref) return null;
+    return ALL_TOKENS.includes(ref[1]) ? ref[1] : null;
+  }
+
+  it('states a readable colour on every fill it paints', () => {
+    const css = stripComments(readFileSync(join(SRC, 'App.css'), 'utf8'));
+    const failures: string[] = [];
+
+    for (const { selector, body } of declarationBlocks(css)) {
+      const bg = tokenOf(body, /(?:^|;)\s*background(?:-color)?\s*:\s*([^;]+)/);
+      const fg = tokenOf(body, /(?:^|;)\s*color\s*:\s*([^;]+)/);
+      if (!bg || !fg) continue;
+      // An OVERLAY background is translucent by contract: what it composites
+      // over is unknown here, so the ratio would be meaningless. A SURFACE
+      // background is a region, not a control — see the header.
+      if (OVERLAY.has(bg) || SURFACE.has(bg)) continue;
+
+      // Same split as the syntax-contrast rule above: ours to answer for,
+      // upstream's to keep faithful.
+      for (const theme of enforced) {
+        const ui = theme.ui as unknown as Record<string, string>;
+        const ratio = contrast(ui[fg], ui[bg]);
+        if (ratio >= 4.5) continue;
+        failures.push(`${selector} — --${fg} on --${bg} = ${ratio.toFixed(2)} in ${theme.id}`);
+      }
+    }
+
+    expect(failures).toEqual([]);
+  });
+});
+
 /**
  * Monaco falls back to a saturated red (#FF1212 family) for any colour ID a
  * theme leaves unstated — a hue no palette here uses, so it always reads as a

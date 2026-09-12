@@ -1,0 +1,25 @@
+---
+/**
+ * Dark, always.
+ *
+ * Starlight has no `defaultTheme` option — its own ThemeProvider reads
+ * `localStorage['starlight-theme']`, falls back to `prefers-color-scheme`, and
+ * stamps `data-theme` accordingly. The rest of unityide.app has no light mode
+ * and no theme toggle, so a visitor whose OS prefers light was the one person
+ * getting a page the site cannot actually paint.
+ *
+ * `starlight-overrides.css` declares its tokens under all three `data-theme`
+ * states as a second line of defence, but this is the one that makes
+ * "dark-only" true rather than merely survivable.
+ *
+ * `window.StarlightThemeProvider` is kept because Starlight's ThemeSelect calls
+ * `updatePickers()` on it. That picker is hidden here, but a missing global
+ * would throw on any page that still mounts one.
+ */
+---
+
+{/* Inlined, like Starlight's own, so there is no flash before it runs. */}
+<script is:inline>
+  document.documentElement.dataset.theme = 'dark';
+  window.StarlightThemeProvider = { updatePickers() {} };
+</script>

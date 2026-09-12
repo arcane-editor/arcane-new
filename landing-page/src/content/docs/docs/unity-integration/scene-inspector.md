@@ -17,10 +17,10 @@ The toolbar at the top of the window contains Play, Pause, Stop, and Step button
 
 | Button | Action | Shortcut |
 |--------|--------|----------|
-| Play | Enter Play mode | `Ctrl+Shift+F5` |
-| Pause | Pause execution | `Ctrl+Shift+F6` |
-| Stop | Exit Play mode | `Ctrl+Shift+F10` |
-| Step | Advance one frame | `Ctrl+Shift+F11` |
+| Play | Enter Play mode | `F5` |
+| Pause | Pause execution | `F6` |
+| Stop | Exit Play mode | `Shift+F5` |
+| Step | Advance one frame | `F7` |
 
 The toolbar also displays the current play state (Playing / Paused / Stopped).
 

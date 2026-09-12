@@ -44,9 +44,19 @@ const ALLOWLIST = {
   // actual in-tree directory. All 18 are genuine paths to it — CI working-dirs,
   // two .gitignores, the bridge sync script, AGENTS.md, SPEC.md.
   // 18 -> 17 when AGENTS.md was excluded (see EXCLUDE).
+  //
+  // 17 -> 22 for the dev-channel Unity package (2026-08-31). The extension now
+  // ships once per release channel, and the packaging path names its source
+  // directory in five new places: `deploy.sh`'s staging comment, one comment in
+  // `sync-unity-bridge.mjs`, two lines in the new `unity-extension-dev` job in
+  // dev-build.yml, and one comment in `scripts/unity-extension-channel.mjs`.
+  // All five are genuine paths to the in-tree package, same as the other 17.
+  //
   // Adjust this deliberately and say why; never edit it to silence a surprise.
-  'arcane-extension': 17,
-  'arcane-releases': 25,   // +3: named in the cutover runbook    // R2 bucket name, deliberately kept
+  'arcane-extension': 22,
+  // +2 (2026-08-31): the two R2 keys the dev-channel Unity package is published
+  // under, in dev-build.yml's `unity-extension-dev` job.
+  'arcane-releases': 27,   // +3: named in the cutover runbook    // R2 bucket name, deliberately kept
   'arcane-landing': 8,     // +2: named in the cutover runbook      // Cloudflare Pages project names
   'arcane-server': 80,      // worker name + JWT_ISSUER + OAUTH_COOKIE_ISSUER + user agent
   'arcane_user_id': 9,      // Dodo checkout metadata key (round-trips through Dodo)

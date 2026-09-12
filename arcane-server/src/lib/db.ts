@@ -670,3 +670,56 @@ export async function getInlineSpend(db: D1Database, userId: number, monthKey: s
     ).bind(userId, monthKey).first<{ spend_micro: number }>();
     return row?.spend_micro ?? 0;
 }
+
+// --- Client crash reports (POST /v1/client-error) ---
+
+export interface ClientErrorRow {
+    id: number;
+    kind: string;
+    message: string;
+    stack: string;
+    component_stack: string;
+    app_version: string;
+    channel: string;
+    os: string;
+    session_id: string;
+    user_id: string | null;
+    created_at: string;
+}
+
+export interface ClientErrorInput {
+    kind: string;
+    message: string;
+    stack: string;
+    componentStack: string;
+    appVersion: string;
+    channel: string;
+    os: string;
+    sessionId: string;
+    userId: string | null;
+}
+
+export async function createClientError(
+    db: D1Database,
+    data: ClientErrorInput,
+): Promise<ClientErrorRow> {
+    const result = await db.prepare(
+        `INSERT INTO client_errors
+           (kind, message, stack, component_stack, app_version, channel, os, session_id, user_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`
+    ).bind(
+        data.kind, data.message, data.stack, data.componentStack,
+        data.appVersion, data.channel, data.os, data.sessionId, data.userId,
+    ).first<ClientErrorRow>();
+    return result!;
+}
+
+export async function findRecentClientErrors(
+    db: D1Database,
+    limit = 100,
+): Promise<ClientErrorRow[]> {
+    const result = await db.prepare(
+        'SELECT * FROM client_errors ORDER BY created_at DESC, id DESC LIMIT ?'
+    ).bind(limit).all<ClientErrorRow>();
+    return result.results;
+}

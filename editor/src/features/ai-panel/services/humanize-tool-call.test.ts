@@ -256,6 +256,102 @@ describe('humanizeToolCall', () => {
     });
   });
 
+  describe('get_compile_errors', () => {
+    it('reports a static label', () => {
+      expect(humanizeToolCall('get_compile_errors', {}).title).toBe('Checked Unity compile status');
+    });
+  });
+
+  describe('unity_console_clear', () => {
+    it('reports a static label', () => {
+      expect(humanizeToolCall('unity_console_clear', {}).title).toBe('Cleared Unity console');
+    });
+  });
+
+  describe('unity subsystem tools (F-5.6 / Task 18)', () => {
+    it('unity_scriptable_objects', () => {
+      expect(humanizeToolCall('unity_scriptable_objects', {}).title).toBe('Read ScriptableObjects');
+    });
+    it('unity_ui_toolkit', () => {
+      expect(humanizeToolCall('unity_ui_toolkit', {}).title).toBe('Read UI Toolkit setup');
+    });
+    it('unity_input_actions', () => {
+      expect(humanizeToolCall('unity_input_actions', {}).title).toBe('Read input actions');
+    });
+    it('unity_fix_so_drift', () => {
+      expect(humanizeToolCall('unity_fix_so_drift', {}).title).toBe('Repaired ScriptableObject drift');
+    });
+    it('unity_input_edit', () => {
+      expect(humanizeToolCall('unity_input_edit', {}).title).toBe('Edited input actions');
+    });
+    it('unity_asset_edit shows the asset basename', () => {
+      expect(humanizeToolCall('unity_asset_edit', { path: 'Assets/Data/Enemy.asset' }).title).toBe(
+        'Edited Unity asset Enemy.asset',
+      );
+    });
+    it('unity_asset_edit falls back to a generic label when path is missing', () => {
+      expect(humanizeToolCall('unity_asset_edit', {}).title).toBe('Edited a Unity asset');
+    });
+  });
+
+  describe('unity_attach_ui_document', () => {
+    it('shows the target GameObject path', () => {
+      expect(humanizeToolCall('unity_attach_ui_document', { gameObject: 'UI/HUD' }).title).toBe(
+        'Attached UIDocument to "UI/HUD"',
+      );
+    });
+    it('falls back to a generic label when gameObject is missing', () => {
+      expect(humanizeToolCall('unity_attach_ui_document', {}).title).toBe('Attached a UIDocument');
+    });
+  });
+
+  describe('unity_set_property', () => {
+    it('shows Component.property when both are given', () => {
+      expect(
+        humanizeToolCall('unity_set_property', { component: 'PlayerController', property: 'speed' }).title,
+      ).toBe('Set PlayerController.speed');
+    });
+    it('shows just the property when there is no component (a GameObject-level property)', () => {
+      expect(humanizeToolCall('unity_set_property', { property: 'name' }).title).toBe('Set name');
+    });
+    it('falls back to a generic label when property is missing', () => {
+      expect(humanizeToolCall('unity_set_property', { gameObject: 'Player' }).title).toBe('Set a Unity property');
+    });
+  });
+
+  describe('unity_ui_write', () => {
+    it('shows the UI file basename', () => {
+      expect(humanizeToolCall('unity_ui_write', { path: 'Assets/UI/HUD.uxml' }).title).toBe(
+        'Wrote UI file HUD.uxml',
+      );
+    });
+    it('falls back to a generic label when path is missing', () => {
+      expect(humanizeToolCall('unity_ui_write', {}).title).toBe('Wrote a UI file');
+    });
+  });
+
+  describe('unity_ui_layout', () => {
+    it('shows the previewed document basename', () => {
+      expect(humanizeToolCall('unity_ui_layout', { document: 'Assets/UI/HUD.uxml' }).title).toBe(
+        'Previewed layout of HUD.uxml',
+      );
+    });
+    it('falls back to a generic label when document is missing', () => {
+      expect(humanizeToolCall('unity_ui_layout', {}).title).toBe('Previewed a UI layout');
+    });
+  });
+
+  describe('unity_ui_scaffold', () => {
+    it('shows the screen kind', () => {
+      expect(humanizeToolCall('unity_ui_scaffold', { screen: 'main-menu', name: 'MainMenu' }).title).toBe(
+        'Drafted a main-menu screen',
+      );
+    });
+    it('falls back to a generic label when screen is missing', () => {
+      expect(humanizeToolCall('unity_ui_scaffold', {}).title).toBe('Drafted a UI screen');
+    });
+  });
+
   describe('graphify', () => {
     it('every graphify_* tool maps to the same label', () => {
       expect(humanizeToolCall('graphify_query', {}).title).toBe('Queried code graph');

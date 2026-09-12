@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { generateText } from 'ai';
 import type { AppEnv } from '../types.ts';
 import type { AuthPayload } from '../middleware/auth.ts';
-import { checkAiBudget } from '../lib/credits.ts';
+import { checkAiBudget, budgetErrorBody } from '../lib/credits.ts';
 import { recordUsage } from '../lib/usage.ts';
 import { getModelRouting, getEffectivePricing } from '../lib/app-config.ts';
 import { resolveModel } from '../services/llm-router.ts';
@@ -79,7 +79,10 @@ graphRouter.post('/v1/graph/enrich', async (c) => {
     const user = c.get('user') as AuthPayload;
 
     const budget = await checkAiBudget(c.env.arcane_db, parseInt(user.sub));
-    if (!budget.ok) return c.json({ error: budget.error, code: budget.code }, budget.status);
+    if (!budget.ok) {
+        if (budget.retryAfterSeconds !== undefined) c.header('Retry-After', String(budget.retryAfterSeconds));
+        return c.json(budgetErrorBody(budget), budget.status);
+    }
 
     const body = await c.req.json<GraphEnrichRequest>();
     if (!body?.stats || !Array.isArray(body.communities)) {
@@ -106,8 +109,9 @@ graphRouter.post('/v1/graph/enrich', async (c) => {
     // Generative enrichment, like chat, is sampled (temperature 0.2) — skip the
     // gateway cache so a repeat call doesn't replay a stale sampled response.
     // resolveModel (not workersAiProvider directly) so a 'direct'-route model
-    // (spark/…) — the shipped default mid.executor — is servable here too,
-    // not just @cf/ Workers AI catalog ids.
+    // (spark/…) is servable here too, not just @cf/ Workers AI catalog ids.
+    // The shipped default mid.executor is a @cf/ id again as of 2026-08-27,
+    // but an admin can still route this tier at a direct-route model.
     const model = resolveModel(enrichModel, c.env, { skipCache: true });
 
     const system = [

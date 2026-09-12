@@ -5,9 +5,131 @@ All notable changes to this package will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.4.0] - Unreleased
+
+### Added
+- Protocol 6 stable scene-object and component identities, existing-root edits,
+  root-scoped persistence checks, and Scene view selection/framing after authoring.
+
+### Changed
+- Saved editable scene authoring is the default specialist workflow. Runtime-only
+  level generators must be converted to explicit Editor builders.
+
+## [0.3.0] - Unreleased
+
+### Added
+- Protocol 5 editor-time authoring operations with owned roots, declared assets,
+  Undo, conflict checks, durable operation status and saved-content inspection.
+- Input-driven gameplay scenarios with reload-aware lifecycle, cancellation,
+  assertions, console/performance evidence and rendered Game-view capture.
+- Optional Input System adapter for keyboard, pointer, gamepad and single-touch
+  simulation. The core package compiles without the Input System.
+- Integration fixtures for authoring and real action-binding delivery.
+
+### Compatibility
+- Existing bridge methods remain available. Protocol 5 capabilities require the
+  matching desktop workflow; older integrations receive an upgrade notice.
+- Specialist automation remains experimental until live acceptance is complete.
+
+## [0.2.0] - Unreleased
+
+### Added
+- **Bridge wire-protocol bumped to version 4** (`Discovery.ProtocolVersion`,
+  pinned against `PROTOCOL_VERSION` in `unity_ipc.rs`), and the RPCs it makes
+  room for now all ship:
+  - **`getConsoleSnapshot` / `clearConsole`** — a point-in-time read of the
+    console (for the IDE's post-turn check to merge against its own live
+    stream) and a way to clear it from the IDE. Backed by a bounded
+    (2000-entry) "hook ring" that persists its last 500 entries through a
+    domain reload (`SessionState`, plus the running `Seq`/`ClearEpoch`
+    counters), so a script recompile doesn't reset an agent's paging
+    baseline to zero.
+  - **`runTests`, queued, with a `test_run_completed` push.** A test run no
+    longer blocks a request/response pair on however long the suite takes:
+    `runTests` is dispatched through `RpcDispatcher.RegisterQueued` (coalesced
+    on a `"testRun"` key, so a second call while one is running joins the
+    first rather than starting a duplicate), and the IDE learns the outcome
+    from the awaited `test_run_completed` push — summary counts plus a capped
+    list of failures — decoupled from the `test_event` stream already used for
+    live per-test progress.
+  - **`attachUiDocument` / `setSerializedProperty`** — the bridge's first
+    scene-WRITE RPCs. `attachUiDocument` wires a UIDocument to a GameObject,
+    a `.uxml`, a PanelSettings and a theme in one call (creating whichever of
+    those is missing) and gets its own 25s timeout (`AttachTimeoutMs`) rather
+    than the default 8s, since it can touch several assets. Both go through
+    `EditorGate`, the shared guard that refuses a scene write outright when
+    Play Mode, a domain reload, or Prefab Mode would make it unsafe or would
+    silently land on the wrong scene.
+  - **Per-handler RPC timeouts.** `RpcDispatcher.Register` now takes an
+    optional `timeoutMs`, defaulting to `HandlerTimeoutMs` (8000); a handler
+    that legitimately needs longer (`attachUiDocument`) opts in explicitly
+    instead of the whole dispatcher's timeout floor moving for one RPC.
+
+  Package version bumped to 0.2.0 to match the new protocol floor
+  (`MIN_PACKAGE_VERSION`).
+- **The package now ships once per release channel.** The release build targets
+  the UnityIDE application, `unityide://` and `~/.unityide`; the dev build
+  (`com.unityide.editor.dev`) targets UnityIDE Dev, `unityide-dev://` and
+  `~/.unityide-dev`. Both are generated from this source by
+  `scripts/unity-extension-channel.mjs`, which also gives the dev package its
+  own assembly names and asset GUIDs so the two can never be confused for one
+  another. Installing either one removes the other.
+
+  This replaces working the channel out at runtime, which got it wrong in the
+  one case that mattered: it always resolved to release, so anyone testing the
+  dev build had their double-clicks answered by the release app, silently.
+- **Window > UnityIDE > Open Project in UnityIDE** opens the current project in
+  UnityIDE, launching it if it is not running and bringing it to the front if it
+  is. Unity's own **Assets > Open C# Project** now works too — it hands us an
+  empty file path, which produced a bare `UnityIDE "<project>"` that the app's
+  argument parser ignored entirely.
+- A one-time offer to make UnityIDE the external script editor, shown the first
+  time the package loads on a machine where UnityIDE is installed and something
+  else is configured. Opt-in, with "Not now" and "Never ask again"; the setting
+  is never changed without an answer.
+- **Window > UnityIDE > Use UnityIDE for C# Scripts**, for taking that offer
+  later.
+- Preferences > External Tools now reports where UnityIDE was found and whether
+  it currently has this project open, with a button to open it.
+- Opening now goes through the `unityide://open` deep link before it goes
+  looking for an executable. The OS already knows where UnityIDE is installed
+  and how to bring it forward, so a copy in a non-default location — or one the
+  probe list has never heard of — is opened correctly, and on macOS nothing
+  spawns a throwaway process to relay the request.
+
+  Falling back to launching an executable is still needed and still happens: on
+  macOS `tauri dev` can never register a scheme, and on Windows registration
+  happens on the app's first run, so an install nobody has opened yet has no
+  handler. The package only fires a deep link at Windows once
+  `~/.unityide/install.json` proves the app has run.
 
 ### Fixed
+- Double-clicking a script no longer relaunches the app when UnityIDE already
+  has the project open. The file is sent over the bridge journal instead, with
+  its line and column, and the IDE raises itself — no throwaway process, no dock
+  bounce, and no dependence on knowing where the app is installed.
+- UnityIDE is found on Windows again. The probe list carried Electron's
+  `%LOCALAPPDATA%\Programs\<app>` convention while the installer puts a
+  per-user install in `%LOCALAPPDATA%\<app>`, so a default install was never
+  detected. The app now also records its own location in
+  `~/.unityide/install.json` on every launch, which makes discovery work for a
+  copy installed anywhere.
+- A pre-rename install is found again. The bulk rename that turned Arcane into
+  UnityIDE also rewrote the constant naming the *pre*-rename app, so every
+  "legacy" probe path was a duplicate of the current one.
+- Paths ending in a separator no longer mangle the launch. A trailing backslash
+  escaped its own closing quote, so `"C:\Proj\"` swallowed every argument
+  after it.
+- The Unity test assembly compiles. It exercises internal types
+  (`Discovery`, `Journal`, `BridgeClient`) and the package never granted it
+  access, so none of its tests had ever run.
+- Double-clicking a script when the package is installed but the application is
+  not now opens the download page, once per Unity session. It used to write a
+  console error and nothing else — from inside Unity, indistinguishable from
+  the integration being broken.
+- The dev application is discoverable at all. The probe list only ever named
+  `UnityIDE`, so a machine with only UnityIDE Dev installed, and no install
+  record yet, found nothing.
 - A domain reload no longer looks like a disconnect. The bridge announces a new
   `reloading` message before tearing down its AppDomain, so the IDE widens its
   liveness deadline instead of dropping the session, and a script recompile no

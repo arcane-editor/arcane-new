@@ -7,7 +7,18 @@ import { classifyFile, FilePriority } from '../../csharp';
 import { useSceneUsageStore } from '../stores/scene-usage';
 import type { AssetKind, AssetUsageEntry } from '../services/scene-usage-finder';
 
-function SceneUsagePanel() {
+interface SceneUsagePanelProps {
+  /**
+   * Hide the ScriptableObject section.
+   *
+   * Set by the ScriptableObject inspector's Usages tab, where instances of the
+   * open class are shown in their own tab and would otherwise appear twice.
+   * A prop rather than a copy of this component so the two can never drift.
+   */
+  hideScriptableObjects?: boolean;
+}
+
+function SceneUsagePanel({ hideScriptableObjects = false }: SceneUsagePanelProps = {}) {
   const activeFilePath = useWorkspaceStore((s) => s.activeFilePath);
   const workspacePath = useWorkspaceStore((s) => s.workspacePath);
   const isUnityProject = useProjectContextStore((s) => s.isUnityProject);
@@ -52,23 +63,27 @@ function SceneUsagePanel() {
       )
     : list;
 
-  const sceneCount = filtered.filter((a) => a.kind === 'scene').length;
-  const prefabCount = filtered.filter((a) => a.kind === 'prefab').length;
-  const soCount = filtered.filter((a) => a.kind === 'scriptableObject').length;
-  const totalGameObjects = filtered
+  const visible = hideScriptableObjects
+    ? filtered.filter((a) => a.kind !== 'scriptableObject')
+    : filtered;
+
+  const sceneCount = visible.filter((a) => a.kind === 'scene').length;
+  const prefabCount = visible.filter((a) => a.kind === 'prefab').length;
+  const soCount = visible.filter((a) => a.kind === 'scriptableObject').length;
+  const totalGameObjects = visible
     .filter((a) => a.kind !== 'scriptableObject')
     .reduce((sum, s) => sum + s.gameObjects.length, 0);
 
   const grouped = useMemo(() => {
-    const scenes = filtered.filter((a) => a.kind === 'scene');
-    const prefabs = filtered.filter((a) => a.kind === 'prefab');
-    const scriptableObjects = filtered.filter((a) => a.kind === 'scriptableObject');
+    const scenes = visible.filter((a) => a.kind === 'scene');
+    const prefabs = visible.filter((a) => a.kind === 'prefab');
+    const scriptableObjects = visible.filter((a) => a.kind === 'scriptableObject');
     const sections: { kind: AssetKind; items: AssetUsageEntry[] }[] = [];
     if (scenes.length) sections.push({ kind: 'scene', items: scenes });
     if (prefabs.length) sections.push({ kind: 'prefab', items: prefabs });
     if (scriptableObjects.length) sections.push({ kind: 'scriptableObject', items: scriptableObjects });
     return sections;
-  }, [filtered]);
+  }, [visible]);
 
   const toggleAsset = (asset: AssetUsageEntry) => {
     setExpandedAssets((prev) => {
@@ -136,9 +151,13 @@ function SceneUsagePanel() {
         <div className="scene-usage-subtitle">
           {isLoading
             ? 'Scanning scenes, prefabs, and assets…'
-            : filtered.length === 0 && !unityConnected
+            : visible.length === 0 && !unityConnected
             ? 'Unity not connected — usage may be incomplete.'
-            : `Found in ${sceneCount} ${sceneCount === 1 ? 'scene' : 'scenes'}, ${prefabCount} ${prefabCount === 1 ? 'prefab' : 'prefabs'}, ${soCount} ${soCount === 1 ? 'scriptable object' : 'scriptable objects'} (${totalGameObjects} GameObjects)`}
+            : `Found in ${sceneCount} ${sceneCount === 1 ? 'scene' : 'scenes'}, ${prefabCount} ${prefabCount === 1 ? 'prefab' : 'prefabs'}${
+                hideScriptableObjects
+                  ? ''
+                  : `, ${soCount} ${soCount === 1 ? 'scriptable object' : 'scriptable objects'}`
+              } (${totalGameObjects} GameObjects)`}
         </div>
       )}
 
@@ -164,7 +183,7 @@ function SceneUsagePanel() {
         </div>
       )}
 
-      {gate && !isLoading && filtered.length === 0 && (
+      {gate && !isLoading && visible.length === 0 && (
         <div className="scene-usage-empty" style={{ padding: '12px', color: 'var(--text-secondary)', fontSize: 12 }}>
           {entries === null
             ? 'Loading…'
@@ -176,7 +195,7 @@ function SceneUsagePanel() {
         </div>
       )}
 
-      {gate && !isLoading && filtered.length > 0 && (
+      {gate && !isLoading && visible.length > 0 && (
         <div className="scene-usage-tree">
           {grouped.map((section) => (
             <div key={section.kind}>

@@ -1,22 +1,29 @@
 // UXML (UI Toolkit markup) reuses Monaco's `xml` language for highlighting; we
 // contribute UI Toolkit element + attribute completions scoped to `.uxml` files.
 // Element names use the conventional `ui:` namespace prefix used in authored UXML.
+//
+// Neither list is maintained here any more. Both used to be hand-written, and
+// they had already drifted from `utils/uxml-controls.ts` — the elements list
+// carried `ui:VisualTreeAsset`, which is not a tag, and omitted `ui:Scroller`
+// and `ui:PopupField`, which are. That is harmless for completions and fatal
+// once a diagnostic reads the same knowledge, so both now derive from the
+// control table and a property added for one purpose is known to the other.
+// `uxml-registry-parity.test.ts` pins that, the same way `uss.ts` is pinned.
 
-export const UXML_ELEMENTS: string[] = [
-  'ui:UXML', 'ui:VisualElement', 'ui:Box', 'ui:Button', 'ui:Label', 'ui:Image',
-  'ui:ScrollView', 'ui:ListView', 'ui:TreeView', 'ui:Toggle',
-  'ui:Slider', 'ui:SliderInt', 'ui:MinMaxSlider', 'ui:Scroller',
-  'ui:TextField', 'ui:IntegerField', 'ui:FloatField', 'ui:DoubleField', 'ui:LongField',
-  'ui:Vector2Field', 'ui:Vector3Field', 'ui:Vector4Field', 'ui:RectField', 'ui:BoundsField',
-  'ui:Foldout', 'ui:PopupField', 'ui:DropdownField', 'ui:EnumField',
-  'ui:ProgressBar', 'ui:RadioButton', 'ui:RadioButtonGroup', 'ui:GroupBox',
-  'ui:Tab', 'ui:TabView', 'ui:HelpBox', 'ui:Template', 'ui:Instance', 'ui:Style',
-  'ui:VisualTreeAsset', 'ui:BindableElement',
-];
+import { knownUxmlElementNames, allKnownAttributeNames } from '../../../utils/uxml-controls';
 
-/** Common UXML attributes (per-element subsets exist, but these are broadly valid). */
-export const UXML_ATTRIBUTES: string[] = [
-  'name', 'class', 'style', 'text', 'value', 'label', 'tooltip',
-  'binding-path', 'view-data-key', 'picking-mode', 'focusable', 'enabled',
-  'tabindex', 'src', 'template', 'high-value', 'low-value', 'low-limit', 'high-limit',
-];
+/**
+ * Element names offered as completions in `.uxml` files, `ui:`-prefixed.
+ *
+ * Derived from `UXML_CONTROLS` — see the note above before adding anything here.
+ */
+export const UXML_ELEMENTS: readonly string[] = knownUxmlElementNames().map((n) => `ui:${n}`);
+
+/**
+ * Attribute names offered as completions.
+ *
+ * The union across every control, because a completion list cannot know which
+ * element the caret sits in. `attributesFor(typeName)` is the per-element
+ * subset, and is what any CHECK must use.
+ */
+export const UXML_ATTRIBUTES: readonly string[] = allKnownAttributeNames();

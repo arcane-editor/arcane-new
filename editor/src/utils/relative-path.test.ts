@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { toRelativePath } from './relative-path';
+import { toRelativePath, isAbsolutePath, toAbsolutePath } from './relative-path';
 
 describe('toRelativePath', () => {
   it('strips the workspace path prefix', () => {
@@ -39,5 +39,42 @@ describe('toRelativePath', () => {
     expect(toRelativePath('/Users/dev/project/README.md', '/Users/dev/project')).toBe(
       'README.md',
     );
+  });
+});
+
+describe('isAbsolutePath', () => {
+  it('accepts POSIX and Windows drive paths', () => {
+    expect(isAbsolutePath('/Users/dev/project')).toBe(true);
+    expect(isAbsolutePath('D:/Unity/Proj')).toBe(true);
+    expect(isAbsolutePath('D:\\Unity\\Proj')).toBe(true);
+    expect(isAbsolutePath('c:/unity/proj')).toBe(true);
+  });
+
+  it('rejects workspace-relative paths', () => {
+    expect(isAbsolutePath('Assets/UI/Theme.uss')).toBe(false);
+    expect(isAbsolutePath('Theme.uss')).toBe(false);
+  });
+});
+
+describe('toAbsolutePath', () => {
+  it('joins a relative path onto the workspace', () => {
+    expect(toAbsolutePath('Assets/UI/Theme.uss', 'D:/Unity/Proj'))
+      .toBe('D:/Unity/Proj/Assets/UI/Theme.uss');
+  });
+
+  it('leaves an already-absolute path alone on either platform', () => {
+    expect(toAbsolutePath('D:/Unity/Proj/Assets/UI/Theme.uss', 'D:/Unity/Proj'))
+      .toBe('D:/Unity/Proj/Assets/UI/Theme.uss');
+    expect(toAbsolutePath('/Users/dev/project/Assets/UI/Theme.uss', '/Users/dev/project'))
+      .toBe('/Users/dev/project/Assets/UI/Theme.uss');
+  });
+
+  it('does not double the separator on a workspace with a trailing slash', () => {
+    expect(toAbsolutePath('Assets/UI/Theme.uss', 'D:/Unity/Proj/'))
+      .toBe('D:/Unity/Proj/Assets/UI/Theme.uss');
+  });
+
+  it('returns the path unchanged when no workspace is open', () => {
+    expect(toAbsolutePath('Assets/UI/Theme.uss', null)).toBe('Assets/UI/Theme.uss');
   });
 });
