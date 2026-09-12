@@ -10,6 +10,7 @@
 
 import { AssistantMessageEventStream } from '../../src/features/ai-panel/services/vendor/event-stream';
 import { convertToOpenAI } from '../../src/features/ai-panel/services/openai-format';
+import { getStreamExtras } from '../../src/features/ai-panel/services/stream-extras';
 import { combineSignals, computeBackoffMs, isTransient, sleep } from '../../src/features/ai-panel/services/stream-retry';
 import type {
   StreamFn,
@@ -123,6 +124,7 @@ export function createEvalStreamFn(
             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.apiKey}` },
             body: JSON.stringify({
               model: cfg.model,
+              ...(getStreamExtras(context)?.toolChoice ? { tool_choice: getStreamExtras(context)!.toolChoice } : {}),
               messages,
               tools: tools.length > 0 ? tools : undefined,
               stream: false,

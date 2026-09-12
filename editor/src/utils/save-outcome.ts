@@ -18,6 +18,6 @@ export function applySaveResult(
   writtenContent: string,
 ): OpenFile[] {
   return openFiles.map((f) =>
-    f.path === path ? { ...f, isDirty: f.content !== writtenContent } : f,
+    f.path === path ? { ...f, diskContent: writtenContent, saveConflict: false, isDirty: f.content !== writtenContent } : f,
   );
 }

@@ -17,19 +17,18 @@ function humanSize(bytes: number): string {
  * clicking one is ordinary. The copy explains rather than apologises, and says
  * where the file can actually be edited.
  */
-export function BinaryFileNotice({ name, byteSize }: { name: string; byteSize?: number }) {
+export function BinaryFileNotice({ name, byteSize, isTooLarge }: { name: string; byteSize?: number; isTooLarge?: boolean }) {
   return (
     <div className="editor-container" style={SHELL}>
       <div style={CARD}>
         <FileQuestion size={20} style={{ color: 'var(--text-secondary)' }} />
-        <h2 style={TITLE}>{name} is a binary file</h2>
+        <h2 style={TITLE}>{name} {isTooLarge ? 'is too large to edit' : 'is a binary file'}</h2>
         <p style={BODY}>
-          Its bytes are not text, so there is nothing to show or edit here.
+          {isTooLarge ? 'Files over 20 MB are not loaded into the text editor to keep the IDE responsive.' : 'Its bytes are not text, so there is nothing to show or edit here.'}
           {typeof byteSize === 'number' ? ` It is ${humanSize(byteSize)} on disk.` : ''}
         </p>
         <p style={BODY}>
-          Unity stores some assets this way &mdash; terrain, XR settings, lightmaps &mdash; even in
-          projects set to Force Text serialization. Open it in Unity to change it.
+          Open this asset in Unity to change it, or use a tool suited to large files.
         </p>
       </div>
     </div>

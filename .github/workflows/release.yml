@@ -124,6 +124,12 @@ jobs:
       - name: Vendor csharp-ls package
         run: cd editor && bun run prepare:csharp-ls --require
 
+      # The Unity analyzers, same reasoning: without the package in the bundle
+      # the app produces an editor that compiles C# but says nothing about
+      # Unity mistakes, and nothing at build time would have said so.
+      - name: Vendor Unity analyzers package
+        run: cd editor && bun run prepare:unity-analyzers --require
+
       # Use the tauri BINARY (`bunx tauri`), NOT `bun run tauri` — the npm script
       # re-runs build-lsp-sidecars under CI=true (all targets). The frontend build
       # is handled by tauri's beforeBuildCommand. ad-hoc mac / unsigned Windows

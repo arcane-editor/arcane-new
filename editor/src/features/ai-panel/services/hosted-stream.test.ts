@@ -26,6 +26,7 @@ mock.module('../../../stores/auth', () => ({
 }));
 
 let aiState: {
+  conversationGeneration?: number;
   mode: 'ask' | 'agent' | 'plan';
   hostedPlan: Array<{ status: string; difficulty?: 'easy' | 'hard' }> | null;
 } = { mode: 'ask', hostedPlan: null };
@@ -73,6 +74,7 @@ function sseResponse(lines: string[], status = 200): Response {
 
 interface CapturedRequestBody {
   metadata: Record<string, unknown>;
+  messages: Array<{ role: string; content: unknown }>;
 }
 
 /** Captures the JSON body of the (single, non-retried) fetch call for metadata assertions. */
@@ -151,6 +153,18 @@ beforeEach(() => {
 });
 
 describe('createHostedStreamFn', () => {
+  it('sends captured tool frames to the hosted router after the corresponding result batch', async () => {
+    const { fetchImpl, bodies } = capturingFetchImpl(sseResponse(['data: [DONE]\n\n']));
+    const streamFn = createHostedStreamFn({ fetchImpl });
+    await drain(streamFn({ ...ctx, messages: [
+      { role: 'assistant', content: [{ type: 'toolCall', id: 'capture', name: 'unity_playtest_status', arguments: {} }], stopReason: 'toolUse', timestamp: 1 },
+      { role: 'toolResult', toolCallId: 'capture', toolName: 'unity_playtest_status', content: [{ type: 'text', text: 'Game view' }, { type: 'image', mimeType: 'image/png', data: 'TEST_FRAME' }], isError: false, timestamp: 2 },
+    ] }, opts()));
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0].messages.map((m) => m.role)).toEqual(['system', 'assistant', 'tool', 'user']);
+    expect(JSON.stringify(bodies[0].messages.at(-1)?.content)).toContain('data:image/png;base64,TEST_FRAME');
+  });
+
   it('retries once after a transient 500 and succeeds on the second attempt', async () => {
     let calls = 0;
     const fetchImpl = (async () => {
@@ -571,6 +585,23 @@ describe('createHostedStreamFn', () => {
       { inputTokens: 10, outputTokens: 5 },
       { inputTokens: 3, outputTokens: 2 },
     ]);
+  });
+
+  it('late usage from a replaced conversation cannot update the new session', async () => {
+    aiState.conversationGeneration = 1;
+    let respond!: (response: Response) => void;
+    const fetchImpl = (() => new Promise<Response>((resolve) => { respond = resolve; })) as unknown as typeof fetch;
+    const pending = drain(createHostedStreamFn({ fetchImpl })(ctx, opts()));
+    await Promise.resolve();
+    aiState.conversationGeneration = 2;
+    respond(sseResponse([
+      'data: {"type":"usage","input_tokens":10,"output_tokens":5,"model":"old-model"}\n\n',
+      'data: [DONE]\n\n',
+    ]));
+    await pending;
+    expect(sessionUsageCalls).toEqual([]);
+    expect(servedModelCalls).toEqual([]);
+    expect(nextTurnTelemetry().lastTurnLatencyMs).toBeNull();
   });
 
   it('reports corruption when the stream carries only malformed data: lines before [DONE]', async () => {

@@ -1,4 +1,7 @@
+import { captureRenamedView, forgetRenamedView } from '../utils/renamed-editor-view';
 import { create } from 'zustand';
+import { diagnosticsKey } from '../utils/diagnostics-key';
+import { useNavigationStore } from './navigation';
 import { invoke } from '@tauri-apps/api/core';
 import { listenScoped } from '../utils/tauri-listener';
 import type { FileEntry, TreeNode, OpenFile, DiffInfo } from '../types';
@@ -18,6 +21,10 @@ import {
   forgetDocument,
   fileUri,
   markCsharpProjectLoaded,
+  markCsharpProjectLoading,
+  isLoadStartedMessage,
+  isLoadFinishedMessage,
+  setRoslynAnalyzersInjected,
   resetCsharpProjectLoaded,
   ensureCsharpLs,
   resetCsharpLsProvisioning,
@@ -49,6 +56,35 @@ import { detectLanguage } from '../utils/language-detect';
 import { safeUnlisten } from '../utils/tauri-listener';
 import { filesToReload } from '../utils/open-file-reload';
 import { isIgnoreFile } from '../utils/ignore-file';
+
+// Pending work belongs to one tab lifetime; close/rename/workspace changes
+// invalidate its token before an awaited read or server startup can finish.
+const fileLifetimes = new Map<string, symbol>();
+const tabLspClaims = new Map<string, { lifetime: symbol | undefined; epoch: number }>();
+const pendingOpens = new Map<string, Promise<void>>();
+const pendingSaves = new Map<string, Promise<void>>();
+let activationSequence = 0;
+const normalizeFilePath = (path: string) => diagnosticsKey(path.replace(/\\/g, '/'));
+
+function releaseFile(file: OpenFile): void {
+  fileLifetimes.delete(file.path);
+  pendingOpens.delete(file.path);
+  if (file.path.startsWith('search://')) useSearchStore.getState().closeSession(file.path);
+  const ctx = getRunningClientForFile(file.name);
+  const claim = tabLspClaims.get(file.path);
+  if (ctx && claim) syncDocumentClose(ctx.client, file.path, claim.epoch);
+  tabLspClaims.delete(file.path);
+  forgetRenamedView(file.path);
+  useUiStore.getState().clearFileDiagnostics(file.path);
+  disposeModelForPath(file.path);
+}
+
+function openTabDocument(client: LspClient, file: OpenFile, language: string): void {
+  const lifetime = fileLifetimes.get(file.path);
+  if (file.isBinary || file.isTooLarge || tabLspClaims.get(file.path)?.lifetime === lifetime && tabLspClaims.has(file.path)) return;
+  const epoch = syncDocumentOpen(client, file.path, file.content, language);
+  tabLspClaims.set(file.path, { lifetime, epoch });
+}
 
 // Track provider dispose function
 let disposeLspProviders: (() => void) | null = null;
@@ -175,7 +211,9 @@ async function runUnityCsprojReload(
   // Returns the solution path (or null if it couldn't be generated).
   let solutionPath: string | null;
   try {
-    solutionPath = await invoke<string | null>('unity_setup_lsp', { workspacePath });
+    const setup = await invoke<UnityLspSetup>('unity_setup_lsp', { workspacePath });
+    solutionPath = setup.solution;
+    setRoslynAnalyzersInjected(setup.analyzersInjected);
   } catch (err) {
     console.warn('[Workspace] unity_setup_lsp regen failed during hot-reload:', err);
     return;
@@ -254,7 +292,9 @@ async function proactivelyOpenCSharpFiles(workspacePath: string): Promise<void> 
   for (const file of csFiles) {
     try {
       const content = await invoke<string>('read_file', { path: file.path });
-      syncDocumentOpen(csharpClient, file.path, content, 'csharp');
+      if (useWorkspaceStore.getState().workspacePath !== workspacePath) return;
+      const epoch = syncDocumentOpen(csharpClient, file.path, content, 'csharp');
+      syncDocumentClose(csharpClient, file.path, epoch);
     } catch {
       // Skip unreadable files
     }
@@ -267,6 +307,17 @@ async function proactivelyOpenCSharpFiles(workspacePath: string): Promise<void> 
 
 // Track the C# solution path for restart purposes (csharp-only).
 let csharpSolutionPath: string | null = null;
+
+/**
+ * What `unity_setup_lsp` reports back.
+ *
+ * `analyzersInjected` is the difference between "the Unity analyzers found
+ * nothing" and "the Unity analyzers never ran" — see `unity_analyzers.rs`.
+ */
+interface UnityLspSetup {
+  solution: string | null;
+  analyzersInjected: boolean;
+}
 
 // Per-language restart budget: if a server crashes more than N times within
 // the window, we stop auto-restarting and surface an error so the user can
@@ -450,23 +501,27 @@ async function runLspStart(
       else if (v.title) useUiStore.getState().setLspProgress(v.title);
     });
 
-    // csharp-ls 0.22 reports solution load progress via window/logMessage,
-    // not $/progress, and uses pull diagnostics so publishDiagnostics never
-    // arrives. Watch the log stream for the load-finished marker and flip
-    // to 'ready' so the StatusBar isn't a permanent "Loading".
+    // csharp-ls reports solution load progress via window/logMessage, not
+    // $/progress, and uses pull diagnostics so publishDiagnostics never
+    // arrives. Watch the log stream for the load markers and flip the status
+    // bar so it isn't a permanent "Loading".
+    //
+    // Both markers matter, not just the finish. Since csharp-ls 0.23 the
+    // solution loads ON DEMAND — nothing at `initialize`, the load starts with
+    // the first `didOpen` — so a load can begin long after startup and the
+    // graph goes back to being unusable while it runs.
     let solutionLoadFinished = false;
     unsubscribeCsharpLogMessage = client.onNotification('window/logMessage', (params: unknown) => {
-      const p = params as { message?: string };
-      const raw = p?.message ?? '';
-      const msg = raw.replace(/^csharp-ls:\s*/, '');
+      const msg = ((params as { message?: string })?.message ?? '').trim();
       if (!msg) return;
 
-      if (msg.startsWith('Loading solution') || msg.startsWith('Loading project')) {
-        useUiStore.getState().setLspProgress(msg);
-      } else if (
-        msg.startsWith('Finished loading solution') ||
-        msg.startsWith('Finished loading project')
-      ) {
+      if (isLoadStartedMessage(msg)) {
+        useUiStore.getState().setLspProgress(msg.replace(/^csharp-ls:\s*/i, ''));
+        // Hold diagnostics for the duration. A report answered mid-load is a
+        // CS0518 cascade over every line, indistinguishable at the wire level
+        // from a real one — see project-readiness.ts.
+        markCsharpProjectLoading();
+      } else if (isLoadFinishedMessage(msg)) {
         solutionLoadFinished = true;
         useUiStore.getState().setLspProgress(null);
         useUiStore.getState().setLspStatus('ready');
@@ -502,7 +557,8 @@ async function runLspStart(
     const info = detectLanguage(file.name);
     if (info.lspServerKey === language && info.lspLanguageId) {
       forgetDocument(file.path);
-      syncDocumentOpen(client, file.path, file.content, info.lspLanguageId);
+      tabLspClaims.delete(file.path);
+      openTabDocument(client, file, info.lspLanguageId);
     }
   }
 }
@@ -864,7 +920,7 @@ interface WorkspaceState {
    *  excerpt is first edited: the file must join `openFiles` so dirty state,
    *  save, the close guard and LSP sync all apply, but stealing focus from the
    *  results tab mid-keystroke would be hostile. No-op if already open. */
-  openFileInBackground: (path: string, content: string) => void;
+  openFileInBackground: (path: string, content: string, diskContent?: string) => void;
   closeFile: (path: string) => void;
   setActiveFile: (path: string) => void;
   reorderTabs: (fromPath: string, toPath: string) => void;
@@ -1043,6 +1099,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     }
     const tree = filterEntries(entries, get().extraExcludePatterns).map(toTreeNode);
 
+    for (const file of get().openFiles) releaseFile(file);
+    fileLifetimes.clear();
+    tabLspClaims.clear();
+    pendingOpens.clear();
+    ++activationSequence;
     set({
       workspacePath: path,
       assetsRootPath: unityInfo.is_unity ? treeRoot : null,
@@ -1057,6 +1118,14 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     addRecentProject(path);
 
     useProjectContextStore.getState().applyDetection(path, unityInfo);
+
+    // Nothing is known about this workspace's analyzers until `unity_setup_lsp`
+    // reports back, and the local rules that defer to them must not carry the
+    // previous project's answer across. Cleared here rather than in each of the
+    // paths below that return early — a non-Unity workspace, a dotnet block, a
+    // setup that threw — because forgetting one of those is exactly how a rule
+    // ends up switched off with nothing switched on in its place.
+    setRoslynAnalyzersInjected(false);
 
     // C# LSP eager startup is Unity-only. Non-Unity projects can still get
     // C# completions if the user opens a .cs file — ensureLspForFile (below)
@@ -1084,7 +1153,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       } else {
         let solutionPath: string | null = null;
         try {
-          solutionPath = await invoke<string | null>('unity_setup_lsp', { workspacePath: path });
+          const setup = await invoke<UnityLspSetup>('unity_setup_lsp', {
+            workspacePath: path,
+          });
+          solutionPath = setup.solution;
+          setRoslynAnalyzersInjected(setup.analyzersInjected);
           if (solutionPath) {
             console.log('[Workspace] Unity project setup complete, solution:', solutionPath);
           }
@@ -1270,58 +1343,45 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   },
 
   openFile: async (path: string, name: string) => {
-    const { openFiles } = get();
-    const existing = openFiles.find((f) => f.path === path);
-    if (existing) {
-      set({ activeFilePath: path });
-      return;
+    path = normalizeFilePath(path);
+    const activation = ++activationSequence;
+    const existing = get().openFiles.find((f) => normalizeFilePath(f.path) === path);
+    if (existing) { get().setActiveFile(existing.path); return; }
+    let pending = pendingOpens.get(path);
+    if (!pending) {
+      const lifetime = Symbol(path);
+      fileLifetimes.set(path, lifetime);
+      const owns = () => fileLifetimes.get(path) === lifetime;
+      pending = (async () => {
+        const read = await invoke<{ text: string | null; isBinary: boolean; isTooLarge?: boolean; size: number }>('read_file_checked', { path });
+        if (!owns() || get().openFiles.some((f) => f.path === path)) return;
+        const content = read.text ?? '';
+        const file: OpenFile = { path, name, content, diskContent: content, isDirty: false,
+          isBinary: read.isBinary, isTooLarge: read.isTooLarge, byteSize: read.size };
+        set((state) => ({ openFiles: [...state.openFiles, file] }));
+        if (read.isBinary || read.isTooLarge) return;
+        const ctx = await ensureLspForFile(name);
+        const current = get().openFiles.find((f) => f.path === path);
+        if (ctx && owns() && current) openTabDocument(ctx.client, current, ctx.lspLanguageId);
+      })();
+      pendingOpens.set(path, pending);
     }
-
-    // `auth://account` used to be opened here as a contentless virtual tab.
-    // The account view is a section of the settings modal now, so nothing
-    // creates one — the remaining `auth://` guards elsewhere in the codebase
-    // are kept only to tolerate state persisted by an older version.
-    // `read_file_checked` rather than `read_file`: a binary asset is an
-    // ordinary thing to click in a Unity project, and `read_to_string` reports
-    // it with the same io::Error as a missing file. That surfaced to the user
-    // as the raw OS string "stream did not contain valid UTF-8".
-    const read = await invoke<{ text: string | null; isBinary: boolean; size: number }>(
-      'read_file_checked',
-      { path },
-    );
-
-    if (read.isBinary) {
-      // Content stays empty and the tab is flagged, so the editor renders an
-      // explanation and every write path refuses it.
-      set((state) => ({
-        openFiles: [
-          ...state.openFiles,
-          { path, name, content: '', isDirty: false, isBinary: true, byteSize: read.size },
-        ],
-        activeFilePath: path,
-      }));
-      return;
-    }
-
-    const content = read.text ?? '';
-    const file: OpenFile = { path, name, content, isDirty: false };
-    set((state) => ({
-      openFiles: [...state.openFiles, file],
-      activeFilePath: path,
-    }));
-
-    // Notify (and lazily start) the LSP server for this file's language.
-    const ctx = await ensureLspForFile(name);
-    if (ctx) {
-      syncDocumentOpen(ctx.client, path, content, ctx.lspLanguageId);
+    try {
+      await pending;
+      if (activation === activationSequence && get().openFiles.some((f) => f.path === path)) get().setActiveFile(path);
+    } finally {
+      if (pendingOpens.get(path) === pending) pendingOpens.delete(path);
     }
   },
 
-  openFileInBackground: (path, content) => {
+  openFileInBackground: (path, content, diskContent) => {
+    path = normalizeFilePath(path);
     if (get().openFiles.some((f) => f.path === path)) return;
     const name = path.split('/').pop() || path;
+    const lifetime = Symbol(path);
+    fileLifetimes.set(path, lifetime);
     set((state) => ({
-      openFiles: [...state.openFiles, { path, name, content, isDirty: true }],
+      openFiles: [...state.openFiles, { path, name, content, diskContent, isDirty: true }],
     }));
 
     // Notify (and lazily start) the LSP server for this file's language —
@@ -1337,43 +1397,22 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     // for the rest of the session — no error, no stale diagnostics, just
     // none at all.
     void ensureLspForFile(name).then((ctx) => {
-      if (!ctx) return;
+      if (!ctx || fileLifetimes.get(path) !== lifetime || !get().openFiles.some((f) => f.path === path)) return;
       // Read the CURRENT content, not the snapshot closed over by this call:
       // the user may keep typing while the server is still lazily starting,
       // and `didOpen`'s text is what establishes the server's baseline — a
       // stale baseline here would need a further edit to ever self-correct.
       const current = get().openFiles.find((f) => f.path === path)?.content ?? content;
-      syncDocumentOpen(ctx.client, path, current, ctx.lspLanguageId);
+      openTabDocument(ctx.client, { ...get().openFiles.find((f) => f.path === path)!, content: current }, ctx.lspLanguageId);
     });
   },
 
   closeFile: (path: string) => {
-    if (path.startsWith('search://')) {
-      useSearchStore.getState().closeSession(path);
-    }
-
-    // Notify the LSP server for this file's language before removing.
+    path = normalizeFilePath(path);
+    fileLifetimes.delete(path);
+    pendingOpens.delete(path);
     const file = get().openFiles.find((f) => f.path === path);
-    if (file) {
-      const ctx = getRunningClientForFile(file.name);
-      if (ctx) syncDocumentClose(ctx.client, path);
-    }
-
-    // Diagnostics are keyed by document URI and nothing cleared them on close,
-    // so the Problems panel and the status-bar error count kept reporting files
-    // that are closed — or deleted — with no way to make them go away.
-    // Cleared under both keys: providers store some diagnostics by document
-    // URI and some by raw path (TabBar reads both), so clearing one alone
-    // leaves the other reporting a file that is no longer open.
-    useUiStore.getState().clearFileDiagnostics(fileUri(path));
-    useUiStore.getState().clearFileDiagnostics(path);
-
-    // Free the Monaco model — AFTER didClose, so the server is told about a
-    // document that still exists. Left alive, the orphan keeps whatever the
-    // user typed (including changes discarded at the "Close Anyway" prompt),
-    // and a later LSP rename that touches this file will find it and write
-    // that whole buffer back to disk.
-    disposeModelForPath(path);
+    if (file) releaseFile(file);
 
     set((state) => {
       const openFiles = state.openFiles.filter((f) => f.path !== path);
@@ -1414,6 +1453,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   },
 
   setActiveFile: (path: string) => {
+    path = normalizeFilePath(path);
+    ++activationSequence;
     set({ activeFilePath: path });
     syncActiveSearchSession(path);
   },
@@ -1432,11 +1473,12 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   },
 
   updateFileContent: (path: string, content: string) => {
+    path = normalizeFilePath(path);
     set((state) => ({
       openFiles: state.openFiles.map((f) =>
         // A binary tab never takes content: marking it dirty would arm a save
         // that truncates the file.
-        f.path === path && !f.isBinary ? { ...f, content, isDirty: true } : f,
+        f.path === path && !f.isBinary && !f.isTooLarge ? { ...f, content, isDirty: true } : f,
       ),
     }));
 
@@ -1449,6 +1491,15 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   },
 
   saveFile: async (path: string) => {
+    path = normalizeFilePath(path);
+    // Serialize the whole save, including formatter requests and baselines.
+    const lifetime = fileLifetimes.get(path);
+    const owns = () => fileLifetimes.get(path) === lifetime && get().openFiles.some((f) => f.path === path);
+    const previous = pendingSaves.get(path);
+    const work = (async () => {
+    if (previous) await previous.catch(() => {});
+    if (!owns()) return;
+
     const { openFiles } = get();
     const file = openFiles.find((f) => f.path === path);
     if (!file) return;
@@ -1456,10 +1507,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     // it would truncate the asset, so saving is refused outright rather than
     // silently no-oped -- the user pressed Cmd+S and deserves to know why
     // nothing happened.
-    if (file.isBinary) {
-      notify.error(`${file.name} is a binary file and cannot be saved from the editor.`);
+    if (file.isBinary || file.isTooLarge) {
+      notify.error(`${file.name} cannot be edited and cannot be saved from the editor.`);
       return;
     }
+    if (file.saveConflict) return;
     // Format on save, before the snapshot below, so `written` IS the formatted
     // text and the buffer-clean comparison after the write still lines up.
     //
@@ -1476,7 +1528,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         // is always better than not saving.
         try {
           const formatted = await formatDocumentBeforeSave(fmtCtx.client, path);
-          if (formatted !== null && formatted !== file.content) {
+          if (owns() && formatted !== null && formatted !== file.content) {
             get().updateFileContent(path, formatted);
           }
         } catch (err) {
@@ -1490,9 +1542,17 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     // NOT in this payload. Re-read from the store rather than reusing `file`:
     // formatting above may have replaced the content since that closure value
     // was taken.
-    const written = get().openFiles.find((f) => f.path === path)?.content ?? file.content;
+    if (!owns()) return;
+    const current = get().openFiles.find((f) => f.path === path)!;
+    const written = current.content;
     try {
-      await invoke('write_file', { path, contents: written });
+      const saved = await invoke<boolean>('write_file_if_unchanged', { path, contents: written, expectedContent: current.diskContent ?? null });
+      if (!owns()) return;
+      if (!saved) {
+        set((state) => ({ openFiles: state.openFiles.map((f) => f.path === path ? { ...f, saveConflict: true, isDirty: true } : f) }));
+        notify.error(`${file.name} changed on disk. Compare the versions or choose Overwrite in the editor.`);
+        return;
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       notify.error(`Failed to save ${file.name}: ${msg}`);
@@ -1521,18 +1581,23 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     // Unity: ask the connected Editor to refresh/recompile on .cs save
     // (gated + fire-and-forget; no-op outside Unity projects).
     maybeRefreshUnityAfterSave(path);
+    })();
+    pendingSaves.set(path, work);
+    try { await work; } finally { if (pendingSaves.get(path) === work) pendingSaves.delete(path); }
   },
 
   reloadFileFromDisk: async (path: string, opts?: { skipIfDirty?: boolean }) => {
+    path = normalizeFilePath(path);
     const { openFiles } = get();
     const file = openFiles.find((f) => f.path === path);
     if (!file) return;
     if (isVirtualPath(path)) return;
     // A binary tab holds no text to refresh, and `read_file` would fail on it.
-    if (file.isBinary) return;
-    let content: string;
+    if (file.isBinary || file.isTooLarge) return;
+    let read: { text: string | null; isBinary: boolean; isTooLarge?: boolean; size: number };
+    const lifetime = fileLifetimes.get(path);
     try {
-      content = await invoke<string>('read_file', { path });
+      read = await invoke('read_file_checked', { path });
     } catch (err) {
       console.warn('[Workspace] reloadFileFromDisk failed:', path, err);
       return;
@@ -1543,21 +1608,28 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     // callers (checkpoint restore, discard, rename-sync) intentionally
     // overwrite dirty buffers.
     const current = get().openFiles.find((f) => f.path === path);
-    if (!current) return;
+    if (!current || fileLifetimes.get(path) !== lifetime) return;
+    const content = read.text ?? '';
     if (opts?.skipIfDirty) {
       if (current.isDirty) return;
       // Echo suppression: our own saves (and no-op external writes) round-trip
       // through the watcher; identical content needs no store churn or LSP
       // didChange.
-      if (current.content === content) return;
+      if (current.content === content && !!current.isBinary === read.isBinary
+        && !!current.isTooLarge === !!read.isTooLarge) return;
     }
     set((state) => ({
       openFiles: state.openFiles.map((f) =>
-        f.path === path ? { ...f, content, isDirty: false } : f,
+        f.path === path ? { ...f, content, diskContent: content, saveConflict: false, isDirty: false, isBinary: read.isBinary, isTooLarge: read.isTooLarge, byteSize: read.size } : f,
       ),
     }));
     const ctx = getRunningClientForFile(file.name);
-    if (ctx) syncDocumentChange(ctx.client, path, content);
+    if (read.isBinary || read.isTooLarge) {
+      const claim = tabLspClaims.get(path);
+      if (ctx && claim) syncDocumentClose(ctx.client, path, claim.epoch);
+      tabLspClaims.delete(path);
+      disposeModelForPath(path);
+    } else if (ctx) syncDocumentChange(ctx.client, path, content);
   },
 
   openDiffTab: async (filePath: string, fileName: string, staged: boolean, origPath?: string | null) => {
@@ -1804,6 +1876,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   },
 
   renamePath: async (oldPath: string, newPath: string) => {
+    oldPath = normalizeFilePath(oldPath);
+    newPath = normalizeFilePath(newPath);
     await invoke('rename_path', { oldPath, newPath });
     // Co-rename .meta file in Unity projects, then offer to sync a matching
     // class name (F-2.5).
@@ -1811,6 +1885,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       await coRenameMeta(oldPath, newPath);
       offerClassRenameSync(oldPath, newPath);
     }
+    const affected = get().openFiles.filter((f) => f.path === oldPath || f.path.startsWith(oldPath + '/'));
+    for (const file of affected) { captureRenamedView(file.path, newPath + file.path.slice(oldPath.length)); releaseFile(file); }
+    const remap = (path: string) => path === oldPath || path.startsWith(oldPath + '/') ? newPath + path.slice(oldPath.length) : path;
+    for (const key of fileLifetimes.keys()) if (remap(key) !== key) { fileLifetimes.delete(key); pendingOpens.delete(key); }
+    useNavigationStore.setState((state) => ({ back: state.back.map((e) => ({ ...e, path: remap(e.path) })), forward: state.forward.map((e) => ({ ...e, path: remap(e.path) })) }));
     // Update any open files that match the old path
     const newName = newPath.split('/').pop() || '';
     set((state) => {
@@ -1830,17 +1909,33 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         : state.activeFilePath?.startsWith(oldPath + '/')
           ? newPath + state.activeFilePath.slice(oldPath.length)
           : state.activeFilePath;
-      return { openFiles, activeFilePath };
+      return { openFiles, activeFilePath, recentlyClosed: state.recentlyClosed.map(remap), recentFiles: state.recentFiles.map(remap) };
     });
+    await Promise.all(affected.map(async (file) => {
+      const path = remap(file.path);
+      const lifetime = Symbol(path);
+      fileLifetimes.set(path, lifetime);
+      if (file.isBinary || file.isTooLarge) return;
+      const current = get().openFiles.find((f) => f.path === path);
+      if (!current) return;
+      const ctx = await ensureLspForFile(current.name);
+      const latest = get().openFiles.find((f) => f.path === path);
+      if (ctx && latest && fileLifetimes.get(path) === lifetime) openTabDocument(ctx.client, latest, ctx.lspLanguageId);
+    }));
     await get().refreshTree();
   },
 
   deletePath: async (path: string) => {
+    path = normalizeFilePath(path);
     await invoke('delete_path', { path });
     // Co-delete .meta file in Unity projects
     if (useProjectContextStore.getState().isUnityProject) {
       await coDeleteMeta(path);
     }
+    const deleted = (p: string) => p === path || p.startsWith(path + '/');
+    for (const file of get().openFiles) if (deleted(file.path)) releaseFile(file);
+    for (const key of fileLifetimes.keys()) if (deleted(key)) { fileLifetimes.delete(key); pendingOpens.delete(key); }
+    useNavigationStore.setState((state) => ({ back: state.back.filter((e) => !deleted(e.path)), forward: state.forward.filter((e) => !deleted(e.path)) }));
     // Close any open files at or under this path
     set((state) => {
       const openFiles = state.openFiles.filter(
@@ -1849,7 +1944,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       const activeFilePath = (state.activeFilePath === path || state.activeFilePath?.startsWith(path + '/'))
         ? (openFiles.length > 0 ? openFiles[openFiles.length - 1].path : null)
         : state.activeFilePath;
-      return { openFiles, activeFilePath };
+      return { openFiles, activeFilePath,
+        recentlyClosed: state.recentlyClosed.filter((p) => !deleted(p)),
+        recentFiles: state.recentFiles.filter((p) => !deleted(p)) };
     });
     // Same fallback-to-last-remaining-tab shape as closeFile — the newly
     // active tab can be a search:// one, so the search store's active

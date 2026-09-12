@@ -11,6 +11,10 @@ import {
   offsetToLineCol,
   type CSharpScan,
 } from './csharp-scan';
+import { runRules } from './rule-runner';
+import { untCodeActionsForModel } from './unt-quick-fixes';
+import { useAsmdefStore } from '../../../stores/asmdef';
+import { lspManager, roslynAnalyzersReporting } from '../../lsp';
 
 // ── Public rule contract ─────────────────────────────────────────────────────
 
@@ -41,6 +45,14 @@ export interface Finding {
   fixes?: FindingFix[];
 }
 
+/**
+ * What a rule may know about the project, beyond the text in front of it.
+ *
+ * Injected rather than imported. A rule that reaches into a Zustand store
+ * drags `@tauri-apps/api` in behind it, and then the rule cannot be imported
+ * by a test at all — which is how thirteen of these rules ended up with no
+ * coverage while the engine they run in had plenty.
+ */
 export interface RuleContext {
   /** The model being analysed (null when running headless via runAnalyzersOnText). */
   model: editor.ITextModel | null;
@@ -49,6 +61,23 @@ export interface RuleContext {
   /** Detected Unity version string, or null. */
   unityVersion: string | null;
   monaco: Monaco | null;
+  /**
+   * Which assembly owns `filePath`, from the asmdef graph.
+   *
+   * `undefined` means "not resolved yet" and must be treated as unknown, not
+   * as "no owner" — a rule that guesses here reports a build-breaking error on
+   * a file that is perfectly fine.
+   */
+  owningAssembly?: (filePath: string) => string | null | undefined;
+  /** Is `assembly` editor-only? `undefined` when the graph has no entry. */
+  isEditorOnlyAssembly?: (assembly: string) => boolean | undefined;
+  /** Ask the engine to re-run once an async lookup has landed. */
+  requestRefresh?: () => void;
+  /**
+   * Are the Unity Roslyn analyzers reporting? When true, rules that Roslyn
+   * covers with real type information stand down — see `supersededBy`.
+   */
+  roslynAnalyzersActive?: boolean;
 }
 
 export interface AnalyzerRule {
@@ -59,6 +88,27 @@ export interface AnalyzerRule {
    * (in addition to the master gate + isUnityProject).
    */
   settingKey?: keyof SettingsSchema;
+  /**
+   * Every diagnostic code this rule can emit. Declared rather than inferred so
+   * a uniqueness test can see them without running the rule — two rules
+   * sharing a code makes a suppression comment ambiguous and a quick-fix
+   * lookup wrong.
+   */
+  codes: string[];
+  /**
+   * UNT codes from `Microsoft.Unity.Analyzers` that cover the same ground.
+   *
+   * When those analyzers are live this rule stands down: Roslyn has a real
+   * parser and full type information, so its verdict on the same issue is
+   * strictly better than a regex's, and reporting both puts two squiggles on
+   * one span.
+   *
+   * It stays registered rather than being deleted because the analyzers can
+   * fail to arrive — an unvendored package, an old server, a user who turned
+   * them off — and losing the inspection from both engines at once, silently,
+   * is worse than a slightly noisier one.
+   */
+  supersededBy?: string[];
   /** Produce findings for one scanned document. Must never throw. */
   run(scan: CSharpScan, ctx: RuleContext): Finding[];
 }
@@ -99,6 +149,44 @@ function ruleEnabled(rule: AnalyzerRule): boolean {
   return true;
 }
 
+/**
+ * The parts of `RuleContext` that come from stores.
+ *
+ * Assembled here so rules never import a store themselves. One of them used
+ * to, and the cost was that neither it nor anything importing it could be
+ * loaded in a test — a Zustand store in this app reaches `@tauri-apps/api`,
+ * which does not exist outside the app.
+ */
+function projectContext(monaco: Monaco | null): Partial<RuleContext> {
+  return {
+    owningAssembly: (filePath) => {
+      const store = useAsmdefStore.getState();
+      const cached = store.byFile.get(filePath);
+      if (cached !== undefined) return cached;
+      // A miss is answered as "unknown", never as "no owner" — a rule that
+      // guessed here would report a build-breaking error on a file that is
+      // fine. Resolve in the background and re-run once the answer lands.
+      void store.getOwningAssembly(filePath).then(() => {
+        if (monaco) refreshAll(monaco);
+      });
+      return undefined;
+    },
+    isEditorOnlyAssembly: (assembly) =>
+      useAsmdefStore.getState().graph.find((n) => n.name === assembly)?.is_editor_only,
+    requestRefresh: () => {
+      if (monaco) refreshAll(monaco);
+    },
+    // Not `roslynAnalyzersInjected()` alone. The csproj naming the analyzer
+    // is one of three conditions; the user switching the feature off and the
+    // server dying are the other two, and neither touches the csproj.
+    roslynAnalyzersActive: roslynAnalyzersReporting({
+      analyzersEnabled:
+        useSettingsStore.getState().getSetting('lsp.csharp.analyzers') !== false,
+      serverRunning: lspManager.client('csharp').isRunning(),
+    }),
+  };
+}
+
 // ── Core run ─────────────────────────────────────────────────────────────────
 
 /**
@@ -120,18 +208,10 @@ export function runAnalyzersOnText(
     unityVersion:
       opts?.unityVersion ?? useProjectContextStore.getState().unityVersion ?? null,
     monaco: opts?.monaco ?? null,
+    ...projectContext(opts?.monaco ?? null),
   };
 
-  const findings: Finding[] = [];
-  for (const rule of rules) {
-    if (!ruleEnabled(rule)) continue;
-    try {
-      findings.push(...rule.run(scan, ctx));
-    } catch (err) {
-      console.warn(`[unity-analyzers] rule '${rule.id}' threw (skipping):`, err);
-    }
-  }
-  return findings;
+  return runRules(rules, scan, ctx, { isEnabled: ruleEnabled });
 }
 
 // ── Finding → marker / diagnostic conversion ─────────────────────────────────
@@ -212,17 +292,10 @@ function publishForModel(monaco: Monaco, model: editor.ITextModel): void {
     filePath,
     unityVersion: useProjectContextStore.getState().unityVersion ?? null,
     monaco,
+    ...projectContext(monaco),
   };
 
-  const findings: Finding[] = [];
-  for (const rule of rules) {
-    if (!ruleEnabled(rule)) continue;
-    try {
-      findings.push(...rule.run(scan, ctx));
-    } catch (err) {
-      console.warn(`[unity-analyzers] rule '${rule.id}' threw (skipping):`, err);
-    }
-  }
+  const findings = runRules(rules, scan, ctx, { isEnabled: ruleEnabled });
 
   const markers: editor.IMarkerData[] = [];
   const items: DiagnosticItem[] = [];
@@ -248,6 +321,7 @@ function publishForModel(monaco: Monaco, model: editor.ITextModel): void {
       message: f.message,
       severity: f.severity,
       source: DIAGNOSTIC_SOURCE,
+      code: f.code,
     });
     for (const fix of f.fixes ?? []) {
       fixes.push({ range, fix });
@@ -267,6 +341,7 @@ const perUriDebounce = new Map<string, ReturnType<typeof setTimeout>>();
 let createModelSub: IDisposable | null = null;
 const contentSubs = new Map<string, IDisposable>();
 let unregisterCodeActions: (() => void) | null = null;
+let unregisterUntFixes: (() => void) | null = null;
 let started = false;
 let monacoRef: Monaco | null = null;
 
@@ -331,6 +406,14 @@ export function startEngine(monaco: Monaco): () => void {
     watchModel(monaco, m),
   );
 
+  // Quick fixes for the ROSLYN Unity analyzers' diagnostics. Separate source,
+  // because these are keyed by marker code rather than by a finding this
+  // engine produced — csharp-ls does not surface the fixes those analyzers
+  // ship, so the editor has to supply them (see `unt-quick-fixes.ts`).
+  unregisterUntFixes = registerLocalCodeActionSource('csharp', (model, _range, ctx) =>
+    untCodeActionsForModel(model, ctx.markers),
+  );
+
   unregisterCodeActions = registerLocalCodeActionSource('csharp', (model, range) => {
     const list = pendingFixes.get(model.uri.toString());
     if (!list || list.length === 0) return [];
@@ -370,6 +453,10 @@ export function stopEngine(): void {
   if (unregisterCodeActions) {
     unregisterCodeActions();
     unregisterCodeActions = null;
+  }
+  if (unregisterUntFixes) {
+    unregisterUntFixes();
+    unregisterUntFixes = null;
   }
   // Clear all published markers + diagnostics we own (every C# model, so we
   // also clear any whose pending-fix entry was already evicted).

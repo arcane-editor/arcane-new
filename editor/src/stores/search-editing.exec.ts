@@ -40,7 +40,7 @@ mock.module('@tauri-apps/api/core', () => ({
   // `refreshStatus`/`refreshOpenDiffTabs` (git store, unrelated to this
   // file). Anything else is a sign a test reached further than intended.
   invoke: async (cmd: string, args?: Record<string, unknown>) => {
-    if (cmd === 'write_file') {
+    if (cmd === 'write_file_if_unchanged') {
       const path = args?.path as string;
       if (failingWritePaths.has(path)) {
         throw new Error(`simulated write failure for ${path}`);
@@ -49,7 +49,7 @@ mock.module('@tauri-apps/api/core', () => ({
         path,
         contents: args?.contents as string,
       });
-      return undefined;
+      return true;
     }
     throw new Error(`unexpected invoke('${cmd}') call in search-editing.exec`);
   },

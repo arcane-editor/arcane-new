@@ -5,6 +5,22 @@ All notable changes to this package will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - Unreleased
+
+### Added
+- Protocol 5 editor-time authoring operations with owned roots, declared assets,
+  Undo, conflict checks, durable operation status and saved-content inspection.
+- Input-driven gameplay scenarios with reload-aware lifecycle, cancellation,
+  assertions, console/performance evidence and rendered Game-view capture.
+- Optional Input System adapter for keyboard, pointer, gamepad and single-touch
+  simulation. The core package compiles without the Input System.
+- Integration fixtures for authoring and real action-binding delivery.
+
+### Compatibility
+- Existing bridge methods remain available. Protocol 5 capabilities require the
+  matching desktop workflow; older integrations receive an upgrade notice.
+- Specialist automation remains experimental until live acceptance is complete.
+
 ## [0.2.0] - Unreleased
 
 ### Added

@@ -22,11 +22,12 @@ function closeFileBody(source: string): string {
  */
 describe('closeFile', () => {
   it('disposes the Monaco model for the closed path', () => {
-    expect(closeFileBody(STORE)).toMatch(/disposeModelForPath\(/);
+    expect(closeFileBody(STORE)).toContain('releaseFile(file)');
+    expect(STORE).toContain('disposeModelForPath(file.path)');
   });
 
   it('disposes only after telling the language server the document closed', () => {
-    const body = closeFileBody(STORE);
+    const body = STORE.slice(STORE.indexOf('function releaseFile('), STORE.indexOf('// Track provider dispose'));
     const close = body.indexOf('syncDocumentClose');
     const dispose = body.indexOf('disposeModelForPath');
     expect(close).toBeGreaterThan(-1);

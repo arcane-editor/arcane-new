@@ -1,0 +1,33 @@
+import React, { useRef } from 'react';
+import { createRoot } from 'react-dom/client';
+import { flushSync } from 'react-dom';
+import { Allotment } from 'allotment';
+import 'allotment/dist/style.css';
+import RightSidebarPanel from '__EDITOR__/src/features/app-shell/components/RightSidebarPanel.tsx';
+import MaximizedAiOverlay from '__EDITOR__/src/features/ai-panel/components/MaximizedAiOverlay.tsx';
+import { ErrorBoundary } from '__EDITOR__/src/components/ErrorBoundary.tsx';
+import { useUiStore } from '__EDITOR__/src/stores/ui.ts';
+import { AiChatPanel, fixture } from './ui-panel';
+const tick = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+async function run() {
+ const out = document.getElementById('results')!;
+ const log = (s:string) => { out.textContent += s+'\n'; };
+ await tick(); fixture.input?.setText('unfinished Unity prompt'); await tick();
+ log('Before maximize: '+JSON.stringify(document.querySelector('[contenteditable]')?.textContent));
+ flushSync(()=>useUiStore.getState().setAiPanelMaximized(true)); await tick();
+ log('After maximize: '+JSON.stringify(document.querySelector('[contenteditable]')?.textContent));
+ flushSync(()=>useUiStore.getState().setAiPanelMaximized(false)); await tick();
+ fixture.setCrash(true); await tick();
+ log('Crash fallback visible: '+String(document.body.textContent?.includes('AI panel crashed')));
+ fixture.setCrash(false);
+ flushSync(()=>useUiStore.getState().setRightSidebarVisible(false)); await tick();
+ flushSync(()=>useUiStore.getState().setRightSidebarVisible(true)); await tick();
+ log('After hide/reopen, error fallback remains: '+String(document.body.textContent?.includes('AI panel crashed')));
+ log('After hide/reopen, composer restored: '+String(!!document.querySelector('[contenteditable]')));
+}
+function App() {
+ const visible=useUiStore(s=>s.rightSidebarVisible), max=useUiStore(s=>s.aiPanelMaximized);
+ return <><button onClick={()=>void run()}>Run review UI checks</button><pre id="results"/><div style={{height:350,position:'relative'}}><Allotment><Allotment.Pane>Editor placeholder</Allotment.Pane><Allotment.Pane visible={visible} minSize={200}><RightSidebarPanel/></Allotment.Pane></Allotment></div>{max&&<MaximizedAiOverlay><ErrorBoundary fallback={<div>AI panel crashed</div>}><AiChatPanel/></ErrorBoundary></MaximizedAiOverlay>}</>;
+}
+useUiStore.setState({rightSidebarVisible:true});
+createRoot(document.getElementById('root')!).render(<App/>);

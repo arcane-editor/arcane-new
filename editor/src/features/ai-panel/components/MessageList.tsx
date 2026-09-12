@@ -1,3 +1,4 @@
+import { ErrorBoundary } from '../../../components/ErrorBoundary';
 /**
  * MessageList — scrollable container that renders the conversation messages.
  *
@@ -32,6 +33,7 @@ import { ArrowDown } from 'lucide-react';
 import { useAiStore, type AiMessage } from '../../../stores/ai';
 import UserMessage from './UserMessage';
 import AssistantMessage from './AssistantMessage';
+import SpecialistActivity from './SpecialistActivity';
 import PlanActions from './PlanActions';
 import PermissionRequestBlock from './PermissionRequestBlock';
 import QuestionBlock from './QuestionBlock';
@@ -115,7 +117,7 @@ const MessageRow = memo(function MessageRow({
       node = <StoppedBlock message={message} />;
       break;
     case 'system':
-      node = <div className="ai-panel-system-message">{message.text}</div>;
+      node = message.specialistRun ? <SpecialistActivity run={message.specialistRun} /> : <div className="ai-panel-system-message">{message.text}</div>;
       break;
     // toolResult messages are rendered inline via ToolCallBlock
     default:
@@ -273,13 +275,14 @@ function MessageList() {
           {messages.map((msg, idx) => {
             if (msg.role === 'user') currentUserMessageId = msg.id;
             return (
+              <ErrorBoundary key={msg.id} resetKey={msg} fallback="This message could not be displayed.">
               <MessageRow
-                key={msg.id}
                 message={msg}
                 turnUserMessageId={currentUserMessageId}
                 withPlanActions={idx === lastAssistantIdx && showPlanActions}
                 isLast={idx === messages.length - 1}
               />
+              </ErrorBoundary>
             );
           })}
           {showWorking && (

@@ -1,4 +1,10 @@
 import type { LspClient } from './client';
+// The URI helpers live in `utils/` so the diagnostics store can use them
+// too — a store importing this feature would be a cycle. Re-exported here
+// because this module is where the rest of the tree already looks for them.
+import { fileUri, pathFromFileUri } from '../../../utils/file-uri';
+
+export { fileUri, pathFromFileUri };
 
 // ── Version/open-state tracking ──────────────────────────────────
 
@@ -32,65 +38,6 @@ function currentEpoch(filePath: string): number {
 function isSyncablePath(filePath: string): boolean {
   // Ignore virtual/invalid paths (diff://, auth://, empty, etc.)
   return !!filePath && !filePath.includes('://');
-}
-
-export function fileUri(filePath: string): string {
-  // Encode path components for valid URIs (spaces → %20, etc.). Split first
-  // so separators survive — encodeURIComponent would escape them.
-  const encodeSegments = (p: string) => p.split('/').map(encodeURIComponent).join('/');
-
-  // Windows drive path (`D:/x/y`). Paths reach the frontend `/`-separated
-  // (src-tauri/src/path_util.rs), so the drive would otherwise become its own
-  // segment and encode to `D%3A` — producing `file://D%3A/x/y`, where the
-  // drive is parsed as the URI *authority*. The drive must sit in the path:
-  // `file:///D:/x/y`. The colon is left literal, matching what VS Code and
-  // Roslyn-based servers emit.
-  const drive = /^([A-Za-z]:)\/(.*)$/.exec(filePath);
-  if (drive) return `file:///${drive[1]}/${encodeSegments(drive[2])}`;
-
-  // UNC (`//server/share/x`) — here the host genuinely IS the authority, so
-  // it collapses to `file://server/share/x` rather than gaining slashes.
-  const unc = /^\/\/([^/]+)\/(.*)$/.exec(filePath);
-  if (unc) return `file://${unc[1]}/${encodeSegments(unc[2])}`;
-
-  // POSIX: the leading empty segment supplies the third slash.
-  return 'file://' + encodeSegments(filePath);
-}
-
-/**
- * Exact inverse of [`fileUri`]: `file:///D:/x/A.cs` → `D:/x/A.cs`,
- * `file://server/share/A.cs` → `//server/share/A.cs`,
- * `file:///Users/me/A.cs` → `/Users/me/A.cs`.
- *
- * The naive `decodeURIComponent(uri.replace('file://', ''))` this replaces got
- * both Windows shapes wrong: it left the third slash in front of the drive
- * (`/D:/x/A.cs`, which Win32 rejects with os error 123 — see
- * `src-tauri/src/path_util.rs`), and it dropped the two leading slashes of a
- * UNC path along with its host's authority position.
- *
- * Decoding per segment (not over the whole string) matters for the same reason
- * `fileUri` encodes per segment: a `%2F` inside a file name must not decode
- * into a separator.
- *
- * Non-`file://` input is returned unchanged, matching the previous behaviour
- * at the call sites that don't pre-filter.
- */
-export function pathFromFileUri(uri: string): string {
-  if (!uri.startsWith('file://')) return uri;
-  const decodeSegments = (p: string) => p.split('/').map(decodeURIComponent).join('/');
-  const rest = uri.slice('file://'.length);
-
-  // Empty authority (`file:///…`) — a POSIX or Windows-drive path.
-  if (rest.startsWith('/')) {
-    const body = rest.slice(1);
-    // The drive letter belongs to the path, so it must NOT keep that slash.
-    if (/^[A-Za-z]:(\/|$)/.test(body)) return decodeSegments(body);
-    return '/' + decodeSegments(body);
-  }
-
-  // Non-empty authority = a UNC host, which `fileUri` collapsed from
-  // `//host/share` to `file://host/share`; restore the leading slashes.
-  return '//' + decodeSegments(rest);
 }
 
 /**

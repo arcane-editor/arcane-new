@@ -1,5 +1,5 @@
 import type { Monaco } from '@monaco-editor/react';
-import { LIFECYCLE_METHOD_NAMES, UNITY_LIFECYCLE_METHODS } from './lifecycle-db';
+import { LIFECYCLE_METHOD_NAMES, UNITY_LIFECYCLE_METHODS } from '../../../data/unity-messages';
 import { UNITY_API_NAMES } from '../../../data/unity-api-names';
 
 export type UnityDecorationKind = 'lifecycle' | 'engine-type' | 'inspector-attribute';

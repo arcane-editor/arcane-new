@@ -46,6 +46,9 @@ describe('fix-console-error.ts — prompt assembly is not duplicated (Task 13)',
 
   it('still sends at the user\'s current effort in agent mode, never a hardcoded tier', () => {
     expect(SRC).toContain('const effort = useAiStore.getState().effort;');
-    expect(SRC).toContain("sendMessage(prompt, { mode: 'agent', effort })");
+    // Through `sendChatMessage`, so the selected agent actually receives it —
+    // `getAgentService()` here sent to the hosted agent even with Claude
+    // selected. `agent-routing.test.ts` guards the rule across every service.
+    expect(SRC).toContain("sendChatMessage(prompt, { mode: 'agent', effort })");
   });
 });

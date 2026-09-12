@@ -135,12 +135,28 @@ export const useTestStore = create<TestState>((set, get) => ({
   },
 
   debugTest: async (fullName, mode) => {
+    // Running the test needs the bridge; attaching the debugger does not — it
+    // finds the editor through Library/EditorInstance.json. So the bridge check
+    // guards the run, not the attach.
     if (!useUnityStore.getState().connected) {
-      notify.warning('Debugging tests requires a connected Unity Editor.');
+      notify.warning('Running tests requires a connected Unity Editor.');
       return;
     }
     try {
-      await useDebugStore.getState().attach(false);
+      const debug = useDebugStore.getState();
+      // Reuse a session that is already attached: a second attach would be
+      // refused, since the runtime accepts one debugger at a time.
+      if (debug.status === 'inactive' || debug.status === 'terminated') {
+        await debug.attach(false);
+      }
+      // Only start the run once breakpoints are actually armed. Starting it
+      // first is a race the test usually wins — it runs to completion before
+      // the breakpoints bind, and the debugger looks broken when it is simply
+      // late.
+      if (useDebugStore.getState().status === 'inactive') {
+        notify.warning('Could not attach the debugger; the test was not run.');
+        return;
+      }
       await bridgeRpc.runTests(mode, fullName, crypto.randomUUID());
     } catch (err) {
       notify.error(`Debug test failed: ${err}`);

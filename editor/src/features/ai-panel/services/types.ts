@@ -2,6 +2,8 @@
  * Shared AI panel types: chat mode, effort level, attachment kinds.
  */
 
+import type { ErrorReportEntry, ErrorReportSource } from '../data/error-report';
+
 export type ChatMode = 'ask' | 'agent' | 'plan' | 'design';
 
 // Maps 1:1 to the server's `reasoningLevel` (low|mid|high). The backend
@@ -63,6 +65,7 @@ export function coerceEffort(value: unknown): Effort {
 }
 
 export type Attachment =
+  | { kind: 'unity-evidence'; id: string; evidence: import('../../../types/unity-evidence').UnityEvidence }
   | {
       kind: 'file';
       id: string;
@@ -114,6 +117,22 @@ export type Attachment =
       guid: string;
       path: string;
       relPath: string;
+    }
+  | {
+      /**
+       * A frozen snapshot of errors pinned from the Unity Console or the
+       * Problems panel. Unlike `unity-context`'s `console` verb this is NOT
+       * re-read at send time: both surfaces are volatile (a clear, a ring
+       * eviction, the next LSP pull) and neither has a stable id, so a lazy
+       * chip would send different errors than the ones that were on screen.
+       * `entries` stay structured rather than pre-rendered so a second
+       * "Ask AI" click can merge into this same chip. See `data/error-report.ts`.
+       */
+      kind: 'error-report';
+      id: string;
+      source: ErrorReportSource;
+      entries: ErrorReportEntry[];
+      capturedAt: number;
     };
 
 /**

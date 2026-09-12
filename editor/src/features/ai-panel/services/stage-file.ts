@@ -23,7 +23,8 @@ export function relPathOf(absPath: string, workspacePath: string | null): string
   return absPath;
 }
 
-function newAttachmentId(): string {
+/** Shared so every staging path mints ids the same way. */
+export function newAttachmentId(): string {
   return `att_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 

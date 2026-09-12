@@ -1,7 +1,7 @@
 import { Search, Settings, Loader2 } from 'lucide-react';
 import { isMac } from '../../../utils/platform';
 import Tooltip from '../../../components/Tooltip';
-import WindowControls from './WindowControls';
+import WindowControls from '../../../components/WindowControls';
 import { useAuthStore } from '../../../stores/auth';
 import { useCommandsStore } from '../../../stores/commands';
 import { useUnityStore } from '../../../stores/unity';

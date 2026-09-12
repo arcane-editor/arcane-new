@@ -3,14 +3,20 @@ import type { UnlistenFn } from '@tauri-apps/api/event';
 import { listenScoped } from '../../../utils/tauri-listener';
 
 /**
- * Debug Adapter Protocol client. Speaks DAP to the Rust DAP host (`dap.rs`)
- * which spawns the mono-debug adapter and relays its `Content-Length`-framed
- * stdio over the `dap-message` / `dap-exited` Tauri events.
+ * Debug Adapter Protocol client. Speaks DAP to the native Mono soft-debugger
+ * client in `src-tauri/src/debug/`, over the `dap-message` / `dap-exited`
+ * Tauri events.
+ *
+ * There is no adapter process any more. This used to talk to
+ * `vscode-mono-debug` running under a system Mono runtime — a binary the app
+ * never vendored and a runtime it never shipped, so in a packaged build the
+ * debugger could not start at all. The protocol on this side is unchanged;
+ * only what answers it moved in-process.
  *
  * Mirrors the LSP client's seq-correlation pattern: each request gets a unique
  * `seq`; responses carry `request_seq`, which we match against a pending map.
- * Adapter-initiated events (stopped/continued/terminated/output…) are fanned
- * out to registered handlers so the debug store can drive UI state.
+ * Debugger-initiated events (stopped/continued/terminated/breakpoint…) are
+ * fanned out to registered handlers so the debug store can drive UI state.
  */
 
 export interface DapResponse {
@@ -61,10 +67,10 @@ class DapClient {
     return () => set?.delete(handler);
   }
 
-  /** Spawn the adapter and attach event listeners. Throws if Mono/adapter missing. */
-  async start(): Promise<void> {
+  /** Start the debug session for this window. */
+  async start(workspacePath: string): Promise<void> {
     if (this.running) return;
-    // Attach listeners BEFORE starting so we don't miss the adapter's early
+    // Attach listeners BEFORE starting so we don't miss the session's early
     // 'initialized' event (the host emits the instant dap_start returns).
     this.unlistenMessage = await listenScoped<string>('dap-message', (e) => {
       this.handleMessage(e.payload);
@@ -73,7 +79,7 @@ class DapClient {
       this.handleExit();
     });
     try {
-      await invoke('dap_start');
+      await invoke('dap_start', { workspacePath });
       this.running = true;
     } catch (err) {
       await this.cleanupListeners();
@@ -110,7 +116,7 @@ class DapClient {
     this.running = false;
     for (const [, pending] of this.pending) {
       clearTimeout(pending.timer);
-      pending.reject(new Error('Debug adapter exited'));
+      pending.reject(new Error('Debug session ended'));
     }
     this.pending.clear();
     const handlers = this.eventHandlers.get('__exited');
@@ -119,7 +125,7 @@ class DapClient {
 
   /** Send a DAP request and await its response body. */
   async request<T = unknown>(command: string, args?: unknown): Promise<T> {
-    if (!this.running) throw new Error('Debug adapter is not running');
+    if (!this.running) throw new Error('Debug session is not running');
     const seq = this.nextSeq++;
     const payload = JSON.stringify({ seq, type: 'request', command, arguments: args });
     const result = new Promise<unknown>((resolve, reject) => {
@@ -138,7 +144,7 @@ class DapClient {
       try {
         await this.request('disconnect', { terminateDebuggee: false });
       } catch {
-        /* adapter may already be gone */
+        /* the session may already be gone */
       }
     }
     try {

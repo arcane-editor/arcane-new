@@ -33,13 +33,20 @@ import AttachmentBar from './AttachmentBar';
 import ImageAttachButton from './ImageAttachButton';
 
 function ChatInput() {
-  const isAgentRunning = useAiStore((s) => s.isAgentRunning);
+  const isAgentRunning = useAiStore((s) => s.isAgentRunning || s.isSubmitting);
   const mode = useAiStore((s) => s.mode);
   const selectedAgent = useAiStore((s) => s.selectedAgent);
   const planPhase = useAiStore((s) => s.planPhase);
   const activePlanPath = useAiStore((s) => s.activePlanPath);
   const workspacePath = useWorkspaceStore((s) => s.workspacePath);
   const attachmentCount = useAiStore((s) => s.attachments.length);
+  // A primitive, never an object/array literal: a selector returning a fresh
+  // reference re-renders on every store write.
+  // The number of ERRORS staged, not the number of chips — "these 3 errors" is
+  // a claim about the content.
+  const errorAttachmentCount = useAiStore((s) =>
+    s.attachments.reduce((n, a) => (a.kind === 'error-report' ? n + a.entries.length : n), 0),
+  );
   const pendingQuestion = useAiStore(selectPendingQuestion);
 
   const editorRef = useRef<LexicalChatInputHandle>(null);
@@ -57,17 +64,31 @@ function ChatInput() {
     return () => window.removeEventListener('ai-compose-prefill', onPrefill);
   }, []);
 
+  // "Ask AI" on an error row reveals the panel and then asks for focus, so the
+  // user can type their question straight away. It never prefills text — see
+  // `errorAttachmentCount` in `data/composer-copy.ts`.
+  useEffect(() => {
+    function onFocus() {
+      editorRef.current?.focus();
+    }
+    window.addEventListener('ai-focus-composer', onFocus);
+    return () => window.removeEventListener('ai-focus-composer', onFocus);
+  }, []);
+
   function handleSubmit(text: string) {
     // Answer-mode routing FIRST: while a question is pending, typed text
     // answers the question instead of sending a normal message — no
     // `addUserMessage` (the answer shows in the locked QuestionBlock, not as
     // a user bubble) and no `clearAttachments` (staged attachments are
     // unrelated to the question and must survive to the next real send).
-    if (shouldRouteToQuestion({ pendingQuestion: !!pendingQuestion, text })) {
-      useAiStore.getState().resolveQuestionRequest(pendingQuestion!.toolCallId, { answer: text.trim() });
-      return;
+    const currentQuestion = selectPendingQuestion(useAiStore.getState());
+    if (shouldRouteToQuestion({ pendingQuestion: !!currentQuestion, text })) {
+      useAiStore.getState().resolveQuestionRequest(currentQuestion!.toolCallId, { answer: text.trim() });
+      return true;
     }
 
+    const state = useAiStore.getState();
+    if (state.isAgentRunning || state.isSubmitting) return false;
     // Sending from the SIDEBAR leaves the design chat's mode behind. The mode
     // pill here shows Agent for a design thread (`modeOptionFor`), and this is
     // what makes that true rather than a label the next send contradicts — the
@@ -77,7 +98,7 @@ function ChatInput() {
       useAiStore.getState().setMode('agent');
     }
 
-    dispatchComposerSend(text, useAiStore.getState().attachments);
+    return dispatchComposerSend(text, useAiStore.getState().attachments);
   }
 
   function handleStop() {
@@ -98,6 +119,7 @@ function ChatInput() {
     mode,
     planRoute: routePlanSend(planPhase, activePlanPath),
     pendingQuestion: !!pendingQuestion,
+    errorAttachmentCount,
   });
 
   return (

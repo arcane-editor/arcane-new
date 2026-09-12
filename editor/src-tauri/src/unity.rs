@@ -777,6 +777,23 @@ fn workspace_scripting_root(workspace_path: &Path) -> Option<PathBuf> {
     unity_scripting_root(Path::new(&install.path))
 }
 
+/// The Unity install's `Data` directory for a project.
+///
+/// `PlaybackEngines` — and the Android SDK inside it, which is where `adb`
+/// comes from without anyone downloading anything — lives directly under Data,
+/// while the scripting root may sit a level deeper. So this repeats the layout
+/// choice rather than reusing `workspace_scripting_root`.
+pub(crate) fn workspace_editor_data(workspace_path: &Path) -> Option<PathBuf> {
+    let version = read_unity_version(&workspace_path.join("ProjectSettings"))?;
+    let install = resolve_unity_editor(version).ok()??;
+    let install_path = Path::new(&install.path);
+    Some(if install_path.extension().is_some_and(|e| e == "app") {
+        install_path.join("Contents")
+    } else {
+        install_path.parent()?.join("Data")
+    })
+}
+
 /// Collect every reference assembly Roslyn needs straight out of the Unity
 /// install: the UnityEngine/UnityEditor modules, the top-level engine and
 /// editor assemblies, and the netstandard 2.1 reference + shim facades.
@@ -998,9 +1015,9 @@ fn find_asmdef_assemblies(assets: &Path) -> Vec<String> {
 /// and every UnityEngine/UnityEditor module. We then top up with the
 /// `Library/ScriptAssemblies/*.dll` outputs from package and asmdef
 /// compilation, replacing the ProjectReferences Roslyn can't resolve.
-fn generate_ide_csproj(workspace: &Path) -> Result<bool, String> {
+fn generate_ide_csproj(workspace: &Path, analyzer_dll: Option<&Path>) -> Result<bool, String> {
     let scripting_root = workspace_scripting_root(workspace);
-    generate_ide_csproj_from(workspace, scripting_root.as_deref())
+    generate_ide_csproj_from(workspace, scripting_root.as_deref(), analyzer_dll)
 }
 
 /// Body of [`generate_ide_csproj`] with the Unity install injected rather
@@ -1084,6 +1101,7 @@ fn uses_input_system_package(workspace: &Path) -> bool {
 fn generate_ide_csproj_from(
     workspace: &Path,
     scripting_root: Option<&Path>,
+    analyzer_dll: Option<&Path>,
 ) -> Result<bool, String> {
     let assets = workspace.join("Assets");
     if !assets.is_dir() {
@@ -1264,14 +1282,40 @@ fn generate_ide_csproj_from(
         "    <DefineConstants>{}</DefineConstants>\n",
         xml_escape(&defines.join(";"))
     ));
-    xml.push_str(
-        r#"    <NoWarn>0169;0436;CS0436;CS0162;CS0168</NoWarn>
-    <ErrorReport>none</ErrorReport>
-    <WarningLevel>0</WarningLevel>
-  </PropertyGroup>
-  <ItemGroup>
-"#,
-    );
+    // WarningLevel 4, not 0.
+    //
+    // This is a prerequisite for the `<Analyzer>` item below, not a
+    // preference. Roslyn's `CSharpDiagnosticFilter` suppresses any diagnostic
+    // whose warning level EXCEEDS `WarningLevel`, and every analyzer
+    // diagnostic reported as Warning, Info or Hidden carries level 1. At
+    // level 0 the Unity analyzers would load, run, and have every finding
+    // discarded before it reached the client — a silent, total loss with no
+    // error on either side. 4 is also what Unity's own generated csprojs use.
+    //
+    // CS0649 rides on the same switch, and it is why `NoWarn` is conditional.
+    // "Field is never assigned to" is a level-4 warning, so WarningLevel 0 was
+    // suppressing it — and Roslyn cannot know that Unity assigns serialized
+    // fields from the inspector, so raising the level without a suppressor
+    // puts a warning on essentially every `[SerializeField]` field anyone
+    // writes.
+    //
+    // The analyzers' USP0007 suppressor handles that properly: it exempts
+    // serialized fields while leaving genuinely unused private fields
+    // reported. But it ships INSIDE the analyzer assembly, so it exists only
+    // when the `<Analyzer>` item does. Without the analyzer the blunt
+    // instrument is the right one — a user with no Unity inspections must not
+    // be punished with a warning per serialized field in exchange.
+    //
+    // The other codes are Unity's own defaults for generated projects.
+    let mut no_warn = String::from("0169;0436;CS0436;CS0162;CS0168");
+    if analyzer_dll.is_none() {
+        no_warn.push_str(";CS0649");
+    }
+    xml.push_str(&format!(
+        "    <NoWarn>{no_warn}</NoWarn>\n    \
+         <ErrorReport>none</ErrorReport>\n    \
+         <WarningLevel>4</WarningLevel>\n  </PropertyGroup>\n  <ItemGroup>\n"
+    ));
 
     let mut sorted: Vec<(&String, &String)> = refs.iter().collect();
     sorted.sort_by(|a, b| a.0.cmp(b.0));
@@ -1286,6 +1330,22 @@ fn generate_ide_csproj_from(
     xml.push_str("  </ItemGroup>\n  <ItemGroup>\n");
     xml.push_str("    <Compile Include=\"Assets/**/*.cs\" />\n");
     xml.push_str("  </ItemGroup>\n");
+
+    // The Unity analyzers. csharp-ls 0.24+ runs whatever a project references
+    // (`Roslyn/Analyzers.fs`), so this one item is the entire delivery
+    // mechanism for 43 Unity diagnostics and 23 suppressors.
+    //
+    // Omitted entirely when the assembly is absent: a dangling `<Analyzer>`
+    // makes MSBuild warn on every evaluation, and Unity inspections are an
+    // enhancement over working C# IntelliSense, never a prerequisite for it.
+    if let Some(analyzer) = analyzer_dll {
+        // Never hand MSBuild a verbatim path prefix — Tauri reports resource
+        // directories that way and MSBuild cannot resolve them.
+        let path = crate::path_util::normalize_windows_path(&analyzer.to_string_lossy());
+        xml.push_str("  <ItemGroup>\n    <Analyzer Include=\"");
+        xml.push_str(&xml_escape(&path));
+        xml.push_str("\" />\n  </ItemGroup>\n");
+    }
     xml.push_str("  <Import Project=\"$(MSBuildToolsPath)\\Microsoft.CSharp.targets\" />\n");
     xml.push_str("</Project>\n");
 
@@ -1325,8 +1385,11 @@ fn remove_legacy_project_files(workspace: &Path) {
 
 /// Generate a `.unityide.sln` at the workspace root pointing to our
 /// self-contained `.unityide.csproj`.
-fn generate_solution(workspace_path: &Path) -> Result<Option<String>, String> {
-    if !generate_ide_csproj(workspace_path)? {
+fn generate_solution(
+    workspace_path: &Path,
+    analyzer_dll: Option<&Path>,
+) -> Result<Option<String>, String> {
+    if !generate_ide_csproj(workspace_path, analyzer_dll)? {
         return Ok(None);
     }
 
@@ -1373,6 +1436,22 @@ fn generate_solution(workspace_path: &Path) -> Result<Option<String>, String> {
 
     Ok(Some(".unityide.sln".to_string()))
 }
+/// The outcome of setting a Unity workspace up for LSP.
+///
+/// `analyzersInjected` exists so the frontend can tell "the Unity analyzers
+/// found nothing" from "the Unity analyzers never ran". The TypeScript rule
+/// engine stands down for the rules Roslyn covers better, and it can only do
+/// that safely if it knows Roslyn is actually covering them — otherwise a
+/// machine where the analyzer package failed to unpack would silently lose
+/// those inspections from both engines at once.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UnityLspSetup {
+    /// The generated solution, relative to the workspace, or null when this is
+    /// not a Unity project.
+    pub solution: Option<String>,
+    pub analyzers_injected: bool,
+}
 
 /// Set up a Unity workspace for LSP usage: generate a self-contained
 /// `.unityide.csproj` and the `.unityide.sln` that points at it, if the workspace
@@ -1383,16 +1462,51 @@ fn generate_solution(workspace_path: &Path) -> Result<Option<String>, String> {
 /// dropped a `Directory.Build.props` at the workspace root, which every other
 /// csproj in the user's project silently inherited.
 #[tauri::command]
-pub fn unity_setup_lsp(workspace_path: String) -> Result<Option<String>, String> {
-    let root = Path::new(&workspace_path);
+pub fn unity_setup_lsp(app: AppHandle, workspace_path: String) -> Result<UnityLspSetup, String> {
+    // Provisioned lazily, here rather than at startup: this is the one moment
+    // an analyzer path is needed, and it costs a single extraction of a 156 KB
+    // assembly, once per version. Returns None on any failure — a missing
+    // analyzer must degrade to "no Unity inspections", never block project
+    // generation. See `unity_analyzers.rs`.
+    let analyzer = crate::unity_analyzers::ensure_installed(&app);
+    setup_lsp_files(Path::new(&workspace_path), analyzer.as_deref())
+}
+
+/// [`unity_setup_lsp`] without the Tauri handle.
+///
+/// The split is what lets the smoke tests and `verify:intellisense` drive the
+/// real generator headlessly — the probe shells out to
+/// `smoke_generate_full_setup` for exactly this, and a command that can only
+/// run inside a built app would put the generated project outside the reach of
+/// every check.
+pub fn setup_lsp_files(
+    root: &Path,
+    analyzer_dll: Option<&Path>,
+) -> Result<UnityLspSetup, String> {
     let assets = root.join("Assets");
     let project_settings = root.join("ProjectSettings");
 
     if !assets.is_dir() || !project_settings.is_dir() {
-        return Ok(None);
+        return Ok(UnityLspSetup { solution: None, analyzers_injected: false });
     }
 
-    generate_solution(root)
+    let solution = generate_solution(root, analyzer_dll)?;
+
+    // Read back from the file that was actually written, rather than assuming
+    // the inputs produced it.
+    //
+    // The frontend uses this to decide whether local rules may stand down for
+    // the inspections Roslyn covers, so a value that merely describes what was
+    // ASKED for turns any future divergence — a generator that skips the item,
+    // a write that half-succeeded — into both engines going quiet at once with
+    // nothing reported anywhere. Reading the csproj costs one file read per
+    // workspace open.
+    let analyzers_injected = solution.is_some()
+        && fs::read_to_string(root.join(".unityide.csproj"))
+            .map(|xml| xml.contains("<Analyzer Include="))
+            .unwrap_or(false);
+
+    Ok(UnityLspSetup { analyzers_injected, solution })
 }
 
 #[cfg(test)]
@@ -1927,7 +2041,7 @@ mod tests {
 
         let app = make_unity_install(&dir, true);
         let root = unity_scripting_root(&app).unwrap();
-        assert!(generate_ide_csproj_from(&workspace, Some(root.as_path())).expect("generate ok"));
+        assert!(generate_ide_csproj_from(&workspace, Some(root.as_path()), None).expect("generate ok"));
 
         assert!(workspace.join(".unityide.csproj").exists(), "new csproj must be written");
         assert!(
@@ -2028,7 +2142,7 @@ mod tests {
         assert!(!workspace.join("Assembly-CSharp-Editor.csproj").exists());
 
         let generated =
-            generate_ide_csproj_from(&workspace, Some(root.as_path())).expect("generate ok");
+            generate_ide_csproj_from(&workspace, Some(root.as_path()), None).expect("generate ok");
         assert!(generated, "must generate even with no Unity csproj present");
 
         let content = fs::read_to_string(workspace.join(".unityide.csproj")).expect("read csproj");
@@ -2070,7 +2184,7 @@ mod tests {
         let app = make_unity_install(&dir, true);
         let root = unity_scripting_root(&app).unwrap();
 
-        generate_ide_csproj_from(&workspace, Some(root.as_path())).expect("generate ok");
+        generate_ide_csproj_from(&workspace, Some(root.as_path()), None).expect("generate ok");
         let content = fs::read_to_string(workspace.join(".unityide.csproj")).expect("read csproj");
 
         assert!(
@@ -2108,7 +2222,7 @@ mod tests {
         let workspace = dir.join("project");
         make_unity_project(&workspace, "6000.3.5f2");
 
-        let generated = generate_ide_csproj_from(&workspace, None).expect("generate ok");
+        let generated = generate_ide_csproj_from(&workspace, None, None).expect("generate ok");
         assert!(!generated, "must not generate a reference-less project");
         assert!(!workspace.join(".unityide.csproj").exists());
 
@@ -2139,7 +2253,7 @@ mod tests {
 
         let app = make_unity_install(&dir, true);
         let root = unity_scripting_root(&app).unwrap();
-        generate_ide_csproj_from(&workspace, Some(root.as_path())).expect("generate ok");
+        generate_ide_csproj_from(&workspace, Some(root.as_path()), None).expect("generate ok");
 
         let content = fs::read_to_string(workspace.join(".unityide.csproj")).unwrap();
         assert!(
@@ -2160,18 +2274,192 @@ mod tests {
         );
     }
 
+    // ─── recent-project discovery (hermetic) ──────────────────────────────
+    //
+    // The parsers behind `smoke_workspace`. They are what let the smoke tests
+    // and `verify:intellisense` find a project without being told where one
+    // is — the difference between a check that runs and a check that prints
+    // SKIPPED on the machine whose IntelliSense is broken.
+
+    #[test]
+    fn registry_recent_projects_decode_in_recency_order() {
+        // Verbatim `reg query` output, hex included.
+        let out = "\r\nHKEY_CURRENT_USER\\Software\\Unity Technologies\\Unity Editor 5.x\r\n    \
+                   RecentlyUsedProjectPaths-1_h2222222222    REG_BINARY    443A2F776F726B2F5365636F6E6400\r\n    \
+                   RecentlyUsedProjectPaths-0_h1085040554    REG_BINARY    433A2F55736572732F73643132302F46697273742050726F6A65637420706D2057696E646F777300\r\n";
+        assert_eq!(
+            parse_registry_recent_projects(out),
+            vec![
+                "C:/Users/sd120/First Project pm Windows".to_string(),
+                "D:/work/Second".to_string(),
+            ],
+        );
+    }
+
+    #[test]
+    fn registry_parsing_ignores_unrelated_values_and_empty_output() {
+        assert!(parse_registry_recent_projects("").is_empty());
+        assert!(parse_registry_recent_projects("    Other_h1    REG_SZ    hello").is_empty());
+    }
+
+    #[test]
+    fn plist_recent_projects_decode_in_recency_order() {
+        let xml = "<dict>\
+                   <key>RecentlyUsedProjectPaths-1</key><data>L1VzZXJzL21lL1NlY29uZA==</data>\
+                   <key>RecentlyUsedProjectPaths-0</key><data>\n  L1VzZXJzL21lL0ZpcnN0\n  </data>\
+                   </dict>";
+        assert_eq!(
+            parse_plist_recent_projects(xml),
+            vec!["/Users/me/First".to_string(), "/Users/me/Second".to_string()],
+        );
+    }
+
+    #[test]
+    fn base64_decoder_handles_padding_and_rejects_garbage() {
+        assert_eq!(decode_base64("L1VzZXJz").unwrap(), b"/Users".to_vec());
+        assert_eq!(decode_base64("YQ==").unwrap(), b"a".to_vec());
+        assert!(decode_base64("!!!!").is_none());
+    }
+
+    // There is deliberately no unit test for `smoke_required` itself. It reads
+    // one environment variable, and a test for it has to mutate the
+    // environment of a process running tests in parallel — which is exactly
+    // the kind of cross-test interference that produces a failure nobody can
+    // reproduce. The behaviour it guards is checked from outside instead:
+    // `verify:intellisense` runs the generator with UNITYIDE_SMOKE_E2E=required
+    // on every invocation, so a silently-skipping smoke test fails the gate.
+
     // ─── smoke tests (skipped when real workspace absent) ──────────────────────
+
+    /// Recent Unity projects, most recent first.
+    ///
+    /// The Unity Editor records what it opened under
+    /// `HKCU\Software\Unity Technologies\Unity Editor 5.x` on Windows and in
+    /// `com.unity3d.UnityEditor5.x` preferences on macOS, as
+    /// `RecentlyUsedProjectPaths-<rank>` — a NUL-terminated UTF-8 path. Reading
+    /// it is what lets these tests run on a developer's machine without being
+    /// told where anything is.
+    ///
+    /// (Unity Hub 3 keeps its own list in a database rather than the
+    /// `projects-v1.json` it used to write, so the Hub is not consulted here.)
+    fn recent_unity_projects() -> Vec<PathBuf> {
+        #[cfg(target_os = "windows")]
+        let parsed = {
+            let raw = crate::process_util::command("reg")
+                .args(["query", r"HKCU\Software\Unity Technologies\Unity Editor 5.x"])
+                .output()
+                .ok()
+                .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+                .unwrap_or_default();
+            parse_registry_recent_projects(&raw)
+        };
+
+        #[cfg(target_os = "macos")]
+        let parsed = {
+            let raw = crate::process_util::command("defaults")
+                .args(["export", "com.unity3d.UnityEditor5.x", "-"])
+                .output()
+                .ok()
+                .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+                .unwrap_or_default();
+            parse_plist_recent_projects(&raw)
+        };
+
+        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+        let parsed: Vec<String> = Vec::new();
+
+        parsed.into_iter().map(PathBuf::from).collect()
+    }
+
+    /// Decode `RecentlyUsedProjectPaths-<rank>_h<hash>  REG_BINARY  <hex>`
+    /// lines from `reg query` output, ordered by rank.
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    fn parse_registry_recent_projects(reg_output: &str) -> Vec<String> {
+        let re =
+            Regex::new(r"RecentlyUsedProjectPaths-(\d+)(?:_h\d+)?\s+REG_BINARY\s+([0-9A-Fa-f]+)")
+                .unwrap();
+        let mut found: Vec<(u32, String)> = Vec::new();
+        for caps in re.captures_iter(reg_output) {
+            let rank: u32 = caps[1].parse().unwrap_or(u32::MAX);
+            let hex = &caps[2];
+            let bytes: Vec<u8> = (0..hex.len() / 2)
+                .filter_map(|i| u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).ok())
+                .collect();
+            let decoded = String::from_utf8_lossy(&bytes)
+                .trim_end_matches('\0')
+                .replace('\\', "/");
+            if !decoded.is_empty() {
+                found.push((rank, decoded));
+            }
+        }
+        found.sort_by_key(|(rank, _)| *rank);
+        found.into_iter().map(|(_, p)| p).collect()
+    }
+
+    /// The macOS counterpart: the same keys, base64 rather than hex.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    fn parse_plist_recent_projects(plist_xml: &str) -> Vec<String> {
+        let re = Regex::new(
+            r"(?s)<key>RecentlyUsedProjectPaths-(\d+)(?:_h\d+)?</key>\s*<data>(.*?)</data>",
+        )
+        .unwrap();
+        let mut found: Vec<(u32, String)> = Vec::new();
+        for caps in re.captures_iter(plist_xml) {
+            let rank: u32 = caps[1].parse().unwrap_or(u32::MAX);
+            let b64: String = caps[2].chars().filter(|c| !c.is_whitespace()).collect();
+            if let Some(bytes) = decode_base64(&b64) {
+                let decoded = String::from_utf8_lossy(&bytes)
+                    .trim_end_matches('\0')
+                    .to_string();
+                if !decoded.is_empty() {
+                    found.push((rank, decoded));
+                }
+            }
+        }
+        found.sort_by_key(|(rank, _)| *rank);
+        found.into_iter().map(|(_, p)| p).collect()
+    }
+
+    /// Minimal standard-alphabet base64, so this needs no new dependency.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    fn decode_base64(input: &str) -> Option<Vec<u8>> {
+        const TABLE: &[u8; 64] =
+            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let mut out = Vec::new();
+        let mut acc: u32 = 0;
+        let mut bits = 0;
+        for ch in input.bytes() {
+            if ch == b'=' {
+                break;
+            }
+            let value = TABLE.iter().position(|&c| c == ch)? as u32;
+            acc = (acc << 6) | value;
+            bits += 6;
+            if bits >= 8 {
+                bits -= 8;
+                out.push((acc >> bits) as u8);
+            }
+        }
+        Some(out)
+    }
 
     /// Locate a real Unity project to smoke-test against.
     ///
-    /// `UNITYIDE_SMOKE_UNITY_PROJECT` overrides; otherwise we try a couple of
-    /// known local projects. These tests are opt-in by nature — but a hardcoded
-    /// path that has since been deleted makes them *silently* vacuous, which is
-    /// how a total IntelliSense outage stayed green through a full suite.
+    /// `UNITYIDE_SMOKE_UNITY_PROJECT` overrides; then whatever the developer
+    /// most recently opened in Unity; then a couple of known local projects.
+    /// These tests are opt-in by nature — but a hardcoded path that has since
+    /// been deleted makes them *silently* vacuous, which is how a total
+    /// IntelliSense outage stayed green through a full suite.
     fn smoke_workspace() -> Option<PathBuf> {
         if let Ok(p) = env::var("UNITYIDE_SMOKE_UNITY_PROJECT") {
             let path = PathBuf::from(p);
             return path.join("Assets").is_dir().then_some(path);
+        }
+        if let Some(recent) = recent_unity_projects()
+            .into_iter()
+            .find(|p| p.join("Assets").is_dir())
+        {
+            return Some(recent);
         }
         // Real directories on a developer's disk, not brand strings. The rename
         // sweep rewrote "Arcane Demo" here and the smoke test silently went back
@@ -2187,14 +2475,167 @@ mod tests {
         .find(|p| p.join("Assets").is_dir())
     }
 
+    /// The analyzer the smoke tests generate with — the same one production
+    /// uses, unpacked from the vendored package into the real managed
+    /// directory. `None` when it has not been vendored, which is also what
+    /// production does in that case.
+    fn smoke_analyzer() -> Option<PathBuf> {
+        let nupkg = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("resources")
+            .join("unity-analyzers")
+            .join(format!(
+                "microsoft.unity.analyzers.{}.nupkg",
+                crate::unity_analyzers::UNITY_ANALYZERS_VERSION
+            ));
+        if !nupkg.is_file() {
+            return None;
+        }
+        let root = crate::unity_analyzers::managed_root()?;
+        crate::unity_analyzers::ensure_installed_from(&nupkg, &root).ok()
+    }
+
+    /// `UNITYIDE_SMOKE_E2E=required` turns a skip into a failure.
+    fn smoke_required() -> bool {
+        env::var("UNITYIDE_SMOKE_E2E").as_deref() == Ok("required")
+    }
+
+    /// The workspace for `test`, or `None` after saying so out loud.
+    ///
+    /// The three tests below used to `return` on `None` with no output at all.
+    /// That is the precise failure this module's own comments warn about: a
+    /// skipped test and a passing test looked identical, and a total
+    /// IntelliSense outage rode through a full green suite because of it.
+    fn smoke_workspace_or_skip(test: &str) -> Option<PathBuf> {
+        match smoke_workspace() {
+            Some(w) => Some(w),
+            None => {
+                eprintln!(
+                    "SKIPPED {test}: no Unity project found. \
+                     Open one in Unity or set UNITYIDE_SMOKE_UNITY_PROJECT."
+                );
+                assert!(
+                    !smoke_required(),
+                    "{test} skipped, but UNITYIDE_SMOKE_E2E=required forbids skipping"
+                );
+                None
+            }
+        }
+    }
+
+    // ─── Unity analyzers in the generated project ─────────────────────────
+
+    /// The `<Analyzer>` item is the entire delivery mechanism for Unity
+    /// inspections: csharp-ls 0.24+ runs the analyzers a project references,
+    /// and nothing else in the pipeline mentions them.
+    #[test]
+    fn csproj_references_the_unity_analyzer_when_one_is_available() {
+        let dir = make_temp_dir("_analyzer");
+        let workspace = dir.join("project");
+        make_unity_project(&workspace, "6000.3.5f2");
+        let app = make_unity_install(&dir, true);
+        let root = unity_scripting_root(&app).unwrap();
+
+        // A path with a space and an ampersand: both occur in real install
+        // locations and both are XML-hostile.
+        let analyzer_dir = dir.join("Unity & Co");
+        fs::create_dir_all(&analyzer_dir).unwrap();
+        let analyzer = analyzer_dir.join("Microsoft.Unity.Analyzers.dll");
+        fs::write(&analyzer, b"MZ").unwrap();
+
+        generate_ide_csproj_from(&workspace, Some(root.as_path()), Some(analyzer.as_path()))
+            .expect("generate ok");
+        let content = fs::read_to_string(workspace.join(".unityide.csproj")).expect("read csproj");
+
+        assert!(
+            content.contains("<Analyzer Include=\""),
+            "no analyzer item — Unity inspections cannot run at all"
+        );
+        assert!(
+            content.contains("Microsoft.Unity.Analyzers.dll"),
+            "the analyzer item does not name the assembly"
+        );
+        assert!(
+            content.contains("Unity &amp; Co"),
+            "the analyzer path is not XML-escaped, which makes the project unparseable"
+        );
+        // With the analyzer present, CS0649 must NOT be blanket-suppressed:
+        // USP0007 exempts serialized fields precisely, leaving genuinely
+        // unused private fields reported.
+        assert!(
+            !content.contains("CS0649"),
+            "CS0649 should be left to the analyzers' suppressor when one is present"
+        );
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A dangling `<Analyzer>` makes MSBuild warn on every evaluation, and
+    /// Unity inspections are an enhancement over working IntelliSense — never
+    /// a prerequisite for it.
+    #[test]
+    fn csproj_omits_the_analyzer_item_when_there_is_no_assembly() {
+        let dir = make_temp_dir("_no_analyzer");
+        let workspace = dir.join("project");
+        make_unity_project(&workspace, "6000.3.5f2");
+        let app = make_unity_install(&dir, true);
+        let root = unity_scripting_root(&app).unwrap();
+
+        generate_ide_csproj_from(&workspace, Some(root.as_path()), None).expect("generate ok");
+        let content = fs::read_to_string(workspace.join(".unityide.csproj")).expect("read csproj");
+
+        assert!(
+            !content.contains("<Analyzer"),
+            "emitted an analyzer item with no assembly behind it"
+        );
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Analyzer diagnostics cannot reach the client at all without this.
+    ///
+    /// Roslyn's `CSharpDiagnosticFilter` discards any diagnostic whose warning
+    /// level exceeds the project's `WarningLevel`, and every analyzer
+    /// diagnostic reported as Warning, Info or Hidden carries level 1. The
+    /// generated project shipped with `<WarningLevel>0</WarningLevel>`, so
+    /// adding the analyzers without this change would have loaded them, run
+    /// them, and thrown every finding away — with no error on either side, and
+    /// nothing to distinguish it from "your code is fine".
+    #[test]
+    fn csproj_enables_warnings_so_analyzer_diagnostics_are_not_filtered_out() {
+        let dir = make_temp_dir("_warninglevel");
+        let workspace = dir.join("project");
+        make_unity_project(&workspace, "6000.3.5f2");
+        let app = make_unity_install(&dir, true);
+        let root = unity_scripting_root(&app).unwrap();
+
+        generate_ide_csproj_from(&workspace, Some(root.as_path()), None).expect("generate ok");
+        let content = fs::read_to_string(workspace.join(".unityide.csproj")).expect("read csproj");
+
+        assert!(
+            !content.contains("<WarningLevel>0</WarningLevel>"),
+            "WarningLevel 0 silently discards every analyzer diagnostic"
+        );
+        assert!(content.contains("<WarningLevel>4</WarningLevel>"));
+        // With NO analyzer, CS0649 must be suppressed. Raising the warning
+        // level without the USP0007 suppressor — which ships inside the
+        // analyzer assembly — puts "field is never assigned to" on every
+        // [SerializeField] field in the project.
+        assert!(
+            content.contains("CS0649"),
+            "without the analyzer, CS0649 must be suppressed or every serialized field warns"
+        );
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
     #[test]
     fn smoke_generate_ide_csproj() {
         let _guard = crate::sync_util::lock_recover(&SMOKE_WORKSPACE);
-        let workspace = match smoke_workspace() {
-            Some(w) => w,
-            None => return,
+        let Some(workspace) = smoke_workspace_or_skip("smoke_generate_ide_csproj") else {
+            return;
         };
-        let result = generate_ide_csproj(&workspace).expect("generate ok");
+        let result = generate_ide_csproj(&workspace, smoke_analyzer().as_deref())
+            .expect("generate ok");
         assert!(result, "csproj should have been generated");
 
         let content = fs::read_to_string(workspace.join(".unityide.csproj")).expect("read csproj");
@@ -2223,11 +2664,10 @@ mod tests {
     #[test]
     fn smoke_generated_hint_paths_all_exist() {
         let _guard = crate::sync_util::lock_recover(&SMOKE_WORKSPACE);
-        let workspace = match smoke_workspace() {
-            Some(w) => w,
-            None => return,
+        let Some(workspace) = smoke_workspace_or_skip("smoke_generated_hint_paths_all_exist") else {
+            return;
         };
-        generate_ide_csproj(&workspace).expect("generate ok");
+        generate_ide_csproj(&workspace, smoke_analyzer().as_deref()).expect("generate ok");
         let content = fs::read_to_string(workspace.join(".unityide.csproj")).expect("read csproj");
 
         let re = Regex::new(r"<HintPath>([^<]+)</HintPath>").unwrap();
@@ -2243,14 +2683,27 @@ mod tests {
     #[test]
     fn smoke_generate_full_setup() {
         let _guard = crate::sync_util::lock_recover(&SMOKE_WORKSPACE);
-        let workspace = match smoke_workspace() {
-            Some(w) => w,
-            None => return,
+        let Some(workspace) = smoke_workspace_or_skip("smoke_generate_full_setup") else {
+            return;
         };
-        let sln = unity_setup_lsp(workspace.to_string_lossy().to_string()).expect("setup ok");
-        assert_eq!(sln.as_deref(), Some(".unityide.sln"));
+        let analyzer = smoke_analyzer();
+        let setup = setup_lsp_files(&workspace, analyzer.as_deref()).expect("setup ok");
+        assert_eq!(setup.solution.as_deref(), Some(".unityide.sln"));
         assert!(workspace.join(".unityide.sln").exists());
         assert!(workspace.join(".unityide.csproj").exists());
+
+        // The probe drives this test to regenerate the project it then asks
+        // csharp-ls about, so the analyzer must land here or its UNT
+        // assertions would be checking a project that never referenced one.
+        let content = fs::read_to_string(workspace.join(".unityide.csproj")).expect("read csproj");
+        assert_eq!(
+            setup.analyzers_injected,
+            content.contains("<Analyzer Include="),
+            "analyzers_injected must describe what the csproj actually says"
+        );
+        if analyzer.is_some() {
+            assert!(setup.analyzers_injected, "a vendored analyzer was not injected");
+        }
     }
 
     // ── install record ───────────────────────────────────────────────────

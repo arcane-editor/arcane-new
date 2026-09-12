@@ -6,7 +6,7 @@
 
 import type { AgentEvent } from './vendor/types';
 
-interface TurnTelemetry {
+export interface TurnTelemetry {
   turnIndex: number;
   toolErrorCount: number;
   repairCount: number;
@@ -45,6 +45,8 @@ interface TurnTelemetry {
   lastTurnLatencyMs: number | null;
 }
 
+/** One instance per agent; the legacy facade below remains for older callers. */
+export function createTurnTelemetry() {
 const EMPTY_TELEMETRY: TurnTelemetry = {
   turnIndex: 0,
   toolErrorCount: 0,
@@ -81,7 +83,7 @@ let previousSendNudgeCounts: NudgeCounts = { ...EMPTY_NUDGE_COUNTS };
 /** Snapshot of the PREVIOUS send's repair count, captured by `resetTurnTelemetry()` — drives send-boundary escalation (send-escalation.ts). */
 let previousSendRepairCount = 0;
 
-export function resetTurnTelemetry(): void {
+function resetTurnTelemetry(): void {
   // Snapshot THIS (about-to-be-superseded) send's nudge counts as "previous"
   // before zeroing them for the new send — `agent-service.ts`'s sendMessage
   // calls this once, up front, then later reads `getPreviousSendNudgeCounts()`
@@ -93,7 +95,7 @@ export function resetTurnTelemetry(): void {
 }
 
 /** Read-only peek at the PREVIOUS send's nudge counts (T9, Part 4) — consulted by `agent-service.ts` at send time. */
-export function getPreviousSendNudgeCounts(): NudgeCounts {
+function getPreviousSendNudgeCounts(): NudgeCounts {
   return { ...previousSendNudgeCounts };
 }
 
@@ -103,7 +105,7 @@ export function getPreviousSendNudgeCounts(): NudgeCounts {
  * stronger tier. (Mid-send escalation was removed: switching models inside a
  * send resets the provider's prompt-prefix cache for the whole conversation.)
  */
-export function getPreviousSendRepairCount(): number {
+function getPreviousSendRepairCount(): number {
   return previousSendRepairCount;
 }
 
@@ -113,12 +115,12 @@ export function getPreviousSendRepairCount(): number {
  * substantial mutating work (>=3 write/edit/bash calls) without ever calling
  * `todo_update`.
  */
-export function shouldNudgeTodoUpdate(mutatingCalls: number, todoUpdateCalls: number): boolean {
+function shouldNudgeTodoUpdate(mutatingCalls: number, todoUpdateCalls: number): boolean {
   return mutatingCalls >= 3 && todoUpdateCalls === 0;
 }
 
 /** Called once when the grounding linter fires a revise turn for this send (P2.2). */
-export function recordGroundingLintHit(): void {
+function recordGroundingLintHit(): void {
   current.groundingLintHits++;
 }
 
@@ -126,12 +128,12 @@ export function recordGroundingLintHit(): void {
  * Called once when the post-turn console check fires its ONE repair pass
  * (Task 13). Never touches `repairCount` — see `consoleRepairs` above.
  */
-export function recordConsoleRepair(): void {
+function recordConsoleRepair(): void {
   current.consoleRepairs++;
 }
 
 /** Called once per repeat-call-guard suppression this send (P3.2, `tool-guards.ts`). */
-export function recordLoopGuardHit(): void {
+function recordLoopGuardHit(): void {
   current.loopGuardHits++;
 }
 
@@ -141,7 +143,7 @@ export function recordLoopGuardHit(): void {
  * executions that pass the repeat-call guard (guard is outermost), not event
  * emissions which include suppressed calls. Imported directly by `api-search-tool.ts`.
  */
-export function recordGroundingToolCall(): void {
+function recordGroundingToolCall(): void {
   current.groundingToolCalls++;
 }
 
@@ -150,7 +152,7 @@ export function recordGroundingToolCall(): void {
  * this send — imported directly by `api-search-tool.ts` since that's the only
  * place both the lookup and search unavailable paths are visible (P4).
  */
-export function recordGroundingUnavailable(): void {
+function recordGroundingUnavailable(): void {
   current.groundingUnavailable++;
 }
 
@@ -159,7 +161,7 @@ export function recordGroundingUnavailable(): void {
  * send (P4, `hosted-stream.ts`'s `usage` event handling). Overwrites on every
  * call — only the LATEST completed request's latency is kept.
  */
-export function recordTurnLatency(latencyMs: number): void {
+function recordTurnLatency(latencyMs: number): void {
   current.lastTurnLatencyMs = latencyMs;
 }
 
@@ -168,7 +170,7 @@ export function recordTurnLatency(latencyMs: number): void {
  * this does NOT increment `turnIndex` — reading telemetry isn't itself a new
  * outgoing request.
  */
-export function getRepairCount(): number {
+function getRepairCount(): number {
   return current.repairCount;
 }
 
@@ -177,12 +179,12 @@ export function getRepairCount(): number {
  * bumped tier, so every request's telemetry snapshot (and the request
  * metadata sent to the server) carries it. Idempotent.
  */
-export function recordEscalation(): void {
+function recordEscalation(): void {
   current.escalated = true;
 }
 
 /** Called once per outgoing LLM request; returns the snapshot to send. */
-export function nextTurnTelemetry(): TurnTelemetry {
+function nextTurnTelemetry(): TurnTelemetry {
   current.turnIndex++;
   return { ...current };
 }
@@ -206,12 +208,12 @@ const REPAIR_MARKERS = ['[Unity compile]', '[Unity analyzers]', '[C# language se
  */
 const REPAIR_COUNT_PATTERN = /\d+\s[^\n]*?(?:error|issue)\(s\)/;
 
-export function isRepairNote(text: string): boolean {
+function isRepairNote(text: string): boolean {
   if (!REPAIR_MARKERS.some((m) => text.includes(m))) return false;
   return REPAIR_COUNT_PATTERN.test(text);
 }
 
-export function recordTelemetryEvent(event: AgentEvent): void {
+function recordTelemetryEvent(event: AgentEvent): void {
   if (event.type === 'tool_execution_end') {
     if (event.isError) {
       current.toolErrorCount++;
@@ -234,3 +236,8 @@ export function recordTelemetryEvent(event: AgentEvent): void {
     }
   }
 }
+
+return { resetTurnTelemetry, getPreviousSendNudgeCounts, getPreviousSendRepairCount, shouldNudgeTodoUpdate, recordGroundingLintHit, recordConsoleRepair, recordLoopGuardHit, recordGroundingToolCall, recordGroundingUnavailable, recordTurnLatency, getRepairCount, recordEscalation, nextTurnTelemetry, isRepairNote, recordTelemetryEvent };
+}
+
+export const { resetTurnTelemetry, getPreviousSendNudgeCounts, getPreviousSendRepairCount, shouldNudgeTodoUpdate, recordGroundingLintHit, recordConsoleRepair, recordLoopGuardHit, recordGroundingToolCall, recordGroundingUnavailable, recordTurnLatency, getRepairCount, recordEscalation, nextTurnTelemetry, isRepairNote, recordTelemetryEvent } = createTurnTelemetry();

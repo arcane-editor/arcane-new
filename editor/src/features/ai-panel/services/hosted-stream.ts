@@ -115,6 +115,14 @@ interface HostedStreamEvent {
 }
 
 export interface HostedStreamHardeningConfig {
+  /** Explicit caller identity for isolated specialists. Legacy callers use the UI store. */
+  execution?: {
+    sessionId: string;
+    mode: 'agent' | 'plan';
+    planPhase: 'executing';
+    onUsage: (input: number, output: number) => void;
+    nextTelemetry: typeof nextTurnTelemetry;
+  };
   /** Injectable for tests; defaults to global `fetch`. Production call sites never pass this. */
   fetchImpl?: typeof fetch;
   /** Total attempts (including the first) for the initial connect phase, before any SSE byte is read. Default 3. */
@@ -138,6 +146,7 @@ export interface HostedStreamHardeningConfig {
 }
 
 interface ResolvedHostedStreamConfig {
+  execution?: HostedStreamHardeningConfig['execution'];
   fetchImpl: typeof fetch;
   maxAttempts: number;
   retryBaseDelayMs: number;
@@ -186,6 +195,7 @@ function corruptionErrorEvent(
  */
 export function createHostedStreamFn(config: HostedStreamHardeningConfig = {}): StreamFn {
   const resolved: ResolvedHostedStreamConfig = {
+    execution: config.execution,
     // Bound to the global on the way in. This lands on a config object and is
     // then invoked as `cfg.fetchImpl(...)` below — a method call, so an unbound
     // `fetch` would receive `cfg` as its `this`. WKWebView (Tauri's macOS
@@ -227,6 +237,9 @@ async function doStream(
   // covers the full request including any connect retries, since a retried
   // attempt is still logically the same outgoing turn.
   const requestStartTime = Date.now();
+  const generation = useAiStore.getState().conversationGeneration;
+  const current = () => !options.signal?.aborted
+    && useAiStore.getState().conversationGeneration === generation;
 
   const token = useAuthStore.getState().token;
   if (!token) {
@@ -261,7 +274,7 @@ async function doStream(
     },
   }));
 
-  const currentMode = useAiStore.getState().mode;
+  const currentMode = cfg.execution?.mode ?? useAiStore.getState().mode;
   // Task-aware routing signals (server config/routing.ts), derived from the
   // conversation's FIRST user message so every send of a conversation routes
   // identically — provider prompt caches are per-model, so the routed model
@@ -320,19 +333,19 @@ async function doStream(
       reasoningLevel: options.reasoning ?? 'low',
       // Conversation id — the server derives provider prompt-cache routing
       // hints from it (prompt_cache_key / x-session-affinity).
-      sessionId: useAiStore.getState().sessionId ?? undefined,
+      sessionId: cfg.execution?.sessionId ?? useAiStore.getState().sessionId ?? undefined,
       // Plan-mode phase FACT (send-context.ts) — the server's routing layer
       // maps low-tier planning sends to the mid model; the editor never
       // chooses models.
-      planPhase: getSendPlanPhase(),
+      planPhase: cfg.execution?.planPhase ?? getSendPlanPhase(),
       // Difficulty FACT (difficulty.ts) — undefined outside high-tier
       // agent/plan-execution sends, or when the current in_progress/pending
       // todo carries no tag. `JSON.stringify` drops the key entirely when
       // undefined, same as `planPhase` above — the server sees no key at all
       // rather than a literal `"difficulty": null`.
-      difficulty: difficultyForRequest(options.reasoning, getSendPromptMode(), useAiStore.getState().hostedPlan),
+      difficulty: cfg.execution ? undefined : difficultyForRequest(options.reasoning, getSendPromptMode(), useAiStore.getState().hostedPlan),
       routing,
-      telemetry: nextTurnTelemetry(),
+      telemetry: (cfg.execution?.nextTelemetry ?? nextTurnTelemetry)(),
     },
   });
 
@@ -415,7 +428,7 @@ async function doStream(
       if (attemptResponse.status === 403) {
         const body = (await attemptResponse.json().catch(() => ({}))) as { error?: string; code?: string };
         if (body.error === 'email_unverified') {
-          useAiStore.getState().setVerificationRequired(true);
+          if (current()) useAiStore.getState().setVerificationRequired(true);
           throw new Error(
             'Verify your email address to use AI features. Check your inbox for the verification link.',
           );
@@ -440,10 +453,10 @@ async function doStream(
         // Never retried — a retry would just repeat the same 401.
         // Set BEFORE logout() so the notice is already in the store by the
         // time the sign-in gate replaces the timeline.
-        useAiStore
-          .getState()
-          .setAuthNotice('Your session expired and you were signed out. Sign in again to continue.');
-        await useAuthStore.getState().logout().catch(() => {});
+        if (useAuthStore.getState().token === token) {
+          if (current()) useAiStore.getState().setAuthNotice('Your session expired and you were signed out. Sign in again to continue.');
+          await useAuthStore.getState().logout().catch(() => {});
+        }
         throw new Error('Authentication expired. Please log in again.');
       }
 
@@ -737,9 +750,12 @@ async function doStream(
             // (surfaced to the server on the NEXT request, P4) and a session-
             // cumulative counter into the ai store (for later UI surfacing;
             // nothing renders it yet).
-            recordTurnLatency(Date.now() - requestStartTime);
-            useAiStore.getState().recordSessionUsage(event.input_tokens ?? 0, event.output_tokens ?? 0);
-            if (event.model) {
+            if (current()) {
+              if (!cfg.execution) recordTurnLatency(Date.now() - requestStartTime);
+              useAiStore.getState().recordSessionUsage(event.input_tokens ?? 0, event.output_tokens ?? 0);
+            }
+            cfg.execution?.onUsage(event.input_tokens ?? 0, event.output_tokens ?? 0);
+            if (event.model && !cfg.execution && current()) {
               useAiStore.getState().recordServedModel(event.model);
             }
             break;

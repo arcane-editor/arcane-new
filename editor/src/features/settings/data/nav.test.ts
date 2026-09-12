@@ -30,9 +30,10 @@ describe('filterSettings', () => {
     expect(filterSettings(SETTING_DEFINITIONS, 'Minimap').map((d) => d.key)).toContain(
       'editor.minimap',
     );
-    // Description-only term.
-    expect(filterSettings(SETTING_DEFINITIONS, 'ghost-text').map((d) => d.key)).toContain(
-      'ai.inlineSuggestions.enabled',
+    // Description-only term: "formatter" appears in the description of
+    // editor.formatOnSave and in neither its label nor its key.
+    expect(filterSettings(SETTING_DEFINITIONS, 'formatter').map((d) => d.key)).toContain(
+      'editor.formatOnSave',
     );
     // Dotted key.
     expect(filterSettings(SETTING_DEFINITIONS, 'terminal.font').map((d) => d.key)).toContain(

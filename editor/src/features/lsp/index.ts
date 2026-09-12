@@ -15,11 +15,21 @@ export { registerLspProviders, attachClientToProviders } from './services/provid
 export {
   isCsharpProjectLoaded,
   markCsharpProjectLoaded,
+  markCsharpProjectLoading,
   resetCsharpProjectLoaded,
   onCsharpProjectLoaded,
   whenCsharpProjectLoaded,
   CSHARP_READINESS_FAILSAFE_MS,
 } from './services/project-readiness';
+export {
+  isLoadStartedMessage,
+  isLoadFinishedMessage,
+} from './services/csharp-ls-log-markers';
+export {
+  setRoslynAnalyzersInjected,
+  roslynAnalyzersInjected,
+  roslynAnalyzersReporting,
+} from './services/roslyn-analyzers-state';
 export {
   requestFileDiagnostics,
   type FileDiag,
@@ -45,6 +55,8 @@ export {
   toMonacoRange,
   toLspPosition,
   toLspRange,
+  lspDocumentUri,
+  modelFilePath,
   type LspRange,
   type LspPosition,
 } from './services/model-context';

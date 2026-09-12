@@ -9,6 +9,7 @@ import { notify } from './stores/notifications';
 import { hydratePersistence } from './utils/persistence';
 import { isMac, isWindows } from './utils/platform';
 import { reportCrash } from './utils/crash-report';
+import { installExternalLinkHandler } from './utils/external-link';
 
 // Apply theme before React renders to prevent FOUC
 import { getTheme, DEFAULT_THEME_ID, applyTheme, ensureMonacoTheme } from './features/theme';
@@ -27,6 +28,13 @@ document.documentElement.dataset.os = isMac()
   : isWindows()
     ? 'windows'
     : 'linux';
+
+// Send `<a href="https://…">` to the OS browser. A webview has nowhere to open
+// a link, so without this every generated link — markdown from the AI panel,
+// the markdown preview — either navigated the app away or did nothing at all.
+// Installed here rather than in a component: it is document-level, applies to
+// BOTH views, and must be listening before the first render paints a link.
+installExternalLinkHandler();
 
 // Global error handlers
 //

@@ -29,7 +29,7 @@ interface FileExcerptBlockProps {
    *  read-only rows. Every excerpt of a hot file is hot — see `ExcerptList`. */
   hotExcerptIds: string[];
   registry: SearchModelRegistry;
-  onFirstEdit: (filePath: string, content: string) => void;
+  onFirstEdit: (filePath: string, content: string, diskContent?: string) => void;
   /** Registers/clears a hydrated excerpt's live editor instance with the
    *  list, so `openActiveExcerpt` (Enter/alt+Enter) can read its real cursor
    *  position instead of a caret probe. See `ExcerptList`. */

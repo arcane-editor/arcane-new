@@ -26,11 +26,11 @@
 //! is left is reading a file we shipped and writing files into a directory we
 //! own, which is the whole job.
 //!
-//! **What it deliberately does not do.** It never overrides a `csharp-ls` the
-//! user already has — [`resolve_existing`] checks their install first and the
-//! managed copy last, so nobody's working setup changes underneath them.
+//! The managed, pinned copy takes precedence over automatic global/PATH
+//! discovery. An explicit path override still wins. Global tools are never
+//! overwritten; incompatible automatic discoveries trigger managed provisioning.
 //!
-//! **The prerequisite that is easy to get wrong.** csharp-ls 0.22.0 targets
+//! **The prerequisite that is easy to get wrong.** csharp-ls 0.27.0 targets
 //! `net10.0`, so "has dotnet" is not the requirement — the .NET 10 *runtime*
 //! is, plus an SDK on top of that because the server loads projects through
 //! MSBuildLocator. Both are probed before installing and each gets its own
@@ -49,13 +49,13 @@ use tokio::sync::Mutex;
 /// [`REQUIRED_RUNTIME_MAJOR`] if the new release retargets. The version is
 /// also load-bearing for `project-readiness.ts`, which parses log lines this
 /// release emits — see the notes there before moving it.
-pub const CSHARP_LS_VERSION: &str = "0.22.0";
+pub const CSHARP_LS_VERSION: &str = "0.27.0";
 
 /// The NuGet package id, which is also the command name users know.
 const PACKAGE_ID: &str = "csharp-ls";
 
 /// Major version of `Microsoft.NETCore.App` the pinned tool needs. Tied to
-/// the tool package's target framework: 0.22.0 ships `tools/net10.0/any`, so
+/// the tool package's target framework: 0.27.0 ships `tools/net10.0/any`, so
 /// a machine with only .NET 8 unpacks it fine and then cannot run it.
 const REQUIRED_RUNTIME_MAJOR: u32 = 10;
 
@@ -184,28 +184,33 @@ pub enum Source {
 
 /// Locate an existing csharp-ls, in precedence order.
 ///
-/// The user's own install wins over ours on purpose. Someone who ran
-/// `dotnet tool install -g csharp-ls`, or who pinned a build for a reason we
-/// cannot see, must not have that silently replaced by an app update.
+/// An explicit override wins; otherwise prefer the version this app verifies.
+/// An unrelated global tool can predate the project's required LSP features.
 pub fn resolve_existing() -> Option<(ServerLaunch, Source)> {
-    if let Some(raw) = std::env::var_os(PATH_OVERRIDE_ENV) {
-        let p = PathBuf::from(raw);
-        if p.is_file() {
-            return Some((ServerLaunch::Executable(p), Source::Override));
-        }
+    select_existing(
+        std::env::var_os(PATH_OVERRIDE_ENV).map(PathBuf::from).filter(|p| p.is_file()),
+        managed_version_dir().as_deref().and_then(entry_point_in),
+        global_tool_binary().filter(|p| p.is_file()),
+        path_binary(),
+    )
+}
+
+fn select_existing(explicit: Option<PathBuf>, managed: Option<PathBuf>, user: Option<PathBuf>, path: Option<PathBuf>) -> Option<(ServerLaunch, Source)> {
+    explicit.map(|p| (ServerLaunch::Executable(p), Source::Override))
+        .or_else(|| managed.map(|p| (ServerLaunch::DotnetDll(p), Source::Managed)))
+        .or_else(|| user.map(|p| (ServerLaunch::Executable(p), Source::User)))
+        .or_else(|| path.map(|p| (ServerLaunch::Executable(p), Source::Path)))
+}
+
+async fn compatible_existing() -> Option<(ServerLaunch, Source)> {
+    let (launch, source) = resolve_existing()?;
+    if matches!(source, Source::User | Source::Path) {
+        let output = tokio::time::timeout(std::time::Duration::from_secs(5),
+            crate::process_util::async_command(launch.path()).arg("--version").kill_on_drop(true).output()
+        ).await.ok()?.ok()?;
+        if !output.status.success() || !version_output_matches(&String::from_utf8_lossy(&output.stdout)) { return None; }
     }
-    if let Some(p) = global_tool_binary() {
-        if p.is_file() {
-            return Some((ServerLaunch::Executable(p), Source::User));
-        }
-    }
-    if let Some(p) = path_binary() {
-        return Some((ServerLaunch::Executable(p), Source::Path));
-    }
-    if let Some(dll) = managed_version_dir().as_deref().and_then(entry_point_in) {
-        return Some((ServerLaunch::DotnetDll(dll), Source::Managed));
-    }
-    None
+    Some((launch, source))
 }
 
 /// The bundled nupkg, if it shipped with this build.
@@ -334,7 +339,7 @@ pub(crate) fn parse_max_runtime_major(stdout: &str) -> Option<u32> {
 
 /// True if `--version` reported the pinned version.
 ///
-/// Verbatim shape: `csharp-ls, 0.22.0.0` — a four-part assembly version, so
+/// Verbatim shape: `csharp-ls, 0.27.0.0` — a four-part assembly version, so
 /// this is a prefix match against the three-part package version.
 pub(crate) fn version_output_matches(stdout: &str) -> bool {
     stdout
@@ -359,7 +364,7 @@ pub struct InstallError {
 }
 
 impl InstallError {
-    fn new(code: &str, message: impl Into<String>) -> Self {
+    pub(crate) fn new(code: &str, message: impl Into<String>) -> Self {
         Self { code: code.to_string(), message: message.into() }
     }
 }
@@ -717,7 +722,7 @@ pub struct CsharpLsStatus {
 
 #[tauri::command]
 pub async fn csharp_ls_status() -> CsharpLsStatus {
-    let existing = resolve_existing();
+    let existing = compatible_existing().await;
     let dotnet = probe_dotnet().await;
     let can_install = dotnet.present
         && dotnet.has_sdk
@@ -742,7 +747,7 @@ pub async fn csharp_ls_install(
 ) -> Result<String, InstallError> {
     // Serialized so two windows cannot unpack into the same directory.
     let _guard = state.0.lock().await;
-    if let Some((launch, _)) = resolve_existing() {
+    if let Some((launch, _)) = compatible_existing().await {
         return Ok(launch.path().to_string_lossy().into_owned());
     }
     let path = install(&app).await?;
@@ -752,6 +757,19 @@ pub async fn csharp_ls_install(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn managed_server_wins_over_automatic_global_discovery_but_not_an_explicit_override() {
+        let managed = PathBuf::from("managed/CSharpLanguageServer.dll");
+        let global = PathBuf::from("global/csharp-ls");
+        let explicit = PathBuf::from("custom/csharp-ls");
+        let (launch, source) = select_existing(None, Some(managed.clone()), Some(global.clone()), None).unwrap();
+        assert_eq!(source, Source::Managed);
+        assert_eq!(launch.path(), managed);
+        let (launch, source) = select_existing(Some(explicit.clone()), Some(managed), Some(global), None).unwrap();
+        assert_eq!(source, Source::Override);
+        assert_eq!(launch.path(), explicit);
+    }
 
     /// Verbatim `dotnet --list-runtimes` from a .NET 10 macOS install.
     const RUNTIMES_NET10: &str = "\
@@ -827,11 +845,16 @@ Microsoft.WindowsDesktop.App 10.0.4 [C:\\Program Files\\dotnet\\shared\\Microsof
 
     #[test]
     fn accepts_the_pinned_version_banner() {
-        assert!(version_output_matches("csharp-ls, 0.22.0.0\n"));
+        assert!(version_output_matches("csharp-ls, 0.27.0.0\n"));
     }
 
     #[test]
     fn rejects_a_different_version() {
+        // 0.22.0 is listed explicitly: it is the version this app shipped
+        // before, and the one a developer is most likely to still have
+        // unpacked in their data directory. Accepting it would mean running a
+        // server with no analyzer support while every check reported success.
+        assert!(!version_output_matches("csharp-ls, 0.22.0.0\n"));
         assert!(!version_output_matches("csharp-ls, 0.21.0.0\n"));
         assert!(!version_output_matches(""));
         assert!(!version_output_matches("csharp-ls"));
@@ -979,6 +1002,44 @@ Microsoft.WindowsDesktop.App 10.0.4 [C:\\Program Files\\dotnet\\shared\\Microsof
             .filter(|n| n.contains(".tmp-"))
             .collect();
         assert!(leftovers.is_empty(), "staging left behind: {leftovers:?}");
+    }
+
+    /// Provision the managed copy for real, into the directory the app uses.
+    ///
+    /// Opt-in via `UNITYIDE_PROVISION_MANAGED=1`, and inert otherwise — it is
+    /// the one test here that writes outside a tempdir.
+    ///
+    /// It exists because of what happens on the FIRST run after the pin moves:
+    /// the app provisions the new server on its next C# start, but
+    /// `verify:intellisense` runs before that and finds nothing to probe, so
+    /// the gate prints SKIPPED at exactly the moment an upgrade most needs
+    /// checking. The probe invokes this so it can verify the server this build
+    /// actually pins, on a machine where the app has not been launched since.
+    ///
+    /// Deliberately the same `install_into` the app calls, not a
+    /// reimplementation: a provisioning path only the probe uses would prove
+    /// nothing about the one users get.
+    #[tokio::test]
+    async fn provisions_the_pinned_server_into_the_managed_directory() {
+        if std::env::var("UNITYIDE_PROVISION_MANAGED").as_deref() != Ok("1") {
+            eprintln!(
+                "SKIPPED provisioning the managed csharp-ls: \
+                 set UNITYIDE_PROVISION_MANAGED=1 to install it for real"
+            );
+            return;
+        }
+        let Some((dotnet_dir, nupkg)) = e2e_prerequisites() else { return };
+        let root = managed_root().expect("a data directory");
+
+        let dll = install_into(&dotnet_dir, &root, &nupkg, |_, _| {})
+            .await
+            .expect("provision the bundled package into the managed directory");
+
+        assert!(dll.is_file(), "entry assembly should exist at {}", dll.display());
+        verify_server(&dll, &dotnet_dir)
+            .await
+            .expect("the provisioned server should run and report the pinned version");
+        eprintln!("provisioned csharp-ls {CSHARP_LS_VERSION} at {}", dll.display());
     }
 
     /// Only the tool payload is unpacked, flattened. Packaging metadata

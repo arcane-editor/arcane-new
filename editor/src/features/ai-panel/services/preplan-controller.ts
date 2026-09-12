@@ -73,6 +73,8 @@ export interface AgentModeDeps {
   getAiState: () => PreplanAiState;
   getServerConfig: () => ServerConfig | null;
   getAgentService: () => PreplanAgentService;
+  usesCoordinator?: () => boolean;
+  isCurrent?: () => boolean;
 }
 
 /** "hostedPlan has no non-done items" — the same predicate `preplan-route.ts`
@@ -92,6 +94,7 @@ export async function runAgentModeSend(
   text: string,
   attachments: Attachment[] = [],
 ): Promise<void> {
+  if (deps.isCurrent?.() === false) return;
   const state = deps.getAiState();
   // Caller guarantees: ChatInput's handleSubmit only reaches the agent-mode
   // branch for `mode === 'agent'` on the UnityIDE backend (it already returns
@@ -105,7 +108,7 @@ export async function runAgentModeSend(
 
   const effort = state.effort;
   const agentService = deps.getAgentService();
-  const decision = routeAgentSend(shouldPreplanTier(deps.getServerConfig(), effort), state.hostedPlan);
+  const decision = routeAgentSend(!deps.usesCoordinator?.() && shouldPreplanTier(deps.getServerConfig(), effort), state.hostedPlan);
 
   if (decision === 'execute') {
     await agentService.sendMessage(text, { mode: 'agent', effort, attachments });
@@ -117,7 +120,7 @@ export async function runAgentModeSend(
   // (turn-governor.ts's module header, SUBMIT SCOPE) — bracket the whole
   // chain so `resetTurnGovernor()` between send 1 and send 2 (agent-service's
   // `runSend`, same call site as always) leaves the running count alone.
-  beginSubmitBudget();
+  const budget = beginSubmitBudget();
   try {
     // Send 1: read-only exploration + exactly one todo_update call.
     await agentService.sendMessage(text, {
@@ -130,7 +133,7 @@ export async function runAgentModeSend(
     // Chain-guards: each one on its own must prevent (or redirect) send 2.
     //
     // (i) The user stopped the preplanning turn — nothing more to chain into.
-    if (agentService.wasLastSendAborted()) return;
+    if (deps.isCurrent?.() === false || agentService.wasLastSendAborted()) return;
 
     // (ii) The preplanning turn errored — the T5 choke point's outcome
     // inspection appends a `role: 'error'` message for every error/crash tail
@@ -165,11 +168,12 @@ export async function runAgentModeSend(
       promptMode: 'agent',
     });
   } finally {
-    endSubmitBudget();
+    endSubmitBudget(budget);
   }
 }
 
 async function liveDeps(): Promise<AgentModeDeps> {
+  const [{ useSettingsStore }, { useProjectContextStore }] = await Promise.all([import('../../../stores/settings'), import('../../../stores/project-context')]);
   const [{ useAiStore }, { useServerConfigStore }, { getAgentService }] = await Promise.all([
     import('../../../stores/ai'),
     import('../../../stores/server-config'),
@@ -179,11 +183,14 @@ async function liveDeps(): Promise<AgentModeDeps> {
     getAiState: () => useAiStore.getState(),
     getServerConfig: () => useServerConfigStore.getState().config,
     getAgentService: () => getAgentService(),
+    usesCoordinator: () => useProjectContextStore.getState().isUnityProject && useSettingsStore.getState().getSetting('ai.specialists.enabled') === true,
   };
 }
 
 export const agentModeController = {
-  async sendAgentModeMessage(text: string, attachments: Attachment[] = []): Promise<void> {
-    await runAgentModeSend(await liveDeps(), text, attachments);
+  async sendAgentModeMessage(text: string, attachments: Attachment[] = [], isCurrent: () => boolean = () => true): Promise<void> {
+    const deps = await liveDeps();
+    if (!isCurrent()) return;
+    await runAgentModeSend({ ...deps, isCurrent }, text, attachments);
   },
 };

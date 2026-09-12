@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import type { ConsoleSnapshot, UnityLogType } from '../../../types/unity';
+import type { AuthoringOperation, AutomationReport, GameplayScenario } from '../../../types/automation';
 
 /**
  * Typed wrappers over the `unity_ipc_request` Tauri command, which sends an
@@ -109,6 +110,18 @@ export interface DebuggerEndpoint {
   host: string;
   port: number;
   pid: number;
+}
+
+/**
+ * The Editor's managed-code optimization mode.
+ *
+ * `release` is Unity's default since 2020.1 and is the single most common
+ * reason a correctly attached debugger still behaves badly.
+ */
+export interface CodeOptimization {
+  /** False on Editors predating the setting — nothing to fix. */
+  supported: boolean;
+  mode: 'debug' | 'release';
 }
 
 /** A GameObject in a loaded scene, addressed by instance id or hierarchy path. */
@@ -230,6 +243,13 @@ export interface SetSerializedPropertyResult {
 const ATTACH_UI_DOCUMENT_TIMEOUT_MS = 30_000;
 
 export const bridgeRpc = {
+  author: (operation: AuthoringOperation) => rpc<AutomationReport>('authorScene', { ...operation }, 120_000),
+  authorStatus: (operationId: string) => rpc<AutomationReport>('getAuthoringStatus', { operationId }),
+  verifyScene: (scenePath: string, requireAuthoredLevel = false) => rpc<AutomationReport>('verifySavedScene', { scenePath, requireAuthoredLevel }, 30_000),
+  startPlaytest: (operationId: string, scenario: GameplayScenario, taskId: string) => rpc<AutomationReport>('startPlaytest', { operationId, scenario, taskId }),
+  automationState: () => rpc<{ activePlaytest?: string; taskId?: string }>('getAutomationState', {}),
+  playtestStatus: (operationId: string, includeCaptures = false) => rpc<AutomationReport>('getPlaytestStatus', { operationId, includeCaptures }),
+  cancelPlaytest: (operationId: string) => rpc<AutomationReport>('cancelPlaytest', { operationId }),
   getEditorState: () => rpc<EditorState>('getEditorState'),
   getSceneHierarchy: () => rpc<SceneHierarchy>('getSceneHierarchy'),
   getGameObject: (target: { instanceId?: number; path?: string }) =>
@@ -280,6 +300,23 @@ export const bridgeRpc = {
   setExternalScriptEditor: (path: string) =>
     rpc<{ ok: boolean }>('setExternalScriptEditor', { path }),
   getDebuggerEndpoint: () => rpc<DebuggerEndpoint>('getDebuggerEndpoint'),
+  /**
+   * Whether the Editor's own managed code is compiled for debugging.
+   *
+   * Unity 2020.1+ starts in Release, where the JIT discards locals and folds
+   * statements: breakpoints land in odd places and variables read as
+   * unavailable. Nothing surfaces this — it simply looks like a broken
+   * debugger. `supported: false` means the Editor predates the setting, so
+   * there is nothing to fix.
+   */
+  getCodeOptimization: () => rpc<CodeOptimization>('getCodeOptimization'),
+  /**
+   * Switch the Editor's code optimization. This costs a domain reload, so it
+   * is offered to the user rather than done on their behalf; `reloads` says
+   * whether one is actually coming.
+   */
+  setCodeOptimization: (mode: 'debug' | 'release') =>
+    rpc<CodeOptimization & { ok: boolean; reloads: boolean }>('setCodeOptimization', { mode }),
   /**
    * Ask Unity to run tests. Queued on the Unity side (protocol 4+): this
    * resolves once the ask is ACCEPTED, not once the run finishes — the real

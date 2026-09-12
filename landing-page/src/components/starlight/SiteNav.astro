@@ -1,0 +1,64 @@
+---
+/**
+ * The marketing nav, injected into Starlight's header.
+ *
+ * Mounted through the `SocialIcons` slot rather than by replacing `Header.astro`
+ * outright: that slot already sits in the header's `.right-group`, which
+ * Starlight hides below 50rem and which keeps search and the mobile menu
+ * working. Nothing about the header's grid has to be rebuilt.
+ *
+ * Before this, the only way out of the docs and back into the product was the
+ * logo. Sixteen pages, one exit.
+ */
+import { docsNavLinks, DOWNLOAD_HREF } from '../../lib/site-nav';
+---
+
+<nav class="site-nav" aria-label="Site">
+  {docsNavLinks.map((link) => <a href={link.href}>{link.label}</a>)}
+  <a href="/auth">Sign in</a>
+  <a href={DOWNLOAD_HREF} class="site-nav-cta">Download</a>
+</nav>
+
+<style>
+  .site-nav {
+    display: flex;
+    align-items: center;
+    gap: 1.25rem;
+    font-family: var(--sans);
+    font-size: 0.875rem;
+  }
+
+  .site-nav a {
+    color: var(--mute);
+    text-decoration: none;
+    white-space: nowrap;
+    transition: color 0.15s ease;
+  }
+
+  .site-nav a:hover {
+    color: var(--text);
+  }
+
+  /* Candle gold, matching `Navbar.tsx`'s `variant="hero"` exactly (#D4B062 is
+     `--primary` from global.css). The five-hue rule governs the CONTENT of a
+     docs page, where gold means "modified"; the header is site chrome, and site
+     chrome has spoken gold on every other page of unityide.app for as long as
+     there has been a Download button. A reader crossing from /pricing into
+     /docs should not have to find a differently coloured version of the same
+     button. */
+  .site-nav a.site-nav-cta {
+    padding: 0.375rem 0.75rem;
+    border-radius: 6px;
+    background: #d4b062;
+    font-weight: 600;
+    /* Qualified with the element on purpose. `.site-nav a` above is (0,1,1) and
+       would beat a bare `.site-nav-cta` at (0,1,0) — which is how this button
+       first rendered in --mute on gold, at about 1.9:1. */
+    color: #100e14;
+  }
+
+  .site-nav a.site-nav-cta:hover {
+    background: #e8c97d;
+    color: #100e14;
+  }
+</style>

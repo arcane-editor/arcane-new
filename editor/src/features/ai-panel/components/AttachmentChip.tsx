@@ -8,12 +8,23 @@
  * most disambiguating — segment survives the truncation.
  */
 
-import { BookOpen, ClipboardList, Image as ImageIcon, Boxes, Box, X } from 'lucide-react';
+import {
+  BookOpen,
+  ClipboardList,
+  Image as ImageIcon,
+  Boxes,
+  Box,
+  CircleAlert,
+  TriangleAlert,
+  X,
+} from 'lucide-react';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { useWorkspaceStore } from '../../../stores/workspace';
 import { useAiStore } from '../../../stores/ai';
 import { FileIcon } from '../../../utils/file-icons';
 import { pasteChipLabel } from '../data/paste-chip';
+import { buildErrorReport } from '../data/error-report';
+import { revealErrorSource } from '../services/attach-errors';
 import type { Attachment } from '../services/types';
 
 interface Props {
@@ -38,6 +49,11 @@ function AttachmentChip({ attachment: a, removable = true }: Props) {
       openFile(a.path, a.relPath.split('/').pop() ?? a.relPath);
     } else if (a.kind === 'unity-doc') {
       openUrl(a.url).catch(() => {});
+    } else if (a.kind === 'error-report') {
+      // Reveal the panel it came from, rather than opening one arbitrary file
+      // out of N — the chip stands for the SET, and the set is what that panel
+      // shows.
+      revealErrorSource(a.source).catch(() => {});
     }
     // Image: lightbox in Phase 8 polish; no-op for now.
   }
@@ -103,6 +119,33 @@ function AttachmentChip({ attachment: a, removable = true }: Props) {
       preview = a.text.split('\n', 1)[0].trim().slice(0, 80);
       title = a.text.slice(0, 400) + (a.text.length > 400 ? '\n…' : '');
       break;
+    case 'unity-evidence': {
+      icon = <ClipboardList size={12} />;
+      label = a.evidence.label;
+      title = `${a.evidence.label} · ${a.evidence.capturedAt}`;
+      break;
+    }
+    case 'error-report': {
+      const report = buildErrorReport(a.source, a.entries, a.capturedAt);
+      const allErrors = a.entries.every((e) => e.severity === 'error');
+      icon = allErrors ? (
+        <CircleAlert size={12} style={{ color: 'var(--error-text)' }} />
+      ) : (
+        <TriangleAlert size={12} style={{ color: 'var(--warning)' }} />
+      );
+      label = report.label;
+      // Same reasoning as `pasted-text`: three chips reading "3 errors" say
+      // nothing, and an error is identified by how it STARTS — so `preview`,
+      // which truncates from the end, not `dir`, which truncates from the left.
+      preview = report.body.split('\n', 1)[0].trim().slice(0, 80);
+      title =
+        report.body.slice(0, 400) +
+        (report.body.length > 400 ? '\n…' : '') +
+        (a.source === 'unity-console'
+          ? '\n\nClick to show in the Unity Console'
+          : '\n\nClick to show in Problems');
+      break;
+    }
   }
 
   return (

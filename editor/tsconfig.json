@@ -27,6 +27,23 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src"],
+  // `scripts` is included, and that is not cosmetic: nothing typechecked it
+  // before, and bun strips types without checking them, so the verification
+  // script — the one whose entire job is to notice when something is quietly
+  // broken — ran for its whole life unchecked.
+  //
+  // Only `.ts` files, and not the handful of tests that import a sibling
+  // `.mjs`: those modules are plain JavaScript with no declarations, and
+  // `allowJs` would pull every `.mjs` in the tree into the program for no
+  // benefit. They are covered by `bun test scripts`.
+  "include": ["src", "scripts/**/*.ts"],
+  "exclude": [
+    "scripts/check-deep-modules.test.ts",
+    "scripts/check-invoke-args.test.ts",
+    "scripts/editable-fields.test.ts",
+    "scripts/unity-extension-channel.test.ts",
+    "scripts/update-manifest.test.ts",
+    "scripts/version-sync.test.ts"
+  ],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

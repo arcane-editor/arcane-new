@@ -162,7 +162,7 @@ function ExcerptList({ sessionId }: ExcerptListProps) {
   // needs to change if the tab itself changes — and it must otherwise stay
   // stable, since `HydratedExcerpt`'s mount effect (Task 8) depends on it and
   // would otherwise remount every hot editor on unrelated re-renders.
-  const onFirstEdit = useCallback((filePath: string, content: string) => {
+  const onFirstEdit = useCallback((filePath: string, content: string, diskContent?: string) => {
     const workspace = useWorkspaceStore.getState();
     if (workspace.openFiles.some((f) => f.path === filePath)) {
       // Already a tab — the existing dirty/LSP path owns it.
@@ -171,7 +171,7 @@ function ExcerptList({ sessionId }: ExcerptListProps) {
       // The tab now owns the model and its unsaved changes, so search must
       // stop treating it as disposable.
       registryRef.current.transfer(filePath);
-      workspace.openFileInBackground(filePath, content);
+      workspace.openFileInBackground(filePath, content, diskContent);
     }
 
     // Record the edit regardless of which branch above ran — the "N

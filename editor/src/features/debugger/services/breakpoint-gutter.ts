@@ -3,6 +3,7 @@ import type { editor as MonacoEditor } from 'monaco-editor';
 import { useDebugStore } from '../../../stores/debug';
 import { useSettingsStore } from '../../../stores/settings';
 import { useProjectContextStore } from '../../../stores/project-context';
+import { pathFromFileUri } from '../../../utils/file-uri';
 
 /**
  * Wires Monaco's glyph margin to the debug store: click the margin to toggle a
@@ -10,11 +11,21 @@ import { useProjectContextStore } from '../../../stores/project-context';
  * once per mounted editor (the editor swaps models per tab, so we re-render on
  * model change). No-op for non-Unity projects or when debugging is disabled.
  */
+
+/**
+ * The OS path behind a Monaco model.
+ *
+ * Uses the shared `pathFromFileUri` rather than stripping the scheme by hand.
+ * The hand-rolled version here produced `/C:/Users/...` on Windows — a leading
+ * slash that matches no path the debugger ever sees, so breakpoints keyed by it
+ * silently belonged to a file that does not exist. It is the same bug class
+ * CLAUDE.md documents costing months of dead C# IntelliSense.
+ */
 function modelFilePath(model: MonacoEditor.ITextModel | null): string | null {
   if (!model) return null;
   const uri = model.uri.toString();
   if (!uri.startsWith('file://')) return null;
-  return decodeURIComponent(uri.replace(/^file:\/\//, ''));
+  return pathFromFileUri(uri);
 }
 
 export function attachBreakpointGutter(

@@ -22,13 +22,13 @@ const SRC = readFileSync(path.resolve(import.meta.dir, './agent-service.ts'), 'u
 describe('agent-service.ts — createToolsForPromptMode wiring (Task 11)', () => {
   it('takes an `effort` parameter', () => {
     expect(SRC).toMatch(
-      /function createToolsForPromptMode\(mode: PromptMode, workspacePath: string, effort: Effort\)/,
+      /function createToolsForPromptMode\(mode: PromptMode, workspacePath: string, effort: Effort, execution\?/,
     );
   });
 
   it("has its own early-return branch for 'preplanning' (read-only + ask_user + todo, no write/edit/bash)", () => {
     const match = SRC.match(
-      /if \(mode === 'preplanning'\) \{\s*return \[([\s\S]*?)\]\.map\(\(t\) => withRepeatCallGuard\(t, workspacePath\)\);\s*\}/,
+      /if \(mode === 'preplanning'\) \{\s*return \[([\s\S]*?)\]\.map\(\(t\) => guardRepeat\(t, workspacePath\)\);\s*\}/,
     );
     expect(match).not.toBeNull();
     const branch = match![1];
@@ -78,7 +78,7 @@ describe('agent-service.ts — TODO_NUDGE_TEXT gating (Task 11)', () => {
 
 describe('agent-service.ts — wasLastSendAborted (Task 11)', () => {
   it('exposes wasLastSendAborted() returning the persisted abortRequested flag', () => {
-    expect(SRC).toMatch(/wasLastSendAborted\(\): boolean \{\s*return this\.abortRequested;\s*\}/);
+    expect(SRC).toMatch(/wasLastSendAborted\(\): boolean \{\s*return this\.abortRequested \|\| !this\.belongsToCurrentConversation\(\);\s*\}/);
   });
 
   it('abortRequested is reset at the top of every sendMessage (survives until the NEXT send starts)', () => {
@@ -106,16 +106,16 @@ describe('agent-service.ts — turn governor wiring (Task 3)', () => {
 
   it('reports live progress onto the ai store for the working-row count', () => {
     expect(SRC).toContain(
-      'onProgress: (used, cap) => useAiStore.getState().setModelCallBudget({ used, cap }),',
+      'onProgress: (used, cap) => this.belongsToCurrentConversation() && useAiStore.getState().setModelCallBudget({ used, cap }),',
     );
   });
 
   it('pushes the soft-limit and cap-reached notices as system messages', () => {
     expect(SRC).toContain(
-      "onSoftLimit: (_effort, used, cap) => useAiStore.getState().addSystemMessage(softLimitNotice(used, cap)),",
+      "onSoftLimit: (_effort, used, cap) => this.belongsToCurrentConversation() && useAiStore.getState().addSystemMessage(softLimitNotice(used, cap)),",
     );
     expect(SRC).toContain(
-      "onCapReached: (_effort, cap) => useAiStore.getState().addSystemMessage(capReachedNotice(cap)),",
+      "onCapReached: (_effort, cap) => this.belongsToCurrentConversation() && useAiStore.getState().addSystemMessage(capReachedNotice(cap)),",
     );
   });
 
@@ -194,7 +194,7 @@ describe('agent-service.ts — Unity subsystem tools', () => {
   it('leaves bash out of design mode', () => {
     // bash bypasses the checkpoint, the approval gate and every asset check.
     const design = SRC.slice(SRC.indexOf("if (mode === 'ui-design')"));
-    const branch = design.slice(0, design.indexOf('withRepeatCallGuard'));
+    const branch = design.slice(0, design.indexOf('guardRepeat'));
     expect(branch).not.toContain('createBashTool');
   });
 
@@ -209,7 +209,7 @@ describe('agent-service.ts — Unity subsystem tools', () => {
   it('registers their writes with the verified pass and the buffer reload', () => {
     // bash already bypasses both and is documented as doing so; a second
     // silent bypass is exactly what this wiring exists to prevent.
-    expect(SRC).toMatch(/onWrite: \(path\) => \{[\s\S]*?recordTouchedFile\(abs\);[\s\S]*?onFileWritten\(abs\);/);
+    expect(SRC).toMatch(/onWrite: \(path\) => \{[\s\S]*?recordWrite\(abs\);[\s\S]*?onFileWritten\(abs\);/);
   });
 
   it('gates them on the project being a Unity one, like every other Unity tool', () => {
@@ -408,7 +408,7 @@ describe('agent-service.ts — post-turn console check (Task 13)', () => {
     const method = SRC.match(/private async runConsoleCheck\([\s\S]*?\n  \}\n/)![0];
     const promptIdx = method.indexOf('buildConsoleRepairPrompt({');
     const abortIdx = method.indexOf('if (this.abortRequested) {');
-    const secondPassIdx = method.indexOf('secondPass = await runVerifiedPass(workspacePath);');
+    const secondPassIdx = method.indexOf('secondPass = await runVerifiedPass(workspacePath,');
     expect(abortIdx).toBeGreaterThan(promptIdx);
     expect(secondPassIdx).toBeGreaterThan(abortIdx);
     expect(method).toContain(
@@ -472,7 +472,7 @@ describe('agent-service.ts — design-mode context and closing checks', () => {
   it('does not trigger a Unity recompile for a turn that touched no C#', () => {
     // `computeCompile` waits on a real recompile rather than reading a cached
     // verdict, and a `.uxml`/`.uss` turn cannot have introduced a compile error.
-    expect(SRC).toMatch(/runVerifiedPass\(workspacePath, undefined, \{ skipCompile: isDesign \}\)/);
+    expect(SRC).toMatch(/runVerifiedPass\(workspacePath, undefined, \{ skipCompile: isDesign, signal: this\.closingAbort\.signal \}\)/);
   });
 
   it('drops the cached C# usage map when a script is written or edited', () => {

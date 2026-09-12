@@ -1,0 +1,89 @@
+bun test v1.2.11 (cb6abd21)
+
+../../../../../../private/tmp/unityide-review/workspace.exec.ts:
+[LSP] didOpen sent {
+  filePath: "/ws/Player.cs",
+  uri: "file:///ws/Player.cs",
+  languageId: "csharp",
+}
+REPRO duplicate open: 2 tabs; closing both leaves 1 LSP document tracked
+(pass) Review reproductions of CURRENT behavior (not desired behavior) > two overlapping opens append duplicate tabs and leave an LSP open after close [2.08ms]
+[LSP] didOpen sent {
+  filePath: "/ws/Player.cs",
+  uri: "file:///ws/Player.cs",
+  languageId: "csharp",
+}
+REPRO rename: old URI tracked; new URI untracked; didChange dropped; old model not disposed
+(pass) Review reproductions of CURRENT behavior (not desired behavior) > renaming an open C# file does not transfer LSP tracking; edits are dropped
+[LSP] didOpen sent {
+  filePath: "/ws/Player.cs",
+  uri: "file:///ws/Player.cs",
+  languageId: "csharp",
+}
+REPRO delete: no visible tab, no model disposal, no didClose
+(pass) Review reproductions of CURRENT behavior (not desired behavior) > deleting an open file bypasses model disposal and didClose [0.31ms]
+[LSP] didOpen sent {
+  filePath: "/ws/Player.cs",
+  uri: "file:///ws/Player.cs",
+  languageId: "csharp",
+}
+REPRO external conflict: externalChange overwritten without a disk comparison
+(pass) Review reproductions of CURRENT behavior (not desired behavior) > saving a dirty buffer silently overwrites a newer external disk version [0.18ms]
+
+ 4 pass
+ 0 fail
+ 12 expect() calls
+Ran 4 tests across 1 files. [207.00ms]
+
+bun test v1.2.11 (cb6abd21)
+
+../../../../../../private/tmp/unityide-review/format.exec.ts:
+REPRO stale formatter: the newly typed y was replaced by old x
+(pass) REPRO: formatting applies a response for version 1 over a typed version 2 [2.31ms]
+
+ 1 pass
+ 0 fail
+ 2 expect() calls
+Ran 1 tests across 1 files. [111.00ms]
+
+bun test v1.2.11 (cb6abd21)
+
+../../../../../../private/tmp/unityide-review/cards.exec.tsx:
+CONFIRMED historical card with absent subsystem fields renders after migration
+(pass) existing migration repairs the historical missing-problems crash [7.28ms]
+REPRO malformed card: uiToolkit:null survives parsing and throws reading problems
+(pass) REPRO robustness gap: null subsystem field survives restore and crashes the actual component [0.67ms]
+
+ 2 pass
+ 0 fail
+ 3 expect() calls
+Ran 2 tests across 1 files. [59.00ms]
+
+bun test v1.2.11 (cb6abd21)
+
+../../../../../../private/tmp/unityide-review/composer.exec.ts:
+REPRO keyboard submit: user bubble recorded and attachments cleared, but backend refuses busy turn
+(pass) REPRO running composer accepts keyboard submit and clears attachments before service refuses [5.05ms]
+
+ 1 pass
+ 0 fail
+ 3 expect() calls
+Ran 1 tests across 1 files. [182.00ms]
+
+bun test v1.2.11 (cb6abd21)
+
+../../../../../../private/tmp/unityide-review/lifecycle.exec.ts:
+REPRO stale completion: old session verification was appended to new-session after dispose
+(pass) REPRO New Chat during closing verification receives the disposed turn card [2.32ms]
+
+ 1 pass
+ 0 fail
+ 4 expect() calls
+Ran 1 tests across 1 files. [121.00ms]
+
+Browser fixture (Codex in-app browser, 2026-09-10):
+Before maximize: "unfinished Unity prompt"
+After maximize: ""
+Crash fallback visible: true
+After hide/reopen, error fallback remains: true
+After hide/reopen, composer restored: false

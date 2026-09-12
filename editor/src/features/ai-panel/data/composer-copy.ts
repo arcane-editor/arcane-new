@@ -28,6 +28,14 @@ export interface PlaceholderInput {
   planRoute: 'revise' | 'resume' | 'plan';
   /** The agent is blocked on an `ask_user` question, so typing answers it. */
   pendingQuestion: boolean;
+  /**
+   * How many errors are staged as context right now — from "Ask AI" on the
+   * Problems panel or the Unity Console. A placeholder, never a prefill:
+   * `ai-compose-prefill` REPLACES the composer's text, which would destroy a
+   * half-typed message, and a prefilled sentence is one the user has to
+   * delete.
+   */
+  errorAttachmentCount: number;
 }
 
 /** Shown in place of the agent's name when we have nothing better. */
@@ -40,6 +48,15 @@ export function composerPlaceholder(input: PlaceholderInput): string {
   // matter which agent asked it or what mode is selected behind it.
   if (input.pendingQuestion) {
     return "Answer the agent's question — or click an option above.";
+  }
+
+  // Ranked above the agent/mode branches: the errors just staged are the most
+  // specific and most recent fact about this send. The sentence deliberately
+  // claims nothing about which agent or mode receives it, so it stays true for
+  // both backends.
+  if (input.errorAttachmentCount > 0) {
+    const n = input.errorAttachmentCount;
+    return `Ask about ${n === 1 ? 'this error' : `these ${n} errors`}. @ for more context, ⏎ to send.`;
   }
 
   if (isExternalAgent(input.agent)) {

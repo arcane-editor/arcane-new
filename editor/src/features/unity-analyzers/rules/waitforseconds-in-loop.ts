@@ -15,6 +15,7 @@ const YIELD_WFS_RE =
 export const waitForSecondsInLoopRule: AnalyzerRule = {
   id: 'unity/waitforseconds-in-loop',
   defaultSeverity: 'warning',
+  codes: ['UNITY0210'],
 
   run(scan, _ctx): Finding[] {
     const findings: Finding[] = [];

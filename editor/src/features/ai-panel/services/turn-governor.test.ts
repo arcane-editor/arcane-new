@@ -200,6 +200,19 @@ describe('withTurnGovernor', () => {
   });
 
   describe('submit-scoped budget', () => {
+    it('late cleanup of a previous submit cannot reset the new submit budget', () => {
+      const { streamFn } = recordingStreamFn();
+      const governed = withTurnGovernor(streamFn);
+      const oldBudget = beginSubmitBudget();
+      const newBudget = beginSubmitBudget();
+      governed(CTX, opts('mid'));
+      endSubmitBudget(oldBudget);
+      resetTurnGovernor();
+      expect(getSubmitCallCount()).toBe(1);
+      endSubmitBudget(newBudget);
+      resetTurnGovernor();
+      expect(getSubmitCallCount()).toBe(0);
+    });
     it('single-send submits (no beginSubmitBudget) keep per-send semantics: resetTurnGovernor still zeroes the count', () => {
       const { streamFn, calls } = recordingStreamFn();
       const governed = withTurnGovernor(streamFn, () => ({ caps: { mid: 2 } }));

@@ -29,6 +29,7 @@ export const uitoolkitQueryRule: AnalyzerRule = {
   id: RULE_ID,
   defaultSeverity: 'warning',
   settingKey: 'unity.uiDiagnostics.enabled',
+  codes: ['UNITY0501', 'UNITY0504'],
 
   run(scan): Finding[] {
     const uxml = getUxmlIndex();

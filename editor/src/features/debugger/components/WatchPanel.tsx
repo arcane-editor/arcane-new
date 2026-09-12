@@ -1,11 +1,13 @@
 import { useState } from 'react';
 import { Plus, X } from 'lucide-react';
+import { VarRow } from './VariablesPanel';
 import { useDebugStore } from '../../../stores/debug';
 
 /** Watch expressions, evaluated against the selected frame when paused. */
 export function WatchPanel() {
   const watches = useDebugStore((s) => s.watches);
   const results = useDebugStore((s) => s.watchResults);
+  const variables = useDebugStore((s) => s.watchVariables);
   const [draft, setDraft] = useState('');
 
   const add = () => {
@@ -29,8 +31,7 @@ export function WatchPanel() {
       </div>
       {watches.map((expr) => (
         <div key={expr} className="dbg-watch-row">
-          <span className="dbg-watch-expr">{expr}</span>
-          <span className="dbg-watch-value">{results.get(expr) ?? '…'}</span>
+          <div style={{ flex: 1, minWidth: 0 }}><VarRow node={variables.get(expr) ?? { name: expr, value: results.get(expr) ?? '…', variablesReference: 0 }} depth={0} containerRef={0} /></div>
           <button className="dbg-watch-del" onClick={() => useDebugStore.getState().removeWatch(expr)} title="Remove">
             <X size={12} />
           </button>

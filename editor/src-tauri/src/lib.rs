@@ -8,6 +8,7 @@ mod search;
 mod file_scanner;
 mod file_index;
 mod unity;
+mod unity_analyzers;
 mod asmdef;
 mod unity_asset_edit;
 mod unity_yaml;
@@ -16,7 +17,8 @@ mod unity_diff;
 mod unity_tests;
 mod unity_ipc;
 mod unity_journal;
-mod dap;
+mod debug;
+mod unity_profiler;
 mod acp;
 mod auth;
 mod auth_loopback;
@@ -28,6 +30,7 @@ mod window_registry;
 mod path_util;
 mod project_settings;
 mod process_util;
+mod process_tree;
 mod sync_util;
 mod walk_policy;
 #[cfg(target_os = "macos")]
@@ -118,15 +121,20 @@ pub struct FileContent {
     pub content: String,
 }
 
-/// Stays `sync` (not converted for C8): a single non-recursive `fs::read_dir`
-/// call plus one short-lived `git check-ignore` batch — no walk, bounded by
-/// one directory's entry count — invoked on every lazy file-tree expand.
-/// Cheap enough that main-thread dispatch is the right tradeoff (an `async`
-/// command still pays IPC/task scheduling overhead), and every fallible
-/// operation is funneled through `?`/`Result` or degrades (ignore status),
-/// not a panic path.
+// Limit concurrent filesystem jobs, including queued large-file opens.
+async fn blocking_fs<T: Send + 'static>(work: impl FnOnce() -> Result<T, String> + Send + 'static) -> Result<T, String> {
+    static LIMIT: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(4);
+    let permit = LIMIT.acquire().await.map_err(|e| e.to_string())?;
+    let result = tauri::async_runtime::spawn_blocking(move || { let _permit = permit; work() }).await.map_err(|e| e.to_string())?;
+    result
+}
+
 #[tauri::command]
-fn read_directory(path: String) -> Result<Vec<FileEntry>, String> {
+async fn read_directory(path: String) -> Result<Vec<FileEntry>, String> {
+    blocking_fs(move || read_directory_sync(path)).await
+}
+
+fn read_directory_sync(path: String) -> Result<Vec<FileEntry>, String> {
     let entries = fs::read_dir(&path).map_err(|e| e.to_string())?;
 
     let skip_dirs = ["node_modules", "target", ".git", "dist", "build"];
@@ -181,8 +189,21 @@ fn read_directory(path: String) -> Result<Vec<FileEntry>, String> {
 }
 
 #[tauri::command]
-fn read_file(path: String) -> Result<String, String> {
-    fs::read_to_string(&path).map_err(|e| e.to_string())
+async fn read_file(path: String) -> Result<String, String> {
+    blocking_fs(move || fs::read_to_string(&path).map_err(|e| e.to_string())).await
+}
+
+/// Byte-exact authoring checkpoints, including generated meshes and textures.
+#[tauri::command]
+fn read_file_bytes(path: String) -> Result<Vec<u8>, String> {
+    let size = fs::metadata(&path).map_err(|e| e.to_string())?.len();
+    if size > 2 * 1024 * 1024 { return Err("Asset exceeds the 2 MiB checkpoint limit; authoring was not started.".into()); }
+    fs::read(&path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn write_file_bytes(path: String, contents: Vec<u8>) -> Result<(), String> {
+    blocking_fs(move || fs_atomic::write_atomic(Path::new(&path), &contents).map_err(|e| e.to_string())).await
 }
 
 /// What a read found, distinguishing "binary" from "failed".
@@ -199,6 +220,7 @@ pub struct FileRead {
     /// `None` exactly when the bytes are not valid UTF-8.
     text: Option<String>,
     is_binary: bool,
+    is_too_large: bool,
     size: u64,
 }
 
@@ -208,19 +230,44 @@ pub struct FileRead {
 /// looks editable and silently destroys the file the moment it is saved.
 /// Callers get `text: None` and must refuse to write.
 #[tauri::command]
-fn read_file_checked(path: String) -> Result<FileRead, String> {
-    let bytes = fs::read(&path).map_err(|e| e.to_string())?;
+async fn read_file_checked(path: String) -> Result<FileRead, String> {
+    blocking_fs(move || read_file_checked_sync(path)).await
+}
+
+const MAX_EDITOR_FILE_BYTES: u64 = 20 * 1024 * 1024;
+
+fn read_file_checked_sync(path: String) -> Result<FileRead, String> {
+    use std::io::Read;
+    let mut file = fs::File::open(&path).map_err(|e| e.to_string())?;
+    let size = file.metadata().map_err(|e| e.to_string())?.len();
+    // Detect common binary assets with a bounded prefix; a huge text file also
+    // stays out of IPC and Monaco. A UTF-8 character split at the prefix edge
+    // is not a binary marker.
+    let mut prefix = vec![0; 8192];
+    // Read through one bounded stream, so non-seekable or growing files cannot
+    // bypass the size cap.
+    let n = file.read(&mut prefix).map_err(|e| e.to_string())?;
+    prefix.truncate(n);
+    let is_binary = prefix.contains(&0) || std::str::from_utf8(&prefix).is_err_and(|e| e.error_len().is_some());
+    if is_binary || size > MAX_EDITOR_FILE_BYTES {
+        return Ok(FileRead { text: None, is_binary, is_too_large: size > MAX_EDITOR_FILE_BYTES, size });
+    }
+    let mut bytes = prefix;
+    file.take(MAX_EDITOR_FILE_BYTES + 1 - bytes.len() as u64).read_to_end(&mut bytes).map_err(|e| e.to_string())?;
     let size = bytes.len() as u64;
+    if size > MAX_EDITOR_FILE_BYTES {
+        return Ok(FileRead { text: None, is_binary: false, is_too_large: true, size });
+    }
+    if bytes.contains(&0) { return Ok(FileRead { text: None, is_binary: true, is_too_large: false, size }); }
     match String::from_utf8(bytes) {
-        Ok(text) => Ok(FileRead { text: Some(text), is_binary: false, size }),
-        Err(_) => Ok(FileRead { text: None, is_binary: true, size }),
+        Ok(text) => Ok(FileRead { text: Some(text), is_binary: false, is_too_large: false, size }),
+        Err(_) => Ok(FileRead { text: None, is_binary: true, is_too_large: false, size }),
     }
 }
 
-
 #[cfg(test)]
 mod read_file_checked_tests {
-    use super::read_file_checked;
+    use super::read_file_checked_sync as read_file_checked;
 
     #[test]
     fn utf8_file_reads_as_text() {
@@ -251,14 +298,47 @@ mod read_file_checked_tests {
     }
 
     #[test]
+    fn huge_sparse_file_never_materializes_in_memory_or_ipc() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("huge.asset");
+        let file = std::fs::File::create(&path).unwrap();
+        file.set_len(4 * 1024 * 1024 * 1024).unwrap();
+        let read = read_file_checked(path.to_string_lossy().into()).unwrap();
+        assert!(read.is_too_large);
+        assert!(read.text.is_none());
+    }
+
+    #[test]
+    fn nul_is_binary_even_when_utf8_decoding_would_succeed() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("binary.asset");
+        std::fs::write(&path, b"abc\0def").unwrap();
+        assert!(read_file_checked(path.to_string_lossy().into()).unwrap().is_binary);
+    }
+
+    #[test]
+    fn multibyte_character_at_prefix_edge_is_text() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("text.cs");
+        let text = "a".repeat(8191) + "日本語";
+        std::fs::write(&path, &text).unwrap();
+        assert_eq!(read_file_checked(path.to_string_lossy().into()).unwrap().text, Some(text));
+    }
+
+    #[test]
     fn a_missing_file_is_still_an_error() {
         assert!(read_file_checked("/no/such/file/at/all".into()).is_err());
     }
 }
 
 #[tauri::command]
-fn write_file(path: String, contents: String) -> Result<(), String> {
-    fs::write(&path, &contents).map_err(|e| e.to_string())
+async fn write_file(path: String, contents: String) -> Result<(), String> {
+    blocking_fs(move || fs_atomic::write_atomic(Path::new(&path), contents.as_bytes()).map_err(|e| e.to_string())).await
+}
+
+#[tauri::command]
+async fn write_file_if_unchanged(path: String, contents: String, expected_content: Option<String>) -> Result<bool, String> {
+    blocking_fs(move || fs_atomic::write_if_unchanged(Path::new(&path), contents.as_bytes(), expected_content.as_deref()).map_err(|e| e.to_string())).await
 }
 
 /// Cheap existence check for a single candidate file path — no content read,
@@ -434,7 +514,11 @@ fn rename_path(old_path: String, new_path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn delete_path(path: String) -> Result<(), String> {
+async fn delete_path(path: String) -> Result<(), String> {
+    blocking_fs(move || delete_path_sync(path)).await
+}
+
+fn delete_path_sync(path: String) -> Result<(), String> {
     let p = Path::new(&path);
     if p.is_dir() {
         fs::remove_dir_all(p).map_err(|e| e.to_string())
@@ -657,25 +741,10 @@ async fn execute_command(
         // detached process that kept burning CPU — and turns stacked them up.
         .kill_on_drop(true);
 
-    // `kill_on_drop` only reaches the `sh` leader. The commands the agent runs
-    // spawn their own children, which outlive it. Putting the shell in its own
-    // process group lets the timeout path below kill the whole tree.
-    #[cfg(unix)]
-    unsafe {
-        cmd.pre_exec(|| {
-            libc::setpgid(0, 0);
-            Ok(())
-        });
-    }
-
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| format!("Failed to spawn command: {}", e))?;
-
-    // Captured BEFORE the child moves into the future below, so the timeout arm
-    // can still address the group after the future (and the child) is dropped.
-    #[cfg(unix)]
-    let pgid = child.id().map(|id| id as i32);
+    process_tree::ProcessTree::prepare(&mut cmd);
+    let mut child = cmd.spawn().map_err(|e| format!("Failed to spawn command: {}", e))?;
+    let _tree = process_tree::ProcessTree::attach(&child)
+        .map_err(|e| format!("Failed to own command process tree: {}", e))?;
 
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
@@ -703,15 +772,6 @@ async fn execute_command(
         match tokio::time::timeout(timeout, run).await {
             Ok(v) => v,
             Err(_) => {
-                // The future (and with it the child) has been dropped, so
-                // `kill_on_drop` has already signalled the leader. Take out any
-                // grandchildren it left behind.
-                #[cfg(unix)]
-                if let Some(pgid) = pgid {
-                    unsafe {
-                        libc::killpg(pgid, libc::SIGKILL);
-                    }
-                }
                 return Err(format!("Command timed out after {}ms", timeout.as_millis()));
             }
         };
@@ -1081,14 +1141,17 @@ pub fn run() {
         .manage(file_scanner::FileWatcherState::new())
         .manage(file_index::FileIndexState::new())
         .manage(unity_ipc::UnityIpcState::new())
-        .manage(dap::DapState::new())
+        .manage(debug::host::DebugState::new())
         .manage(acp::AcpState::new())
         .manage(search::ContentSearchState::new())
         .manage(auth_loopback::LoopbackState::new())
         .invoke_handler(tauri::generate_handler![
             read_directory,
             read_file,
+            read_file_bytes,
+            write_file_bytes,
             write_file,
+            write_file_if_unchanged,
             path_exists,
             dir_exists,
             canonicalize_path,
@@ -1218,10 +1281,19 @@ pub fn run() {
             unity_ipc::unity_ipc_request,
             unity_ipc::unity_ipc_reconnect,
             unity_ipc::unity_ipc_status,
-            dap::dap_start,
-            dap::dap_send,
-            dap::dap_stop,
-            dap::check_mono_installed,
+            debug::host::dap_start,
+            debug::host::dap_send,
+            debug::host::dap_stop,
+            unity_profiler::profiler_create,
+            unity_profiler::profiler_ingest,
+            unity_profiler::profiler_list,
+            unity_profiler::profiler_frames,
+            unity_profiler::profiler_query,
+            unity_profiler::profiler_export,
+            unity_profiler::profiler_import,
+            debug::host::debug_targets,
+            debug::host::debug_scan_targets,
+            debug::host::debug_trace_path,
             acp::acp_probe,
             acp::acp_install,
             acp::acp_start,
@@ -1430,12 +1502,14 @@ pub fn run() {
                         dummy.drop_window(&label_clone).await;
                     });
                 }
-                // Per-window DAP session cleanup
-                if let Some(state) = window.try_state::<dap::DapState>() {
+                // Per-window debug session cleanup. Dropping the session ends
+                // its router task, which detaches from the runtime cleanly —
+                // abandoning the socket instead is what kills a Unity editor.
+                if let Some(state) = window.try_state::<debug::host::DebugState>() {
                     let inner = state.0.clone();
                     let label_clone = label.clone();
                     tauri::async_runtime::spawn(async move {
-                        let dummy = dap::DapState(inner);
+                        let dummy = debug::host::DebugState(inner);
                         dummy.drop_window(&label_clone).await;
                     });
                 }
@@ -1539,7 +1613,7 @@ mod path_exists_tests {
 
 #[cfg(test)]
 mod read_directory_ignore_tests {
-    use super::{read_directory, FileEntry};
+    use super::{read_directory_sync, FileEntry};
     use std::process::Command;
 
     /// Setup git commands isolate host gitconfig, mirroring git.rs's test
@@ -1578,7 +1652,7 @@ mod read_directory_ignore_tests {
         std::fs::write(tmp.path().join("a.log"), "l").unwrap();
         std::fs::create_dir(tmp.path().join("ignored-dir")).unwrap();
 
-        let entries = read_directory(root).unwrap();
+        let entries = read_directory_sync(root).unwrap();
         assert!(entry(&entries, "a.log").ignored);
         assert!(entry(&entries, "ignored-dir").ignored);
         assert!(!entry(&entries, "kept.txt").ignored);
@@ -1591,7 +1665,7 @@ mod read_directory_ignore_tests {
         std::fs::write(tmp.path().join("a.log"), "l").unwrap();
         std::fs::write(tmp.path().join("kept.txt"), "k").unwrap();
 
-        let entries = read_directory(tmp.path().to_str().unwrap().to_string()).unwrap();
+        let entries = read_directory_sync(tmp.path().to_str().unwrap().to_string()).unwrap();
         assert!(entries.iter().all(|e| !e.ignored));
     }
 
@@ -1606,7 +1680,7 @@ mod read_directory_ignore_tests {
         std::fs::write(sub.join("local.txt"), "x").unwrap();
         std::fs::write(sub.join("other.txt"), "y").unwrap();
 
-        let entries = read_directory(sub.to_str().unwrap().to_string()).unwrap();
+        let entries = read_directory_sync(sub.to_str().unwrap().to_string()).unwrap();
         assert!(entry(&entries, "local.txt").ignored);
         assert!(!entry(&entries, "other.txt").ignored);
     }

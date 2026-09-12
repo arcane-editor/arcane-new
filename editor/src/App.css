@@ -193,6 +193,22 @@ html, body, #root {
   -webkit-app-region: no-drag;
 }
 
+/* The project-management window (WelcomeApp) has no `.title-bar` — just a 28px
+   drag strip — so the controls need the padding and stretch that rule supplies
+   here instead, and the negative margin that cancels it undone. */
+.welcome-titlebar {
+  display: flex;
+  align-items: stretch;
+  justify-content: flex-end;
+  height: 28px;
+  flex-shrink: 0;
+}
+
+.welcome-titlebar .window-controls {
+  margin-left: 0;
+  margin-right: 0; /* nothing to cancel: this strip has no padding */
+}
+
 .window-control {
   width: 46px;
   display: flex;
@@ -3647,32 +3663,207 @@ html, body, #root {
   background: var(--hover);
 }
 
-.problems-severity-icon {
+/* These carry the `problems-item-` / `problems-file-` prefixes the panel
+   actually renders. An earlier set (`.problems-message`, `.problems-source`,
+   `.problems-location`, `.problems-severity-*`) was orphaned by a rename and
+   styled nothing, which is why the message column had no `flex: 1`. */
+.problems-item-icon {
   flex-shrink: 0;
+  display: inline-flex;
 }
 
-.problems-severity-error { color: var(--error-text); }
-.problems-severity-warning { color: var(--warning); }
-.problems-severity-info { color: var(--info); }
-.problems-severity-hint { color: var(--text-secondary); }
-
-.problems-message {
+.problems-item-message {
   flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.problems-source {
+.problems-item-source {
   color: var(--text-secondary);
   font-size: 12px;
+  flex-shrink: 0;
 }
 
-.problems-location {
+.problems-source-badge {
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.problems-item-location {
   color: var(--text-secondary);
   font-size: 12px;
   flex-shrink: 0;
   font-family: var(--font-mono);
+}
+
+.problems-file-icon {
+  flex-shrink: 0;
+  color: var(--text-secondary);
+}
+
+.problems-file-name {
+  flex-shrink: 0;
+}
+
+.problems-file-path {
+  color: var(--text-secondary);
+  font-size: 11px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.problems-filter-count {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+/* --- Copy / Ask AI ------------------------------------------------------ */
+
+.problems-bar-spacer {
+  flex: 1;
+}
+
+.problems-bar-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.problems-bar-action {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border: 1px solid transparent;
+  background: none;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+.problems-bar-action:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--text-primary);
+}
+
+.problems-bar-action:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* Reveal by opacity, never by `display`: the row must not change width when
+   the pointer enters it. `:focus-within` is not optional — an `opacity: 0`
+   button is still in the tab order. */
+.problems-item-actions,
+.problems-file-actions {
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.problems-item:hover .problems-item-actions,
+.problems-item:focus-within .problems-item-actions,
+.problems-file-header:hover .problems-file-actions,
+.problems-file-header:focus-within .problems-file-actions {
+  opacity: 1;
+}
+
+.problems-item-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+.problems-item-action:hover {
+  background: var(--hover);
+  color: var(--text-primary);
+}
+
+/* ==================== Unity Console: Copy / Ask AI ==================== */
+
+/* The action group holds its width at rest and only fades: the console rows
+   are measured by `virtualizer.measureElement` and their message is
+   `pre-wrap`, so any layout change on hover reflows the row and makes every
+   row below it jump under the pointer. Reveal is pure CSS for the same
+   reason a `hoveredIndex` state would be wrong — it would re-render the
+   windowed list on every pointer move. */
+.unity-console-row-actions {
+  display: flex;
+  gap: 2px;
+  width: 44px;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.unity-console-row:hover .unity-console-row-actions,
+.unity-console-row:focus-within .unity-console-row-actions {
+  opacity: 1;
+}
+
+.unity-console-row-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+.unity-console-row-action:hover {
+  background: var(--hover);
+  color: var(--text-primary);
+}
+
+.unity-console-bar-spacer {
+  flex: 1;
+}
+
+.unity-console-bar-action {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  padding: 2px 6px;
+  cursor: pointer;
+}
+
+.unity-console-bar-action:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--text-primary);
+}
+
+.unity-console-bar-action:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 .problems-empty {
@@ -10711,3 +10902,7 @@ html, body, #root {
   gap: 4px;
   flex-shrink: 0;
 }
+.ai-specialist-activity { margin: 8px 12px; padding: 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 12px; }
+.ai-specialist-activity summary { cursor: pointer; }
+.ai-specialist-activity summary span { margin-left: 8px; opacity: 0.7; }
+.ai-specialist-summary { white-space: pre-wrap; overflow-wrap: anywhere; }

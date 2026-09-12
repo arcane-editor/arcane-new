@@ -1,64 +1,17 @@
 import { registerRule } from './analyzer-engine';
-
-// Part B
-import { nearMissMessagesRule } from '../rules/near-miss-messages';
-// Part C
-import { nonSerializableTypesRule } from '../rules/non-serializable-types';
-// Part D — performance
-import { getComponentInUpdateRule } from '../rules/getcomponent-in-update';
-import { cameraMainRule } from '../rules/camera-main';
-import { stringApisRule } from '../rules/string-apis';
-import { allocInUpdateRule } from '../rules/alloc-in-update';
-import { emptyMessagesRule } from '../rules/empty-messages';
-import { waitForSecondsInLoopRule } from '../rules/waitforseconds-in-loop';
-// Part E — correctness
-import { nullPropagationUnityObjectRule } from '../rules/null-propagation-unity-object';
-import { destroyThisRule } from '../rules/destroy-this';
-import { deltaTimeInFixedUpdateRule } from '../rules/deltatime-in-fixedupdate';
-import { transformPositionPerAxisRule } from '../rules/transform-position-per-axis';
-import { editorApiInRuntimeRule } from '../rules/editor-api-in-runtime';
-// Part F — validated against the project's own ProjectSettings assets
-import { projectSettingsLiteralsRule } from '../rules/project-settings-literals';
-// Part G -- validated against the project's .inputactions assets
-import { inputActionsRule } from '../rules/input-actions';
-import { inputCallbackLeakRule } from '../rules/input-callback-leak';
-import { inputLegacyApiRule } from '../rules/input-legacy-api';
-import { uitoolkitQueryRule } from '../rules/uitoolkit-query';
-import { unityEventListenersRule } from '../rules/unity-event-listeners';
+import { ALL_RULES } from '../rules';
 
 let registered = false;
 
 /**
- * Register every analyzer rule with the engine exactly once. Order here is the
- * order findings are produced in (cosmetic only — the Problems panel sorts).
+ * Register every analyzer rule with the engine exactly once.
+ *
+ * The list itself lives in `rules/index.ts`, which imports no store and no
+ * engine — so a test can read it without loading Tauri. This module is only
+ * the wiring.
  */
 export function registerAllRules(): void {
   if (registered) return;
   registered = true;
-
-  registerRule(nearMissMessagesRule);
-  registerRule(nonSerializableTypesRule);
-
-  registerRule(getComponentInUpdateRule);
-  registerRule(cameraMainRule);
-  registerRule(stringApisRule);
-  registerRule(allocInUpdateRule);
-  registerRule(emptyMessagesRule);
-  registerRule(waitForSecondsInLoopRule);
-
-  registerRule(nullPropagationUnityObjectRule);
-  registerRule(destroyThisRule);
-  registerRule(deltaTimeInFixedUpdateRule);
-  registerRule(transformPositionPerAxisRule);
-  registerRule(editorApiInRuntimeRule);
-
-  registerRule(projectSettingsLiteralsRule);
-
-  registerRule(inputActionsRule);
-  registerRule(inputCallbackLeakRule);
-  registerRule(inputLegacyApiRule);
-
-  // Validated against the project's .uxml/.uss rather than against C# alone.
-  registerRule(uitoolkitQueryRule);
-  registerRule(unityEventListenersRule);
+  for (const rule of ALL_RULES) registerRule(rule);
 }

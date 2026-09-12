@@ -1,0 +1,10 @@
+{
+  "name": "UnityIDE.InputSystem.Tests",
+  "references": ["UnityIDE.Editor", "UnityIDE.Automation.InputSystem", "Unity.InputSystem", "UnityEditor.TestRunner", "UnityEngine.TestRunner"],
+  "includePlatforms": ["Editor"],
+  "overrideReferences": true,
+  "precompiledReferences": ["nunit.framework.dll"],
+  "autoReferenced": false,
+  "defineConstraints": ["UNITY_INCLUDE_TESTS", "UNITYIDE_HAS_INPUT_SYSTEM"],
+  "versionDefines": [{ "name": "com.unity.inputsystem", "expression": "1.0.0", "define": "UNITYIDE_HAS_INPUT_SYSTEM" }]
+}

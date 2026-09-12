@@ -1,6 +1,7 @@
 import type { editor } from 'monaco-editor';
 import type { LspClient } from './client';
 import { lspManager } from './manager';
+import { fileUri } from './document-sync';
 import { detectLanguage } from '../../../utils/language-detect';
 
 /**
@@ -55,12 +56,65 @@ export function toLspRange(range: {
   };
 }
 
+// ── The document URI that goes on the wire ──────────────────────
+//
+// **Never send `model.uri.toString()` to a language server.** Monaco's
+// `Uri.toString()` is not the identity on the `file:///D:/x/A.cs` this app
+// hands it: `_asFormatted` lower-cases the drive letter AND percent-encodes
+// its colon, so the model whose URI was built from `file:///C:/x/A.cs` renders
+// as `file:///c%3A/x/A.cs`. Every notification (`didOpen`/`didChange`) is sent
+// under `fileUri(path)`, so a request built from `toString()` names a document
+// the server has never been told about — and Roslyn answers `null` to every
+// completion, hover, definition, code action and diagnostic pull for it. That
+// shipped, and it made C# IntelliSense look "partly working" on Windows
+// because Monaco's word-based suggestions and this app's static Unity
+// providers kept answering while the LSP answered nothing at all.
+//
+// On csharp-ls 0.24+ the same mismatch is worse than useless: a `didOpen`
+// for a document outside the solution is *added* to the workspace, so the
+// phantom URI would compile a second copy of the file and report duplicate
+// type definitions against the real one.
+//
+// `fileUri` (document-sync.ts) is therefore the single builder for both
+// directions. `model.uri.toString()` stays the right key for Monaco-internal
+// maps (markers, pull timers, ui-store diagnostics) — it just never crosses
+// the wire.
+
+/**
+ * Rebuild the original file path from a Monaco model URI.
+ *
+ * Reads `.authority`/`.path` rather than `toString()` or `fsPath`: `.path` is
+ * already percent-decoded and preserves the drive letter's case, while
+ * `fsPath` lower-cases the drive and uses backslashes on Windows. Mirrors the
+ * three shapes `fileUri` produces.
+ */
+export function modelFilePath(model: {
+  uri: { authority?: string; path: string };
+}): string {
+  const { authority, path } = model.uri;
+  // UNC — `fileUri` collapsed `//host/share` into the authority position.
+  if (authority) return `//${authority}${path}`;
+  // Windows drive — the leading slash is the URI's, not the path's.
+  if (/^\/[A-Za-z]:(\/|$)/.test(path)) return path.slice(1);
+  return path;
+}
+
+/**
+ * The URI to name `model` by in an LSP request. Always equal to the
+ * `fileUri(filePath)` the document was opened under.
+ */
+export function lspDocumentUri(model: {
+  uri: { authority?: string; path: string };
+}): string {
+  return fileUri(modelFilePath(model));
+}
+
 export function buildTextDocumentPositionParams(
-  model: { uri: { toString(): string } },
+  model: { uri: { authority?: string; path: string } },
   position: { lineNumber: number; column: number },
 ) {
   return {
-    textDocument: { uri: model.uri.toString() },
+    textDocument: { uri: lspDocumentUri(model) },
     position: toLspPosition(position),
   };
 }
@@ -77,10 +131,9 @@ export function buildTextDocumentPositionParams(
 export function getLspContextForModel(
   model: editor.ITextModel,
 ): { client: LspClient; lspLanguageId: string } | null {
-  const uri = model.uri.toString();
-  if (!uri.startsWith('file://')) return null;
+  if (model.uri.scheme !== 'file') return null;
 
-  const filename = decodeURIComponent(uri.split('/').pop() ?? '');
+  const filename = modelFilePath(model).split('/').pop() ?? '';
   const info = detectLanguage(filename);
   if (!info.lspServerKey || !info.lspLanguageId) return null;
 

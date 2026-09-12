@@ -51,7 +51,7 @@ interface Props {
   /** Called whenever the editor's text content changes. */
   onTextChange: (hasText: boolean) => void;
   /** Called when the user submits (Enter or external trigger). */
-  onSubmit: (text: string) => void;
+  onSubmit: (text: string) => boolean | void;
 }
 
 const LexicalChatInput = forwardRef<LexicalChatInputHandle, Props>(
@@ -77,7 +77,7 @@ const LexicalChatInput = forwardRef<LexicalChatInputHandle, Props>(
     const submit = useCallback(() => {
       const text = textRef.current.trim();
       if (!text) return;
-      onSubmit(text);
+      if (onSubmit(text) === false) return;
       clearRef.current?.clear();
       textRef.current = '';
       setHasText(false);

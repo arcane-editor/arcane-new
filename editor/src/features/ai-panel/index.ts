@@ -41,6 +41,13 @@ export {
   isDropOnAiPanel,
 } from './services/drop-target';
 export { fixConsoleError } from './services/fix-console-error';
+export {
+  attachErrorReport,
+  copyErrorReport,
+  errorSelectionText,
+  type ErrorSelection,
+} from './services/attach-errors';
+export { isAskableConsoleEntry } from './data/error-report';
 export { isAiComposerFocused } from './services/composer-focus';
 // The design dock submits through the SAME routing body the composer uses, so
 // a design send goes down one code path with every other send rather than
@@ -119,3 +126,7 @@ export type {
 // dependency-free timing utility, and re-exporting it through this barrel made
 // it part of a cycle that broke app startup outright — see
 // src/utils/update-coalescer.ts. Import it from '../utils/update-coalescer'.
+export type { SpecialistResult } from './services/specialists/contracts';
+export type { TaskRunSnapshot } from './services/specialists/task-context';
+
+export { attachUnityEvidence } from './services/attach-unity-evidence';

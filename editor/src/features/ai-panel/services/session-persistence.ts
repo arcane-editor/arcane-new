@@ -1,3 +1,4 @@
+import { normalizeVerifiedCard } from './verified-card-data';
 /**
  * Session persistence — saves/loads AI chat sessions as JSON files.
  * Location: <per-app config dir>/sessions/<sessionId>.json — i.e. ~/.unityide/sessions
@@ -174,12 +175,18 @@ function deriveTitle(messages: AiMessage[]): string {
  */
 function sanitizeMessagesForPersistence(messages: AiMessage[]): AiMessage[] {
   return messages.map((m) => {
-    if (!m.attachments || m.attachments.length === 0) return m;
+    const history = m.specialistRun?.history?.map((message) => {
+      if ((message.role !== 'user' && message.role !== 'toolResult') || !Array.isArray(message.content)) return message;
+      return { ...message, content: message.content.map((part) => part.type === 'image'
+        ? { type: 'text' as const, text: '[Captured image omitted from saved history. Fetch the operation with unity_playtest_status to inspect it again.]' }
+        : part) };
+    });
     return {
       ...m,
-      attachments: m.attachments.map((a) =>
+      ...(m.specialistRun && history ? { specialistRun: { ...m.specialistRun, history } } : {}),
+      ...(m.attachments ? { attachments: m.attachments.map((a) =>
         a.kind === 'image' ? { ...a, dataUrl: '' } : a,
-      ),
+      ) } : {}),
     };
   });
 }
@@ -303,6 +310,7 @@ export function settleDanglingRequests(messages: AiMessage[]): AiMessage[] {
 
 export function parseSessionData(json: string): SessionData {
   const data = JSON.parse(json) as SessionData;
+  if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('Invalid session record');
   data.agentKind = coerceAgentKind(data.agentKind);
 
   // `hostedPlan` was `arcanePlan` before the rename. Unlike `agentKind` there
@@ -316,7 +324,14 @@ export function parseSessionData(json: string): SessionData {
   delete (data as { arcanePlan?: unknown }).arcanePlan;
 
   if (Array.isArray(data.messages)) {
-    data.messages = backfillVerifiedCards(settleDanglingRequests(data.messages));
+    data.messages = backfillVerifiedCards(settleDanglingRequests(data.messages.filter((message) => !!message && typeof message === 'object' && typeof message.id === 'string' && typeof message.role === 'string'))).map((message) =>
+      message.specialistRun?.status === 'running'
+        ? { ...message, specialistRun: { ...message.specialistRun, status: 'interrupted' as const, activity: undefined } }
+        : message,
+    ).map((message) => message.specialistTask?.status === 'running'
+      ? { ...message, specialistTask: { ...message.specialistTask, status: 'interrupted' as const } }
+      : message,
+    );
   }
   return data;
 }
@@ -330,18 +345,6 @@ export function parseSessionData(json: string): SessionData {
  * after those. So the set of fields a saved card carries depends on which
  * build wrote it.
  */
-const VERIFIED_CARD_DEFAULTS: Record<string, string> = {
-  analyzers: 'skipped',
-  compile: 'skipped',
-  guids: 'skipped',
-  uiToolkit: 'skipped',
-  scriptableObjects: 'skipped',
-  input: 'skipped',
-  layout: 'skipped',
-  console: 'skipped',
-  tests: 'skipped',
-};
-
 /**
  * Backfill missing verified-card fields on restore.
  *
@@ -360,17 +363,9 @@ const VERIFIED_CARD_DEFAULTS: Record<string, string> = {
  */
 export function backfillVerifiedCards(messages: AiMessage[]): AiMessage[] {
   return messages.map((m) => {
-    const card = (m as { verifiedPass?: Record<string, unknown> }).verifiedPass;
-    if (!card || typeof card !== 'object') return m;
-
-    let patched: Record<string, unknown> | null = null;
-    for (const key of Object.keys(VERIFIED_CARD_DEFAULTS)) {
-      if (card[key] === undefined) {
-        patched ??= { ...card };
-        patched[key] = VERIFIED_CARD_DEFAULTS[key];
-      }
-    }
-    return patched ? ({ ...m, verifiedPass: patched } as unknown as AiMessage) : m;
+    if (m.verifiedPass === undefined) return m;
+    const card = normalizeVerifiedCard(m.verifiedPass);
+    return card === m.verifiedPass ? m : { ...m, verifiedPass: card };
   });
 }
 

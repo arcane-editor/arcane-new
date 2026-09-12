@@ -10,11 +10,11 @@ const LINQ_RE = /\.\s*(Where|Select|SelectMany|ToList|ToArray|ToDictionary|Order
 const NEW_RE = /\bnew\s+([A-Za-z_][\w.]*)\s*(?:<[^>;]*>)?\s*[([{]/g;
 
 // foreach loops — non-array enumeration may allocate an enumerator.
-const FOREACH_RE = /\bforeach\s*\(/g;
 
 export const allocInUpdateRule: AnalyzerRule = {
   id: 'unity/alloc-in-update',
   defaultSeverity: 'info',
+  codes: ['UNITY0205', 'UNITY0206', 'UNITY0207'],
 
   run(scan, _ctx): Finding[] {
     const findings: Finding[] = [];
@@ -45,20 +45,11 @@ export const allocInUpdateRule: AnalyzerRule = {
           `String concatenation with '+' inside a loop in ${method.name}() allocates a new string each iteration. Use a StringBuilder or build the string once.`,
           'UNITY0207'));
       }
-
-      // foreach over a non-array (heuristic) → potential enumerator allocation.
-      for (const m of matchesInBody(scan, body, FOREACH_RE)) {
-        // Heuristic: flag foreach only when the collection token is not an
-        // obvious array access. We look at the `in <expr>)` tail.
-        const tail = scan.code.slice(m.index, Math.min(scan.code.length, m.index + 160));
-        const inMatch = /\bin\s+([^)]*)\)/.exec(tail);
-        if (!inMatch) continue;
-        const collection = inMatch[1].trim();
-        if (collection.endsWith(']')) continue; // array element / indexer — skip
-        findings.push(info(this.id, m.index, m.index + 'foreach'.length,
-          `'foreach' inside ${method.name}() can allocate an enumerator each frame for non-array/List collections. Prefer a for-loop over an array/List in hot paths.`,
-          'UNITY0208'));
-      }
+      // No `foreach` check. There was one (UNITY0208), and it was wrong:
+      // List<T>, arrays and Dictionary<K,V> all return STRUCT enumerators,
+      // so iterating them allocates nothing. It fired on nearly every
+      // foreach a Unity developer writes, which is how a performance
+      // analyzer teaches people to ignore it.
     }
 
     return findings;
@@ -77,7 +68,6 @@ function info(ruleId: string, start: number, end: number, message: string, code:
 function stringConcatInLoops(scan: CSharpScan, body: SourceSpan): number[] {
   const offsets: number[] = [];
   const code = scan.code;
-  const text = scan.text;
   const slice = code.slice(body.start, body.end);
 
   const loopRe = /\b(for|foreach|while)\s*\(/g;
@@ -101,9 +91,16 @@ function stringConcatInLoops(scan: CSharpScan, body: SourceSpan): number[] {
       }
     }
     if (close < 0) continue;
-    const loopBody = text.slice(braceIdx, close + 1);
+    // The BLANKED view, not the original text.
+    //
+    // `scan.code` keeps the quotes and replaces a literal's contents with
+    // spaces, and blanks comments entirely — so matching here cannot fire on
+    // `// replace s + "suffix"`, which the raw text did. The `\n` exclusion
+    // fixes the other half: `[^"]*` spans newlines, so a match could start at
+    // one literal and end at a different one further down the file.
+    const loopBody = code.slice(braceIdx, close + 1);
     // String concat heuristics: `x += "..."`, `"..." + var`, `var + "..."`.
-    const concatRe = /(\+=\s*"[^"]*")|("[^"]*"\s*\+)|(\+\s*"[^"]*")/g;
+    const concatRe = /(\+=\s*"[^"\n]*")|("[^"\n]*"\s*\+)|(\+\s*"[^"\n]*")/g;
     let cm: RegExpExecArray | null;
     while ((cm = concatRe.exec(loopBody)) !== null) {
       offsets.push(braceIdx + cm.index);

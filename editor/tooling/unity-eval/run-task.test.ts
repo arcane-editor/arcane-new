@@ -6,6 +6,7 @@ import { AssistantMessageEventStream } from '../../src/features/ai-panel/service
 import type { Context, StreamFn, AssistantMessage } from '../../src/features/ai-panel/services/vendor/types';
 import type { UnityApiClient } from '../../src/features/ai-panel/services/unity-tools/api-search-tool';
 import { runTask, buildTools, maxTokensForMode, ASK_MAX_TOKENS, AGENT_MAX_TOKENS } from './run-task';
+import { getStreamExtras } from '../../src/features/ai-panel/services/stream-extras';
 import type { EvalTask } from './eval-types';
 import type { EvalRequestState } from './eval-stream';
 
@@ -51,7 +52,7 @@ function runawayStreamFn(): { streamFn: StreamFn; lastContext: () => Context | u
     lastContext = context;
     const stream = new AssistantMessageEventStream();
     stream.push({ type: 'start' });
-    if (context.tools.length === 0) {
+    if (getStreamExtras(context)?.toolChoice === 'none') {
       stream.push({
         type: 'done',
         message: {
@@ -130,7 +131,8 @@ describe('runTask', () => {
     // message (P3.2's `withTurnGovernor`), which is what let the loop end
     // naturally instead of needing an abort.
     const finalRequest = lastContext();
-    expect(finalRequest?.tools).toEqual([]);
+    expect(finalRequest?.tools.length).toBeGreaterThan(0);
+    expect(getStreamExtras(finalRequest!)?.toolChoice).toBe('none');
     expect(
       finalRequest?.messages.some(
         (m) => m.role === 'user' && typeof m.content === 'string' && m.content.includes('one response left'),

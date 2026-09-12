@@ -47,6 +47,10 @@ export interface DiffInfo {
 }
 
 export interface OpenFile {
+  /** Last disk bytes read/saved; undefined means no known baseline. */
+  diskContent?: string;
+  saveConflict?: boolean;
+  isTooLarge?: boolean;
   path: string;
   name: string;
   content: string;
@@ -181,6 +185,7 @@ export interface SettingsSchema {
   'graphify.suppressFirstOpenToast': boolean;
   'ai.checkpoints.enabled': boolean;
   'ai.escalation.enabled': boolean;
+  'ai.specialists.enabled': boolean;
   'ai.memory.enabled': boolean;
   'ai.edits.applyMode': 'approve' | 'auto';
   'ai.edits.alwaysApproveUnityAssets': boolean;
@@ -202,6 +207,7 @@ export interface SettingsSchema {
   'unity.uiDiagnostics.enabled': boolean;
   'unity.uiToolkit.panel': boolean;
   'lsp.solutionWideAnalysis': boolean;
+  'lsp.csharp.analyzers': boolean;
   'unity.asmdef.diagnostics': boolean;
   'unity.bridge.enabled': boolean;
   'unity.bridge.refreshOnSave': boolean;
@@ -225,6 +231,7 @@ export interface SettingsSchema {
   'unity.git.yamlMergeIntegration': boolean;
   'unity.testRunner.enabled': boolean;
   'unity.inputHub.enabled': boolean;
+  'debug.inlineValues': boolean;
   'unity.debugger.enabled': boolean;
   'unity.shader.completions': boolean;
   'unity.packages.manifestIntelligence': boolean;
@@ -271,6 +278,15 @@ export interface DiagnosticItem {
   message: string;
   severity: 'error' | 'warning' | 'info' | 'hint';
   source?: DiagnosticSource;
+  /**
+   * The diagnostic's own code — `CS0029`, `UNT0002`, `UNITY0201`.
+   *
+   * Four engines now write into this one panel (the C# compiler, Roslyn's
+   * Unity analyzers, this app's rules, and the asmdef checks), and the code is
+   * what tells a reader which of them produced a finding and what to search
+   * for. It is also what a suppression comment names.
+   */
+  code?: string;
 }
 
 export interface SearchMatch {

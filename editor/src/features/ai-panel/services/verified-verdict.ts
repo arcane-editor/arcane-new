@@ -22,8 +22,10 @@ export type VerifiedVerdict =
   /** Nothing actually ran — never show this as a pass. */
   | 'unverified';
 
-export function verifiedVerdict(markers: CheckMarker[]): VerifiedVerdict {
+export function verifiedVerdict(markers: CheckMarker[], required: readonly { status: string }[] = []): VerifiedVerdict {
+  if (required.some((e) => e.status === 'failed')) return 'failed';
   if (markers.some((m) => m === 'bad')) return 'failed';
+  if (required.some((e) => e.status !== 'passed')) return 'unverified';
   if (markers.every((m) => m === 'skip')) return 'unverified';
   return 'passed';
 }

@@ -59,6 +59,7 @@ import { withEditReview } from './edit-review/edit-review-decorator';
 import {
   withTurnGovernor,
   resetTurnGovernor,
+  endSubmitBudget,
   grantExtraCalls,
   wasCapReachedThisSend,
   softLimitNotice,
@@ -121,6 +122,7 @@ import { primeMemory } from './memory/memory-cache';
 import { sideTaskRequest } from './memory/memory-request';
 import { tauriMemoryFs } from './memory/tauri-memory-fs';
 import { useAiStore, type AiMessage } from '../../../stores/ai';
+import { cancelPendingSends } from './send-cancellation';
 import { useAuthStore } from '../../../stores/auth';
 import {
   useServerConfigStore,
@@ -228,7 +230,12 @@ const DESIGN_ENGINE_TOOLS: ReadonlySet<string> = new Set([
   'unity_set_property',
 ]);
 
-function createToolsForPromptMode(mode: PromptMode, workspacePath: string, effort: Effort): AgentTool[] {
+export function createToolsForPromptMode(mode: PromptMode, workspacePath: string, effort: Effort, execution?: {
+  recordTouchedFile: (path: string) => void;
+  withRepeatCallGuard: typeof withRepeatCallGuard;
+}): AgentTool[] {
+  const recordWrite = execution?.recordTouchedFile ?? recordTouchedFile;
+  const guardRepeat = execution?.withRepeatCallGuard ?? withRepeatCallGuard;
   const isUnity = useProjectContextStore.getState().isUnityProject;
   // Sandbox roots per workspace shape — see sandbox-roots.ts. Unity confines
   // file operations to Assets/ (+ .unityide/ plan files + Packages/ for
@@ -276,7 +283,7 @@ function createToolsForPromptMode(mode: PromptMode, workspacePath: string, effor
   // Live-bridge compile gate: real Unity compiler errors fed back to the agent.
   // Default-on for Unity projects; the gate itself no-ops when no bridge is connected.
   const compileGateOn =
-    isUnity && settings.getSetting('unity.compileGate.enabled') !== false;
+    !execution && isUnity && settings.getSetting('unity.compileGate.enabled') !== false;
   // LSP diagnostics gate: csharp-ls error-severity diagnostics fed back to the
   // agent. Default-on; the gate itself no-ops when csharp-ls isn't running.
   const lspGateOn = isUnity && settings.getSetting('unity.lspGate.enabled') !== false;
@@ -288,11 +295,11 @@ function createToolsForPromptMode(mode: PromptMode, workspacePath: string, effor
   const unityRead: AgentTool[] = isUnity ? createUnityReadTools(workspacePath) : [];
 
   if (mode === 'ask') {
-    return [...readOnly, ...graphTools, ...memoryTools, ...unityRead].map((t) => withRepeatCallGuard(t, workspacePath));
+    return [...readOnly, ...graphTools, ...memoryTools, ...unityRead].map((t) => guardRepeat(t, workspacePath));
   }
 
   if (mode === 'plan-planning') {
-    return [...readOnly, ...graphTools, ...memoryTools, ...unityRead, createAskUserTool()].map((t) => withRepeatCallGuard(t, workspacePath));
+    return [...readOnly, ...graphTools, ...memoryTools, ...unityRead, createAskUserTool()].map((t) => guardRepeat(t, workspacePath));
   }
 
   if (mode === 'preplanning') {
@@ -303,7 +310,7 @@ function createToolsForPromptMode(mode: PromptMode, workspacePath: string, effor
       ...unityRead,
       createAskUserTool(),
       createTodoTool(),
-    ].map((t) => withRepeatCallGuard(t, workspacePath));
+    ].map((t) => guardRepeat(t, workspacePath));
   }
 
   // Verified-pass (P3.4) registers every file the send touches by composing
@@ -318,7 +325,7 @@ function createToolsForPromptMode(mode: PromptMode, workspacePath: string, effor
     ...createWriteTool(workspacePath, {
       operations: tauriWriteOperations,
       onFileWritten: (path) => {
-        recordTouchedFile(path);
+        recordWrite(path);
         dropUsageIndexIfCs(path);
         onFileWritten(path);
       },
@@ -330,7 +337,7 @@ function createToolsForPromptMode(mode: PromptMode, workspacePath: string, effor
     ...createEditTool(workspacePath, {
       operations: tauriEditOperations,
       onFileEdited: (path) => {
-        recordTouchedFile(path);
+        recordWrite(path);
         dropUsageIndexIfCs(path);
         onFileEdited(path);
       },
@@ -371,7 +378,7 @@ function createToolsForPromptMode(mode: PromptMode, workspacePath: string, effor
   // Structured diffs (P5.1): `withResultDiffs` sits OUTSIDE the cs-gates (so
   // the diff it attaches reflects the FINAL result the gates have already
   // annotated) but stays INSIDE the repeat-call guard applied by the trailing
-  // `.map((t) => withRepeatCallGuard(t, workspacePath))` below (so a suppressed repeat call never
+  // `.map((t) => guardRepeat(t, workspacePath))` below (so a suppressed repeat call never
   // triggers a redundant pair of diff reads).
   //
   // Edit review (T7): `withEditReview` sits OUTSIDE `withResultDiffs` — it
@@ -412,7 +419,7 @@ function createToolsForPromptMode(mode: PromptMode, workspacePath: string, effor
       ? createUnityAssetMutateTools(workspacePath, {
           onWrite: (path) => {
             const abs = resolveToCwd(path, workspacePath);
-            recordTouchedFile(abs);
+            recordWrite(abs);
             onFileWritten(abs);
           },
         }).filter((t) => t.name === 'unity_ui_write')
@@ -468,7 +475,7 @@ function createToolsForPromptMode(mode: PromptMode, workspacePath: string, effor
       scopedCode(editTool),
       ...(includesTodoTool(mode, effort) ? [createTodoTool()] : []),
       createAskUserTool(),
-    ].map((t) => withRepeatCallGuard(t, workspacePath));
+    ].map((t) => guardRepeat(t, workspacePath));
   }
 
   return [
@@ -489,7 +496,7 @@ function createToolsForPromptMode(mode: PromptMode, workspacePath: string, effor
           // pass's touched-file registry, and the editor's open-buffer reload.
           onWrite: (path) => {
             const abs = resolveToCwd(path, workspacePath);
-            recordTouchedFile(abs);
+            recordWrite(abs);
             onFileWritten(abs);
           },
         }).map((t) =>
@@ -542,7 +549,7 @@ function createToolsForPromptMode(mode: PromptMode, workspacePath: string, effor
     },
     ...(includesTodoTool(mode, effort) ? [createTodoTool()] : []),
     createAskUserTool(),
-  ].map((t) => withRepeatCallGuard(t, workspacePath));
+  ].map((t) => guardRepeat(t, workspacePath));
 }
 
 let agentInstance: AgentService | null = null;
@@ -586,12 +593,15 @@ export interface SendMessageOptions {
 }
 
 export class AgentService {
+  private specialistTask: import('./specialists/task-context').TaskRunContext | null = null;
   /** Identifies this backend to `chat-backend.ts`'s `ChatBackend` contract. */
   readonly kind = 'hosted' as const;
 
   private agent: Agent;
   private unsubscribe: (() => void) | null = null;
   private unsubscribeTelemetry: (() => void) | null = null;
+  private unsubscribeConversation: (() => void) | null = null;
+  private unsubscribeWorkspace: (() => void) | null = null;
   /**
    * Set by `abort()`, read (and reset) by `sendMessage`'s outcome inspection
    * (T5): `detectTurnOutcome` needs to know a user-initiated abort happened
@@ -605,6 +615,19 @@ export class AgentService {
    * covers the loop. `sendMessage` guards on both so sends serialize fully.
    */
   private sendInFlight = false;
+  private disposed = false;
+  private readonly conversationGeneration = useAiStore.getState().conversationGeneration;
+  private readonly workspacePath = getCurrentWorkspacePath();
+  private closingAbort = new AbortController();
+
+  belongsToCurrentConversation(): boolean {
+    return !this.disposed && this.conversationGeneration === useAiStore.getState().conversationGeneration
+      && this.workspacePath === getCurrentWorkspacePath();
+  }
+
+  private checkContinuation(): void {
+    if (!this.belongsToCurrentConversation() || this.abortRequested) throw new Error('Turn cancelled');
+  }
 
   constructor() {
     const workspacePath = getCurrentWorkspacePath();
@@ -627,9 +650,9 @@ export class AgentService {
       // than in `turn-governor.ts` (kept Bun-safe for the eval harness).
       streamFn: withStreamErrorGuard(withTurnGovernor(hostedStream, () => ({
         caps: turnCapsFromConfig(useServerConfigStore.getState().config),
-        onProgress: (used, cap) => useAiStore.getState().setModelCallBudget({ used, cap }),
-        onSoftLimit: (_effort, used, cap) => useAiStore.getState().addSystemMessage(softLimitNotice(used, cap)),
-        onCapReached: (_effort, cap) => useAiStore.getState().addSystemMessage(capReachedNotice(cap)),
+        onProgress: (used, cap) => this.belongsToCurrentConversation() && useAiStore.getState().setModelCallBudget({ used, cap }),
+        onSoftLimit: (_effort, used, cap) => this.belongsToCurrentConversation() && useAiStore.getState().addSystemMessage(softLimitNotice(used, cap)),
+        onCapReached: (_effort, cap) => this.belongsToCurrentConversation() && useAiStore.getState().addSystemMessage(capReachedNotice(cap)),
       }))),
       convertToLlm,
       reasoning: 'mid',
@@ -643,14 +666,22 @@ export class AgentService {
     // as a banner (never a timeline block; this runs from inside an event
     // handler, not a send's own try/catch).
     this.unsubscribe = this.agent.subscribe((event) => {
+      if (!this.belongsToCurrentConversation()) return;
       try {
         useAiStore.getState().handleAgentEvent(event);
+        if (this.sendInFlight) useAiStore.getState().setAgentRunning(true);
       } catch (error) {
         console.error('Internal UI error while processing agent events:', error);
         useAiStore.getState().setError('Internal UI error while processing agent events.');
       }
     });
-    this.unsubscribeTelemetry = this.agent.subscribe((event) => recordTelemetryEvent(event));
+    this.unsubscribeTelemetry = this.agent.subscribe((event) => { if (this.belongsToCurrentConversation()) recordTelemetryEvent(event); });
+    this.unsubscribeConversation = useAiStore.subscribe((state, previous) => {
+      if (state.conversationGeneration !== previous.conversationGeneration) this.dispose();
+    });
+    this.unsubscribeWorkspace = useWorkspaceStore.subscribe((state, previous) => {
+      if (state.workspacePath !== previous.workspacePath) this.dispose();
+    });
   }
 
   /**
@@ -694,6 +725,7 @@ export class AgentService {
   }
 
   async sendMessage(text: string, opts: SendMessageOptions): Promise<void> {
+    if (!this.belongsToCurrentConversation()) return;
     // Serialize whole SENDS, not just the vendor loop: `agent.isRunning`
     // goes false while turn A's post-loop (grounding lint / verified pass,
     // up to ~10s) is still running, and a quick follow-up send used to clear
@@ -711,6 +743,7 @@ export class AgentService {
       if (auth.loggedIn && !auth.token) {
         await auth.logout().catch(() => {});
       }
+      if (!this.belongsToCurrentConversation()) return;
       useAiStore.getState().setError('Sign in to use AI.');
       return;
     }
@@ -718,20 +751,30 @@ export class AgentService {
     // T5: fresh per-send abort tracking. AFTER the guards, so entering while
     // a prior send is mid-post-loop can never clear THAT send's abort flag.
     this.abortRequested = false;
+    this.closingAbort = new AbortController();
     // T5: capture the exact send for retry-turn.ts's replay path. Set only
     // after the guards above so a rejected send (already running / signed
     // out) never clobbers a real in-flight send's replay target.
     lastSend = { text, opts };
 
     this.sendInFlight = true;
+    useAiStore.getState().setAgentRunning(true);
     try {
       await this.runSend(text, opts);
+    } catch (error) {
+      if (this.belongsToCurrentConversation()) {
+        if (this.abortRequested) useAiStore.getState().addStoppedMarker({ promptMode: opts.promptMode ?? defaultPromptModeFor(opts.mode) });
+        else throw error;
+      }
     } finally {
       this.sendInFlight = false;
       // Close the checkpoint turn opened in runSend — recordPreWrite calls
       // landing after this send (mid-turn settings flips, stragglers) must
       // not attach to it (see stores/checkpoints.ts's endTurn).
-      useCheckpointsStore.getState().endTurn();
+      if (this.belongsToCurrentConversation()) {
+        useAiStore.getState().setAgentRunning(false);
+        useCheckpointsStore.getState().endTurn();
+      }
     }
   }
 
@@ -831,6 +874,7 @@ export class AgentService {
 
     if (opts.attachments && opts.attachments.length > 0) {
       const resolved = await resolveAttachments(opts.attachments);
+      this.checkContinuation();
       if (resolved.warnings.length > 0) {
         useAiStore.getState().setError(resolved.warnings.join(' • '));
       }
@@ -901,6 +945,7 @@ export class AgentService {
         getCurrentWorkspacePath(),
         opts.uiDesign.documentPath,
       ).catch(() => null);
+      this.checkContinuation();
       if (brief) promptText = `${brief}\n\n---\n\n${promptText}`;
     }
 
@@ -931,7 +976,24 @@ export class AgentService {
     const before = this.agent.getMessages().length;
 
     try {
-      if (imageBlocks.length > 0) {
+      const specialistMode = (promptMode === 'agent' || promptMode === 'plan-execution') &&
+        useProjectContextStore.getState().isUnityProject && useSettingsStore.getState().getSetting('ai.specialists.enabled') === true;
+      if (specialistMode) {
+        const { runSpecialistHarness } = await import('./specialists/host');
+        this.checkContinuation();
+        const sessionId = useAiStore.getState().sessionId ?? this.currentUserMessageId();
+        const messages = await runSpecialistHarness({
+          text: promptText, images: imageBlocks, messages: this.agent.getMessages(),
+          workspacePath: getCurrentWorkspacePath(), sessionId,
+          taskId: `${sessionId}-${this.currentUserMessageId()}`.replace(/[^A-Za-z0-9_-]/g, '_').slice(-96),
+          effort: effectiveEffort,
+          maxCalls: turnCapsFromConfig(useServerConfigStore.getState().config)[effectiveEffort],
+          contextWindow: effectiveContextWindow(useServerConfigStore.getState().config, effectiveEffort),
+          onContext: (task) => { this.specialistTask = task; if (this.abortRequested || !this.belongsToCurrentConversation()) task?.abort.abort(); },
+        });
+        this.checkContinuation();
+        this.agent.setMessages(messages);
+      } else if (imageBlocks.length > 0) {
         await this.agent.promptStructured([
           // Never an EMPTY text part: providers reject one deterministically,
           // and the retry loop turns that into a long wait ending in a bare
@@ -943,6 +1005,7 @@ export class AgentService {
         await this.agent.prompt(promptText);
       }
 
+      if (!this.belongsToCurrentConversation()) return;
       // Ask-mode grounding linter (P2.2): one forced revise turn, hooked
       // OUTSIDE the vendor loop (architecturally the answer-level sibling of
       // the compile/analyzer gates, which operate at the tool-call level).
@@ -953,12 +1016,14 @@ export class AgentService {
         // Closing checks (P3.4 + Task 13): the agent/plan-execution sibling of
         // the grounding linter above — runs once the whole send is done, over
         // everything it touched AND over what Unity reported while it worked.
-        await this.runClosingChecks(promptMode);
+        if (!specialistMode) await this.runClosingChecks(promptMode);
         // Memory distillation (spec §4): fire-and-forget on the cheap
         // side-task lane; a failure never surfaces as a send error.
         this.maybeDistillMemory(promptMode, text);
       }
     } catch (error) {
+      if (!this.belongsToCurrentConversation()) return;
+      if (this.abortRequested) { useAiStore.getState().addStoppedMarker({ promptMode }); return; }
       if (error instanceof Error && error.message === 'Agent is already running') {
         // Pre-send validation, not a turn that actually ran (see the
         // concurrent-entry comment above) — banner only, no turn error.
@@ -986,6 +1051,7 @@ export class AgentService {
     // outcome detector itself is now the single source of truth for "was this
     // aborted", so it always runs, and its result is always the right one to
     // act on.
+    if (!this.belongsToCurrentConversation()) return;
     const outcome = detectTurnOutcome(this.agent.getMessages().slice(before), this.abortRequested);
     if (outcome.type === 'error') {
       useAiStore.getState().addTurnError(classifyTurnError(outcome.raw));
@@ -1018,7 +1084,7 @@ export class AgentService {
     // below misses it — and this method then fired a fresh BILLED revise
     // turn on a brand-new AbortController for a cancelled send. Same guard
     // maybeDistillMemory already has.
-    if (this.abortRequested) return;
+    if (this.abortRequested || !this.belongsToCurrentConversation()) return;
     if (!useProjectContextStore.getState().isUnityProject) return;
 
     const lastAssistant = [...this.agent.getMessages()]
@@ -1090,7 +1156,7 @@ export class AgentService {
     if (promptMode !== 'agent' && promptMode !== 'plan-execution' && !isDesign) return;
     // Same Stop guard as runGroundingLint: a cancelled send must not trigger
     // a live Unity recompile and a "Verified" card.
-    if (this.abortRequested) return;
+    if (this.abortRequested || !this.belongsToCurrentConversation()) return;
     // Drained here, once: `takeRecordedTestRuns()` is also the answer to "did
     // this send run any tests", which is now a reason to run the closing
     // checks even when no file was written (the agent can run a suite, watch
@@ -1116,7 +1182,8 @@ export class AgentService {
 
     try {
       const workspacePath = getCurrentWorkspacePath();
-      const data = await runVerifiedPass(workspacePath, undefined, { skipCompile: isDesign });
+      const data = await runVerifiedPass(workspacePath, undefined, { skipCompile: isDesign, signal: this.closingAbort.signal });
+      this.checkContinuation();
 
       const baseline = consoleCheckBaseline();
       const consoleEnabled =
@@ -1135,6 +1202,7 @@ export class AgentService {
         runAttempts,
         workspacePath,
       );
+      this.checkContinuation();
       useAiStore.getState().addVerifiedPassMessage(merged);
     } catch {
       // runVerifiedPass is already defensive per-step; this is just an extra
@@ -1156,6 +1224,7 @@ export class AgentService {
     workspacePath: string,
   ): Promise<VerifiedCardData> {
     const before = await collectConsoleProblems(baseline, firstPass, latestRun(recordedRuns));
+    this.checkContinuation();
 
     if (
       !shouldRepair(before, consoleRepairAttempts(), {
@@ -1196,6 +1265,7 @@ export class AgentService {
     const regions = await buildRegions(repairPromptFrames(before), tauriRegionDeps(), {
       dedupe: true,
     });
+    this.checkContinuation();
     // Everything after this seq is evidence the repair did not work; the
     // sightings before it are the ones the repair was asked about.
     const repairStartSeq = useUnityStore.getState().logSeq;
@@ -1224,8 +1294,11 @@ export class AgentService {
 
       // Re-verify from scratch: the repair wrote files, so the first pass's
       // compile/analyzer/GUID results are stale.
-      secondPass = await runVerifiedPass(workspacePath);
+      this.checkContinuation();
+      secondPass = await runVerifiedPass(workspacePath, undefined, { signal: this.closingAbort.signal });
+      this.checkContinuation();
       after = await collectConsoleProblems(baseline, secondPass, null);
+      this.checkContinuation();
       outcome = diffAfterRepair(before, after, {
         repairStartSeq,
         // Only a genuinely CLEAN report proves a compiler error gone. A
@@ -1268,7 +1341,7 @@ export class AgentService {
    */
   private maybeDistillMemory(promptMode: PromptMode, userPrompt: string): void {
     if (promptMode !== 'agent' && promptMode !== 'plan-execution') return;
-    if (this.abortRequested) return;
+    if (this.abortRequested || !this.belongsToCurrentConversation()) return;
     if (touchedFileCount() === 0) return;
     if (useSettingsStore.getState().getSetting('ai.memory.enabled') === false) return;
     const workspacePath = getCurrentWorkspacePath();
@@ -1287,8 +1360,8 @@ export class AgentService {
       { userPrompt, finalAssistantText, touchedFiles: touchedFileList() },
       { request: sideTaskRequest, fs: tauriMemoryFs, workspacePath },
     )
-      .then(() => maybeConsolidate({ fs: tauriMemoryFs, workspacePath, request: sideTaskRequest }))
-      .then(() => primeMemory(workspacePath))
+      .then(() => this.belongsToCurrentConversation() && !this.abortRequested ? maybeConsolidate({ fs: tauriMemoryFs, workspacePath, request: sideTaskRequest }) : undefined)
+      .then(() => this.belongsToCurrentConversation() && !this.abortRequested ? primeMemory(workspacePath) : undefined)
       .catch(() => {});
   }
 
@@ -1308,7 +1381,10 @@ export class AgentService {
   }
 
   abort(): void {
+    if (this.belongsToCurrentConversation()) cancelPendingSends();
     this.abortRequested = true;
+    this.closingAbort.abort();
+    this.specialistTask?.abort.abort();
     this.agent.abort();
   }
 
@@ -1320,7 +1396,7 @@ export class AgentService {
    * — from the end of a send until the next one starts.
    */
   wasLastSendAborted(): boolean {
-    return this.abortRequested;
+    return this.abortRequested || !this.belongsToCurrentConversation();
   }
 
   /**
@@ -1379,6 +1455,12 @@ export class AgentService {
   }
 
   dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    this.unsubscribeConversation?.();
+    this.unsubscribeWorkspace?.();
+    endSubmitBudget();
+    this.abort();
     this.unsubscribe?.();
     this.unsubscribeTelemetry?.();
     this.agent.abort();
@@ -1398,7 +1480,7 @@ export class AgentService {
 export function getAgentService(): AgentService {
   const currentPath = getCurrentWorkspacePath();
 
-  if (agentInstance && lastWorkspacePath !== currentPath) {
+  if (agentInstance && (lastWorkspacePath !== currentPath || !agentInstance.belongsToCurrentConversation())) {
     agentInstance.dispose();
     agentInstance = null;
   }

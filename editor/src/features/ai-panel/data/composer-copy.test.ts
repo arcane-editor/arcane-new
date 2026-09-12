@@ -6,6 +6,7 @@ const base: PlaceholderInput = {
   mode: 'agent',
   planRoute: 'plan',
   pendingQuestion: false,
+  errorAttachmentCount: 0,
 };
 const p = (o: Partial<PlaceholderInput> = {}) => composerPlaceholder({ ...base, ...o });
 
@@ -67,5 +68,24 @@ describe('composerPlaceholder — pending question', () => {
     for (const agent of ['hosted', 'claude'] as const) {
       expect(p({ agent, pendingQuestion: true })).toContain("Answer the agent's question");
     }
+  });
+});
+
+describe('composerPlaceholder — staged errors', () => {
+  /**
+   * "Ask AI" on an error row stages a chip and focuses the composer without
+   * sending. The placeholder is what tells the user the next Enter is theirs
+   * to compose — and it says nothing about the agent or the mode, so it stays
+   * true on both backends.
+   */
+  it('names the staged errors, singular and plural', () => {
+    expect(p({ errorAttachmentCount: 1 })).toBe('Ask about this error. @ for more context, ⏎ to send.');
+    expect(p({ errorAttachmentCount: 3 })).toBe('Ask about these 3 errors. @ for more context, ⏎ to send.');
+  });
+
+  it('outranks the agent and mode copy, but not a pending question', () => {
+    expect(p({ errorAttachmentCount: 2, agent: 'claude' })).toContain('these 2 errors');
+    expect(p({ errorAttachmentCount: 2, mode: 'ask' })).toContain('these 2 errors');
+    expect(p({ errorAttachmentCount: 2, pendingQuestion: true })).toContain("Answer the agent's question");
   });
 });

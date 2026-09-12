@@ -385,7 +385,7 @@ function isRepairableType(logType: UnityLogType): boolean {
   return ERROR_TYPE_SET.has(logType);
 }
 
-function isBridgeChatter(message: string): boolean {
+export function isBridgeChatter(message: string): boolean {
   return message.trimStart().startsWith(BRIDGE_MESSAGE_PREFIX);
 }
 

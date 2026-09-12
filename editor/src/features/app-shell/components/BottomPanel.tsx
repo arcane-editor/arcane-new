@@ -7,6 +7,9 @@ import { RichTerminalPanel } from '../../terminal';
 import { UnityConsolePanel } from '../../unity-console';
 import ProblemsPanel from './ProblemsPanel';
 import { ReferencesPanel } from '../../references';
+import { DebugConsole } from '../../debugger';
+import { UnityProfilerPanel } from '../../unity-profiler';
+import { useDebugStore } from '../../../stores/debug';
 
 function BottomPanel() {
   const activeTab = useUiStore((s) => s.activeBottomTab);
@@ -17,6 +20,8 @@ function BottomPanel() {
   // open" is no longer implied by "we are rendering".
   const panelVisible = useUiStore((s) => s.bottomPanelVisible);
   const maximized = useUiStore((s) => s.bottomPanelMaximized);
+  // The console tab only exists while there is a session to produce output.
+  const debugActive = useDebugStore((s) => s.status !== 'inactive');
   const toggleMaximized = useUiStore((s) => s.toggleBottomPanelMaximized);
   const setMaximized = useUiStore((s) => s.setBottomPanelMaximized);
   const isUnityProject = useProjectContextStore((s) => s.isUnityProject);
@@ -42,6 +47,10 @@ function BottomPanel() {
   const tabs: Array<{ id: BottomPanelTab; label: string }> = [
     { id: 'terminal', label: 'Terminal' },
     ...(isUnityProject ? [{ id: 'unity-console' as BottomPanelTab, label: 'Unity Console' }] : []),
+    // Only while a debug session exists: an always-present tab that is always
+    // empty teaches people to ignore it.
+    ...(debugActive ? [{ id: 'debug-console' as BottomPanelTab, label: 'Debug Console' }] : []),
+    ...(isUnityProject ? [{ id: 'unity-profiler' as BottomPanelTab, label: 'Unity Profiler' }] : []),
     { id: 'problems', label: 'Problems' },
     { id: 'references', label: 'Usages' },
   ];
@@ -107,6 +116,8 @@ function BottomPanel() {
         {effectiveTab === 'unity-console' && <UnityConsolePanel />}
         {effectiveTab === 'problems' && <ProblemsPanel />}
         {effectiveTab === 'references' && <ReferencesPanel />}
+        {effectiveTab === 'debug-console' && <DebugConsole />}
+        {effectiveTab === 'unity-profiler' && <UnityProfilerPanel />}
       </div>
     </div>
   );

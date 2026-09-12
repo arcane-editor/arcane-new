@@ -23,8 +23,15 @@ function parseUnityVersion(v: string | null): { major: number; minor: number } |
  */
 function shouldFlag(unityVersion: string | null): boolean {
   const parsed = parseUnityVersion(unityVersion);
-  // Unknown version → flag (the safe default for older-style projects).
-  if (!parsed) return true;
+  // Unknown version → stay silent.
+  //
+  // This used to flag, on the theory that warning was the safe default. It is
+  // the opposite: Unity has cached `Camera.main` internally since 2020.2, so
+  // on any project made in the last five years this advice is simply wrong —
+  // and it would be given on every project whose ProjectVersion.txt could not
+  // be read. A false warning about correct code costs more than a missed one
+  // about a pattern that is no longer slow.
+  if (!parsed) return false;
   if (parsed.major > 2020) return false;
   if (parsed.major === 2020 && parsed.minor >= 2) return false;
   return true;
@@ -33,6 +40,7 @@ function shouldFlag(unityVersion: string | null): boolean {
 export const cameraMainRule: AnalyzerRule = {
   id: 'unity/camera-main-in-update',
   defaultSeverity: 'warning',
+  codes: ['UNITY0202'],
 
   run(scan, ctx): Finding[] {
     if (!shouldFlag(ctx.unityVersion)) return [];

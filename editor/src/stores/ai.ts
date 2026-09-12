@@ -80,6 +80,8 @@ export interface QuestionRequestData {
 }
 
 export interface AiMessage {
+  specialistRun?: import('../features/ai-panel').SpecialistResult;
+  specialistTask?: import('../features/ai-panel').TaskRunSnapshot;
   id: string;
   role:
     | 'user'
@@ -251,6 +253,8 @@ interface AiState {
 
   // Agent status
   isAgentRunning: boolean;
+  isSubmitting: boolean;
+  conversationGeneration: number;
   toolCalls: Map<string, ToolCallStatus>;
   errorMessage: string | null;
   /**
@@ -457,6 +461,8 @@ interface AiState {
   markQuestionCancelled: (toolCallId: string) => void;
   addAttachment: (attachment: Attachment) => void;
   removeAttachment: (id: string) => void;
+  /** Replace one staged attachment in place, keeping its position in the bar. */
+  replaceAttachment: (id: string, next: Attachment) => void;
   clearAttachments: () => void;
   setPlanPhase: (phase: PlanPhase) => void;
   setActivePlanPath: (path: string | null) => void;
@@ -661,6 +667,8 @@ export const useAiStore = create<AiState>((set, get) => ({
   messages: [],
   streamingMessageId: null,
   isAgentRunning: false,
+  isSubmitting: false,
+  conversationGeneration: 0,
   toolCalls: new Map(),
   errorMessage: null,
   authNotice: null,
@@ -951,6 +959,8 @@ export const useAiStore = create<AiState>((set, get) => ({
 
   resetConversation: () => {
     set({
+      conversationGeneration: get().conversationGeneration + 1,
+      isSubmitting: false,
       messages: [],
       streamingMessageId: null,
       isAgentRunning: false,
@@ -982,6 +992,8 @@ export const useAiStore = create<AiState>((set, get) => ({
 
   loadSessionIntoStore: (session: SessionData) => {
     set(() => ({
+      conversationGeneration: get().conversationGeneration + 1,
+      isSubmitting: false,
       messages: sweepUnresolvedQuestions(session.messages ?? []),
       streamingMessageId: null,
       isAgentRunning: false,
@@ -1244,6 +1256,11 @@ export const useAiStore = create<AiState>((set, get) => ({
 
   removeAttachment: (id: string) =>
     set((s) => ({ attachments: s.attachments.filter((a) => a.id !== id) })),
+
+  // In place, not remove-then-add: merging a second error into a staged
+  // report must not make its chip jump to the end of the bar.
+  replaceAttachment: (id: string, next: Attachment) =>
+    set((s) => ({ attachments: s.attachments.map((a) => (a.id === id ? next : a)) })),
 
   clearAttachments: () => set({ attachments: [] }),
 

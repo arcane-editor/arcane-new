@@ -50,7 +50,7 @@ namespace UnityIDE.Bridge
         /// Mirrors "version" in package.json. Reported in connection_init so the
         /// IDE can tell an outdated package from a missing one. Keep in lockstep.
         /// </summary>
-        private const string PackageVersion = "0.2.0";
+        private const string PackageVersion = "0.3.0";
 
         private static BridgeClient _client;
         private static bool _started;
@@ -153,9 +153,12 @@ namespace UnityIDE.Bridge
             EditorStateHandlers.Register(_client);
             HierarchyHandlers.Register(_client);
             DebuggerHandlers.Register(_client);
+            ProfilerHandlers.Register(_client);
             TestRunnerHandlers.Register(_client);
             ConsoleHandlers.Register(_client);
             SceneMutationHandlers.Register(_client);
+            AuthoringHandlers.Register();
+            PlaytestHandlers.Register();
 
             // Main-thread pump: drains the dispatcher and ticks the timed flushers.
             EditorApplication.update += Pump;
@@ -224,6 +227,8 @@ namespace UnityIDE.Bridge
                 HierarchyHandlers.Tick();      // debounced hierarchy_changed
                 TestRunnerHandlers.Tick();     // (no-op; TestRunnerApi fires on the main thread)
                 PlayModeStatsHook.Tick();      // ≤4Hz play-mode telemetry
+                PlaytestHandlers.Tick();
+                ProfilerHandlers.Tick();
             }
             catch (Exception e)
             {
@@ -344,6 +349,7 @@ namespace UnityIDE.Bridge
                 PlayStateHook.Uninstall();
                 CompilationHook.Uninstall();
                 PlayModeStatsHook.Uninstall();
+                ProfilerHandlers.Uninstall();
                 EditorStateHandlers.UninstallSelectionHook();
                 HierarchyHandlers.UninstallHierarchyHook();
                 TestRunnerHandlers.Shutdown();

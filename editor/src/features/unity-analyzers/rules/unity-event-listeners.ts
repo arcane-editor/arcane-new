@@ -41,6 +41,7 @@ export const unityEventListenersRule: AnalyzerRule = {
   id: RULE_ID,
   defaultSeverity: 'warning',
   settingKey: 'unity.uiDiagnostics.enabled',
+  codes: ['UNITY0502', 'UNITY0503'],
 
   run(scan: CSharpScan, ctx: RuleContext): Finding[] {
     const snapshot = getListenerSnapshot(ctx.filePath);

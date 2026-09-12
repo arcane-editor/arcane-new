@@ -58,6 +58,7 @@ export function stableStringify(value: unknown): string {
   return `{${keys.map((k) => `${JSON.stringify(k)}:${stableStringify(obj[k])}`).join(',')}}`;
 }
 
+export function createRepeatCallGuard(onLoopGuardHit = recordLoopGuardHit) {
 /** Per-send call count, keyed by `toolName::stableStringify(args)`. */
 const callCounts = new Map<string, number>();
 
@@ -87,7 +88,7 @@ function uiWriteLanded(result: AgentToolResult): boolean {
 }
 
 /** Reset all per-send guard state. Call once per user send (mirrors `resetCompileGate`/`resetTurnGovernor`). */
-export function resetRepeatCallGuard(): void {
+function resetRepeatCallGuard(): void {
   callCounts.clear();
   writtenSincePaths.clear();
   uiWrittenSinceLayout = false;
@@ -150,7 +151,7 @@ function synthesizeRepeatResult(toolName: string): AgentToolResult {
  * checkpoint snapshot — so a suppressed call never reaches them (no phantom
  * snapshots, no gate feedback for a call that never ran).
  */
-export function withRepeatCallGuard(tool: AgentTool, cwd: string): AgentTool {
+function withRepeatCallGuard(tool: AgentTool, cwd: string): AgentTool {
   return {
     ...tool,
     async execute(id, params, signal, onUpdate) {
@@ -172,7 +173,7 @@ export function withRepeatCallGuard(tool: AgentTool, cwd: string): AgentTool {
           if (reReadExempt) writtenSincePaths.delete(path!);
           if (reRenderExempt) uiWrittenSinceLayout = false;
         } else {
-          recordLoopGuardHit();
+          onLoopGuardHit();
           return synthesizeRepeatResult(tool.name);
         }
       }
@@ -208,3 +209,7 @@ export function withRepeatCallGuard(tool: AgentTool, cwd: string): AgentTool {
     },
   };
 }
+
+return { resetRepeatCallGuard, withRepeatCallGuard };
+}
+export const { resetRepeatCallGuard, withRepeatCallGuard } = createRepeatCallGuard();

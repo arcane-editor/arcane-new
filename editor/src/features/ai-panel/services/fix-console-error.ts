@@ -15,7 +15,7 @@
 // The Tauri reader itself lives in `console-check-io.ts`, the check's
 // store/RPC boundary, so both callers embed code the same way.
 
-import { getAgentService } from './agent-service';
+import { sendChatMessage } from './chat-backend';
 import { buildFixPrompt } from './prompts/console-repair';
 import { tauriRegionDeps } from './console-check-io';
 import { useAiStore } from '../../../stores/ai';
@@ -36,5 +36,10 @@ export async function fixConsoleError(entry: UnityLogEntry): Promise<void> {
   useAiStore.getState().addUserMessage(`Fix this console error: ${summary}`);
   useUiStore.getState().setActiveRightSidebarView('ai-panel');
   useUiStore.getState().setRightSidebarVisible(true);
-  await getAgentService().sendMessage(prompt, { mode: 'agent', effort });
+  // Through `getChatBackend()` (via `sendChatMessage`), never `getAgentService()`
+  // directly: this button used to reach the hosted agent even with Claude
+  // selected. `sendChatMessage` also re-reads the entitlement gate, so a lapsed
+  // plan refuses instead of sending. Exactly one user bubble either way — the
+  // Claude backend deliberately adds none of its own.
+  await sendChatMessage(prompt, { mode: 'agent', effort });
 }

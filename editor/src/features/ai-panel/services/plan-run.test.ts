@@ -117,6 +117,19 @@ function makeHarness(opts: HarnessOpts) {
 }
 
 describe('runPlanExecution — guards', () => {
+  it('Stop during the initial plan read prevents the queued send', async () => {
+    const { deps, planPath, calls, phases } = makeHarness({ before: '_' });
+    let finish!: (value: string) => void;
+    let cancelled = false;
+    deps.isCancelled = () => cancelled;
+    deps.readPlan = () => new Promise((resolve) => { finish = resolve; });
+    const pending = runPlanExecution(deps, planPath, 'Execute the plan.');
+    cancelled = true;
+    finish('_');
+    await pending;
+    expect(calls).toHaveLength(0);
+    expect(phases).toHaveLength(0);
+  });
   it('a dirty plan tab errors and never sends', async () => {
     const { deps, planPath, calls, errors, phases } = makeHarness({ dirty: true, before: 'irrelevant' });
 

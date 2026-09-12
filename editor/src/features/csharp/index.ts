@@ -18,4 +18,7 @@ export {
   computeUnityDecorations,
 } from './services/csharp-decorations';
 export type { UnityDecoration, UnityDecorationKind } from './services/csharp-decorations';
-export { UNITY_LIFECYCLE_METHODS, LIFECYCLE_METHOD_NAMES } from './services/lifecycle-db';
+// The table itself lives in `src/data/unity-messages.ts` — shared data, not
+// a csharp-feature internal. Re-exported here so existing consumers of this
+// barrel are unaffected.
+export { UNITY_LIFECYCLE_METHODS, LIFECYCLE_METHOD_NAMES } from '../../data/unity-messages';

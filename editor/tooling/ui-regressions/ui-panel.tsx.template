@@ -1,0 +1,10 @@
+import React,{useState,useRef} from 'react';
+import LexicalChatInput from '__EDITOR__/src/features/ai-panel/components/LexicalChatInput.tsx';
+export const fixture: {input:any,acceptSubmit:boolean,setCrash:(v:boolean)=>void}={input:null,acceptSubmit:true,setCrash:()=>{}};
+export function AiChatPanel(){
+ const [crash,setCrash]=useState(false); fixture.setCrash=setCrash;
+ if(crash)throw new Error('Controlled review fault');
+ return <div className="ai-panel"><LexicalChatInput ref={r=>{fixture.input=r;}} disabled={false} placeholder="Prompt" onTextChange={()=>{}} onSubmit={()=>fixture.acceptSubmit}/></div>;
+}
+
+export { default as MaximizedAiOverlay } from '__EDITOR__/src/features/ai-panel/components/MaximizedAiOverlay.tsx';

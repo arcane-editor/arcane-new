@@ -28,9 +28,9 @@ mock.module('@tauri-apps/api/core', () => ({
   ...realCore,
   invoke: async (cmd: string, args?: Record<string, unknown>) => {
     if (cmd === 'read_file_checked') return { text: ORIGINAL, isBinary: false, size: ORIGINAL.length };
-    if (cmd === 'write_file') {
+    if (cmd === 'write_file_if_unchanged') {
       writes.push(args as { path: string; contents: string });
-      return undefined;
+      return true;
     }
     // saveFile pings git and Unity afterwards; neither is under test.
     return undefined;

@@ -14,10 +14,32 @@ export type DebugStatus = 'inactive' | 'attaching' | 'running' | 'paused' | 'ter
 
 export interface Breakpoint {
   line: number;
+  enabled?: boolean;
   condition?: string;
   hitCondition?: string;
+  /**
+   * A logpoint: print this and keep going instead of stopping. `{expression}`
+   * holes are evaluated in the frame — a print statement you did not have to
+   * recompile for.
+   */
+  logMessage?: string;
   verified?: boolean;
 }
+
+/** One line in the debug console. */
+export interface ConsoleLine {
+  /** DAP output category: `console`, `stdout`, `stderr`, `important`. */
+  category: string;
+  text: string;
+}
+
+/**
+ * How many console lines to keep.
+ *
+ * A logpoint inside `Update()` produces sixty lines a second, so this is a
+ * bounded buffer rather than a growing log.
+ */
+const MAX_CONSOLE_LINES = 5000;
 
 export interface StackFrame {
   id: number;
@@ -46,11 +68,31 @@ export interface DapCapabilities {
   exceptionBreakpointFilters?: Array<{ filter: string; label: string; default?: boolean }>;
 }
 
+/**
+ * An attachable debugger endpoint, as reported by the `debug_targets` command.
+ *
+ * For a Unity editor the port is `56000 + (pid % 1000)`, read from
+ * `Library/EditorInstance.json` — the same signal Unity's own tooling uses.
+ */
+export interface DebugTarget {
+  id: string;
+  kind: 'unityEditor' | 'unityPlayer';
+  label: string;
+  host: string;
+  port: number;
+  pid?: number;
+}
+
 interface DebugState {
   capabilities: DapCapabilities;
   status: DebugStatus;
-  monoAvailable: boolean | null;
-  /** Why the debugger isn't available (for a precise, layered message). */
+  /** Attach targets discovered for this project. */
+  targets: DebugTarget[];
+  /** Which target the user picked, when there is more than one. */
+  selectedTargetId: string | null;
+  /** True while the slow player/Android scan is running. */
+  scanning: boolean;
+  /** Why there is nothing to attach to, if there isn't. */
   unavailableReason: string | null;
   /** Breakpoints by absolute file path. */
   breakpoints: Map<string, Breakpoint[]>;
@@ -63,10 +105,28 @@ interface DebugState {
   variables: Map<number, VariableNode[]>;
   watches: string[];
   watchResults: Map<string, string>;
+  watchVariables: Map<string, VariableNode>;
+  stopReason: string | null;
+  exceptionFilters: string[];
+  selectThread: (id: number) => Promise<void>;
+  setExceptionFilters: (filters: string[]) => Promise<void>;
+  setBreakpointEnabled: (file: string, line: number, enabled: boolean) => void;
+  /** Debug console output: logpoints, condition failures, adapter notices. */
+  consoleLines: ConsoleLine[];
+  clearConsole: () => void;
 
-  checkMono: () => Promise<boolean>;
+  loadTargets: () => Promise<DebugTarget[]>;
+  /** The slow scan: network players and attached Android devices. */
+  scanTargets: () => Promise<DebugTarget[]>;
+  selectTarget: (id: string | null) => void;
   toggleBreakpoint: (file: string, line: number) => void;
-  setBreakpointCondition: (file: string, line: number, condition?: string, hitCondition?: string) => void;
+  setBreakpointCondition: (
+    file: string,
+    line: number,
+    condition?: string,
+    hitCondition?: string,
+    logMessage?: string,
+  ) => void;
   breakpointsFor: (file: string) => Breakpoint[];
 
   attach: (play: boolean) => Promise<void>;
@@ -80,6 +140,10 @@ interface DebugState {
   loadChildren: (variablesReference: number) => Promise<void>;
   /** Write a new value into a variable and refresh the rows that showed it. */
   setVariable: (containerRef: number, name: string, value: string) => Promise<void>;
+  /** Run until `line` without leaving a breakpoint behind. */
+  runToCursor: (file: string, line: number) => Promise<void>;
+  /** Move the execution pointer to `line` inside the current method. */
+  setNextStatement: (file: string, line: number) => Promise<void>;
   addWatch: (expr: string) => void;
   removeWatch: (expr: string) => void;
 }
@@ -111,7 +175,9 @@ let handlersBound = false;
 export const useDebugStore = create<DebugState>((set, get) => ({
   capabilities: {},
   status: 'inactive',
-  monoAvailable: null,
+  targets: [],
+  selectedTargetId: null,
+  scanning: false,
   unavailableReason: null,
   // Hydrated post-init (see the queueMicrotask below). Reading useWorkspaceStore
   // here would run during this store's module-eval and TDZ-crash the boot when
@@ -126,29 +192,78 @@ export const useDebugStore = create<DebugState>((set, get) => ({
   variables: new Map(),
   watches: [],
   watchResults: new Map(),
-
-  checkMono: async () => {
+  watchVariables: new Map(),
+  stopReason: null,
+  exceptionFilters: ['uncaught'],
+  setExceptionFilters: async (exceptionFilters) => {
+    await dapClient.request('setExceptionBreakpoints', { filters: exceptionFilters }).then(() => set({ exceptionFilters })).catch(e => notify.error(String(e)));
+  },
+  setBreakpointEnabled: (file, line, enabled) => {
+    const map = new Map(get().breakpoints);
+    const list = (map.get(file) ?? []).map(bp => bp.line === line ? { ...bp, enabled, verified: false } : bp);
+    map.set(file, list); set({ breakpoints: map });
+    persistBreakpoints(useWorkspaceStore.getState().workspacePath ?? '', map);
+    void syncBreakpointsForFile(file, list);
+  },
+  selectThread: async (currentThreadId) => {
+    if (get().status !== 'paused') return;
+    set({ currentThreadId, currentFrameId: null, frames: [], scopes: [], variables: new Map(), watchVariables: new Map() });
     try {
-      const info = await invoke<{ available: boolean; mono_path: string | null; adapter_path: string | null }>(
-        'check_mono_installed',
-      );
-      let reason: string | null = null;
-      if (!info.available) {
-        if (!info.mono_path && !info.adapter_path) {
-          reason = 'Mono runtime and debug adapter not found. Install Mono and the mono-debug adapter to enable debugging.';
-        } else if (!info.mono_path) {
-          reason = 'Mono runtime not found. Install Mono (e.g. brew install mono) to enable debugging.';
-        } else {
-          reason = 'Mono debug adapter not found. Install the VS Code "Mono Debug" extension or vendor mono-debug.exe.';
-        }
-      }
-      set({ monoAvailable: info.available, unavailableReason: reason });
-      return info.available;
+      const res = await dapClient.request<{ stackFrames: Array<{ id: number; name: string; line: number; column: number; source?: { path?: string } }> }>('stackTrace', { threadId: currentThreadId, startFrame: 0, levels: 100 });
+      if (get().status !== 'paused' || get().currentThreadId !== currentThreadId) return;
+      const frames = (res.stackFrames ?? []).map(f => ({ ...f, path: f.source?.path }));
+      set({ frames }); if (frames[0]) await get().selectFrame(frames[0].id);
+    } catch (e) { notify.error(`Could not load thread: ${String(e)}`); }
+  },
+  consoleLines: [],
+
+  clearConsole: () => set({ consoleLines: [] }),
+
+  loadTargets: async () => {
+    const workspacePath = useWorkspaceStore.getState().workspacePath;
+    if (!workspacePath) {
+      set({ targets: [], unavailableReason: 'No project is open.' });
+      return [];
+    }
+    try {
+      const targets = await invoke<DebugTarget[]>('debug_targets', { workspacePath });
+      set({
+        targets,
+        // Nothing to install any more — the debugger is built in. The only
+        // reason it can be unavailable is that Unity is not running.
+        unavailableReason: targets.length
+          ? null
+          : 'No running Unity editor found for this project. Open the project in Unity, then attach.',
+      });
+      return targets;
     } catch (err) {
-      set({ monoAvailable: false, unavailableReason: `Debugger probe failed: ${String(err)}` });
-      return false;
+      set({ targets: [], unavailableReason: `Could not look for a Unity editor: ${String(err)}` });
+      return [];
     }
   },
+
+  scanTargets: async () => {
+    const workspacePath = useWorkspaceStore.getState().workspacePath;
+    if (!workspacePath) return [];
+    set({ scanning: true });
+    try {
+      const targets = await invoke<DebugTarget[]>('debug_scan_targets', { workspacePath });
+      set({
+        targets,
+        unavailableReason: targets.length
+          ? null
+          : 'Nothing found to attach to. Open the project in Unity, or run a development build with script debugging enabled.',
+      });
+      return targets;
+    } catch (err) {
+      set({ unavailableReason: `Could not scan for targets: ${String(err)}` });
+      return get().targets;
+    } finally {
+      set({ scanning: false });
+    }
+  },
+
+  selectTarget: (id) => set({ selectedTargetId: id }),
 
   breakpointsFor: (file) => get().breakpoints.get(file) ?? [],
 
@@ -165,13 +280,14 @@ export const useDebugStore = create<DebugState>((set, get) => ({
     void syncBreakpointsForFile(file, list);
   },
 
-  setBreakpointCondition: (file, line, condition, hitCondition) => {
+  setBreakpointCondition: (file, line, condition, hitCondition, logMessage) => {
     const map = new Map(get().breakpoints);
     const list = [...(map.get(file) ?? [])];
     const bp = list.find((b) => b.line === line);
     if (bp) {
       bp.condition = condition;
       bp.hitCondition = hitCondition;
+      bp.logMessage = logMessage;
       map.set(file, list);
       set({ breakpoints: map });
       persistBreakpoints(useWorkspaceStore.getState().workspacePath ?? '', map);
@@ -181,19 +297,31 @@ export const useDebugStore = create<DebugState>((set, get) => ({
 
   attach: async (play) => {
     const notify = useNotificationsStore.getState().addNotification;
-    if (!(await get().checkMono())) {
-      notify({
-        type: 'warning',
-        message: get().unavailableReason ?? 'Debugger unavailable.',
-        persistent: true,
-      });
+    const workspacePath = useWorkspaceStore.getState().workspacePath;
+    if (!workspacePath) {
+      notify({ type: 'warning', message: 'Open a Unity project before attaching.' });
       return;
     }
-    set({ status: 'attaching' });
-    try {
-      // Resolve the debugger endpoint: prefer the bridge, else the pid-derived port.
-      let host = '127.0.0.1';
-      let port = 0;
+
+    // Resolve the debugger endpoint.
+    //
+    // Discovery leads, because it is the only source that knows about players
+    // and Android devices — and because an explicit choice in the picker must
+    // not be overridden by whatever the bridge happens to report. The bridge is
+    // the fallback for setups discovery cannot see. It used to be the only
+    // source *and* mandatory, so attach aborted outright whenever the in-editor
+    // package was not connected, leaving a perfectly debuggable editor
+    // unreachable.
+    let host = '127.0.0.1';
+    let port = 0;
+
+    const known = get().targets.length ? get().targets : await get().loadTargets();
+    const chosen = known.find((t) => t.id === get().selectedTargetId) ?? known[0];
+
+    if (chosen) {
+      host = chosen.host;
+      port = chosen.port;
+    } else {
       try {
         const ep = await bridgeRpc.getDebuggerEndpoint();
         host = ep.host;
@@ -201,14 +329,18 @@ export const useDebugStore = create<DebugState>((set, get) => ({
       } catch {
         notify({
           type: 'warning',
-          message: 'Unity bridge not connected — cannot resolve debugger port. Connect the bridge first.',
+          message:
+            get().unavailableReason ?? 'No running Unity editor found for this project.',
+          persistent: true,
         });
-        set({ status: 'inactive' });
         return;
       }
+    }
 
+    set({ status: 'attaching' });
+    try {
       bindDapHandlers(set, get);
-      await dapClient.start();
+      await dapClient.start(workspacePath);
       // The response body is the adapter's capability set. It used to be
       // dropped on the floor, so nothing could tell whether setVariable,
       // logpoints or exception filters were available.
@@ -223,11 +355,12 @@ export const useDebugStore = create<DebugState>((set, get) => ({
       set({ capabilities: caps ?? {} });
       // attach kicks the session; the 'initialized' event handler then sends
       // breakpoints + configurationDone.
-      await dapClient.request('attach', { address: host, port });
+      await dapClient.request('attach', { host, port });
       if (play) {
         await useUnityStore.getState().sendPlay();
       }
-      set({ status: 'running' });
+      if (get().status === 'attaching') set({ status: 'running' });
+      void warnIfEditorIsOptimized();
     } catch (err) {
       notify({ type: 'error', message: `Attach failed: ${String(err)}` });
       set({ status: 'inactive' });
@@ -237,21 +370,23 @@ export const useDebugStore = create<DebugState>((set, get) => ({
 
   resume: async () => {
     const tid = get().currentThreadId;
-    await dapClient.request('continue', { threadId: tid ?? 0 }).catch(() => {});
-    set({ status: 'running', frames: [], scopes: [], variables: new Map() });
+    try {
+      await dapClient.request('continue', { threadId: tid ?? 0 });
+      set({ status: 'running', currentFrameId: null, stopReason: null, frames: [], scopes: [], variables: new Map(), watchVariables: new Map(), watchResults: new Map() });
+    } catch (e) { notify.error(`Continue failed: ${String(e)}`); }
   },
   pause: async () => {
     const tid = get().currentThreadId ?? get().threads[0]?.id ?? 0;
-    await dapClient.request('pause', { threadId: tid }).catch(() => {});
+    await dapClient.request('pause', { threadId: tid }).catch(e => notify.error(`Debugger operation failed: ${String(e)}`));
   },
   stepOver: async () => {
-    await dapClient.request('next', { threadId: get().currentThreadId ?? 0 }).catch(() => {});
+    await dapClient.request('next', { threadId: get().currentThreadId ?? 0 }).catch(e => notify.error(`Debugger operation failed: ${String(e)}`));
   },
   stepIn: async () => {
-    await dapClient.request('stepIn', { threadId: get().currentThreadId ?? 0 }).catch(() => {});
+    await dapClient.request('stepIn', { threadId: get().currentThreadId ?? 0 }).catch(e => notify.error(`Debugger operation failed: ${String(e)}`));
   },
   stepOut: async () => {
-    await dapClient.request('stepOut', { threadId: get().currentThreadId ?? 0 }).catch(() => {});
+    await dapClient.request('stepOut', { threadId: get().currentThreadId ?? 0 }).catch(e => notify.error(`Debugger operation failed: ${String(e)}`));
   },
   stop: async () => {
     await dapClient.stop().catch(() => {});
@@ -266,6 +401,7 @@ export const useDebugStore = create<DebugState>((set, get) => ({
         { frameId },
       );
       const scopes = res.scopes ?? [];
+      if (get().status !== 'paused' || get().currentFrameId !== frameId) return;
       set({ scopes });
       // Eagerly load the first scope (Locals).
       if (scopes[0]) await get().loadChildren(scopes[0].variablesReference);
@@ -279,9 +415,11 @@ export const useDebugStore = create<DebugState>((set, get) => ({
   loadChildren: async (variablesReference) => {
     if (variablesReference <= 0) return;
     try {
+      const frame = get().currentFrameId;
       const res = await dapClient.request<{ variables: VariableNode[] }>('variables', {
         variablesReference,
       });
+      if (get().status !== 'paused' || get().currentFrameId !== frame) return;
       const map = new Map(get().variables);
       map.set(variablesReference, res.variables ?? []);
       set({ variables: map });
@@ -301,11 +439,45 @@ export const useDebugStore = create<DebugState>((set, get) => ({
 
       set({ variables: applySetVariable(get().variables, containerRef, name, res) });
 
+      // Reload expanded containers so aliases and parent struct summaries update.
+      for (const reference of [...get().variables.keys()]) await get().loadChildren(reference);
       // A watch expression may read the field just changed, so re-evaluate.
       const fid = get().currentFrameId;
       if (fid != null) void refreshWatches(fid, set, get);
     } catch (err) {
       notify.error(`Could not set ${name}: ${String(err)}`);
+    }
+  },
+
+  runToCursor: async (file, line) => {
+    if (get().status !== 'paused') return;
+    try {
+      await dapClient.request('runToCursor', { source: { path: file }, line });
+    } catch (err) {
+      notify.error(`Run to cursor failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  },
+
+  setNextStatement: async (file, line) => {
+    if (get().status !== 'paused') return;
+    const threadId = get().currentThreadId ?? undefined;
+    try {
+      // Ask what is reachable first: the runtime can only move the pointer
+      // inside the method already executing, so a line elsewhere has no target
+      // and saying so beats attempting a jump that will be refused.
+      const targets = await dapClient.request<{
+        targets: Array<{ id: number; label: string }>;
+      }>('gotoTargets', { source: { path: file }, line });
+      const target = targets.targets?.[0];
+      if (!target) {
+        notify.warning('Execution can only be moved within the current method.');
+        return;
+      }
+      await dapClient.request('goto', { threadId, targetId: target.id });
+    } catch (err) {
+      notify.error(
+        `Could not move execution: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   },
 
@@ -341,7 +513,12 @@ async function syncBreakpointsForFile(file: string, list: Breakpoint[]): Promise
   try {
     await dapClient.request('setBreakpoints', {
       source: { path: file, name: file.split('/').pop() },
-      breakpoints: list.map((b) => ({ line: b.line, condition: b.condition, hitCondition: b.hitCondition })),
+      breakpoints: list.filter(b => b.enabled !== false).map((b) => ({
+        line: b.line,
+        condition: b.condition,
+        hitCondition: b.hitCondition,
+        logMessage: b.logMessage,
+      })),
     });
   } catch (err) {
     // A breakpoint the adapter never received is indistinguishable, in the
@@ -359,23 +536,82 @@ async function refreshWatches(
   set: (partial: Partial<DebugState>) => void,
   get: () => DebugState,
 ): Promise<void> {
-  const results = new Map(get().watchResults);
+  const results = new Map<string, string>();
+  const watchVariables = new Map<string, VariableNode>();
   for (const expr of get().watches) {
     try {
-      const res = await dapClient.request<{ result: string }>('evaluate', {
+      const res = await dapClient.request<{ result: string; type?: string; variablesReference?: number }>('evaluate', {
         expression: expr,
         frameId,
         context: 'watch',
       });
       results.set(expr, res.result);
-    } catch {
-      results.set(expr, '<error>');
+      watchVariables.set(expr, { name: expr, value: res.result, type: res.type, variablesReference: res.variablesReference ?? 0 });
+    } catch (e) {
+      results.set(expr, String(e));
     }
   }
-  set({ watchResults: results });
+  if (get().status === 'paused' && get().currentFrameId === frameId) set({ watchResults: results, watchVariables });
 }
 
 /** Bind DAP adapter events to store updates. Idempotent. */
+/**
+ * Tell the user when the Editor is compiled for speed rather than for debugging.
+ *
+ * Unity 2020.1+ starts in Release, where the JIT discards locals and folds
+ * statements: breakpoints land on the wrong line and variables read as
+ * unavailable. Nothing in Unity surfaces this, so the debugger looks broken
+ * while being perfectly attached — it is the most common false "the debugger
+ * doesn't work" report there is.
+ *
+ * Offered, never done automatically: switching triggers a domain reload, which
+ * throws away Play Mode state. Silent for Editors that predate the setting, and
+ * silent when the bridge is not connected — attaching does not depend on it.
+ */
+async function warnIfEditorIsOptimized(): Promise<void> {
+  let state: { supported: boolean; mode: 'debug' | 'release' };
+  try {
+    state = await bridgeRpc.getCodeOptimization();
+  } catch {
+    return;
+  }
+  if (!state.supported || state.mode === 'debug') return;
+
+  useNotificationsStore.getState().addNotification({
+    type: 'warning',
+    persistent: true,
+    message:
+      'Unity is running in Release code optimization. Breakpoints and variables will be unreliable until you switch to Debug (this reloads the domain).',
+    actions: [
+      {
+        label: 'Switch to Debug',
+        run: () => {
+          void bridgeRpc.setCodeOptimization('debug').catch(() => {});
+        },
+      },
+    ],
+  });
+}
+
+/**
+ * Compare two paths the way the debugger has to.
+ *
+ * The runtime reports the path its compiler recorded — native separators, and
+ * on Windows any casing — while the editor keys breakpoints by the path Monaco
+ * gave it. Comparing them literally makes every binding notification miss.
+ */
+function samePath(a: string, b: string): boolean {
+  const normalize = (p: string) => {
+    const forward = p.replace(/\\/g, '/');
+    return isWindowsPath(forward) ? forward.toLowerCase() : forward;
+  };
+  return normalize(a) === normalize(b);
+}
+
+function isWindowsPath(p: string): boolean {
+  return /^[A-Za-z]:\//.test(p);
+}
+
 function bindDapHandlers(
   set: (partial: Partial<DebugState>) => void,
   get: () => DebugState,
@@ -389,43 +625,81 @@ function bindDapHandlers(
       for (const [file, list] of get().breakpoints) {
         await syncBreakpointsForFile(file, list);
       }
+      // Use the filters the session actually offers rather than a hardcoded
+      // name. The old code always sent `user-unhandled`, which meant the
+      // exception-filter capability was reported and then ignored.
+      const offered = get().capabilities.exceptionBreakpointFilters ?? [];
+      const enabled = get().exceptionFilters.filter(id => offered.some(f => f.filter === id));
       await dapClient
-        .request('setExceptionBreakpoints', { filters: ['user-unhandled'] })
+        .request('setExceptionBreakpoints', {
+          filters: enabled,
+        })
         .catch(() => {});
       await dapClient.request('configurationDone').catch(() => {});
     })();
   });
 
   dapClient.on('stopped', (body) => {
-    const b = body as { threadId?: number };
+    const b = body as { threadId?: number; reason?: string; description?: string };
     const threadId = b.threadId ?? get().currentThreadId ?? 0;
-    set({ status: 'paused', currentThreadId: threadId });
+    set({ status: 'paused', currentThreadId: threadId, stopReason: b.description ?? b.reason ?? 'Paused' });
     void (async () => {
       try {
-        const threadsRes = await dapClient.request<{ threads: Array<{ id: number; name: string }> }>('threads');
-        const stackRes = await dapClient.request<{
-          stackFrames: Array<{ id: number; name: string; line: number; column: number; source?: { path?: string } }>;
-        }>('stackTrace', { threadId, startFrame: 0, levels: 50 });
-        const frames: StackFrame[] = (stackRes.stackFrames ?? []).map((f) => ({
-          id: f.id,
-          name: f.name,
-          path: f.source?.path,
-          line: f.line,
-          column: f.column,
-        }));
-        set({ threads: threadsRes.threads ?? [], frames });
-        if (frames[0]) await get().selectFrame(frames[0].id);
-      } catch {
-        /* ignore */
-      }
+        const threads = await dapClient.request<{ threads: Array<{ id: number; name: string }> }>('threads');
+        if (get().status !== 'paused') return;
+        set({ threads: threads.threads });
+        await get().selectThread(threadId);
+      } catch (e) { notify.error(`Could not inspect stopped thread: ${String(e)}`); }
     })();
   });
 
   dapClient.on('continued', () => {
-    set({ status: 'running', frames: [], scopes: [], variables: new Map() });
+    set({ status: 'running', currentFrameId: null, stopReason: null, frames: [], scopes: [], variables: new Map(), watchVariables: new Map(), watchResults: new Map() });
   });
 
-  const onEnd = () => set({ status: 'terminated', frames: [], scopes: [], variables: new Map(), threads: [] });
+  // Logpoint output, condition failures and adapter notices. Nothing consumed
+  // these before, so a logpoint printed into the void.
+  dapClient.on('output', (body) => {
+    const b = body as { category?: string; output?: string };
+    if (!b.output) return;
+    const lines = get().consoleLines.concat({
+      category: b.category ?? 'console',
+      text: b.output,
+    });
+    // Bounded: a logpoint in Update() writes sixty lines a second.
+    set({
+      consoleLines:
+        lines.length > MAX_CONSOLE_LINES ? lines.slice(lines.length - MAX_CONSOLE_LINES) : lines,
+    });
+  });
+
+  // A breakpoint binds when the type holding it loads, which is often after
+  // `setBreakpoints` answered — and again after every Unity domain reload,
+  // since recompiling scripts or entering Play Mode reloads the assembly. The
+  // gutter would otherwise show the line as unverified for the rest of the
+  // session even though the runtime is armed on it.
+  dapClient.on('breakpoint', (body) => {
+    const b = body as { breakpoint?: { verified?: boolean; line?: number; source?: { path?: string } } };
+    const path = b.breakpoint?.source?.path;
+    const line = b.breakpoint?.line;
+    if (!path || typeof line !== 'number') return;
+
+    const map = new Map(get().breakpoints);
+    for (const [file, list] of map) {
+      if (!samePath(file, path)) continue;
+      // The runtime may bind below the requested line (a blank line, a
+      // comment), so match on either spelling before marking it verified.
+      const updated = list.map((bp) =>
+        bp.line === line || bp.verified === undefined
+          ? { ...bp, verified: b.breakpoint?.verified ?? true }
+          : bp,
+      );
+      map.set(file, updated);
+    }
+    set({ breakpoints: map });
+  });
+
+  const onEnd = () => set({ status: 'terminated', frames: [], scopes: [], variables: new Map(), threads: [], currentFrameId: null, currentThreadId: null, stopReason: null, watchVariables: new Map(), watchResults: new Map() });
   dapClient.on('terminated', onEnd);
   dapClient.on('exited', onEnd);
   dapClient.on('__exited', onEnd);

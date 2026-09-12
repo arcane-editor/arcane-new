@@ -36,8 +36,8 @@ export function buildSummarizePrompt({ filePath, promptText }: SummarizeSceneDif
  * the user's current effort (never hardcoded). Reveals the AI panel.
  */
 export async function summarizeSceneDiff(args: SummarizeSceneDiffArgs): Promise<void> {
-  const [{ getAgentService }, { useAiStore }, { useUiStore }] = await Promise.all([
-    import('./agent-service'),
+  const [{ sendChatMessage }, { useAiStore }, { useUiStore }] = await Promise.all([
+    import('./chat-backend'),
     import('../../../stores/ai'),
     import('../../../stores/ui'),
   ]);
@@ -48,5 +48,8 @@ export async function summarizeSceneDiff(args: SummarizeSceneDiffArgs): Promise<
   useAiStore.getState().addUserMessage(`Summarize this scene change: ${args.filePath}`);
   useUiStore.getState().setActiveRightSidebarView('ai-panel');
   useUiStore.getState().setRightSidebarVisible(true);
-  await getAgentService().sendMessage(prompt, { mode: 'ask', effort });
+  // Through `getChatBackend()` (via `sendChatMessage`), never `getAgentService()`:
+  // this one-click action used to reach the hosted agent even with an external
+  // one selected. Same fix, same reason, as `fix-console-error.ts`.
+  await sendChatMessage(prompt, { mode: 'ask', effort });
 }

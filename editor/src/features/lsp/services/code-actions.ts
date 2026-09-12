@@ -3,6 +3,7 @@ import type { editor, languages } from 'monaco-editor';
 import { lspManager } from './manager';
 import {
   getLspContextForModel,
+  lspDocumentUri,
   toLspRange,
   toMonacoRange,
   type LspRange,
@@ -302,7 +303,7 @@ export function registerLspCodeActionProviders(monaco: Monaco): () => void {
     if (!ctx) return [];
 
     const params = {
-      textDocument: { uri: model.uri.toString() },
+      textDocument: { uri: lspDocumentUri(model) },
       range: toLspRange(range),
       context: {
         diagnostics: overlappingMarkers.map(markerToLspDiagnostic),

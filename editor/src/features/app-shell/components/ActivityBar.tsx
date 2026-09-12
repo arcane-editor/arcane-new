@@ -1,4 +1,5 @@
-import { Files, GitBranch, Search, Settings, Bug, Network, FlaskConical, SquareTerminal, Gamepad2, Boxes, PanelsTopLeft } from 'lucide-react';
+import { useEffect } from 'react';
+import { Files, GitBranch, Search, Settings, Bug, Network, FlaskConical, SquareTerminal, Gamepad2, Boxes, PanelsTopLeft, Gauge } from 'lucide-react';
 import Tooltip from '../../../components/Tooltip';
 import { useUiStore, type SidebarView } from '../../../stores/ui';
 import { useCommandsStore } from '../../../stores/commands';
@@ -6,6 +7,7 @@ import { useProjectContextStore } from '../../../stores/project-context';
 import { useSettingsStore } from '../../../stores/settings';
 import { useGitStore } from '../../../stores/git';
 import { isNewInputSystemActive } from '../../../utils/input-system';
+import { showSourceControl } from '../../../utils/source-control-visibility';
 
 // `commandId` is what supplies the chord in the tooltip. Never spell a chord
 // into `label`: it goes stale the moment the binding moves, and five tooltips
@@ -20,8 +22,18 @@ interface ActivityItem {
 const SIDEBAR_ITEMS: ActivityItem[] = [
   { id: 'explorer', icon: Files, label: 'Explorer', commandId: 'view.explorer' },
   { id: 'search', icon: Search, label: 'Search', commandId: 'search.openTab' },
-  { id: 'source-control', icon: GitBranch, label: 'Source Control', commandId: 'view.sourceControl' },
 ];
+
+// Source Control is conditional on the workspace being a git repository at all
+// -- Unity project or plain folder alike -- so a non-git project doesn't carry
+// an icon whose only view is the "not a git repository" placeholder. The
+// `view.sourceControl` command in App.tsx is gated on the same predicate.
+const SOURCE_CONTROL_ITEM: ActivityItem = {
+  id: 'source-control',
+  icon: GitBranch,
+  label: 'Source Control',
+  commandId: 'view.sourceControl',
+};
 
 function ActivityBar() {
   const activeView = useUiStore((s) => s.activeSidebarView);
@@ -40,6 +52,9 @@ function ActivityBar() {
   // icon is absent rather than present-and-empty. `inputSystem` is null until
   // detection lands, which keeps the icon from flashing in on project open.
   const inputSystemActive = useProjectContextStore((s) => isNewInputSystemActive(s.inputSystem));
+  // Optimistic until a `git status` verdict lands, so a git project (the
+  // common case) never has the icon flash in under the whole activity bar.
+  const gitAvailable = useGitStore(showSourceControl);
 
   // Narrow selector: only re-render when the changed-file count changes.
   //
@@ -54,11 +69,22 @@ function ActivityBar() {
     return seen.size;
   });
 
+  // Losing the icon has to lose the panel with it: opening a plain folder
+  // while Source Control is showing would otherwise strand the sidebar on a
+  // view with no icon left to toggle it back off.
+  useEffect(() => {
+    const ui = useUiStore.getState();
+    if (!gitAvailable && ui.activeSidebarView === 'source-control') {
+      ui.setActiveSidebarView('explorer');
+    }
+  }, [gitAvailable]);
+
   // Read the chord back out of the registry rather than writing it here. The
   // tooltip used to hardcode "Cmd+`" and went stale the moment the binding
   // moved; formatKeybinding is the same formatter the onboarding signpost uses.
   const items: ActivityItem[] = [
     ...SIDEBAR_ITEMS,
+    ...(gitAvailable ? [SOURCE_CONTROL_ITEM] : []),
     ...(isUnityProject && hierarchyEnabled
       ? [{ id: 'hierarchy' as SidebarView, icon: Network, label: 'Unity Hierarchy', commandId: 'view.hierarchy' }]
       : []),
@@ -105,6 +131,19 @@ function ActivityBar() {
           </button>
         </Tooltip>
       ))}
+
+      {isUnityProject && (
+        <Tooltip label="Unity Profiler" commandId="unity.showProfiler">
+          <button
+            aria-label="Unity Profiler"
+            aria-pressed={bottomPanelVisible && activeBottomTab === 'unity-profiler'}
+            className={`activity-bar-icon${bottomPanelVisible && activeBottomTab === 'unity-profiler' ? ' active' : ''}`}
+            onClick={() => useCommandsStore.getState().executeCommand('unity.showProfiler')}
+          >
+            <Gauge size={18} />
+          </button>
+        </Tooltip>
+      )}
 
       <div className="activity-bar-bottom">
         {/* The terminal had no button at all — keyboard or palette only, which

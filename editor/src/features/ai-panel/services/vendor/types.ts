@@ -167,6 +167,7 @@ export interface DiffContent {
 
 export interface AgentToolResult {
   content: (TextContent | ImageContent)[];
+  isError?: boolean;
   /**
    * Optional file diffs produced by the tool, rendered by `DiffBlock`.
    * The UnityIDE path populates this via `diff-decorator.ts`'s write/edit

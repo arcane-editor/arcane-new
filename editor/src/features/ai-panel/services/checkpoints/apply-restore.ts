@@ -18,6 +18,7 @@ import type { RestorePlanEntry } from './restore-plan';
 export interface ApplyRestoreDeps {
   deletePath: (path: string) => Promise<void>;
   writeFile: (path: string, contents: string) => Promise<void>;
+  writeBinary?: (path: string, base64: string) => Promise<void>;
   /** Best-effort side channel (co-deleting sidecar meta) — its own failures never affect applied/failed accounting. */
   coDeleteMeta: (path: string) => Promise<void>;
 }
@@ -43,7 +44,10 @@ export async function runRestorePlan(
         await deps.deletePath(restoreEntry.path);
         await deps.coDeleteMeta(restoreEntry.path).catch(() => {});
       } else {
-        await deps.writeFile(restoreEntry.path, restoreEntry.content ?? '');
+        if (restoreEntry.encoding === 'base64') {
+          if (!deps.writeBinary) throw new Error('Binary checkpoint restoration unavailable');
+          await deps.writeBinary(restoreEntry.path, restoreEntry.content ?? '');
+        } else await deps.writeFile(restoreEntry.path, restoreEntry.content ?? '');
       }
       applied.push(restoreEntry.path);
     } catch (err) {

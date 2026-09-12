@@ -1,7 +1,5 @@
 import type { AnalyzerRule, Finding, RuleContext } from '../services/analyzer-engine';
-import { refreshAll } from '../services/analyzer-engine';
 import { type CSharpScan } from '../services/csharp-scan';
-import { useAsmdefStore } from '../../../stores/asmdef';
 import { buildEdit, type PendingEdit } from '../services/fix-helpers';
 
 // `using UnityEditor;` directive, and any `UnityEditor.` member access.
@@ -25,6 +23,7 @@ const RUNTIME_PREDEFINED = new Set(['Assembly-CSharp', 'Assembly-CSharp-firstpas
 export const editorApiInRuntimeRule: AnalyzerRule = {
   id: 'unity/editor-api-in-runtime',
   defaultSeverity: 'error',
+  codes: ['UNITY0311'],
 
   run(scan, ctx): Finding[] {
     const filePath = ctx.filePath;
@@ -37,7 +36,7 @@ export const editorApiInRuntimeRule: AnalyzerRule = {
     if (owner === undefined) return [];
 
     // Editor-only assembly → fine.
-    if (owner !== null && isEditorOnlyAssembly(owner)) return [];
+    if (owner !== null && isEditorOnlyAssembly(owner, ctx)) return [];
 
     // Find the bounds covered by #if UNITY_EDITOR so we can exempt them.
     const editorGuardedRanges = unityEditorGuardRanges(scan);
@@ -59,7 +58,7 @@ export const editorApiInRuntimeRule: AnalyzerRule = {
         severity: this.defaultSeverity,
         start,
         end,
-        code: 'UNITY0305',
+        code: 'UNITY0311',
         message: `'using UnityEditor;' in a runtime assembly will break player builds. Move this script to an Editor-only assembly/folder, or wrap editor-only code in '#if UNITY_EDITOR'.`,
         fixes: buildWrapFileFix(scan, ctx.model),
       });
@@ -75,7 +74,7 @@ export const editorApiInRuntimeRule: AnalyzerRule = {
         severity: this.defaultSeverity,
         start,
         end: start + m[0].length,
-        code: 'UNITY0305',
+        code: 'UNITY0311',
         message: `'${m[0].replace(/\s+/g, '')}' references the Editor-only UnityEditor namespace from a runtime assembly — this won't compile in a player build. Guard it with '#if UNITY_EDITOR'.`,
         fixes: buildWrapFileFix(scan, ctx.model),
       });
@@ -96,23 +95,23 @@ function isInEditorFolder(filePath: string): boolean {
  *   undefined — not yet cached (caller stays silent + we background-resolve)
  */
 function resolveOwnerSync(filePath: string, ctx: RuleContext): string | null | undefined {
-  const store = useAsmdefStore.getState();
-  const cached = store.byFile.get(filePath);
+  // No store import here on purpose: the lookup arrives through the context.
+  // This rule used to read the asmdef store directly, which dragged
+  // `@tauri-apps/api` into its import graph and made it — and anything that
+  // imported the rule list — impossible to load in a test.
+  const cached = ctx.owningAssembly?.(filePath);
   if (cached !== undefined) {
     // Predefined runtime assembly counts as a real (runtime) owner.
     return cached;
   }
-  // Miss: resolve in the background, then re-run analysis for open models.
-  void store.getOwningAssembly(filePath).then(() => {
-    if (ctx.monaco) refreshAll(ctx.monaco);
-  });
+  // Miss: the engine resolves it in the background and re-runs us.
+  ctx.requestRefresh?.();
   return undefined;
 }
 
-function isEditorOnlyAssembly(owner: string): boolean {
+function isEditorOnlyAssembly(owner: string, ctx: RuleContext): boolean {
   if (RUNTIME_PREDEFINED.has(owner)) return false;
-  const node = useAsmdefStore.getState().graph.find((n) => n.name === owner);
-  return node?.is_editor_only === true;
+  return ctx.isEditorOnlyAssembly?.(owner) === true;
 }
 
 /**

@@ -260,6 +260,7 @@ async function runLoop(
           }
         }
 
+        isError ||= result.isError === true;
         stream.push({
           type: 'tool_execution_end',
           toolCallId: toolCall.id,

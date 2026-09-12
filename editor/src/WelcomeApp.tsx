@@ -7,6 +7,8 @@ import { listenScoped, safeUnlisten } from './utils/tauri-listener';
 import { formatRelativeDate } from './utils/date';
 import { Folder, FolderOpen } from 'lucide-react';
 import TooltipHost from './components/TooltipHost';
+import WindowControls from './components/WindowControls';
+import { isMac } from './utils/platform';
 
 const ERROR_DISMISS_MS = 6000;
 
@@ -244,7 +246,14 @@ function WelcomeApp() {
       fontFamily: 'var(--font-display)',
     }}>
       <TooltipHost />
-      <div data-tauri-drag-region style={{ height: 28, flexShrink: 0 }} />
+      {/* This window's decorations are off everywhere but macOS (`lib.rs` for
+          the one declared in tauri.conf.json, `openWelcomeWindow` for a
+          respawned one) so that the OS bar does not stack on top of this
+          strip — which means the strip owes the user the buttons it replaced.
+          macOS overlays its own traffic lights here instead. */}
+      <div className="welcome-titlebar" data-tauri-drag-region>
+        {!isMac() && <WindowControls />}
+      </div>
       <div style={{
         flex: 1,
         minHeight: 0,
@@ -252,7 +261,9 @@ function WelcomeApp() {
         flexDirection: 'column',
         padding: '12px 36px 32px',
       }}>
-        <div style={{ marginBottom: 28, paddingLeft: 80 }}>
+        {/* Clears macOS's traffic lights, which sit over the strip above.
+            Off macOS they do not exist and this was a dead 80px indent. */}
+        <div style={{ marginBottom: 28, paddingLeft: isMac() ? 80 : 0 }}>
           <h1 style={{ margin: 0, fontSize: 22, fontWeight: 600, letterSpacing: 2 }}>UNITYIDE</h1>
           <div style={{ marginTop: 4, fontSize: 13, color: 'var(--text-secondary)' }}>
             AI-assisted editor for Unity
