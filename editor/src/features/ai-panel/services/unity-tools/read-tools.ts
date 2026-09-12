@@ -554,7 +554,7 @@ function createGetEditorState(): AgentTool {
 function formatNode(n: HierarchyNode, depth: number, maxDepth: number, out: string[]): void {
   const indent = '  '.repeat(depth);
   const comps = n.components.map((c) => c.type).join(', ');
-  out.push(`${indent}${n.name}${n.active ? '' : ' (inactive)'} [${comps || 'no components'}]`);
+  out.push(`${indent}${n.name}${n.active ? '' : ' (inactive)'} [${comps || 'no components'}]${n.globalObjectId ? ` {${n.globalObjectId}}` : ''}`);
   if (depth < maxDepth) {
     for (const c of n.children) formatNode(c, depth + 1, maxDepth, out);
   } else if (n.children.length > 0) {
@@ -601,11 +601,12 @@ function createGetSceneHierarchy(): AgentTool {
 
 const gameObjectSchema = Type.Object({
   instanceId: Type.Optional(Type.Integer({ description: 'Instance id (preferred).' })),
+  globalObjectId: Type.Optional(Type.String({ description: 'Stable Edit Mode object id from get_scene_hierarchy.' })),
   path: Type.Optional(Type.String({ description: 'Hierarchy path "Parent/Child".' })),
 });
 
 async function fetchGameObject(
-  t: { instanceId?: number; path?: string },
+  t: { instanceId?: number; path?: string; globalObjectId?: string },
 ): Promise<HierarchyNode & { components: HierarchyComponent[] }> {
   const { bridgeRpc } = await import('../../../unity-bridge');
   return bridgeRpc.getGameObject(t);
@@ -616,12 +617,12 @@ function createGetGameObject(): AgentTool {
     name: 'get_game_object',
     label: 'get game object',
     description:
-      'Get a live GameObject\'s components and their serialized property values from Unity, by instanceId or hierarchy path. Use after get_scene_hierarchy to inspect a specific object (e.g. to check whether a serialized field is assigned). Requires a connected bridge.',
+      'Get a live GameObject\'s components and serialized values by stable globalObjectId, instanceId, or hierarchy path. Prefer the stable ID returned by get_scene_hierarchy when preparing an existing-scene authoring operation. Requires a connected bridge.',
     parameters: gameObjectSchema,
     async execute(_id, params) {
       if (!(await isConnected())) return txt(NOT_CONNECTED);
       const t = params as Static<typeof gameObjectSchema>;
-      if (t.instanceId == null && !t.path) return txt('Provide instanceId or path.');
+      if (t.instanceId == null && !t.path && !t.globalObjectId) return txt('Provide globalObjectId, instanceId or path.');
       try {
         const go = await fetchGameObject(t);
         return txt(cap(JSON.stringify(go, null, 1)));

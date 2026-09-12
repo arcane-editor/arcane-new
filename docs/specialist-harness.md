@@ -1,11 +1,11 @@
 # Specialist harness implementation and acceptance
 
-The built-in UnityIDE agent has an opt-in coordinator workflow under
-`ai.specialists.enabled`. It is **off by default** until the live Unity and
-three-generation runner benchmark pass. Turning it off restores the existing
-execution path. Ask, Plan planning, the single-document design workflow and
-external ACP agents keep their existing paths. Approved plan execution can use
-the coordinator.
+The built-in UnityIDE agent routes Unity Agent work and approved plan execution
+through the coordinator workflow under `ai.specialists.enabled`. It is enabled
+by default, including a one-time migration for installations that stored the old
+experimental `false` default. A later user opt-out is preserved. Ask, Plan
+planning, the single-document design workflow and external ACP agents keep their
+existing paths.
 
 ## Execution
 
@@ -38,7 +38,7 @@ The specialist workflow uses explicit task state, private repeat guards and
 telemetry, and its own console/scenario evidence instead of those mutable
 registries. It does not run the old preplanning pass outside its shared budget.
 
-## Bridge 5 / integration 0.3.0
+## Bridge 6 / integration 0.4.0
 
 New methods:
 
@@ -46,7 +46,7 @@ New methods:
 | --- | --- |
 | `authorScene` | Execute structured actions or a declared editor builder in Edit Mode |
 | `getAuthoringStatus` | Recover an operation outcome without replaying it |
-| `verifySavedScene` | Reopen the saved scene and inspect persistence and references |
+| `verifySavedScene` | Reopen the saved scene and inspect one required authored root, persistence and references |
 | `startPlaytest` | Accept an input-driven scenario, then enter task-owned Play Mode |
 | `getPlaytestStatus` | Read durable progress, assertions, console/performance evidence and optional images |
 | `cancelPlaytest` | Release test input, exit only test-owned Play Mode and restore scene layout |
@@ -60,11 +60,15 @@ part of this implementation.
 
 ### Authoring contract
 
-An operation names `operationId`, `taskId`, `scenePath`, `ownedRoot`, `outputs`,
-and `actions`. Targets are hierarchy paths relative to the owned root. Supported
-actions create/update objects, instantiate prefabs, attach components, assign
-serialized values and save prefabs. Parentage comes from the target path, for
-example `Track/Obstacle`; parents must exist first. Property values use the
+An operation names `operationId`, `taskId`, `scenePath`, `outputs`, `actions`,
+and exactly one root selector. `ownedRoot` creates or updates an isolated root
+owned by automation. `rootGlobalObjectId` selects existing designer-authored
+content through Unity's persistent identity. Hierarchy and GameObject reads
+return these stable identities for objects and components. Existing-root actions
+are confined to that subtree, and a stale or out-of-scope identity fails closed.
+Supported actions create/update objects, instantiate prefabs, attach components,
+assign serialized values and save prefabs. Parentage comes from the target path,
+for example `Track/Obstacle`; parents must exist first. Property values use the
 existing bridge's typed serialized-value contract.
 
 A generated builder declares `{ type, method, parameters }`. Its entry point is
@@ -74,9 +78,13 @@ It must not regenerate in Awake/Start or use InitializeOnLoad/ExecuteAlways as a
 authoring trigger. Builder code executes in Unity's process, so these are trusted
 project scripts, not a sandbox for arbitrary C#.
 
-Only automation-owned roots and output assets may be updated. Rerunning a fresh
-operation updates existing named children instead of adding duplicates. Saved
-scenes are reopened through preview scenes; declared prefabs are reloaded too.
+Generated builders may update only automation-owned roots and declared output
+assets. Existing roots use scoped structured actions and checkpoint hashes so a
+designer's intervening edit blocks the transaction. Rerunning a fresh operation
+updates existing named children instead of adding duplicates. Saved scenes are
+reopened through preview scenes; declared prefabs are reloaded too. After a
+successful transaction Unity selects the authored root and frames its renderers
+in the Scene view, leaving the scene saved and editable before Play.
 Missing scripts, missing serialized references and transient mesh/material/texture
 dependencies fail persistence checks. Level assignments also require rendered
 geometry and collision before Play. Independent review must still judge whether
@@ -138,10 +146,12 @@ bun run sync:bridge -- --channel dev
 bun run sync:bridge
 ```
 
-`verify:unity-automation` uses Unity's compiler to build core, runtime, optional
-Input System and test assemblies separately, including a core build without the
-optional packages. Set `UNITYIDE_UNITY_RESOURCES` for a different installation.
-Compilation is not a substitute for executing Unity Test Runner.
+`verify:unity-automation` uses Unity's compiler to build core, runtime and
+optional Input System assemblies separately, including a core build without the
+optional packages. It also compiles the test assemblies when the selected Unity
+installation bundles NUnit; otherwise it reports those assemblies as unverified.
+Set `UNITYIDE_UNITY_RESOURCES` for a different installation. Compilation is not
+a substitute for executing Unity Test Runner.
 
 On a workstation with an older global `csharp-ls`, point
 `UNITYIDE_CSHARP_LS_DLL` at the bundled pinned server for verification. Fetch the
@@ -176,7 +186,9 @@ run for each seed. It rejects missing evidence, altered acceptance fixtures,
 reused fresh-project identities and mismatched model configurations. This is an
 acceptance gate over collected evidence, not an unattended project-generation
 launcher. The live three-generation benchmark and before/after model evaluation
-must run before enabling the new workflow by default.
+remain release-confidence checks before claiming a broader improvement in game
+generation quality. The default editable-scene rollout is gated by the focused
+host contracts and live saved-authoring tests below.
 
 ## Unity API references
 
@@ -188,6 +200,24 @@ APIs. The optional adapter queues
 against synthetic devices. Rendered capture follows the documented end-of-frame
 timing for
 [CaptureScreenshotAsTexture](https://docs.unity3d.com/6000.3/Documentation/ScriptReference/ScreenCapture.CaptureScreenshotAsTexture.html).
+
+## Validation recorded on 2026-09-12
+
+| Check | Result |
+| --- | --- |
+| Focused prompt, routing, acceptance, plan-progress, settings and compiler-path suites | Passed: 90 tests, including exact per-root evidence and conflict-safe `.aplan` checkbox persistence |
+| `bun test tooling/unity-eval` | Passed: 129 evaluation and harness tests |
+| `bun run verify:unity-automation` | Passed production assembly compilation on Unity 6000.0.24f1: runtime, core without optional packages, editor, and Input System; direct test-assembly compilation is unverified because this installation does not bundle NUnit |
+| Live Unity EditMode `UnityIDE.Tests.AutomationTests` | Passed: 14/14 on Unity 6000.0.24f1, including saved-scene reopen, scoped representative geometry, selection/framing state, designer-root preservation, and duplicate-name targeting by stable ID |
+| `bun run verify` | TypeScript, deep-module/invoke/version checks, JavaScript suites, 928 Rust tests, live C# IntelliSense/analyzers, and the Mono debugger passed. The aggregate command remains failed because the Unity profiler fixture produced no verified marker within 60 seconds; the ACP probe was skipped because its optional managed adapter is not installed |
+| Unity profiler JSON persistence | Fixed metadata, chunk, status, and result output to use `JsonValue.Serialize()`; the live Unity 6000.0.24f1 headless capture still produced no verified marker |
+| Bundled bridge synchronization | Passed for dev GUID remapping and release bundle; protocol 6, package 0.4.0 |
+| Three fresh runner generations and before/after hosted-model evaluation | Not run; no broader generation-quality benchmark claim |
+
+The live authoring fixture was isolated under the system temp directory and used
+the package from this checkout. The Unity Test Runner result had zero failures
+and zero skipped tests. The missing ACP adapter and the headless profiler marker
+are recorded as unverified rather than counted as passing.
 
 ## Validation recorded on 2026-09-10
 
@@ -213,4 +243,6 @@ The isolated Unity fixture was `/private/tmp/unityide-automation-fixture`; its
 stalled editor process was stopped without closing any other Unity project.
 Remaining acceptance work is to run the live Unity fixtures, execute the runner
 generation/seed matrix and the same-model before/after evaluations, then tune
-against those results. Default enablement must wait for that evidence.
+against those results. This was the historical pre-rollout state; the editable
+scene work was subsequently enabled by default after the focused 2026-09-12
+authoring validation.

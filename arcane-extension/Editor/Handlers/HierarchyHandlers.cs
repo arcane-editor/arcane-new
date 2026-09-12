@@ -188,6 +188,7 @@ namespace UnityIDE.Bridge
             result["name"] = go.name ?? "";
             result["active"] = go.activeSelf;
             result["instanceId"] = go.GetInstanceID();
+            HierarchySerializer.AddStableId(go, result, new HierarchySerializer.Budget(4096));
 
             string tag;
             try { tag = go.tag; } catch { tag = "Untagged"; }
@@ -210,6 +211,13 @@ namespace UnityIDE.Bridge
         /// </summary>
         internal static GameObject ResolveGameObject(JsonValue p)
         {
+            if (p["globalObjectId"].IsString)
+            {
+                var resolved = ResolveGlobalObject(p["globalObjectId"].AsString);
+                if (resolved is GameObject stableGo) return stableGo;
+                if (resolved is Component stableComponent) return stableComponent.gameObject;
+                return null;
+            }
             // By instanceId (preferred — unambiguous).
             if (p["instanceId"].IsNumber)
             {
@@ -235,6 +243,12 @@ namespace UnityIDE.Bridge
                 return FindByHierarchyPath(path);
 
             return null;
+        }
+
+        internal static UnityEngine.Object ResolveGlobalObject(string value)
+        {
+            if (!GlobalObjectId.TryParse(value, out GlobalObjectId id)) return null;
+            return GlobalObjectId.GlobalObjectIdentifierToObjectSlow(id);
         }
 
         /// <summary>"Parent/Child/Leaf", searched across every loaded scene.</summary>
@@ -286,6 +300,7 @@ namespace UnityIDE.Bridge
 
             obj["type"] = c.GetType().Name;
             obj["instanceId"] = c.GetInstanceID();
+            HierarchySerializer.AddStableId(c, obj, new HierarchySerializer.Budget(4096));
 
             var props = JsonValue.NewObject();
             try

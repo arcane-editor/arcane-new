@@ -2,6 +2,7 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
 using NUnit.Framework;
 using UnityEditor;
 using UnityEditor.SceneManagement;
@@ -61,7 +62,10 @@ namespace UnityIDE.Tests
             Assert.AreEqual(1, scene.GetRootGameObjects().Length);
             Assert.AreEqual(1, scene.GetRootGameObjects()[0].transform.childCount);
             Assert.AreEqual(4, scene.GetRootGameObjects()[0].transform.GetChild(0).localPosition.x);
-            Assert.AreEqual("passed", AuthoringHandlers.Verify(first["scenePath"].AsString)["status"].AsString);
+            Assert.AreEqual(scene.GetRootGameObjects()[0], Selection.activeGameObject);
+            Assert.IsFalse(scene.isDirty, "Authoring must leave the Scene view on saved content.");
+            var verification = AuthoringHandlers.Verify(first["scenePath"].AsString);
+            Assert.AreEqual("passed", verification["status"].AsString, verification.Serialize());
         }
         [Test]
         public void ChangedPayloadCannotReuseAnOperationIdentity()
@@ -147,6 +151,54 @@ namespace UnityIDE.Tests
             Assert.Throws<InvalidOperationException>(() => AuthoringHandlers.AssertRepresentativeLevel(SceneManager.GetActiveScene()));
             GameObject.CreatePrimitive(PrimitiveType.Cube);
             Assert.DoesNotThrow(() => AuthoringHandlers.AssertRepresentativeLevel(SceneManager.GetActiveScene()));
+        }
+        [Test]
+        public void RepresentativeLevelIsScopedToAnActiveAuthoredRoot()
+        {
+            GameObject.CreatePrimitive(PrimitiveType.Cube).name = "UnrelatedGeometry";
+            var root = new GameObject("AuthoredLevel");
+            Assert.Throws<InvalidOperationException>(() => AuthoringHandlers.AssertRepresentativeLevel(root.scene, root));
+            var disabled = GameObject.CreatePrimitive(PrimitiveType.Cube); disabled.name = "DisabledTrack";
+            disabled.transform.SetParent(root.transform); disabled.GetComponent<Renderer>().enabled = false;
+            Assert.Throws<InvalidOperationException>(() => AuthoringHandlers.AssertRepresentativeLevel(root.scene, root));
+            disabled.GetComponent<Renderer>().enabled = true;
+            Assert.DoesNotThrow(() => AuthoringHandlers.AssertRepresentativeLevel(root.scene, root));
+        }
+        [Test]
+        public void ExistingSceneObjectsCanBeTargetedWithoutAutomationOwnership()
+        {
+            var scene = SceneManager.GetActiveScene();
+            var root = new GameObject("DesignerLevel");
+            var obstacle = GameObject.CreatePrimitive(PrimitiveType.Cube); obstacle.name = "Obstacle"; obstacle.transform.SetParent(root.transform);
+            var duplicate = GameObject.CreatePrimitive(PrimitiveType.Cube); duplicate.name = "Obstacle"; duplicate.transform.SetParent(root.transform); duplicate.transform.localPosition = Vector3.left;
+            var untouched = new GameObject("DesignerNotes"); untouched.transform.SetParent(root.transform); untouched.transform.localPosition = Vector3.one;
+            string path = _folder + "/Existing.unity"; EditorSceneManager.SaveScene(scene, path);
+
+            var op = JsonValue.NewObject(); op["operationId"] = _prefix + "existing"; op["taskId"] = _prefix;
+            op["scenePath"] = path; op["rootGlobalObjectId"] = GlobalObjectId.GetGlobalObjectIdSlow(root).ToString();
+            op["outputs"] = JsonValue.NewArray(); op["outputs"].Add(path); op["actions"] = JsonValue.NewArray();
+            op["expectedAssetHashes"] = JsonValue.NewObject();
+            using (var hash = SHA256.Create()) op["expectedAssetHashes"][path] = BitConverter.ToString(hash.ComputeHash(File.ReadAllBytes(path))).Replace("-", "");
+            var action = JsonValue.NewObject(); action["kind"] = "object";
+            action["targetGlobalObjectId"] = GlobalObjectId.GetGlobalObjectIdSlow(obstacle).ToString(); action["target"] = "";
+            var position = JsonValue.NewObject(); position["x"] = 7; position["y"] = 0; position["z"] = 0; action["position"] = position;
+            op["actions"].Add(action);
+
+            var result = AuthoringHandlers.Author(op);
+            Assert.AreEqual("passed", result["status"].AsString, result.Serialize());
+            Assert.AreEqual(7, obstacle.transform.localPosition.x);
+            Assert.AreEqual(Vector3.left, duplicate.transform.localPosition, "Stable IDs must disambiguate duplicate designer object names.");
+            Assert.AreEqual(Vector3.one, untouched.transform.localPosition);
+            Assert.AreEqual("DesignerLevel", result["authoredRoot"].AsString);
+        }
+        [Test]
+        public void HierarchyIncludesStableObjectAndComponentIdentifiers()
+        {
+            var go = GameObject.CreatePrimitive(PrimitiveType.Cube); go.name = "Stable";
+            EditorSceneManager.SaveScene(go.scene, _folder + "/Stable.unity");
+            var json = HierarchySerializer.SerializeGameObject(go, new HierarchySerializer.Budget(10000));
+            StringAssert.StartsWith("GlobalObjectId_V1-", json["globalObjectId"].AsString);
+            Assert.IsTrue(json["components"].Array.All(c => c["globalObjectId"].AsString.StartsWith("GlobalObjectId_V1-")));
         }
         [Test]
         public void AssetPathsRejectTraversalAndExternalPaths()

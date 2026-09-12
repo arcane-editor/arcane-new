@@ -1,4 +1,5 @@
 import { UNITY_CONTEXT } from './unity-context';
+import { EDITABLE_SCENE_CONTRACT } from './editable-scene-contract';
 
 export interface PlanExecutionPromptArgs {
   workspacePath: string;
@@ -19,6 +20,8 @@ export function buildPlanExecutionPrompt(args: PlanExecutionPromptArgs): string 
 
 The user's project is at: ${args.workspacePath}
 
+${EDITABLE_SCENE_CONTRACT}
+
 A plan has already been drafted, reviewed, and approved by the user. The plan file is at:
 
 \`${args.planPath}\`
@@ -32,10 +35,10 @@ The approved plan's contents are provided in the conversation. If they are not, 
 - For each todo:
   1. Briefly state which todo you're starting (e.g. "T3: Add CoinPickup component"), and mark that todo's \`todo_update\` item \`in_progress\`.
   2. Use the read/write/edit/bash tools to perform the work, following that todo's Guide entry.
-  3. When the todo is done and verified, **edit the plan file** (\`${args.planPath}\`) to mark its checkbox as complete: change \`- [ ]\` to \`- [x]\` on that todo's line, preserving its \`T<n>\` id and \`[easy|hard]\` tag verbatim — e.g. \`- [ ] T2 [hard] Refactor NavMeshAgent wiring\` becomes \`- [x] T2 [hard] Refactor NavMeshAgent wiring\` — and mark the same \`todo_update\` item \`done\`.
+  3. When the todo is done and verified, call \`plan_progress\` with its exact \`T<n>\` id when that tool is available. The host will atomically mark the matching checkbox complete in \`${args.planPath}\` while preserving the rest of the plan. If the tool is unavailable, edit the plan file directly: change \`- [ ]\` to \`- [x]\` on that todo's line while preserving its \`T<n>\` id and \`[easy|hard]\` tag verbatim. Then mark the same \`todo_update\` item \`done\`.
   4. Move to the next todo.
 - If the plan interleaves script and editor work, do the **script todos first**: complete every remaining todo that only creates or edits files before starting todos that drive the Unity editor (GameObjects, prefabs, scenes, baking, menu items). Tick each todo's checkbox as it completes, whatever order that happens in.
-- If a todo requires manual user action in the Unity editor (assigning a prefab in the Inspector, adding a component to a scene GameObject), perform every part you can, then mark the todo as complete with a short note appended after its title, e.g. \`- [x] T4 [easy] Wire CoinPickup to scene — created prefab; user must drag into Coins/ in MainScene\`.
+- Do not leave routine scene wiring to the user. Assign prefab references, add components, and place objects through the saved authoring workflow, then verify the exact scene/root after reopening it. Ask for help only when user intent or conflicting unsaved designer work cannot be resolved safely.
 - If a todo fails (compile error, missing dependency, ambiguous requirement), do **not** silently skip it. Stop, summarize what failed and what you'd need to proceed, and wait for the user.
 
 ## The Unity editor connection is NOT required for script work

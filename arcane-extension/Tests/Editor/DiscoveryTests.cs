@@ -99,7 +99,9 @@ namespace UnityIDE.Tests
             // ACCEPTANCE, real completion arrives as refresh_completed).
             // 4 = console snapshot/clear RPCs, queued runTests +
             // test_run_completed, attachUiDocument/setSerializedProperty.
-            Assert.AreEqual(5, Discovery.ProtocolVersion);
+            // 6 = scoped authoring verification plus stable GlobalObjectId
+            // targets for editing existing scene content safely.
+            Assert.AreEqual(6, Discovery.ProtocolVersion);
         }
     }
 }

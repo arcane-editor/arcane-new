@@ -96,24 +96,20 @@ export const UNITY_RECIPES: UnityRecipe[] = [
       'prefab',
       'level',
     ],
-    body: `- **There is no tool that creates or configures a GameObject.** The Unity bridge can
-  read the hierarchy, read components and run menu items, but it has no call to add
-  a GameObject, add or configure a component, set a transform, or save a scene. Plan
-  accordingly — do not write todos that assume otherwise.
-- **\`unity_execute_menu_item\` can create a primitive** (e.g. \`GameObject/3D Object/Capsule\`)
-  into the open scene, but nothing can then position it, rename it, size it, or
-  attach a script to it. Treat it as "make the object exist", never as "set the
-  object up".
-- **Do not hand-write \`.unity\` or \`.prefab\` YAML.** Those files are fileID and GUID
-  graphs; there is no tool here to generate valid ones, and none of the write-time
-  correctness gates (analyzer, compile, LSP) look at anything but \`.cs\`, so a
-  malformed scene is caught by nothing and can break the file for the user.
-- **So: write the scene work as explicit Inspector steps for the user**, in that
-  todo's Guide entry — which object to create, what to name it, its transform, which
-  component to add, and what to set each field to. A plan that states five precise
-  manual steps is worth far more than one that pretends it can do them.
-- Scripts still come first: every \`.cs\` todo before any editor todo, so the project
-  compiles once and the user is configuring components that already exist.`,
+    body: `- **A generated level is authored content.** It must exist as saved, selectable
+  GameObjects and assets in Edit Mode and be visible in the Scene view before Play.
+- **Use \`unity_author\` after scripts compile.** For large layouts, write an Editor builder
+  that runs once through the authoring operation, updates a declared root, and saves all
+  generated meshes, materials and prefabs. Do not run it from Awake, Start,
+  RuntimeInitializeOnLoadMethod, InitializeOnLoad or ExecuteAlways.
+- **Convert runtime-built levels completely.** Move construction to the Editor builder,
+  execute it, save the scene, wire gameplay scripts to the saved objects, and remove the
+  runtime construction trigger. Play must use the designer-editable scene rather than
+  replace it.
+- **Modify existing scenes surgically.** Inspect the hierarchy first, target the intended
+  saved objects, and preserve unrelated roots, prefab overrides and designer changes.
+- **Do not hand-write \`.unity\` or \`.prefab\` YAML.** Use structured Unity authoring and
+  verify that the scene reopens with its persistent dependencies.`,
   },
 ];
 

@@ -25,6 +25,7 @@ import { COORDINATOR_PROMPT } from './definitions';
 import { TaskRunContext } from './task-context';
 import { SpecialistOrchestrator } from './orchestrator';
 import { createAutomationTools, type AutomationDeps } from './automation-tools';
+import { createPlanProgressTool } from './plan-progress-tool';
 import type { SpecialistResult } from './contracts';
 import type { Effort } from '../types';
 
@@ -65,11 +66,14 @@ export function productionAutomationDeps(task: TaskRunContext): AutomationDeps {
       await useCheckpointsStore.getState().flushCheckpointsNow();
       return hashes;
     },
-    author: (operation) => bridgeRpc.author({ ...operation, requireAuthoredLevel: task.requiresAuthoredLevel }),
-    authorStatus: bridgeRpc.authorStatus, verifyScene: (path) => bridgeRpc.verifyScene(path, task.requiresAuthoredLevel),
+    author: bridgeRpc.author,
+    authorStatus: bridgeRpc.authorStatus, verifyScene: (path, root, requireRepresentativeLevel) => bridgeRpc.verifyScene(path, requireRepresentativeLevel, root),
     play: (id, scenario) => bridgeRpc.startPlaytest(id, scenario, task.id), status: bridgeRpc.playtestStatus, cancel: bridgeRpc.cancelPlaytest, wait,
     reconcile: async () => {
-      if ((useUnityStore.getState().bridgeProtocol ?? 0) < 5) throw new Error('Reconnect Unity and update to integration package 0.3.0 to resume this task.');
+      // Coding and planning remain useful while Unity is closed or an older
+      // bridge is installed. Automation tools still reject verification, so a
+      // task cannot claim completion without current live evidence.
+      if ((useUnityStore.getState().bridgeProtocol ?? 0) < 6) return;
       const state = await bridgeRpc.automationState();
       if (state.activePlaytest) {
         if (state.taskId !== task.id) throw new Error('Another task owns the active Unity playtest. Resume after it finishes.');
@@ -86,6 +90,7 @@ export function productionAutomationDeps(task: TaskRunContext): AutomationDeps {
 export async function runSpecialistHarness(args: {
   text: string; images: ImageContent[]; messages: AgentMessage[];
   workspacePath: string; sessionId: string; taskId: string; effort: Effort; maxCalls: number; contextWindow: number;
+  planExecution?: { planPath: string };
   onContext: (task: TaskRunContext | null) => void;
 }): Promise<AgentMessage[]> {
   const previous = [...useAiStore.getState().messages].reverse().find((m) => m.specialistTask?.status === 'interrupted' && m.specialistTask.workspacePath === args.workspacePath);
@@ -161,8 +166,27 @@ export async function runSpecialistHarness(args: {
   const engine = createAutomationTools(task, 'coordinator', deps).filter((t) => t.name === 'unity_compile' || t.name.endsWith('_status')).map((tool): AgentTool => ({
     ...tool, execute: (id, params, signal, update) => task.exclusive(() => tool.execute(id, params, signal, update)),
   }));
+  const planProgress = args.planExecution ? [createPlanProgressTool({
+    workspacePath: args.workspacePath,
+    planPath: args.planExecution.planPath,
+    assertAllowed: (path) => assertWithinRootReal(
+      path,
+      `${args.workspacePath.replace(/[\\/]+$/, '')}/.unityide/plans`,
+      tauriRealPathOperations,
+    ),
+    read: (path) => invoke<string>('read_file', { path }),
+    writeIfUnchanged: (path, content, expectedContent) =>
+      invoke<boolean>('write_file_if_unchanged', { path, contents: content, expectedContent }),
+    isDirty: (path) => {
+      const normalized = path.replace(/\\/g, '/').toLowerCase();
+      return useWorkspaceStore.getState().openFiles.some(
+        (file) => file.path.replace(/\\/g, '/').toLowerCase() === normalized && file.isDirty,
+      );
+    },
+    onWritten: (path) => useWorkspaceStore.getState().reloadFileFromDisk(path, { skipIfDirty: true }),
+  })] : [];
   const coordinator = new Agent({ model: { id: 'auto', name: 'auto', provider: 'hosted' }, reasoning: args.effort, contextWindow: args.contextWindow,
-    systemPrompt: `${COORDINATOR_PROMPT}\n\n${facts}`, tools: [...reads, ...orchestrator.tools(), ...engine, createAskUserTool(), createTodoTool()], streamFn: orchestrator.stream('coordinator', 'coordinator'), convertToLlm });
+    systemPrompt: `${COORDINATOR_PROMPT}\n\n${facts}`, tools: [...reads, ...orchestrator.tools(), ...engine, ...planProgress, createAskUserTool(), createTodoTool()], streamFn: orchestrator.stream('coordinator', 'coordinator'), convertToLlm });
   coordinator.setMessages(args.messages);
   const unsubscribe = coordinator.subscribe((event) => {
     telemetryFor('coordinator').recordTelemetryEvent(event);

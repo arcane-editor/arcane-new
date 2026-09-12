@@ -3,7 +3,7 @@
 //
 // Shape (getSceneHierarchy result):
 //   { scenes:[{ name, path, roots: GameObjectNode[] }], truncated: bool }
-//   GameObjectNode = { name, active, tag, layer, instanceId,
+//   GameObjectNode = { name, active, tag, layer, instanceId, globalObjectId,
 //                      components:[{ type, ... }], children: GameObjectNode[] }
 //
 // The serialized payload is capped at ~2 MB. We approximate the cost as we build
@@ -79,6 +79,7 @@ namespace UnityIDE.Bridge
             node["tag"] = SafeTag(go);
             node["layer"] = go.layer;
             node["instanceId"] = go.GetInstanceID();
+            AddStableId(go, node, budget);
 
             budget.Add(go.name);
 
@@ -107,6 +108,7 @@ namespace UnityIDE.Bridge
                     string typeName = c.GetType().Name;
                     compObj["type"] = typeName;
                     budget.Add(typeName);
+                    AddStableId(c, compObj, budget);
                     AddScriptIdentity(c, compObj, budget);
                 }
                 components.Add(compObj);
@@ -124,6 +126,14 @@ namespace UnityIDE.Bridge
             node["children"] = children;
 
             return node;
+        }
+
+        internal static void AddStableId(UnityEngine.Object value, JsonValue target, Budget budget)
+        {
+            if (value == null || string.IsNullOrEmpty(AssetDatabase.GetAssetOrScenePath(value))) return;
+            string id = GlobalObjectId.GetGlobalObjectIdSlow(value).ToString();
+            target["globalObjectId"] = id;
+            budget.Add(id);
         }
 
 

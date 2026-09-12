@@ -31,6 +31,16 @@ describe('task execution ownership', () => {
     task.record({ id: 'game', kind: 'gameplay', status: 'unsupported', revision: 1, summary: 'Legacy input', artifacts: [] });
     expect(task.canFinish()).toBe(false);
   });
+  it('requires current persistence evidence for every declared scene root', () => {
+    const task = new TaskRunContext('test', '/game', 10); task.criteria.push('Editable level');
+    task.requireScene({ scenePath: 'Assets/Main.unity', root: 'Level' });
+    task.requireScene({ scenePath: 'Assets/Menu.unity', root: 'Menu' });
+    task.record({ id: 'scene:main', kind: 'scene-persistence', status: 'passed', revision: 0, summary: 'Saved', artifacts: ['Assets/Main.unity'], sceneTarget: { scenePath: 'Assets/Main.unity', root: 'Level' } });
+    expect(task.canFinish()).toBe(false);
+    expect(task.requiredResults().find((e) => e.id.includes('Assets/Menu.unity'))?.status).toBe('not-run');
+    task.record({ id: 'scene:menu', kind: 'scene-persistence', status: 'passed', revision: 0, summary: 'Saved', artifacts: ['Assets/Menu.unity'], sceneTarget: { scenePath: 'Assets/Menu.unity', root: 'Menu' } });
+    expect(task.canFinish()).toBe(true);
+  });
   it('stops after two repair rounds make no progress and never exceeds five rounds', () => {
     const task = new TaskRunContext('test', '/game', 10);
     expect(task.beginRepair()).toBe(true); expect(task.beginRepair()).toBe(true); expect(task.beginRepair()).toBe(false);

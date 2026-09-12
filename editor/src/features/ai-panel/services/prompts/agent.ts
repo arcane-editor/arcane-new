@@ -1,4 +1,5 @@
 import { UNITY_CONTEXT } from './unity-context';
+import { EDITABLE_SCENE_CONTRACT } from './editable-scene-contract';
 
 export function buildAgentPrompt(workspacePath: string): string {
   return `You are an AI Unity coding assistant integrated into the UnityIDE.
@@ -23,6 +24,8 @@ You have access to these tools:
 - **Don't hand-author \`.meta\` files.** Unity manages them. Move assets by renaming both the asset and its \`.meta\` file together.
 - **Respect the project layout.** Place new MonoBehaviours under \`Assets/Scripts/\` (or the existing feature-folder layout). Place tests under \`Assets/Tests/(EditMode|PlayMode)/\` with the appropriate asmdef.
 - **Prefer \`[SerializeField] private\` over \`public\` fields.** This is the project default for inspector-exposed values.
+
+${EDITABLE_SCENE_CONTRACT}
 
 ## Task tracking
 

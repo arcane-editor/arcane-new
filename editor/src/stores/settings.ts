@@ -23,8 +23,8 @@ const DEFAULT_SETTINGS: SettingsSchema = {
   'graphify.suppressFirstOpenToast': false,
   'ai.checkpoints.enabled': true,
   'ai.escalation.enabled': true,
-  // Remains opt-in until the real Unity acceptance benchmark passes.
-  'ai.specialists.enabled': false,
+  'ai.specialists.enabled': true,
+  'ai.specialists.editableScenesVersion': 1,
   'ai.memory.enabled': true,
   'ai.edits.applyMode': 'auto',
   'ai.edits.alwaysApproveUnityAssets': true,
@@ -79,6 +79,43 @@ const DEFAULT_SETTINGS: SettingsSchema = {
   'updates.autoInstall': true,
 };
 
+/**
+ * Merge persisted settings while applying one-time migrations.
+ *
+ * Specialist routing used to ship disabled. Existing installations therefore
+ * commonly contain `false` even though the user never opted out. The rollout
+ * marker enables the new Unity studio workflow once, while preserving every
+ * explicit opt-out made after that migration.
+ */
+export function mergeStoredSettings(stored: Record<string, unknown>): SettingsSchema {
+  const merged = { ...DEFAULT_SETTINGS } as Record<string, unknown>;
+  for (const [key, value] of Object.entries(stored)) {
+    if (key in DEFAULT_SETTINGS) merged[key] = value;
+  }
+
+  if (stored['ai.specialists.editableScenesVersion'] !== 1) {
+    merged['ai.specialists.enabled'] = true;
+    merged['ai.specialists.editableScenesVersion'] = 1;
+  }
+
+  // Migration: any stored value referencing a font that's a webfont
+  // (Geist Mono Variable) or commonly missing on macOS (Cascadia Code,
+  // Source Code Pro, JetBrains Mono) makes xterm measure the wrong cell
+  // width and renders the prompt as "c o n t e n t". Force-reset to the
+  // system default in those cases.
+  const storedFont = (merged['terminal.fontFamily'] as string) ?? '';
+  const looksProblematic =
+    storedFont === '' ||
+    /Geist/i.test(storedFont) ||
+    /Cascadia Code\b/i.test(storedFont) ||
+    /Source Code Pro/i.test(storedFont) ||
+    /JetBrains Mono/i.test(storedFont) ||
+    /Fira Code/i.test(storedFont);
+  if (looksProblematic) merged['terminal.fontFamily'] = DEFAULT_SETTINGS['terminal.fontFamily'];
+
+  return merged as unknown as SettingsSchema;
+}
+
 interface SettingsState {
   settings: SettingsSchema;
   isLoaded: boolean;
@@ -96,28 +133,14 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   loadSettings: async () => {
     try {
       const stored = await invoke<Record<string, unknown>>('read_settings');
-      const merged = { ...DEFAULT_SETTINGS } as Record<string, unknown>;
-      for (const [key, value] of Object.entries(stored)) {
-        if (key in DEFAULT_SETTINGS) merged[key] = value;
-      }
-      // Migration: any stored value referencing a font that's a webfont
-      // (Geist Mono Variable) or commonly missing on macOS (Cascadia Code,
-      // Source Code Pro, JetBrains Mono) makes xterm measure the wrong cell
-      // width and renders the prompt as "c o n t e n t". Force-reset to the
-      // system default in those cases.
-      const storedFont = (merged['terminal.fontFamily'] as string) ?? '';
-      const looksProblematic =
-        storedFont === '' ||
-        /Geist/i.test(storedFont) ||
-        /Cascadia Code\b/i.test(storedFont) ||
-        /Source Code Pro/i.test(storedFont) ||
-        /JetBrains Mono/i.test(storedFont) ||
-        /Fira Code/i.test(storedFont);
-      if (looksProblematic) {
-        merged['terminal.fontFamily'] = DEFAULT_SETTINGS['terminal.fontFamily'];
+      const merged = mergeStoredSettings(stored);
+      if (
+        stored['ai.specialists.editableScenesVersion'] !== 1 ||
+        ('terminal.fontFamily' in stored && stored['terminal.fontFamily'] !== merged['terminal.fontFamily'])
+      ) {
         invoke('write_settings', { settings: merged }).catch(() => {});
       }
-      set({ settings: merged as unknown as SettingsSchema, isLoaded: true });
+      set({ settings: merged, isLoaded: true });
     } catch {
       set({ isLoaded: true });
     }

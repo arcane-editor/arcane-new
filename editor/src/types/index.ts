@@ -186,6 +186,7 @@ export interface SettingsSchema {
   'ai.checkpoints.enabled': boolean;
   'ai.escalation.enabled': boolean;
   'ai.specialists.enabled': boolean;
+  'ai.specialists.editableScenesVersion': number;
   'ai.memory.enabled': boolean;
   'ai.edits.applyMode': 'approve' | 'auto';
   'ai.edits.alwaysApproveUnityAssets': boolean;

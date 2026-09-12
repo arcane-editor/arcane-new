@@ -1,18 +1,29 @@
-/** Compile all integration assemblies and optional input/tests with Unity's own compiler.
+/** Compile integration assemblies and, when installed, test assemblies with Unity's compiler.
  * Does not claim runtime validation. Use Unity Test Runner for execution; see the harness guide.
  * UNITYIDE_UNITY_RESOURCES may point at another installed Unity's Resources directory.
  */
 import { readdir, mkdir, mkdtemp, writeFile, access } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { tmpdir } from 'node:os';
-const resources = process.env.UNITYIDE_UNITY_RESOURCES ?? '/Applications/Unity/Hub/Editor/6000.3.5f2/Unity.app/Contents/Resources';
+import { homedir, tmpdir } from 'node:os';
+import { compilerLayout, isOptionalInputSource } from './unity-automation-paths';
+let resources = process.env.UNITYIDE_UNITY_RESOURCES;
+if (!resources) {
+  const hub = process.platform === 'darwin' ? '/Applications/Unity/Hub/Editor' : process.platform === 'win32' ? 'C:/Program Files/Unity/Hub/Editor' : join(homedir(), 'Unity/Hub/Editor');
+  for (const version of (await readdir(hub).catch(() => [] as string[])).sort().reverse()) {
+    const candidate = join(hub, version, process.platform === 'darwin' ? 'Unity.app/Contents/Resources' : process.platform === 'win32' ? 'Editor/Data' : 'Editor/Data/Resources');
+    if (await access(candidate).then(() => true, () => false)) { resources = candidate; break; }
+  }
+}
+if (!resources) throw new Error('Unity installation unavailable. Set UNITYIDE_UNITY_RESOURCES; this check did not run.');
 const extension = resolve(import.meta.dir, '../../arcane-extension');
 const output = await mkdtemp(join(tmpdir(), 'unityide-automation-compile-'));
-const scripting = join(resources, 'Scripting');
-const mono = join(scripting, 'MonoBleedingEdge/bin/mono');
-const csc = join(scripting, 'MonoBleedingEdge/lib/mono/4.5/csc.exe');
-const cache = join(resources, 'PackageManager/ProjectTemplates/libcache/com.unity.template.3d-cross-platform-17.0.14/ScriptAssemblies');
-const nunit = join(resources, 'PackageManager/BuiltInPackages/com.unity.ext.nunit/net40/unity-custom/nunit.framework.dll');
+const { scripting, mono, csc } = compilerLayout(resources);
+const packageManager = process.platform === 'win32' ? join(resources, 'Resources/PackageManager') : join(resources, 'PackageManager');
+const templateRoot = join(packageManager, 'ProjectTemplates/libcache');
+const template = (await readdir(templateRoot).catch(() => [] as string[])).filter((name) => name.startsWith('com.unity.template.3d-cross-platform-')).sort().reverse()[0];
+if (!template) throw new Error('Unity 3D template assemblies unavailable; this check did not run.');
+const cache = join(templateRoot, template, 'ScriptAssemblies');
+const nunit = join(packageManager, 'BuiltInPackages/com.unity.ext.nunit/net40/unity-custom/nunit.framework.dll');
 async function files(root: string, suffix: string): Promise<string[]> {
   const result: string[] = [];
   for (const entry of await readdir(root, { withFileTypes: true })) {
@@ -26,6 +37,7 @@ try { await access(csc); } catch { throw new Error('Unity compiler unavailable. 
 const references = [...await files(join(scripting, 'Managed/UnityEngine'), '.dll'),
   join(scripting, 'NetStandard/ref/2.1.0/netstandard.dll'), ...await files(join(scripting, 'NetStandard/compat/2.1.0/shims/netfx'), '.dll')];
 const testReferences = [nunit, join(cache, 'UnityEditor.TestRunner.dll'), join(cache, 'UnityEngine.TestRunner.dll')];
+const hasTestFramework = (await Promise.all(testReferences.map((path) => access(path).then(() => true, () => false)))).every(Boolean);
 async function compile(name: string, sources: string[], extra: string[] = [], defines = '') {
   await mkdir(output, { recursive: true });
   const destination = join(output, name + '.dll');
@@ -38,12 +50,13 @@ async function compile(name: string, sources: string[], extra: string[] = [], de
   return destination;
 }
 const runtime = await compile('UnityIDE.Automation.Runtime', await files(join(extension, 'Runtime'), '.cs'));
-const editorSources = (await files(join(extension, 'Editor'), '.cs')).filter((p) => !p.includes('/InputSystem/'));
+const editorSources = (await files(join(extension, 'Editor'), '.cs')).filter((p) => !isOptionalInputSource(p));
 // Core stays loadable without either optional integration package.
 await compile('UnityIDE.Core.WithoutOptionalPackages', editorSources, [runtime]);
-const editor = await compile('UnityIDE.Editor', editorSources, [runtime, ...testReferences], ',UNITYIDE_HAS_TEST_FRAMEWORK');
-await compile('UnityIDE.Editor.Tests', await files(join(extension, 'Tests/Editor'), '.cs'), [runtime, editor, ...testReferences], ',UNITYIDE_HAS_TEST_FRAMEWORK,UNITY_INCLUDE_TESTS');
+const editor = await compile('UnityIDE.Editor', editorSources, [runtime, ...(hasTestFramework ? testReferences : [])], hasTestFramework ? ',UNITYIDE_HAS_TEST_FRAMEWORK' : '');
+if (hasTestFramework) await compile('UnityIDE.Editor.Tests', await files(join(extension, 'Tests/Editor'), '.cs'), [runtime, editor, ...testReferences], ',UNITYIDE_HAS_TEST_FRAMEWORK,UNITY_INCLUDE_TESTS');
 const input = await compile('UnityIDE.Automation.InputSystem', await files(join(extension, 'Editor/InputSystem'), '.cs'), [editor, join(cache, 'Unity.InputSystem.dll')], ',UNITYIDE_HAS_INPUT_SYSTEM');
-await compile('UnityIDE.InputSystem.Tests', await files(join(extension, 'Tests/InputSystem'), '.cs'), [editor, input, join(cache, 'Unity.InputSystem.dll'), ...testReferences], ',UNITYIDE_HAS_INPUT_SYSTEM,UNITY_INCLUDE_TESTS');
-console.log(`PASS: integration and test assemblies compile with and without optional packages. ${output}`);
+if (hasTestFramework) await compile('UnityIDE.InputSystem.Tests', await files(join(extension, 'Tests/InputSystem'), '.cs'), [editor, input, join(cache, 'Unity.InputSystem.dll'), ...testReferences], ',UNITYIDE_HAS_INPUT_SYSTEM,UNITY_INCLUDE_TESTS');
+console.log(`PASS: integration assemblies compile with and without optional packages. ${output}`);
+if (!hasTestFramework) console.log('UNVERIFIED: test assemblies were not compiled because this Unity installation does not include NUnit. Run them through Unity Test Runner.');
 console.log('Runtime tests, Play Mode reloads, input bindings and rendered captures are NOT verified by compilation.');

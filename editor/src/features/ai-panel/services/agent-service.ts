@@ -989,6 +989,7 @@ export class AgentService {
           effort: effectiveEffort,
           maxCalls: turnCapsFromConfig(useServerConfigStore.getState().config)[effectiveEffort],
           contextWindow: effectiveContextWindow(useServerConfigStore.getState().config, effectiveEffort),
+          planExecution: opts.planExecution ? { planPath: opts.planExecution.planPath } : undefined,
           onContext: (task) => { this.specialistTask = task; if (this.abortRequested || !this.belongsToCurrentConversation()) task?.abort.abort(); },
         });
         this.checkContinuation();
