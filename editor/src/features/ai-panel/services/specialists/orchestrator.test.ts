@@ -24,6 +24,26 @@ function harness(toolName?: string, toolPath = 'Assets/Scripts/A.cs') {
   return { task, seen, writes, runner };
 }
 describe('specialist execution', () => {
+  it('locks authored scene targets into acceptance independently of specialist routing', async () => {
+    const h = harness();
+    h.task.criteria.length = 0;
+    const setAcceptance = h.runner.tools().find((tool) => tool.name === 'set_acceptance')!;
+    const result = await setAcceptance.execute('accept', {
+      criteria: ['The level is editable before Play'],
+      required: ['scene-persistence'],
+      scenes: [
+        { scenePath: 'Assets/Scenes/Main.unity', root: 'AuthoredLevel', requireRepresentativeLevel: true },
+        { scenePath: 'Assets/Scenes/Menu.unity', root: 'MenuUI', requireRepresentativeLevel: false },
+      ],
+    });
+    expect(result.isError).not.toBe(true);
+    expect(h.task.requiredScenes).toEqual(new Map([
+      ['Assets/Scenes/Main.unity#AuthoredLevel', { scenePath: 'Assets/Scenes/Main.unity', root: 'AuthoredLevel', requireRepresentativeLevel: true }],
+      ['Assets/Scenes/Menu.unity#MenuUI', { scenePath: 'Assets/Scenes/Menu.unity', root: 'MenuUI', requireRepresentativeLevel: false }],
+    ]));
+    expect(h.task.sceneRequiresRepresentativeLevel('Assets/Scenes/Main.unity', 'AuthoredLevel')).toBe(true);
+    expect(h.task.sceneRequiresRepresentativeLevel('Assets/Scenes/Menu.unity', 'MenuUI')).toBe(false);
+  });
   it('uses separate histories and keeps a stable specialist history on followup', async () => {
     const h = harness();
     await h.runner.run(assignment('movement')); await h.runner.run(assignment('ui', 'ui-building'));

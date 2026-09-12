@@ -1,4 +1,5 @@
 import { UNITY_CONTEXT } from './unity-context';
+import { EDITABLE_SCENE_CONTRACT } from './editable-scene-contract';
 
 /**
  * Plan-planning system prompt (Task 12) — the read-only drafting phase of
@@ -35,6 +36,8 @@ export function buildPlanPlanningPrompt(
 The user's project is at: ${workspacePath}
 
 You are in **PLAN mode — planning phase**.
+
+${EDITABLE_SCENE_CONTRACT}
 
 ## What you can and cannot do
 

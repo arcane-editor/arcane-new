@@ -4,6 +4,11 @@ import type { Effort } from '../types';
 export type SpecialistRole = 'level-design' | 'ui-building' | 'editor-tooling' | 'gameplay' | 'presentation' | 'gameplay-verification' | 'independent-review';
 export type EvidenceKind = 'compile' | 'scene-persistence' | 'gameplay' | 'visual-review' | 'review';
 export type EvidenceStatus = 'passed' | 'failed' | 'not-run' | 'unsupported';
+export interface SceneTarget {
+  scenePath: string;
+  root: string;
+  requireRepresentativeLevel?: boolean;
+}
 export interface VerificationEvidence {
   id: string;
   kind: EvidenceKind;
@@ -14,6 +19,7 @@ export interface VerificationEvidence {
   operationId?: string;
   scenarioId?: string;
   assertions?: { passed: number; total: number };
+  sceneTarget?: SceneTarget;
 }
 export interface SpecialistDefinition {
   role: SpecialistRole;

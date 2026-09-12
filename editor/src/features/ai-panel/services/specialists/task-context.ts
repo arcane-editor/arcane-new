@@ -1,4 +1,4 @@
-import type { EvidenceKind, VerificationEvidence } from './contracts';
+import type { EvidenceKind, SceneTarget, VerificationEvidence } from './contracts';
 
 // Resource arbitration is shared per workspace; execution state is never global.
 const workspaceLeases = new Map<string, Promise<void>>();
@@ -12,6 +12,7 @@ export interface TaskRunSnapshot {
   noProgress: number;
   previousProgress?: number;
   requiresAuthoredLevel?: boolean;
+  requiredScenes?: SceneTarget[];
   originalRequest?: string;
 }
 
@@ -28,6 +29,7 @@ export class TaskRunContext {
   readonly changedAt = new Map<string, number>();
   readonly operations = new Map<string, { revision: number; payload: string }>();
   readonly scenarios = new Map<string, string>();
+  readonly requiredScenes = new Map<string, SceneTarget>();
   suiteDeadline = 0;
   suiteRevision = -1;
   needsRepair = false;
@@ -84,18 +86,49 @@ export class TaskRunContext {
     this.onChange();
   }
 
+  requireScene(target: SceneTarget): void {
+    const normalized = {
+      scenePath: target.scenePath.replace(/\\/g, '/'),
+      root: target.root,
+      requireRepresentativeLevel: target.requireRepresentativeLevel === true,
+    };
+    this.requiredScenes.set(`${normalized.scenePath}#${normalized.root}`, normalized);
+    this.requirements.add('scene-persistence');
+    if (normalized.requireRepresentativeLevel) this.requiresAuthoredLevel = true;
+    this.onChange();
+  }
+
+  sceneRequiresRepresentativeLevel(scenePath: string, root: string): boolean {
+    const normalizedPath = scenePath.replace(/\\/g, '/');
+    const scoped = this.requiredScenes.get(`${normalizedPath}#${root}`);
+    if (scoped) return scoped.requireRepresentativeLevel === true;
+    // Compatibility for a resumed protocol-5 task that predates per-root
+    // acceptance. New tasks carry the decision on each scene target.
+    return this.requiredScenes.size === 0 && this.requiresAuthoredLevel;
+  }
+
   requiredResults(): VerificationEvidence[] {
-    return [...this.requirements].map((kind) => {
+    return [...this.requirements].flatMap((kind) => {
       const matches = [...this.evidence.values()].filter((e) => e.kind === kind && e.revision === this.revision);
+      if (kind === 'scene-persistence' && this.requiredScenes.size > 0) {
+        return [...this.requiredScenes].map(([key, target]) => {
+          const scoped = matches.filter((e) => e.sceneTarget?.scenePath === target.scenePath && e.sceneTarget.root === target.root);
+          return scoped.find((e) => e.status === 'failed') ?? scoped.find((e) => e.status !== 'passed') ?? scoped.at(-1) ?? {
+            id: `scene-persistence:${key}`, kind, status: 'not-run' as const, revision: this.revision,
+            summary: `Required authored scene root needs current persistence evidence: ${target.scenePath}#${target.root}`,
+            artifacts: [], sceneTarget: target,
+          };
+        });
+      }
       const failed = matches.find((e) => e.status === 'failed');
       if (kind === 'gameplay') {
         const missing = [...this.scenarios.keys()].filter((id) => !matches.some((e) => e.scenarioId === id && e.status === 'passed'));
-        if (!failed && missing.length) return { id: kind, kind, status: 'not-run', revision: this.revision, summary: `Required scenarios need current passing evidence: ${missing.join(', ')}`, artifacts: [] };
+        if (!failed && missing.length) return [{ id: kind, kind, status: 'not-run', revision: this.revision, summary: `Required scenarios need current passing evidence: ${missing.join(', ')}`, artifacts: [] }];
       }
-      return failed ?? matches.find((e) => e.status !== 'passed') ?? matches.at(-1) ?? {
+      return [failed ?? matches.find((e) => e.status !== 'passed') ?? matches.at(-1) ?? {
         id: kind, kind, status: 'not-run', revision: this.revision,
         summary: 'Required evidence is missing or predates the latest project change.', artifacts: [],
-      };
+      }];
     });
   }
 
@@ -138,12 +171,14 @@ export class TaskRunContext {
     return { id: this.id, workspacePath: this.workspacePath, maxCalls: this.maxCalls, calls: this.calls, revision: this.revision,
       repairCycles: this.repairCycles, status, criteria: [...this.criteria], requirements: [...this.requirements],
       evidence: [...this.evidence.values()], touchedFiles: [...this.touchedFiles], usage: [...this.usage],
-      operations: [...this.operations], scenarios: [...this.scenarios], previousProgress: this.previousProgress, noProgress: this.noProgress, requiresAuthoredLevel: this.requiresAuthoredLevel, originalRequest: this.originalRequest };
+      operations: [...this.operations], scenarios: [...this.scenarios], previousProgress: this.previousProgress, noProgress: this.noProgress, requiresAuthoredLevel: this.requiresAuthoredLevel,
+      requiredScenes: [...this.requiredScenes.values()], originalRequest: this.originalRequest };
   }
 
   static restore(saved: TaskRunSnapshot): TaskRunContext {
     const task = new TaskRunContext(saved.id, saved.workspacePath, saved.maxCalls);
     task.requiresAuthoredLevel = saved.requiresAuthoredLevel ?? false;
+    (saved.requiredScenes ?? []).forEach((target) => task.requiredScenes.set(`${target.scenePath}#${target.root}`, target));
     task.originalRequest = saved.originalRequest ?? '';
     task.calls = saved.calls; task.repairCycles = saved.repairCycles;
     // Offline edits and Unity reloads make all former evidence stale.

@@ -33,7 +33,7 @@ describe('unityRecipesFor — selection', () => {
       'character controller with wasd and jump, and set up a basic scene with stairs',
     );
     expect(out).toContain('CharacterController');
-    expect(out).toContain('Inspector');
+    expect(out).toContain('unity_author');
   });
 
   it('never repeats a recipe that matched on two different keywords', () => {
@@ -78,16 +78,20 @@ describe('character-controller recipe — the things the model gets wrong', () =
   });
 });
 
-describe('scene-setup recipe — what the agent actually cannot do', () => {
+describe('scene-setup recipe — saved editable authoring', () => {
   const r = unityRecipesFor('set up a basic scene so I can play right away');
 
-  it('states that there is no tool to create or configure a GameObject', () => {
-    expect(r.toLowerCase()).toMatch(/cannot|no tool/);
-    expect(r).toContain('GameObject');
+  it('requires generated levels to exist in Edit Mode before Play', () => {
+    expect(r).toContain('Edit Mode');
+    expect(r).toContain('Scene view');
+    expect(r).toContain('before Play');
   });
 
-  it('tells the planner to write the manual steps down instead of pretending', () => {
-    expect(r).toContain('Inspector');
+  it('uses saved scene authoring rather than runtime construction or manual setup', () => {
+    expect(r).toContain('unity_author');
+    expect(r).toContain('Editor builder');
+    expect(r).not.toContain('There is no tool');
+    expect(r).not.toContain('explicit Inspector steps for the user');
   });
 
   it('warns off hand-writing scene YAML', () => {

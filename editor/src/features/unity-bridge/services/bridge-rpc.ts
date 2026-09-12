@@ -37,6 +37,7 @@ export interface ComponentScript {
 
 export interface HierarchyComponent {
   type: string;
+  globalObjectId?: string;
   /**
    * Present only for MonoBehaviours whose source lives under `Assets/`.
    *
@@ -70,6 +71,7 @@ export interface HierarchyNode {
   tag: string;
   layer: number;
   instanceId: number;
+  globalObjectId?: string;
   components: HierarchyComponent[];
   children: HierarchyNode[];
 }
@@ -245,14 +247,14 @@ const ATTACH_UI_DOCUMENT_TIMEOUT_MS = 30_000;
 export const bridgeRpc = {
   author: (operation: AuthoringOperation) => rpc<AutomationReport>('authorScene', { ...operation }, 120_000),
   authorStatus: (operationId: string) => rpc<AutomationReport>('getAuthoringStatus', { operationId }),
-  verifyScene: (scenePath: string, requireAuthoredLevel = false) => rpc<AutomationReport>('verifySavedScene', { scenePath, requireAuthoredLevel }, 30_000),
+  verifyScene: (scenePath: string, requireAuthoredLevel = false, root?: string) => rpc<AutomationReport>('verifySavedScene', { scenePath, requireAuthoredLevel, root }, 30_000),
   startPlaytest: (operationId: string, scenario: GameplayScenario, taskId: string) => rpc<AutomationReport>('startPlaytest', { operationId, scenario, taskId }),
   automationState: () => rpc<{ activePlaytest?: string; taskId?: string }>('getAutomationState', {}),
   playtestStatus: (operationId: string, includeCaptures = false) => rpc<AutomationReport>('getPlaytestStatus', { operationId, includeCaptures }),
   cancelPlaytest: (operationId: string) => rpc<AutomationReport>('cancelPlaytest', { operationId }),
   getEditorState: () => rpc<EditorState>('getEditorState'),
   getSceneHierarchy: () => rpc<SceneHierarchy>('getSceneHierarchy'),
-  getGameObject: (target: { instanceId?: number; path?: string }) =>
+  getGameObject: (target: { instanceId?: number; path?: string; globalObjectId?: string }) =>
     rpc<HierarchyNode & { components: HierarchyComponent[] }>('getGameObject', target),
   getSelection: () => rpc<{ objects: SelectionObject[] }>('getSelection'),
   findReferencesToScript: (guid: string) =>

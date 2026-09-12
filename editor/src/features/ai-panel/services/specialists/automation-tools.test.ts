@@ -7,7 +7,7 @@ function harness(overrides: Partial<AutomationDeps> = {}) {
   const task = new TaskRunContext('test', '/game', 20); const calls: string[] = [];
   task.scenarios.set(play.scenario.id, JSON.stringify(play.scenario));
   const deps: AutomationDeps = {
-    protocol: () => 5, compile: async () => ({ status: 'report', report: { started: false, success: true, errors: 0 } }),
+    protocol: () => 6, compile: async () => ({ status: 'report', report: { started: false, success: true, errors: 0 } }),
     checkpoint: async () => { calls.push('checkpoint'); },
     author: async (op) => { calls.push('author'); return { operationId: op.operationId, status: 'passed' }; },
     authorStatus: async (id) => ({ operationId: id, status: 'unsupported' }),
@@ -23,6 +23,29 @@ function harness(overrides: Partial<AutomationDeps> = {}) {
 const author = { operationId: 'build', scenePath: 'Assets/Main.unity', ownedRoot: 'Level', outputs: ['Assets/Main.unity'], actions: [] };
 const play = { operationId: 'play', scenario: { id: 'move', seed: 1, scenePath: 'Assets/Main.unity', steps: [{ kind: 'input', device: 'keyboard', control: 'space', value: 1 }, { kind: 'assert', target: 'Player', property: 'activeSelf', expected: true }] } };
 describe('automation tools', () => {
+  it('records persistence against the authored scene root required by acceptance', async () => {
+    let requiredLevel: boolean | undefined;
+    const h = harness({ author: async (op) => { requiredLevel = op.requireAuthoredLevel; return { operationId: op.operationId, status: 'passed', outputs: [op.scenePath], authoredRoot: op.ownedRoot }; } });
+    h.task.criteria.push('Editable level'); h.task.requireScene({ scenePath: author.scenePath, root: author.ownedRoot, requireRepresentativeLevel: true });
+    await h.tool('unity_author').execute('id', author);
+    expect(requiredLevel).toBe(true);
+    expect(h.task.canFinish()).toBe(true);
+  });
+  it('does not require level geometry for a UI-only authored root', async () => {
+    let requiredLevel: boolean | undefined;
+    const h = harness({ author: async (op) => { requiredLevel = op.requireAuthoredLevel; return { operationId: op.operationId, status: 'passed' }; } });
+    h.task.requireScene({ scenePath: author.scenePath, root: author.ownedRoot, requireRepresentativeLevel: false });
+    await h.tool('unity_author').execute('id', author);
+    expect(requiredLevel).toBe(false);
+  });
+  it('accepts one stable existing-scene root and rejects ambiguous root selection', async () => {
+    const h = harness();
+    const existing = { ...author, ownedRoot: undefined, rootGlobalObjectId: 'GlobalObjectId_V1-2-scene-1-0' };
+    expect((await h.tool('unity_author').execute('existing', existing)).isError).not.toBe(true);
+    expect(h.calls).toEqual(['checkpoint', 'author']);
+    const ambiguous = await harness().tool('unity_author').execute('ambiguous', { ...author, rootGlobalObjectId: 'GlobalObjectId_V1-2-scene-1-0' });
+    expect(ambiguous.isError).toBe(true);
+  });
   it('blocks authoring on unknown compilation and checkpoints before dispatch', async () => {
     const unknown = harness({ compile: async () => ({ status: 'unknown', reason: 'bridge-lost' }) });
     await unknown.tool('unity_author').execute('id', author); expect(unknown.calls).toEqual([]);
@@ -51,8 +74,8 @@ describe('automation tools', () => {
     expect(interrupted.task.evidence.get('gameplay:move')?.status).toBe('not-run');
   });
   it('does not call unavailable bridge methods', async () => {
-    const h = harness({ protocol: () => 4 });
-    await expect(h.tool('unity_author').execute('id', author)).rejects.toThrow('protocol 5'); expect(h.calls).toEqual([]);
+    const h = harness({ protocol: () => 5 });
+    await expect(h.tool('unity_author').execute('id', author)).rejects.toThrow('protocol 6'); expect(h.calls).toEqual([]);
   });
 });
 
@@ -94,7 +117,7 @@ it('does not allow a new operation to replace assertions from an earlier require
 it('requires the reviewer to actually fetch current rendered frames before a visual pass', async () => {
   const task = new TaskRunContext('review', '/game', 10); task.requirements.add('visual-review');
   task.record({ id: 'game', kind: 'gameplay', revision: 0, status: 'passed', summary: 'passed', operationId: 'play', artifacts: [] });
-  const tools = createAutomationTools(task, 'independent-review', { protocol: () => 5, status: async () => ({ operationId: 'play', status: 'passed', captures: [{ label: 'frame', mimeType: 'image/png', data: 'AA==' }] }) } as unknown as AutomationDeps);
+  const tools = createAutomationTools(task, 'independent-review', { protocol: () => 6, status: async () => ({ operationId: 'play', status: 'passed', captures: [{ label: 'frame', mimeType: 'image/png', data: 'AA==' }] }) } as unknown as AutomationDeps);
   const submit = tools.find((t) => t.name === 'submit_review')!;
   const args = { passed: true, summary: 'Reviewed', visual: { operationId: 'play', passed: true, summary: 'Readable' } };
   await submit.execute('one', args); expect(task.evidence.get('visual-review')?.status).toBe('not-run');

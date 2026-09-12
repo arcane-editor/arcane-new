@@ -4,7 +4,7 @@ import { convertToLlm } from '../vendor/messages';
 import type { AgentTool, AgentToolResult, StreamFn } from '../vendor/types';
 import { SPECIALISTS, SPECIALIST_ROLES, specialistPrompt } from './definitions';
 import { TaskRunContext, taskPathAllowed } from './task-context';
-import type { EvidenceKind, SpecialistRole, SpecialistTask, SpecialistResult, SpecialistRunnerDeps } from './contracts';
+import type { EvidenceKind, SceneTarget, SpecialistRole, SpecialistTask, SpecialistResult, SpecialistRunnerDeps } from './contracts';
 
 const text = (value: unknown, isError = false): AgentToolResult => ({ content: [{ type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value) }], ...(isError ? { isError: true } : {}) });
 const MUTATIONS = new Set(['write', 'edit', 'unity_ui_write', 'unity_input_edit', 'unity_asset_edit', 'unity_fix_so_drift', 'unity_author']);
@@ -135,14 +135,16 @@ export class SpecialistOrchestrator {
   tools(): AgentTool[] {
     return [
       { name: 'set_acceptance', label: 'set acceptance criteria', description: 'Declare original task outcomes and required evidence before delegating. Cannot weaken criteria after work starts.',
-        parameters: Type.Object({ criteria: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }), required: Type.Array(Type.Union(['compile', 'scene-persistence', 'gameplay', 'visual-review', 'review'].map((v) => Type.Literal(v))), { minItems: 1 }) }),
+        parameters: Type.Object({ criteria: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }), required: Type.Array(Type.Union(['compile', 'scene-persistence', 'gameplay', 'visual-review', 'review'].map((v) => Type.Literal(v))), { minItems: 1 }),
+          scenes: Type.Optional(Type.Array(Type.Object({ scenePath: Type.String({ pattern: '^Assets/[^\\\\]+$', minLength: 8 }), root: Type.String({ minLength: 1 }), requireRepresentativeLevel: Type.Boolean() }), { maxItems: 32 })) }),
         execute: async (_id, raw) => {
           if (this.task.criteria.length) return text('Acceptance is already fixed for this task.', true);
-          const args = raw as { criteria: string[]; required: EvidenceKind[] };
+          const args = raw as { criteria: string[]; required: EvidenceKind[]; scenes?: SceneTarget[] };
           this.task.criteria.push(...args.criteria); args.required.forEach((k) => this.task.requirements.add(k));
+          (args.scenes ?? []).forEach((target) => this.task.requireScene(target));
           this.task.requirements.add('compile'); this.task.requirements.add('review');
           this.task.onChange();
-          return text({ criteria: this.task.criteria, required: [...this.task.requirements] });
+          return text({ criteria: this.task.criteria, required: [...this.task.requirements], scenes: [...this.task.requiredScenes.values()] });
         } },
       { name: 'delegate_tasks', label: 'run specialists', timeoutMs: Number.POSITIVE_INFINITY,
         description: 'Execute focused specialist assignments. Dependencies must be completed. Up to two read-only reviews may run together; all writers run sequentially. Reuse an ID to continue its private history.',

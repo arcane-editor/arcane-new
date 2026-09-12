@@ -61,7 +61,7 @@ namespace UnityIDE.Bridge
                             if (measured <= 0 || Math.Abs(measured - sample["durationMs"].AsNumber) > 0.00001) throw new Exception("Exported timing disagrees with Unity's raw frame");
                             if (view.GetSampleName(sampleId) != sample["name"].AsString) throw new Exception("Exported sample identity disagrees with Unity");
                         }
-                        File.WriteAllText(Path.Combine(Path.GetDirectoryName(Application.dataPath), "profiler-status.json"), status.ToString());
+                        File.WriteAllText(Path.Combine(Path.GetDirectoryName(Application.dataPath), "profiler-status.json"), status.Serialize());
                         Finish(true, "Real Unity marker and timing match the exported compressed capture"); return;
                     }
                 }
@@ -72,7 +72,7 @@ namespace UnityIDE.Bridge
         {
             EditorApplication.update -= Update;
             var result = JsonValue.NewObject(); result["ok"] = ok; result["message"] = message; result["unityVersion"] = Application.unityVersion;
-            File.WriteAllText(Path.Combine(Path.GetDirectoryName(Application.dataPath), "profiler-verification.json"), result.ToString());
+            File.WriteAllText(Path.Combine(Path.GetDirectoryName(Application.dataPath), "profiler-verification.json"), result.Serialize());
             ProfilerHandlers.Uninstall(); EditorApplication.Exit(ok ? 0 : 1);
         }
     }

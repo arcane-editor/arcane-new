@@ -1,13 +1,17 @@
-/** Protocol 5: authoring and playtesting. Queued acknowledgement is never proof. */
+/** Protocol 6: scoped authoring and playtesting. Queued acknowledgement is never proof. */
 export type AutomationStatus = 'queued' | 'running' | 'passed' | 'failed' | 'cancelled' | 'interrupted' | 'unsupported';
 export interface AuthoringAction {
   kind: 'object' | 'prefab' | 'component' | 'property' | 'savePrefab';
   /** Path relative to this operation's owned root, not an arbitrary scene. */
   target: string;
+  /** Stable Edit Mode identity for an existing object; never falls back to target when stale. */
+  targetGlobalObjectId?: string;
   parent?: string;
   primitive?: 'Cube' | 'Sphere' | 'Capsule' | 'Cylinder' | 'Plane' | 'Quad';
   assetPath?: string;
   component?: string;
+  /** Stable identity when an object has multiple components of the same type. */
+  componentGlobalObjectId?: string;
   property?: string;
   value?: unknown;
   position?: { x: number; y: number; z: number };
@@ -17,7 +21,9 @@ export interface AuthoringOperation {
   operationId: string;
   taskId: string;
   scenePath: string;
-  ownedRoot: string;
+  ownedRoot?: string;
+  /** Stable identity of a root in an existing saved scene. Mutually exclusive with ownedRoot. */
+  rootGlobalObjectId?: string;
   outputs: string[];
   actions: AuthoringAction[];
   builder?: { type: string; method: string; parameters: string };
@@ -67,6 +73,7 @@ export interface AutomationReport {
   captures?: AutomationCapture[];
   consoleErrors?: string[];
   scenePersistence?: boolean;
+  authoredRoot?: string;
   elapsedSeconds?: number;
   cleanupComplete?: boolean;
   payloadHash?: string;
