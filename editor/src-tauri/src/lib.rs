@@ -731,8 +731,15 @@ async fn execute_command(
 
     let mut cmd =
         crate::process_util::async_command(if cfg!(target_os = "windows") { "cmd" } else { "sh" });
-    cmd.args(if cfg!(target_os = "windows") { vec!["/C", &command] } else { vec!["-c", &command] })
-        .current_dir(&cwd)
+    // `cmd.exe` has no backslash escape, so the `\"` that `Command::arg` writes
+    // for an embedded quote reaches the child verbatim and corrupts whatever it
+    // was quoting. Build the command line here instead: `/S` makes cmd strip
+    // exactly the one pair added here and run the remainder unaltered.
+    #[cfg(windows)]
+    cmd.raw_arg(format!("/S /C \"{}\"", command));
+    #[cfg(not(windows))]
+    cmd.args(["-c", command.as_str()]);
+    cmd.current_dir(&cwd)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         // Dropping the timed-out future must not leave the shell running. This
@@ -1820,6 +1827,32 @@ mod execute_command_tests {
         .expect_err("should time out");
 
         assert!(err.contains("timed out"), "unexpected error: {}", err);
+    }
+
+    /// Windows only, and the whole bug is in the escaping. `Command::arg`
+    /// escapes an embedded `"` as `\"`, but `cmd.exe` has no backslash escape:
+    /// it strips the wrapping pair and passes the backslashes through, so a
+    /// quoted path reached the child with literal quote characters inside it.
+    /// Every agent command carrying a quoted argument — a path with a space,
+    /// `git commit -m "…"` — failed on Windows alone, with a syntax error from
+    /// the shell rather than anything naming the cause.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn a_quoted_argument_reaches_the_child_intact() {
+        let dir = tmpdir();
+        let file = dir.path().join("hello world.txt");
+        std::fs::write(&file, "quoted-ok").expect("fixture should be written");
+
+        let out = execute_command(
+            format!("type \"{}\"", file.display()),
+            dir.path().to_string_lossy().to_string(),
+            Some(10_000),
+        )
+        .await
+        .expect("command should run");
+
+        assert_eq!(out.stdout.trim(), "quoted-ok");
+        assert_eq!(out.exit_code, 0, "stderr: {}", out.stderr);
     }
 
     /// The regression this whole rewrite exists for. `kill_on_drop` was absent
