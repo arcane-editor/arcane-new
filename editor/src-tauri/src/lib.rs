@@ -1141,6 +1141,7 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(cli::PendingOpen::default())
+        .manage(auth::LaunchCallbackClaim::default())
         .manage(window_registry::WindowWorkspaces::default())
         .manage(lsp::LspState::new())
         .manage(csharp_ls::CsharpLsState::new())
@@ -1279,6 +1280,7 @@ pub fn run() {
             auth::auth_delete_token,
             auth::get_config_home_dir,
             auth::auth_deep_link_scheme,
+            auth::auth_claim_launch_callback,
             auth::auth_check_channel,
             auth_loopback::auth_loopback_start,
             auth_loopback::auth_loopback_stop,

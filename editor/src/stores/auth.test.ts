@@ -49,6 +49,11 @@ let submitManualCodeMode: 'pending' | 'none' = 'none';
 // (did a launch URL match a persisted attempt?), `hadLaunchUrlResult` is
 // whether the OS launched the app with a deep link at all. The two together
 // select resume / re-initiate / do-nothing.
+// The process-wide one-shot claim the store takes before acting on a launch
+// URL: `claimLaunchCallback` is what Rust would answer, `claimCalls` counts the
+// asks.
+let claimLaunchCallback = true;
+let claimCalls = 0;
 let coldStartCalls = 0;
 let coldStartResumes = false;
 let hadLaunchUrlResult = false;
@@ -98,6 +103,10 @@ mock.module('../features/auth', () => ({
     return coldStartResumes;
   },
   hadLaunchUrl: async () => hadLaunchUrlResult,
+  claimLaunchCallback: async () => {
+    claimCalls++;
+    return claimLaunchCallback;
+  },
   submitManualCode: (code: string) => {
     submitManualCodeCalls.push(code);
     if (submitManualCodeMode === 'pending' && capturedHandlers) {
@@ -190,6 +199,8 @@ function resetStore(): void {
 
 beforeEach(() => {
   resetStore();
+  claimLaunchCallback = true;
+  claimCalls = 0;
   exchangeEditorCodeCalls = [];
   exchangeEditorCodeImpl = async () => ({ success: false, error: 'not configured' });
   loadFromDiskImpl = async () => null;
@@ -268,6 +279,31 @@ describe('useAuthStore.resumeColdStartLogin', () => {
     expect(beginBrowserLoginCalls).toBe(0);
     expect(useAuthStore.getState().loggedIn).toBe(false);
     expect(useAuthStore.getState().error).toBeNull();
+  });
+
+  it('claims the launch callback before doing anything', async () => {
+    coldStartResumes = false;
+    hadLaunchUrlResult = false;
+
+    await useAuthStore.getState().resumeColdStartLogin();
+
+    expect(claimCalls).toBe(1);
+  });
+
+  it('stands down entirely when another window already claimed the callback', async () => {
+    // The welcome window handled the cold-start callback; the project window
+    // the user opens afterwards still mounts and still sees the SAME launch
+    // URL from `getCurrent()`, which never clears for the life of the process.
+    // Without the claim it would fall through to the re-initiate branch and
+    // reopen the browser at someone who is already signed in.
+    claimLaunchCallback = false;
+    coldStartResumes = false;
+    hadLaunchUrlResult = true;
+
+    await useAuthStore.getState().resumeColdStartLogin();
+
+    expect(coldStartCalls).toBe(0);
+    expect(beginBrowserLoginCalls).toBe(0);
   });
 });
 

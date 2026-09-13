@@ -4,11 +4,18 @@ import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
 // (no webview). Same pattern as hosted-stream.test.ts: register module mocks
 // BEFORE dynamically importing the module under test, and capture calls.
 let invokeCalls: string[] = [];
+// The process-wide one-shot claim on the cold-start callback.
+let claimResult = true;
+let claimThrows = false;
 const scheme = 'unityide-dev';
 mock.module('@tauri-apps/api/core', () => ({
   invoke: async (cmd: string) => {
     invokeCalls.push(cmd);
     if (cmd === 'auth_deep_link_scheme') return scheme;
+    if (cmd === 'auth_claim_launch_callback') {
+      if (claimThrows) throw new Error('command unavailable');
+      return claimResult;
+    }
     throw new Error(`unexpected invoke: ${cmd}`);
   },
 }));
@@ -526,6 +533,25 @@ describe('resumeFromColdStart', () => {
     const { calls, handlers } = makeHandlers();
     expect(await bl.resumeFromColdStart(handlers)).toBe(true);
     expect(calls).toEqual([{ code: 'CODE2', verifier: 'ver-1' }]);
+  });
+});
+
+describe('claimLaunchCallback', () => {
+  it('passes through whichever answer Rust gave', async () => {
+    claimThrows = false;
+    claimResult = true;
+    expect(await bl.claimLaunchCallback()).toBe(true);
+    claimResult = false;
+    expect(await bl.claimLaunchCallback()).toBe(false);
+  });
+
+  it('fails CLOSED when the command is unavailable', async () => {
+    // A refused claim costs one cold-start resume. A granted one would reopen
+    // the browser at a user who is already signed in, so an unreachable
+    // command must never read as "you own it".
+    claimThrows = true;
+    expect(await bl.claimLaunchCallback()).toBe(false);
+    claimThrows = false;
   });
 });
 

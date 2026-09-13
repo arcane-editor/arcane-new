@@ -11,6 +11,7 @@ export {
   reopenBrowser,
   resumeFromColdStart,
   hadLaunchUrl,
+  claimLaunchCallback,
   type BrowserLoginHandlers,
   type PollResult,
 } from './services/browser-login';
