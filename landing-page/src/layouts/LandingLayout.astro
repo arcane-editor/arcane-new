@@ -1,5 +1,7 @@
 ---
 import '../styles/global.css';
+import { isDevChannel } from '../lib/releases';
+import { REDDIT_PIXEL_ID } from '../lib/reddit';
 
 interface Props {
   // Set to false on auth pages (/auth, /verify, /reset, ...) — those pages
@@ -42,6 +44,26 @@ const ogImage = Astro.site ? new URL('/og-image.png', Astro.site).href : undefin
  * none at all before. `offers` at price 0 is what marks it free during beta;
  * omitting it entirely reads as "price unknown" rather than "free".
  */
+/** Same switch the download links read (see `lib/releases.ts`). */
+const apiUrlForPixel = import.meta.env.PUBLIC_API_URL ?? '';
+
+/**
+ * The Reddit pixel runs on production marketing pages only.
+ *
+ * Two independent gates, for two different reasons:
+ *  - `analytics` is the existing third-party-script switch, off on /auth,
+ *    /verify, /reset, /account and /admin because those URLs carry one-time
+ *    tokens. The pixel is a third-party script like any other and obeys it.
+ *  - The channel gate exists because there is exactly ONE pixel id for both
+ *    environments. A dev deploy firing it would report conversions against
+ *    live ad spend and quietly mistrain the campaign's optimizer.
+ *
+ * The consequence worth knowing: the pixel cannot be smoke-tested on
+ * dev.unityide.app. Verify it on production with Reddit's Pixel Helper, or
+ * against the Conversions API's `test_mode`, which does not count conversions.
+ */
+const redditPixel = analytics && !isDevChannel(apiUrlForPixel);
+
 const structuredData = {
   '@context': 'https://schema.org',
   '@type': 'SoftwareApplication',
@@ -117,6 +139,30 @@ const structuredData = {
         })
       </script>
     )}
+    {/* Reddit Pixel (production marketing pages only — see `redditPixel`).
+        Vendor snippet, kept byte-for-byte as Reddit ships it apart from the
+        pixel id being interpolated. Deliberately NO advanced matching in the
+        init call: Reddit's own example passes a plaintext email, which would
+        put a user's address into page HTML and into a third-party script's
+        reach. The same match key is sent SHA-256 hashed from the Worker via
+        the Conversions API instead, which Reddit matches identically. */}
+    {redditPixel && (
+      <script is:inline define:vars={{ redditPixelId: REDDIT_PIXEL_ID }}>
+        !function(w,d){if(!w.rdt){var p=w.rdt=function(){p.sendEvent?p.sendEvent.apply(p,arguments):p.callQueue.push(arguments)};p.callQueue=[];var t=d.createElement("script");t.src="https://www.redditstatic.com/ads/pixel.js?pixel_id="+redditPixelId,t.async=!0;var s=d.getElementsByTagName("script")[0];s.parentNode.insertBefore(t,s)}}(window,document);
+        rdt('init', redditPixelId);
+        rdt('track', 'PageVisit');
+      </script>
+    )}
+
+    {/* Click-id capture. FIRST-PARTY and therefore unconditional — it runs on
+        the auth pages too, where the pixel above deliberately does not. That
+        asymmetry is the whole point: signup is the only moment an ad click can
+        be bound to an account, and this is how the click id survives the trip
+        from the ad landing page to a page no third-party script may touch. */}
+    <script>
+      import { captureClickId } from '../lib/reddit';
+      captureClickId(window.location, document);
+    </script>
   </head>
   <body class="min-h-screen bg-background text-foreground antialiased">
     <slot />

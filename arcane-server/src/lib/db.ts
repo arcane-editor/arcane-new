@@ -20,6 +20,11 @@ export interface UserRow {
     topup_credits_micro: number;  // persists until spent
     plan_period_end: string | null;  // ISO-8601 UTC; NULL = free cycle not yet anchored
     dodo_customer_id: string | null;
+    // Reddit Ads attribution (migration 0024). NULL for every organic account
+    // and every account created before it — the Conversions API simply reports
+    // without a click id in that case, matching on hashed email instead.
+    rdt_click_id: string | null;
+    rdt_uuid: string | null;
 }
 
 /** Billing-only projection — the columns the credit gate + usage route read. */
@@ -722,4 +727,93 @@ export async function findRecentClientErrors(
         'SELECT * FROM client_errors ORDER BY created_at DESC, id DESC LIMIT ?'
     ).bind(limit).all<ClientErrorRow>();
     return result.results;
+}
+
+// ─── Reddit Ads attribution (migration 0024) ────────────────
+
+export interface RedditConversionInput {
+    eventName: string;
+    conversionId: string;
+    userId: number | null;
+    installId: string | null;
+    clickId: string | null;
+    status: string;
+    httpStatus: number | null;
+    error: string | null;
+    testMode: boolean;
+}
+
+export interface RedditConversionRow {
+    id: number;
+    event_name: string;
+    conversion_id: string;
+    user_id: number | null;
+    install_id: string | null;
+    click_id: string | null;
+    status: string;
+    http_status: number | null;
+    error: string | null;
+    test_mode: number;
+    created_at: string;
+}
+
+/** One audit row per Conversions API attempt, successful or not. */
+export async function createRedditConversion(
+    db: D1Database,
+    data: RedditConversionInput,
+): Promise<RedditConversionRow> {
+    const result = await db.prepare(
+        `INSERT INTO reddit_conversions
+           (event_name, conversion_id, user_id, install_id, click_id, status, http_status, error, test_mode)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`
+    ).bind(
+        data.eventName, data.conversionId, data.userId, data.installId, data.clickId,
+        data.status, data.httpStatus, data.error, data.testMode ? 1 : 0,
+    ).first<RedditConversionRow>();
+    return result!;
+}
+
+export async function findRecentRedditConversions(
+    db: D1Database,
+    limit = 100,
+): Promise<RedditConversionRow[]> {
+    const result = await db.prepare(
+        'SELECT * FROM reddit_conversions ORDER BY created_at DESC, id DESC LIMIT ?'
+    ).bind(limit).all<RedditConversionRow>();
+    return result.results;
+}
+
+/**
+ * Remember which Reddit ad click won this account.
+ *
+ * COALESCE keeps the FIRST click id we ever recorded for a user rather than
+ * the newest. A later sign-in from a different ad would otherwise rewrite the
+ * provenance of an account that an earlier campaign actually won, and the
+ * Purchase reported months later would be credited to the wrong campaign.
+ * Passing NULL is therefore always safe — it cannot erase what we know.
+ */
+export async function setUserRedditAttribution(
+    db: D1Database,
+    userId: number,
+    data: { clickId?: string | null; rdtUuid?: string | null },
+): Promise<void> {
+    await db.prepare(
+        `UPDATE users
+            SET rdt_click_id = COALESCE(rdt_click_id, ?),
+                rdt_uuid     = COALESCE(rdt_uuid, ?)
+          WHERE id = ?`
+    ).bind(data.clickId ?? null, data.rdtUuid ?? null, userId).run();
+}
+
+/** One desktop install's first-run report. `false` means we had already seen
+ *  this install id, which is how a duplicate Install conversion is prevented. */
+export async function recordInstall(
+    db: D1Database,
+    data: { installId: string; os: string; appVersion: string; channel: string },
+): Promise<boolean> {
+    const result = await db.prepare(
+        `INSERT OR IGNORE INTO app_installs (install_id, os, app_version, channel)
+         VALUES (?, ?, ?, ?)`
+    ).bind(data.installId, data.os, data.appVersion, data.channel).run();
+    return result.meta.changes > 0;
 }

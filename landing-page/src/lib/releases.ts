@@ -42,8 +42,14 @@ export interface ManifestUrls {
 /** Whether this build targets the dev channel. Extracted so `downloadUrls`
  *  and `manifestUrls` can never disagree about which channel a site is on —
  *  a card showing a dev version beside a production download link would be
- *  worse than either being wrong on its own. */
-function isDevChannel(apiUrl: string): boolean {
+ *  worse than either being wrong on its own.
+ *
+ *  Exported because the Reddit pixel gates on it too: there is exactly ONE
+ *  pixel id across both environments, so dev traffic firing it would report
+ *  conversions against live ad spend. Deriving that from the same predicate
+ *  as the download links means the pixel cannot end up disagreeing with them
+ *  about which site it is running on. */
+export function isDevChannel(apiUrl: string): boolean {
     return apiUrl.includes('api-dev.unityide.app')
         || apiUrl.includes('localhost')
         || apiUrl.includes('127.0.0.1');

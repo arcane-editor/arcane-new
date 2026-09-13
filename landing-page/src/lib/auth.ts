@@ -1,3 +1,5 @@
+import { currentAttribution, currentAttributionQuery } from './reddit';
+
 const API_URL = import.meta.env.PUBLIC_API_URL || 'https://api.unityide.app';
 const TOKEN_KEY = 'unityide_auth_token';
 
@@ -135,6 +137,11 @@ export async function apiLogin(email: string, password: string, turnstileToken?:
 export async function apiSignup(email: string, password: string, turnstileToken?: string): Promise<AuthResponse> {
     const body: Record<string, string> = { email, password };
     if (turnstileToken) body['cf-turnstile-response'] = turnstileToken;
+    // Reddit ad attribution, read from our own first-party cookie. Signup is
+    // the only point where an ad click can be bound to an account, and the
+    // server needs it to report the conversion. Absent for organic signups,
+    // which is why the server treats both fields as optional.
+    Object.assign(body, currentAttribution());
     const res = await fetch(`${API_URL}/v1/auth/signup`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -169,13 +176,15 @@ export async function apiGetMe(token: string): Promise<MeResponse> {
 export function googleStartUrl(returnTo: '/auth' | '/account'): string {
     // Full-page navigation target (302 to Google), NOT a fetch endpoint.
     // returnTo must be on the server's allowlist: /auth, /account.
-    return `${API_URL}/v1/auth/google/start?return_to=${encodeURIComponent(returnTo)}`;
+    // The attribution rides as query params rather than a body because this
+    // navigates away — there is no request for the server to read instead.
+    return `${API_URL}/v1/auth/google/start?return_to=${encodeURIComponent(returnTo)}${currentAttributionQuery()}`;
 }
 
 /** Full-page navigation target (302 to GitHub), NOT a fetch endpoint.
  *  returnTo must be on the server's allowlist: /auth, /account. */
 export function githubStartUrl(returnTo: '/auth' | '/account'): string {
-    return `${API_URL}/v1/auth/github/start?return_to=${encodeURIComponent(returnTo)}`;
+    return `${API_URL}/v1/auth/github/start?return_to=${encodeURIComponent(returnTo)}${currentAttributionQuery()}`;
 }
 
 export async function apiWebExchange(code: string): Promise<AuthResponse> {

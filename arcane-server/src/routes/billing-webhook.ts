@@ -6,6 +6,7 @@ import {
     upsertSubscription, findSubscriptionById, expireCompPlan,
 } from '../lib/db.ts';
 import { tierGrantMicro, isTierId, creditsToMicro, TOPUP_PACKS, TIERS, type Tier } from '../config/tiers.ts';
+import { reportUserPurchase } from '../lib/attribution.ts';
 
 export const billingWebhookRouter = new Hono<AppEnv>();
 
@@ -20,6 +21,17 @@ interface DodoEventData {
     product_id?: string;
     current_period_end?: string;
     next_billing_date?: string;
+}
+
+/** List price of a tier, used as the Purchase value reported to Reddit.
+ *
+ *  Taken from OUR price table rather than the webhook payload: Dodo's amount
+ *  field is not currently parsed here, and the list price is the number we
+ *  actually charge. It is approximate where a discount code applied, which is
+ *  acceptable for ad-platform value reporting and is never used for billing. */
+function tierPriceUsd(tierId: string): number {
+    const tier = (TIERS as Record<string, Tier | undefined>)[tierId];
+    return tier?.priceUsd ?? 0;
 }
 
 /** Reverse-map a Dodo product id back to a tier via the configured product
@@ -45,7 +57,15 @@ function tierFromProductId(env: AppEnv['Bindings'], productId: string | undefine
  */
 export async function handleBillingEvent(
     env: AppEnv['Bindings'], type: string, data: DodoEventData,
+    ctx?: { waitUntil(promise: Promise<unknown>): void },
 ): Promise<void> {
+    /** Report a Reddit Purchase without delaying the webhook response.
+     *  Falls back to awaiting when no ctx is supplied, which is what makes
+     *  the conversion observable from tests. */
+    const reportPurchase = (promise: Promise<unknown>): Promise<void> => {
+        if (ctx) { ctx.waitUntil(promise); return Promise.resolve(); }
+        return promise.then(() => undefined);
+    };
     const md = data.metadata ?? {};
     const ref = md.arcane_ref ?? '';
     const kind = md.arcane_kind;
@@ -80,6 +100,14 @@ export async function handleBillingEvent(
                 return;
             }
             await grantPlanCredits(env.arcane_db, userId, resolvedTier, tierGrantMicro(resolvedTier), periodEnd);
+            // Revenue, reported to Reddit — but only on the FIRST payment for a
+            // subscription, never on a renewal. A renewal is not a new
+            // conversion: crediting the original ad click again every month
+            // would inflate the campaign's conversion count and teach the
+            // optimizer that one click is worth several customers.
+            if (type === 'subscription.active') {
+                await reportPurchase(reportUserPurchase(env, userId, tierPriceUsd(resolvedTier)));
+            }
             if (subscriptionId) {
                 await upsertSubscription(env.arcane_db, {
                     subscriptionId, userId, productId: data.product_id ?? null,
@@ -122,8 +150,14 @@ export async function handleBillingEvent(
             // by subscription.active/renewed.
             if (kind === 'topup') {
                 const pack = TOPUP_PACKS.find(p => p.id === ref);
-                if (pack) await addTopupCredits(env.arcane_db, userId, creditsToMicro(pack.credits));
-                else console.error('billing_topup_unknown_pack', JSON.stringify({ userId, ref }));
+                if (pack) {
+                    await addTopupCredits(env.arcane_db, userId, creditsToMicro(pack.credits));
+                    // A top-up is genuinely incremental revenue, unlike a
+                    // renewal, so every one of them is a Purchase.
+                    await reportPurchase(reportUserPurchase(env, userId, pack.priceUsd));
+                } else {
+                    console.error('billing_topup_unknown_pack', JSON.stringify({ userId, ref }));
+                }
             }
             break;
         }
@@ -168,7 +202,7 @@ billingWebhookRouter.post('/v1/billing/webhook', async (c) => {
     if (!isNew) return c.json({ ok: true, duplicate: true });
 
     try {
-        await handleBillingEvent(c.env, type, event.data ?? {});
+        await handleBillingEvent(c.env, type, event.data ?? {}, c.executionCtx);
     } catch (err) {
         // Effect failed after we recorded the id → log loudly; a manual replay
         // may be needed. Still 200 so Dodo doesn't hammer a poisoned event.

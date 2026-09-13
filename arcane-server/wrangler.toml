@@ -75,6 +75,12 @@ DODO_PRODUCT_PRO = "pdt_0NlwPDacvAVEMYd4bvzFU"
 DODO_PRODUCT_MAX = "pdt_0NlwPDbltsef7FkTyLMzJ"
 DODO_PRODUCT_TOPUP_16 = "pdt_0NlwPDdr7WL5ONR4Y5qRm"
 DODO_PRODUCT_TOPUP_75 = "pdt_0NlwPDfBR7ti2u1BdgqVU"
+# Reddit Ads account id for the Conversions API. Not a secret: it is the same
+# `a2_…` string as the pixel id, which ships in the landing page's HTML. The
+# companion REDDIT_CONVERSION_TOKEN *is* a secret (`wrangler secret put`);
+# with either missing, conversions are recorded as 'skipped' and nothing
+# breaks. ENVIRONMENT drives test_mode, so only this worker reports for real.
+REDDIT_AD_ACCOUNT_ID = "a2_joe9q5eoimhu"
 
 [observability]
 enabled = true
@@ -112,6 +118,16 @@ name = "RL_CLIENT_ERROR"
 namespace_id = "1004"
 simple = { limit = 20, period = 60 }
 
+# First-run install pings (POST /v1/install). Public and IP-keyed. A real
+# client sends this ONCE in its lifetime, so anything repeating is a retry
+# loop or someone manufacturing installs — and a manufactured install is an
+# ad conversion, which makes this limiter a spend-integrity control, not just
+# a write cap. Deliberately tighter than the crash limiter for that reason.
+[[ratelimits]]
+name = "RL_INSTALL"
+namespace_id = "1005"
+simple = { limit = 10, period = 60 }
+
 # ── dev environment ─────────────────────────────────────────────────────────
 # Deploy: wrangler deploy --env dev   (worker: arcane-server-dev)
 # NOTE: bindings/vars are NOT inherited into named envs — the full set is
@@ -145,6 +161,10 @@ SPARK_BASE_URL = "https://api.meta.ai/v1"
 WEB_BASE_URL = "https://dev.unityide.app"
 API_BASE_URL = "https://api-dev.unityide.app"
 EMAIL_FROM = "no-reply@unityide.app"
+# Same pixel/account id as prod — there is only one. Safe because ENVIRONMENT
+# is "development" here, which forces test_mode on every event: Reddit
+# validates and echoes them but counts no conversion against live ad spend.
+REDDIT_AD_ACCOUNT_ID = "a2_joe9q5eoimhu"
 # Dodo product ids are deliberately ABSENT from this block: on dev they are
 # SECRETS on the worker (`wrangler secret put DODO_PRODUCT_<SLOT> --env dev`).
 # A plaintext var of the same name SHADOWS the secret at deploy time, so
@@ -190,3 +210,8 @@ simple = { limit = 30, period = 60 }
 name = "RL_CLIENT_ERROR"
 namespace_id = "2004"
 simple = { limit = 20, period = 60 }
+
+[[env.dev.ratelimits]]
+name = "RL_INSTALL"
+namespace_id = "2005"
+simple = { limit = 10, period = 60 }

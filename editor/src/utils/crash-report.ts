@@ -165,7 +165,10 @@ const SESSION_ID =
     ? crypto.randomUUID()
     : String(Date.now());
 
-function detectOs(): string {
+/** Exported so the install report describes the same machine the same way —
+ *  two different spellings of "windows" in two tables is a reconciliation
+ *  problem nobody wants to discover later. */
+export function detectOs(): string {
   const ua = typeof navigator === 'undefined' ? '' : navigator.userAgent;
   if (/Windows/i.test(ua)) return 'windows';
   if (/Mac OS X|Macintosh/i.test(ua)) return 'macos';
@@ -176,7 +179,8 @@ function detectOs(): string {
 /** Derived from the endpoint this build targets rather than a separate flag:
  *  it is the same signal that decides which worker (and which D1) the report
  *  lands in, so the two can never disagree. */
-function detectChannel(): string {
+/** Exported alongside `detectOs`, for the same reason. */
+export function detectChannel(): string {
   return API_URL.includes('api-dev') ? 'dev' : 'release';
 }
 

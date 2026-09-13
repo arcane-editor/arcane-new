@@ -22,6 +22,7 @@ mod unity_profiler;
 mod acp;
 mod auth;
 mod auth_loopback;
+mod install_id;
 mod graphify;
 mod fs_atomic;
 mod fs_copy;
@@ -1282,6 +1283,8 @@ pub fn run() {
             auth::auth_deep_link_scheme,
             auth::auth_claim_launch_callback,
             auth::auth_check_channel,
+            install_id::install_claim,
+            install_id::install_mark_reported,
             auth_loopback::auth_loopback_start,
             auth_loopback::auth_loopback_stop,
             unity_ipc::unity_ipc_start,

@@ -112,7 +112,7 @@ const platforms = [
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px">
           {
             platforms.map((p) => (
-              <a href={p.href} class="lp-dl-card">
+              <a href={p.href} class="lp-dl-card" data-rdt-download={p.name}>
                 <span style="font-size:17px;font-weight:500">
                   {p.name}
                   {p.badge && (
@@ -207,3 +207,42 @@ const platforms = [
     </div>
   </div>
 </section>
+
+{/*
+  Download clicks, reported to Reddit as `Lead`.
+
+  `Lead` rather than a custom event because Reddit's campaign optimizer works
+  against its standard events, and this is the highest-volume signal the funnel
+  has — the optimizer needs roughly 50 conversions a week to learn anything, and
+  signups alone will not get there for a while. Read it as "clicked download",
+  not "installed": the genuine install is a separate custom `Install` event the
+  desktop app reports from its first run.
+
+  This is the ONE conversion that fires browser-side, so ad blockers will cost
+  some share of it — the numbers here will read lower than reality, and lower
+  than server-reported SignUp/Install, by design of the chosen approach.
+
+  The handler never blocks navigation. `rdt` is absent whenever the pixel did
+  not load (dev builds, blockers, a failed CDN fetch), so the call is guarded
+  and the download proceeds regardless — a tracking failure must never cost
+  somebody the product.
+*/}
+<script>
+  const rdt = (window as unknown as { rdt?: (...args: unknown[]) => void }).rdt;
+  if (rdt) {
+    document.querySelectorAll<HTMLAnchorElement>('[data-rdt-download]').forEach((link) => {
+      link.addEventListener('click', () => {
+        try {
+          rdt('track', 'Lead', {
+            // Distinguishes Windows from macOS in Events Manager without
+            // needing a second event type.
+            products: [{ id: link.dataset.rdtDownload, name: link.dataset.rdtDownload }],
+            conversionId: crypto.randomUUID(),
+          });
+        } catch {
+          // Never let an analytics failure interrupt a download.
+        }
+      });
+    });
+  }
+</script>

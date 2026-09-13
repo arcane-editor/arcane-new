@@ -9,6 +9,9 @@ import type { UserRow } from '../lib/db.ts';
 import { generateToken, sha256Hex, s256Challenge, TOKEN_TTL_SECONDS } from '../lib/tokens.ts';
 import { mintAuthResponse } from '../middleware/auth.ts';
 import { logAuthEvent } from '../lib/log.ts';
+import {
+    redditAttributionFromQuery, recordSignupConversion, runInBackground, optionalExecutionCtx,
+} from '../lib/attribution.ts';
 import type { AppEnv } from '../types.ts';
 
 export const authGoogleRouter = new Hono<AppEnv>();
@@ -26,6 +29,13 @@ interface OAuthCookiePayload {
     nonce: string;
     pkce_verifier: string;
     return_to: string;
+    // Reddit ad attribution, parked here for the duration of the round trip.
+    // The click id lives in a first-party cookie on the website; once the
+    // browser leaves for Google there is no body and no same-site cookie to
+    // carry it, and this signed state cookie is already making the same
+    // journey. Optional: absent for every organic sign-in.
+    rdt_cid?: string;
+    rdt_uuid?: string;
 }
 
 // The state cookie is a 10-minute HS256 JWT under the existing JWT_SECRET —
@@ -89,8 +99,15 @@ authGoogleRouter.get('/v1/auth/google/start', async (c) => {
     const pkceVerifier = generateToken();
     const challenge = await s256Challenge(pkceVerifier);
 
+    const attribution = redditAttributionFromQuery(c.req.url);
     const cookie = await signOAuthCookie(
-        { state, nonce, pkce_verifier: pkceVerifier, return_to: returnTo }, c.env.JWT_SECRET);
+        {
+            state, nonce, pkce_verifier: pkceVerifier, return_to: returnTo,
+            ...(attribution.clickId ? { rdt_cid: attribution.clickId } : {}),
+            ...(attribution.rdtUuid ? { rdt_uuid: attribution.rdtUuid } : {}),
+        },
+        c.env.JWT_SECRET,
+    );
     setCookie(c, OAUTH_COOKIE, cookie, {
         httpOnly: true,
         secure: true,
@@ -162,8 +179,24 @@ authGoogleRouter.get('/v1/auth/google/callback', async (c) => {
     if (claims.email_verified !== true) { return fail('google_email_unverified'); }
 
     const db = c.env.arcane_db;
+    // Whether this callback CREATES the account, decided before it does.
+    // A returning user signing in again is not a signup, and reporting one
+    // would inflate the conversion Reddit optimizes against. These are the
+    // same two lookups `resolveGoogleAccount` makes before it falls through
+    // to `createOAuthUser` — it creates exactly when both of these miss, so
+    // the two must stay in step.
+    const preexisting = await findUserByGoogleSub(db, claims.sub)
+        ?? await findUserByEmail(db, claims.email);
+
     const user = await resolveGoogleAccount(db, claims.sub, claims.email);
     if (!user) { return fail('link_conflict'); }
+
+    if (!preexisting) {
+        await runInBackground(optionalExecutionCtx(c), recordSignupConversion(c.env, user, {
+            clickId: cookie.rdt_cid ?? null,
+            rdtUuid: cookie.rdt_uuid ?? null,
+        }));
+    }
 
     // 60-second single-use handoff code in the query string — never a JWT in
     // a URL. The static site exchanges it via POST /v1/auth/web/exchange.

@@ -59,6 +59,16 @@ export type AppEnv = {
         DODO_PRODUCT_MAX?: string;
         DODO_PRODUCT_TOPUP_16?: string;
         DODO_PRODUCT_TOPUP_75?: string;
+        // Reddit Ads Conversions API. The token is a SECRET (Reddit Ads →
+        // Event Manager → Conversions API → Generate Access Token); the
+        // account id is a public var — it is the same `a2_…` string as the
+        // pixel id, which ships in the site's HTML anyway. Either being unset
+        // makes every conversion a recorded no-op (status 'skipped') rather
+        // than an error, so an unconfigured Worker still serves signups and
+        // payments normally — see lib/reddit.ts `redditConfig`.
+        REDDIT_CONVERSION_TOKEN?: string;
+        REDDIT_AD_ACCOUNT_ID?: string;
+        RL_INSTALL?: RateLimiter;       // 10/60s/IP first-run ping cap (absent in tests → fail open)
     };
     Variables: {
         user: AuthPayload;

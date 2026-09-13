@@ -8,6 +8,9 @@ import {
 import type { UserRow } from '../lib/db.ts';
 import { generateToken, sha256Hex, TOKEN_TTL_SECONDS } from '../lib/tokens.ts';
 import { logAuthEvent } from '../lib/log.ts';
+import {
+    redditAttributionFromQuery, recordSignupConversion, runInBackground, optionalExecutionCtx,
+} from '../lib/attribution.ts';
 import type { AppEnv } from '../types.ts';
 
 export const authGithubRouter = new Hono<AppEnv>();
@@ -24,6 +27,10 @@ const RETURN_TO_ALLOWLIST = ['/auth', '/account'];
 interface OAuthCookiePayload {
     state: string;
     return_to: string;
+    /** Reddit ad attribution, carried across the provider round trip. See the
+     *  Google route for the full reasoning; optional, absent when organic. */
+    rdt_cid?: string;
+    rdt_uuid?: string;
 }
 
 // Same 10-minute HS256 state cookie the Google route uses, under its own
@@ -180,7 +187,18 @@ authGithubRouter.get('/v1/auth/github/start', async (c) => {
     const returnTo = RETURN_TO_ALLOWLIST.includes(requested) ? requested : '/auth';
 
     const state = generateToken();
-    const cookie = await signOAuthCookie({ state, return_to: returnTo }, c.env.JWT_SECRET);
+    // Reddit ad attribution rides the signed state cookie through the round
+    // trip — once the browser leaves for GitHub there is no body and no
+    // same-site cookie left to carry it. Absent for every organic sign-in.
+    const attribution = redditAttributionFromQuery(c.req.url);
+    const cookie = await signOAuthCookie(
+        {
+            state, return_to: returnTo,
+            ...(attribution.clickId ? { rdt_cid: attribution.clickId } : {}),
+            ...(attribution.rdtUuid ? { rdt_uuid: attribution.rdtUuid } : {}),
+        },
+        c.env.JWT_SECRET,
+    );
     setCookie(c, OAUTH_COOKIE, cookie, {
         httpOnly: true,
         secure: true,
@@ -242,11 +260,26 @@ authGithubRouter.get('/v1/auth/github/callback', async (c) => {
     }
 
     const db = c.env.arcane_db;
+    // Whether this callback CREATES the account, decided before it does — a
+    // returning user signing in again is not a signup, and reporting one would
+    // inflate the conversion Reddit optimizes against. These are the same two
+    // lookups `resolveGitHubAccount` makes before falling through to
+    // `createOAuthUser`, so the two must stay in step.
+    const preexisting = await findUserByGitHubId(db, identity.identity.id)
+        ?? await findUserByEmail(db, identity.identity.email);
+
     const user = await resolveGitHubAccount(db, identity.identity.id, identity.identity.email);
     // Naming the conflict leaks nothing: GitHub just verified this caller owns
     // the address, so they are entitled to know it is bound elsewhere — and
     // "use your other GitHub account" is advice they can act on.
     if (!user) { return fail('link_conflict', 'github_account'); }
+
+    if (!preexisting) {
+        await runInBackground(optionalExecutionCtx(c), recordSignupConversion(c.env, user, {
+            clickId: cookie.rdt_cid ?? null,
+            rdtUuid: cookie.rdt_uuid ?? null,
+        }));
+    }
 
     // 60-second single-use handoff code in the query string — never a JWT in
     // a URL. The static site exchanges it via POST /v1/auth/web/exchange.

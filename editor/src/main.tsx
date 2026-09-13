@@ -128,6 +128,34 @@ async function bootWelcome() {
   );
 }
 
+/**
+ * First-run install report.
+ *
+ * Deliberately AFTER the UI has booted and never awaited by it: this exists to
+ * measure an ad campaign, and nothing about that is worth a slower first paint,
+ * let alone a failed launch. Every module it needs is imported lazily for the
+ * same reason, and the whole thing is wrapped because "reporting an install"
+ * must never become a reason the app does not start.
+ *
+ * Safe to run from both views and from every window — the id is claimed
+ * atomically in Rust and the server deduplicates on it.
+ */
+function reportInstall(): void {
+  void (async () => {
+    try {
+      const [{ invoke }, { getVersion }, { reportInstallInBackground }] = await Promise.all([
+        import('@tauri-apps/api/core'),
+        import('@tauri-apps/api/app'),
+        import('./utils/install-report'),
+      ]);
+      const version = await getVersion().catch(() => '');
+      await reportInstallInBackground(invoke, version);
+    } catch {
+      /* never disturb boot */
+    }
+  })();
+}
+
 (async () => {
   try { await hydratePersistence(); } catch { /* ignore */ }
   if (isWelcomeView) {
@@ -135,4 +163,5 @@ async function bootWelcome() {
   } else {
     await bootEditor();
   }
+  reportInstall();
 })();

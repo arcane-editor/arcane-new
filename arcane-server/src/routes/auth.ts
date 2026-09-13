@@ -11,6 +11,7 @@ import { generateOtp, otpHash, TOKEN_TTL_SECONDS } from '../lib/tokens.ts';
 import { sendVerificationEmail } from '../lib/email.ts';
 import { verifyTurnstile } from '../lib/turnstile.ts';
 import { logAuthEvent } from '../lib/log.ts';
+import { redditAttributionFrom, recordSignupConversion } from '../lib/attribution.ts';
 import type { AppEnv } from '../types.ts';
 
 export const authRouter = new Hono<AppEnv>();
@@ -64,6 +65,14 @@ authRouter.post('/v1/auth/signup', async (c) => {
     });
     c.executionCtx.waitUntil(sendVerificationEmail(c.env, user.email, code));
     logAuthEvent('signup', { userId: user.id });
+
+    // Reddit Ads attribution. `rdtCid` is the ad click that won this account,
+    // read by the website from its own first-party cookie — the Reddit pixel
+    // never runs on /auth, so this is the only way it reaches us. Both fields
+    // are absent for an organic signup, and the conversion is still reported:
+    // Reddit matches on the hashed email in that case.
+    const attribution = redditAttributionFrom(body);
+    c.executionCtx.waitUntil(recordSignupConversion(c.env, user, attribution));
 
     return c.json(await mintAuthResponse(user, c.env.JWT_SECRET));
 });
