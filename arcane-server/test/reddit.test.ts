@@ -10,6 +10,7 @@ import {
     redditConfig,
     conversionsUrl,
     postEvent,
+    retryDelayMs,
     reportConversion,
     type RedditConfig,
     type RedditEventPayload,
@@ -152,10 +153,38 @@ describe('buildEvent', () => {
         expect(event.click_id).toBeUndefined();
     });
 
-    it('does not re-hash a value that is already a digest', async () => {
+    it('does not re-hash an EMAIL that is already a digest', async () => {
         const digest = await sha256Hex('dev@example.com');
         const event = await buildEvent({ eventName: 'SignUp', email: digest }, 'cid-7');
         expect(event.user!.email).toBe(digest);
+    });
+
+    /**
+     * The pass-through is email-only on purpose. `external_id` on the PUBLIC
+     * /v1/install endpoint is caller-controlled, and an install id of
+     * [A-Za-z0-9-]{8,64} admits a 64-char hex string — so honouring
+     * "looks already hashed" there would let anyone plant a chosen digest in
+     * Reddit's match-key space instead of a hash of a value we generated.
+     */
+    it('ALWAYS hashes a hex-shaped external_id, so a public caller cannot choose the digest', async () => {
+        const attackerChosen = 'a'.repeat(64);
+        const event = await buildEvent({ eventName: 'Install', externalId: attackerChosen }, 'cid-7b');
+
+        expect(event.user!.external_id).not.toBe(attackerChosen);
+        expect(event.user!.external_id).toBe(await sha256Hex(attackerChosen));
+    });
+
+    it('always hashes a hex-shaped ip_address for the same reason', async () => {
+        const hexish = 'b'.repeat(64);
+        const event = await buildEvent({ eventName: 'Install', ipAddress: hexish }, 'cid-7c');
+        expect(event.user!.ip_address).toBe(await sha256Hex(hexish));
+    });
+
+    /** Reddit lowercases the ip_address match key before hashing; an IPv6
+     *  address with uppercase hex would otherwise never match. */
+    it('lowercases an IPv6 address before hashing it', async () => {
+        const event = await buildEvent({ eventName: 'Install', ipAddress: '2A03:2880:F12F::FACE' }, 'cid-7d');
+        expect(event.user!.ip_address).toBe(await sha256Hex('2a03:2880:f12f::face'));
     });
 
     it('attaches value and currency only for a purchase', async () => {
@@ -375,5 +404,59 @@ describe('reportConversion', () => {
         const impl = (() => { throw new Error('boom'); }) as unknown as typeof fetch;
         const result = await reportConversion(redditEnv(), { eventName: 'SignUp', email: 'e@test.dev' }, impl);
         expect(result.status).toBe('failed');
+    });
+});
+
+describe('retryDelayMs', () => {
+    it('waits before a retry rather than re-sending in the same tick', () => {
+        expect(retryDelayMs({ ok: false, httpStatus: 500 })).toBeGreaterThan(0);
+    });
+
+    /** A 429 retried instantly lands in the same rate-limit window and is
+     *  near-certain to be rejected again, making the retry decorative. */
+    it('honours Retry-After when Reddit sends one', () => {
+        expect(retryDelayMs({ ok: false, httpStatus: 429, retryAfterSeconds: 2 })).toBe(2000);
+    });
+
+    it('caps a hostile Retry-After so a waitUntil task cannot be pinned open', () => {
+        expect(retryDelayMs({ ok: false, httpStatus: 429, retryAfterSeconds: 86_400 })).toBe(5_000);
+    });
+
+    it('ignores a malformed Retry-After', () => {
+        expect(retryDelayMs({ ok: false, httpStatus: 429, retryAfterSeconds: -5 })).toBeGreaterThan(0);
+        expect(retryDelayMs({ ok: false, httpStatus: 429, retryAfterSeconds: NaN })).toBeGreaterThan(0);
+    });
+});
+
+describe('postEvent backoff', () => {
+    it('sleeps between attempts, and reads the delay from Retry-After', async () => {
+        const slept: number[] = [];
+        const calls: string[] = [];
+        const impl = (async () => {
+            calls.push('x');
+            return calls.length === 1
+                ? new Response('slow down', { status: 429, headers: { 'Retry-After': '1' } })
+                : new Response('', { status: 200 });
+        }) as unknown as typeof fetch;
+
+        const out = await postEvent(CONFIG, {
+            event_at: '2026-09-13T10:00:00.000Z',
+            event_type: { tracking_type: 'SignUp' },
+            click_id: 'c',
+        }, impl, 2, async (ms) => { slept.push(ms); });
+
+        expect(out.ok).toBe(true);
+        expect(slept).toEqual([1000]);
+    });
+
+    it('does not sleep when the first attempt succeeds', async () => {
+        const slept: number[] = [];
+        const impl = (async () => new Response('', { status: 200 })) as unknown as typeof fetch;
+        await postEvent(CONFIG, {
+            event_at: '2026-09-13T10:00:00.000Z',
+            event_type: { tracking_type: 'SignUp' },
+            click_id: 'c',
+        }, impl, 2, async (ms) => { slept.push(ms); });
+        expect(slept).toEqual([]);
     });
 });

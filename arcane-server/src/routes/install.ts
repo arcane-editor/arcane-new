@@ -36,10 +36,10 @@ const LIMITS = {
 /**
  * The install id must be a plain opaque token.
  *
- * It becomes a PRIMARY KEY, an `external_id` match key sent to a third party,
- * and a value echoed back in admin listings. The app generates a UUID; this
- * allows that shape and little else, so the endpoint cannot be used to write
- * arbitrary strings into any of those places.
+ * It becomes a PRIMARY KEY and part of an `external_id` match key sent to a
+ * third party. The app generates a UUID; this allows that shape and little
+ * else, so a public endpoint cannot be used to write arbitrary strings into
+ * either place.
  */
 const INSTALL_ID_RE = /^[A-Za-z0-9-]{8,64}$/;
 
@@ -78,6 +78,10 @@ installRouter.post('/v1/install', async (c) => {
     if (isFirstReport) {
         c.executionCtx.waitUntil(reportConversion(c.env, {
             eventName: 'Install',
+            // Derived from the install id, so even a replay of this exact
+            // conversion collapses on Reddit's side rather than inventing a
+            // second machine.
+            conversionId: `install:${installId}`,
             installId,
             externalId: installId,
             ipAddress: c.req.header('CF-Connecting-IP') ?? null,

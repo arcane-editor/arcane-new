@@ -39,17 +39,40 @@ export interface ManifestUrls {
     windows: string;
 }
 
+/** The one API origin that means "this is the real site". */
+const PROD_API_URL = 'https://api.unityide.app';
+
+/**
+ * Whether this build is the PRODUCTION site.
+ *
+ * Deliberately a positive match on the production API URL rather than
+ * `!isDevChannel(...)`, and the difference is not academic. `PUBLIC_API_URL`
+ * is set only by the deploy workflow, so it is empty on every local `pnpm dev`
+ * and every local build — and `isDevChannel('')` is FALSE, because it looks
+ * for 'api-dev'/'localhost' inside the API URL and an empty string contains
+ * neither. Anything gated on the negation therefore treats "unconfigured" as
+ * "production".
+ *
+ * That is harmless for download links (falling back to production installers
+ * is the safe default, which is why `isDevChannel` is written that way) and
+ * actively wrong for the Reddit pixel: there is exactly ONE pixel id across
+ * both environments, so a developer running the site locally would fire real
+ * PageVisit and Lead events against live ad spend. Unknown must fail CLOSED
+ * here, which only a positive match gives.
+ */
+export function isProdChannel(apiUrl: string): boolean {
+    return apiUrl.trim().replace(/\/+$/, '') === PROD_API_URL;
+}
+
 /** Whether this build targets the dev channel. Extracted so `downloadUrls`
  *  and `manifestUrls` can never disagree about which channel a site is on —
  *  a card showing a dev version beside a production download link would be
  *  worse than either being wrong on its own.
  *
- *  Exported because the Reddit pixel gates on it too: there is exactly ONE
- *  pixel id across both environments, so dev traffic firing it would report
- *  conversions against live ad spend. Deriving that from the same predicate
- *  as the download links means the pixel cannot end up disagreeing with them
- *  about which site it is running on. */
-export function isDevChannel(apiUrl: string): boolean {
+ *  Note the asymmetry with `isProdChannel`: this one treats an unrecognised
+ *  host as production ON PURPOSE, so an unknown build never advertises dev
+ *  installers publicly. Do not use it as a stand-in for "is production". */
+function isDevChannel(apiUrl: string): boolean {
     return apiUrl.includes('api-dev.unityide.app')
         || apiUrl.includes('localhost')
         || apiUrl.includes('127.0.0.1');

@@ -47,9 +47,11 @@ describe('sanitizeClickId', () => {
         expect(sanitizeClickId(input)).toBeNull();
     });
 
+    /** The cookie is scoped to `.unityide.app`, so every stored byte also
+     *  rides on every api/releases subdomain request for 30 days. */
     it('rejects an oversized click id rather than filling the cookie jar', () => {
-        expect(sanitizeClickId('a'.repeat(513))).toBeNull();
-        expect(sanitizeClickId('a'.repeat(512))).toBe('a'.repeat(512));
+        expect(sanitizeClickId('a'.repeat(129))).toBeNull();
+        expect(sanitizeClickId('a'.repeat(128))).toBe('a'.repeat(128));
     });
 });
 

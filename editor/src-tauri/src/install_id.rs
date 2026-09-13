@@ -77,7 +77,7 @@ pub fn claim(dir: &Path, candidate: &str) -> Result<InstallRecord, String> {
     if let Some(existing) = read_valid(&path) {
         return Ok(existing);
     }
-    fs::write(&path, &body).map_err(|e| e.to_string())?;
+    write_atomic(dir, &path, &body)?;
     Ok(record)
 }
 
@@ -127,11 +127,44 @@ fn publish(dir: &Path, path: &Path, body: &str) -> Result<bool, String> {
 }
 
 /// A usable record at `path`, or None for absent, unreadable, malformed, or
-/// present-but-empty — every one of which means "we do not have an id yet".
+/// carrying an id the server would reject — every one of which means "we do
+/// not have a usable id yet".
 fn read_valid(path: &Path) -> Option<InstallRecord> {
     let text = fs::read_to_string(path).ok()?;
     let record = serde_json::from_str::<InstallRecord>(&text).ok()?;
-    (!record.install_id.is_empty()).then_some(record)
+    is_reportable_id(&record.install_id).then_some(record)
+}
+
+/// The server's own rule for `/v1/install`, mirrored here: `[A-Za-z0-9-]{8,64}`.
+///
+/// Checked on READ, not just on write, so a hand-edited or partially restored
+/// install.json holding something the server will reject is replaced with a
+/// fresh id rather than being posted — and rejected — on every launch forever.
+fn is_reportable_id(id: &str) -> bool {
+    (8..=64).contains(&id.len()) && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+}
+
+/// Replace a file's contents atomically.
+///
+/// `fs::write` truncates the destination first, so for a moment the file is
+/// visible with zero bytes — and a window launching in that moment reads
+/// nothing, judges the record corrupt, and mints a NEW install id over the
+/// top of the real one. That is the same empty-file race `publish` exists to
+/// avoid, so the replacement path has to avoid it too. `rename` is atomic and
+/// replaces, so the destination only ever holds a complete record.
+fn write_atomic(dir: &Path, path: &Path, body: &str) -> Result<(), String> {
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = dir.join(format!("{INSTALL_FILE}.set.{}.{seq}", std::process::id()));
+
+    fs::write(&tmp, body).map_err(|e| e.to_string())?;
+    match fs::rename(&tmp, path) {
+        Ok(()) => Ok(()),
+        Err(err) => {
+            let _ = fs::remove_file(&tmp);
+            Err(err.to_string())
+        }
+    }
 }
 
 /// Record that the server has accepted this install's first-run report.
@@ -146,14 +179,50 @@ pub fn mark_reported(dir: &Path) -> Result<(), String> {
     let mut record: InstallRecord = serde_json::from_str(&text).map_err(|e| e.to_string())?;
     record.reported = true;
     let body = serde_json::to_string(&record).map_err(|e| e.to_string())?;
-    fs::write(&path, body).map_err(|e| e.to_string())
+    write_atomic(dir, &path, &body)
+}
+
+/// What the frontend needs to decide whether to POST.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ClaimOutcome {
+    pub install_id: String,
+    pub reported: bool,
+    /// Whether THIS caller should send the report.
+    pub should_report: bool,
+}
+
+/// True exactly once per process, for the first caller that asks.
+///
+/// UnityIDE opens one window per project and they all share a single Rust
+/// process, so without this a session restoring six projects fires six
+/// concurrent claims and six POSTs from one IP — against a rate limiter sized
+/// on "a real client sends this once in its lifetime" (10/60s). The server
+/// deduplicates, so nothing is miscounted, but the work is wasted and a user
+/// with enough windows, or an office NAT where several machines first-run
+/// together, would start collecting 429s.
+///
+/// If that one reporter fails, nothing retries until the next launch. That is
+/// the deliberate trade: a missed report costs one day of attribution, a
+/// thundering herd costs the rate limiter for everyone behind that IP.
+fn claim_report_slot() -> bool {
+    static CLAIMED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    !CLAIMED.swap(true, std::sync::atomic::Ordering::SeqCst)
 }
 
 // ─── Tauri commands ─────────────────────────────────────────
 
 #[tauri::command]
-pub fn install_claim(app: tauri::AppHandle, candidate: String) -> Result<InstallRecord, String> {
-    claim(&crate::auth::config_home_dir(&app)?, &candidate)
+pub fn install_claim(app: tauri::AppHandle, candidate: String) -> Result<ClaimOutcome, String> {
+    let record = claim(&crate::auth::config_home_dir(&app)?, &candidate)?;
+    // Ask for the slot only when there is something to report, so a window
+    // opening on an already-reported machine does not consume it.
+    let should_report = !record.reported && claim_report_slot();
+    Ok(ClaimOutcome {
+        install_id: record.install_id,
+        reported: record.reported,
+        should_report,
+    })
 }
 
 #[tauri::command]
@@ -182,10 +251,10 @@ mod tests {
     #[test]
     fn keeps_the_first_id_on_later_launches() {
         let dir = tmpdir("stable");
-        claim(&dir, "first").unwrap();
-        let second = claim(&dir, "second").unwrap();
+        claim(&dir, "first-0000-1111").unwrap();
+        let second = claim(&dir, "second-0000-2222").unwrap();
         assert_eq!(
-            second.install_id, "first",
+            second.install_id, "first-0000-1111",
             "a second launch proposing a new id must not replace the recorded one"
         );
     }
@@ -193,12 +262,12 @@ mod tests {
     #[test]
     fn remembers_that_the_report_was_sent() {
         let dir = tmpdir("reported");
-        claim(&dir, "id-1").unwrap();
+        claim(&dir, "id-0000-1111").unwrap();
         mark_reported(&dir).unwrap();
 
-        let reread = claim(&dir, "ignored").unwrap();
+        let reread = claim(&dir, "ignored-0000-9999").unwrap();
         assert!(reread.reported, "a reported install must not report again");
-        assert_eq!(reread.install_id, "id-1");
+        assert_eq!(reread.install_id, "id-0000-1111");
     }
 
     /// The whole point of `create_new`: two windows launching together must
@@ -240,5 +309,55 @@ mod tests {
         fs::write(install_path(&dir), r#"{"installId":"","reported":false}"#).unwrap();
 
         assert_eq!(claim(&dir, "replacement").unwrap().install_id, "replacement");
+    }
+}
+
+#[cfg(test)]
+mod report_slot_tests {
+    use super::*;
+
+    /// One process, many windows: only the first caller may report.
+    #[test]
+    fn only_one_caller_in_a_process_gets_the_report_slot() {
+        let granted: Vec<bool> = (0..8).map(|_| claim_report_slot()).collect();
+        assert_eq!(
+            granted.iter().filter(|g| **g).count(),
+            1,
+            "exactly one window may POST the install, got {granted:?}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod id_shape_tests {
+    use super::*;
+
+    #[test]
+    fn accepts_a_uuid() {
+        assert!(is_reportable_id("11111111-2222-3333-4444-555555555555"));
+    }
+
+    /// Mirrors the server's /v1/install rule. Anything it would 400 must be
+    /// treated as "no id yet" so a fresh one is minted, rather than posted and
+    /// rejected on every launch for the life of the machine.
+    #[test]
+    fn rejects_what_the_server_would_reject() {
+        assert!(!is_reportable_id(""));
+        assert!(!is_reportable_id("abc"));
+        assert!(!is_reportable_id(&"a".repeat(65)));
+        assert!(!is_reportable_id("has spaces"));
+        assert!(!is_reportable_id("../../etc/passwd"));
+        assert!(!is_reportable_id("semi;colon"));
+    }
+
+    #[test]
+    fn a_malformed_stored_id_is_replaced_rather_than_kept() {
+        let dir = std::env::temp_dir().join(format!("unityide-install-badid-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(install_path(&dir), r#"{"installId":"abc","reported":false}"#).unwrap();
+
+        let record = claim(&dir, "11111111-2222-3333-4444-555555555555").unwrap();
+        assert_eq!(record.install_id, "11111111-2222-3333-4444-555555555555");
     }
 }

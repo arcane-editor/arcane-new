@@ -158,10 +158,17 @@ function reportInstall(): void {
 
 (async () => {
   try { await hydratePersistence(); } catch { /* ignore */ }
-  if (isWelcomeView) {
-    await bootWelcome();
-  } else {
-    await bootEditor();
+  try {
+    if (isWelcomeView) {
+      await bootWelcome();
+    } else {
+      await bootEditor();
+    }
+  } finally {
+    // `finally`, not a trailing statement: bootEditor can reject (a failed
+    // dynamic import of ./App or the Monaco workers, a missing #root), and an
+    // unguarded await would take the install report down with it — losing the
+    // datapoint on exactly the launches most worth knowing about.
+    reportInstall();
   }
-  reportInstall();
 })();

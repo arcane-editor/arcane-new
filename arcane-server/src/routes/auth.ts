@@ -72,7 +72,10 @@ authRouter.post('/v1/auth/signup', async (c) => {
     // are absent for an organic signup, and the conversion is still reported:
     // Reddit matches on the hashed email in that case.
     const attribution = redditAttributionFrom(body);
-    c.executionCtx.waitUntil(recordSignupConversion(c.env, user, attribution));
+    c.executionCtx.waitUntil(recordSignupConversion(c.env, user, attribution, {
+        ipAddress: c.req.header('CF-Connecting-IP'),
+        userAgent: c.req.header('User-Agent'),
+    }));
 
     return c.json(await mintAuthResponse(user, c.env.JWT_SECRET));
 });

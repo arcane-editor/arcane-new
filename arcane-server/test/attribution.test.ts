@@ -26,7 +26,7 @@ describe('sanitizeToken', () => {
     /**
      * `/v1/auth/signup` is public, so the website's own sanitizing is a
      * convenience and this is the check that counts. These values reach a D1
-     * column, an admin listing and a third-party request body.
+     * column and the body of a request to a third party.
      */
     it.each([
         ['empty', ''],
@@ -211,5 +211,64 @@ describe('POST /v1/auth/signup — Reddit attribution', () => {
         const rows = await conversionsFor(user!.id as number);
         expect(rows[0]!.status).toBe('skipped');
         expect(rows[0]!.error).toBe('reddit_not_configured');
+    });
+});
+
+describe('conversion ids are derived, not random', () => {
+    async function conversionIdFor(userId: number): Promise<string | undefined> {
+        const row = await env.arcane_db
+            .prepare('SELECT conversion_id FROM reddit_conversions WHERE user_id = ? AND event_name = ?')
+            .bind(userId, 'SignUp')
+            .first<{ conversion_id: string }>();
+        return row?.conversion_id;
+    }
+
+    /**
+     * A random id per call makes both the UNIQUE column and Reddit's own
+     * dedupe useless: any cross-request replay — a manual re-send of a failed
+     * audit row, a redelivered webhook — would land as a NEW conversion and
+     * double-count. Deriving it from the subject is what makes the migration's
+     * "a retry of the same conversion collapses" comment true.
+     */
+    it('keys a SignUp on the user id, so a replay collapses', async () => {
+        const email = `derived-${crypto.randomUUID()}@test.dev`;
+        await SELF.fetch('https://example.com/v1/auth/signup', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, password: 'password123' }),
+        });
+        const user = await env.arcane_db
+            .prepare('SELECT id FROM users WHERE email = ?').bind(email).first<{ id: number }>();
+
+        expect(await conversionIdFor(user!.id)).toBe(`signup:${user!.id}`);
+    });
+});
+
+describe('signup match keys', () => {
+    /** An organic signup has no click id, so its hashed email, IP and user
+     *  agent are every match key Reddit will ever get for it. */
+    it('records the signup conversion with the browser IP available', async () => {
+        const email = `keys-${crypto.randomUUID()}@test.dev`;
+        const res = await SELF.fetch('https://example.com/v1/auth/signup', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'CF-Connecting-IP': '203.0.113.9',
+                'User-Agent': 'Mozilla/5.0 (test)',
+            },
+            body: JSON.stringify({ email, password: 'password123' }),
+        });
+        expect(res.status).toBe(200);
+
+        const user = await env.arcane_db
+            .prepare('SELECT id FROM users WHERE email = ?').bind(email).first<{ id: number }>();
+        const row = await env.arcane_db
+            .prepare('SELECT * FROM reddit_conversions WHERE user_id = ?')
+            .bind(user!.id).first<Record<string, unknown>>();
+
+        // Unconfigured in tests, so it is 'skipped' — but the row proves the
+        // conversion was attempted for this user with a real request behind it.
+        expect(row).toBeTruthy();
+        expect(row!.event_name).toBe('SignUp');
     });
 });

@@ -773,16 +773,6 @@ export async function createRedditConversion(
     return result!;
 }
 
-export async function findRecentRedditConversions(
-    db: D1Database,
-    limit = 100,
-): Promise<RedditConversionRow[]> {
-    const result = await db.prepare(
-        'SELECT * FROM reddit_conversions ORDER BY created_at DESC, id DESC LIMIT ?'
-    ).bind(limit).all<RedditConversionRow>();
-    return result.results;
-}
-
 /**
  * Remember which Reddit ad click won this account.
  *

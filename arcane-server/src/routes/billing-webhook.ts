@@ -100,13 +100,25 @@ export async function handleBillingEvent(
                 return;
             }
             await grantPlanCredits(env.arcane_db, userId, resolvedTier, tierGrantMicro(resolvedTier), periodEnd);
-            // Revenue, reported to Reddit — but only on the FIRST payment for a
-            // subscription, never on a renewal. A renewal is not a new
-            // conversion: crediting the original ad click again every month
-            // would inflate the campaign's conversion count and teach the
-            // optimizer that one click is worth several customers.
-            if (type === 'subscription.active') {
-                await reportPurchase(reportUserPurchase(env, userId, tierPriceUsd(resolvedTier)));
+            // Revenue, reported to Reddit — but only on the FIRST payment for
+            // this subscription. A renewal is not a new conversion: crediting
+            // the original ad click again every month would inflate the
+            // campaign's count and teach the optimizer that one click is worth
+            // several customers.
+            //
+            // `!stored` is the part doing the real work. The event TYPE alone
+            // is not enough: `subscription.active` is re-emitted when a dunning
+            // hold recovers, and each re-emission carries a fresh Dodo event id
+            // so the webhook's own replay dedupe does not catch it either.
+            // `stored` is read before this switch and written by the upsert
+            // below, so it is null exactly once per subscription — on the
+            // genuine first payment. A later resubscribe gets a new
+            // subscription id, hence a null `stored`, and counts as the new
+            // purchase it actually is.
+            if (type === 'subscription.active' && !stored) {
+                await reportPurchase(reportUserPurchase(
+                    env, userId, tierPriceUsd(resolvedTier), subscriptionId || `sub-${userId}-${periodEnd ?? ''}`,
+                ));
             }
             if (subscriptionId) {
                 await upsertSubscription(env.arcane_db, {
@@ -153,8 +165,12 @@ export async function handleBillingEvent(
                 if (pack) {
                     await addTopupCredits(env.arcane_db, userId, creditsToMicro(pack.credits));
                     // A top-up is genuinely incremental revenue, unlike a
-                    // renewal, so every one of them is a Purchase.
-                    await reportPurchase(reportUserPurchase(env, userId, pack.priceUsd));
+                    // renewal, so every one of them is a Purchase — keyed on
+                    // the payment id so each is distinct but a redelivery of
+                    // the same payment is not.
+                    await reportPurchase(reportUserPurchase(
+                        env, userId, pack.priceUsd, data.id ?? `topup-${userId}-${ref}`,
+                    ));
                 } else {
                     console.error('billing_topup_unknown_pack', JSON.stringify({ userId, ref }));
                 }

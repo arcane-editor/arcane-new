@@ -122,10 +122,27 @@ export function normalizeEmail(email: string): string {
     return email.trim().toLowerCase();
 }
 
-/** Hash a match key, passing through a value that is already a digest. */
-async function hashKey(value: string, normalize: (v: string) => string): Promise<string> {
+/**
+ * Hash a match key.
+ *
+ * `allowPreHashed` is deliberately opt-in and set ONLY for email. The
+ * pass-through exists so a caller that already holds a digest does not hash it
+ * twice — but it also means a caller who controls the input controls the
+ * digest, and `external_id` on the PUBLIC /v1/install endpoint is exactly
+ * that: an install id of `[A-Za-z0-9-]{8,64}` admits a 64-char hex string, so
+ * anyone could plant a chosen value in Reddit's match-key space instead of a
+ * hash of something we generated. No caller in this repo pre-hashes anything,
+ * so for those keys the branch was dead for us and live only for an attacker.
+ */
+async function hashKey(
+    value: string,
+    normalize: (v: string) => string,
+    allowPreHashed = false,
+): Promise<string> {
     const trimmed = value.trim();
-    return looksHashed(trimmed) ? trimmed.toLowerCase() : sha256Hex(normalize(trimmed));
+    return allowPreHashed && looksHashed(trimmed)
+        ? trimmed.toLowerCase()
+        : sha256Hex(normalize(trimmed));
 }
 
 // ─── Payload ────────────────────────────────────────────────
@@ -151,13 +168,18 @@ export async function buildEvent(input: ConversionInput, conversionId: string): 
     const user: RedditUserPayload = {};
 
     const email = clean(input.email);
-    if (email) user.email = await hashKey(email, normalizeEmail);
+    if (email) user.email = await hashKey(email, normalizeEmail, true);
 
     const externalId = clean(input.externalId);
     if (externalId) user.external_id = await hashKey(externalId, (v) => v);
 
+    // Lowercased before hashing, like the email: Reddit normalizes the
+    // ip_address match key that way, and an IPv6 address delivered with
+    // uppercase hex (2A03:…:FACE) would otherwise hash to something Reddit's
+    // own digest never equals — silently dropping the Install event's
+    // strongest probabilistic key, with nothing to show for it.
     const ip = clean(input.ipAddress);
-    if (ip) user.ip_address = await hashKey(ip, (v) => v);
+    if (ip) user.ip_address = await hashKey(ip, (v) => v.toLowerCase());
 
     const userAgent = clean(input.userAgent);
     if (userAgent) user.user_agent = userAgent;
@@ -231,10 +253,25 @@ function isRetryable(status: number): boolean {
     return status === 429 || status >= 500;
 }
 
+/** Default gap before a retry, or whatever `Retry-After` asked for. Capped so
+ *  a hostile or mistaken header cannot pin a waitUntil task open for minutes. */
+const RETRY_BASE_MS = 400;
+const RETRY_MAX_MS = 5_000;
+
+export function retryDelayMs(previous: PostOutcome): number {
+    const after = previous.retryAfterSeconds;
+    if (typeof after === 'number' && Number.isFinite(after) && after > 0) {
+        return Math.min(after * 1000, RETRY_MAX_MS);
+    }
+    return RETRY_BASE_MS;
+}
+
 export interface PostOutcome {
     ok: boolean;
     httpStatus?: number;
     error?: string;
+    /** Parsed from a `Retry-After` response header, when Reddit sends one. */
+    retryAfterSeconds?: number;
 }
 
 /**
@@ -248,11 +285,18 @@ export async function postEvent(
     event: RedditEventPayload,
     fetchImpl: typeof fetch = fetch,
     attempts = 2,
+    sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms)),
 ): Promise<PostOutcome> {
     const body: RedditRequestBody = { test_mode: config.testMode, events: [event] };
     let last: PostOutcome = { ok: false, error: 'not attempted' };
 
     for (let attempt = 1; attempt <= attempts; attempt++) {
+        // Wait before every attempt after the first. Retrying a 429 in the
+        // same tick — which is what a bare loop does — lands inside the same
+        // rate-limit window and is near-certain to be rejected again, making
+        // the retry decorative. This runs inside waitUntil, so the delay is
+        // invisible to the user and costs nothing.
+        if (attempt > 1) await sleep(retryDelayMs(last));
         try {
             const res = await fetchImpl(conversionsUrl(config.accountId), {
                 method: 'POST',
@@ -269,7 +313,13 @@ export async function postEvent(
             // Truncated: an HTML error page from an edge proxy would otherwise
             // land whole in a D1 column.
             const text = (await res.text().catch(() => '')).slice(0, 500);
-            last = { ok: false, httpStatus: res.status, error: text || `HTTP ${res.status}` };
+            const retryAfter = Number(res.headers.get('Retry-After'));
+            last = {
+                ok: false,
+                httpStatus: res.status,
+                error: text || `HTTP ${res.status}`,
+                ...(Number.isFinite(retryAfter) && retryAfter > 0 ? { retryAfterSeconds: retryAfter } : {}),
+            };
             if (!isRetryable(res.status)) return last;
         } catch (err) {
             last = { ok: false, error: err instanceof Error ? err.message : String(err) };

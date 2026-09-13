@@ -149,3 +149,47 @@ describe('billing webhook', () => {
         expect(res.status).toBe(200); // logged + skipped
     });
 });
+
+describe('Reddit Purchase conversion', () => {
+    async function purchases(userId: number) {
+        const r = await env.arcane_db
+            .prepare("SELECT * FROM reddit_conversions WHERE user_id = ? AND event_name = 'Purchase'")
+            .bind(userId).all<Record<string, unknown>>();
+        return r.results;
+    }
+
+    it('reports one Purchase on the first payment for a subscription', async () => {
+        const u = await seedPasswordUser(`rp-first-${crypto.randomUUID()}@test.dev`, 'password123');
+        await postWebhook(subEvent('subscription.active', u.id, 'pro'));
+
+        const rows = await purchases(u.id);
+        expect(rows).toHaveLength(1);
+        expect(rows[0]!.conversion_id).toBe(`purchase:sub_${u.id}`);
+    });
+
+    /** A renewal is not a new conversion — crediting the original ad click
+     *  every month teaches the optimizer one click is worth many customers. */
+    it('reports nothing on a renewal', async () => {
+        const u = await seedPasswordUser(`rp-renew-${crypto.randomUUID()}@test.dev`, 'password123');
+        await postWebhook(subEvent('subscription.active', u.id, 'pro'));
+        await postWebhook(subEvent('subscription.renewed', u.id, 'pro'));
+
+        expect(await purchases(u.id)).toHaveLength(1);
+    });
+
+    /**
+     * The regression this guard exists for. `subscription.active` is re-emitted
+     * when a dunning hold recovers, under a FRESH Dodo event id — so the
+     * webhook's own replay dedupe does not catch it, and keying only on the
+     * event type would count a second purchase that never happened.
+     */
+    it('reports nothing when subscription.active is re-emitted for the same subscription', async () => {
+        const u = await seedPasswordUser(`rp-reactivate-${crypto.randomUUID()}@test.dev`, 'password123');
+        await postWebhook(subEvent('subscription.active', u.id, 'pro'));
+        await postWebhook(subEvent('subscription.on_hold', u.id, 'pro'));
+        // Recovery: a distinct webhook-id, so this is NOT a replay.
+        await postWebhook(subEvent('subscription.active', u.id, 'pro'));
+
+        expect(await purchases(u.id)).toHaveLength(1);
+    });
+});

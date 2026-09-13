@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { downloadUrls, manifestUrls, uncachedManifestUrl, unityExtensionUrl, versionFromManifest } from './releases';
+import { downloadUrls, manifestUrls, uncachedManifestUrl, unityExtensionUrl, versionFromManifest,
+    isProdChannel,
+} from './releases';
 
 describe('downloadUrls', () => {
     it('serves the dev channel when the site is built against the dev API', () => {
@@ -134,5 +136,35 @@ describe('uncachedManifestUrl', () => {
         const parsed = new URL(uncachedManifestUrl(manifestUrls('https://api-dev.unityide.app').windows));
         expect(parsed.origin + parsed.pathname)
             .toBe('https://releases.unityide.app/dev/latest/windows-x86_64.json');
+    });
+});
+
+describe('isProdChannel', () => {
+    it('is true only for the production API URL', () => {
+        expect(isProdChannel('https://api.unityide.app')).toBe(true);
+        expect(isProdChannel('https://api.unityide.app/')).toBe(true);
+        expect(isProdChannel('  https://api.unityide.app  ')).toBe(true);
+    });
+
+    /**
+     * The regression this exists for. `PUBLIC_API_URL` is set only by the
+     * deploy workflow, so it is EMPTY on every local run — and `!isDevChannel`
+     * reads empty as production, which would load the real Reddit pixel on a
+     * developer's laptop and fire conversions against live ad spend.
+     */
+    it('is false when the API URL is unconfigured', () => {
+        expect(isProdChannel('')).toBe(false);
+        expect(isProdChannel('   ')).toBe(false);
+    });
+
+    it('is false for dev and local hosts', () => {
+        expect(isProdChannel('https://api-dev.unityide.app')).toBe(false);
+        expect(isProdChannel('http://localhost:8787')).toBe(false);
+        expect(isProdChannel('http://127.0.0.1:8787')).toBe(false);
+    });
+
+    it('is false for a lookalike host', () => {
+        expect(isProdChannel('https://api.unityide.app.evil.test')).toBe(false);
+        expect(isProdChannel('https://notapi.unityide.app')).toBe(false);
     });
 });

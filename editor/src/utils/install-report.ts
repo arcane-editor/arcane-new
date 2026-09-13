@@ -27,13 +27,24 @@ import { detectChannel, detectOs } from './crash-report';
 export interface InstallRecord {
     installId: string;
     reported: boolean;
+    /**
+     * Whether THIS caller should send the report. False for every window after
+     * the first in a process — Tauri runs one process for all windows, so
+     * without this a session restoring six projects would POST six times from
+     * one IP against a limiter sized for once-per-lifetime.
+     */
+    shouldReport: boolean;
 }
 
 export type InstallReportOutcome =
     /** Sent and accepted; this machine will not report again. */
     | 'reported'
-    /** Already reported on an earlier launch. */
+    /** Already reported on an earlier launch, or another window in this
+     *  process is doing it. */
     | 'already'
+    /** The server rejected the report permanently (4xx). Retrying would fail
+     *  identically on every launch, so it is not retried. */
+    | 'rejected'
     /** Could not reach the Tauri host at all (browser dev, tests). */
     | 'unavailable'
     /** Attempted and failed; will be retried on the next launch. */
@@ -70,7 +81,7 @@ export async function reportInstallOnce(deps: InstallReportDeps): Promise<Instal
         return 'unavailable';
     }
 
-    if (record.reported) return 'already';
+    if (record.reported || !record.shouldReport) return 'already';
 
     try {
         const res = await fetchImpl(`${baseUrl}/v1/install`, {
@@ -83,7 +94,16 @@ export async function reportInstallOnce(deps: InstallReportDeps): Promise<Instal
                 channel: detectChannel(),
             }),
         });
-        if (!res.ok) return 'failed';
+        if (!res.ok) {
+            // A 4xx is a permanent verdict on this payload — the server will
+            // reject the same install id identically forever, so treating it
+            // as transient would re-POST on every launch for the life of the
+            // machine and never count the install anyway. Rust validates the
+            // id against the server's own rule on read, so reaching here means
+            // something we cannot fix by trying again.
+            if (res.status >= 400 && res.status < 500) return 'rejected';
+            return 'failed';
+        }
     } catch {
         return 'failed';
     }

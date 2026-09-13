@@ -46,12 +46,16 @@ export const CLICK_ID_MAX_AGE_DAYS = 30;
  * Upper bound on a stored click id.
  *
  * This value arrives in a URL that anyone can craft, gets written into a
- * cookie, and is later sent to our API and on to Reddit. Two separate reasons
- * to bound it: a cookie jar is a shared, limited resource (an oversized value
- * can evict real cookies), and an unbounded string would ride into a D1 column
- * and a third-party request body.
+ * cookie, and is later sent to our API and on to Reddit. Three reasons to
+ * bound it, and to bound it tightly: a cookie jar is a shared, limited
+ * resource (an oversized value can evict real cookies), an unbounded string
+ * would ride into a D1 column and a third-party request body, and — because
+ * the cookie is scoped to `.unityide.app` so the apex and www agree — every
+ * byte also rides on every request to api.unityide.app and
+ * releases.unityide.app for the next 30 days. Real Reddit click ids are far
+ * shorter than this; 128 is already generous.
  */
-const CLICK_ID_MAX_LENGTH = 512;
+const CLICK_ID_MAX_LENGTH = 128;
 
 /**
  * Characters a click id may contain.

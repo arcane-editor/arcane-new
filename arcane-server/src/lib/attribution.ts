@@ -19,10 +19,9 @@ import type { UserRow } from './db.ts';
 /**
  * Characters an attribution token may contain.
  *
- * Same allow-list the website applies. These values reach a D1 column and a
- * third-party request body, and the click id is additionally echoed into
- * admin listings, so the bound is on the value's shape rather than on
- * escaping it correctly at each of those sites.
+ * Same allow-list the website applies. These values reach a D1 column and the
+ * body of a request to a third party, so the bound is on the value's shape
+ * once, here, rather than on escaping it correctly at each of those sites.
  */
 const SAFE_TOKEN = /^[A-Za-z0-9._~-]{1,512}$/;
 
@@ -76,6 +75,10 @@ export async function recordSignupConversion(
     env: Parameters<typeof reportConversion>[0],
     user: Pick<UserRow, 'id' | 'email'>,
     attribution: RedditAttribution,
+    /** The signing-up browser's IP and user agent. Real match keys, and the
+     *  only ones an organic signup has besides its hashed email — worth
+     *  passing even though a click id is the stronger signal when present. */
+    request: { ipAddress?: string | null; userAgent?: string | null } = {},
 ): Promise<void> {
     try {
         if (hasAttribution(attribution)) {
@@ -86,8 +89,15 @@ export async function recordSignupConversion(
         }
         await reportConversion(env, {
             eventName: 'SignUp',
+            // Derived, not random: one account can only ever be signed up
+            // once, so a replay of this conversion — a manual re-send of a
+            // failed audit row, say — collapses on Reddit's side instead of
+            // inventing a second customer.
+            conversionId: `signup:${user.id}`,
             userId: user.id,
             email: user.email,
+            ipAddress: request.ipAddress ?? null,
+            userAgent: request.userAgent ?? null,
             // Our own user id as a stable cross-event key, so a later Purchase
             // and this SignUp are recognisably the same person even if the
             // email match ever fails.
@@ -113,6 +123,12 @@ export async function recordSignupConversion(
  * whole reason `users.rdt_click_id` is persisted instead of being consumed at
  * signup and discarded.
  *
+ * Deliberately carries NO ip_address or user_agent, unlike the SignUp event.
+ * The request this runs inside is Dodo's webhook call, so the only IP and UA
+ * available belong to Dodo's servers — sending those as the USER's match keys
+ * would not merely be weak, it would be wrong, and would attribute the
+ * purchase to whoever else Reddit associates with that address.
+ *
  * Never throws: a billing webhook must not fail over ad reporting, or Dodo
  * will retry a payment we have already applied.
  */
@@ -120,12 +136,17 @@ export async function reportUserPurchase(
     env: Parameters<typeof reportConversion>[0],
     userId: number,
     valueUsd: number,
+    /** Stable identity for THIS payment — the Dodo subscription or payment id.
+     *  Makes the conversion id derivable, so a webhook redelivered under a new
+     *  event id cannot be counted as a second purchase. */
+    paymentRef: string,
 ): Promise<void> {
     try {
         const user = await findUserById(env.arcane_db, userId);
         if (!user) return;
         await reportConversion(env, {
             eventName: 'Purchase',
+            conversionId: `purchase:${paymentRef}`,
             userId: user.id,
             email: user.email,
             externalId: String(user.id),

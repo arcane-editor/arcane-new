@@ -275,10 +275,14 @@ authGithubRouter.get('/v1/auth/github/callback', async (c) => {
     if (!user) { return fail('link_conflict', 'github_account'); }
 
     if (!preexisting) {
-        await runInBackground(optionalExecutionCtx(c), recordSignupConversion(c.env, user, {
-            clickId: cookie.rdt_cid ?? null,
-            rdtUuid: cookie.rdt_uuid ?? null,
-        }));
+        await runInBackground(optionalExecutionCtx(c), recordSignupConversion(
+            c.env,
+            user,
+            { clickId: cookie.rdt_cid ?? null, rdtUuid: cookie.rdt_uuid ?? null },
+            // This callback is the user's own browser returning from the
+            // provider, so its IP and user agent are genuinely theirs.
+            { ipAddress: c.req.header('CF-Connecting-IP'), userAgent: c.req.header('User-Agent') },
+        ));
     }
 
     // 60-second single-use handoff code in the query string — never a JWT in

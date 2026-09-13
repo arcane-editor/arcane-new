@@ -1,6 +1,6 @@
 ---
 import '../styles/global.css';
-import { isDevChannel } from '../lib/releases';
+import { isProdChannel } from '../lib/releases';
 import { REDDIT_PIXEL_ID } from '../lib/reddit';
 
 interface Props {
@@ -55,14 +55,18 @@ const apiUrlForPixel = import.meta.env.PUBLIC_API_URL ?? '';
  *    /verify, /reset, /account and /admin because those URLs carry one-time
  *    tokens. The pixel is a third-party script like any other and obeys it.
  *  - The channel gate exists because there is exactly ONE pixel id for both
- *    environments. A dev deploy firing it would report conversions against
- *    live ad spend and quietly mistrain the campaign's optimizer.
+ *    environments. A dev deploy — or a developer running this site locally —
+ *    firing it would report conversions against live ad spend and quietly
+ *    mistrain the campaign's optimizer. `isProdChannel` is a POSITIVE match
+ *    on the production API URL for that reason: `PUBLIC_API_URL` is unset
+ *    outside the deploy workflow, and anything phrased as "not dev" would
+ *    read that empty value as production.
  *
  * The consequence worth knowing: the pixel cannot be smoke-tested on
  * dev.unityide.app. Verify it on production with Reddit's Pixel Helper, or
  * against the Conversions API's `test_mode`, which does not count conversions.
  */
-const redditPixel = analytics && !isDevChannel(apiUrlForPixel);
+const redditPixel = analytics && isProdChannel(apiUrlForPixel);
 
 const structuredData = {
   '@context': 'https://schema.org',

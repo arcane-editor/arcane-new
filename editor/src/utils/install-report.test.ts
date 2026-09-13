@@ -29,7 +29,7 @@ function harness(options: {
         calls.push({ cmd, args });
         if (cmd === 'install_claim') {
             if (options.claimThrows) throw new Error('no ipc');
-            return (options.record ?? { installId: 'install-1', reported: false }) as T;
+            return (options.record ?? { installId: 'install-1', reported: false, shouldReport: true }) as T;
         }
         if (cmd === 'install_mark_reported' && options.markThrows) throw new Error('disk full');
         return undefined as T;
@@ -80,7 +80,7 @@ describe('reportInstallOnce', () => {
 
     /** The property the whole feature rests on. */
     it('sends nothing when this machine already reported', async () => {
-        const h = harness({ record: { installId: 'install-1', reported: true } });
+        const h = harness({ record: { installId: 'install-1', reported: true, shouldReport: false } });
 
         expect(await reportInstallOnce(h.deps)).toBe('already');
         expect(h.sent).toHaveLength(0);
@@ -126,5 +126,42 @@ describe('reportInstallInBackground', () => {
         // such — the point is that boot cannot be taken down by ad reporting.
         const invoke = (() => { throw new Error('sync throw'); }) as never;
         expect(await reportInstallInBackground(invoke, '0.3.3')).toBe('unavailable');
+    });
+});
+
+describe('one report per process', () => {
+    /**
+     * Tauri runs ONE process for every window, so a session restoring six
+     * projects would otherwise fire six POSTs from one IP at a limiter sized
+     * for once-per-lifetime. Rust hands out a single report slot; this is the
+     * side that must respect it.
+     */
+    it('sends nothing when another window in this process holds the slot', async () => {
+        const h = harness({ record: { installId: 'install-1', reported: false, shouldReport: false } });
+
+        expect(await reportInstallOnce(h.deps)).toBe('already');
+        expect(h.sent).toHaveLength(0);
+        expect(h.marked()).toBe(false);
+    });
+});
+
+describe('permanent rejection', () => {
+    /**
+     * A 4xx is the server's permanent verdict on this install id. Treating it
+     * as transient would re-POST on every launch for the life of the machine
+     * and still never count the install.
+     */
+    it('does not retry forever when the server rejects the payload', async () => {
+        const h = harness({ status: 400 });
+
+        expect(await reportInstallOnce(h.deps)).toBe('rejected');
+        expect(h.sent).toHaveLength(1);
+    });
+
+    it('still treats a 5xx as worth retrying next launch', async () => {
+        const h = harness({ status: 503 });
+
+        expect(await reportInstallOnce(h.deps)).toBe('failed');
+        expect(h.marked()).toBe(false);
     });
 });
