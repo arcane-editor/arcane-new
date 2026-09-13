@@ -355,6 +355,26 @@ export function submitManualCode(code: string): boolean {
 // ── Cold start ──────────────────────────────────────────────────────────────
 
 /**
+ * Claim the cold-start callback for THIS window, process-wide and once.
+ *
+ * The resume below runs on window mount, and every webview is its own JS
+ * context — so it runs once per WINDOW, while `getCurrent()` keeps handing back
+ * the same launch URL for the life of the process. The Rust side hands the
+ * claim to whoever asks first; everyone after gets `false` and stands down.
+ *
+ * Resolves false when the command is unavailable (an older shell, a test
+ * harness): a refused claim costs a cold-start resume, whereas a granted one
+ * could reopen the browser at a user who is already signed in.
+ */
+export async function claimLaunchCallback(): Promise<boolean> {
+  try {
+    return await invoke<boolean>('auth_claim_launch_callback');
+  } catch {
+    return false;
+  }
+}
+
+/**
  * True when the OS launched this process with a deep link.
  *
  * `getCurrent()` is the ONLY way to see a startup URL: the plugin delivers

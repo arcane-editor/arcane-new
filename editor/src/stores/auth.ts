@@ -8,6 +8,7 @@ import {
   submitManualCode as serviceSubmitManualCode,
   resumeFromColdStart as serviceResumeFromColdStart,
   hadLaunchUrl as serviceHadLaunchUrl,
+  claimLaunchCallback as serviceClaimLaunchCallback,
   planGrantsClient,
   type Session,
 } from '../features/auth';
@@ -191,6 +192,13 @@ export const useAuthStore = create<AuthState>((set) => ({
       onError: (message: string) => set({ loginStatus: 'error', error: message }),
     };
     try {
+      // Every window runs this on mount, and `getCurrent()` keeps handing back
+      // the same launch URL for the life of the process — so claim it once,
+      // process-wide. Without this, the project window opened after a
+      // cold-start sign-in would re-enter Case 2 below against an already
+      // consumed callback and reopen the browser out of nowhere.
+      if (!(await serviceClaimLaunchCallback())) return;
+
       // Case 1: this app started the sign-in, was closed, and the OS has now
       // launched it with the callback. The persisted attempt still holds the
       // verifier, so the exchange can happen directly.

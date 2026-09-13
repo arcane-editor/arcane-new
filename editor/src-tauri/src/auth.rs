@@ -277,6 +277,36 @@ pub fn auth_deep_link_scheme(app: tauri::AppHandle) -> String {
     deep_link_scheme(&app)
 }
 
+// ── Cold-start callback claim ───────────────────────────────────────────────
+
+/// One-shot claim on the auth callback the OS launched this process with.
+///
+/// The cold-start resume runs on window mount, and every webview is its own JS
+/// context — so it runs once PER WINDOW, while `deep_link().get_current()`
+/// keeps returning the same launch URL for the life of the process. Without a
+/// claim, the project window a user opens minutes later re-runs the cold-start
+/// path against a callback the welcome window already consumed, finds no
+/// persisted attempt left, and "helpfully" reopens the browser.
+///
+/// Same shape as `cli::claim_pending_open`: whoever asks first owns it, and no
+/// window ever has to take a request and hand it back.
+#[derive(Default)]
+pub struct LaunchCallbackClaim(pub std::sync::Mutex<bool>);
+
+/// True for the FIRST caller in this process, false for every one after.
+#[tauri::command]
+pub fn auth_claim_launch_callback(state: tauri::State<'_, LaunchCallbackClaim>) -> bool {
+    // Plain-data state (one bool), so poison recovery is safe here — see
+    // sync_util's "When this is safe". A poisoned lock must not permanently
+    // disable cold-start sign-in for the rest of the process's life.
+    let mut claimed = crate::sync_util::lock_recover(&state.0);
+    if *claimed {
+        return false;
+    }
+    *claimed = true;
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::{

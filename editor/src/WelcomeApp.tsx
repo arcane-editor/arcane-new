@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useRecentsStore } from './stores/recents';
+import { useAuthStore } from './stores/auth';
 import { openDroppedProject, openProjectInNewWindow, routePendingOpenToProjectWindow } from './features/project';
 import { listenScoped, safeUnlisten } from './utils/tauri-listener';
 import { formatRelativeDate } from './utils/date';
@@ -45,6 +46,50 @@ function WelcomeApp() {
   }, []);
 
   useEffect(() => { void reload(); }, [reload]);
+
+  // Finish a sign-in the OS launched us with.
+  //
+  // `unityide://auth/callback?…` carries no project, so `parse_deep_link`
+  // ignores it, no project window is created, and THIS window is the only one
+  // that ever mounts. The cold-start resume used to live solely in App.tsx (the
+  // project window), so the whole journey the website's "Open UnityIDE" button
+  // exists to serve — sign in on the site with the app closed — landed here and
+  // died silently: the app opened on this panel, still signed out, with no clue
+  // that a callback had been dropped.
+  //
+  // The store claims the launch URL process-wide before acting, so the project
+  // window opened later cannot re-run this against a consumed callback.
+  useEffect(() => {
+    void useAuthStore.getState().resumeColdStartLogin();
+  }, []);
+
+  // `resumeColdStartLogin` is deliberately silent on its own (it runs on every
+  // window mount, almost always with nothing to do). Here it is the reason the
+  // app is on screen at all, so its outcome has to be visible: this window
+  // mounts no NotificationContainer, so the inline strip is the only surface.
+  const loginStatus = useAuthStore((s) => s.loginStatus);
+  const loggedIn = useAuthStore((s) => s.loggedIn);
+  const authError = useAuthStore((s) => s.error);
+  const [authNotice, setAuthNotice] = useState<{ text: string; bad: boolean } | null>(null);
+
+  useEffect(() => {
+    if (loginStatus === 'exchanging') {
+      setAuthNotice({ text: 'Finishing sign-in…', bad: false });
+      return;
+    }
+    if (loginStatus === 'waiting-browser') {
+      setAuthNotice({ text: 'Finish signing in in your browser…', bad: false });
+      return;
+    }
+    // Outcomes are reported ONLY for a sign-in this window actually started —
+    // `prev === null` means we never went busy, and an already-signed-in user
+    // reopening the app must not be told they just signed in.
+    setAuthNotice((prev) => {
+      if (prev === null) return null;
+      if (loginStatus === 'error') return { text: authError ?? 'Sign-in failed.', bad: true };
+      return loggedIn ? { text: 'Signed in. Open a project to get started.', bad: false } : null;
+    });
+  }, [loginStatus, loggedIn, authError]);
 
   // Unity launches us as `UnityIDE --goto <file>:<line>:<col> <project>` or
   // `UnityIDE --project <project>`. When no window has that project open, this
@@ -298,6 +343,16 @@ function WelcomeApp() {
             overflowWrap: 'break-word',
           }}>
             {error}
+          </div>
+        )}
+        {authNotice && (
+          <div style={{
+            padding: '8px 14px', fontSize: 12, lineHeight: 1.4,
+            color: authNotice.bad ? 'var(--error-text, #dc2626)' : 'var(--text-secondary)',
+            borderBottom: '1px solid var(--border)',
+            overflowWrap: 'break-word',
+          }}>
+            {authNotice.text}
           </div>
         )}
         <div style={{ flex: 1, overflowY: 'auto' }}>
