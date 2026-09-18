@@ -5,6 +5,15 @@ All notable changes to this package will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-09-18
+
+### Fixed
+- Compile error on Unity editors newer than 6000.3.5, where
+  `SerializedProperty.objectReferenceInstanceIDValue` became obsolete-as-error
+  (CS0619) in favour of `objectReferenceEntityIdValue`. The saved-scene
+  persistence check now resolves whichever accessor the running editor has, so
+  the package still compiles on 2021.3 through the latest 6.3 patches.
+
 ## [0.4.0] - Unreleased
 
 ### Added
