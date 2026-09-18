@@ -23,6 +23,7 @@ import type {
   EditorState,
   SceneHierarchy,
   CompileWaitOutcome,
+  UnityObjectId,
 } from '../../../unity-bridge';
 import type { RefHit } from '../../../../stores/unity-index';
 import type {
@@ -600,13 +601,17 @@ function createGetSceneHierarchy(): AgentTool {
 // ── get_game_object ──────────────────────────────────────────────────────────
 
 const gameObjectSchema = Type.Object({
-  instanceId: Type.Optional(Type.Integer({ description: 'Instance id (preferred).' })),
+  instanceId: Type.Optional(
+    Type.Union([Type.String(), Type.Integer()], {
+      description: 'Instance id (preferred). Pass the instanceId from get_scene_hierarchy back exactly as given; it is an opaque string on current bridges.',
+    }),
+  ),
   globalObjectId: Type.Optional(Type.String({ description: 'Stable Edit Mode object id from get_scene_hierarchy.' })),
   path: Type.Optional(Type.String({ description: 'Hierarchy path "Parent/Child".' })),
 });
 
 async function fetchGameObject(
-  t: { instanceId?: number; path?: string; globalObjectId?: string },
+  t: { instanceId?: UnityObjectId; path?: string; globalObjectId?: string },
 ): Promise<HierarchyNode & { components: HierarchyComponent[] }> {
   const { bridgeRpc } = await import('../../../unity-bridge');
   return bridgeRpc.getGameObject(t);
@@ -645,7 +650,7 @@ async function findReferencesInIndex(guid: string): Promise<RefHit[]> {
   return useUnityIndexStore.getState().findReferences(guid);
 }
 
-async function fetchLiveReferences(guid: string): Promise<{ scene: string; path: string; instanceId: number }[]> {
+async function fetchLiveReferences(guid: string): Promise<{ scene: string; path: string; instanceId: UnityObjectId }[]> {
   const { bridgeRpc } = await import('../../../unity-bridge');
   const live = await bridgeRpc.findReferencesToScript(guid);
   return live.gameObjects;

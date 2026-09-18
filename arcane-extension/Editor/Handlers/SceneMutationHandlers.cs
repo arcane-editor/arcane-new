@@ -179,11 +179,11 @@ namespace UnityIDE.Bridge
 
             var goInfo = JsonValue.NewObject();
             goInfo["path"] = HierarchyHandlers.HierarchyPath(go.transform);
-            goInfo["instanceId"] = go.GetInstanceID();
+            goInfo["instanceId"] = UnityIds.IdOf(go);
             goInfo["created"] = createdGameObject;
 
             var docInfo = JsonValue.NewObject();
-            docInfo["instanceId"] = doc.GetInstanceID();
+            docInfo["instanceId"] = UnityIds.IdOf(doc);
             docInfo["created"] = createdDocument;
 
             var psInfo = JsonValue.NewObject();
@@ -245,9 +245,9 @@ namespace UnityIDE.Bridge
             GameObject existing = HierarchyHandlers.ResolveGameObject(target);
             if (existing != null) return existing;
 
-            if (target["instanceId"].IsNumber)
+            if (UnityIds.IsId(target["instanceId"]))
             {
-                refusal = "No GameObject with instanceId " + target["instanceId"].AsInt +
+                refusal = "No GameObject with instanceId " + UnityIds.Describe(target["instanceId"]) +
                           " — it may have been deleted. Pass a hierarchy path instead.";
                 return null;
             }
@@ -675,12 +675,12 @@ namespace UnityIDE.Bridge
             isAsset = false;
             refusal = null;
 
-            if (p["componentInstanceId"].IsNumber)
+            if (UnityIds.IsId(p["componentInstanceId"]))
             {
-                UnityEngine.Object byId = ObjectFromInstanceId(p["componentInstanceId"].AsInt);
+                UnityEngine.Object byId = UnityIds.ToObject(p["componentInstanceId"]);
                 if (byId == null)
                 {
-                    refusal = "No object with componentInstanceId " + p["componentInstanceId"].AsInt +
+                    refusal = "No object with componentInstanceId " + UnityIds.Describe(p["componentInstanceId"]) +
                               " — it may have been deleted.";
                     return null;
                 }
@@ -732,7 +732,7 @@ namespace UnityIDE.Bridge
             {
                 string path = target["path"].AsString;
                 refusal = string.IsNullOrEmpty(path)
-                    ? "No GameObject with instanceId " + target["instanceId"].AsInt + " in any loaded scene."
+                    ? "No GameObject with instanceId " + UnityIds.Describe(target["instanceId"]) + " in any loaded scene."
                     : "No GameObject at \"" + path + "\" in any loaded scene.";
                 return null;
             }
@@ -766,18 +766,6 @@ namespace UnityIDE.Bridge
             return null;
         }
 
-        private static UnityEngine.Object ObjectFromInstanceId(int id)
-        {
-            // Unity 6.3 renamed instance ids to entity ids and deprecated the int
-            // overload; EntityIdToObject does not exist below it. Same guard as
-            // HierarchyHandlers.ResolveGameObject.
-#if UNITY_6000_3_OR_NEWER
-            return EditorUtility.EntityIdToObject(id);
-#else
-            return EditorUtility.InstanceIDToObject(id);
-#endif
-        }
-
         private static Scene SceneOf(UnityEngine.Object obj)
         {
             var go = obj as GameObject;
@@ -790,7 +778,7 @@ namespace UnityIDE.Bridge
         private static JsonValue DescribeTarget(UnityEngine.Object obj, bool isAsset)
         {
             var o = JsonValue.NewObject();
-            o["instanceId"] = obj.GetInstanceID();
+            o["instanceId"] = UnityIds.IdOf(obj);
             o["type"] = obj.GetType().Name;
             o["isAsset"] = isAsset;
             if (isAsset)

@@ -65,12 +65,20 @@ export interface RpcRefusal {
   reason: string;
 }
 
+/**
+ * A live object's session id as the bridge reports it. Package 0.4.2+ sends
+ * the editor's entity id as a decimal string, because Unity 6.5 made EntityId
+ * 64-bit and a JSON number is only exact to 2^53; older packages send a
+ * number. Opaque either way: never parse it, only echo it back.
+ */
+export type UnityObjectId = string | number;
+
 export interface HierarchyNode {
   name: string;
   active: boolean;
   tag: string;
   layer: number;
-  instanceId: number;
+  instanceId: UnityObjectId;
   globalObjectId?: string;
   components: HierarchyComponent[];
   children: HierarchyNode[];
@@ -83,7 +91,7 @@ export interface SceneHierarchy {
 
 export interface SelectionObject {
   name: string;
-  instanceId: number;
+  instanceId: UnityObjectId;
   type: string;
   path: string;
 }
@@ -128,7 +136,7 @@ export interface CodeOptimization {
 
 /** A GameObject in a loaded scene, addressed by instance id or hierarchy path. */
 export interface SceneTarget {
-  instanceId?: number;
+  instanceId?: UnityObjectId;
   path?: string;
 }
 
@@ -147,8 +155,8 @@ export interface AttachUiDocumentParams {
 
 export interface AttachUiDocumentResult {
   ok: true;
-  gameObject: { path: string; instanceId: number; created: boolean };
-  uiDocument: { instanceId: number; created: boolean };
+  gameObject: { path: string; instanceId: UnityObjectId; created: boolean };
+  uiDocument: { instanceId: UnityObjectId; created: boolean };
   panelSettings: {
     path: string;
     guid: string;
@@ -209,14 +217,14 @@ export interface SetSerializedPropertyParams {
   /** An asset (ScriptableObject, PanelSettings, prefab…). Mutually exclusive with `target`. */
   assetPath?: string;
   component?: string;
-  componentInstanceId?: number;
+  componentInstanceId?: UnityObjectId;
   property: string;
   value: SerializedValue;
 }
 
 export interface SetSerializedPropertyResult {
   ok: true;
-  target: { path: string; instanceId: number; type: string; isAsset: boolean };
+  target: { path: string; instanceId: UnityObjectId; type: string; isAsset: boolean };
   property: string;
   /** Unity's `SerializedPropertyType` name, e.g. `Float`. */
   propertyType: string;
@@ -254,11 +262,11 @@ export const bridgeRpc = {
   cancelPlaytest: (operationId: string) => rpc<AutomationReport>('cancelPlaytest', { operationId }),
   getEditorState: () => rpc<EditorState>('getEditorState'),
   getSceneHierarchy: () => rpc<SceneHierarchy>('getSceneHierarchy'),
-  getGameObject: (target: { instanceId?: number; path?: string; globalObjectId?: string }) =>
+  getGameObject: (target: { instanceId?: UnityObjectId; path?: string; globalObjectId?: string }) =>
     rpc<HierarchyNode & { components: HierarchyComponent[] }>('getGameObject', target),
   getSelection: () => rpc<{ objects: SelectionObject[] }>('getSelection'),
   findReferencesToScript: (guid: string) =>
-    rpc<{ gameObjects: Array<{ scene: string; path: string; instanceId: number }> }>(
+    rpc<{ gameObjects: Array<{ scene: string; path: string; instanceId: UnityObjectId }> }>(
       'findReferencesToScript',
       { guid },
     ),

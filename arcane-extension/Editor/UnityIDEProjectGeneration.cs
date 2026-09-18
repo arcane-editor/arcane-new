@@ -8,9 +8,12 @@ namespace UnityIDE.Editor
 {
     /// <summary>
     /// Generates .sln and .csproj files by invoking ProjectGeneration.Sync()
-    /// from whichever Unity IDE package is installed (com.unity.ide.vscode or
-    /// com.unity.ide.visualstudio), using reflection to avoid compile-time dependencies.
-    /// If neither package is found, auto-installs com.unity.ide.vscode.
+    /// from whichever Unity IDE package is installed (com.unity.ide.rider,
+    /// com.unity.ide.visualstudio or the deprecated com.unity.ide.vscode), using
+    /// reflection to avoid compile-time dependencies. If none is found,
+    /// auto-installs com.unity.ide.visualstudio — the generator Unity 6 project
+    /// templates ship with, and the only one still maintained; com.unity.ide.vscode
+    /// was deprecated in 2023 and would land in a user's manifest as a warning.
     /// </summary>
     public static class UnityIDEProjectGeneration
     {
@@ -78,11 +81,18 @@ namespace UnityIDE.Editor
             Sync();
         }
 
+        // Order is preference when several are installed. Rider and Visual Studio
+        // are what Unity 6 templates ship; the VS Code package is deprecated but
+        // still present in older projects, and its generator still works.
         private static readonly (string assemblyName, string typeName)[] Candidates =
         {
-            ("Unity.VSCode.Editor", "VSCodeEditor.ProjectGeneration"),
+            ("Unity.Rider.Editor", "Packages.Rider.Editor.ProjectGeneration.ProjectGeneration"),
             ("Unity.VisualStudio.Editor", "Microsoft.Unity.VisualStudio.Editor.ProjectGeneration"),
+            ("Unity.VSCode.Editor", "VSCodeEditor.ProjectGeneration"),
         };
+
+        /// <summary>The package installed when no generator is present. Public so the settings UI and logs agree on it.</summary>
+        public const string AutoInstalledPackage = "com.unity.ide.visualstudio";
 
         /// <summary>
         /// Generate all .sln and .csproj files for the current Unity project.
@@ -158,9 +168,9 @@ namespace UnityIDE.Editor
 
             _packageInstallRequested = true;
 
-            UnityIDELog.Info("No IDE package found. Auto-installing com.unity.ide.vscode for project file generation...");
+            UnityIDELog.Info("No IDE package found. Auto-installing " + AutoInstalledPackage + " for project file generation...");
 
-            var request = UnityEditor.PackageManager.Client.Add("com.unity.ide.vscode");
+            var request = UnityEditor.PackageManager.Client.Add(AutoInstalledPackage);
 
             _installCheckCallback = () =>
             {
@@ -171,11 +181,11 @@ namespace UnityIDE.Editor
 
                 if (request.Status == UnityEditor.PackageManager.StatusCode.Success)
                 {
-                    UnityIDELog.Info("com.unity.ide.vscode installed successfully. Unity will reload scripts.");
+                    UnityIDELog.Info(AutoInstalledPackage + " installed successfully. Unity will reload scripts.");
                 }
                 else
                 {
-                    UnityIDELog.Error($"Failed to install com.unity.ide.vscode: {request.Error?.message}");
+                    UnityIDELog.Error($"Failed to install {AutoInstalledPackage}: {request.Error?.message}");
                     _packageInstallRequested = false;
                 }
             };

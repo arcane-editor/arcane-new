@@ -98,7 +98,7 @@ namespace UnityIDE.Bridge
                 if (obj == null) continue;
                 var o = JsonValue.NewObject();
                 o["name"] = obj.name ?? "";
-                o["instanceId"] = obj.GetInstanceID();
+                o["instanceId"] = UnityIds.IdOf(obj);
                 o["type"] = obj.GetType().Name;
 
                 // Hierarchy path for GameObjects; asset path otherwise.

@@ -3,6 +3,7 @@
  */
 
 import type { ErrorReportEntry, ErrorReportSource } from '../data/error-report';
+import type { UnityObjectId } from '../../unity-bridge';
 
 export type ChatMode = 'ask' | 'agent' | 'plan' | 'design';
 
@@ -98,7 +99,8 @@ export type Attachment =
       kind: 'unity-object';
       id: string;
       name: string;
-      instanceId?: number;
+      /** Opaque bridge id (a string on package 0.4.2+, a number before). */
+      instanceId?: UnityObjectId;
     }
   | {
       /**

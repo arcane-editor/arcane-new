@@ -22,7 +22,7 @@ import { useWorkspaceStore } from '../../../stores/workspace';
 import { useProjectContextStore } from '../../../stores/project-context';
 import { useUnitySceneStore } from '../../../stores/unity-scene';
 import { useUnityIndexStore, getGuidMap, INDEX_RELEVANT } from '../../../stores/unity-index';
-import type { HierarchyNode } from '../../unity-bridge';
+import type { HierarchyNode, UnityObjectId } from '../../unity-bridge';
 import { UNITY_API_LIST, UNITY_API_DEFAULTS } from '../../../data/unity-api-list';
 import { FileIcon } from '../../../utils/file-icons';
 import { relPathOf } from '../services/stage-file';
@@ -80,7 +80,7 @@ export type MentionPick =
   | { kind: 'file'; path: string; relPath: string; bytes?: number }
   | { kind: 'unity-doc'; name: string; url: string; category?: string }
   | { kind: 'unity-context'; verb: 'scene' | 'selection' | 'hierarchy' | 'console' }
-  | { kind: 'unity-object'; name: string; instanceId?: number }
+  | { kind: 'unity-object'; name: string; instanceId?: UnityObjectId }
   | { kind: 'unity-asset'; guid: string; path: string; relPath: string };
 
 interface FileItem {
@@ -279,10 +279,10 @@ function MentionPopover({ open, query, anchorRect, onPick, onClose }: Props) {
     return SCENE_VERBS.filter((v) => !q || v.verb.includes(q)).map((v) => v.verb);
   }, [isUnityProject, query]);
 
-  const objectItems = useMemo<{ name: string; instanceId: number }[]>(() => {
+  const objectItems = useMemo<{ name: string; instanceId: UnityObjectId }[]>(() => {
     if (!isUnityProject || !sceneHierarchy) return [];
     const q = query.toLowerCase();
-    const out: { name: string; instanceId: number }[] = [];
+    const out: { name: string; instanceId: UnityObjectId }[] = [];
     const walk = (n: HierarchyNode) => {
       if (!q || n.name.toLowerCase().includes(q)) out.push({ name: n.name, instanceId: n.instanceId });
       for (const c of n.children) walk(c);

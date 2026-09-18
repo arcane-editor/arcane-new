@@ -621,3 +621,27 @@ describe('get_compile_errors', () => {
     expect(tool.timeoutMs).toBe(95_000);
   });
 });
+
+describe('get_game_object argument schema', () => {
+  // Package 0.4.2 sends `instanceId` as a decimal string (Unity 6.5 made
+  // EntityId 64-bit, beyond what a JSON number carries exactly); older
+  // packages send a number. The model echoes whichever it was shown, so the
+  // schema has to admit both — a `Type.Integer` here would reject every id a
+  // current bridge produces.
+  it('accepts the string ids current bridges send and the numbers older ones sent', async () => {
+    const { createUnityBridgeReadTools } = await import('./read-tools');
+    const { validateToolArgs } = await import('../vendor/tools/validate-args');
+    const tool = createUnityBridgeReadTools(idleClient).find((t) => t.name === 'get_game_object');
+    if (!tool) throw new Error('get_game_object tool missing');
+    // The 64-bit id must come out exactly as it went in: validation coerces
+    // (`Value.Convert`), and a union with Integer first would parse the string
+    // into a lossy double. String stays first for that reason.
+    const big = validateToolArgs(tool.name, tool.parameters, { instanceId: '18446744073709551615' });
+    expect(big).toEqual({ ok: true, value: { instanceId: '18446744073709551615' } });
+    expect(validateToolArgs(tool.name, tool.parameters, { instanceId: '-1234' })).toEqual({ ok: true, value: { instanceId: '-1234' } });
+    expect(validateToolArgs(tool.name, tool.parameters, { instanceId: 1234 })).toEqual({ ok: true, value: { instanceId: 1234 } });
+    expect(validateToolArgs(tool.name, tool.parameters, { path: 'Player/Camera' }).ok).toBe(true);
+    // Convert stringifies scalars, so only a non-scalar is a genuine schema miss.
+    expect(validateToolArgs(tool.name, tool.parameters, { instanceId: [1] }).ok).toBe(false);
+  });
+});

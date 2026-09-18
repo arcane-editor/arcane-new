@@ -7,6 +7,7 @@ export type {
   EditorState,
   HierarchyNode,
   HierarchyComponent,
+  UnityObjectId,
   ComponentScript,
   ProjectScene,
   SceneHierarchy,

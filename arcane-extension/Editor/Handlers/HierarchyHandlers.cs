@@ -6,6 +6,7 @@
 //   getSceneHierarchy  → { scenes:[{name,path,roots[]}], truncated }
 //   getGameObject      → full component list with serialized property values
 //   findReferencesToScript → { gameObjects:[{scene,path,instanceId}] } for a guid
+//   (every instanceId is the object's entity id as a decimal string — see UnityIds.cs)
 //   listScenes         → { scenes:[{name,path,guid,loaded}] } — every scene in Assets/
 //   openScene          → { ok } | error — opens a scene, honouring unsaved changes
 //
@@ -187,7 +188,7 @@ namespace UnityIDE.Bridge
             result["found"] = true;
             result["name"] = go.name ?? "";
             result["active"] = go.activeSelf;
-            result["instanceId"] = go.GetInstanceID();
+            result["instanceId"] = UnityIds.IdOf(go);
             HierarchySerializer.AddStableId(go, result, new HierarchySerializer.Budget(4096));
 
             string tag;
@@ -218,20 +219,12 @@ namespace UnityIDE.Bridge
                 if (resolved is Component stableComponent) return stableComponent.gameObject;
                 return null;
             }
-            // By instanceId (preferred — unambiguous).
-            if (p["instanceId"].IsNumber)
+            // By instanceId (preferred — unambiguous). A decimal string from this
+            // package, or a number from older IDE builds; UnityIds owns the
+            // instance-id → entity-id rename so no Unity name is written here.
+            if (UnityIds.IsId(p["instanceId"]))
             {
-                int id = p["instanceId"].AsInt;
-                // Unity 6.3 renamed instance ids to entity ids and deprecated the
-                // int overload. EntityIdToObject does not exist below 6.3, so this
-                // has to be a version guard rather than a straight swap — the
-                // package still supports 2021.3. `int` converts to EntityId
-                // implicitly, so the argument is unchanged.
-#if UNITY_6000_3_OR_NEWER
-                var obj = EditorUtility.EntityIdToObject(id);
-#else
-                var obj = EditorUtility.InstanceIDToObject(id);
-#endif
+                var obj = UnityIds.ToObject(p["instanceId"]);
                 if (obj is GameObject go) return go;
                 if (obj is Component comp) return comp.gameObject;
                 return null;
@@ -299,7 +292,7 @@ namespace UnityIDE.Bridge
             }
 
             obj["type"] = c.GetType().Name;
-            obj["instanceId"] = c.GetInstanceID();
+            obj["instanceId"] = UnityIds.IdOf(c);
             HierarchySerializer.AddStableId(c, obj, new HierarchySerializer.Budget(4096));
 
             var props = JsonValue.NewObject();
@@ -383,7 +376,7 @@ namespace UnityIDE.Bridge
                         {
                             o["name"] = refObj.name ?? "";
                             o["type"] = refObj.GetType().Name;
-                            o["instanceId"] = refObj.GetInstanceID();
+                            o["instanceId"] = UnityIds.IdOf(refObj);
                         }
                         else
                         {
@@ -485,7 +478,7 @@ namespace UnityIDE.Bridge
                     var entry = JsonValue.NewObject();
                     entry["scene"] = sceneName ?? "";
                     entry["path"] = HierarchyPath(go.transform);
-                    entry["instanceId"] = go.GetInstanceID();
+                    entry["instanceId"] = UnityIds.IdOf(go);
                     outArr.Add(entry);
                     break; // one hit per GameObject is enough
                 }

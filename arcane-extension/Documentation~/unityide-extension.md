@@ -105,7 +105,7 @@ Run Unity tests from the IDE (requires `com.unity.test-framework` package):
 - Aggregate summary on completion
 
 ### Project Generation
-Generate `.sln` and `.csproj` files for C# IntelliSense support. The extension auto-detects available IDE packages (`com.unity.ide.vscode`, `com.unity.ide.visualstudio`) and uses them via reflection.
+Generate `.sln` and `.csproj` files for C# IntelliSense support. The extension auto-detects available IDE packages (`com.unity.ide.rider`, `com.unity.ide.visualstudio`, or the deprecated `com.unity.ide.vscode`) and uses them via reflection. When none is installed it adds `com.unity.ide.visualstudio`.
 
 ## Settings
 
@@ -124,7 +124,11 @@ Access settings via **UnityIDE > Settings** in the menu bar.
 |--------------|--------|
 | 2021.3 LTS | Supported |
 | 2022.3 LTS | Supported |
-| Unity 6 (6000.x) | Supported |
+| Unity 6 (6000.0 – 6000.2) | Supported |
+| Unity 6.3 – 6.6 (6000.3 – 6000.6) | Supported — the package resolves Unity's instance-id → entity-id rename at load time, so one build covers every patch |
+
+Object ids in bridge replies (`instanceId`) are the editor's entity id as a
+decimal string; pass them back unchanged.
 
 ### Platforms
 - macOS (Intel & Apple Silicon)

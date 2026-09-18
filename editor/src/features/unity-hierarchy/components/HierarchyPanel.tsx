@@ -4,7 +4,7 @@ import { useUnitySceneStore } from '../../../stores/unity-scene';
 import { useUnityStore } from '../../../stores/unity';
 import { useWorkspaceStore } from '../../../stores/workspace';
 import { notify } from '../../../stores/notifications';
-import { bridgeRpc, type HierarchyNode, type ProjectScene } from '../../unity-bridge';
+import { bridgeRpc, type HierarchyNode, type ProjectScene, type UnityObjectId } from '../../unity-bridge';
 import Tooltip from '../../../components/Tooltip';
 import { hierarchyHasScriptIdentity, scriptsOf, type ScriptComponent } from '../services/hierarchy-scripts';
 
@@ -50,8 +50,8 @@ function ScriptRow({ script, type, depth }: { script: ScriptComponent['script'];
 interface NodeRowProps {
   node: HierarchyNode;
   depth: number;
-  expanded: Set<number>;
-  toggle: (id: number) => void;
+  expanded: Set<UnityObjectId>;
+  toggle: (id: UnityObjectId) => void;
 }
 
 function NodeRow({ node, depth, expanded, toggle }: NodeRowProps) {
@@ -130,7 +130,7 @@ export function HierarchyPanel() {
   const hierarchy = useUnitySceneStore((s) => s.hierarchy);
   const loading = useUnitySceneStore((s) => s.loading);
   const connected = useUnityStore((s) => s.connected);
-  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  const [expanded, setExpanded] = useState<Set<UnityObjectId>>(new Set());
   const [scenes, setScenes] = useState<ProjectScene[]>([]);
 
   useEffect(() => {
@@ -161,7 +161,7 @@ export function HierarchyPanel() {
     };
   }, [connected, hierarchy]);
 
-  const toggle = useCallback((id: number) => {
+  const toggle = useCallback((id: UnityObjectId) => {
     setExpanded((prev) => {
       const n = new Set(prev);
       if (n.has(id)) n.delete(id);

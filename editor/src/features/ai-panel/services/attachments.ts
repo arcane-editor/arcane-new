@@ -22,7 +22,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import type { Attachment } from './types';
 import { buildErrorReport } from '../data/error-report';
-import type { HierarchyNode } from '../../unity-bridge';
+import type { HierarchyNode, UnityObjectId } from '../../unity-bridge';
 
 const MAX_FILE_BYTES = 200 * 1024;
 const MAX_TOTAL_FILE_BYTES = 500 * 1024;
@@ -250,7 +250,7 @@ async function resolveUnityContext(
   return `<unity-${verb}>\n${capBlock(out.join('\n') || '(no open scenes)')}\n</unity-${verb}>`;
 }
 
-async function resolveUnityObject(name: string, instanceId?: number): Promise<string | null> {
+async function resolveUnityObject(name: string, instanceId?: UnityObjectId): Promise<string | null> {
   const { useUnityStore } = await import('../../../stores/unity');
   if (!useUnityStore.getState().connected) return null;
   const { bridgeRpc } = await import('../../unity-bridge');

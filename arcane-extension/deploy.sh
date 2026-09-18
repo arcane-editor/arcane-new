@@ -71,23 +71,26 @@ done
 echo ""
 echo "Checking .meta files..."
 
-# Check folders (skip Documentation~ — the ~ suffix makes it hidden to Unity, no meta needed)
-for dir in Editor; do
+# Every folder Unity imports needs a .meta, including nested ones (Editor/Handlers,
+# Tests/Editor…). Documentation~ is skipped: the ~ suffix hides it from Unity.
+for dir in Editor Runtime Tests $(find Editor Runtime Tests -mindepth 1 -type d 2>/dev/null); do
     if [ -d "$dir" ] && [ ! -f "$dir.meta" ]; then
         echo -e "  ${RED}MISSING META${NC}: $dir.meta"
         ERRORS=$((ERRORS + 1))
     fi
 done
 
-# Check .cs and .asmdef files in Editor/
-for file in Editor/*.cs Editor/*.asmdef; do
-    if [ -f "$file" ] && [ ! -f "$file.meta" ]; then
+# Every script and assembly definition, at any depth. A missing one is not
+# fatal to Unity — it generates a guid — but that guid differs per machine and
+# breaks every asmdef reference to the file on the next upgrade.
+while IFS= read -r file; do
+    if [ ! -f "$file.meta" ]; then
         echo -e "  ${RED}MISSING META${NC}: $file.meta"
         ERRORS=$((ERRORS + 1))
     else
         echo -e "  ${GREEN}OK${NC}: $file.meta"
     fi
-done
+done < <(find Editor Runtime Tests -type f \( -name '*.cs' -o -name '*.asmdef' \) 2>/dev/null | sort)
 
 # Check package.json meta
 if [ ! -f "package.json.meta" ]; then
@@ -168,21 +171,28 @@ if command -v npm &>/dev/null; then
         fi
     fi
 else
-    # Fallback: manual tar (excludes dev files and hidden files)
+    # Fallback without npm: the same content `npm pack` ships (everything
+    # .npmignore does not exclude) under the `package/` root UPM requires.
+    # Staged through a copy because BSD and GNU tar disagree on how to prefix
+    # paths, and a `Documentation~.meta` is deliberately absent — the ~ hides
+    # the folder from Unity, and a meta for it would be reported as orphaned.
     TARBALL="${NAME}-${VERSION}.tgz"
-    tar czf "$TARBALL" \
-        --exclude='.DS_Store' \
-        --exclude='.gitignore' \
-        --exclude='*.tgz' \
-        --exclude='install-dev.sh' \
-        --exclude='deploy.sh' \
-        --exclude='.pack-dev' \
-        --exclude='.unityide-dev-path' \
-        package.json \
-        LICENSE.md LICENSE.md.meta \
-        CHANGELOG.md CHANGELOG.md.meta \
-        Editor/ Editor.meta \
-        Documentation~/ Documentation~.meta
+    PACK_STAGE="$(mktemp -d)"
+    mkdir -p "$PACK_STAGE/package"
+    tar -cf - \
+        --exclude='.DS_Store' --exclude='.gitignore' --exclude='.npmignore' --exclude='.git' \
+        --exclude='*.tgz' --exclude='install-dev.sh' --exclude='deploy.sh' \
+        --exclude='.pack-dev' --exclude='.unityide-dev-path' --exclude='.wrangler' \
+        . | tar -xf - -C "$PACK_STAGE/package"
+    for required in package.json Editor Editor.meta Runtime Runtime.meta 'Documentation~'; do
+        if [ ! -e "$PACK_STAGE/package/$required" ]; then
+            echo -e "${RED}FAILED${NC}: fallback tarball is missing $required"
+            rm -rf "$PACK_STAGE"
+            exit 1
+        fi
+    done
+    tar czf "$TARBALL" -C "$PACK_STAGE" package
+    rm -rf "$PACK_STAGE"
 
     if [ -f "$TARBALL" ]; then
         echo -e "${GREEN}SUCCESS${NC}: Built $TARBALL"

@@ -5,6 +5,25 @@ All notable changes to this package will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.2] - 2026-09-18
+
+### Fixed
+- The package now compiles and runs on Unity 6.4, 6.5 and 6.6, where the
+  instance-id → entity-id rename continues: `Object.GetInstanceID` is obsolete
+  (6.4) then an error (6.5), `EntityId` becomes 64-bit (6.5), and the implicit
+  `int` conversion plus `EditorUtility.InstanceIDToObject` become runtime stubs
+  that throw (6.6). Every id now goes through one reflection-resolved seam
+  (`UnityIds`) instead of nine literal `GetInstanceID` calls and two
+  `#if UNITY_6000_3_OR_NEWER` guards, and the saved-scene check compares
+  against `EntityId.None` rather than assuming the unassigned id is zero.
+- Object ids cross the wire as decimal strings so a 64-bit id survives JSON;
+  numeric ids from older IDE builds are still accepted.
+- Project-file generation recognises `com.unity.ide.rider` (a Unity 6 template
+  default) and, when no generator is installed, adds `com.unity.ide.visualstudio`
+  instead of the deprecated `com.unity.ide.vscode`.
+- `deploy.sh`'s no-npm fallback produced a tarball Unity could not import
+  (no `package/` root, no `Runtime/`, a `Documentation~.meta` that must not exist).
+
 ## [0.4.1] - 2026-09-18
 
 ### Fixed

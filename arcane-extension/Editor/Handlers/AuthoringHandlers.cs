@@ -350,41 +350,13 @@ namespace UnityIDE.Bridge
                     {
                         if (property.propertyType != SerializedPropertyType.ObjectReference) continue;
                         var referenced = property.objectReferenceValue;
-                        if (referenced == null && HasMissingReference(property)) throw new InvalidOperationException("Missing reference: " + transform.name + "." + property.propertyPath);
+                        // A null value on a set id is a reference to an object that no longer exists.
+                        if (referenced == null && UnityIds.IsReferenceSet(property)) throw new InvalidOperationException("Missing reference: " + transform.name + "." + property.propertyPath);
                         if (referenced is Mesh || referenced is Material || referenced is Texture)
                             if (!EditorUtility.IsPersistent(referenced)) throw new InvalidOperationException("Save generated dependency as an asset: " + referenced.name);
                     }
                 }
             }
-        }
-
-        // Unity 6.3 began renaming instance ids to entity ids, and this property is
-        // the tail of that rename: `objectReferenceEntityIdValue` does not exist yet in
-        // 6000.3.5, where `objectReferenceInstanceIDValue` is also not yet obsolete, and
-        // on newer editors the old name is obsolete-AS-ERROR (CS0619). So neither name
-        // can be written literally — the package supports 2021.3 upward — and unlike the
-        // `EditorUtility.EntityIdToObject` guards in HierarchyHandlers/SceneMutationHandlers
-        // the boundary here falls inside 6000.3, which has no `#if` to name it. Resolve
-        // the accessor once instead, newest name first.
-        private static readonly PropertyInfo ObjectReferenceId =
-            typeof(SerializedProperty).GetProperty("objectReferenceEntityIdValue", BindingFlags.Instance | BindingFlags.Public)
-            ?? typeof(SerializedProperty).GetProperty("objectReferenceInstanceIDValue", BindingFlags.Instance | BindingFlags.Public);
-
-        // The id of an unassigned reference, boxed from whatever type this editor's
-        // accessor returns — `int` before the rename, `EntityId` after. Both are zero
-        // by default and compare by value, so one Equals covers either.
-        private static readonly object UnassignedReferenceId =
-            ObjectReferenceId == null ? null : Activator.CreateInstance(ObjectReferenceId.PropertyType);
-
-        // A reference that no longer resolves: a null objectReferenceValue sitting on a
-        // non-zero id. Callers check objectReferenceValue first. If neither accessor
-        // exists the id cannot be read at all, so report "not missing" — refusing a save
-        // that is in fact fine is worse than letting this one assertion go unenforced.
-        private static bool HasMissingReference(SerializedProperty property)
-        {
-            if (ObjectReferenceId == null) return false;
-            var id = ObjectReferenceId.GetValue(property);
-            return id != null && !id.Equals(UnassignedReferenceId);
         }
 
         internal static void AssertRepresentativeLevel(Scene scene, GameObject authoredRoot = null)

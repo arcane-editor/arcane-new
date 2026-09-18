@@ -5,7 +5,7 @@
 import { readdir, mkdir, mkdtemp, writeFile, access } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
-import { compilerLayout, isOptionalInputSource } from './unity-automation-paths';
+import { compilerLayout, isOptionalInputSource, unityVersionDefines, unityVersionFromResources } from './unity-automation-paths';
 let resources = process.env.UNITYIDE_UNITY_RESOURCES;
 if (!resources) {
   const hub = process.platform === 'darwin' ? '/Applications/Unity/Hub/Editor' : process.platform === 'win32' ? 'C:/Program Files/Unity/Hub/Editor' : join(homedir(), 'Unity/Hub/Editor');
@@ -15,6 +15,12 @@ if (!resources) {
   }
 }
 if (!resources) throw new Error('Unity installation unavailable. Set UNITYIDE_UNITY_RESOURCES; this check did not run.');
+// The editor's own version symbols, so every `#if UNITY_x_y_OR_NEWER` compiles the
+// branch this editor takes — a hardcoded list once compiled the pre-6.3 branch
+// against 6000.3 and called it verified.
+const unityVersion = process.env.UNITYIDE_UNITY_VERSION ?? unityVersionFromResources(resources);
+if (!unityVersion) throw new Error(`Cannot tell which Unity version ${resources} is. Set UNITYIDE_UNITY_VERSION (e.g. 6000.3.5f2); this check did not run.`);
+const versionDefines = unityVersionDefines(unityVersion);
 const extension = resolve(import.meta.dir, '../../arcane-extension');
 const output = await mkdtemp(join(tmpdir(), 'unityide-automation-compile-'));
 const { scripting, mono, csc } = compilerLayout(resources);
@@ -42,8 +48,11 @@ async function compile(name: string, sources: string[], extra: string[] = [], de
   await mkdir(output, { recursive: true });
   const destination = join(output, name + '.dll');
   const rsp = join(output, name + '.rsp');
-  await writeFile(rsp, ['-nostdlib+', '-target:library', '-langversion:latest',
-    '-define:UNITY_EDITOR,UNITY_2021_3_OR_NEWER,UNITY_6000_0_OR_NEWER' + defines, `-out:"${destination}"`,
+  // Obsolete-API use is an error here, not a warning: Unity turns each obsolete
+  // member into a compile error one or two releases later, and this gate is the
+  // only compiler the package meets before a user's editor does.
+  await writeFile(rsp, ['-nostdlib+', '-target:library', '-langversion:latest', '-warnaserror+:CS0612,CS0618',
+    '-define:' + ['UNITY_EDITOR', ...versionDefines].join(',') + defines, `-out:"${destination}"`,
     ...references.concat(extra).map((r) => `-r:"${r}"`), ...sources.map((p) => `"${p}"`)].join('\n'));
   const child = Bun.spawn([mono, csc, '-noconfig', '@' + rsp], { stdout: 'inherit', stderr: 'inherit' });
   if (await child.exited !== 0) throw new Error(`${name} compilation failed.`);
@@ -57,6 +66,6 @@ const editor = await compile('UnityIDE.Editor', editorSources, [runtime, ...(has
 if (hasTestFramework) await compile('UnityIDE.Editor.Tests', await files(join(extension, 'Tests/Editor'), '.cs'), [runtime, editor, ...testReferences], ',UNITYIDE_HAS_TEST_FRAMEWORK,UNITY_INCLUDE_TESTS');
 const input = await compile('UnityIDE.Automation.InputSystem', await files(join(extension, 'Editor/InputSystem'), '.cs'), [editor, join(cache, 'Unity.InputSystem.dll')], ',UNITYIDE_HAS_INPUT_SYSTEM');
 if (hasTestFramework) await compile('UnityIDE.InputSystem.Tests', await files(join(extension, 'Tests/InputSystem'), '.cs'), [editor, input, join(cache, 'Unity.InputSystem.dll'), ...testReferences], ',UNITYIDE_HAS_INPUT_SYSTEM,UNITY_INCLUDE_TESTS');
-console.log(`PASS: integration assemblies compile with and without optional packages. ${output}`);
+console.log(`PASS: integration assemblies compile against Unity ${unityVersion} with and without optional packages, obsolete API use forbidden. ${output}`);
 if (!hasTestFramework) console.log('UNVERIFIED: test assemblies were not compiled because this Unity installation does not include NUnit. Run them through Unity Test Runner.');
 console.log('Runtime tests, Play Mode reloads, input bindings and rendered captures are NOT verified by compilation.');
