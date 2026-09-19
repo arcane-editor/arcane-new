@@ -1,9 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import {
     GOOGLE_ADS_ID,
+    DOWNLOAD_CONVERSION_LABEL,
     isValidTagId,
     googleTagSrc,
     googleTagBootstrap,
+    conversionSendTo,
 } from './google-ads';
 
 describe('GOOGLE_ADS_ID', () => {
@@ -85,5 +87,46 @@ describe('googleTagBootstrap', () => {
 
     it('throws on a malformed id rather than emitting injected script', () => {
         expect(() => googleTagBootstrap("AW-1');alert(1);('")).toThrow(/tag id/i);
+    });
+});
+
+/**
+ * The conversion the download click reports.
+ *
+ * It points at a Google Ads action NAMED "Purchase" on purpose: the campaign
+ * was built optimizing for Purchase, and the owner chose to feed it downloads
+ * rather than repoint the campaign. The name is Google's; the trigger is a
+ * download.
+ */
+describe('DOWNLOAD_CONVERSION_LABEL', () => {
+    it('is the label Google Ads issued for that action', () => {
+        expect(DOWNLOAD_CONVERSION_LABEL).toBe('k8AWCJW33f0cEP2lxuNE');
+    });
+
+    /** Google labels are URL-safe tokens. A stray quote or slash here would
+     *  address a different action, or none, and report nothing forever. */
+    it('is a plain URL-safe token', () => {
+        expect(DOWNLOAD_CONVERSION_LABEL).toMatch(/^[A-Za-z0-9_-]+$/);
+    });
+});
+
+describe('conversionSendTo', () => {
+    it('joins the account and the label the way gtag expects', () => {
+        expect(conversionSendTo('k8AWCJW33f0cEP2lxuNE')).toBe(
+            'AW-18462380797/k8AWCJW33f0cEP2lxuNE'
+        );
+    });
+
+    it('defaults to the download conversion', () => {
+        expect(conversionSendTo()).toBe(`${GOOGLE_ADS_ID}/${DOWNLOAD_CONVERSION_LABEL}`);
+    });
+
+    it.each([
+        ['empty', ''],
+        ['a slash (second path segment)', 'abc/def'],
+        ['a quote', "abc'def"],
+        ['whitespace', 'abc def'],
+    ])('throws on a label containing %s', (_label, value) => {
+        expect(() => conversionSendTo(value)).toThrow(/conversion label/i);
     });
 });

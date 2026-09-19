@@ -21,6 +21,36 @@
 export const GOOGLE_ADS_ID = 'AW-18462380797';
 
 /**
+ * The conversion label for the download click.
+ *
+ * It addresses a Google Ads conversion action NAMED "Purchase". That is
+ * deliberate, not a mismatch: the campaign was built optimizing for Purchase,
+ * and the owner chose to feed that action with downloads rather than repoint
+ * the campaign at a Download action. Google's name, our trigger.
+ *
+ * Public by construction like every other id here — it ships in the page the
+ * moment the conversion fires.
+ *
+ * Worth knowing if the numbers ever look wrong: the action is set to count
+ * "Every conversion" and values each one at ₹1, so the value and currency we
+ * send below match what Google Ads itself generated for this label.
+ */
+export const DOWNLOAD_CONVERSION_LABEL = 'k8AWCJW33f0cEP2lxuNE';
+
+/** Labels are URL-safe tokens. Same reasoning as `TAG_ID`: an allow-list,
+ *  because a malformed label silently addresses nothing and reports nothing
+ *  for as long as nobody checks. */
+const CONVERSION_LABEL = /^[A-Za-z0-9_-]+$/;
+
+/** The `send_to` value for a conversion event: account and label, joined. */
+export function conversionSendTo(label: string = DOWNLOAD_CONVERSION_LABEL): string {
+    if (typeof label !== 'string' || !CONVERSION_LABEL.test(label)) {
+        throw new Error(`Refusing to emit an invalid conversion label: ${JSON.stringify(label)}`);
+    }
+    return `${GOOGLE_ADS_ID}/${label}`;
+}
+
+/**
  * Tag ids Google issues, by product: Ads (`AW`), GA4 (`G`), Google tag (`GT`),
  * Tag Manager (`GTM`), Campaign Manager (`DC`) and Merchant Center (`MC`).
  */

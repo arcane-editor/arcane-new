@@ -229,6 +229,7 @@ const platforms = [
 */}
 <script>
   import { DOWNLOAD_EVENT } from '../lib/google-tag-manager';
+  import { conversionSendTo } from '../lib/google-ads';
 
   /**
    * One click handler, two destinations.
@@ -245,7 +246,39 @@ const platforms = [
    * and any browser that blocks it — nothing was bound at all, and the
    * dataLayer push would have been lost with it.
    */
-  const rdt = (window as unknown as { rdt?: (...args: unknown[]) => void }).rdt;
+  const w = window as unknown as {
+    rdt?: (...args: unknown[]) => void;
+    gtag?: (...args: unknown[]) => void;
+    dataLayer?: unknown[];
+  };
+
+  /**
+   * One id per browsing session, shared by every download click within it.
+   *
+   * Google Ads deduplicates conversions that arrive with a `transaction_id`
+   * it has already seen, and the action behind this label counts EVERY
+   * conversion. Without an id, the two platform cards sitting side by side
+   * make a single person worth two purchases, and an impatient double-click
+   * two more — on the metric the campaign bids against.
+   *
+   * Scoped to the session rather than to the browser on purpose: collapsing
+   * one visit is the point, but somebody who comes back weeks later off a
+   * fresh ad click is a real second conversion and should count as one.
+   */
+  function sessionConversionId(): string {
+    const KEY = 'unityide.download.conversion';
+    try {
+      const existing = sessionStorage.getItem(KEY);
+      if (existing) return existing;
+      const fresh = crypto.randomUUID();
+      sessionStorage.setItem(KEY, fresh);
+      return fresh;
+    } catch {
+      // Private mode, or storage blocked. A per-click id still reports the
+      // conversion; it just cannot dedupe, which beats not reporting.
+      return crypto.randomUUID();
+    }
+  }
 
   document.querySelectorAll<HTMLAnchorElement>('[data-rdt-download]').forEach((link) => {
     link.addEventListener('click', () => {
@@ -256,7 +289,6 @@ const platforms = [
         // are gated off, neither gtag nor GTM has created the array, and the
         // push should still be a no-op instead of a TypeError in a click
         // handler that a download depends on.
-        const w = window as unknown as { dataLayer?: unknown[] };
         (w.dataLayer = w.dataLayer || []).push({
           event: DOWNLOAD_EVENT,
           downloadPlatform: platform,
@@ -265,9 +297,28 @@ const platforms = [
         // Never let an analytics failure interrupt a download.
       }
 
-      if (!rdt) return;
       try {
-        rdt('track', 'Lead', {
+        // The Google Ads conversion, fired straight at gtag rather than left
+        // to a GTM tag — one less place the measurement can be switched off
+        // by accident. Value and currency are exactly what Google generated
+        // for this label; the action values an unpriced conversion at ₹1.
+        //
+        // No `event_callback`: Google's navigating variant exists for links
+        // that unload the page, and these do not — the href is an installer
+        // on releases.unityide.app, so the browser downloads it and leaves
+        // the page where it is.
+        w.gtag?.('event', 'conversion', {
+          send_to: conversionSendTo(),
+          value: 1.0,
+          currency: 'INR',
+          transaction_id: sessionConversionId(),
+        });
+      } catch {
+        // Never let an analytics failure interrupt a download.
+      }
+
+      try {
+        w.rdt?.('track', 'Lead', {
           // Distinguishes Windows from macOS in Events Manager without
           // needing a second event type.
           products: [{ id: platform, name: platform }],
