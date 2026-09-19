@@ -4,6 +4,45 @@ import starlight from '@astrojs/starlight';
 import react from '@astrojs/react';
 import tailwind from '@astrojs/tailwind';
 import sitemap from '@astrojs/sitemap';
+import { isProdChannel } from './src/lib/releases.ts';
+import { GOOGLE_ADS_ID, googleTagBootstrap, googleTagSrc } from './src/lib/google-ads.ts';
+
+/**
+ * The Google tag on the DOCS pages.
+ *
+ * The marketing pages get it from `LandingLayout`, which Starlight's pages do
+ * not use — so without this the tag covered / , /features and /pricing and
+ * stopped at /docs/. Google's own guidance is that the tag belongs on every
+ * page of the site, and docs is where a high-intent reader spends their time
+ * before converting; leaving it off makes every session that passes through
+ * the docs look like it ended there.
+ *
+ * Same production-only gate as `LandingLayout` and for the same reason (one
+ * Ads account across both environments — see the comment on `adTags` there).
+ * Read from `process.env` rather than `import.meta.env` because this file is
+ * evaluated by Node before Vite exists; the deploy workflow sets
+ * PUBLIC_API_URL for both, so the two gates agree.
+ */
+const docsAdTags = isProdChannel(process.env.PUBLIC_API_URL ?? '');
+
+/** Google's snippet as Starlight head entries: async loader, then the inline
+ *  bootstrap that must define `dataLayer`/`gtag` before gtag.js arrives.
+ *
+ *  The `@type {const}` casts are not decoration: Starlight types `tag` as a
+ *  union of element names, and without them TS widens these to `string` and
+ *  the whole `head` array stops typechecking. */
+const googleTagHead = docsAdTags
+	? [
+		{
+			tag: /** @type {const} */ ('script'),
+			attrs: { async: true, src: googleTagSrc(GOOGLE_ADS_ID) },
+		},
+		{
+			tag: /** @type {const} */ ('script'),
+			content: googleTagBootstrap(GOOGLE_ADS_ID),
+		},
+	]
+	: [];
 
 /**
  * The docs' code theme, wired to the five meanings in `src/styles/lp-tokens.css`.
@@ -137,6 +176,7 @@ export default defineConfig({
 						href: 'https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,300..800&family=IBM+Plex+Mono:ital,wght@0,400;0,500;1,400&display=swap',
 					},
 				},
+				...googleTagHead,
 			],
 			customCss: ['./src/styles/starlight-overrides.css'],
 			expressiveCode: {

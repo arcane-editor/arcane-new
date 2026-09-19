@@ -2,6 +2,7 @@
 import '../styles/global.css';
 import { isProdChannel } from '../lib/releases';
 import { REDDIT_PIXEL_ID } from '../lib/reddit';
+import { GOOGLE_ADS_ID, googleTagBootstrap, googleTagSrc } from '../lib/google-ads';
 
 interface Props {
   // Set to false on auth pages (/auth, /verify, /reset, ...) — those pages
@@ -45,28 +46,34 @@ const ogImage = Astro.site ? new URL('/og-image.png', Astro.site).href : undefin
  * omitting it entirely reads as "price unknown" rather than "free".
  */
 /** Same switch the download links read (see `lib/releases.ts`). */
-const apiUrlForPixel = import.meta.env.PUBLIC_API_URL ?? '';
+const apiUrlForAdTags = import.meta.env.PUBLIC_API_URL ?? '';
 
 /**
- * The Reddit pixel runs on production marketing pages only.
+ * The advertising tags — Reddit's pixel and the Google tag — run on
+ * production marketing pages only.
  *
  * Two independent gates, for two different reasons:
  *  - `analytics` is the existing third-party-script switch, off on /auth,
  *    /verify, /reset, /account and /admin because those URLs carry one-time
- *    tokens. The pixel is a third-party script like any other and obeys it.
- *  - The channel gate exists because there is exactly ONE pixel id for both
- *    environments. A dev deploy — or a developer running this site locally —
- *    firing it would report conversions against live ad spend and quietly
- *    mistrain the campaign's optimizer. `isProdChannel` is a POSITIVE match
- *    on the production API URL for that reason: `PUBLIC_API_URL` is unset
- *    outside the deploy workflow, and anything phrased as "not dev" would
- *    read that empty value as production.
+ *    tokens. An ad tag is a third-party script like any other and obeys it.
+ *    It matters more for the Google tag than for Reddit's: gtag reports
+ *    `page_location`, the FULL current URL, on every page view, so on those
+ *    pages it would hand Google a verification code or a password-reset
+ *    token as a field of the hit.
+ *  - The channel gate exists because there is exactly ONE pixel id and ONE
+ *    Ads account for both environments. A dev deploy — or a developer running
+ *    this site locally — firing them would report conversions against live ad
+ *    spend and quietly mistrain both campaigns' optimizers. `isProdChannel`
+ *    is a POSITIVE match on the production API URL for that reason:
+ *    `PUBLIC_API_URL` is unset outside the deploy workflow, and anything
+ *    phrased as "not dev" would read that empty value as production.
  *
- * The consequence worth knowing: the pixel cannot be smoke-tested on
- * dev.unityide.app. Verify it on production with Reddit's Pixel Helper, or
- * against the Conversions API's `test_mode`, which does not count conversions.
+ * The consequence worth knowing: neither tag can be smoke-tested on
+ * dev.unityide.app. Verify them on production — Reddit's Pixel Helper or the
+ * Conversions API's `test_mode` (which does not count conversions), and
+ * Google's Tag Assistant against unityide.app.
  */
-const redditPixel = analytics && isProdChannel(apiUrlForPixel);
+const adTags = analytics && isProdChannel(apiUrlForAdTags);
 
 const structuredData = {
   '@context': 'https://schema.org',
@@ -150,12 +157,33 @@ const structuredData = {
         put a user's address into page HTML and into a third-party script's
         reach. The same match key is sent SHA-256 hashed from the Worker via
         the Conversions API instead, which Reddit matches identically. */}
-    {redditPixel && (
+    {adTags && (
       <script is:inline define:vars={{ redditPixelId: REDDIT_PIXEL_ID }}>
         !function(w,d){if(!w.rdt){var p=w.rdt=function(){p.sendEvent?p.sendEvent.apply(p,arguments):p.callQueue.push(arguments)};p.callQueue=[];var t=d.createElement("script");t.src="https://www.redditstatic.com/ads/pixel.js?pixel_id="+redditPixelId,t.async=!0;var s=d.getElementsByTagName("script")[0];s.parentNode.insertBefore(t,s)}}(window,document);
         rdt('init', redditPixelId);
         rdt('track', 'PageVisit');
       </script>
+    )}
+
+    {/* Google tag (gtag.js) for the Google Ads account — production
+        marketing pages only (see `adTags`). Two elements, exactly as Google
+        ships the snippet: the async loader, and an inline bootstrap that
+        defines `window.dataLayer` and the `gtag` shim BEFORE gtag.js lands,
+        so anything measured during page load is queued instead of dropped.
+
+        `is:inline` is load-bearing on the bootstrap. Without it Astro bundles
+        the snippet as an ES module, which both defers it past the loader and
+        scopes `gtag` to that module — where no later inline call, and no tag
+        Google adds from the Ads UI, can reach it.
+
+        The same pair is injected into the docs pages from `astro.config.mjs`,
+        which is why the snippet lives in `lib/google-ads.ts` and is built
+        rather than pasted twice. */}
+    {adTags && (
+      <>
+        <script is:inline async src={googleTagSrc(GOOGLE_ADS_ID)}></script>
+        <script is:inline set:html={googleTagBootstrap(GOOGLE_ADS_ID)} />
+      </>
     )}
 
     {/* Click-id capture. FIRST-PARTY and therefore unconditional — it runs on
