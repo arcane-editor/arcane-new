@@ -6,6 +6,7 @@ import tailwind from '@astrojs/tailwind';
 import sitemap from '@astrojs/sitemap';
 import { isProdChannel } from './src/lib/releases.ts';
 import { GOOGLE_ADS_ID, googleTagBootstrap, googleTagSrc } from './src/lib/google-ads.ts';
+import { GTM_CONTAINER_ID, gtmBootstrap } from './src/lib/google-tag-manager.ts';
 
 /**
  * The Google tag on the DOCS pages.
@@ -25,14 +26,25 @@ import { GOOGLE_ADS_ID, googleTagBootstrap, googleTagSrc } from './src/lib/googl
  */
 const docsAdTags = isProdChannel(process.env.PUBLIC_API_URL ?? '');
 
-/** Google's snippet as Starlight head entries: async loader, then the inline
- *  bootstrap that must define `dataLayer`/`gtag` before gtag.js arrives.
+/** Google's snippets as Starlight head entries: the GTM container, then the
+ *  Google tag's async loader and the inline bootstrap that must define
+ *  `dataLayer`/`gtag` before gtag.js arrives.
+ *
+ *  Starlight's `head` can only reach <head>, so the docs get the container
+ *  WITHOUT the `<noscript>` iframe the marketing pages carry. That costs
+ *  nothing real: the fallback only runs with JavaScript disabled, where the
+ *  container can fire image and iframe tags and nothing else — no Ads
+ *  conversion has ever come through it.
  *
  *  The `@type {const}` casts are not decoration: Starlight types `tag` as a
  *  union of element names, and without them TS widens these to `string` and
  *  the whole `head` array stops typechecking. */
 const googleTagHead = docsAdTags
 	? [
+		{
+			tag: /** @type {const} */ ('script'),
+			content: gtmBootstrap(GTM_CONTAINER_ID),
+		},
 		{
 			tag: /** @type {const} */ ('script'),
 			attrs: { async: true, src: googleTagSrc(GOOGLE_ADS_ID) },

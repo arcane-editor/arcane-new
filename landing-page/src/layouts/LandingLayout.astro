@@ -3,6 +3,7 @@ import '../styles/global.css';
 import { isProdChannel } from '../lib/releases';
 import { REDDIT_PIXEL_ID } from '../lib/reddit';
 import { GOOGLE_ADS_ID, googleTagBootstrap, googleTagSrc } from '../lib/google-ads';
+import { GTM_CONTAINER_ID, gtmBootstrap, gtmNoscriptSrc } from '../lib/google-tag-manager';
 
 interface Props {
   // Set to false on auth pages (/auth, /verify, /reset, ...) — those pages
@@ -165,6 +166,21 @@ const structuredData = {
       </script>
     )}
 
+    {/* Google Tag Manager. Gated exactly like the tags below it: the
+        container's whole purpose is to carry Google Ads conversion tags, so
+        loading it on dev or localhost would fire them against the same live
+        Ads account, and loading it on /auth or /verify would expose those
+        URLs' one-time tokens to whatever the container is configured to run.
+
+        Kept beside the Google tag rather than at the very top of <head>
+        because the rule binding them has to be read as one thing: the code
+        owns the `AW-…` destination, the container owns everything built on
+        top of it, and a "Google tag" configuration tag for that same id
+        inside GTM would double-report every page view. `lib/google-tag-
+        manager.ts` has the long version. The snippet is async either way, so
+        the position costs nothing measurable. */}
+    {adTags && <script is:inline set:html={gtmBootstrap(GTM_CONTAINER_ID)} />}
+
     {/* Google tag (gtag.js) for the Google Ads account — production
         marketing pages only (see `adTags`). Two elements, exactly as Google
         ships the snippet: the async loader, and an inline bootstrap that
@@ -197,6 +213,20 @@ const structuredData = {
     </script>
   </head>
   <body class="min-h-screen bg-background text-foreground antialiased">
+    {/* GTM's no-JavaScript fallback, which Google's install puts immediately
+        after <body>. It buys very little — with JS off the container can fire
+        only image and iframe tags, so no Ads conversion ever comes through it
+        — but Tag Assistant checks for it and it costs one hidden iframe. */}
+    {adTags && (
+      <noscript>
+        <iframe
+          src={gtmNoscriptSrc(GTM_CONTAINER_ID)}
+          height="0"
+          width="0"
+          style="display:none;visibility:hidden"
+        ></iframe>
+      </noscript>
+    )}
     <slot />
 
     {/* Scroll reveal observer */}

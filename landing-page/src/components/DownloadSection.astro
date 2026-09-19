@@ -228,21 +228,54 @@ const platforms = [
   somebody the product.
 */}
 <script>
+  import { DOWNLOAD_EVENT } from '../lib/google-tag-manager';
+
+  /**
+   * One click handler, two destinations.
+   *
+   * The Reddit half is unchanged. The `dataLayer` push is what lets a Google
+   * Ads download conversion be created, relabelled or removed entirely in
+   * GTM's UI — a Custom Event trigger on `download` — without another deploy
+   * here. That is the point of the container; a GTM install with no dataLayer
+   * events can only trigger on URLs and raw click selectors, which break the
+   * next time this markup is touched.
+   *
+   * The listener is registered unconditionally now. It used to hang off
+   * `if (rdt)`, so with the Reddit pixel absent — every non-production build,
+   * and any browser that blocks it — nothing was bound at all, and the
+   * dataLayer push would have been lost with it.
+   */
   const rdt = (window as unknown as { rdt?: (...args: unknown[]) => void }).rdt;
-  if (rdt) {
-    document.querySelectorAll<HTMLAnchorElement>('[data-rdt-download]').forEach((link) => {
-      link.addEventListener('click', () => {
-        try {
-          rdt('track', 'Lead', {
-            // Distinguishes Windows from macOS in Events Manager without
-            // needing a second event type.
-            products: [{ id: link.dataset.rdtDownload, name: link.dataset.rdtDownload }],
-            conversionId: crypto.randomUUID(),
-          });
-        } catch {
-          // Never let an analytics failure interrupt a download.
-        }
-      });
+
+  document.querySelectorAll<HTMLAnchorElement>('[data-rdt-download]').forEach((link) => {
+    link.addEventListener('click', () => {
+      const platform = link.dataset.rdtDownload;
+
+      try {
+        // Seeded defensively rather than assumed: on a build where the tags
+        // are gated off, neither gtag nor GTM has created the array, and the
+        // push should still be a no-op instead of a TypeError in a click
+        // handler that a download depends on.
+        const w = window as unknown as { dataLayer?: unknown[] };
+        (w.dataLayer = w.dataLayer || []).push({
+          event: DOWNLOAD_EVENT,
+          downloadPlatform: platform,
+        });
+      } catch {
+        // Never let an analytics failure interrupt a download.
+      }
+
+      if (!rdt) return;
+      try {
+        rdt('track', 'Lead', {
+          // Distinguishes Windows from macOS in Events Manager without
+          // needing a second event type.
+          products: [{ id: platform, name: platform }],
+          conversionId: crypto.randomUUID(),
+        });
+      } catch {
+        // Never let an analytics failure interrupt a download.
+      }
     });
-  }
+  });
 </script>
