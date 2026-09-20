@@ -3,16 +3,30 @@
     "dodopayments": {
       "type": "stdio",
       "command": "npx",
-
-    "permissions": {
-      "allow": ["mcp__dodopayments__execute"]
-    },
+      "permissions": {
+        "allow": [
+          "mcp__dodopayments__execute"
+        ]
+      },
       "args": [
         "-y",
         "mcp-remote@latest",
         "https://mcp.dodopayments.com/sse"
       ],
       "env": {}
+    },
+    "google-ads": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/googleads/google-ads-mcp.git",
+        "google-ads-mcp"
+      ],
+      "env": {
+        "GOOGLE_PROJECT_ID": "unityide-ads",
+        "GOOGLE_CLOUD_PROJECT": "unityide-ads"
+      }
     }
   }
 }

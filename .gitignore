@@ -101,3 +101,7 @@ dev/
 # can be piped into `wrangler secret put` without crossing a terminal
 # transcript. Delete it once the secret is set — it must never be committed.
 .dodo-webhook-secret.txt
+
+# Google Cloud OAuth desktop client for the google-ads MCP server (holds a client secret)
+unityide-ads-oauth.json
+client_secret_*.json
