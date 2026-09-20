@@ -22,18 +22,25 @@ interface Props {
   title: string;
   /** Meta description. */
   description: string;
-  /** ISO date this text last changed. Shown to the reader and machine-readable. */
-  updated: string;
+  /**
+   * ISO date this text last changed. Optional: privacy and terms carry one
+   * because "which version did I agree to" is a real question about them.
+   * /about is not a dated instrument, and stamping it with a date only invites
+   * the reader to wonder what changed.
+   */
+  updated?: string;
 }
 
 const { title, description, updated } = Astro.props;
 
-const updatedLabel = new Date(`${updated}T00:00:00Z`).toLocaleDateString('en-GB', {
-  day: 'numeric',
-  month: 'long',
-  year: 'numeric',
-  timeZone: 'UTC',
-});
+const updatedLabel = updated
+  ? new Date(`${updated}T00:00:00Z`).toLocaleDateString('en-GB', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+      timeZone: 'UTC',
+    })
+  : null;
 ---
 
 <LandingLayout title={`${title} — UnityIDE`} description={description}>
@@ -43,9 +50,11 @@ const updatedLabel = new Date(`${updated}T00:00:00Z`).toLocaleDateString('en-GB'
       <h1 class="font-display text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
         {title}
       </h1>
-      <p class="mt-3 text-sm text-muted-foreground">
-        Last updated <time datetime={updated}>{updatedLabel}</time>
-      </p>
+      {updatedLabel && (
+        <p class="mt-3 text-sm text-muted-foreground">
+          Last updated <time datetime={updated}>{updatedLabel}</time>
+        </p>
+      )}
 
       {/* One place to style the prose, so each page is only content. Astro
           scopes styles to this component, and slotted markup is not scoped to

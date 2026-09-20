@@ -1,0 +1,124 @@
+---
+import LegalLayout from '../layouts/LegalLayout.astro';
+
+/**
+ * Who publishes UnityIDE, and where it legitimately comes from.
+ *
+ * Written for two readers at once. The first is an ordinary visitor deciding
+ * whether to trust a desktop binary from a site they have not heard of. The
+ * second is a Google Ads policy reviewer assessing the "free desktop software"
+ * certification, which exists precisely to establish that an advertiser is the
+ * AUTHORITATIVE DISTRIBUTION SOURCE for what it advertises.
+ *
+ * Before this page the site never said who published it: no entity, no
+ * location, no contact outside the two legal pages. A reviewer asking "is this
+ * the real publisher, or someone redistributing someone else's binary?" had
+ * nothing on the site to answer with — the single weakest point in the
+ * application, and the reason this page exists.
+ *
+ * The "Official distribution" section is the load-bearing one. Naming the only
+ * canonical hosts, and stating plainly that nothing is bundled, is what the
+ * policy actually asks a publisher to assert. Keep the download URLs pointing
+ * at the stable `latest` paths — a broken link here reads as an abandoned or
+ * impersonated site, which is worse than having no page at all.
+ */
+---
+
+<LegalLayout
+  title="About UnityIDE"
+  description="Who builds UnityIDE, and where to download it from safely."
+>
+  <p>
+    UnityIDE is a desktop IDE built for one thing: working in Unity. Not a
+    general-purpose editor with Unity plugins bolted on — an IDE where scenes,
+    prefabs, ScriptableObjects, UI Toolkit documents and input actions open as real
+    editors, and where the AI is checked against your actually-running Unity Editor
+    rather than guessing from the files on disk.
+  </p>
+
+  <h2>Who publishes it</h2>
+  <p>
+    UnityIDE is developed and distributed by <strong>Unity IDE</strong>, based in
+    India. We are an independent software publisher. UnityIDE is our own product —
+    we wrote it, we sign the releases, and we are the only party that distributes it.
+  </p>
+  <p>
+    Reach us at <a href="mailto:support@unityide.app">support@unityide.app</a> for
+    support, security reports, press, or anything about the data we hold.
+  </p>
+
+  <h2>Official distribution</h2>
+  <p>
+    <strong><a href="https://unityide.app">unityide.app</a> is the only official
+    source for UnityIDE.</strong> Every genuine build is served from our own domain:
+  </p>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>Platform</th><th>Official download</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Windows</td>
+          <td><a href="https://releases.unityide.app/latest/UnityIDESetup.exe">releases.unityide.app/latest/UnityIDESetup.exe</a></td>
+        </tr>
+        <tr>
+          <td>macOS (Apple silicon)</td>
+          <td><a href="https://releases.unityide.app/latest/UnityIDE-arm64.dmg">releases.unityide.app/latest/UnityIDE-arm64.dmg</a></td>
+        </tr>
+        <tr>
+          <td>Unity package</td>
+          <td><a href="https://releases.unityide.app/unity-extension-releases/latest/com.unityide.editor.tgz">releases.unityide.app/unity-extension-releases/latest/com.unityide.editor.tgz</a></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p>
+    If you obtained UnityIDE anywhere else — a download portal, a mirror, a torrent,
+    a bundled installer — it is not a build we published, and we cannot vouch for
+    what is in it. Download it again from the links above.
+  </p>
+
+  <h2>What you get, and what you don't</h2>
+  <ul>
+    <li>
+      <strong>UnityIDE is free to download and use.</strong> No payment details are
+      required to install it or to work in it. Paid subscription tiers exist and
+      unlock higher AI usage limits and additional model tiers; the editor itself
+      does not expire.
+    </li>
+    <li>
+      <strong>Nothing is bundled.</strong> Our installers contain UnityIDE and
+      nothing else — no toolbars, no browser extensions, no search hijacking, no
+      third-party offers, no additional software presented during setup.
+    </li>
+    <li>
+      <strong>No hidden data collection.</strong> Exactly what we collect, and who
+      else receives it, is itemised field by field in our
+      <a href="/privacy">Privacy Policy</a> — including the section on AI features,
+      which is explicit that your prompts and the surrounding code are sent to model
+      providers.
+    </li>
+    <li>
+      <strong>Uninstall normally.</strong> UnityIDE removes through the standard
+      uninstaller on Windows and by deleting the application on macOS. Nothing is
+      left running.
+    </li>
+  </ul>
+
+  <h2>Independence</h2>
+  <p>
+    UnityIDE is an independent product. It is not affiliated with, endorsed by, or
+    sponsored by Unity Technologies. Unity is a trademark of Unity Technologies,
+    used here only to describe the engine this software is built to work with.
+  </p>
+
+  <h2>Elsewhere on this site</h2>
+  <ul>
+    <li><a href="/#download">Download UnityIDE</a> — current builds for Windows and macOS</li>
+    <li><a href="/docs/">Documentation</a> — installation, the Unity package, and how the AI features work</li>
+    <li><a href="/privacy">Privacy Policy</a> — what we collect and who receives it</li>
+    <li><a href="/terms">Terms of Service</a> — the licence you use UnityIDE under</li>
+    <li><a href="/feedback">Send feedback</a> — bugs, requests, or anything that annoyed you</li>
+  </ul>
+</LegalLayout>

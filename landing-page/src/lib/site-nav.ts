@@ -63,8 +63,16 @@ export const footerColumns: FooterColumn[] = [
     ],
   },
   {
-    title: 'Contact',
-    links: [{ label: 'Send feedback', href: '/feedback' }],
+    // Retitled from "Contact" when /about arrived. The column now answers "who
+    // made this and how do I reach them", which is the pair a reader wants
+    // before running an unfamiliar desktop binary — and the pair a Google Ads
+    // policy reviewer looks for when certifying an authoritative distribution
+    // source.
+    title: 'About',
+    links: [
+      { label: 'About UnityIDE', href: '/about' },
+      { label: 'Send feedback', href: '/feedback' },
+    ],
   },
 ];
 
