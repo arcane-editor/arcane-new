@@ -69,6 +69,23 @@ export const footerColumns: FooterColumn[] = [
 ];
 
 /**
+ * Privacy and Terms, in the footer's bottom bar rather than as a fifth column.
+ *
+ * These are the two links this file's header called out as "the two that should
+ * come back, and they need real pages behind them". They do now —
+ * `src/pages/privacy.astro` and `src/pages/terms.astro`.
+ *
+ * They sit beside the copyright line instead of in `footerColumns` for two
+ * reasons: it is where a reader looks for them, and `Footer.astro` pins its
+ * grid at `[2fr_1fr_1fr_1fr]`, so a fourth column would silently wrap on
+ * desktop. Both footers render this array, so they cannot drift apart.
+ */
+export const legalLinks: NavLink[] = [
+  { label: 'Privacy', href: '/privacy' },
+  { label: 'Terms', href: '/terms' },
+];
+
+/**
  * Unity is a trademark of Unity Technologies. A plain non-affiliation line is
  * the standard way to use an engine's name descriptively, and it belongs on
  * every page that carries the footer — including the 16 docs pages, which

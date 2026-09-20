@@ -15,7 +15,7 @@
  * Navbar wrote `#download`, which is why the nav CTA was dead everywhere but
  * the home page.
  */
-import { footerColumns, TRADEMARK_NOTICE } from '../lib/site-nav';
+import { footerColumns, legalLinks, TRADEMARK_NOTICE } from '../lib/site-nav';
 
 const year = new Date().getFullYear();
 ---
@@ -55,9 +55,19 @@ const year = new Date().getFullYear();
     </div>
 
     <div class="mt-14 border-t border-border pt-6">
-      <p class="text-micro text-muted-foreground">
-        &copy; {year} UnityIDE
-      </p>
+      <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <p class="text-micro text-muted-foreground">
+          &copy; {year} UnityIDE
+        </p>
+        {legalLinks.map((link) => (
+          <a
+            href={link.href}
+            class="text-micro text-muted-foreground transition-colors hover:text-primary"
+          >
+            {link.label}
+          </a>
+        ))}
+      </div>
       <p class="mt-2 max-w-[72ch] text-micro leading-relaxed text-muted-foreground">
         {TRADEMARK_NOTICE}
       </p>

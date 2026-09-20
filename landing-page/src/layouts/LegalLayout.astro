@@ -1,0 +1,156 @@
+---
+import LandingLayout from './LandingLayout.astro';
+import Navbar from '../components/Navbar.tsx';
+import Footer from '../components/Footer.astro';
+
+/**
+ * The shell for the two prose legal pages.
+ *
+ * They exist because Google's "free desktop software" policy will not certify
+ * a download site that has no privacy policy, and `Footer.astro` had removed
+ * the Privacy and Terms links rather than point them at `href="#"`. The links
+ * are only worth restoring once there is something real behind them.
+ *
+ * Deliberately not a Starlight page: these need the marketing chrome (so the
+ * footer's Unity non-affiliation line and the nav come along) and they must
+ * carry the ad tags like any other marketing page, which `/docs` handles
+ * through a separate `head` injection in astro.config.mjs.
+ */
+
+interface Props {
+  /** Page title, without the site suffix. */
+  title: string;
+  /** Meta description. */
+  description: string;
+  /** ISO date this text last changed. Shown to the reader and machine-readable. */
+  updated: string;
+}
+
+const { title, description, updated } = Astro.props;
+
+const updatedLabel = new Date(`${updated}T00:00:00Z`).toLocaleDateString('en-GB', {
+  day: 'numeric',
+  month: 'long',
+  year: 'numeric',
+  timeZone: 'UTC',
+});
+---
+
+<LandingLayout title={`${title} — UnityIDE`} description={description}>
+  <Navbar client:load />
+  <main class="container mx-auto px-6 pb-24 pt-32">
+    <div class="mx-auto max-w-[70ch]">
+      <h1 class="font-display text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
+        {title}
+      </h1>
+      <p class="mt-3 text-sm text-muted-foreground">
+        Last updated <time datetime={updated}>{updatedLabel}</time>
+      </p>
+
+      {/* One place to style the prose, so each page is only content. Astro
+          scopes styles to this component, and slotted markup is not scoped to
+          it — `is:global` inside the wrapper is what reaches the children. */}
+      <div class="legal mt-12">
+        <slot />
+      </div>
+    </div>
+  </main>
+  <Footer />
+</LandingLayout>
+
+<style is:global>
+  .legal h2 {
+    margin-top: 2.75rem;
+    margin-bottom: 0.875rem;
+    font-family: var(--font-display, inherit);
+    font-size: 1.25rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: hsl(var(--foreground));
+  }
+
+  .legal h3 {
+    margin-top: 1.75rem;
+    margin-bottom: 0.5rem;
+    font-size: 0.9375rem;
+    font-weight: 600;
+    color: hsl(var(--foreground));
+  }
+
+  .legal p,
+  .legal li {
+    font-size: 0.9375rem;
+    line-height: 1.7;
+    color: hsl(var(--muted-foreground));
+  }
+
+  .legal p {
+    margin-bottom: 1rem;
+  }
+
+  .legal ul {
+    margin-bottom: 1rem;
+    padding-left: 1.125rem;
+    list-style: disc;
+  }
+
+  .legal li {
+    margin-bottom: 0.4rem;
+  }
+
+  .legal li::marker {
+    color: hsl(var(--primary) / 0.5);
+  }
+
+  .legal strong {
+    font-weight: 600;
+    color: hsl(var(--foreground));
+  }
+
+  .legal a {
+    color: hsl(var(--primary));
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  .legal a:hover {
+    opacity: 0.8;
+  }
+
+  .legal code {
+    font-family: var(--font-mono, ui-monospace, monospace);
+    font-size: 0.8125em;
+    color: hsl(var(--foreground));
+  }
+
+  /* The data tables. Scrollable on a phone rather than forcing the page wide. */
+  .legal .table-wrap {
+    margin-bottom: 1.25rem;
+    overflow-x: auto;
+  }
+
+  .legal table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+  }
+
+  .legal th,
+  .legal td {
+    padding: 0.5rem 0.75rem 0.5rem 0;
+    text-align: left;
+    vertical-align: top;
+    border-bottom: 1px solid hsl(var(--border));
+  }
+
+  .legal th {
+    font-weight: 600;
+    color: hsl(var(--foreground));
+    white-space: nowrap;
+  }
+
+  .legal td {
+    color: hsl(var(--muted-foreground));
+    line-height: 1.6;
+  }
+</style>

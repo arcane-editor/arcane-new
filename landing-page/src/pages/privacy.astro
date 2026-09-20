@@ -1,0 +1,248 @@
+---
+import LegalLayout from '../layouts/LegalLayout.astro';
+
+/**
+ * Written against what the code actually does, not from a template.
+ *
+ * Every row in the tables below corresponds to a real column in the server's
+ * D1 schema or a real outbound call from its routes. If a table gains a column
+ * that holds anything about a person, or a new third party starts receiving
+ * data, this page is wrong until it is updated — that is the point of listing
+ * the fields rather than saying "certain information".
+ */
+---
+
+<LegalLayout
+  title="Privacy Policy"
+  description="What UnityIDE collects, why, who it is shared with, and how to have it deleted."
+  updated="2026-09-20"
+>
+  <p>
+    UnityIDE is a desktop IDE for Unity developers, distributed from
+    <a href="https://unityide.app">unityide.app</a>. This page explains exactly what
+    the website and the desktop application collect, why, and who else sees it.
+  </p>
+  <p>
+    The short version: we collect what is needed to run an account, bill a
+    subscription, fix crashes, and answer your AI requests. We do not sell
+    personal data.
+  </p>
+
+  <h2>What we collect</h2>
+
+  <h3>Account</h3>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>Data</th><th>Why</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Email address</td>
+          <td>Identifies the account, sends verification and password resets.</td>
+        </tr>
+        <tr>
+          <td>Password</td>
+          <td>
+            Stored only as a salted hash. We never store, log or transmit the
+            password itself, and cannot recover it.
+          </td>
+        </tr>
+        <tr>
+          <td>Plan</td>
+          <td>Determines which features and usage limits apply.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p>
+    If you sign in with <strong>Google</strong> or <strong>GitHub</strong> instead,
+    we receive your email address and basic profile information from that provider
+    and create the same account record. We never receive your password for those
+    services.
+  </p>
+
+  <h3>Payments</h3>
+  <p>
+    Subscriptions are processed by <strong>Dodo Payments</strong>, who act as the
+    merchant of record. Card details are entered on their systems and are never
+    sent to, seen by, or stored by us. We store only the subscription identifier,
+    product, plan, status and renewal date needed to know what you are entitled to.
+  </p>
+
+  <h3>Desktop application</h3>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>Data</th><th>Why</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Install identifier</td>
+          <td>
+            A random value generated on your machine on first run. It is not
+            derived from your hardware, your account or any identifier assigned
+            by your operating system, and it lets us count installs without
+            counting the same machine twice.
+          </td>
+        </tr>
+        <tr>
+          <td>Operating system, application version, release channel</td>
+          <td>
+            Tells us which builds are actually in use, so a platform is not
+            broken for a release without anyone noticing.
+          </td>
+        </tr>
+        <tr>
+          <td>Crash and error reports</td>
+          <td>
+            The error type and message, the stack trace, the application version,
+            channel and operating system, a session identifier, and your user
+            identifier when you are signed in. A stack trace can incidentally
+            contain file paths from your project.
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>AI features</h3>
+  <p>
+    This is the section worth reading closely, because it concerns your source code.
+  </p>
+  <p>
+    When you use chat, inline completion or any other AI feature, your prompt is
+    sent to a model provider together with the context needed to answer it. That
+    context can include <strong>source files, file paths, symbol names, and
+    information read from your open Unity Editor</strong> such as scene, prefab
+    and asset structure. Requests are routed through Cloudflare AI Gateway to the
+    model serving your plan; one model tier is served directly by Meta.
+  </p>
+  <p>
+    We record the token counts and cost of each request in order to meter usage
+    against your plan. If you do not want a project's code leaving your machine,
+    do not use the AI features on that project.
+  </p>
+
+  <h3>Feedback</h3>
+  <p>
+    If you send feedback, we store your rating, message, chosen category and the
+    email address you supply, so we can reply.
+  </p>
+
+  <h3>Website, advertising and security</h3>
+  <ul>
+    <li>
+      <strong>Google Ads and Google Tag Manager</strong> run on the public marketing
+      and documentation pages to measure which ads lead to a download. They are
+      never loaded on the sign-in, verification, password-reset, account or admin
+      pages, because those URLs carry one-time tokens.
+    </li>
+    <li>
+      <strong>Reddit</strong> advertising measurement works the same way. A click
+      identifier from a Reddit ad is stored in a first-party cookie on this domain
+      so that a later sign-up can be attributed to it.
+    </li>
+    <li>
+      <strong>Cloudflare Turnstile</strong> protects the sign-in and sign-up forms
+      from automated abuse.
+    </li>
+    <li>
+      <strong>IP address and browser user agent</strong> are processed for security
+      and abuse prevention, and are sent to Reddit in hashed or raw form as part of
+      advertising conversion matching.
+    </li>
+  </ul>
+
+  <h2>Who else receives data</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>Recipient</th><th>What they receive</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Cloudflare</td>
+          <td>Hosting, database, file storage, AI gateway, bot protection. All data above passes through their infrastructure.</td>
+        </tr>
+        <tr>
+          <td>Dodo Payments</td>
+          <td>Your payment details and billing identity, as merchant of record.</td>
+        </tr>
+        <tr>
+          <td>Model providers</td>
+          <td>AI prompts and the code context included with them.</td>
+        </tr>
+        <tr>
+          <td>Google</td>
+          <td>Sign-in (if used), and advertising measurement events from the website.</td>
+        </tr>
+        <tr>
+          <td>GitHub</td>
+          <td>Sign-in, if used.</td>
+        </tr>
+        <tr>
+          <td>Reddit</td>
+          <td>Advertising conversion events, including a hashed email address where available.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p>We do not sell personal data, and we do not share it for unrelated advertising.</p>
+
+  <h2>Cookies</h2>
+  <p>
+    The website sets a session cookie so that you stay signed in, an advertising
+    click-identifier cookie described above, and cookies set by Google's
+    advertising tag. Blocking the advertising cookies does not affect your ability
+    to use the site or the application.
+  </p>
+
+  <h2>How long we keep it</h2>
+  <ul>
+    <li><strong>Account and subscription records</strong> — for as long as the account exists.</li>
+    <li><strong>Crash reports and install records</strong> — retained while they are useful for diagnosing a release, then deleted.</li>
+    <li><strong>Advertising click identifiers</strong> — 30 days.</li>
+    <li>
+      <strong>AI prompts</strong> — not retained by us beyond what is needed to
+      serve the request and record its token count. Model providers apply their
+      own retention.
+    </li>
+  </ul>
+
+  <h2>Your rights</h2>
+  <p>
+    You can ask us to show you the personal data we hold about you, correct it, or
+    delete it along with your account. Write to
+    <a href="mailto:support@unityide.app">support@unityide.app</a> from the address
+    on the account and we will action it. Deleting your account removes the account
+    record and unlinks it from crash reports; it does not retroactively withdraw
+    data already processed by a payment provider, who have their own legal
+    retention obligations.
+  </p>
+  <p>
+    Depending on where you live you may have additional rights under local data
+    protection law, including the right to object to processing and to complain to
+    a supervisory authority.
+  </p>
+
+  <h2>Children</h2>
+  <p>
+    UnityIDE is a professional development tool and is not directed at children
+    under 13. We do not knowingly collect their data.
+  </p>
+
+  <h2>Changes</h2>
+  <p>
+    If this policy changes materially we will update the date at the top of this
+    page. Continuing to use UnityIDE after a change means you accept the updated
+    policy.
+  </p>
+
+  <h2>Contact</h2>
+  <p>
+    Questions about this policy, or a request about your data:
+    <a href="mailto:support@unityide.app">support@unityide.app</a>. You can also use
+    the <a href="/feedback">feedback form</a>.
+  </p>
+</LegalLayout>

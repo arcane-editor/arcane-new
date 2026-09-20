@@ -13,7 +13,7 @@
  * is entirely utility classes and would arrive here unstyled.
  */
 import Default from '@astrojs/starlight/components/Footer.astro';
-import { footerColumns, TRADEMARK_NOTICE } from '../../lib/site-nav';
+import { footerColumns, legalLinks, TRADEMARK_NOTICE } from '../../lib/site-nav';
 
 const year = new Date().getFullYear();
 ---
@@ -47,7 +47,10 @@ const year = new Date().getFullYear();
   </div>
 
   <div class="docs-footer-legal">
-    <p>&copy; {year} UnityIDE</p>
+    <p class="docs-footer-legal-row">
+      <span>&copy; {year} UnityIDE</span>
+      {legalLinks.map((link) => <a href={link.href}>{link.label}</a>)}
+    </p>
     <p>{TRADEMARK_NOTICE}</p>
   </div>
 </div>
@@ -139,5 +142,22 @@ const year = new Date().getFullYear();
 
   .docs-footer-legal p + p {
     margin-top: 0.5rem;
+  }
+
+  .docs-footer-legal-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.25rem 1rem;
+  }
+
+  .docs-footer-legal-row a {
+    color: var(--faint);
+    text-decoration: none;
+    transition: color 0.15s ease;
+  }
+
+  .docs-footer-legal-row a:hover {
+    color: var(--blue);
   }
 </style>
