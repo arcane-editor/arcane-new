@@ -7,6 +7,11 @@ import sitemap from '@astrojs/sitemap';
 import { isProdChannel } from './src/lib/releases.ts';
 import { GOOGLE_ADS_ID, googleTagBootstrap, googleTagSrc } from './src/lib/google-ads.ts';
 import { GTM_CONTAINER_ID, gtmBootstrap } from './src/lib/google-tag-manager.ts';
+import { hasPublishedGuides } from './scripts/lib/editorial-inventory.ts';
+
+// Match the blog route's publication gate. Once a tested guide is published,
+// the next build includes the hub automatically; no permanent exclusion.
+const indexBlogHub = hasPublishedGuides();
 
 /**
  * The Google tag on the DOCS pages.
@@ -145,13 +150,8 @@ export default defineConfig({
 	// every one of the ~16 docs pages shipped with none of the three, and
 	// @astrojs/sitemap cannot run at all.
 	site: 'https://unityide.app',
-	// `scripts/unity-extension-channel.mjs` publishes `unityide.app/download` (and
-	// `/download#dev`) as the Unity package's download URL, and neither route has
-	// ever existed — every reader who followed it from the package manager got a
-	// 404. The download section lives on the home page, so the URL is redirected
-	// rather than duplicated into a second page with its own build-time manifest
-	// fetch and its own claim on the same search result.
-	redirects: { '/download': '/#download' },
+	trailingSlash: 'always',
+	// /download is an HTTP redirect in public/_worker.js, not an HTML refresh page.
 	integrations: [
 		sitemap({
 			// Pages behind sign-in or carrying one-time tokens. They also send
@@ -163,7 +163,8 @@ export default defineConfig({
 			// "success", not "auth" — which is exactly the contradictory state
 			// this filter exists to prevent.
 			filter: (page) =>
-				!/^\/(auth|account|admin|forgot|reset|verify)(\/|$)/.test(new URL(page).pathname),
+				!/^\/(auth|account|admin|forgot|reset|verify)(\/|$)/.test(new URL(page).pathname)
+				&& (new URL(page).pathname !== '/blog/' || indexBlogHub),
 		}),
 		starlight({
 			title: 'UnityIDE Docs',
@@ -179,6 +180,11 @@ export default defineConfig({
 			// starlight-overrides.css: as an @import the request could not be
 			// discovered until that stylesheet had parsed.
 			head: [
+				{ tag: 'meta', attrs: { property: 'og:image', content: 'https://unityide.app/og-image.png' } },
+				{ tag: 'meta', attrs: { property: 'og:image:alt', content: 'UnityIDE — an IDE for Unity development' } },
+				{ tag: 'meta', attrs: { property: 'og:image:width', content: '1200' } },
+				{ tag: 'meta', attrs: { property: 'og:image:height', content: '630' } },
+				{ tag: 'meta', attrs: { name: 'twitter:image', content: 'https://unityide.app/og-image.png' } },
 				{ tag: 'link', attrs: { rel: 'preconnect', href: 'https://fonts.googleapis.com' } },
 				{ tag: 'link', attrs: { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossorigin: true } },
 				{

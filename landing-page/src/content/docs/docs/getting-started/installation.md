@@ -1,6 +1,9 @@
 ---
 title: Installation
 description: Download and install UnityIDE on Windows or macOS.
+head:
+  - tag: title
+    content: Install UnityIDE on Windows or macOS — Setup Guide
 ---
 
 UnityIDE runs on **Windows** and **macOS** (Apple Silicon). Windows is the primary,

@@ -4,6 +4,7 @@ import { isProdChannel } from '../lib/releases';
 import { REDDIT_PIXEL_ID } from '../lib/reddit';
 import { GOOGLE_ADS_ID, googleTagBootstrap, googleTagSrc } from '../lib/google-ads';
 import { GTM_CONTAINER_ID, gtmBootstrap, gtmNoscriptSrc } from '../lib/google-tag-manager';
+import { DEFAULT_TITLE, DEFAULT_DESCRIPTION, canonicalUrl, jsonLd, pageTitle } from '../lib/seo';
 
 interface Props {
   // Set to false on auth pages (/auth, /verify, /reset, ...) — those pages
@@ -17,34 +18,34 @@ interface Props {
   description?: string;
   /** Keep this page out of the index (auth flows, account, admin). */
   noindex?: boolean;
+  structuredData?: Record<string, unknown>[];
+  ogType?: 'website' | 'article';
+  image?: string;
+  imageAlt?: string;
 }
 
 const SITE_NAME = 'UnityIDE';
-const DEFAULT_TITLE = 'UnityIDE — The First IDE Built Only for Unity Developers';
-// "GUID-safe refactors" was removed: there is no project-wide reference-rewriting
-// rename engine in the app. `STANDOUT-FEATURES.md` lists it under a recommended
-// build order, not as shipped. What replaces it is claimable line by line.
-const DEFAULT_DESCRIPTION =
-  'The first IDE built only for Unity developers. Prefabs, ScriptableObjects, UI Toolkit and input actions open as real editors, with an AI checked against your running Editor.';
 
 const {
   analytics = true,
   title = DEFAULT_TITLE,
   description = DEFAULT_DESCRIPTION,
   noindex = false,
+  structuredData: extraStructuredData = [],
+  ogType = 'website',
+  image = '/og-image.png',
+  imageAlt = 'UnityIDE — an IDE for Unity development',
 } = Astro.props;
 
 // Astro.site comes from `site` in astro.config.mjs. Guarded so a
 // misconfiguration degrades to omitting canonical/og:url rather than emitting
 // a relative or "undefined/..." URL, which is worse than emitting neither.
-const canonical = Astro.site ? new URL(Astro.url.pathname, Astro.site).href : undefined;
-const ogImage = Astro.site ? new URL('/og-image.png', Astro.site).href : undefined;
+const canonical = Astro.site ? canonicalUrl(Astro.url.pathname, Astro.site.href) : undefined;
+const ogImage = Astro.site ? new URL(image, Astro.site).href : undefined;
 
 /**
- * SoftwareApplication is the schema Google uses for downloadable dev tools, and
- * it is the highest-leverage structured data available to this site — there was
- * none at all before. `offers` at price 0 is what marks it free during beta;
- * omitting it entirely reads as "price unknown" rather than "free".
+ * The IDE is free; optional AI plans are priced separately. No invented ratings
+ * or reviews: this markup describes the application, not a rich-result promise.
  */
 /** Same switch the download links read (see `lib/releases.ts`). */
 const apiUrlForAdTags = import.meta.env.PUBLIC_API_URL ?? '';
@@ -76,7 +77,7 @@ const apiUrlForAdTags = import.meta.env.PUBLIC_API_URL ?? '';
  */
 const adTags = analytics && isProdChannel(apiUrlForAdTags);
 
-const structuredData = {
+const softwareApplication = {
   '@context': 'https://schema.org',
   '@type': 'SoftwareApplication',
   name: SITE_NAME,
@@ -87,6 +88,11 @@ const structuredData = {
   description: DEFAULT_DESCRIPTION,
   offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
 };
+const isProductPage = ['/', '/features', '/features/'].includes(Astro.url.pathname);
+const structuredData = noindex ? [] : [
+  ...(isProductPage ? [softwareApplication] : []),
+  ...extraStructuredData,
+];
 ---
 
 <!doctype html>
@@ -108,7 +114,7 @@ const structuredData = {
       href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap"
     />
 
-    <title>{title}</title>
+    <title>{pageTitle(title)}</title>
     <meta name="description" content={description} />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     {canonical && <link rel="canonical" href={canonical} />}
@@ -116,21 +122,23 @@ const structuredData = {
 
     {/* Open Graph — the site emitted none of this before, so every shared link
         rendered as a bare URL with no title, description or image. */}
-    <meta property="og:type" content="website" />
+    <meta property="og:type" content={ogType} />
     <meta property="og:site_name" content={SITE_NAME} />
-    <meta property="og:title" content={title} />
+    <meta property="og:title" content={pageTitle(title)} />
     <meta property="og:description" content={description} />
     {canonical && <meta property="og:url" content={canonical} />}
     {ogImage && <meta property="og:image" content={ogImage} />}
-    <meta property="og:image:width" content="1200" />
-    <meta property="og:image:height" content="630" />
+    {ogImage && <meta property="og:image:alt" content={imageAlt} />}
+    {image === '/og-image.png' && <meta property="og:image:width" content="1200" />}
+    {image === '/og-image.png' && <meta property="og:image:height" content="630" />}
 
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content={title} />
+    <meta name="twitter:title" content={pageTitle(title)} />
     <meta name="twitter:description" content={description} />
     {ogImage && <meta name="twitter:image" content={ogImage} />}
+    {ogImage && <meta name="twitter:image:alt" content={imageAlt} />}
 
-    <script type="application/ld+json" set:html={JSON.stringify(structuredData)} />
+    {structuredData.map((data) => <script type="application/ld+json" set:html={jsonLd(data)} />)}
 
     {/* Page-specific head content. The landing page uses this to pull in its
         own two faces (Bricolage Grotesque + IBM Plex Mono) without loading

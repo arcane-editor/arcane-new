@@ -8,28 +8,21 @@
  * wins every line is a table nobody believes.
  */
 const Y = { v: '✓', c: '#6fe3a5' };
-const N = { v: '—', c: '#3a4150' };
 const t = (v: string) => ({ v, c: '#8a8f98' });
 
 const rows = [
-  ['Built only for Unity', 'Every panel exists for a Unity workflow', Y, t('general .NET'), t('general')],
-  ['Scenes & prefabs as structure', 'GameObjects and components instead of YAML text', Y, t('YAML text'), t('YAML text')],
-  ['ScriptableObjects as typed forms', 'Real fields, drift detection against the class', Y, N, N],
-  ['UI Toolkit live canvas', 'UXML rendered beside source; unresolvable queries flagged', Y, t('syntax only'), N],
-  ['Input actions as a table', 'Action names validated against .inputactions', Y, t('references'), N],
-  ['Unity-specific analyzers', 'Allocations in Update, GetComponent in hot paths…', Y, Y, Y],
-  ['Live link to the running Editor', 'Play / pause, streaming console, tests', Y, Y, N],
+  ['Product focus', 'Each product supports Unity development', t('Unity workflows'), t('.NET and game development'), t('General development')],
+  ['C# editing', 'Completions and source navigation', Y, Y, Y],
   ['Debugger attached to the Editor', 'Call stack, variables, watch', Y, Y, Y],
-  ['AI checked against the Editor', 'Recompiles and re-verifies every file it touched', Y, t('generic AI'), t('generic AI')],
-  ['UnityYAMLMerge as merge driver', "Scene and prefab conflicts merge with Unity's tool", Y, Y, N],
-  ['Price for the IDE', '', t('Free'), t('Paid · free non-commercial'), t('Community free')],
+  ['AI assistance', 'Availability and usage costs depend on plan and integration', t('Built-in AI and ACP'), t('JetBrains AI'), t('GitHub Copilot')],
+  ['Price for the IDE', 'AI usage is priced separately; eligibility conditions apply', t('Free'), t('Paid · free non-commercial'), t('Community · paid editions')],
 ] as const;
 ---
 
 <section class="lp-shell" style="padding-bottom:120px">
   <p class="lp-eyebrow" style="margin-bottom:16px">Why choose UnityIDE</p>
   <h2 class="lp-h2" style="margin-bottom:40px;max-width:22ch">
-    General-purpose IDEs treat Unity as a C# project. We don't.
+    Compare tools for your Unity workflow.
   </h2>
 
   <div
@@ -66,8 +59,15 @@ const rows = [
   </div>
 
   <p style="margin:16px 0 0;font-size:12.5px;color:#4a515c;max-width:80ch;text-wrap:pretty">
-    Based on publicly documented features of each product at time of writing. Rider and Visual
-    Studio are trademarks of their respective owners. Spotted a mistake?
-    <a href="/feedback" style="color:#6f747d;border-bottom:1px solid #2a2f37">Tell us</a>.
+    Documentation reviewed <time datetime="2026-09-21">September 21, 2026</time>:
+    <a href="https://www.jetbrains.com/lp/dotnet-unity/">Rider</a> and
+    <a href="https://visualstudio.microsoft.com/vs/unity-tools/">Visual Studio</a>.
+    This is a publisher comparison, not a hands-on benchmark. Rider and Visual Studio
+    are trademarks of their respective owners.
+    <a href="/feedback/" style="color:#6f747d;border-bottom:1px solid #2a2f37">Suggest a correction</a>.
+  </p>
+  <p style="margin:18px 0 0;color:#7cb7ff;display:flex;flex-wrap:wrap;gap:24px;font-size:14px">
+    <a href="/compare/rider/">UnityIDE and Rider →</a>
+    <a href="/compare/vscode/">UnityIDE and VS Code →</a>
   </p>
 </section>

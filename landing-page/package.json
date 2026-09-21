@@ -9,6 +9,7 @@
     "preview": "astro preview",
     "astro": "astro",
     "test": "vitest run",
+    "check:seo": "bun scripts/check-seo.ts",
     "og": "node scripts/generate-og-image.mjs"
   },
   "dependencies": {

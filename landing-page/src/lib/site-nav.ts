@@ -27,8 +27,9 @@ export const DOWNLOAD_HREF = '/#download';
 
 /** Order mirrors the funnel: what it does, what it costs, how to use it. */
 export const navLinks: NavLink[] = [
-  { label: 'Features', href: '/features' },
-  { label: 'Pricing', href: '/pricing' },
+  { label: 'Features', href: '/features/' },
+  { label: 'Pricing', href: '/pricing/' },
+  { label: 'Guides', href: '/blog/' },
   { label: 'Docs', href: '/docs/' },
 ];
 
@@ -38,9 +39,10 @@ export const navLinks: NavLink[] = [
  * reader who just failed to follow an instruction actually wants.
  */
 export const docsNavLinks: NavLink[] = [
-  { label: 'Features', href: '/features' },
-  { label: 'Pricing', href: '/pricing' },
-  { label: 'Feedback', href: '/feedback' },
+  { label: 'Features', href: '/features/' },
+  { label: 'Pricing', href: '/pricing/' },
+  { label: 'Guides', href: '/blog/' },
+  { label: 'Feedback', href: '/feedback/' },
 ];
 
 export type FooterColumn = { title: string; links: NavLink[] };
@@ -49,9 +51,10 @@ export const footerColumns: FooterColumn[] = [
   {
     title: 'Product',
     links: [
-      { label: 'Features', href: '/features' },
+      { label: 'Features', href: '/features/' },
+      { label: 'AI for Unity', href: '/features/ai/' },
       { label: 'Download', href: DOWNLOAD_HREF },
-      { label: 'Pricing', href: '/pricing' },
+      { label: 'Pricing', href: '/pricing/' },
     ],
   },
   {
@@ -60,6 +63,9 @@ export const footerColumns: FooterColumn[] = [
       { label: 'Getting started', href: '/docs/getting-started/installation/' },
       { label: 'Unity package setup', href: '/docs/getting-started/unity-extension/' },
       { label: 'All docs', href: '/docs/' },
+      { label: 'Unity guides', href: '/blog/' },
+      { label: 'Compare with Rider', href: '/compare/rider/' },
+      { label: 'Compare with VS Code', href: '/compare/vscode/' },
     ],
   },
   {
@@ -70,8 +76,8 @@ export const footerColumns: FooterColumn[] = [
     // source.
     title: 'About',
     links: [
-      { label: 'About UnityIDE', href: '/about' },
-      { label: 'Send feedback', href: '/feedback' },
+      { label: 'About UnityIDE', href: '/about/' },
+      { label: 'Send feedback', href: '/feedback/' },
     ],
   },
 ];
@@ -89,8 +95,8 @@ export const footerColumns: FooterColumn[] = [
  * desktop. Both footers render this array, so they cannot drift apart.
  */
 export const legalLinks: NavLink[] = [
-  { label: 'Privacy', href: '/privacy' },
-  { label: 'Terms', href: '/terms' },
+  { label: 'Privacy', href: '/privacy/' },
+  { label: 'Terms', href: '/terms/' },
 ];
 
 /**

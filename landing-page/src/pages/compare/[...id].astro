@@ -1,0 +1,11 @@
+---
+import { getCollection, render } from 'astro:content';
+import EditorialLayout from '../../layouts/EditorialLayout.astro';
+import { isPublished } from '../../lib/editorial';
+export async function getStaticPaths() {
+  return (await getCollection('comparisons', (entry) => isPublished(entry))).map((entry) => ({ params: { id: entry.id }, props: { entry } }));
+}
+const { entry } = Astro.props;
+const { Content, headings } = await render(entry);
+---
+<EditorialLayout entry={entry} headings={headings}><Content /></EditorialLayout>

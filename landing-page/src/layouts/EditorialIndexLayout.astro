@@ -1,0 +1,25 @@
+---
+import LandingLayout from './LandingLayout.astro';
+import Navbar from '../components/Navbar';
+import Footer from '../components/Footer.astro';
+import { type EditorialEntry, dateLabel, editorialPath } from '../lib/editorial';
+import '../styles/editorial.css';
+interface Props { title: string; description: string; entries: EditorialEntry[]; noindex?: boolean; }
+const { title, description, entries, noindex = false } = Astro.props;
+---
+<LandingLayout title={title} description={description} noindex={noindex}>
+  <link slot="head" rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..700&family=IBM+Plex+Mono:wght@400;500&display=swap" />
+  <div class="editorial">
+    <Navbar client:load />
+    <main class="editorial-main" id="main-content">
+      <nav class="editorial-breadcrumbs" aria-label="Breadcrumb"><a href="/">UnityIDE</a><span aria-hidden="true">/</span><span aria-current="page">{title}</span></nav>
+      <header class="editorial-header"><p class="editorial-kicker">Unity development</p><h1>{title}</h1><p class="editorial-deck">{description}</p></header>
+      <div class="editorial-list">{entries.map((entry) => <article>
+        <small>{entry.data.topic}<br />{entry.data.publishedAt && dateLabel(entry.data.publishedAt)}</small>
+        <div><h2><a href={editorialPath(entry)}>{entry.data.title}</a></h2><p>{entry.data.description}</p></div>
+      </article>)}</div>
+      <div class="editorial-prose"><slot /></div>
+    </main>
+    <Footer />
+  </div>
+</LandingLayout>

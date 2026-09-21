@@ -2,6 +2,7 @@
 import LandingLayout from './LandingLayout.astro';
 import Navbar from '../components/Navbar.tsx';
 import Footer from '../components/Footer.astro';
+import { pageTitle } from '../lib/seo';
 
 /**
  * The shell for the two prose legal pages.
@@ -43,7 +44,7 @@ const updatedLabel = updated
   : null;
 ---
 
-<LandingLayout title={`${title} — UnityIDE`} description={description}>
+<LandingLayout title={pageTitle(title)} description={description}>
   <Navbar client:load />
   <main class="container mx-auto px-6 pb-24 pt-32">
     <div class="mx-auto max-w-[70ch]">

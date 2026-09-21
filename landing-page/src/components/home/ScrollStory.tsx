@@ -355,8 +355,8 @@ export default function ScrollStory() {
             </div>
           </div>
           <p className="lp-aside" style={{ opacity: seg(p2, 0.75, 0.9) }}>
-            Everywhere else: compiles clean, returns null at runtime. Invalid UXML is refused here,
-            not warned about.
+            A mismatched query can compile clean and return null at runtime. UnityIDE checks
+            the element name against the document.
           </p>
         </div>
       </section>
@@ -417,7 +417,7 @@ export default function ScrollStory() {
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14 }}>
                 <div className="lp-panel" style={{ padding: '16px 18px' }}>
                   <div style={{ fontFamily: 'var(--mono)', fontSize: 12, color: C.mute, marginBottom: 12 }}>
-                    Every other editor
+                    Rename without a migration
                   </div>
                   <div style={{ display: 'grid', gap: 8 }}>
                     {DRIFT.map(([name, val], i) => {

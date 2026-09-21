@@ -1,0 +1,77 @@
+---
+import { getCollection } from 'astro:content';
+import LandingLayout from './LandingLayout.astro';
+import Navbar from '../components/Navbar';
+import Footer from '../components/Footer.astro';
+import { type EditorialEntry, dateLabel, editorialPath, editorialStructuredData, isPublished } from '../lib/editorial';
+import '../styles/editorial.css';
+
+interface Props {
+  entry: EditorialEntry;
+  headings: { depth: number; slug: string; text: string }[];
+}
+const { entry, headings } = Astro.props;
+const { data } = entry;
+const section = entry.collection === 'blog' ? { label: 'Guides', href: '/blog/' }
+  : entry.collection === 'comparisons' ? { label: 'Compare', href: '/compare/' }
+    : { label: 'Features', href: '/features/' };
+const allEntries = (await Promise.all([
+  getCollection('blog', (item) => isPublished(item)), getCollection('comparisons', (item) => isPublished(item)), getCollection('features', (item) => isPublished(item)),
+])).flat();
+const related = data.related.flatMap((reference) => {
+  const match = allEntries.find((candidate) => candidate.collection === reference.collection && candidate.id === reference.id);
+  return match ? [match] : [];
+});
+const schemas = Astro.site ? editorialStructuredData(entry, Astro.site) : [];
+---
+
+<LandingLayout title={data.title} description={data.description}
+  ogType={entry.collection === 'features' ? 'website' : 'article'} structuredData={schemas}
+  image={data.image?.src} imageAlt={data.image?.alt}>
+  <link slot="head" rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..700&family=IBM+Plex+Mono:wght@400;500&display=swap" />
+  <div class="editorial">
+    <Navbar client:load />
+    <main class="editorial-main" id="main-content">
+      <nav class="editorial-breadcrumbs" aria-label="Breadcrumb">
+        <a href="/">UnityIDE</a><span aria-hidden="true">/</span><a href={section.href}>{section.label}</a><span aria-hidden="true">/</span><span aria-current="page">{data.topic}</span>
+      </nav>
+      <header class="editorial-header">
+        <p class="editorial-kicker">{data.topic}</p>
+        <h1>{data.title}</h1>
+        <p class="editorial-deck">{data.description}</p>
+        <div class="editorial-byline">
+          <a href={data.author.url}>By {data.author.name}</a>
+          {data.publishedAt && <span>Published <time datetime={data.publishedAt.toISOString()}>{dateLabel(data.publishedAt)}</time></span>}
+          {data.updatedAt && <span>Updated <time datetime={data.updatedAt.toISOString()}>{dateLabel(data.updatedAt)}</time></span>}
+        </div>
+      </header>
+      <aside class="editorial-evidence" data-status={data.verification.status} aria-label="Evidence and testing">
+        <strong>{data.verification.status === 'tested' ? 'Tested example' : 'Documentation-based overview'}</strong>
+        <p>{data.verification.summary}</p>
+        {data.testedVersions.length > 0 && <ul>{data.testedVersions.map((item) => <li>{item.tool} {item.version} · {item.platform}</li>)}</ul>}
+        <p>Sources checked {dateLabel(data.researchedAt)}. {data.updateNote}</p>
+      </aside>
+      {data.image && <figure class="editorial-image"><img src={data.image.src} alt={data.image.alt} /><figcaption>{data.image.credit}{data.image.source && <> · <a href={data.image.source}>Image source</a></>}</figcaption></figure>}
+      <div class="editorial-grid">
+        <article class="editorial-prose">
+          <slot />
+          <section class="editorial-sources" id="sources" aria-labelledby="sources-heading">
+            <h2 id="sources-heading">Sources</h2>
+            <ol>{data.sources.map((source) => <li><a href={source.url}>{source.title}</a><small>Checked {dateLabel(source.accessedAt)}</small></li>)}</ol>
+          </section>
+          <section class="editorial-next" aria-labelledby="next-heading">
+            <h2 id="next-heading">Put it to work</h2>
+            <p><a href="/docs/getting-started/installation/">Install UnityIDE</a>, then <a href="/docs/getting-started/unity-extension/">connect your Unity project</a>. Start with a project you can safely experiment in.</p>
+            {related.length > 0 && <ul>{related.map((item) => <li><a href={editorialPath(item)}>{item.data.title}</a></li>)}</ul>}
+            <p><a href="/feedback/">Report a correction or share a missing case</a>.</p>
+          </section>
+        </article>
+        <nav class="editorial-toc" aria-label="On this page">
+          <h2>On this page</h2>
+          <ol>{headings.filter((heading) => heading.depth === 2).map((heading) => <li><a href={`#${heading.slug}`}>{heading.text}</a></li>)}<li><a href="#sources">Sources</a></li></ol>
+        </nav>
+      </div>
+    </main>
+    <Footer />
+  </div>
+</LandingLayout>

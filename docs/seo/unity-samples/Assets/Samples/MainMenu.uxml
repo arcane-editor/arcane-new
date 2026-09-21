@@ -1,0 +1,6 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+    <ui:VisualElement name="menu">
+        <ui:Button name="play" text="Play" class="primary" />
+        <ui:Label name="status" text="Ready" />
+    </ui:VisualElement>
+</ui:UXML>

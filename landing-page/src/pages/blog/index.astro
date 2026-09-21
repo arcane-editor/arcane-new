@@ -1,0 +1,10 @@
+---
+import { getCollection } from 'astro:content';
+import EditorialIndexLayout from '../../layouts/EditorialIndexLayout.astro';
+import { isPublished } from '../../lib/editorial';
+const entries = (await getCollection('blog', (entry) => isPublished(entry))).sort((a, b) => b.data.publishedAt!.valueOf() - a.data.publishedAt!.valueOf());
+---
+<EditorialIndexLayout title="Unity development guides" description="Practical guides to Unity C# setup, serialized data, UI Toolkit, and prefab workflows. Each published technical guide explains its test coverage and limitations." entries={entries} noindex={entries.length === 0}>
+  {entries.length === 0 && <p>Our first guides are being checked in Unity. For setup help now, use the <a href="/docs/getting-started/installation/">installation guide</a> and <a href="/docs/getting-started/unity-extension/">Unity connection guide</a>.</p>}
+  <p>Choosing an editor? Read the <a href="/compare/">UnityIDE comparisons</a> or see <a href="/features/ai/">how the AI workflow connects to Unity</a>.</p>
+</EditorialIndexLayout>

@@ -1,0 +1,9 @@
+---
+import { getCollection } from 'astro:content';
+import EditorialIndexLayout from '../../layouts/EditorialIndexLayout.astro';
+import { isPublished } from '../../lib/editorial';
+const entries = (await getCollection('comparisons', (entry) => isPublished(entry))).sort((a, b) => a.id.localeCompare(b.id));
+---
+<EditorialIndexLayout title="Compare Unity IDEs" description="Compare UnityIDE with Rider and Visual Studio Code by workflow, platform, setup, and licensing. Dated sources and explicit limitations help you choose for your project." entries={entries}>
+  <p>These comparisons are published by the UnityIDE team. They describe documented capabilities, with no performance ranking or implied independent endorsement. Evaluate your own project before changing your team's tools.</p>
+</EditorialIndexLayout>
