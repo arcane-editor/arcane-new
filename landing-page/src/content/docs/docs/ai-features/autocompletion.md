@@ -1,9 +1,11 @@
 ---
 title: AI Chat Modes
-description: Understand Agent, Ask, and Plan modes — and how to choose between them.
+description: Choose Ask, Plan, or Agent for Unity development, set reasoning effort, and understand how built-in AI differs from Claude Code.
 ---
 
-The AI in UnityIDE operates through a **chat panel** on the right side of the editor. It can answer questions, navigate your codebase, write code, run commands, and control the Unity Editor.
+UnityIDE's built-in AI operates through the **chat panel**. It can investigate your project, write code, and use supported Unity tools. The mode you select determines which actions are available.
+
+These modes apply to the **UnityIDE agent**. Claude Code through ACP uses its own modes and permissions; see [External Agents](#external-agents) below.
 
 ## Three Modes
 
@@ -11,41 +13,51 @@ You can switch modes from the mode selector in the chat panel.
 
 ### Agent Mode
 
-The AI has full autonomy. It can:
-- Read and write any file in `Assets/`
-- Run shell commands (dotnet build, git, etc.)
-- Execute Unity play/stop commands
+Agent mode can read project files, implement changes, run shell commands, and call enabled Unity tools. For example, it can edit a C# script, inspect compilation errors, and request a Unity test run.
 
-Use Agent mode when you want the AI to actually implement something end-to-end. It will ask for confirmation on destructive actions.
+File edits follow your [apply-mode settings](/docs/ai-features/code-generation/). Actions that change the running Unity Editor, such as entering Play Mode or setting a component property, require approval. Live Unity tools also need a connected Editor.
+
+Use Agent for a task with a clear scope and an observable result: "Add an EditMode test for this damage calculation, run it, and report the outcome."
 
 ### Ask Mode
 
-Read-only. The AI can explore your codebase and answer questions, but cannot modify files or run commands. Good for understanding code without risk of changes.
+Ask uses read-only tools. The agent can inspect files, query indexed relationships, and read supported Unity context, but cannot use file-writing tools, shell commands, or Unity mutation tools.
+
+Use Ask to understand existing behavior: "Which component handles player input, and what calls it?"
 
 ### Plan Mode
 
-The AI first creates a step-by-step plan, then executes each step. During the planning phase it's read-only. Once the plan is approved, it switches to full tool access for execution.
+Plan develops an approach before implementation. During planning, project investigation uses read-only tools and the agent can ask clarifying questions. Review the plan before starting execution; the execution phase can use editing and enabled Unity action tools.
 
-Use Plan mode for large, multi-file changes where you want to review the approach before anything is touched.
+Use Plan for a change across several scripts or assets, such as migrating a gameplay feature to the Input System. File and Unity action approval settings still apply during execution.
 
-## Reasoning Levels
+The [UI Toolkit canvas](/features/ui-toolkit/) also provides a document-focused **Design** mode through its design dock. It is separate from the three choices in the general chat mode menu.
 
-Inside the chat panel you can also select a **reasoning level**, which controls how much thinking the model does before responding:
+## Reasoning Effort
 
-| Level | Speed | Best for |
-|-------|-------|----------|
-| **Low** | Fastest | Quick questions, simple edits |
-| **Mid** | Balanced | Most everyday tasks |
-| **High** | Slower | Complex logic, architecture questions |
-| **Super** | Slowest | Available in Plan mode only — used for the planning phase of large refactors |
+The reasoning control cycles through the levels available to your account:
 
-Higher reasoning levels use more tokens but produce more accurate, well-considered responses.
+| Level | Purpose |
+| --- | --- |
+| **Standard** | Default reasoning for everyday tasks |
+| **Deep Think** | More reasoning per turn for harder tasks, with higher latency and usage |
+| **Max** | The highest reasoning level available through this control, subject to your plan |
+
+Deep Think and Max require an eligible paid plan. The available options reflect your current account entitlements; see [pricing](/pricing/). More reasoning is not a guarantee of correctness, so review changes and check the result in Unity at every level.
 
 ## Unity Context
 
-The AI automatically has access to:
-- **Recent Unity console output** — errors, warnings, and logs from the last session
-- **Project overview** — script count, scene list, asset statistics
-- **Unity API reference** — embedded documentation for common Unity classes
+The built-in agent can use [AI tools](/docs/ai-features/inline-chat/) to gather:
 
-This context is injected automatically — you don't need to paste it in manually.
+- **Code and asset context** from project files, indexed relationships, and GUID references.
+- **Scene context** from the connected Unity Editor, including GameObjects, components, and serialized values.
+- **Console and compiler evidence** to investigate errors and check changes.
+- **Unity API information** through API search and documentation tools.
+
+Indexing and the [Unity Editor connection](/docs/unity-integration/scene-inspector/) affect what is available. A disconnected bridge cannot inspect the current scene, and an incomplete test run is not a pass.
+
+## External Agents
+
+Claude Code is available through ACP on eligible paid UnityIDE plans. It runs on your Anthropic account with its own tools and permission modes. Its mode, model, and effort controls come from the agent and appear in the chat toolbar.
+
+UnityIDE's Ask/Plan/Agent settings do not control Claude Code. Configured MCP servers can extend the external agent's tools, but ACP alone does not provide all of UnityIDE's built-in Unity actions. For setup context and a practical first task, see [AI agent for Unity developers](/features/ai/).

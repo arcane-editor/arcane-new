@@ -199,13 +199,4 @@ export const AGENTS: Array<{
     badgeBorder: '#2a2f37',
     badgeColor: C.mute,
   },
-  {
-    name: 'Any ACP agent',
-    sub: 'Agent Client Protocol',
-    glyph: '⋯',
-    color: C.blue,
-    badge: 'Supported',
-    badgeBorder: '#1f3a2c',
-    badgeColor: C.green,
-  },
 ];

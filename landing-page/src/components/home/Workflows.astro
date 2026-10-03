@@ -1,0 +1,52 @@
+---
+const workflows = [
+  {
+    title: 'AI agents for Unity development',
+    description: 'Investigate a console error, plan a C# change, or ask an agent to implement a bounded task. Review the diff and check the result in Unity. Built-in AI and Claude Code have different tools and access requirements.',
+    href: '/features/ai/',
+    label: 'Explore the Unity AI workflow',
+  },
+  {
+    title: 'UXML and USS editing',
+    description: 'Open UI Toolkit source beside a live preview, inspect elements, and work on the interface with design chat. Use the preview while editing, then verify layout and behavior in the Unity Editor.',
+    href: '/features/ui-toolkit/',
+    label: 'See UI Toolkit editing and preview',
+  },
+  {
+    title: 'A connected Unity Editor',
+    description: 'Install the UnityIDE Unity package, open the same project in both applications, and confirm the connection. Stream console logs, control Play Mode, and run Edit Mode or Play Mode tests when the Unity Test Framework is installed.',
+    href: '/docs/getting-started/unity-extension/',
+    label: 'Connect your Unity project',
+  },
+];
+---
+
+<section class="lp-shell workflows" aria-labelledby="workflows-heading">
+  <p class="lp-eyebrow">Find your workflow</p>
+  <h2 class="lp-h2" id="workflows-heading">Code, UI and AI in your Unity project.</h2>
+  <div class="workflow-grid">
+    {workflows.map((workflow) => (
+      <article class="lp-panel workflow-card">
+        <h3>{workflow.title}</h3>
+        <p>{workflow.description}</p>
+        <a href={workflow.href}>{workflow.label} <span aria-hidden="true">→</span></a>
+      </article>
+    ))}
+  </div>
+  <p class="workflow-next">Getting started with C#? Follow the <a href="/docs/getting-started/installation/">UnityIDE installation and IntelliSense setup guide</a>.</p>
+</section>
+
+<style>
+  .workflows { padding-block: 0 100px; }
+  .workflows h2 { max-width: 24ch; margin-block: 16px 32px; }
+  .workflow-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+  .workflow-card { display: flex; flex-direction: column; padding: 24px; }
+  .workflow-card h3 { margin: 0; font-size: 22px; line-height: 1.2; }
+  .workflow-card p { margin-block: 16px 24px; color: var(--dim); font-size: 15px; line-height: 1.6; }
+  .workflow-card a { margin-top: auto; color: var(--blue); font-size: 14px; }
+  .workflow-next { margin-top: 24px; color: var(--dim); font-size: 15px; line-height: 1.6; }
+  .workflow-next a { color: var(--blue); }
+  .workflows a:hover { text-decoration: underline; }
+  .workflows a:focus-visible { outline: 2px solid var(--blue); outline-offset: 5px; }
+  @media (max-width: 800px) { .workflow-grid { grid-template-columns: 1fr; } }
+</style>

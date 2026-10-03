@@ -225,8 +225,9 @@ export default function ScrollStory() {
             </div>
           </div>
           <p className="lp-aside" style={{ opacity: seg(p1, 0.78, 0.92) }}>
-            C# language server, Unity analyzers, debugger, terminal and git — already in the box.
-            Works from Unity 2021.3 through Unity 6.
+            C# language server, Unity analyzers, debugger, terminal and Git integration included.
+            C# IntelliSense requires the .NET 10 SDK. See the{' '}
+            <a href="/docs/getting-started/installation/">installation requirements</a> for Unity 2021.3 and later.
           </p>
         </div>
       </section>
@@ -638,7 +639,7 @@ export default function ScrollStory() {
               <p className="lp-eyebrow" style={{ marginBottom: 16 }}>05 · AI copilot</p>
               <h2 className="lp-h2" id="ch-ai">An agent with Unity in its hands — that proves its work.</h2>
               <p className="lp-lede">
-                Twenty-five Unity tools: it reads the scene, sets properties with Unity's own Undo
+                Built-in Unity tools: it reads the scene, sets properties with Unity's own Undo
                 stack intact, runs your tests. Then it recompiles in your running Editor — waking it
                 through the OS if it's in the background — and re-checks every file it touched.
               </p>
@@ -1063,11 +1064,12 @@ export default function ScrollStory() {
                 <div className="lp-band-pair">
                   <div>
                     <p className="lp-eyebrow" style={{ marginBottom: 16 }}>Bring your own agent</p>
-                    <h2 className="lp-h3">Connect the coding subscription you already pay for.</h2>
+                    <h2 className="lp-h3">Use Claude Code in your Unity workspace.</h2>
                     <p className="lp-lede" style={{ fontSize: 16.5, maxWidth: '44ch', marginTop: 18 }}>
-                      External agents plug in over ACP and get the same 25 Unity tools, the same
-                      running-Editor verification, and the same reviewable diffs. Your subscription,
-                      our Unity context.
+                      Claude Code connects through ACP on eligible paid UnityIDE plans and uses
+                      your provider sign-in. Its own tools, permissions and configured MCP servers
+                      determine what it can access. See the{' '}
+                      <a href="/features/ai/">AI agent workflow and requirements</a> before connecting.
                     </p>
                   </div>
                   <div className="lp-panel" style={{ fontFamily: 'var(--mono)', fontSize: 12.5 }}>

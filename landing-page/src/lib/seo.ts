@@ -1,7 +1,7 @@
 export const SITE_URL = 'https://unityide.app';
-export const DEFAULT_TITLE = 'UnityIDE — Free IDE for Unity with AI Assistance';
+export const DEFAULT_TITLE = 'UnityIDE — Free Unity IDE with AI Agents';
 export const DEFAULT_DESCRIPTION =
-  'Build Unity projects with C# editing, prefab and asset tools, and AI assistance connected to the Unity Editor. Free for Windows and macOS.';
+  'Edit C#, inspect scenes and prefabs, and work with AI agents in UnityIDE. Free Unity IDE for Windows and macOS with a connected Unity Editor workflow.';
 
 /** Match Pages' directory URLs; never carry acquisition or authentication parameters. */
 export function canonicalUrl(pathname: string, site = SITE_URL): string {

@@ -4,10 +4,20 @@ import Navbar from '../components/Navbar.tsx';
 import Hero from '../components/home/Hero.astro';
 import ScrollStory from '../components/home/ScrollStory.tsx';
 import EverythingElse from '../components/home/EverythingElse.astro';
+import Workflows from '../components/home/Workflows.astro';
 import Comparison from '../components/home/Comparison.astro';
 import DownloadSection from '../components/DownloadSection.astro';
 import Footer from '../components/Footer.astro';
 import '../styles/landing.css';
+import { SITE_URL } from '../lib/seo';
+
+const website = {
+  '@context': 'https://schema.org',
+  '@type': 'WebSite',
+  '@id': `${SITE_URL}/#website`,
+  name: 'UnityIDE',
+  url: `${SITE_URL}/`,
+};
 
 /**
  * The landing page is one argument told in order, and the order is the point:
@@ -31,7 +41,7 @@ import '../styles/landing.css';
  */
 ---
 
-<LandingLayout>
+<LandingLayout structuredData={[website]}>
   {/* Bricolage Grotesque sets the structure; IBM Plex Mono is reserved for
       text that IS machine output — paths, identifiers, log levels, statuses.
       Loaded here rather than in the layout so no other page pays for them. */}
@@ -69,6 +79,7 @@ import '../styles/landing.css';
       <ScrollStory client:load />
 
       <EverythingElse />
+      <Workflows />
       <Comparison />
       <DownloadSection />
     </div>

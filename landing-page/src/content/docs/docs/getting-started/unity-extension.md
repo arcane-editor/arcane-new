@@ -141,9 +141,14 @@ Generates `.sln` and `.csproj` files for C# IntelliSense support. The extension 
 | Unity 6 (6000.x) | Supported |
 
 ### Platforms
-- macOS (Apple Silicon)
-- Windows 10/11
-- Linux (Ubuntu 20.04+)
+
+The desktop downloads are available for **Windows 10/11** and **Apple Silicon
+macOS**. See the [installation guide](/docs/getting-started/installation/) for
+current operating-system requirements and release limitations.
+
+The extension includes Linux launch-path handling, listed above, but a Linux
+UnityIDE desktop build is not currently distributed. Installing this Unity
+package does not provide a Linux desktop application.
 
 ## Troubleshooting
 

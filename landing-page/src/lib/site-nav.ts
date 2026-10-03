@@ -53,6 +53,7 @@ export const footerColumns: FooterColumn[] = [
     links: [
       { label: 'Features', href: '/features/' },
       { label: 'AI for Unity', href: '/features/ai/' },
+      { label: 'UI Toolkit editor', href: '/features/ui-toolkit/' },
       { label: 'Download', href: DOWNLOAD_HREF },
       { label: 'Pricing', href: '/pricing/' },
     ],

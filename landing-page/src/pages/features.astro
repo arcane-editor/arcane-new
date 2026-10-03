@@ -87,6 +87,8 @@ const featureCategories = [
   },
   {
     title: "UI Toolkit",
+    href: "/features/ui-toolkit/",
+    linkLabel: "Explore UXML editing and UI Toolkit preview",
     preview: [
       { tone: "comment", t: "// MainMenu.uxml" },
       { t: "VisualElement .menu-root" },
@@ -104,7 +106,7 @@ const featureCategories = [
       "A design chat docks over the canvas, so the AI works on the screen you are looking at",
       "USS variables, PanelSettings coordinate space and layout rules are part of what the AI is told about your project",
       "Vetted screen templates the agent can scaffold from instead of inventing structure",
-      "Writes are validated first — invalid UXML or USS is refused, not written with a warning",
+      "The UI write tool blocks malformed UXML and specific stylesheet errors before saving; other findings can remain warnings, so verify the result in Unity",
     ],
   },
   {
@@ -152,6 +154,8 @@ const featureCategories = [
   },
   {
     title: "The AI agent",
+    href: "/features/ai/",
+    linkLabel: "Explore AI agents for Unity development",
     preview: [
       { tone: "comment", t: "> Make the enemy drop loot on death" },
       { tone: "dim", t: "---" },
@@ -162,7 +166,7 @@ const featureCategories = [
       { tone: "ok", t: "3 files changed · checkpoint saved" },
       { tone: "ok", t: "console clean after recompile" },
     ],
-    subtitle: "More than thirty tools, most of them Unity-specific.",
+    subtitle: "Code, asset and Editor tools in one Unity development workflow.",
     icon: `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/></svg>`,
     bullets: [
       "Reads the scene hierarchy, inspects GameObjects, resolves GUIDs and finds asset references",
@@ -171,7 +175,7 @@ const featureCategories = [
       "Edits land as reviewable diffs, and checkpoints let a turn be rolled back after the fact",
       "Approval gates stand in front of anything that mutates a scene or writes a Unity asset",
       "Plans for larger work, with a live todo list and a stop button that actually stops",
-      "External agents are supported over ACP — bring Claude Code or another agent and keep the same Unity tools",
+      "Claude Code connects through ACP on eligible paid plans; provider authentication and configured MCP servers determine its available tools",
     ],
   },
   {
@@ -243,8 +247,8 @@ const featureCategories = [
 ---
 
 <LandingLayout
-  title="UnityIDE Features — C#, Assets and Unity Integration"
-  description="Explore UnityIDE’s C# tools, scene and prefab views, ScriptableObject editing, UI Toolkit preview, and live Unity Editor integration."
+  title="Unity IDE Features — C#, AI Agents and UI Toolkit | UnityIDE"
+  description="Explore UnityIDE’s C# tools, AI agents, scene and prefab views, UXML and USS preview, and live Unity Editor integration. Follow setup and workflow guides."
 >
   <Navbar client:load />
 
@@ -261,7 +265,7 @@ const featureCategories = [
         </div>
 
         <h1 class="mb-6 font-display text-3xl font-bold leading-[1.1] tracking-tight sm:text-5xl md:text-6xl">
-          Built <span class="text-gradient-orange">Deep</span> for Unity
+          IDE tools built for <span class="text-gradient-orange">Unity</span>
         </h1>
 
         <p class="mb-8 mx-auto max-w-2xl text-base sm:text-lg leading-relaxed text-muted-foreground">
@@ -307,6 +311,7 @@ const featureCategories = [
                   </li>
                 ))}
               </ul>
+              {cat.href && <p class="mt-6"><a href={cat.href} class="text-primary underline underline-offset-4">{cat.linkLabel} →</a></p>}
             </div>
 
             {/* Visual side */}

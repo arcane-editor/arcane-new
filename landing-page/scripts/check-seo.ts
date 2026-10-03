@@ -154,6 +154,15 @@ for (const [route, page] of pages) {
   }
 }
 
+// The home page identifies the site separately from the software it offers.
+// Keep this tied to the canonical URL so aliases do not become separate sites.
+const websites = pages.get('/')?.graphs.filter((item) => item['@type'] === 'WebSite') ?? [];
+check(websites.length === 1, '/: needs exactly one WebSite schema for the site name.');
+if (websites.length === 1) {
+  check(websites[0].name === 'UnityIDE', '/: WebSite name must match the visible UnityIDE brand.');
+  check(websites[0].url === canonicalUrl('/'), '/: WebSite URL must match the canonical home page.');
+}
+
 // Validate rendered links and fragments, including noindex/private pages.
 // The one download alias is tested through the actual emitted edge handler.
 const workerFile = join(dist, '_worker.js');
@@ -188,6 +197,14 @@ for (const [route, page] of pages) {
 errors.push(...badLinks);
 const robots = readFileSync(join(dist, 'robots.txt'), 'utf8');
 check(robots.includes(`${SITE_URL}/sitemap-index.xml`), 'robots.txt does not advertise the canonical sitemap index.');
+// Every page on this static public site must remain crawlable: indexable pages
+// expose their canonical, and private route shells expose their noindex tag.
+// Google cannot apply noindex to a URL that robots.txt prevents it from fetching.
+// https://developers.google.com/search/docs/crawling-indexing/block-indexing
+const disallowedPaths = [...robots.matchAll(/^[ \t]*disallow[ \t]*:[ \t]*([^#\r\n]*)/gim)]
+  .map((match) => match[1].trim()).filter(Boolean);
+check(disallowedPaths.length === 0,
+  `robots.txt must allow crawling so canonical and noindex directives can be read; found Disallow: ${disallowedPaths.join(', ')}.`);
 
 if (warnings.length) console.warn(`SEO notes (${warnings.length}):\n${warnings.map((message) => `  - ${message}`).join('\n')}`);
 if (errors.length) {
