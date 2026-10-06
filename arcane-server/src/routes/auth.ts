@@ -12,6 +12,7 @@ import { sendVerificationEmail } from '../lib/email.ts';
 import { verifyTurnstile } from '../lib/turnstile.ts';
 import { logAuthEvent } from '../lib/log.ts';
 import { redditAttributionFrom, recordSignupConversion } from '../lib/attribution.ts';
+import { recordAcquisition } from '../lib/acquisition.ts';
 import type { AppEnv } from '../types.ts';
 
 export const authRouter = new Hono<AppEnv>();
@@ -57,6 +58,7 @@ authRouter.post('/v1/auth/signup', async (c) => {
 
     const { hash, salt } = await hashPassword(password);
     const user = await createUser(db, { email, passwordHash: hash, salt });
+    c.executionCtx.waitUntil(recordAcquisition(db, user.id, body.acquisition));
 
     const code = generateOtp();
     await createAuthToken(db, {

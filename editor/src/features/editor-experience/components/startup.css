@@ -1,0 +1,10 @@
+.experience-startup { height: 100vh; overflow-y: auto; background: var(--bg-primary); color: var(--text-primary); }
+.experience-startup-titlebar { height: 32px; display: flex; justify-content: flex-end; position: sticky; top: 0; background: var(--bg-primary); z-index: 2; }
+.experience-startup-wait { padding: 50px 32px; font-size: 13px; text-align: center; color: var(--text-secondary); }
+.experience-invitation { position: fixed; top: 44px; right: 16px; z-index: 1200; max-width: min(440px, calc(100vw - 32px)); display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 14px; background: var(--bg-sidebar); color: var(--text-primary); border: 1px solid var(--border); border-radius: var(--radius-md); box-shadow: var(--shadow-2); font-size: 12px; }
+.experience-invitation > span { flex-basis: 100%; overflow-wrap: anywhere; }
+.experience-invitation button { padding: 6px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-primary); background: var(--bg-input); cursor: pointer; }
+.experience-invitation button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.experience-overlay { position: fixed; inset: 0; z-index: 1300; display: flex; align-items: center; justify-content: center; padding: 20px; background: var(--modal-backdrop); }
+.experience-setup-dialog { max-height: calc(100vh - 40px); max-width: 720px; width: 100%; overflow-y: auto; background: var(--bg-primary); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--modal-shadow); }
+.experience-gate-error { margin: 12px 32px; color: var(--error-text); font-size: 12px; overflow-wrap: anywhere; }

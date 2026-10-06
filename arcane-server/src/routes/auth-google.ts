@@ -13,6 +13,7 @@ import {
     redditAttributionFromQuery, recordSignupConversion, runInBackground, optionalExecutionCtx,
 } from '../lib/attribution.ts';
 import type { AppEnv } from '../types.ts';
+import { acquisitionFromQuery, recordAcquisition, type Acquisition } from '../lib/acquisition.ts';
 
 export const authGoogleRouter = new Hono<AppEnv>();
 
@@ -25,6 +26,7 @@ const OAUTH_COOKIE_ISSUER = 'arcane-server-google-oauth';
 const RETURN_TO_ALLOWLIST = ['/auth', '/account'];
 
 interface OAuthCookiePayload {
+    acquisition?: Acquisition;
     state: string;
     nonce: string;
     pkce_verifier: string;
@@ -100,9 +102,11 @@ authGoogleRouter.get('/v1/auth/google/start', async (c) => {
     const challenge = await s256Challenge(pkceVerifier);
 
     const attribution = redditAttributionFromQuery(c.req.url);
+    const acquisition = acquisitionFromQuery(c.req.url);
     const cookie = await signOAuthCookie(
         {
             state, nonce, pkce_verifier: pkceVerifier, return_to: returnTo,
+            ...(acquisition ? { acquisition } : {}),
             ...(attribution.clickId ? { rdt_cid: attribution.clickId } : {}),
             ...(attribution.rdtUuid ? { rdt_uuid: attribution.rdtUuid } : {}),
         },
@@ -192,6 +196,7 @@ authGoogleRouter.get('/v1/auth/google/callback', async (c) => {
     if (!user) { return fail('link_conflict'); }
 
     if (!preexisting) {
+        await runInBackground(optionalExecutionCtx(c), recordAcquisition(db, user.id, cookie.acquisition));
         await runInBackground(optionalExecutionCtx(c), recordSignupConversion(
             c.env,
             user,

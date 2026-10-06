@@ -1,10 +1,17 @@
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 import type { SettingsSchema } from '../types';
+import type { EditorPreferences } from '../types/editor-experience';
+import { publishPreferences, subscribePreferences } from '../utils/preferences-events';
 
 const DEFAULT_SETTINGS: SettingsSchema = {
   'editor.fontSize': 14,
+  'editor.fontFamily': "'JetBrains Mono', 'SF Mono', Menlo, Monaco, 'Courier New', monospace",
+  'editor.fontLigatures': true,
+  'editor.lineHeight': 0,
   'editor.tabSize': 2,
+  'editor.insertSpaces': true,
+  'editor.detectIndentation': true,
   'editor.wordWrap': 'off',
   'editor.minimap': true,
   'editor.lineNumbers': 'on',
@@ -98,20 +105,16 @@ export function mergeStoredSettings(stored: Record<string, unknown>): SettingsSc
     merged['ai.specialists.editableScenesVersion'] = 1;
   }
 
-  // Migration: any stored value referencing a font that's a webfont
-  // (Geist Mono Variable) or commonly missing on macOS (Cascadia Code,
-  // Source Code Pro, JetBrains Mono) makes xterm measure the wrong cell
-  // width and renders the prompt as "c o n t e n t". Force-reset to the
-  // system default in those cases.
+  // Keep explicit system-font choices, including fonts imported from Rider.
+  // xterm waits for document.fonts.ready and remeasures on changes. A generic
+  // fallback is enough for a missing local font; resetting on every load used
+  // to erase valid imported JetBrains Mono/Cascadia/Fira choices.
   const storedFont = (merged['terminal.fontFamily'] as string) ?? '';
-  const looksProblematic =
-    storedFont === '' ||
-    /Geist/i.test(storedFont) ||
-    /Cascadia Code\b/i.test(storedFont) ||
-    /Source Code Pro/i.test(storedFont) ||
-    /JetBrains Mono/i.test(storedFont) ||
-    /Fira Code/i.test(storedFont);
-  if (looksProblematic) merged['terminal.fontFamily'] = DEFAULT_SETTINGS['terminal.fontFamily'];
+  if (storedFont === '') {
+    merged['terminal.fontFamily'] = DEFAULT_SETTINGS['terminal.fontFamily'];
+  } else if (!/\bmonospace\b/i.test(storedFont)) {
+    merged['terminal.fontFamily'] = `${storedFont}, monospace`;
+  }
 
   return merged as unknown as SettingsSchema;
 }
@@ -131,6 +134,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   isLoaded: false,
 
   loadSettings: async () => {
+    if (get().isLoaded) return;
     try {
       const stored = await invoke<Record<string, unknown>>('read_settings');
       const merged = mergeStoredSettings(stored);
@@ -138,7 +142,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         stored['ai.specialists.editableScenesVersion'] !== 1 ||
         ('terminal.fontFamily' in stored && stored['terminal.fontFamily'] !== merged['terminal.fontFamily'])
       ) {
-        invoke('write_settings', { settings: merged }).catch(() => {});
+        invoke<EditorPreferences>('patch_editor_settings', { patch: merged }).then(publishPreferences).catch(console.warn);
       }
       set({ settings: merged, isLoaded: true });
     } catch {
@@ -151,19 +155,23 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   setSetting: (key, value) => {
     const next = { ...get().settings, [key]: value };
     set({ settings: next });
-    invoke('write_settings', { settings: next }).catch(console.warn);
+    invoke<EditorPreferences>('patch_editor_settings', { patch: { [key]: value } }).then(publishPreferences).catch(console.warn);
   },
 
   resetSetting: (key) => {
     const next = { ...get().settings, [key]: DEFAULT_SETTINGS[key] };
     set({ settings: next });
-    invoke('write_settings', { settings: next }).catch(() => {});
+    invoke<EditorPreferences>('patch_editor_settings', { patch: { [key]: DEFAULT_SETTINGS[key] } }).then(publishPreferences).catch(console.warn);
   },
 
   resetAllSettings: () => {
     set({ settings: { ...DEFAULT_SETTINGS } });
-    invoke('write_settings', { settings: DEFAULT_SETTINGS }).catch(() => {});
+    invoke<EditorPreferences>('patch_editor_settings', { patch: DEFAULT_SETTINGS }).then(publishPreferences).catch(console.warn);
   },
 }));
+
+subscribePreferences((preferences) => {
+  useSettingsStore.setState({ settings: mergeStoredSettings(preferences.settings), isLoaded: true });
+});
 
 export { DEFAULT_SETTINGS };

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { ACCOUNT_SECTION, categoriesOf, filterSettings, isKnownSection } from './nav';
+import { ACCOUNT_SECTION, EDITOR_EXPERIENCE_SECTION, categoriesOf, filterSettings, isKnownSection } from './nav';
 import { SETTING_DEFINITIONS } from './definitions';
 
 describe('categoriesOf', () => {
@@ -60,8 +60,9 @@ describe('filterSettings', () => {
 describe('isKnownSection', () => {
   const cats = categoriesOf(SETTING_DEFINITIONS);
 
-  it('accepts the account section and every real category', () => {
+  it('accepts custom panes and every real category', () => {
     expect(isKnownSection(ACCOUNT_SECTION, cats)).toBe(true);
+    expect(isKnownSection(EDITOR_EXPERIENCE_SECTION, cats)).toBe(true);
     for (const c of cats) expect(isKnownSection(c, cats)).toBe(true);
   });
 

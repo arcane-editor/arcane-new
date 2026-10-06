@@ -57,6 +57,7 @@ function SettingRow({ definition }: { definition: SettingDefinition }) {
           options={definition.options ?? []}
           value={String(currentValue)}
           onChange={handleChange}
+          allowCustom={definition.key === 'editor.fontFamily'}
         />
       );
     }

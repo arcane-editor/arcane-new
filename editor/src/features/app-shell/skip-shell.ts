@@ -1,3 +1,5 @@
+import { bindingBeatsShell } from '../../utils/editor-keybindings';
+
 /**
  * Decides who owns a keystroke when a terminal has focus: the app, or the shell
  * running inside it.
@@ -18,13 +20,6 @@
  * attachCustomKeyEventHandler), so yielding them to the shell would make the
  * keys do nothing at all rather than something useful.
  */
-const COMMANDS_TO_SKIP_SHELL: ReadonlySet<string> = new Set([
-  'terminal.toggle',
-  'terminal.new',
-  'terminal.split',
-  'terminal.focusNextPane',
-  'terminal.focusPreviousPane',
-]);
 
 /**
  * True when `keybinding` is a bare Ctrl+<letter> — no Shift, no Alt.
@@ -35,16 +30,6 @@ const COMMANDS_TO_SKIP_SHELL: ReadonlySet<string> = new Set([
  * a digit or punctuation, produces something no readline binding claims — so
  * those stay the app's without conflict.
  */
-function isBareCtrlLetterChord(keybinding: string): boolean {
-  const parts = keybinding.toLowerCase().split('+').map((p) => p.trim());
-  const hasCtrl = parts.includes('mod') || parts.includes('ctrl');
-  if (!hasCtrl) return false;
-  if (parts.includes('shift') || parts.includes('alt') || parts.includes('meta')) {
-    return false;
-  }
-  const keys = parts.filter((p) => !['mod', 'ctrl', 'shift', 'alt', 'meta'].includes(p));
-  return keys.length === 1 && /^[a-z]$/.test(keys[0]);
-}
 
 /**
  * Whether an app command should fire, given where focus is.
@@ -59,11 +44,5 @@ export function commandBeatsShell(
 ): boolean {
   if (!opts.inTerminal) return true;
 
-  // On macOS `mod` is Cmd, and xterm never forwards Cmd chords to the PTY. The
-  // shell therefore has no claim on them, and yielding would just make the key
-  // do nothing — strictly worse than today.
-  if (opts.isMac) return true;
-
-  if (COMMANDS_TO_SKIP_SHELL.has(commandId)) return true;
-  return !isBareCtrlLetterChord(keybinding);
+  return bindingBeatsShell({ commandId, strokes: [keybinding] }, opts.isMac);
 }

@@ -3,6 +3,7 @@ mod git;
 mod lsp;
 mod terminal;
 mod settings;
+mod editor_experience;
 mod updates;
 mod search;
 mod file_scanner;
@@ -23,6 +24,7 @@ mod acp;
 mod auth;
 mod auth_loopback;
 mod install_id;
+mod activation;
 mod graphify;
 mod fs_atomic;
 mod fs_copy;
@@ -44,6 +46,14 @@ use tauri::Manager;
 use std::fs;
 use std::path::Path;
 use walkdir::WalkDir;
+
+#[tauri::command]
+fn update_menu_keybindings(app: tauri::AppHandle, bindings: Vec<editor_experience::KeyBinding>) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    { menu::update_menu_keybindings(&app, bindings) }
+    #[cfg(not(target_os = "macos"))]
+    { let _ = (app, bindings); Ok(()) }
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct FileEntry {
@@ -1155,6 +1165,7 @@ pub fn run() {
         .manage(search::ContentSearchState::new())
         .manage(auth_loopback::LoopbackState::new())
         .invoke_handler(tauri::generate_handler![
+            update_menu_keybindings,
             read_directory,
             read_file,
             read_file_bytes,
@@ -1181,6 +1192,15 @@ pub fn run() {
             debug_panic_async,
             settings::read_settings,
             settings::write_settings,
+            editor_experience::read_editor_preferences,
+            editor_experience::discover_editor_sources,
+            editor_experience::preview_editor_import,
+            editor_experience::apply_editor_preferences,
+            editor_experience::patch_editor_settings,
+            editor_experience::patch_editor_theme,
+            editor_experience::restore_editor_preferences,
+            editor_experience::claim_editor_setup,
+            editor_experience::release_editor_setup,
             updates::updates_apply_and_restart,
             search::start_content_search,
             search::cancel_content_search,
@@ -1285,6 +1305,10 @@ pub fn run() {
             auth::auth_check_channel,
             install_id::install_claim,
             install_id::install_mark_reported,
+            activation::activation_observe,
+            activation::activation_claim,
+            activation::activation_ack,
+            activation::activation_release,
             auth_loopback::auth_loopback_start,
             auth_loopback::auth_loopback_stop,
             unity_ipc::unity_ipc_start,

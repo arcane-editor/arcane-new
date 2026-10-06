@@ -12,6 +12,7 @@ import {
     redditAttributionFromQuery, recordSignupConversion, runInBackground, optionalExecutionCtx,
 } from '../lib/attribution.ts';
 import type { AppEnv } from '../types.ts';
+import { acquisitionFromQuery, recordAcquisition, type Acquisition } from '../lib/acquisition.ts';
 
 export const authGithubRouter = new Hono<AppEnv>();
 
@@ -25,6 +26,7 @@ const OAUTH_COOKIE_ISSUER = 'arcane-server-github-oauth';
 const RETURN_TO_ALLOWLIST = ['/auth', '/account'];
 
 interface OAuthCookiePayload {
+    acquisition?: Acquisition;
     state: string;
     return_to: string;
     /** Reddit ad attribution, carried across the provider round trip. See the
@@ -191,9 +193,11 @@ authGithubRouter.get('/v1/auth/github/start', async (c) => {
     // trip — once the browser leaves for GitHub there is no body and no
     // same-site cookie left to carry it. Absent for every organic sign-in.
     const attribution = redditAttributionFromQuery(c.req.url);
+    const acquisition = acquisitionFromQuery(c.req.url);
     const cookie = await signOAuthCookie(
         {
             state, return_to: returnTo,
+            ...(acquisition ? { acquisition } : {}),
             ...(attribution.clickId ? { rdt_cid: attribution.clickId } : {}),
             ...(attribution.rdtUuid ? { rdt_uuid: attribution.rdtUuid } : {}),
         },
@@ -275,6 +279,7 @@ authGithubRouter.get('/v1/auth/github/callback', async (c) => {
     if (!user) { return fail('link_conflict', 'github_account'); }
 
     if (!preexisting) {
+        await runInBackground(optionalExecutionCtx(c), recordAcquisition(db, user.id, cookie.acquisition));
         await runInBackground(optionalExecutionCtx(c), recordSignupConversion(
             c.env,
             user,

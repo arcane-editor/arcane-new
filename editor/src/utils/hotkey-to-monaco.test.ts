@@ -160,16 +160,28 @@ describe('parseHotkeyToMonaco', () => {
       expect(result).toBe(2048 | 20);
     });
 
-    it('parses cmd+backtick (cmd alias for mod)', () => {
-      const result = parseHotkeyToMonaco('cmd+`', monaco);
+    it('parses Cmd on macOS independently of the test host', () => {
+      const result = parseHotkeyToMonaco('cmd+`', monaco, true);
       expect(result).not.toBeNull();
       expect(result).toBe(2048 | 26);
     });
 
     it('parses ctrl+k', () => {
-      const result = parseHotkeyToMonaco('ctrl+k', monaco);
+      const result = parseHotkeyToMonaco('ctrl+k', monaco, false);
       expect(result).not.toBeNull();
       expect(result).toBe(2048 | 103); // KeyK
+    });
+
+    it('preserves explicit Ctrl and Cmd modifiers on both platforms', () => {
+      expect(parseHotkeyToMonaco('ctrl+k', monaco, true)).toBe(256 | 103);
+      expect(parseHotkeyToMonaco('cmd+k', monaco, true)).toBe(2048 | 103);
+      expect(parseHotkeyToMonaco('ctrl+k', monaco, false)).toBe(2048 | 103);
+      expect(parseHotkeyToMonaco('cmd+k', monaco, false)).toBe(256 | 103);
+    });
+
+    it('encodes two-stroke shortcuts and rejects longer sequences', () => {
+      expect(parseHotkeyToMonaco('ctrl+k ctrl+c', monaco, false)).toBe(((2048 | 103) | ((2048 | 102) << 16)) >>> 0);
+      expect(parseHotkeyToMonaco('ctrl+k ctrl+c ctrl+a', monaco, false)).toBeNull();
     });
   });
 

@@ -217,7 +217,9 @@ const structuredData = noindex ? [] : [
         from the ad landing page to a page no third-party script may touch. */}
     <script>
       import { captureClickId } from '../lib/reddit';
+      import { captureAcquisition } from '../lib/acquisition';
       captureClickId(window.location, document);
+      captureAcquisition();
     </script>
   </head>
   <body class="min-h-screen bg-background text-foreground antialiased">

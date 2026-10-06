@@ -7,6 +7,7 @@ interface FontPickerProps {
   options: SettingOption[];
   value: string;
   onChange: (value: string) => void;
+  allowCustom?: boolean;
 }
 
 const MENU_WIDTH = 260;
@@ -21,14 +22,17 @@ const MENU_WIDTH = 260;
  * a missing one silently falls through its stack, and a plain list gives no
  * hint that happened.
  */
-function FontPicker({ options, value, onChange }: FontPickerProps) {
+function FontPicker({ options, value, onChange, allowCustom = false }: FontPickerProps) {
   const [open, setOpen] = useState(false);
   const [rect, setRect] = useState<DOMRect | null>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const [customValue, setCustomValue] = useState(value);
 
   const active = options.find((o) => String(optionValue(o)) === value);
-  const activeLabel = active ? optionLabel(active) : 'Custom';
+  const activeLabel = active ? optionLabel(active) : value.split(',')[0].trim().replace(/^['"]|['"]$/g, '') || 'Custom';
+
+  useEffect(() => { setCustomValue(value); }, [value]);
 
   useEffect(() => {
     if (!open) return;
@@ -46,11 +50,13 @@ function FontPicker({ options, value, onChange }: FontPickerProps) {
     // Deferred so the click that opened the menu does not immediately close it.
     const t = setTimeout(() => window.addEventListener('mousedown', onDown), 0);
     window.addEventListener('keydown', onKey);
-    window.addEventListener('scroll', () => setOpen(false), true);
+    const onScroll = () => setOpen(false);
+    window.addEventListener('scroll', onScroll, true);
     return () => {
       clearTimeout(t);
       window.removeEventListener('mousedown', onDown);
       window.removeEventListener('keydown', onKey);
+      window.removeEventListener('scroll', onScroll, true);
     };
   }, [open]);
 
@@ -60,7 +66,7 @@ function FontPicker({ options, value, onChange }: FontPickerProps) {
         ref={buttonRef}
         type="button"
         className="settings-font-trigger"
-        aria-haspopup="listbox"
+        aria-haspopup={allowCustom ? 'dialog' : 'listbox'}
         aria-expanded={open}
         onClick={() => {
           if (!open && buttonRef.current) setRect(buttonRef.current.getBoundingClientRect());
@@ -78,7 +84,8 @@ function FontPicker({ options, value, onChange }: FontPickerProps) {
         createPortal(
           <div
             ref={menuRef}
-            role="listbox"
+            role={allowCustom ? 'dialog' : 'listbox'}
+            aria-label={allowCustom ? 'Choose editor font' : 'Fonts'}
             className="settings-font-menu"
             style={{
               position: 'fixed',
@@ -87,6 +94,7 @@ function FontPicker({ options, value, onChange }: FontPickerProps) {
               width: MENU_WIDTH,
             }}
           >
+            <div role={allowCustom ? 'listbox' : undefined} aria-label={allowCustom ? 'Fonts' : undefined}>
             {options.map((opt) => {
               const v = String(optionValue(opt));
               const selected = v === value;
@@ -115,6 +123,20 @@ function FontPicker({ options, value, onChange }: FontPickerProps) {
                 </button>
               );
             })}
+            </div>
+            {allowCustom && (
+              <form style={{ padding: '8px 10px', borderTop: '1px solid var(--border)' }} onSubmit={(event) => {
+                event.preventDefault();
+                const next = customValue.trim();
+                if (next) { onChange(next); setOpen(false); }
+              }}>
+                <label style={{ display: 'block', color: 'var(--text-secondary)', fontSize: 11, marginBottom: 6 }}>
+                  Custom font family
+                  <input className="settings-control-select" style={{ width: '100%', marginTop: 6 }} value={customValue} onChange={(event) => setCustomValue(event.target.value)} placeholder="Font name, monospace" />
+                </label>
+                <button type="submit" className="settings-control-select" disabled={!customValue.trim()}>Use font</button>
+              </form>
+            )}
           </div>,
           document.body,
         )}

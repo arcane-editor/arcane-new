@@ -158,6 +158,13 @@ let reloadGraceTimer: ReturnType<typeof setTimeout> | null = null;
  * `reloading` state does not (the session survives it, so history is still current). */
 let historicalBackfillDone = false;
 
+function observeOpenedProjectActivation(): void {
+  const { workspacePath, assetsRootPath, isLoadingTree } = useWorkspaceStore.getState();
+  if (!workspacePath || !assetsRootPath || isLoadingTree) return;
+  void import('../utils/activation-runtime')
+    .then(({ observeUnityActivation }) => observeUnityActivation(workspacePath)).catch(() => {});
+}
+
 export const useUnityStore = create<UnityState>((set, get) => ({
   connected: false,
   projectInfo: null,
@@ -433,6 +440,7 @@ export const useUnityStore = create<UnityState>((set, get) => ({
     if (status.connected && (status.bridgeProtocol ?? 0) >= CONSOLE_RPC_MIN_PROTOCOL) {
       void get().backfillConsoleHistory();
     }
+    if (status.connected) observeOpenedProjectActivation();
   },
 
   setupListeners: async () => {
@@ -446,6 +454,7 @@ export const useUnityStore = create<UnityState>((set, get) => ({
         reloadGraceTimer = null;
       }
       if (isConnected) {
+        observeOpenedProjectActivation();
         const protocolVersion = event.payload.info?.protocolVersion ?? null;
         set({
           connected: true,

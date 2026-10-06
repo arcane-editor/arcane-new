@@ -61,6 +61,12 @@ function EditorPanel() {
   const monacoThemeId = `app-theme-${activeThemeId}`;
 
   const editorFontSize = useSettingsStore((s) => s.settings['editor.fontSize']);
+  const editorFontFamily = useSettingsStore((s) => s.settings['editor.fontFamily']);
+  const editorFontLigatures = useSettingsStore((s) => s.settings['editor.fontLigatures']);
+  const editorLineHeight = useSettingsStore((s) => s.settings['editor.lineHeight']);
+  const editorInsertSpaces = useSettingsStore((s) => s.settings['editor.insertSpaces']);
+  const editorDetectIndentation = useSettingsStore((s) => s.settings['editor.detectIndentation']);
+  const editorFontStack = `${editorFontFamily}, 'SF Mono', Menlo, Monaco, Consolas, monospace`;
   const editorTabSize = useSettingsStore((s) => s.settings['editor.tabSize']);
   const editorWordWrap = useSettingsStore((s) => s.settings['editor.wordWrap']);
   const editorMinimap = useSettingsStore((s) => s.settings['editor.minimap']);
@@ -90,6 +96,25 @@ function EditorPanel() {
   const planPhase = useAiStore((s) => s.planPhase);
 
   const editorRef = useRef<MonacoEditorNs.IStandaloneCodeEditor | null>(null);
+  const diffEditorRef = useRef<MonacoEditorNs.IStandaloneDiffEditor | null>(null);
+
+  function getCommandEditor() {
+    const diff = diffEditorRef.current;
+    if (!diff) return editorRef.current;
+    const original = diff.getOriginalEditor();
+    return original.hasTextFocus() ? original : diff.getModifiedEditor();
+  }
+
+  function configureDiffIndentation(diff: MonacoEditorNs.IStandaloneDiffEditor) {
+    for (const model of [diff.getOriginalEditor().getModel(), diff.getModifiedEditor().getModel()]) {
+      model?.updateOptions({ tabSize: editorTabSize, insertSpaces: editorInsertSpaces });
+      if (editorDetectIndentation) model?.detectIndentation(editorInsertSpaces, editorTabSize);
+    }
+  }
+
+  useEffect(() => {
+    if (diffEditorRef.current) configureDiffIndentation(diffEditorRef.current);
+  }, [editorTabSize, editorInsertSpaces, editorDetectIndentation, activeFilePath]);
 
   // Whenever the active file changes, move keyboard focus into the editor
   // so the user can start typing immediately — no click-to-focus required
@@ -122,7 +147,7 @@ function EditorPanel() {
   useEffect(() => {
     const navHandler = (e: Event) => {
       const { line, column } = (e as CustomEvent).detail;
-      const editor = editorRef.current;
+      const editor = getCommandEditor();
       if (editor) {
         const pos = { lineNumber: line, column: column || 1 };
         editor.setPosition(pos);
@@ -130,29 +155,23 @@ function EditorPanel() {
         editor.focus();
       }
     };
-    const formatHandler = () => {
-      editorRef.current?.getAction('editor.action.formatDocument')?.run();
+    const runAction = (id: string) => {
+      const action = getCommandEditor()?.getAction(id);
+      if (action?.isSupported()) void action.run();
     };
-    const gotoHandler = () => {
-      editorRef.current?.getAction('editor.action.gotoLine')?.run();
-    };
+    const formatHandler = () => runAction('editor.action.formatDocument');
+    const gotoHandler = () => runAction('editor.action.gotoLine');
     // Both of these are Monaco built-ins that stay inert until a provider
     // exists: quickOutline needs a DocumentSymbolProvider, refactor needs a
     // CodeActionProvider advertising `refactor.*` kinds. Both are registered
     // now (see lsp/services/symbol-providers.ts and code-actions.ts), so the
     // only thing missing was a reachable command.
-    const symbolHandler = () => {
-      editorRef.current?.getAction('editor.action.quickOutline')?.run();
-    };
-    const refactorHandler = () => {
-      editorRef.current?.getAction('editor.action.refactor')?.run();
-    };
+    const symbolHandler = () => runAction('editor.action.quickOutline');
+    const refactorHandler = () => runAction('editor.action.refactor');
     // Alt+Enter, the JetBrains "show intentions" reflex. Same widget Monaco
     // already opens on Cmd+. — the code actions were always there, they just
     // had one chord instead of two.
-    const quickFixHandler = () => {
-      editorRef.current?.getAction('editor.action.quickFix')?.run();
-    };
+    const quickFixHandler = () => runAction('editor.action.quickFix');
     window.addEventListener('navigate-to-line', navHandler);
     window.addEventListener('format-document', formatHandler);
     window.addEventListener('goto-line', gotoHandler);
@@ -395,6 +414,15 @@ function EditorPanel() {
               ensureMonacoTheme(useThemeStore.getState().getActiveTheme());
             }}
             onMount={(_editor, _monaco) => {
+              diffEditorRef.current = _editor;
+              const unbindOriginal = bindGlobalShortcutsToMonaco(_editor.getOriginalEditor(), _monaco);
+              const unbindModified = bindGlobalShortcutsToMonaco(_editor.getModifiedEditor(), _monaco);
+              _editor.onDidDispose(() => {
+                unbindOriginal();
+                unbindModified();
+                if (diffEditorRef.current === _editor) diffEditorRef.current = null;
+              });
+              configureDiffIndentation(_editor);
               ensureMonacoTheme(useThemeStore.getState().getActiveTheme());
             }}
             options={{
@@ -407,8 +435,13 @@ function EditorPanel() {
               hideCursorInOverviewRuler: true,
               scrollbar: { useShadows: false },
               fontSize: editorFontSize,
-              fontFamily: "'Geist Mono Variable', 'Geist Mono', 'JetBrains Mono', 'SF Mono', Menlo, Monaco, 'Courier New', monospace",
-              fontLigatures: true,
+              fontFamily: editorFontStack,
+              fontLigatures: editorFontLigatures,
+              lineHeight: editorLineHeight,
+              lineNumbers: editorLineNumbers,
+              renderWhitespace: editorRenderWhitespace,
+              wordWrap: editorWordWrap,
+              diffWordWrap: 'inherit',
             }}
           />
         </div>
@@ -589,8 +622,9 @@ function EditorPanel() {
           readOnly: monacoReadOnly,
           minimap: { enabled: editorMinimap && !isLargeFile },
           fontSize: editorFontSize,
-          fontFamily: "'JetBrains Mono', 'SF Mono', Menlo, Monaco, 'Courier New', monospace",
-          fontLigatures: !isLargeFile,
+          fontFamily: editorFontStack,
+          fontLigatures: editorFontLigatures && !isLargeFile,
+          lineHeight: editorLineHeight,
           lineNumbers: editorLineNumbers,
           scrollBeyondLastLine: false,
           automaticLayout: true,
@@ -610,6 +644,8 @@ function EditorPanel() {
           },
           wordWrap: editorWordWrap,
           tabSize: editorTabSize,
+          insertSpaces: editorInsertSpaces,
+          detectIndentation: editorDetectIndentation,
           cursorBlinking: editorCursorBlinking,
           bracketPairColorization: { enabled: editorBracketPairColorization && !isLargeFile },
           renderWhitespace: editorRenderWhitespace,

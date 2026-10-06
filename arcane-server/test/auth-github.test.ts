@@ -401,6 +401,22 @@ async function runCallback(github: typeof fetch): Promise<Response> {
 }
 
 describe('GET /v1/auth/github/callback (full flow)', () => {
+    it('stores acquisition only when the OAuth flow creates an account', async () => {
+        const email = 'acquisition-callback@test.dev';
+        for (const source of ['google', 'bing']) {
+            const start = await authGithubRouter.request(`/v1/auth/github/start?acq_source=${source}&acq_medium=organic&acq_landing_path=/blog/unity/`, {}, githubEnv());
+            const cookie = start.headers.get('Set-Cookie')!.split(';')[0]!;
+            const state = new URL(start.headers.get('Location')!).searchParams.get('state')!;
+            vi.stubGlobal('fetch', fakeGitHub({ id: 5199, email }));
+            try {
+                const response = await authGithubRouter.request(`/v1/auth/github/callback?code=abc&state=${state}`, { headers: { Cookie: cookie } }, githubEnv());
+                expect(new URL(response.headers.get('Location')!).searchParams.has('code')).toBe(true);
+            } finally { vi.unstubAllGlobals(); }
+        }
+        const user = await findUserByEmail(env.arcane_db, email);
+        const acquisition = await env.arcane_db.prepare('SELECT source, landing_path FROM user_acquisition WHERE user_id = ?').bind(user!.id).first();
+        expect(acquisition).toEqual({ source: 'google', landing_path: '/blog/unity/' });
+    });
     it('creates the account and hands back a single-use web_login code', async () => {
         const res = await runCallback(fakeGitHub({ id: 5150, email: 'e2e@test.dev' }));
         expect(res.status).toBe(302);

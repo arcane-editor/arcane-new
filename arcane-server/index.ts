@@ -19,6 +19,7 @@ import { adminRouter } from './src/routes/admin.ts';
 import { feedbackRouter } from './src/routes/feedback.ts';
 import { clientErrorRouter } from './src/routes/client-error.ts';
 import { installRouter } from './src/routes/install.ts';
+import { activationRouter } from './src/routes/activation.ts';
 import { billingRouter } from './src/routes/billing.ts';
 import { billingWebhookRouter } from './src/routes/billing-webhook.ts';
 
@@ -67,6 +68,7 @@ app.use('/v1/client-error', rateLimit('RL_CLIENT_ERROR'));
 // same reason — but this one also reports an ad conversion, so the limiter is
 // guarding ad-spend integrity as well as the database.
 app.use('/v1/install', rateLimit('RL_INSTALL'));
+app.use('/v1/install/*', rateLimit('RL_INSTALL'));
 
 // Public routes
 app.get('/health', (c) => c.json({ status: 'ok' }));
@@ -78,6 +80,7 @@ app.route('/', authEditorRouter);
 app.route('/', feedbackRouter);
 app.route('/', clientErrorRouter);
 app.route('/', installRouter);
+app.route('/', activationRouter);
 // Billing: the webhook is PUBLIC (Dodo signs it, no user JWT) — mount it with
 // the other public routers, before the AI auth gates. The billingRouter's own
 // routes self-apply authMiddleware (except the public /v1/billing/plans).

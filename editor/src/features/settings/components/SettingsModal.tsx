@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Search, X, UserRound } from 'lucide-react';
+import { Search, X, UserRound, Keyboard } from 'lucide-react';
 import { useUiStore } from '../../../stores/ui';
 import { useAuthStore } from '../../../stores/auth';
 import { SETTING_DEFINITIONS } from '../data/definitions';
-import { ACCOUNT_SECTION, categoriesOf, filterSettings, isKnownSection } from '../data/nav';
+import { ACCOUNT_SECTION, EDITOR_EXPERIENCE_SECTION, categoriesOf, filterSettings, isKnownSection } from '../data/nav';
 import SettingsSection from './SettingsSection';
 import { getVersion } from '@tauri-apps/api/app';
 import AccountSection from './AccountSection';
+import { EditorExperienceSetup } from '../../editor-experience';
 
 /**
  * Settings and Account, as one modal with a nav rail.
@@ -69,9 +70,9 @@ export function SettingsModal() {
 
       // Focus trap: keep Tab inside the dialog so it cannot walk into the
       // editor behind the backdrop, which is inert but still focusable.
-      const focusables = dialogRef.current?.querySelectorAll<HTMLElement>(
-        'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea, [tabindex]:not([tabindex="-1"])',
-      );
+      const focusables = Array.from(dialogRef.current?.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea, summary, [tabindex]:not([tabindex="-1"])',
+      ) ?? []).filter((element) => element.getClientRects().length > 0);
       if (!focusables || focusables.length === 0) return;
       const first = focusables[0];
       const last = focusables[focusables.length - 1];
@@ -138,6 +139,14 @@ export function SettingsModal() {
 
             <div className="settings-modal-nav-divider" />
 
+            <button
+              className={`settings-modal-nav-item${activeSection === EDITOR_EXPERIENCE_SECTION && !searching ? ' is-active' : ''}`}
+              onClick={() => { setSearch(''); setSection(EDITOR_EXPERIENCE_SECTION); }}
+            >
+              <Keyboard size={14} />
+              <span className="settings-modal-nav-label">Editor experience</span>
+            </button>
+
             {categories.map((cat) => (
               <button
                 key={cat}
@@ -174,6 +183,8 @@ export function SettingsModal() {
             />
           ) : activeSection === ACCOUNT_SECTION ? (
             <AccountSection />
+          ) : activeSection === EDITOR_EXPERIENCE_SECTION ? (
+            <EditorExperienceSetup embedded />
           ) : (
             <>
               {activeSection === 'Updates' && appVersion && (

@@ -137,9 +137,9 @@ describe('token contract is parseable', () => {
     expect(new Set(ALL_TOKENS).size).toBe(ALL_TOKENS.length);
   });
 
-  it('registers all six themes', () => {
+  it('registers all built-in themes', () => {
     expect(themes.map((t) => t.id).sort()).toEqual([
-      'dark-plus', 'dracula', 'light-plus', 'monokai', 'unityide-dark', 'unityide-light',
+      'dark-plus', 'dracula', 'light-plus', 'monokai', 'rider-dark', 'rider-light', 'unityide-dark', 'unityide-light',
     ]);
   });
 });
@@ -274,12 +274,12 @@ describe.each(themes.map((t) => [t.id, t] as const))('%s', (_id, theme) => {
 // unityide-dark and 2.75:1 in unityide-light through a green suite — roughly 40%
 // of a typical C# file rendered below the AA floor.
 //
-// Enforced for the UnityIDE themes ONLY. The other four are faithful ports and
+// Enforced for the UnityIDE and Rider-inspired themes. The other four are faithful ports and
 // their palettes are upstream's decision, not ours; an audit at the time of
 // writing found monokai with 11 rules under 4.5:1 (its signature #F92672 sits
 // at 3.93) and dracula's canonical comment blue #6272A4 at 3.03. Holding them
 // to AA would mean not shipping Monokai or Dracula.
-const CONTRAST_ENFORCED = new Set(['unityide-dark', 'unityide-light']);
+const CONTRAST_ENFORCED = new Set(['unityide-dark', 'unityide-light', 'rider-dark', 'rider-light']);
 
 const enforced = themes.filter((t) => CONTRAST_ENFORCED.has(t.id));
 
@@ -404,7 +404,7 @@ describe('every custom-property reference resolves', () => {
 // that states BOTH its background and its foreground in theme tokens has
 // declared a pairing, and that pairing has to be legible in all six themes.
 //
-// Enforced for the UnityIDE themes only, for the same reason the syntax rule
+// Enforced for the UnityIDE and Rider-inspired themes, for the same reason the syntax rule
 // above is (see CONTRAST_ENFORCED): the other four are faithful ports.
 //
 // Scope is FILLED CONTROLS: a block whose background is a FILL or CONTENT

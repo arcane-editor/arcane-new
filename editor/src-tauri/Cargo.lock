@@ -965,7 +965,7 @@ checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
 
 [[package]]
 name = "editor"
-version = "0.3.3"
+version = "0.4.0"
 dependencies = [
  "dirs",
  "flate2",
@@ -982,6 +982,7 @@ dependencies = [
  "objc2-foundation",
  "png 0.17.16",
  "portable-pty",
+ "quick-xml 0.38.4",
  "regex",
  "rusqlite",
  "serde",

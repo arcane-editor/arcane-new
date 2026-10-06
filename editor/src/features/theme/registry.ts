@@ -5,6 +5,8 @@ import darkPlus from './definitions/dark-plus';
 import lightPlus from './definitions/light-plus';
 import monokai from './definitions/monokai';
 import dracula from './definitions/dracula';
+import riderDark from './definitions/rider-dark';
+import riderLight from './definitions/rider-light';
 
 const themeRegistry = new Map<string, ThemeDefinition>();
 
@@ -53,3 +55,5 @@ registerTheme(darkPlus);
 registerTheme(lightPlus);
 registerTheme(monokai);
 registerTheme(dracula);
+registerTheme(riderDark);
+registerTheme(riderLight);

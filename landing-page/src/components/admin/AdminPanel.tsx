@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import AcquisitionReport from "./AcquisitionReport";
 import {
     getStoredToken, setStoredToken, clearStoredToken, decodeToken,
     adminLogin, adminGetUsers, adminCreateUser, adminDeleteUser,
@@ -8,7 +9,7 @@ import {
     type AdminUserRow, type ModelRoutingDoc, type ModelPricingDoc, type ModelInfo, type HarnessLimitsDoc,
 } from "@/lib/auth";
 
-type Tab = "users" | "feedback" | "crashes" | "models" | "pricing" | "harness" | "grants";
+type Tab = "users" | "feedback" | "crashes" | "models" | "pricing" | "harness" | "grants" | "growth";
 
 interface ClientErrorItem {
     id: number;
@@ -500,6 +501,7 @@ export default function AdminPanel() {
         { id: "pricing", label: "Pricing" },
         { id: "harness", label: "Harness" },
         { id: "grants", label: "Grants" },
+        { id: "growth", label: "Growth" },
     ];
 
     return (
@@ -508,7 +510,7 @@ export default function AdminPanel() {
             <p className="text-muted-foreground text-sm mb-6">Manage users, AI config, and plan grants</p>
 
             {/* Tabs */}
-            <div className="flex gap-1 border-b border-border/50 mb-6">
+            <div className="flex gap-1 overflow-x-auto border-b border-border/50 mb-6">
                 {tabs.map(t => (
                     <button
                         key={t.id}
@@ -528,6 +530,8 @@ export default function AdminPanel() {
                     </button>
                 ))}
             </div>
+
+            {tab === "growth" && <AcquisitionReport token={token} />}
 
             {/* Users Tab */}
             {tab === "users" && (

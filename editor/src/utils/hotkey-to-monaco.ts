@@ -1,4 +1,5 @@
 import type { Monaco } from '@monaco-editor/react';
+import { isMac } from './platform';
 
 const NAMED_KEYS: Record<string, keyof Monaco['KeyCode']> = {
   enter: 'Enter',
@@ -44,6 +45,7 @@ const NAMED_KEYS: Record<string, keyof Monaco['KeyCode']> = {
   '=': 'Equal',
   equal: 'Equal',
   plus: 'Equal',
+  insert: 'Insert',
 };
 
 function keycodeFor(monaco: Monaco, token: string): number | null {
@@ -67,8 +69,16 @@ function keycodeFor(monaco: Monaco, token: string): number | null {
   return null;
 }
 
-export function parseHotkeyToMonaco(hotkey: string, monaco: Monaco): number | null {
+export function parseHotkeyToMonaco(hotkey: string, monaco: Monaco, mac: boolean = isMac()): number | null {
   if (!hotkey) return null;
+  const strokes = hotkey.trim().split(/\s+/);
+  if (strokes.length > 1) {
+    if (strokes.length !== 2) return null;
+    const first = parseHotkeyToMonaco(strokes[0], monaco, mac);
+    const second = parseHotkeyToMonaco(strokes[1], monaco, mac);
+    if (first === null || second === null) return null;
+    return ((first & 0xffff) | (second << 16)) >>> 0;
+  }
   const tokens = hotkey.split('+').map((t) => t.trim().toLowerCase()).filter(Boolean);
   if (tokens.length === 0) return null;
 
@@ -76,8 +86,12 @@ export function parseHotkeyToMonaco(hotkey: string, monaco: Monaco): number | nu
   let key: number | null = null;
 
   for (const tok of tokens) {
-    if (tok === 'mod' || tok === 'cmd' || tok === 'meta' || tok === 'ctrl' || tok === 'control') {
+    if (tok === 'mod') {
       bitfield |= monaco.KeyMod.CtrlCmd;
+    } else if (tok === 'cmd' || tok === 'meta' || tok === 'command') {
+      bitfield |= mac ? monaco.KeyMod.CtrlCmd : monaco.KeyMod.WinCtrl;
+    } else if (tok === 'ctrl' || tok === 'control') {
+      bitfield |= mac ? monaco.KeyMod.WinCtrl : monaco.KeyMod.CtrlCmd;
     } else if (tok === 'shift') {
       bitfield |= monaco.KeyMod.Shift;
     } else if (tok === 'alt' || tok === 'option') {

@@ -6,6 +6,99 @@ use tauri::{
     menu::{AboutMetadata, Menu, MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder},
     AppHandle, Emitter, Manager, Wry,
 };
+use crate::editor_experience::KeyBinding;
+
+fn accelerator_for(command_id: &str, bindings: &[KeyBinding]) -> Option<String> {
+    let binding = bindings.iter().find(|binding| {
+        binding.command_id == command_id && binding.removed != Some(true)
+            && binding.strokes.len() == 1
+            && binding.context.as_deref().unwrap_or("global") == "global"
+    })?;
+    let stroke = &binding.strokes[0];
+    // Native menus run before the webview and cannot inspect focus. A scoped
+    // mapping or sequence prefix on this chord must stay with JS entirely.
+    if bindings.iter().any(|other| {
+        other.removed != Some(true) && other.strokes.first() == Some(stroke)
+            && (other.strokes.len() > 1 || (other.command_id != command_id
+                && other.context.as_deref().unwrap_or("global") != "global"))
+    }) {
+        return None;
+    }
+    let forbidden = ["cmd+c", "cmd+x", "cmd+v", "cmd+a", "cmd+z", "cmd+shift+z", "cmd+q", "cmd+h",
+        "cmd+alt+h", "cmd+tab", "cmd+shift+tab", "ctrl+cmd+f", "alt+f4", "alt+tab", "ctrl+alt+delete"];
+    if forbidden.contains(&stroke.as_str()) { return None; }
+    let tokens: Option<Vec<String>> = stroke.split('+').map(|token| {
+        Some(match token {
+            "cmd" | "meta" => "Cmd".to_string(), "ctrl" => "Ctrl".to_string(),
+            "alt" => "Alt".to_string(), "shift" => "Shift".to_string(),
+            "backquote" => "`".to_string(), "backslash" => "\\".to_string(),
+            "bracketleft" => "[".to_string(), "bracketright" => "]".to_string(),
+            "comma" => ",".to_string(), "period" => ".".to_string(), "slash" => "/".to_string(),
+            "semicolon" => ";".to_string(), "quote" => "'".to_string(),
+            "equal" => "=".to_string(), "minus" => "-".to_string(),
+            "enter" => "Enter".to_string(), "esc" => "Escape".to_string(), "space" => "Space".to_string(),
+            "tab" => "Tab".to_string(), "backspace" => "Backspace".to_string(), "delete" => "Delete".to_string(),
+            "insert" => "Insert".to_string(), "home" => "Home".to_string(), "end" => "End".to_string(),
+            "pageup" => "PageUp".to_string(), "pagedown" => "PageDown".to_string(),
+            "left" => "Left".to_string(), "right" => "Right".to_string(), "up" => "Up".to_string(), "down" => "Down".to_string(),
+            token if token.len() == 1 && token.chars().all(|c| c.is_ascii_alphanumeric()) => token.to_uppercase(),
+            token if token.starts_with('f') && token[1..].parse::<u8>().is_ok_and(|n| (1..=19).contains(&n)) => token.to_uppercase(),
+            _ => return None,
+        })
+    }).collect();
+    Some(tokens?.join("+"))
+}
+
+#[cfg(target_os = "macos")]
+pub fn update_menu_keybindings(app: &AppHandle, bindings: Vec<KeyBinding>) -> Result<(), String> {
+    use tauri::menu::MenuItemKind;
+    fn update_items(items: Vec<MenuItemKind<Wry>>, bindings: &[KeyBinding]) -> tauri::Result<()> {
+        for item in items {
+            match item {
+                MenuItemKind::Submenu(submenu) => update_items(submenu.items()?, bindings)?,
+                MenuItemKind::MenuItem(item) => item.set_accelerator(accelerator_for(item.id().as_ref(), bindings))?,
+                _ => (), // Native Edit/OS items retain their standard accelerators.
+            }
+        }
+        Ok(())
+    }
+    if let Some(menu) = app.menu() {
+        update_items(menu.items().map_err(|error| error.to_string())?, &bindings).map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod experience_keybinding_tests {
+    use super::*;
+    fn binding(id: &str, strokes: &[&str], context: &str) -> KeyBinding {
+        KeyBinding { command_id: id.to_string(), strokes: strokes.iter().map(|s| s.to_string()).collect(),
+            context: Some(context.to_string()), removed: None }
+    }
+    #[test]
+    fn native_accelerators_follow_the_effective_keymap() {
+        let bindings = vec![binding("palette.commands", &["ctrl+shift+a"], "global")];
+        assert_eq!(accelerator_for("palette.commands", &bindings), Some("Ctrl+Shift+A".to_string()));
+        assert_eq!(accelerator_for("file.save", &bindings), None);
+    }
+    #[test]
+    fn scoped_chords_and_sequence_prefixes_never_answer_globally() {
+        let mut bindings = vec![binding("file.closeTab", &["cmd+w"], "global"),
+            binding("monaco:editor.action.smartSelect.expand", &["cmd+w"], "editor")];
+        assert_eq!(accelerator_for("file.closeTab", &bindings), None);
+        bindings[1] = binding("editor.formatDocument", &["cmd+w", "cmd+d"], "editor");
+        assert_eq!(accelerator_for("file.closeTab", &bindings), None);
+        assert_eq!(accelerator_for("editor.formatDocument", &bindings), None);
+    }
+    #[test]
+    fn protected_and_removed_keys_have_no_accelerators() {
+        let mut bindings = vec![binding("file.save", &["cmd+q"], "global")];
+        assert_eq!(accelerator_for("file.save", &bindings), None);
+        bindings[0] = binding("file.save", &["cmd+s"], "global");
+        bindings[0].removed = Some(true);
+        assert_eq!(accelerator_for("file.save", &bindings), None);
+    }
+}
 
 #[cfg(target_os = "macos")]
 pub fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
@@ -241,11 +334,15 @@ pub fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     // `getCurrentWindow().minimize()` and needs core:window:allow-minimize.
     let minimize = MenuItemBuilder::with_id("window.minimize", "Minimize")
         .build(&app_handle)?;
+    // A predefined Close Window independently owns Cmd+W. Keep that chord
+    // under the effective keymap so changing Close Tab cannot leave it behind.
+    let close_window = MenuItemBuilder::with_id("window.close", "Close Window")
+        .build(&app_handle)?;
     let window_submenu = SubmenuBuilder::new(&app_handle, "Window")
         .item(&minimize)
         .item(&PredefinedMenuItem::maximize(&app_handle, None)?)
         .separator()
-        .item(&PredefinedMenuItem::close_window(&app_handle, None)?)
+        .item(&close_window)
         .build()?;
 
     let menu = MenuBuilder::new(&app_handle)
@@ -268,6 +365,10 @@ pub fn handle_menu_event(app: &AppHandle, event_id: &str) {
         .find(|(_, w)| w.is_focused().unwrap_or(false));
     match focused {
         Some((label, _)) => {
+            if event_id == "window.close" {
+                if let Some(window) = app.get_webview_window(&label) { let _ = window.close(); }
+                return;
+            }
             let _ = app.emit_to(label.as_str(), "menu-action", event_id.to_string());
         }
         None => {

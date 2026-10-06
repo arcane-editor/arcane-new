@@ -75,12 +75,15 @@ const ARIA_KEY_NAMES: Record<string, string> = {
  * announced a Cmd key to every Windows user.
  */
 export function ariaKeyshortcuts(kb: string, isMac: boolean = platformIsMac()): string {
+  // ARIA represents alternatives, not ordered key sequences. Do not announce a sequence as two unrelated shortcuts.
+  if (kb.trim().split(/\s+/).length > 1) return '';
   return kb
     .split('+')
     .map((part) => {
       const p = part.toLowerCase().trim();
       if (p === 'mod') return isMac ? 'Meta' : 'Control';
       if (p === 'ctrl' || p === 'control') return 'Control';
+      if (p === 'cmd' || p === 'meta' || p === 'command') return 'Meta';
       if (p === 'shift') return 'Shift';
       if (p === 'alt') return 'Alt';
       if (ARIA_KEY_NAMES[p]) return ARIA_KEY_NAMES[p];
@@ -92,11 +95,15 @@ export function ariaKeyshortcuts(kb: string, isMac: boolean = platformIsMac()): 
 }
 
 export function formatKeybinding(kb: string, isMac: boolean = platformIsMac()): string {
+  const strokes = kb.trim().split(/\s+/);
+  if (strokes.length > 1) return strokes.map((stroke) => formatKeybinding(stroke, isMac)).join(', ');
   return kb
     .split('+')
     .map((part) => {
       const p = part.toLowerCase().trim();
       if (p === 'mod') return isMac ? '⌘' : 'Ctrl';
+      if (p === 'cmd' || p === 'meta' || p === 'command') return isMac ? '⌘' : 'Meta';
+      if (p === 'ctrl' || p === 'control') return isMac ? '⌃' : 'Ctrl';
       if (p === 'shift') return isMac ? '⇧' : 'Shift';
       if (p === 'alt') return isMac ? '⌥' : 'Alt';
       if (p === '`') return '`';

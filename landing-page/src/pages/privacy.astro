@@ -15,7 +15,7 @@ import LegalLayout from '../layouts/LegalLayout.astro';
 <LegalLayout
   title="Privacy Policy"
   description="What UnityIDE collects, why, who it is shared with, and how to have it deleted."
-  updated="2026-09-20"
+  updated="2026-09-21"
 >
   <p>
     UnityIDE is a desktop IDE for Unity developers, distributed from
@@ -94,6 +94,15 @@ import LegalLayout from '../layouts/LegalLayout.astro';
           </td>
         </tr>
         <tr>
+          <td>First successful Unity connection and optional account association</td>
+          <td>
+            Records when an installation first opens a Unity project and connects
+            to its Editor. After sign-in, the installation can be associated with
+            your account to measure onboarding without counting repeat connections.
+            This event contains no project name, path, source code or scene data.
+          </td>
+        </tr>
+        <tr>
           <td>Crash and error reports</td>
           <td>
             The error type and message, the stack trace, the application version,
@@ -132,6 +141,16 @@ import LegalLayout from '../layouts/LegalLayout.astro';
 
   <h3>Website, advertising and security</h3>
   <ul>
+    <li>
+      <strong>First-party acquisition measurement</strong> retains the first public
+      page pathname, source and medium (such as Google organic or a campaign), and
+      referring hostname in browser storage for up to 30 days. Search terms, full
+      URLs, query strings, and authentication pages are not stored in this record.
+      At account creation, these fields can be associated with your account and
+      subsequent activation to understand which guides help users get started.
+      This first-party capture respects the browser's Global Privacy Control and
+      Do Not Track signals; blocked storage does not prevent use of the site.
+    </li>
     <li>
       <strong>Google Ads and Google Tag Manager</strong> run on the public marketing
       and documentation pages to measure which ads lead to a download. They are
@@ -203,6 +222,7 @@ import LegalLayout from '../layouts/LegalLayout.astro';
     <li><strong>Account and subscription records</strong> — for as long as the account exists.</li>
     <li><strong>Crash reports and install records</strong> — retained while they are useful for diagnosing a release, then deleted.</li>
     <li><strong>Advertising click identifiers</strong> — 30 days.</li>
+    <li><strong>First-touch browser record</strong> — up to 30 days. Acquisition associated with an account is retained with that account; activation milestones are retained with installation records.</li>
     <li>
       <strong>AI prompts</strong> — not retained by us beyond what is needed to
       serve the request and record its token count. Model providers apply their

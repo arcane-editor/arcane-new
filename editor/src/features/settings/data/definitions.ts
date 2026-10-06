@@ -50,7 +50,19 @@ export function optionLabel(opt: SettingOption): string {
 
 export const SETTING_DEFINITIONS: SettingDefinition[] = [
   { key: 'editor.fontSize', type: 'range', min: 10, max: 30, step: 1, unit: 'px', category: 'Editor', label: 'Font Size', description: 'Controls the font size in pixels.' },
-  { key: 'editor.tabSize', type: 'select', options: [2, 4, 8], category: 'Editor', label: 'Tab Size', description: 'The number of spaces a tab is equal to.' },
+  { key: 'editor.fontFamily', type: 'font', options: [
+    { value: "'JetBrains Mono', 'SF Mono', Menlo, Monaco, 'Courier New', monospace", label: 'JetBrains Mono' },
+    { value: "'Geist Mono Variable', 'Geist Mono', monospace", label: 'Geist Mono' },
+    { value: 'Menlo, Monaco, monospace', label: 'Menlo' },
+    { value: "'Consolas', monospace", label: 'Consolas' },
+    { value: "'Cascadia Code', monospace", label: 'Cascadia Code' },
+    { value: "'Fira Code', monospace", label: 'Fira Code' },
+  ], category: 'Editor', label: 'Font Family', description: 'Choose a font or enter a custom font family. Missing fonts use a system monospace fallback.' },
+  { key: 'editor.fontLigatures', type: 'boolean', category: 'Editor', label: 'Font Ligatures', description: 'Combine supported character sequences into ligatures in the editor and diffs.' },
+  { key: 'editor.lineHeight', type: 'range', min: 0, max: 100, step: 1, unit: 'px', category: 'Editor', label: 'Line Height', description: 'Controls the line height in pixels. Set to 0 to use the font\'s automatic line height.' },
+  { key: 'editor.tabSize', type: 'range', min: 1, max: 16, step: 1, category: 'Editor', label: 'Tab Size', description: 'The number of spaces a tab is equal to.' },
+  { key: 'editor.insertSpaces', type: 'boolean', category: 'Editor', label: 'Insert Spaces', description: 'Insert spaces when pressing Tab. Turn off to insert a tab character.' },
+  { key: 'editor.detectIndentation', type: 'boolean', category: 'Editor', label: 'Detect Indentation', description: 'Use the indentation found in each file, overriding tab size and insert spaces for that file.' },
   { key: 'editor.wordWrap', type: 'select', options: ['off', 'on', 'wordWrapColumn'], category: 'Editor', label: 'Word Wrap', description: 'Controls how lines should wrap.' },
   { key: 'editor.minimap', type: 'boolean', category: 'Editor', label: 'Minimap', description: 'Controls whether the minimap is shown.' },
   { key: 'editor.lineNumbers', type: 'select', options: ['on', 'off', 'relative'], category: 'Editor', label: 'Line Numbers', description: 'Controls the display of line numbers.' },

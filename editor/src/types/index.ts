@@ -166,7 +166,13 @@ export interface BlameLine {
 
 export interface SettingsSchema {
   'editor.fontSize': number;
-  'editor.tabSize': 2 | 4 | 8;
+  'editor.fontFamily': string;
+  'editor.fontLigatures': boolean;
+  /** Pixels; zero lets Monaco choose its normal line height. */
+  'editor.lineHeight': number;
+  'editor.tabSize': number;
+  'editor.insertSpaces': boolean;
+  'editor.detectIndentation': boolean;
   'editor.wordWrap': 'on' | 'off' | 'wordWrapColumn';
   'editor.minimap': boolean;
   'editor.lineNumbers': 'on' | 'off' | 'relative';

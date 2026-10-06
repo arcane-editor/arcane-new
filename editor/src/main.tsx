@@ -99,19 +99,23 @@ if (initialTheme) {
   applyTheme(initialTheme);
 }
 
+const root = ReactDOM.createRoot(document.getElementById('root') as HTMLElement);
+
 async function bootEditor() {
   const { initMonaco, loadMonacoWorkers } = await import('./features/editor');
   await loadMonacoWorkers();
   const App = (await import('./App')).default;
+  const { EditorExperienceGate } = await import('./features/editor-experience');
   initMonaco()
-    .then(() => {
-      if (initialTheme) ensureMonacoTheme(initialTheme);
+    .then(async () => {
+      const { useThemeStore } = await import('./stores/theme');
+      ensureMonacoTheme(useThemeStore.getState().getActiveTheme());
     })
     .catch(() => { /* swallow; beforeMount will recover */ });
-  ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
+  root.render(
     <React.StrictMode>
       <ErrorBoundary>
-        <App />
+        <EditorExperienceGate><App /></EditorExperienceGate>
       </ErrorBoundary>
     </React.StrictMode>,
   );
@@ -119,10 +123,11 @@ async function bootEditor() {
 
 async function bootWelcome() {
   const WelcomeApp = (await import('./WelcomeApp')).default;
-  ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
+  const { EditorExperienceGate } = await import('./features/editor-experience');
+  root.render(
     <React.StrictMode>
       <ErrorBoundary>
-        <WelcomeApp />
+        <EditorExperienceGate><WelcomeApp /></EditorExperienceGate>
       </ErrorBoundary>
     </React.StrictMode>,
   );
@@ -159,6 +164,13 @@ function reportInstall(): void {
 (async () => {
   try { await hydratePersistence(); } catch { /* ignore */ }
   try {
+    const { initializeEditorExperience } = await import('./features/editor-experience');
+    await initializeEditorExperience();
+  } catch (error) {
+    // Keep the source preferences intact and show a retry surface in the gate.
+    console.warn('[Editor experience] Preferences could not be initialized:', error);
+  }
+  try {
     if (isWelcomeView) {
       await bootWelcome();
     } else {
@@ -170,5 +182,7 @@ function reportInstall(): void {
     // unguarded await would take the install report down with it — losing the
     // datapoint on exactly the launches most worth knowing about.
     reportInstall();
+    void import('./utils/activation-runtime')
+      .then(({ startActivationReporting }) => startActivationReporting()).catch(() => {});
   }
 })();

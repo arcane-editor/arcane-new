@@ -10,6 +10,8 @@ import { Folder, FolderOpen } from 'lucide-react';
 import TooltipHost from './components/TooltipHost';
 import WindowControls from './components/WindowControls';
 import { isMac } from './utils/platform';
+import { useCommandsStore } from './stores/commands';
+import { KeyboardShortcutManager } from './features/app-shell';
 
 const ERROR_DISMISS_MS = 6000;
 
@@ -176,19 +178,29 @@ function WelcomeApp() {
   const pickFolderRef = useRef<() => void>(() => {});
   const openDroppedProjectRef = useRef<(paths: string[]) => void>(() => {});
 
+  useEffect(() => {
+    useCommandsStore.getState().registerCommands([
+      { id: 'file.openFolder', label: 'Open Folder', category: 'File', keybinding: 'mod+o', handler: () => pickFolderRef.current() },
+      { id: 'file.newWindow', label: 'New Window', category: 'File', keybinding: 'mod+shift+n', handler: () => {} },
+      { id: 'file.closeTab', label: 'Close Window', category: 'File', keybinding: 'mod+w', handler: () => { void getCurrentWindow().close(); } },
+    ]);
+    return () => {
+      useCommandsStore.getState().unregisterCommand('file.openFolder');
+      useCommandsStore.getState().unregisterCommand('file.newWindow');
+      useCommandsStore.getState().unregisterCommand('file.closeTab');
+    };
+  }, []);
+
   // Native menu (macOS): `menu-action` is routed to the FOCUSED window. Now
   // that the welcome window stays open after spawning a project window,
-  // Cmd+O / Cmd+Shift+N focused HERE would otherwise be silent no-ops — this
-  // window (unlike App.tsx's) has no command registry to bridge
-  // `menu-action` into.
+  // Commands use this window's resolved keymap, including Close Window when
+  // no project tab exists, so menu accelerators match document shortcuts.
   useEffect(() => {
     let unlisten: (() => void) | null = null;
     let cancelled = false;
     (async () => {
       const fn = await listenScoped<string>('menu-action', (event) => {
-        if (event.payload === 'file.openFolder') {
-          pickFolderRef.current();
-        }
+        useCommandsStore.getState().executeCommand(event.payload);
         // 'file.newWindow': no-op — the welcome window IS the new-window
         // surface and is already open/focused. All other ids: ignored.
       });
@@ -291,6 +303,7 @@ function WelcomeApp() {
       fontFamily: 'var(--font-display)',
     }}>
       <TooltipHost />
+      <KeyboardShortcutManager />
       {/* This window's decorations are off everywhere but macOS (`lib.rs` for
           the one declared in tauri.conf.json, `openWelcomeWindow` for a
           respawned one) so that the OS bar does not stack on top of this

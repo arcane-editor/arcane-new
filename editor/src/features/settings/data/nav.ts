@@ -16,6 +16,7 @@ import type { SettingDefinition } from './definitions';
  * Prefixed to keep it out of the namespace a future category could occupy.
  */
 export const ACCOUNT_SECTION = '@account';
+export const EDITOR_EXPERIENCE_SECTION = '@editor-experience';
 
 /** Distinct categories, in the order they first appear in the catalogue. */
 export function categoriesOf(definitions: SettingDefinition[]): string[] {
@@ -53,5 +54,5 @@ export function filterSettings(
  * than trusting the caller and rendering a blank pane.
  */
 export function isKnownSection(section: string, categories: string[]): boolean {
-  return section === ACCOUNT_SECTION || categories.includes(section);
+  return section === ACCOUNT_SECTION || section === EDITOR_EXPERIENCE_SECTION || categories.includes(section);
 }

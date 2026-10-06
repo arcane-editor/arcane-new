@@ -19,6 +19,7 @@ import { DEFAULT_MODEL_ROUTING, DEFAULT_HARNESS_LIMITS } from '../config/plans.t
 import type { HarnessLimitsDoc } from '../config/plans.ts';
 import { GATEWAY_FEE, MARGIN, isPaidPlan, tierGrantMicro, microToCredits } from '../config/tiers.ts';
 import { MODEL_CATALOG } from '../lib/costs.ts';
+import { acquisitionReport, reportRange } from '../lib/acquisition-report.ts';
 
 export const adminRouter = new Hono<AppEnv>();
 
@@ -58,6 +59,12 @@ adminRouter.post('/v1/admin/login', async (c) => {
 // All other admin routes require adminAccess() (env-admin token OR a DB
 // user row with role = 'admin').
 adminRouter.use('/v1/admin/*', adminAccess());
+
+adminRouter.get('/v1/admin/acquisition-report', async (c) => {
+    const range = reportRange(c.req.query('from'), c.req.query('to'));
+    if (!range) return c.json({ error: 'invalid_date_range' }, 400);
+    return c.json(await acquisitionReport(c.env.arcane_db, range));
+});
 
 // ─── API: Users ──────────────────────────────────────────────
 

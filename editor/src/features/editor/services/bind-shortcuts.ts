@@ -1,65 +1,43 @@
 import type { Monaco } from '@monaco-editor/react';
-import type { editor as MonacoEditorNs } from 'monaco-editor';
-import { useCommandsStore } from '../../../stores/commands';
+import type { editor as MonacoEditorNs, IDisposable } from 'monaco-editor';
+import { registerEditorCommandTarget, useCommandsStore } from '../../../stores/commands';
 import { parseHotkeyToMonaco } from '../../../utils/hotkey-to-monaco';
 
-// Every app command bridged into Monaco via `editor.addCommand` is registered
-// with the `!findWidgetVisible` context precondition (Monaco's 3rd addCommand
-// arg — a context-key expression string). Without it, `addCommand` installs a
-// keybinding at the highest priority and fires unconditionally whenever the
-// editor has focus, which shadows Monaco's own find/replace-widget keymap
-// (e.g. app `editor.gotoLine` on mod+g shadows Monaco's built-in Find Next on
-// Cmd+G) and makes the widget's own shortcuts unreliable while it's open.
-// `findWidgetVisible` is Monaco's built-in context key (see
-// CONTEXT_FIND_WIDGET_VISIBLE in monaco-editor's findModel.ts): guarding on
-// its negation lets Monaco's find keymap win wholesale while the widget is
-// visible; app commands remain reachable via the document-level hotkeys
-// (KeyboardShortcutManager) when appropriate outside that context.
-export function bindGlobalShortcutsToMonaco(
-  editor: MonacoEditorNs.IStandaloneCodeEditor,
-  monaco: Monaco
-): () => void {
-  const registered = new Set<string>();
-
+/**
+ * The capture-phase document dispatcher owns app shortcuts and their `when`
+ * gates, including editor actions. Monaco contributes disposable default
+ * removal rules, so switching profiles removes former keys without adding
+ * unconditional bindings that swallow a disabled action's fallback chord.
+ */
+export function bindGlobalShortcutsToMonaco(editor: MonacoEditorNs.IStandaloneCodeEditor, monaco: Monaco): () => void {
+  let contributions: IDisposable[] = [];
+  const unregister = registerEditorCommandTarget({
+    focused: () => editor.hasTextFocus(),
+    supports: (actionId) => !!editor.getAction(actionId)?.isSupported(),
+    execute: (actionId) => editor.trigger('editor-experience', actionId, null),
+  });
+  const clear = () => {
+    for (const contribution of contributions) contribution.dispose();
+    contributions = [];
+  };
   const sync = () => {
-    const all = useCommandsStore.getState().commands;
-    for (const cmd of all.values()) {
-      if (!cmd.keybinding) continue;
-      // Commands can opt out of the editor bridge (see the Command type):
-      // an addCommand keybinding consumes the keystroke inside Monaco even
-      // when `when()` returns false, which would shadow Monaco defaults on
-      // the same chord (e.g. terminal.focusNext/PreviousPane vs. non-mac
-      // fold/unfold on mod+shift+bracketleft/right).
-      if (cmd.skipMonacoBridge) continue;
-      // Alias chords are bridged too, or a command would answer only its
-      // primary chord while the editor has focus (e.g. view.zoomIn on
-      // mod+shift+equal) — the exact inconsistency this bridge exists to stop.
-      for (const chord of [cmd.keybinding, ...(cmd.extraKeybindings ?? [])]) {
-        if (!chord) continue;
-        const tag = `${cmd.id}|${chord}`;
-        if (registered.has(tag)) continue;
-        const bitfield = parseHotkeyToMonaco(chord, monaco);
-        if (bitfield === null) {
-          if (import.meta.env.DEV) console.warn('[Shortcuts] Unparseable keybinding, not bound in editor:', chord, cmd.id);
-          continue;
-        }
-        const cmdId = cmd.id;
-        editor.addCommand(
-          bitfield,
-          () => {
-            const live = useCommandsStore.getState().commands.get(cmdId);
-            if (!live) return;
-            if (live.when && !live.when()) return;
-            live.handler();
-          },
-          '!findWidgetVisible'
-        );
-        registered.add(tag);
+    clear();
+    const bindings = useCommandsStore.getState().resolvedBindings;
+    const removals: MonacoEditorNs.IKeybindingRule[] = [];
+    for (const binding of bindings) {
+      if (!binding.commandId.startsWith('monaco:')) continue;
+      const keybinding = parseHotkeyToMonaco(binding.strokes.join(' '), monaco);
+      if (keybinding === null) continue;
+      const actionId = binding.commandId.slice(7);
+      if (binding.removed) {
+        removals.push({ keybinding, command: `-${actionId}` });
       }
     }
+    if (removals.length) contributions.push(monaco.editor.addKeybindingRules(removals));
   };
-
   sync();
-  const unsubscribe = useCommandsStore.subscribe(sync);
-  return unsubscribe;
+  const unsubscribe = useCommandsStore.subscribe((next, previous) => {
+    if (next.resolvedBindings !== previous.resolvedBindings) sync();
+  });
+  return () => { unsubscribe(); clear(); unregister(); };
 }

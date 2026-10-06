@@ -19,7 +19,7 @@
  *
  * `theme-contract.test.ts` enforces all of this — both the invariants above and
  * the "no CSS reference without a token" rule. Adding a token means adding it to
- * all six definitions; the compiler enforces that part.
+ * every definition; the compiler enforces that part.
  */
 export interface UiColors {
   // ── SURFACE (opaque) ──────────────────────────────────────────────

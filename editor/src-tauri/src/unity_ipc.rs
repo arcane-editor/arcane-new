@@ -168,6 +168,9 @@ pub struct UnityIpcInner {
     /// `editor_awake` exists to cover) would otherwise never learn it; polled
     /// back out via `unity_ipc_status`.
     pub bridge_protocol: AtomicU32,
+    /// Reported by a session-id-validated handshake. Kept locally so activation
+    /// recovery can verify the project even when the frontend missed the event.
+    connected_project_path: Mutex<Option<String>>,
 }
 
 impl UnityIpcInner {
@@ -184,6 +187,7 @@ impl UnityIpcInner {
             editor_awake: AtomicBool::new(true),
             editor_can_wake: AtomicBool::new(false),
             bridge_protocol: AtomicU32::new(0),
+            connected_project_path: Mutex::new(None),
         }
     }
 }
@@ -595,6 +599,10 @@ async fn run_journal_session(
                         unity_session_id = Some(incoming.to_string());
                     }
                     connected = true;
+                    *state.connected_project_path.lock().await =
+                        if msg.payload.get("protocolVersion").and_then(|v| v.as_u64()) == Some(PROTOCOL_VERSION as u64) {
+                            msg.payload.get("projectPath").and_then(|v| v.as_str()).map(str::to_owned)
+                        } else { None };
                     state.connected.store(true, Ordering::SeqCst);
                     // Recovered by `unity_ipc_status` too, not just the
                     // `unity-connection-changed` event — a frontend that attaches
@@ -1052,6 +1060,28 @@ pub async fn unity_ipc_status(app: AppHandle, window: Window) -> Result<UnityIpc
     })
 }
 
+/// Local-only activation evidence: a current compatible handshake for exactly
+/// the successfully opened Unity root. Paths never enter the reporting record.
+pub async fn activation_connection_matches(app: &AppHandle, label: &str, workspace: &str) -> bool {
+    let inner = app.state::<UnityIpcState>().get_or_create(label);
+    if !inner.connected.load(Ordering::SeqCst)
+        || inner.bridge_protocol.load(Ordering::SeqCst) != PROTOCOL_VERSION
+    {
+        return false;
+    }
+    let reported = inner.connected_project_path.lock().await.clone();
+    let Some(reported) = reported else { return false };
+    activation_paths_match(workspace, &reported)
+}
+
+fn activation_paths_match(workspace: &str, reported: &str) -> bool {
+    let root = std::path::Path::new(workspace);
+    root.join("Assets").is_dir()
+        && root.join("ProjectSettings").is_dir()
+        && matches!((root.canonicalize(), std::path::Path::new(reported).canonicalize()),
+            (Ok(opened), Ok(connected)) if opened == connected)
+}
+
 #[tauri::command]
 pub async fn unity_ipc_send(app: AppHandle, window: Window, message_json: String) -> Result<(), String> {
     let label = window.label().to_string();
@@ -1210,6 +1240,21 @@ mod tests {
         // what retired the sha1 path fallback and its symlink mismatch.
         let dir = bridge_dir("/x/proj");
         assert_eq!(dir, PathBuf::from("/x/proj/Library/UnityIDE"));
+    }
+
+    #[test]
+    fn activation_requires_a_real_unity_root_matching_the_handshake() {
+        let opened = tempfile::tempdir().unwrap();
+        let other = tempfile::tempdir().unwrap();
+        let path = opened.path().to_str().unwrap();
+        assert!(!activation_paths_match(path, path), "a generic folder is not activation");
+        std::fs::create_dir(opened.path().join("Assets")).unwrap();
+        std::fs::create_dir(opened.path().join("ProjectSettings")).unwrap();
+        assert!(activation_paths_match(path, path));
+        assert!(!activation_paths_match(path, other.path().to_str().unwrap()));
+        assert!(!activation_paths_match(path, ""));
+        assert!(!activation_paths_match(path, "/missing/unity-project"));
+        assert!(activation_paths_match(path, &format!("{path}/.")));
     }
 
     #[test]

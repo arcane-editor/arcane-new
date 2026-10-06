@@ -1,6 +1,9 @@
 import { create } from 'zustand';
 import { getTheme, getAllThemes, DEFAULT_THEME_ID, resolveThemeId, applyTheme, applyCssVariables } from '../features/theme';
 import type { ThemeDefinition } from '../features/theme';
+import { invoke } from '@tauri-apps/api/core';
+import type { EditorPreferences } from '../types/editor-experience';
+import { publishPreferences, subscribePreferences } from '../utils/preferences-events';
 
 const STORAGE_KEY = 'editor-theme-id-v2';
 
@@ -47,6 +50,7 @@ export const useThemeStore = create<ThemeState>((set, get) => ({
     persistThemeId(id);
     set({ activeThemeId: id });
     applyTheme(theme);
+    invoke<EditorPreferences>('patch_editor_theme', { themeId: id }).then(publishPreferences).catch(console.warn);
   },
 
   previewTheme: (id: string) => {
@@ -71,6 +75,16 @@ export const useThemeStore = create<ThemeState>((set, get) => ({
     return getAllThemes();
   },
 }));
+
+subscribePreferences((preferences) => {
+  const id = resolveThemeId(preferences.themeId);
+  const theme = getTheme(id);
+  if (!theme || id === confirmedThemeId) return;
+  confirmedThemeId = id;
+  persistThemeId(id);
+  useThemeStore.setState({ activeThemeId: id });
+  applyTheme(theme);
+});
 
 // Eagerly apply CSS variables at module scope to prevent FOUC
 const initialTheme = getTheme(loadPersistedThemeId());

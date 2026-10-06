@@ -12,6 +12,8 @@ import { overrideKeySequence } from '../key-sequences';
 import { useTerminalStore } from '../../../stores/terminal';
 import { useThemeStore } from '../../../stores/theme';
 import { useSettingsStore } from '../../../stores/settings';
+import { useCommandsStore } from '../../../stores/commands';
+import { shouldSuppressTerminalKey } from '../../../utils/editor-keybindings';
 import { registerTerminal, unregisterTerminal } from '../../theme';
 import { safeUnlisten, listenScoped } from '../../../utils/tauri-listener';
 import { isMac } from '../../../utils/platform';
@@ -161,50 +163,11 @@ function TerminalInstance({ id }: Props) {
           return false;
         }
 
-        // Three pane commands (mod+\, mod+shift+[, mod+shift+]) are Ctrl-
-        // chords on non-mac platforms (mod=Ctrl there). xterm's default
-        // keydown handling would otherwise ALSO forward them to the PTY —
-        // Ctrl+\ as the literal SIGQUIT byte (0x1C), Ctrl+Shift+[ / Ctrl+
-        // Shift+] as escape sequences — double-firing alongside the app-level
-        // command and leaking into whatever's running in the shell (vim, a
-        // REPL, etc). Returning `false` tells xterm to ignore the keystroke
-        // entirely so only the document-level command handler
-        // (KeyboardShortcutManager) sees it. On macOS these are Cmd-chords
-        // instead; xterm never forwards Cmd combinations to the PTY to begin
-        // with, so this guard is naturally dormant there.
-        if (!mac) {
-          if (e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey && e.code === 'Backslash') {
-            return false;
-          }
-          if (
-            e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey &&
-            (e.code === 'BracketLeft' || e.code === 'BracketRight')
-          ) {
-            return false;
-          }
-          // terminal.new (mod+shift+`). It is in COMMANDS_TO_SKIP_SHELL, so
-          // the app command fires from inside a pane — but xterm would also
-          // forward the keystroke to the PTY. This never showed up before
-          // because the chord was spelled with a literal backtick and so
-          // never matched anything at all.
-          if (
-            e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey &&
-            e.code === 'Backquote'
-          ) {
-            return false;
-          }
-          // terminal.toggle owns mod+j (= Ctrl+J here) everywhere, including
-          // from inside a focused terminal — the human ruled the panel toggle
-          // wins, the same call VS Code makes. Swallow it here so xterm's
-          // default encoding never gets a chance to run: this is what costs
-          // Ctrl+J its old job as plain LF (0x0A) into the shell on
-          // Linux/Windows. On macOS this guard is dormant like the others
-          // above; the app's chord there is Cmd+J, which xterm never forwards
-          // to the PTY to begin with.
-          if (e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey && e.code === 'KeyJ') {
-            return false;
-          }
-        }
+        // Use the very same effective binding/policy as app dispatch. Imported
+        // terminal shortcuts must not leak bytes, and formerly bound keys must
+        // return to the shell immediately after a profile switch.
+        const commands = useCommandsStore.getState();
+        if (shouldSuppressTerminalKey(e, commands.resolvedBindings, mac, commands.canExecuteCommand)) return false;
 
         // ---- Clipboard ----------------------------------------------------
         // THE ONE THAT MATTERS: plain Ctrl+V must reach the PTY untouched as

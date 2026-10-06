@@ -1118,6 +1118,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     addRecentProject(path);
 
     useProjectContextStore.getState().applyDetection(path, unityInfo);
+    if (unityInfo.is_unity) {
+      void import('../utils/activation-runtime')
+        .then(({ observeUnityActivation }) => observeUnityActivation(path)).catch(() => {});
+    }
 
     // Nothing is known about this workspace's analyzers until `unity_setup_lsp`
     // reports back, and the local rules that defer to them must not carry the
