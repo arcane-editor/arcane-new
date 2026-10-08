@@ -142,6 +142,9 @@ pub fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     let save_file = MenuItemBuilder::with_id("file.save", "Save")
         .accelerator("CmdOrCtrl+S")
         .build(&app_handle)?;
+    let save_all = MenuItemBuilder::with_id("file.saveAll", "Save All")
+        .accelerator("CmdOrCtrl+Shift+S")
+        .build(&app_handle)?;
     let close_tab = MenuItemBuilder::with_id("file.closeTab", "Close Tab")
         .accelerator("CmdOrCtrl+W")
         .build(&app_handle)?;
@@ -164,6 +167,7 @@ pub fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         .item(&open_recent)
         .separator()
         .item(&save_file)
+        .item(&save_all)
         .separator()
         .item(&close_tab)
         .item(&close_all_tabs)
@@ -171,9 +175,15 @@ pub fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         .build()?;
 
     // Edit menu
+    let undo_workspace_change = MenuItemBuilder::with_id("workspace.undoChange", "Undo Last Workspace Change")
+        .build(&app_handle)?;
+    let review_recovery = MenuItemBuilder::with_id("workspace.reviewRecovery", "Review Interrupted Workspace Changes")
+        .build(&app_handle)?;
     let edit_submenu = SubmenuBuilder::new(&app_handle, "Edit")
         .item(&PredefinedMenuItem::undo(&app_handle, None)?)
         .item(&PredefinedMenuItem::redo(&app_handle, None)?)
+        .item(&undo_workspace_change)
+        .item(&review_recovery)
         .separator()
         .item(&PredefinedMenuItem::cut(&app_handle, None)?)
         .item(&PredefinedMenuItem::copy(&app_handle, None)?)

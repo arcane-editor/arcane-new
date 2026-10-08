@@ -26,7 +26,8 @@ export type UnityEvidence = EvidenceOrigin & ({
     sample: ProfilerSample | null;
     statistics: { count: number; median: number | null; p95: number | null; p99: number | null };
     counters?: ProfilerCounter[];
-    topSamples: { name: string; selfMs: number; durationMs: number; calls: number; allocationBytes: number }[];
+    topSamples: { name: string; selfMs: number; durationMs: number; calls: number; allocationBytes: number | null }[];
+    hotspotRange?: { firstFrame: number | null | undefined; lastFrame: number | null | undefined; thread: number; search: string; complete: boolean };
     includedSamples: number;
     totalSamples?: number;
     droppedFrames?: number;

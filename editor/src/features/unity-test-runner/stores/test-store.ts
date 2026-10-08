@@ -7,9 +7,10 @@ import { useProjectContextStore } from '../../../stores/project-context';
 import { useDebugStore } from '../../../stores/debug';
 import { notify } from '../../../stores/notifications';
 import type { TestRunCompletedPayload } from '../../../types/unity';
+import { sameTestRun } from '../services/run-identity';
 
 export type TestMode = 'EditMode' | 'PlayMode';
-export type TestStatus = 'passed' | 'failed' | 'skipped' | 'running' | 'not-run';
+export type TestStatus = 'passed' | 'failed' | 'skipped' | 'inconclusive' | 'running' | 'not-run';
 
 // Mirrors the Rust unity_tests.rs serde (camelCase).
 export interface TestNode {
@@ -76,6 +77,8 @@ function normStatus(s: string): TestStatus {
       return 'failed';
     case 'skipped':
       return 'skipped';
+    case 'inconclusive':
+      return 'inconclusive';
     default:
       return 'not-run';
   }
@@ -153,11 +156,11 @@ export const useTestStore = create<TestState>((set, get) => ({
       // first is a race the test usually wins — it runs to completion before
       // the breakpoints bind, and the debugger looks broken when it is simply
       // late.
-      if (useDebugStore.getState().status === 'inactive') {
+      if (!useDebugStore.getState().configurationReady) {
         notify.warning('Could not attach the debugger; the test was not run.');
         return;
       }
-      await bridgeRpc.runTests(mode, fullName, crypto.randomUUID());
+      await get().runFiltered(fullName, mode);
     } catch (err) {
       notify.error(`Debug test failed: ${err}`);
     }
@@ -165,11 +168,15 @@ export const useTestStore = create<TestState>((set, get) => ({
 
   applyEvent: (payload) => {
     const phase = payload.phase as string;
+    const run = get().run;
+    if (run?.active && (run.source !== 'bridge' || !sameTestRun(run.runId, payload.runId))) return;
+    if (phase !== 'runStarted' && (!run?.active || run.source !== 'bridge' || !sameTestRun(run.runId, payload.runId))) return;
+    if (phase === 'runStarted' && run && !run.active && sameTestRun(run.runId, payload.runId)) return;
     if (phase === 'runStarted') {
       set({
         run: {
           active: true,
-          mode: (payload.mode as TestMode) ?? 'EditMode',
+          mode: (payload.mode as TestMode) ?? run?.mode ?? 'EditMode',
           source: 'bridge',
           total: (payload.total as number) ?? 0,
           done: 0,
@@ -177,6 +184,7 @@ export const useTestStore = create<TestState>((set, get) => ({
           failed: 0,
           runId: (payload.runId as string | null | undefined) ?? undefined,
         },
+        results: new Map(),
       });
     } else if (phase === 'testStarted') {
       const id = (payload.id as string) ?? (payload.fullName as string);
@@ -184,6 +192,7 @@ export const useTestStore = create<TestState>((set, get) => ({
     } else if (phase === 'testFinished') {
       const id = (payload.id as string) ?? (payload.fullName as string);
       const status = normStatus((payload.status as string) ?? '');
+      if (id && get().results.has(id) && get().results.get(id)?.status !== 'running') return;
       if (id) {
         markResult(set, id, {
           status,
@@ -215,7 +224,7 @@ export const useTestStore = create<TestState>((set, get) => ({
       // The old `test_event` runFinished (above) already flips this for the
       // live path; this covers a caller that only listens for the completed
       // push, and is a no-op if runFinished already ran.
-      run: s.run ? { ...s.run, active: false } : s.run,
+      run: s.run?.source === 'bridge' && sameTestRun(s.run.runId, payload.runId) ? { ...s.run, active: false } : s.run,
     }));
   },
 }));
@@ -239,13 +248,16 @@ async function runWith(
   mode: TestMode,
   filter: string | undefined,
 ): Promise<void> {
-  void get;
+  if (get().run?.active) { notify.warning('A test run is already active.'); return; }
+  const runId = crypto.randomUUID();
   if (useUnityStore.getState().connected) {
     // Live path — results stream via `unity-test-event` → applyEvent.
     try {
-      await bridgeRpc.runTests(mode, filter, crypto.randomUUID());
+      set(() => ({ run: { active: true, mode, source: 'bridge', total: 0, done: 0, passed: 0, failed: 0, runId }, results: new Map() }));
+      await bridgeRpc.runTests(mode, filter, runId);
     } catch (err) {
       notify.error(`Test run failed: ${err}`);
+      set(s => s.run?.runId === runId ? { run: { ...s.run, active: false } } : {});
     }
     return;
   }
@@ -257,7 +269,7 @@ async function runWith(
     notify.warning('Unity not connected and no editor version resolved — cannot run tests headlessly.');
     return;
   }
-  set(() => ({ run: { active: true, mode, source: 'headless', total: 0, done: 0, passed: 0, failed: 0 } }));
+  set(() => ({ run: { active: true, mode, source: 'headless', total: 0, done: 0, passed: 0, failed: 0, runId }, results: new Map() }));
   notify.info('Running tests headlessly (Unity batch mode) — this can take a while…');
   try {
     const summary = await invoke<HeadlessSummary>('unity_tests_run_headless', {
@@ -267,6 +279,7 @@ async function runWith(
       filter: filter ?? null,
     });
     set((s) => {
+      if (s.run?.runId !== runId || useWorkspaceStore.getState().workspacePath !== ws) return {};
       const next = new Map(s.results);
       for (const r of summary.results) {
         next.set(r.fullName, {
@@ -286,11 +299,12 @@ async function runWith(
           done: summary.results.length,
           passed: summary.passed,
           failed: summary.failed,
+          runId,
         },
       };
     });
   } catch (err) {
     notify.error(`Headless test run failed: ${err}`);
-    set((s) => (s.run ? { run: { ...s.run, active: false } } : {}));
+    set((s) => (s.run?.runId === runId ? { run: { ...s.run, active: false } } : {}));
   }
 }

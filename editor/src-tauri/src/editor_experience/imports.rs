@@ -1321,7 +1321,8 @@ fn rider_settings(preview: &mut ImportPreview, root: &Path) -> Result<(), String
 
 fn rider_action(id: &str) -> Option<&'static str> {
     Some(match id {
-        "SaveAll" | "SaveDocument" => "file.save",
+        "SaveAll" => "file.saveAll",
+        "SaveDocument" => "file.save",
         "CloseContent" => "file.closeTab",
         "CloseAllEditors" => "tab.closeAll",
         "ReopenClosedTab" => "tab.reopenClosed",
@@ -1771,7 +1772,7 @@ mod tests {
             result
                 .keybindings
                 .iter()
-                .filter(|b| b.command_id == "file.save")
+                .filter(|b| b.command_id == "file.saveAll")
                 .count(),
             1
         );
@@ -1853,7 +1854,7 @@ mod tests {
         assert_eq!(active.len(), 2);
         assert!(active
             .iter()
-            .any(|b| b.command_id == "file.save" && b.strokes == ["ctrl+alt+k"]));
+            .any(|b| b.command_id == "file.saveAll" && b.strokes == ["ctrl+alt+k"]));
         assert!(active
             .iter()
             .any(|b| b.command_id == "palette.quickOpen" && b.strokes == ["ctrl+alt+l"]));

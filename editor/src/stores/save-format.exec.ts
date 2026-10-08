@@ -189,4 +189,27 @@ describe('format on save', () => {
     expect(writes).toHaveLength(1);
     expect(writes[0].contents).toBe(ORIGINAL);
   });
+
+  it('Save All saves every dirty document through formatting', async () => {
+    await useWorkspaceStore.getState().openFile('/ws/Other.cs', 'Other.cs');
+    useWorkspaceStore.getState().updateFileContent(FILE, 'dirty player');
+    useWorkspaceStore.getState().updateFileContent('/ws/Other.cs', 'dirty other');
+    useSettingsStore.getState().setSetting('editor.formatOnSave', true);
+    formatResult = FORMATTED;
+    const result = await useWorkspaceStore.getState().saveAll();
+    expect(result.saved).toEqual([FILE, '/ws/Other.cs']);
+    expect(result.unsaved).toEqual([]);
+    expect(writes.map(w => w.contents)).toEqual([FORMATTED, FORMATTED]);
+  });
+
+  it('Save All reports conflicts and continues saving other documents', async () => {
+    await useWorkspaceStore.getState().openFile('/ws/Other.cs', 'Other.cs');
+    useWorkspaceStore.getState().updateFileContent(FILE, 'dirty player');
+    useWorkspaceStore.getState().updateFileContent('/ws/Other.cs', 'dirty other');
+    useWorkspaceStore.setState(s => ({ openFiles: s.openFiles.map(f => f.path === FILE ? { ...f, saveConflict: true } : f) }));
+    const result = await useWorkspaceStore.getState().saveAll();
+    expect(result.unsaved).toEqual([FILE]);
+    expect(result.saved).toEqual(['/ws/Other.cs']);
+    expect(writes.map(w => w.path)).toEqual(['/ws/Other.cs']);
+  });
 });

@@ -6,7 +6,7 @@ import { Circle, Square, FolderOpen, Download, RefreshCw, Sparkles } from 'lucid
 import { useProfilerStore } from '../../../stores/profiler';
 import { useWorkspaceStore } from '../../../stores/workspace';
 import { attachUnityEvidence } from '../../ai-panel';
-import { frameStatistics, aggregateSamples } from '../services/analysis';
+import { frameStatistics } from '../services/analysis';
 import type { ProfilerFrame, ProfilerSample } from '../../../types/profiler';
 import './profiler.css';
 const ms = (n: number | null | undefined) => n == null ? '—' : `${n.toFixed(2)} ms`;
@@ -21,7 +21,29 @@ export function UnityProfilerPanel() {
   const virtual = useVirtualizer({ count: view === 'hierarchy' ? rows.length : 0, getScrollElement: () => scroll.current, estimateSize: () => 27, overscan: 10 });
   const statistics = useMemo(() => frameStatistics(s.frames), [s.frames]);
   const baseline = useMemo(() => frameStatistics(comparison), [comparison]);
-  const hotspots = useMemo(() => aggregateSamples(rows), [rows]);
+  const [hotspots, setHotspots] = useState<Array<{ name: string; selfMs: number; durationMs: number; calls: number; allocationBytes: number | null }>>([]);
+  const [hotspotsLoading, setHotspotsLoading] = useState(false);
+  const [hotspotsReady, setHotspotsReady] = useState(false);
+  const [hotspotScope, setHotspotScope] = useState<'frame' | 'capture' | 'range'>('frame');
+  const [rangeStart, setRangeStart] = useState('');
+  const [rangeEnd, setRangeEnd] = useState('');
+  const firstFrame = hotspotScope === 'frame' ? s.frame : hotspotScope === 'capture' ? s.frames.at(-1)?.frame : Number(rangeStart);
+  const lastFrame = hotspotScope === 'frame' ? s.frame : hotspotScope === 'capture' ? s.frames[0]?.frame : Number(rangeEnd);
+  useEffect(() => {
+    setRangeStart(''); setRangeEnd(''); setHotspots([]);
+  }, [s.captureId]);
+  useEffect(() => {
+    let current = true;
+    setHotspots([]); setHotspotsReady(false);
+    if (view !== 'hotspots' || !s.captureId || firstFrame == null || lastFrame == null || (hotspotScope === 'range' && (!rangeStart || !rangeEnd))) { setHotspotsLoading(false); return; }
+    setHotspotsLoading(true);
+    void invoke<Array<{ name: string; selfMs: number; durationMs: number; calls: number; allocationBytes: number | null }>>('profiler_hotspots', {
+      captureId: s.captureId, firstFrame, lastFrame, thread: s.thread, search: s.search,
+    }).then(data => { if (current) { setHotspots(data); setHotspotsReady(true); } })
+      .catch(error => { if (current) useProfilerStore.setState({ error: String(error) }); })
+      .finally(() => { if (current) setHotspotsLoading(false); });
+    return () => { current = false; };
+  }, [s.captureId, s.frames, firstFrame, lastFrame, s.thread, s.search, hotspotScope, rangeStart, rangeEnd, view]);
   const frame = s.frames.find(f => f.frame === s.frame);
   useEffect(() => { void s.refreshCaptures(); }, []);
   useEffect(() => { setSelected(null); }, [s.captureId, s.frame, s.thread]);
@@ -38,7 +60,7 @@ export function UnityProfilerPanel() {
     } catch (e) { reportError(e); }
   };
   const explain = () => void attachUnityEvidence({ source: 'profiler', label: selected ? `Profiler: ${selected.name}` : `Profiler frame ${s.frame}`, capturedAt: new Date().toISOString(), workspacePath: useWorkspaceStore.getState().workspacePath,
-    data: { metadata: s.captures.find(c => c.id === s.captureId), frame, thread: s.data?.threads.find(t => t.id === s.thread), sample: selected, statistics, counters: s.data?.counters, topSamples: hotspots.slice(0, 20), includedSamples: rows.length, totalSamples: s.data?.total, droppedFrames: s.status?.captureId === s.captureId ? s.status.droppedFrames : undefined } });
+    data: { metadata: s.captures.find(c => c.id === s.captureId), frame, thread: s.data?.threads.find(t => t.id === s.thread), sample: selected, statistics, counters: s.data?.counters, topSamples: hotspots.slice(0, 20), hotspotRange: { firstFrame, lastFrame, thread: s.thread, search: s.search, complete: hotspotsReady }, includedSamples: rows.length, totalSamples: s.data?.total, droppedFrames: s.status?.captureId === s.captureId ? s.status.droppedFrames : undefined } });
   const openSource = async (path: string, line: number) => {
     try { await useWorkspaceStore.getState().openFile(path, path.split(/[\\/]/).pop() ?? path); window.dispatchEvent(new CustomEvent('navigate-to-line', { detail: { line, column: 1 } })); } catch (e) { reportError(e); }
   };
@@ -65,6 +87,8 @@ export function UnityProfilerPanel() {
     {!s.frames.length ? <div className="up-empty"><h3>Find the cost of a Unity frame</h3><p>Connect Unity, choose the Editor or a development player, and record a scenario. Select a frame to inspect its threads, script callbacks and allocations.</p><p>Saved captures can be opened without Unity running. Recording starts only when you choose Record.</p></div> : <>
       <div className="up-frame-strip" aria-label="Captured frames">{s.frames.slice(0, 300).reverse().map(f => <button key={f.frame} className={f.frame === s.frame ? 'selected' : ''} aria-label={`Frame ${f.frame}: ${ms(f.durationMs)}`} title={`Frame ${f.frame} · ${ms(f.durationMs)}`} onClick={() => void s.selectFrame(f.frame)}><span style={{ height: `${Math.min(100, Math.max(3, f.durationMs / 50 * 100))}%` }} /></button>)}</div>
       <div className="up-toolbar">
+        <button disabled={s.frames.findIndex(f => f.frame === s.frame) >= s.frames.length - 1} onClick={() => { const index = s.frames.findIndex(f => f.frame === s.frame); if (s.frames[index + 1]) void s.selectFrame(s.frames[index + 1].frame); }}>Older frame</button>
+        <button disabled={s.frames.findIndex(f => f.frame === s.frame) <= 0} onClick={() => { const index = s.frames.findIndex(f => f.frame === s.frame); if (s.frames[index - 1]) void s.selectFrame(s.frames[index - 1].frame); }}>Newer frame</button>
         <label>Frame <input className="up-frame-input" type="number" value={s.frame ?? ''} onChange={e => { const frame = Number(e.target.value); if (s.frames.some(f => f.frame === frame)) void s.selectFrame(frame); }} /></label>
         <b>{ms(frame?.durationMs)}</b><span>GPU {ms(frame?.gpuMs)}</span>
         <select aria-label="Thread" value={s.thread} onChange={e => { useProfilerStore.setState({ thread: Number(e.target.value), offset: 0 }); void s.query(); }}>{s.data?.threads.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select>
@@ -76,7 +100,7 @@ export function UnityProfilerPanel() {
         <div className="up-main">
           {view === 'hierarchy' && <><div className="up-row up-columns"><span>Sample</span><span>Total</span><span>Self</span><span>GC bytes</span></div><div className="up-samples" ref={scroll}><div style={{ height: virtual.getTotalSize(), position: 'relative' }}>{virtual.getVirtualItems().map(item => { const row = rows[item.index]; return <button key={row.id} className={`up-row ${selected?.id === row.id ? 'selected' : ''}`} style={{ position: 'absolute', top: item.start, height: item.size, width: '100%' }} onClick={() => setSelected(row)}><span style={{ paddingLeft: Math.min(row.depth, 24) * 12 }} title={row.name}>{row.name}</span><span>{ms(row.durationMs)}</span><span>{ms(row.selfMs)}</span><span>{row.allocationBytes ?? '—'}</span></button>; })}</div></div></>}
           {view === 'timeline' && <div className="up-timeline"><div className="up-timeline-label">{ms(0)}<span>{ms(frame?.durationMs)}</span></div><div style={{ position: 'relative', height: Math.max(1, ...rows.map(r => r.depth + 1)) * 25 }}>{rows.map(row => <button key={row.id} title={`${row.name} · ${ms(row.durationMs)}`} onClick={() => setSelected(row)} style={{ position: 'absolute', left: `${Math.max(0, row.startMs) / Math.max(.01, frame?.durationMs ?? 1) * 100}%`, width: `${Math.max(.15, row.durationMs / Math.max(.01, frame?.durationMs ?? 1) * 100)}%`, top: row.depth * 25, height: 23, background: `hsl(${(row.category * 47 + 200) % 360} 35% 35%)` }}>{row.name}</button>)}</div></div>}
-          {view === 'hotspots' && <div className="up-scroll"><p className="up-note">Aggregated samples on this page, sorted by self time.</p><div className="up-row up-columns"><span>Marker</span><span>Self</span><span>Calls</span><span>GC bytes</span></div>{hotspots.map(row => <div key={row.name} className="up-row"><span title={row.name}>{row.name}</span><span>{ms(row.selfMs)}</span><span>{row.calls}</span><span>{row.allocationBytes}</span></div>)}</div>}
+          {view === 'hotspots' && <div className="up-scroll"><div className="up-toolbar"><select aria-label="Hotspot analysis range" value={hotspotScope} onChange={e => setHotspotScope(e.target.value as typeof hotspotScope)}><option value="frame">Selected frame</option><option value="capture">Entire capture</option><option value="range">Frame range</option></select>{hotspotScope === 'range' && <><input aria-label="First analysis frame" className="up-frame-input" type="number" placeholder="First" value={rangeStart} onChange={e => setRangeStart(e.target.value)} /><input aria-label="Last analysis frame" className="up-frame-input" type="number" placeholder="Last" value={rangeEnd} onChange={e => setRangeEnd(e.target.value)} /></>}</div><p className="up-note">{hotspotsLoading ? 'Analyzing complete range…' : 'All matching samples in the selected range and thread, sorted by self time.'}</p><div className="up-row up-columns"><span>Marker</span><span>Self</span><span>Calls</span><span>GC bytes</span></div>{hotspots.map(row => <div key={row.name} className="up-row"><span title={row.name}>{row.name}</span><span>{ms(row.selfMs)}</span><span>{row.calls}</span><span>{row.allocationBytes ?? '—'}</span></div>)}</div>}
           {view === 'counters' && <div className="up-scroll"><p className="up-note">Counters reported by this target and thread. Unavailable counters are not inferred from other measurements.</p>{s.data?.counters.map(c => <div key={c.name} className="up-counter"><span>{c.name}</span><b>{c.value.toLocaleString()} {c.unit === 2 ? 'bytes' : c.unit === 1 ? 'ns' : ''}</b></div>)}{!s.data?.counters.length && <p className="up-note">No counter data in this frame.</p>}</div>}
           <div className="up-pagination"><button disabled={s.offset === 0} onClick={() => { useProfilerStore.setState({ offset: Math.max(0, s.offset - 1000) }); void s.query(); }}>Previous</button><span>{s.offset + 1}–{s.offset + rows.length} of {s.data?.total ?? 0} samples</span><button disabled={s.offset + rows.length >= (s.data?.total ?? 0)} onClick={() => { useProfilerStore.setState({ offset: s.offset + 1000 }); void s.query(); }}>Next</button></div>
         </div>

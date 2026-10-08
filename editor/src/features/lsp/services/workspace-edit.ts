@@ -4,9 +4,11 @@ import type { Monaco } from '@monaco-editor/react';
 import { getMonacoInstance } from '../../../utils/monaco-instance';
 import { useWorkspaceStore } from '../../../stores/workspace';
 import { notify } from '../../../stores/notifications';
-import { fileUri, pathFromFileUri } from './document-sync';
+import { fileUri, getDocumentVersion } from './document-sync';
+import { documentIdentity, normalizeWorkspaceEdit, applyEditsToText } from './workspace-edit-plan';
 import { setApplyEditHandler } from './client';
-import { modelFilePath, type LspPosition, type LspRange } from './model-context';
+import { modelFilePath, type LspRange } from './model-context';
+import { requestWorkspaceChangePreview, finishWorkspaceChangePreview } from '../../../stores/workspace-change-preview';
 
 // ── LSP WorkspaceEdit types (structural, not imported) ──────────
 // LspPosition/LspRange live in ./model-context (canonical home).
@@ -14,7 +16,7 @@ import { modelFilePath, type LspPosition, type LspRange } from './model-context'
 export interface LspTextEdit {
   range: LspRange;
   newText: string;
-  /** Present on AnnotatedTextEdit — harmless, ignored by the applier. */
+  /** Present on AnnotatedTextEdit. */
   annotationId?: string;
 }
 
@@ -24,12 +26,14 @@ export interface LspTextDocumentEdit {
 }
 
 /**
- * CreateFile / RenameFile / DeleteFile resource operations. Recognised
- * (so we don't crash) but not applied yet — counted as `skippedOps`.
+ * Resource operations are recognized and reject the complete edit until
+ * transactional resource handling is available.
  */
 export interface LspResourceOperation {
   kind: 'create' | 'rename' | 'delete';
-  [key: string]: unknown;
+  uri?: string;
+  oldUri?: string;
+  newUri?: string;
 }
 
 export type LspDocumentChange = LspTextDocumentEdit | LspResourceOperation;
@@ -40,35 +44,17 @@ export interface LspWorkspaceEdit {
 }
 
 export interface AppliedWorkspaceEditSummary {
+  cancelled: boolean;
   /** Files that received at least one text edit. */
   filesChanged: number;
   /** Total individual text edits applied across all files. */
   editsApplied: number;
-  /** Resource operations (create/rename/delete file) we don't handle yet. */
+  /** Always zero: unsupported operations reject the entire edit. */
   skippedOps: number;
-  /** Files whose edits failed to apply (the rest still get applied). */
+  /** Failure or recovery detail; no partial result is reported as success. */
   failedFiles: Array<{ path: string; error: string }>;
 }
 
-// ── URI helpers ─────────────────────────────────────────────────
-
-/**
- * Convert a `file://` URI to a filesystem path — the exact inverse of
- * `fileUri()`, so a Windows drive path survives the round trip (`file:///D:/x`
- * → `D:/x`, not `/D:/x`, which the Rust side then can't open).
- */
-function uriToFsPath(uri: string): string | null {
-  if (!uri.startsWith('file://')) return null;
-  return pathFromFileUri(uri);
-}
-
-/**
- * Locate an open Monaco model for an LSP uri. Tries the uri as-is, then
- * the canonical encoding produced by `fileUri()` (the same encoding
- * EditorPanel uses for model paths), then falls back to a decoded-path
- * scan so encoding mismatches between the server and Monaco can't make
- * us miss an open buffer.
- */
 function findModelForUri(
   monaco: Monaco,
   uri: string,
@@ -86,114 +72,11 @@ function findModelForUri(
     // rendering lower-cases the drive letter, so on Windows the decoded
     // spelling would never equal the server's `fsPath` and this fallback
     // would be dead code.
-    if (modelFilePath(model) === fsPath) {
+    if (documentIdentity(modelFilePath(model)) === documentIdentity(fsPath)) {
       return model;
     }
   }
   return null;
-}
-
-// ── Edit normalization ──────────────────────────────────────────
-
-function isTextDocumentEdit(change: LspDocumentChange): change is LspTextDocumentEdit {
-  return (change as LspTextDocumentEdit).textDocument !== undefined;
-}
-
-/**
- * Flatten either WorkspaceEdit shape into per-uri edit lists. Per the
- * LSP spec, `documentChanges` is preferred over `changes` when both are
- * present.
- */
-function normalizeWorkspaceEdit(workspaceEdit: LspWorkspaceEdit): {
-  fileEdits: Array<{ uri: string; edits: LspTextEdit[] }>;
-  skippedOps: number;
-} {
-  const byUri = new Map<string, LspTextEdit[]>();
-  let skippedOps = 0;
-
-  if (workspaceEdit.documentChanges && workspaceEdit.documentChanges.length > 0) {
-    for (const change of workspaceEdit.documentChanges) {
-      if (!isTextDocumentEdit(change)) {
-        skippedOps++;
-        continue;
-      }
-      const uri = change.textDocument.uri;
-      const list = byUri.get(uri) ?? [];
-      list.push(...change.edits);
-      byUri.set(uri, list);
-    }
-  } else if (workspaceEdit.changes) {
-    for (const [uri, edits] of Object.entries(workspaceEdit.changes)) {
-      const list = byUri.get(uri) ?? [];
-      list.push(...edits);
-      byUri.set(uri, list);
-    }
-  }
-
-  return {
-    fileEdits: [...byUri.entries()].map(([uri, edits]) => ({ uri, edits })),
-    skippedOps,
-  };
-}
-
-/**
- * Sort edits bottom-up (descending start position) so applying one edit
- * never invalidates the offsets/ranges of the edits still to come.
- * JS sort is stable, so multiple inserts at the same position keep
- * their array order after bottom-up application (LSP spec semantics).
- */
-function sortEditsBottomUp(edits: LspTextEdit[]): LspTextEdit[] {
-  return [...edits].sort((a, b) => {
-    if (a.range.start.line !== b.range.start.line) {
-      return b.range.start.line - a.range.start.line;
-    }
-    return b.range.start.character - a.range.start.character;
-  });
-}
-
-// ── String-based application (closed files) ─────────────────────
-
-function computeLineStarts(text: string): number[] {
-  const starts = [0];
-  for (let i = 0; i < text.length; i++) {
-    if (text.charCodeAt(i) === 10 /* \n */) starts.push(i + 1);
-  }
-  return starts;
-}
-
-/**
- * LSP position → string offset. Positions are UTF-16 code-unit based,
- * which matches JS string indexing exactly. Out-of-range lines clamp to
- * EOF and out-of-range characters clamp to the line end (per spec).
- */
-function offsetAt(text: string, lineStarts: number[], pos: LspPosition): number {
-  if (pos.line < 0) return 0;
-  if (pos.line >= lineStarts.length) return text.length;
-
-  const lineStart = lineStarts[pos.line];
-  let lineEnd: number;
-  if (pos.line + 1 < lineStarts.length) {
-    lineEnd = lineStarts[pos.line + 1] - 1; // position of '\n'
-    if (lineEnd > lineStart && text.charCodeAt(lineEnd - 1) === 13 /* \r */) {
-      lineEnd -= 1;
-    }
-  } else {
-    lineEnd = text.length;
-  }
-
-  return Math.min(lineStart + Math.max(0, pos.character), lineEnd);
-}
-
-/** Apply LSP text edits to a plain string (bottom-up). */
-function applyEditsToText(text: string, edits: LspTextEdit[]): string {
-  const lineStarts = computeLineStarts(text);
-  let result = text;
-  for (const edit of sortEditsBottomUp(edits)) {
-    const startOffset = offsetAt(text, lineStarts, edit.range.start);
-    const endOffset = offsetAt(text, lineStarts, edit.range.end);
-    result = result.slice(0, startOffset) + edit.newText + result.slice(endOffset);
-  }
-  return result;
 }
 
 // ── Model-based application (open files) ────────────────────────
@@ -208,7 +91,7 @@ function applyEditsToModel(
   model: editor.ITextModel,
   edits: LspTextEdit[],
 ): void {
-  const operations = sortEditsBottomUp(edits).map((edit) => ({
+  const operations = edits.map((edit) => ({
     range: new monaco.Range(
       edit.range.start.line + 1,
       edit.range.start.character + 1,
@@ -226,124 +109,236 @@ function applyEditsToModel(
 
 // ── Public API ──────────────────────────────────────────────────
 
-/**
- * Apply an LSP `WorkspaceEdit` across the whole workspace.
- *
- * Per file:
- *  - Open Monaco model → `pushEditOperations` (undo-friendly), then the
- *    workspace store buffer is refreshed (marks the tab dirty and sends
- *    `didChange` to the right LSP — same path as typing).
- *  - No model but the file is open in a tab → edits applied to the tab's
- *    buffer text (marks dirty, syncs LSP).
- *  - Fully closed file → read from disk, apply edits bottom-up, write
- *    back via the Tauri fs layer.
- *
- * CreateFile / RenameFile / DeleteFile operations are not applied yet —
- * they're counted in `skippedOps` instead of crashing the whole edit.
- *
- * Note: cross-file undo is per-file. Edits to open models are individually
- * undoable; edits written straight to disk are not undoable from the editor.
- */
-export async function applyLspWorkspaceEdit(
-  workspaceEdit: LspWorkspaceEdit,
-): Promise<AppliedWorkspaceEditSummary> {
-  const summary: AppliedWorkspaceEditSummary = {
-    filesChanged: 0,
-    editsApplied: 0,
-    skippedOps: 0,
-    failedFiles: [],
-  };
-  if (!workspaceEdit) return summary;
+interface Snapshot {
+  path: string;
+  before: string;
+  after: string;
+  buffer: boolean;
+  model: editor.ITextModel | null;
+  modelVersion?: number;
+  documentVersion?: number;
+  edits: LspTextEdit[];
+}
+interface Transaction { id: string; workspacePath: string; snapshots: Snapshot[] }
+let lastTransaction: Transaction | null = null;
+let pending: Promise<unknown> = Promise.resolve();
 
-  const { fileEdits, skippedOps } = normalizeWorkspaceEdit(workspaceEdit);
-  summary.skippedOps = skippedOps;
+export function captureWorkspaceEditVersions(): Map<string, { content: string; version?: number }> {
+  return new Map(useWorkspaceStore.getState().openFiles.map(f => [documentIdentity(f.path), { content: f.content, version: getDocumentVersion(f.path) }]));
+}
 
-  const monaco = getMonacoInstance();
+function serialized<T>(work: () => Promise<T>): Promise<T> {
+  const result = pending.then(work, work);
+  pending = result.catch(() => {});
+  return result;
+}
 
-  for (const { uri, edits } of fileEdits) {
-    if (edits.length === 0) continue;
+/** Cancel previews and drain queued changes before checking dirty buffers on
+ * window close. A completed disk change must not outlive its buffer update. */
+export async function settleWorkspaceChanges(): Promise<void> {
+  finishWorkspaceChangePreview(false);
+  await pending;
+}
 
-    const fsPath = uriToFsPath(uri);
-    if (!fsPath) {
-      console.warn('[LSP] applyLspWorkspaceEdit: skipping non-file uri', { uri });
-      summary.skippedOps++;
-      continue;
+function assertUnchanged(snapshots: Snapshot[]): void {
+  const workspace = useWorkspaceStore.getState();
+  for (const s of snapshots) {
+    if (s.model && (s.model.isDisposed() || s.model.getVersionId() !== s.modelVersion)) throw new Error(`${s.path} changed while preparing the edit`);
+    const open = workspace.openFiles.find(f => documentIdentity(f.path) === documentIdentity(s.path));
+    if (s.buffer && (!open || open.content !== s.before || getDocumentVersion(s.path) !== s.documentVersion)) throw new Error(`${s.path} changed while preparing the edit`);
+    if (!s.buffer && open) throw new Error(`${s.path} was opened while preparing the edit; retry`);
+  }
+}
+
+function updateBuffer(monaco: Monaco | null, s: Snapshot, text: string, fullReplacement = false): void {
+  const model = s.model;
+  if (monaco && model && !model.isDisposed()) {
+    if (text === s.after && !fullReplacement) applyEditsToModel(monaco, model, s.edits);
+    else {
+      model.pushStackElement();
+      model.pushEditOperations(null, [{ range: model.getFullModelRange(), text }], () => null);
+      model.pushStackElement();
     }
+    if (model.getValue() !== text) throw new Error(`${s.path} did not match the prepared edit; recovery is required`);
+  }
+  const workspace = useWorkspaceStore.getState();
+  // Attached editors may already have sent didChange through onChange.
+  if (workspace.openFiles.find(f => f.path === s.path)?.content !== text) workspace.updateFileContent(s.path, text);
+  if (text === s.before) {
+    useWorkspaceStore.setState(state => ({ openFiles: state.openFiles.map(f => f.path === s.path ? { ...f, isDirty: f.diskContent !== text } : f) }));
+  }
+}
 
+/** All files are prepared before the first mutation. Unsupported operations,
+ * stale buffers and invalid ranges reject the entire request. Closed-file
+ * writes have a durable recovery journal and compare-before-write rollback.
+ * Cross-process edits during recovery are reported, never overwritten. */
+export function applyLspWorkspaceEdit(workspaceEdit: LspWorkspaceEdit, options: { preview?: boolean; expectedBuffers?: ReturnType<typeof captureWorkspaceEditVersions>; expectedTexts?: ReadonlyMap<string, string> } = {}): Promise<AppliedWorkspaceEditSummary> {
+  return serialized(async () => {
+    const summary: AppliedWorkspaceEditSummary = { cancelled: false, filesChanged: 0, editsApplied: 0, skippedOps: 0, failedFiles: [] };
+    let transactionId: string | undefined;
+    const snapshots: Snapshot[] = [];
+    const workspacePath = useWorkspaceStore.getState().workspacePath;
     try {
-      const workspace = useWorkspaceStore.getState();
-      const openFile = workspace.openFiles.find((f) => f.path === fsPath);
-      const model = monaco ? findModelForUri(monaco, uri, fsPath) : null;
-
-      if (monaco && model) {
-        // Open buffer: undo-friendly model edit.
-        applyEditsToModel(monaco, model, edits);
-
-        // Exactly ONE didChange per file. EditorPanel mounts a single
-        // Monaco editor and swaps models per tab (the `path` prop), and
-        // @monaco-editor/react's onChange fires for programmatic
-        // pushEditOperations too — but only for the model currently
-        // ATTACHED to that mounted editor. For the attached (active-tab)
-        // model, onChange → updateFileContent → syncDocumentChange has
-        // already run by the time applyEditsToModel returns, so an
-        // explicit updateFileContent here would send a duplicate
-        // didChange. Background-tab models are not attached to any
-        // editor, get NO onChange, and need the explicit store refresh
-        // (tab dirty flag) + LSP sync below.
-        const attachedToMountedEditor = monaco.editor
-          .getEditors()
-          .some((ed: editor.ICodeEditor) => ed.getModel() === model);
-
-        if (openFile) {
-          if (!attachedToMountedEditor) {
-            workspace.updateFileContent(fsPath, model.getValue());
-          }
-        } else {
-          // Model exists but no tab tracks it (e.g. closed tab whose
-          // model Monaco kept alive) — persist to disk so the edit
-          // isn't stranded in a dangling buffer.
-          await invoke('write_file', { path: fsPath, contents: model.getValue() });
-        }
-      } else if (openFile) {
-        // Tab open but no model mounted yet: edit the buffer text.
-        workspace.updateFileContent(fsPath, applyEditsToText(openFile.content, edits));
-      } else {
-        // Closed file: read → apply bottom-up → write back.
-        const content = await invoke<string>('read_file', { path: fsPath });
-        await invoke('write_file', {
-          path: fsPath,
-          contents: applyEditsToText(content, edits),
-        });
+      if (!workspacePath) throw new Error('Open a workspace before applying changes');
+      const monaco = getMonacoInstance();
+      const documents = normalizeWorkspaceEdit(workspaceEdit);
+      const openPaths = useWorkspaceStore.getState().openFiles.map(f => f.path);
+      const identities = await invoke<Record<string, string>>('workspace_edit_identities', { paths: [...new Set([...documents.map(d => d.path), ...openPaths.filter(p => !p.includes('://'))])] });
+      const grouped = new Map<string, typeof documents[number]>();
+      for (const document of documents) {
+        if (!document.edits.length) continue;
+        const id = identities[document.path];
+        if (!id) throw new Error(`Cannot resolve document identity: ${document.path}`);
+        const prior = grouped.get(id);
+        if (prior) {
+          if (prior.version != null && document.version != null && prior.version !== document.version) throw new Error(`Conflicting document versions: ${document.path}`);
+          prior.version ??= document.version;
+          prior.edits.push(...document.edits);
+        } else grouped.set(id, { ...document, edits: [...document.edits] });
       }
-
-      summary.filesChanged++;
-      summary.editsApplied += edits.length;
-    } catch (err) {
-      // Keep applying the remaining files; collect the failure so
-      // callers (and the user, via the notification below) see it.
-      summary.failedFiles.push({
-        path: fsPath,
-        error: err instanceof Error ? err.message : String(err),
+      const checkCurrent = () => {
+        assertUnchanged(snapshots);
+        const current = useWorkspaceStore.getState().openFiles.map(f => f.path);
+        if (current.length !== openPaths.length || current.some(p => !openPaths.includes(p))) throw new Error('Open documents changed while preparing this operation; retry');
+      };
+      for (const file of grouped.values()) {
+        if (!file.edits.length) continue;
+        const workspace = useWorkspaceStore.getState();
+        const aliases = workspace.openFiles.filter(f => identities[f.path] === identities[file.path]);
+        if (aliases.length > 1) throw new Error(`Close duplicate views of ${file.path} before applying changes`);
+        const open = aliases[0];
+        const path = open?.path ?? file.path;
+        const expected = options.expectedBuffers?.get(documentIdentity(path));
+        if (options.expectedBuffers && (expected ? !open || open.content !== expected.content || getDocumentVersion(path) !== expected.version : !!open)) {
+          throw new Error(`${path} changed while the language server was preparing the edit; retry`);
+        }
+        if (open?.isBinary || open?.isTooLarge || open?.saveConflict) throw new Error(`${path} cannot be edited until its conflict is resolved`);
+        const model = monaco ? findModelForUri(monaco, file.uri, path) : null;
+        const documentVersion = getDocumentVersion(path);
+        if (file.version != null && file.version !== documentVersion) throw new Error(`${path} has a stale or unknown document version`);
+        const before = open ? (model?.getValue() ?? open.content) : await invoke<string>('read_file', { path });
+        const expectedText = options.expectedTexts?.get(documentIdentity(file.path)) ?? options.expectedTexts?.get(documentIdentity(path));
+        if (expectedText !== undefined && before !== expectedText) throw new Error(`${path} changed while deriving the refactoring; retry`);
+        if (open && before !== open.content) throw new Error(`${path} buffer is not synchronized; retry`);
+        const after = applyEditsToText(before, file.edits);
+        snapshots.push({ path, before, after, buffer: !!open, model: open ? model : null, modelVersion: open ? model?.getVersionId() : undefined, documentVersion, edits: file.edits });
+      }
+      if (!snapshots.length) return summary;
+      if ((options.preview || snapshots.length > 1) && !await requestWorkspaceChangePreview(snapshots)) {
+        summary.cancelled = true;
+        return summary;
+      }
+      checkCurrent();
+      if (useWorkspaceStore.getState().workspacePath !== workspacePath) throw new Error('The workspace changed; retry');
+      const result = await invoke<{ id: string; applied: boolean; recoveryRequired: boolean; error?: string }>('workspace_edit_apply', {
+        workspacePath, changes: snapshots.map(({ path, before, after, buffer }) => ({ path, before, after, buffer })),
       });
-      console.error('[LSP] applyLspWorkspaceEdit: failed for file', { uri, fsPath, error: err });
+      if (!result.applied) throw new Error(`${result.error ?? 'Workspace edit failed'}${result.recoveryRequired ? `; recovery required for transaction ${result.id}` : '; changes were rolled back'}`);
+      transactionId = result.id;
+      checkCurrent();
+      if (useWorkspaceStore.getState().workspacePath !== workspacePath) throw new Error('The workspace changed during the edit');
+      for (const s of snapshots) if (s.buffer) updateBuffer(monaco, s, s.after);
+      await invoke('workspace_edit_complete', { workspacePath, id: result.id, undone: false });
+      lastTransaction = { id: result.id, workspacePath, snapshots };
+      summary.filesChanged = snapshots.length;
+      summary.editsApplied = snapshots.reduce((n, s) => n + s.edits.length, 0);
+    } catch (err) {
+      let error = err instanceof Error ? err.message : String(err);
+      if (transactionId && workspacePath) {
+        try {
+          await invoke('workspace_edit_undo', { workspacePath, id: transactionId });
+          const monaco = getMonacoInstance();
+          for (const s of snapshots) {
+            const open = useWorkspaceStore.getState().openFiles.find(f => f.path === s.path);
+            if (s.buffer && open?.content === s.after) updateBuffer(monaco, s, s.before);
+            else if (s.buffer && open?.content !== s.before) throw new Error(`${s.path} changed during rollback; its backup was retained`);
+          }
+          await invoke('workspace_edit_complete', { workspacePath, id: transactionId, undone: true });
+        } catch (recovery) { error += `; recovery required for ${transactionId}: ${String(recovery)}`; }
+      }
+      summary.failedFiles.push({ path: workspacePath ?? '', error });
+      notify.error(`Workspace edit failed: ${error}`);
     }
-  }
+    return summary;
+  });
+}
 
-  if (summary.failedFiles.length > 0) {
-    const first = summary.failedFiles[0].path;
-    notify.error(
-      `Workspace edit applied with ${summary.failedFiles.length} failure${
-        summary.failedFiles.length === 1 ? '' : 's'
-      }: ${first}${summary.failedFiles.length > 1 ? '…' : ''}`,
-    );
-  }
+/** One explicit undo includes closed files as well as dirty buffers. It refuses
+ * to overwrite subsequent edits; normal per-document undo remains available. */
+export function undoLastWorkspaceEdit(): Promise<void> {
+  return serialized(async () => {
+    const transaction = lastTransaction;
+    if (!transaction || transaction.workspacePath !== useWorkspaceStore.getState().workspacePath) throw new Error('No workspace change is available to undo');
+    const { id, workspacePath, snapshots } = transaction;
+    const openPaths = useWorkspaceStore.getState().openFiles.map(f => f.path);
+    const identities = await invoke<Record<string, string>>('workspace_edit_identities', { paths: [...new Set([...snapshots.map(s => s.path), ...openPaths.filter(p => !p.includes('://'))])] });
+    const checkBuffers = () => {
+      if (useWorkspaceStore.getState().workspacePath !== workspacePath) throw new Error('The workspace changed during undo');
+      const current = useWorkspaceStore.getState().openFiles.map(f => f.path);
+      if (current.length !== openPaths.length || current.some(p => !openPaths.includes(p))) throw new Error('Open documents changed during undo; review recovery');
+      for (const s of snapshots.filter(s => !s.buffer)) {
+        if (useWorkspaceStore.getState().openFiles.some(f => (identities[s.path] && identities[f.path] === identities[s.path]) || documentIdentity(f.path) === documentIdentity(s.path))) throw new Error(`Close ${s.path} before undoing this change`);
+      }
+      for (const s of snapshots.filter(s => s.buffer)) {
+        const open = useWorkspaceStore.getState().openFiles.find(f => f.path === s.path);
+        if (open?.content !== s.after || (s.model && (s.model.isDisposed() || s.model.getValue() !== s.after))) throw new Error(`${s.path} changed after the operation; undo was stopped`);
+      }
+    };
+    checkBuffers();
+    await invoke('workspace_edit_undo', { workspacePath, id });
+    checkBuffers();
+    for (const s of snapshots) if (s.buffer) updateBuffer(getMonacoInstance(), s, s.before);
+    await invoke('workspace_edit_complete', { workspacePath, id, undone: true });
+    lastTransaction = null;
+  });
+}
 
-  // Only log when something noteworthy happened (skipped resource ops
-  // or per-file failures) — clean applies stay quiet.
-  if (summary.skippedOps > 0 || summary.failedFiles.length > 0) {
-    console.info('[LSP] applyLspWorkspaceEdit summary', summary);
-  }
-  return summary;
+/** Explicit recovery is previewed, and refuses to overwrite unrelated disk
+ * edits. Original dirty buffers are restored as dirty documents, not saved. */
+export function reviewWorkspaceRecovery(): Promise<void> {
+  return serialized(async () => {
+    const workspacePath = useWorkspaceStore.getState().workspacePath;
+    if (!workspacePath) throw new Error('Open a workspace first');
+    const pending = await invoke<Array<{ id: string; changes: Array<{ path: string; before: string; after: string; buffer: boolean }> }>>('workspace_edit_pending', { workspacePath });
+    if (!pending.length) { notify.info('No interrupted workspace changes need recovery.'); return; }
+    for (const transaction of pending) {
+      if (useWorkspaceStore.getState().workspacePath !== workspacePath) throw new Error('The workspace changed');
+      const snapshots: Snapshot[] = [];
+      const monaco = getMonacoInstance();
+      const identities = await invoke<Record<string, string>>('workspace_edit_identities', { paths: [...new Set([...transaction.changes.map(c => c.path), ...useWorkspaceStore.getState().openFiles.map(f => f.path).filter(p => !p.includes('://'))])] });
+      for (const change of transaction.changes) {
+        const disk = await invoke<string>('read_file', { path: change.path });
+        const aliases = useWorkspaceStore.getState().openFiles.filter(f => (identities[change.path] && identities[f.path] === identities[change.path]) || documentIdentity(f.path) === documentIdentity(change.path));
+        if (aliases.length > 1) throw new Error(`Close duplicate views of ${change.path} before recovery`);
+        let open = aliases.at(0);
+        if (!change.buffer && (open?.isDirty || (disk !== change.before && disk !== change.after))) throw new Error(`${change.path} has subsequent edits; review journal ${transaction.id} before recovering`);
+        if (change.buffer && !open) {
+          useWorkspaceStore.getState().openFileInBackground(change.path, disk, disk);
+          open = useWorkspaceStore.getState().openFiles.find(f => f.path === change.path);
+        }
+        const model = open && monaco ? findModelForUri(monaco, fileUri(open.path), open.path) : null;
+        snapshots.push({ path: open?.path ?? change.path, before: open?.content ?? disk, after: change.before, buffer: !!open,
+          model, modelVersion: model?.getVersionId(), documentVersion: getDocumentVersion(open?.path ?? change.path), edits: [] });
+      }
+      if (!await requestWorkspaceChangePreview(snapshots)) return;
+      assertUnchanged(snapshots);
+      if (useWorkspaceStore.getState().workspacePath !== workspacePath) throw new Error('The workspace changed');
+      await invoke('workspace_edit_undo', { workspacePath, id: transaction.id });
+      assertUnchanged(snapshots);
+      for (const s of snapshots) if (s.buffer) {
+        // Recovery uses full-document snapshots, not the original LSP ranges.
+        updateBuffer(monaco, s, s.after, true);
+        const wasBuffer = transaction.changes.find(c => documentIdentity(c.path) === documentIdentity(s.path))?.buffer;
+        useWorkspaceStore.setState(state => ({ openFiles: state.openFiles.map(f => {
+          if (f.path !== s.path) return f;
+          const diskContent = wasBuffer ? f.diskContent : s.after;
+          return { ...f, diskContent, isDirty: diskContent !== s.after };
+        }) }));
+      }
+      await invoke('workspace_edit_complete', { workspacePath, id: transaction.id, undone: true });
+    }
+  });
 }
 
 // ── workspace/applyEdit (server→client) wiring ──────────────────
@@ -359,6 +354,7 @@ export async function applyLspWorkspaceEdit(
 export function registerApplyEditHandler(): () => void {
   setApplyEditHandler(async (edit) => {
     const summary = await applyLspWorkspaceEdit(edit as LspWorkspaceEdit);
+    if (summary.cancelled) return { applied: false, failureReason: 'The user cancelled the change preview' };
     if (summary.failedFiles.length > 0) {
       const { path, error } = summary.failedFiles[0];
       return {

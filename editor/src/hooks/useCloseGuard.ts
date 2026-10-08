@@ -7,6 +7,9 @@ import { useCheckpointsStore } from '../stores/checkpoints';
 import { useEditReviewStore } from '../stores/edit-review';
 import { flushLayoutPersisters } from '../features/app-shell';
 import { safeUnlisten } from '../utils/tauri-listener';
+import { settleWorkspaceChanges } from '../features/lsp';
+import { dapClient } from '../features/debugger';
+import { notify } from '../stores/notifications';
 
 export function useCloseGuard() {
   useEffect(() => {
@@ -16,6 +19,7 @@ export function useCloseGuard() {
     (async () => {
       const win = getCurrentWindow();
       const fn = await win.onCloseRequested(async (event) => {
+        await settleWorkspaceChanges();
         // Persist any pending chat-session (checkpoint, and edit-review)
         // changes, and any pending layout-size write, before the window goes away.
         await useAiStore.getState().flushSessionNow();
@@ -26,7 +30,15 @@ export function useCloseGuard() {
         const dirty = useWorkspaceStore.getState().openFiles.filter(
           (f) => f.isDirty && !f.path.startsWith('diff://') && !f.path.startsWith('auth://'),
         );
-        if (dirty.length === 0) return;
+        const detach = async () => {
+          try { await dapClient.stop(); return true; }
+          catch (error) {
+            event.preventDefault();
+            notify.error(`Window remains open because debugger shutdown was not confirmed: ${String(error)}`);
+            return false;
+          }
+        };
+        if (dirty.length === 0) { await detach(); return; }
 
         event.preventDefault();
 
@@ -42,7 +54,7 @@ export function useCloseGuard() {
           },
         );
 
-        if (confirmed) {
+        if (confirmed && await detach()) {
           await win.destroy();
         }
       });

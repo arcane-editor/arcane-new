@@ -7,8 +7,8 @@
 //! `vscode-mono-debug` child process that needed a system Mono runtime and a
 //! binary that was never vendored.
 //!
-//! One router task owns each window's session. Dropping the session drops its
-//! request channel, which ends the task, which disposes the connection cleanly
+//! One router task owns each window's session. Stopping a session signals its
+//! router explicitly and waits until the connection has been disposed cleanly
 //! — so closing a project window detaches properly rather than abandoning a
 //! socket, which is the thing that kills a Unity editor.
 
@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use serde_json::Value as Json;
 use tauri::{AppHandle, Emitter, Manager, Window};
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{mpsc, oneshot, Mutex};
 
 use super::router::{Msg, Router};
 use super::{android, discovery, players, trace};
@@ -26,6 +26,8 @@ use super::{android, discovery, players, trace};
 /// One window's debug session.
 pub struct DebugSession {
     requests: mpsc::UnboundedSender<Msg>,
+    shutdown: mpsc::UnboundedSender<oneshot::Sender<Result<(), String>>>,
+    ended: oneshot::Receiver<()>,
 }
 
 /// Per-window session registry (Tauri-managed state).
@@ -37,8 +39,27 @@ impl DebugState {
     }
 
     pub async fn drop_window(&self, label: &str) {
-        // Dropping the sender ends the router task, which disposes cleanly.
-        self.0.lock().await.remove(label);
+        if let Err(e) = self.stop_session(label).await {
+            trace::append("--", &e);
+        }
+    }
+
+    async fn stop_session(&self, label: &str) -> Result<(), String> {
+        // Failed disposal retains ownership of the session for a retry.
+        let mut sessions = self.0.lock().await;
+        if let Some(session) = sessions.get_mut(label) {
+            let (reply, result) = oneshot::channel();
+            if session.shutdown.send(reply).is_ok() {
+                result
+                    .await
+                    .map_err(|_| "Debugger shutdown acknowledgement was lost".to_string())??;
+            }
+            (&mut session.ended)
+                .await
+                .map_err(|_| "Debugger shutdown task ended unexpectedly".to_string())?;
+            sessions.remove(label);
+        }
+        Ok(())
     }
 }
 
@@ -96,11 +117,19 @@ pub async fn dap_start(
     // hold connections to the same runtime.
     {
         let state = app.state::<DebugState>();
-        state.0.lock().await.remove(&label);
+        state.stop_session(&label).await?;
+    }
+    let state = app.state::<DebugState>();
+    let mut sessions = state.0.lock().await;
+    if sessions.contains_key(&label) {
+        return Err("Another debug session started concurrently; retry attachment".into());
     }
 
     let (out_tx, mut out_rx) = mpsc::unbounded_channel::<Json>();
     let (msg_tx, mut msg_rx) = mpsc::unbounded_channel::<Msg>();
+    let (shutdown_tx, mut shutdown_rx) =
+        mpsc::unbounded_channel::<oneshot::Sender<Result<(), String>>>();
+    let (ended_tx, ended_rx) = oneshot::channel();
 
     // Outbound: every DAP message becomes a `dap-message` event carrying the
     // raw JSON string, which is what `dap-client.ts` expects.
@@ -124,23 +153,43 @@ pub async fn dap_start(
         let workspace = PathBuf::from(workspace_path);
         tauri::async_runtime::spawn(async move {
             let mut router = Router::new(out_tx, self_tx, workspace);
-            while let Some(msg) = msg_rx.recv().await {
-                router.on(msg).await;
+            loop {
+                tokio::select! {
+                    biased;
+                    reply = shutdown_rx.recv() => {
+                        let result = router.shutdown().await;
+                        let completed = result.is_ok();
+                        if let Some(reply) = reply { let _ = reply.send(result); }
+                        else { break; }
+                        if completed { break; }
+                    },
+                    msg = msg_rx.recv() => match msg {
+                        // Drain attachment/protocol transitions before closing
+                        // their socket. Honor shutdown before the next request.
+                        Some(msg) => router.on(msg).await,
+                        None => break,
+                    },
+                }
             }
-            // The channel closed: the window went away or the session was
-            // stopped. Detach cleanly before the socket drops.
-            router.shutdown().await;
+            // Explicit shutdown or transport closure ends the session.
+            // Detach cleanly before the socket drops.
+            if let Err(error) = router.shutdown().await {
+                trace::append("--", &error);
+            }
             trace::append("--", "session ended");
             let _ = app.emit_to(label.as_str(), "dap-exited", ());
+            let _ = ended_tx.send(());
         });
     }
 
-    let state = app.state::<DebugState>();
-    state
-        .0
-        .lock()
-        .await
-        .insert(label, DebugSession { requests: msg_tx });
+    sessions.insert(
+        label,
+        DebugSession {
+            requests: msg_tx,
+            shutdown: shutdown_tx,
+            ended: ended_rx,
+        },
+    );
     Ok(())
 }
 
@@ -168,13 +217,70 @@ pub async fn dap_send(window: Window, app: AppHandle, message: String) -> Result
 pub async fn dap_stop(window: Window, app: AppHandle) -> Result<(), String> {
     let label = window.label().to_string();
     let state = app.state::<DebugState>();
-    state.0.lock().await.remove(&label);
-    Ok(())
+    state.stop_session(&label).await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn explicit_shutdown_completes_despite_retained_request_senders() {
+        let state = DebugState::new();
+        let (requests, _rx) = mpsc::unbounded_channel();
+        let retained_sender = requests.clone();
+        let (shutdown, mut shutdown_rx) =
+            mpsc::unbounded_channel::<oneshot::Sender<Result<(), String>>>();
+        let (ended_tx, ended) = oneshot::channel();
+        state.0.lock().await.insert(
+            "test".into(),
+            DebugSession {
+                requests,
+                shutdown,
+                ended,
+            },
+        );
+        let task = tokio::spawn(async move {
+            shutdown_rx.recv().await.unwrap().send(Ok(())).unwrap();
+            ended_tx.send(()).unwrap();
+        });
+        state.stop_session("test").await.unwrap();
+        task.await.unwrap();
+        assert!(state.0.lock().await.is_empty());
+        drop(retained_sender);
+    }
+
+    #[tokio::test]
+    async fn refused_disposal_keeps_the_session_owned_for_retry() {
+        let state = DebugState::new();
+        let (requests, _rx) = mpsc::unbounded_channel();
+        let (shutdown, mut shutdown_rx) =
+            mpsc::unbounded_channel::<oneshot::Sender<Result<(), String>>>();
+        let (ended_tx, ended) = oneshot::channel();
+        state.0.lock().await.insert(
+            "test".into(),
+            DebugSession {
+                requests,
+                shutdown,
+                ended,
+            },
+        );
+        let task = tokio::spawn(async move {
+            shutdown_rx
+                .recv()
+                .await
+                .unwrap()
+                .send(Err("agent did not acknowledge detach".into()))
+                .unwrap();
+            shutdown_rx.recv().await.unwrap().send(Ok(())).unwrap();
+            ended_tx.send(()).unwrap();
+        });
+        assert!(state.stop_session("test").await.is_err());
+        assert!(state.0.lock().await.contains_key("test"));
+        state.stop_session("test").await.unwrap();
+        task.await.unwrap();
+        assert!(state.0.lock().await.is_empty());
+    }
 
     /// A project Unity has never opened has no editor to attach to. Player
     /// discovery may still contribute, so this asserts only that no *editor*

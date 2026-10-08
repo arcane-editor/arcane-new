@@ -19,7 +19,7 @@ const EDITOR_COMMAND_ACTIONS: Record<string, string> = {
   'editor.quickFix': 'editor.action.quickFix',
 };
 function experienceOverlayOpen(): boolean {
-  return typeof document !== 'undefined' && !!document.querySelector('.experience-startup,.experience-overlay');
+  return typeof document !== 'undefined' && !!document.querySelector('.experience-startup,.experience-overlay,[data-workspace-change-overlay]');
 }
 
 export function registerEditorCommandTarget(target: EditorCommandTarget): () => void {

@@ -337,23 +337,13 @@ export class LspClient {
           applyEdit: true,
           workspaceEdit: {
             documentChanges: true,
-            resourceOperations: ['create', 'rename', 'delete'],
-            failureHandling: 'textOnlyTransactional',
-            normalizesLineEndings: true,
-            changeAnnotationSupport: { groupsOnLabel: true },
+            failureHandling: 'abort',
           },
           didChangeConfiguration: { dynamicRegistration: true },
           didChangeWatchedFiles: { dynamicRegistration: true, relativePatternSupport: true },
           symbol: { dynamicRegistration: true },
           executeCommand: { dynamicRegistration: true },
-          fileOperations: {
-            didCreate: true,
-            willCreate: true,
-            didRename: true,
-            willRename: true,
-            didDelete: true,
-            willDelete: true,
-          },
+
         },
       },
     });

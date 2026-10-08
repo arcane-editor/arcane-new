@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { useNotificationsStore } from '../../../stores/notifications';
 import { useWorkspaceStore } from '../../../stores/workspace';
+import { lspManager, fileUri, applyLspWorkspaceEdit, captureWorkspaceEditVersions, type LspWorkspaceEdit } from '../../lsp';
 
 function stem(path: string): string {
   const base = path.split('/').pop() ?? path;
@@ -36,14 +37,30 @@ export function offerClassRenameSync(oldPath: string, newPath: string): void {
         actions: [
           {
             label: 'Rename class',
-            run: () => {
-              const updated = content.replace(classRe, `class ${newStem}`);
-              void invoke('write_file', { path: newPath, contents: updated }).then(() => {
-                const ws = useWorkspaceStore.getState();
-                if (ws.openFiles.find((f) => f.path === newPath)) {
-                  void ws.reloadFileFromDisk(newPath);
-                }
-              });
+            run: async () => {
+              try {
+                const workspace = useWorkspaceStore.getState();
+                await workspace.openFile(newPath, newPath.split('/').pop() ?? newStem);
+                // Resolve against the current buffer, never the text captured
+                // when the notification was first offered.
+                const current = useWorkspaceStore.getState().openFiles.find(f => f.path === newPath);
+                const match = current && classRe.exec(current.content);
+                if (!current || !match) throw new Error('The original class declaration no longer exists');
+                const offset = match.index + match[0].lastIndexOf(oldStem);
+                const prefix = current.content.slice(0, offset);
+                const client = lspManager.client('csharp');
+                if (!client.isRunning()) throw new Error('Wait for C# language services before renaming the class');
+                const expectedBuffers = captureWorkspaceEditVersions();
+                const edit = await client.request<LspWorkspaceEdit | null>('textDocument/rename', {
+                  textDocument: { uri: fileUri(newPath) },
+                  position: { line: prefix.split('\n').length - 1, character: prefix.length - prefix.lastIndexOf('\n') - 1 },
+                  newName: newStem,
+                });
+                if (!edit) throw new Error('The language server could not resolve this class');
+                await applyLspWorkspaceEdit(edit, { preview: true, expectedBuffers });
+              } catch (error) {
+                useNotificationsStore.getState().addNotification({ type: 'error', message: `Class rename stopped: ${String(error)}` });
+              }
             },
           },
         ],

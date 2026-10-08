@@ -1,0 +1,1092 @@
+{
+  "schemaVersion": 1,
+  "release": "0.4.0",
+  "baseline": {
+    "repositoryCommit": "16a2591",
+    "riderDocumentationDate": "2026-10-07",
+    "primaryUnity": "6000.3",
+    "compatibilityUnity": [
+      "6000.0",
+      "2022.3"
+    ],
+    "hosts": [
+      "windows-x64",
+      "macos-arm64"
+    ]
+  },
+  "gates": [
+    {
+      "id": "A.capability-ledger",
+      "track": "A",
+      "title": "Versioned capabilities and truthful release gates",
+      "required": true,
+      "status": "implemented",
+      "requiredEnvironments": [
+        "host-independent"
+      ],
+      "requiredFixtures": [
+        "ledger-validation"
+      ],
+      "reference": "https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#workspaceEdit",
+      "implementationEvidence": [
+        "editor/scripts/check-migration-readiness.test.ts"
+      ],
+      "verification": []
+    },
+    {
+      "id": "A.workspace-failures",
+      "track": "A",
+      "title": "Unsupported operations and failed changes cannot report success",
+      "required": true,
+      "status": "implemented",
+      "requiredEnvironments": [
+        "windows-x64/6000.3",
+        "windows-x64/6000.0",
+        "windows-x64/2022.3",
+        "macos-arm64/6000.3",
+        "macos-arm64/6000.0",
+        "macos-arm64/2022.3"
+      ],
+      "requiredFixtures": [
+        "unsupported-operations",
+        "stale-buffers",
+        "failed-write",
+        "concurrent-external-edit"
+      ],
+      "reference": "https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#workspaceEdit",
+      "implementationEvidence": [
+        "editor/src/features/lsp/services/workspace-edit-plan.test.ts",
+        "editor/src/features/lsp/services/workspace-edit.exec.ts",
+        "editor/src-tauri/src/workspace_edit.rs"
+      ],
+      "verification": []
+    },
+    {
+      "id": "A.headless-tests",
+      "track": "A",
+      "title": "Headless test launch/results belong to the current execution",
+      "required": true,
+      "status": "implemented",
+      "requiredEnvironments": [
+        "windows-x64/6000.3",
+        "windows-x64/6000.0",
+        "windows-x64/2022.3",
+        "macos-arm64/6000.3",
+        "macos-arm64/6000.0",
+        "macos-arm64/2022.3"
+      ],
+      "requiredFixtures": [
+        "failed-launch-with-old-xml",
+        "simultaneous-runs",
+        "truncated-xml",
+        "failed-tests-exit-code"
+      ],
+      "reference": "https://docs.unity3d.com/Packages/com.unity.test-framework@1.1/api/UnityEditor.TestTools.TestRunner.Api.TestRunnerApi.html",
+      "implementationEvidence": [
+        "editor/src-tauri/src/unity_tests.rs"
+      ],
+      "verification": []
+    },
+    {
+      "id": "A.asset-freshness",
+      "track": "A",
+      "title": "Content edits and offline asset changes invalidate references",
+      "required": true,
+      "status": "implemented",
+      "requiredEnvironments": [
+        "windows-x64/6000.3",
+        "windows-x64/6000.0",
+        "windows-x64/2022.3",
+        "macos-arm64/6000.3",
+        "macos-arm64/6000.0",
+        "macos-arm64/2022.3"
+      ],
+      "requiredFixtures": [
+        "prefab-edit",
+        "scene-edit",
+        "offline-create-change-delete",
+        "concurrent-deltas"
+      ],
+      "reference": "https://www.jetbrains.com/help/rider/Asset-serialization-mode.html",
+      "implementationEvidence": [
+        "editor/src-tauri/src/unity_index.rs"
+      ],
+      "verification": []
+    },
+    {
+      "id": "A.debug-ready-close",
+      "track": "A",
+      "title": "Explicit initial-binding readiness and completed shutdown",
+      "required": true,
+      "status": "implemented",
+      "requiredEnvironments": [
+        "windows-x64/6000.3",
+        "windows-x64/6000.0",
+        "windows-x64/2022.3",
+        "macos-arm64/6000.3",
+        "macos-arm64/6000.0",
+        "macos-arm64/2022.3"
+      ],
+      "requiredFixtures": [
+        "first-line-debug-test",
+        "attach-and-play",
+        "window-close-paused",
+        "transport-close",
+        "reload-rebind"
+      ],
+      "reference": "https://www.jetbrains.com/help/rider/Debugging_Unity_Applications.html",
+      "implementationEvidence": [
+        "editor/src-tauri/src/debug/host.rs",
+        "editor/src-tauri/src/debug/router.rs",
+        "editor/src-tauri/src/debug/conn.rs",
+        "editor/src/hooks/useCloseGuard.exec.ts",
+        "editor/src/features/debugger/services/dap-client.exec.ts"
+      ],
+      "verification": []
+    },
+    {
+      "id": "A.save-all",
+      "track": "A",
+      "title": "Save All preserves formatting, conflict handling and action meaning",
+      "required": true,
+      "status": "implemented",
+      "requiredEnvironments": [
+        "windows-x64/6000.3",
+        "windows-x64/6000.0",
+        "windows-x64/2022.3",
+        "macos-arm64/6000.3",
+        "macos-arm64/6000.0",
+        "macos-arm64/2022.3"
+      ],
+      "requiredFixtures": [
+        "multiple-dirty-files",
+        "conflict-plus-success",
+        "typing-during-save",
+        "imported-shortcut"
+      ],
+      "reference": "https://www.jetbrains.com/help/rider/Configuring_Keyboard_and_Mouse_Shortcuts.html",
+      "implementationEvidence": [
+        "editor/src/stores/save-format.exec.ts",
+        "editor/src-tauri/src/editor_experience/imports.rs"
+      ],
+      "verification": []
+    },
+    {
+      "id": "B.compiler-graph",
+      "track": "B",
+      "title": "Unity-evaluated per-assembly compiler graph",
+      "required": true,
+      "status": "incomplete",
+      "requiredEnvironments": [
+        "windows-x64/6000.3",
+        "windows-x64/6000.0",
+        "windows-x64/2022.3",
+        "macos-arm64/6000.3",
+        "macos-arm64/6000.0",
+        "macos-arm64/2022.3"
+      ],
+      "requiredFixtures": [
+        "runtime-editor-test-boundaries",
+        "asmdef-asmref",
+        "defines-constraints-target",
+        "packages-local-embedded-resolved",
+        "language-options",
+        "analyzers-generators",
+        "offline-last-known-good",
+        "stale-graph-visible"
+      ],
+      "reference": "https://docs.unity3d.com/6000.0/Documentation/ScriptReference/Compilation.Assembly.html",
+      "implementationEvidence": [],
+      "verification": []
+    },
+    {
+      "id": "C.preview-undo",
+      "track": "C",
+      "title": "Preview and workspace undo across open buffers and closed files",
+      "required": true,
+      "status": "implemented",
+      "requiredEnvironments": [
+        "windows-x64/6000.3",
+        "windows-x64/6000.0",
+        "windows-x64/2022.3",
+        "macos-arm64/6000.3",
+        "macos-arm64/6000.0",
+        "macos-arm64/2022.3"
+      ],
+      "requiredFixtures": [
+        "multi-file-preview",
+        "cancel",
+        "mixed-dirty-closed-undo",
+        "undo-conflict",
+        "interrupted-apply-recovery",
+        "interrupted-undo-recovery"
+      ],
+      "reference": "https://www.jetbrains.com/help/rider/Asset-serialization-mode.html",
+      "implementationEvidence": [
+        "editor/src/features/lsp/services/workspace-edit.exec.ts",
+        "editor/src-tauri/src/workspace_edit.rs"
+      ],
+      "verification": []
+    },
+    {
+      "id": "C.resource-transactions",
+      "track": "C",
+      "title": "Ordered create/move/delete with meta pairing and durable recovery",
+      "required": true,
+      "status": "incomplete",
+      "requiredEnvironments": [
+        "windows-x64/6000.3",
+        "windows-x64/6000.0",
+        "windows-x64/2022.3",
+        "macos-arm64/6000.3",
+        "macos-arm64/6000.0",
+        "macos-arm64/2022.3"
+      ],
+      "requiredFixtures": [
+        "ordered-resource-ops",
+        "meta-guid-preservation",
+        "crash-recovery",
+        "resource-undo"
+      ],
+      "reference": "https://www.jetbrains.com/help/rider/Asset-serialization-mode.html",
+      "implementationEvidence": [],
+      "verification": []
+    },
+    {
+      "id": "C.serialized-rename",
+      "track": "C",
+      "title": "Semantic serialized-field protection including inheritance and partial types",
+      "required": true,
+      "status": "incomplete",
+      "requiredEnvironments": [
+        "windows-x64/6000.3",
+        "windows-x64/6000.0",
+        "windows-x64/2022.3",
+        "macos-arm64/6000.3",
+        "macos-arm64/6000.0",
+        "macos-arm64/2022.3"
+      ],
+      "requiredFixtures": [
+        "another-file-usage",
+        "inherited-public-field",
+        "partial-type",
+        "serialization-attributes",
+        "ambiguous-symbol"
+      ],
+      "reference": "https://www.jetbrains.com/help/rider/Asset-serialization-mode.html",
+      "implementationEvidence": [
+        "editor/src/features/unity-analyzers/services/fsa-rename.ts"
+      ],
+      "verification": []
+    },
+    {
+      "id": "C.unityevent-rename",
+      "track": "C",
+      "title": "UnityEvent binding rewrites in one validated transaction",
+      "required": true,
+      "status": "incomplete",
+      "requiredEnvironments": [
+        "windows-x64/6000.3",
+        "windows-x64/6000.0",
+        "windows-x64/2022.3",
+        "macos-arm64/6000.3",
+        "macos-arm64/6000.0",
+        "macos-arm64/2022.3"
+      ],
+      "requiredFixtures": [
+        "saved-scene-event",
+        "prefab-event",
+        "prefab-override",
+        "ambiguous-string-review",
+        "stale-index-refusal"
+      ],
+      "reference": "https://www.jetbrains.com/help/rider/Asset-serialization-mode.html",
+      "implementationEvidence": [],
+      "verification": []
+    },
+    {
+      "id": "D.navigation",
+      "track": "D",
+      "title": "Metadata/generated documents, call/type hierarchy and folding",
+      "required": true,
+      "status": "incomplete",
+      "requiredEnvironments": [
+        "windows-x64/6000.3",
+        "windows-x64/6000.0",
+        "windows-x64/2022.3",
+        "macos-arm64/6000.3",
+        "macos-arm64/6000.0",
+        "macos-arm64/2022.3"
+      ],
+      "requiredFixtures": [
+        "metadata-readonly",
+        "generated-readonly",
+        "call-incoming-outgoing",
+        "base-derived-implementation",
+        "structural-folding"
+      ],
+      "reference": "https://www.jetbrains.com/help/rider/Main_Set_of_Refactorings.html",
+      "implementationEvidence": [],
+      "verification": []
+    },
+    {
+      "id": "D.refactorings",
+      "track": "D",
+      "title": "Frozen Unity-applicable C# refactoring inventory",
+      "required": true,
+      "status": "incomplete",
+      "requiredEnvironments": [
+        "windows-x64/6000.3",
+        "windows-x64/6000.0",
+        "windows-x64/2022.3",
+        "macos-arm64/6000.3",
+        "macos-arm64/6000.0",
+        "macos-arm64/2022.3"
+      ],
+      "requiredFixtures": [
+        "rename",
+        "move",
+        "safe-delete",
+        "change-signature",
+        "extract-method",
+        "extract-class",
+        "extract-interface",
+        "extract-superclass",
+        "introduce-variable-field-parameter",
+        "inline-variable-field-parameter-method",
+        "encapsulate-field",
+        "pull-up-push-down",
+        "namespace-folder",
+        "applicable-conversions"
+      ],
+      "reference": "https://www.jetbrains.com/help/rider/Main_Set_of_Refactorings.html",
+      "implementationEvidence": [],
+      "verification": []
+    },
+    {
+      "id": "D.inspections",
+      "track": "D",
+      "title": "Semantic Unity inspections, transitive costs and safe fixes",
+      "required": true,
+      "status": "incomplete",
+      "requiredEnvironments": [
+        "windows-x64/6000.3",
+        "windows-x64/6000.0",
+        "windows-x64/2022.3",
+        "macos-arm64/6000.3",
+        "macos-arm64/6000.0",
+        "macos-arm64/2022.3"
+      ],
+      "requiredFixtures": [
+        "unity-semantics",
+        "transitive-hot-path",
+        "analyzer-fixes",
+        "cleanup-profiles",
+        "team-formatting"
+      ],
+      "reference": "https://www.jetbrains.com/help/rider/Main_Set_of_Refactorings.html",
+      "implementationEvidence": [],
+      "verification": []
+    },
+    {
+      "id": "E.editor-debugging",
+      "track": "E",
+      "title": "Complete reliable Unity Editor debugger loop",
+      "required": true,
+      "status": "incomplete",
+      "requiredEnvironments": [
+        "windows-x64/6000.3",
+        "windows-x64/6000.0",
+        "windows-x64/2022.3",
+        "macos-arm64/6000.3",
+        "macos-arm64/6000.0",
+        "macos-arm64/2022.3"
+      ],
+      "requiredFixtures": [
+        "attach-selection",
+        "first-line-breakpoint",
+        "reload",
+        "step",
+        "typed-exceptions",
+        "casts-static-collections",
+        "async-coroutines",
+        "detach-reattach"
+      ],
+      "reference": "https://www.jetbrains.com/help/rider/Troubleshooting-debugging-Unity-players.html",
+      "implementationEvidence": [],
+      "verification": []
+    },
+    {
+      "id": "E.evaluation",
+      "track": "E",
+      "title": "Bounded explicit method/property invocation",
+      "required": true,
+      "status": "incomplete",
+      "requiredEnvironments": [
+        "windows-x64/6000.3",
+        "windows-x64/6000.0",
+        "windows-x64/2022.3",
+        "macos-arm64/6000.3",
+        "macos-arm64/6000.0",
+        "macos-arm64/2022.3"
+      ],
+      "requiredFixtures": [
+        "main-thread-evaluation",
+        "invocation-timeout",
+        "late-reply",
+        "suspended-thread-safety"
+      ],
+      "reference": "https://www.jetbrains.com/help/rider/Troubleshooting-debugging-Unity-players.html",
+      "implementationEvidence": [],
+      "verification": []
+    },
+    {
+      "id": "E.unity-views",
+      "track": "E",
+      "title": "Pausepoints, scene/component/texture and Entities debugger views",
+      "required": true,
+      "status": "incomplete",
+      "requiredEnvironments": [
+        "windows-x64/6000.3",
+        "windows-x64/6000.0",
+        "windows-x64/2022.3",
+        "macos-arm64/6000.3",
+        "macos-arm64/6000.0",
+        "macos-arm64/2022.3"
+      ],
+      "requiredFixtures": [
+        "pausepoint",
+        "gameobject-components",
+        "texture-view",
+        "entities-view"
+      ],
+      "reference": "https://www.jetbrains.com/help/rider/Troubleshooting-debugging-Unity-players.html",
+      "implementationEvidence": [],
+      "verification": []
+    },
+    {
+      "id": "E.desktop-players",
+      "track": "E",
+      "title": "Local and reachable remote Windows/macOS/Linux players",
+      "required": true,
+      "status": "incomplete",
+      "requiredEnvironments": [
+        "windows-x64/6000.3",
+        "windows-x64/6000.0",
+        "windows-x64/2022.3",
+        "macos-arm64/6000.3",
+        "macos-arm64/6000.0",
+        "macos-arm64/2022.3"
+      ],
+      "requiredFixtures": [
+        "desktop-local",
+        "desktop-remote",
+        "reconnect"
+      ],
+      "reference": "https://www.jetbrains.com/help/rider/Troubleshooting-debugging-Unity-players.html",
+      "implementationEvidence": [],
+      "verification": []
+    },
+    {
+      "id": "E.android",
+      "track": "E",
+      "title": "Android network/USB debugging",
+      "required": true,
+      "status": "incomplete",
+      "requiredEnvironments": [
+        "windows-x64/6000.3",
+        "windows-x64/6000.0",
+        "windows-x64/2022.3",
+        "macos-arm64/6000.3",
+        "macos-arm64/6000.0",
+        "macos-arm64/2022.3"
+      ],
+      "requiredFixtures": [
+        "network",
+        "usb",
+        "disconnect-reconnect"
+      ],
+      "reference": "https://www.jetbrains.com/help/rider/Troubleshooting-debugging-Unity-players.html",
+      "implementationEvidence": [],
+      "verification": []
+    },
+    {
+      "id": "E.ios",
+      "track": "E",
+      "title": "iOS/iPadOS network/USB and Windows device-service workflows",
+      "required": true,
+      "status": "incomplete",
+      "requiredEnvironments": [
+        "windows-x64/6000.3",
+        "windows-x64/6000.0",
+        "windows-x64/2022.3",
+        "macos-arm64/6000.3",
+        "macos-arm64/6000.0",
+        "macos-arm64/2022.3"
+      ],
+      "requiredFixtures": [
+        "network",
+        "usb",
+        "windows-services"
+      ],
+      "reference": "https://www.jetbrains.com/help/rider/Troubleshooting-debugging-Unity-players.html",
+      "implementationEvidence": [],
+      "verification": []
+    },
+    {
+      "id": "E.il2cpp",
+      "track": "E",
+      "title": "Managed IL2CPP attachment/evaluation within documented limits",
+      "required": true,
+      "status": "incomplete",
+      "requiredEnvironments": [
+        "windows-x64/6000.3",
+        "windows-x64/6000.0",
+        "windows-x64/2022.3",
+        "macos-arm64/6000.3",
+        "macos-arm64/6000.0",
+        "macos-arm64/2022.3"
+      ],
+      "requiredFixtures": [
+        "attach",
+        "stepping",
+        "evaluation-limit-reporting"
+      ],
+      "reference": "https://www.jetbrains.com/help/rider/Troubleshooting-debugging-Unity-players.html",
+      "implementationEvidence": [],
+      "verification": []
+    },
+    {
+      "id": "E.consoles",
+      "track": "E",
+      "title": "Licensed physical console target certification",
+      "required": true,
+      "status": "incomplete",
+      "requiredEnvironments": [
+        "windows-x64/6000.3",
+        "windows-x64/6000.0",
+        "windows-x64/2022.3",
+        "macos-arm64/6000.3",
+        "macos-arm64/6000.0",
+        "macos-arm64/2022.3"
+      ],
+      "requiredFixtures": [
+        "documented-console-families"
+      ],
+      "reference": "https://www.jetbrains.com/help/rider/Troubleshooting-debugging-Unity-players.html",
+      "implementationEvidence": [],
+      "verification": []
+    },
+    {
+      "id": "E.mixed-mode",
+      "track": "E",
+      "title": "Coordinated Windows x64 Mono managed/native debugging",
+      "required": true,
+      "status": "incomplete",
+      "requiredEnvironments": [
+        "windows-x64/6000.3",
+        "windows-x64/6000.0",
+        "windows-x64/2022.3"
+      ],
+      "requiredFixtures": [
+        "native-plugin-cross-boundary",
+        "thread-stop-ownership",
+        "symbols",
+        "ordered-detach"
+      ],
+      "reference": "https://www.jetbrains.com/help/rider/Troubleshooting-debugging-Unity-players.html",
+      "implementationEvidence": [],
+      "verification": []
+    },
+    {
+      "id": "F.test-discovery",
+      "track": "F",
+      "title": "Unity-authoritative test tree and parameterized identities",
+      "required": true,
+      "status": "incomplete",
+      "requiredEnvironments": [
+        "windows-x64/6000.3",
+        "windows-x64/6000.0",
+        "windows-x64/2022.3",
+        "macos-arm64/6000.3",
+        "macos-arm64/6000.0",
+        "macos-arm64/2022.3"
+      ],
+      "requiredFixtures": [
+        "parameterized",
+        "source-generated",
+        "offline-provisional"
+      ],
+      "reference": "https://docs.unity3d.com/Packages/com.unity.test-framework@1.1/api/UnityEditor.TestTools.TestRunner.Api.TestRunnerApi.html",
+      "implementationEvidence": [],
+      "verification": []
+    },
+    {
+      "id": "F.run-controller",
+      "track": "F",
+      "title": "Correlated test execution, cancellation and persisted sessions",
+      "required": true,
+      "status": "incomplete",
+      "requiredEnvironments": [
+        "windows-x64/6000.3",
+        "windows-x64/6000.0",
+        "windows-x64/2022.3",
+        "macos-arm64/6000.3",
+        "macos-arm64/6000.0",
+        "macos-arm64/2022.3"
+      ],
+      "requiredFixtures": [
+        "foreign-event-refusal",
+        "duplicate-event",
+        "reload",
+        "cancel-timeout",
+        "compile-failure",
+        "rerun-failed",
+        "persisted-session",
+        "debug-ready"
+      ],
+      "reference": "https://docs.unity3d.com/Packages/com.unity.test-framework@1.1/api/UnityEditor.TestTools.TestRunner.Api.TestRunnerApi.html",
+      "implementationEvidence": [
+        "editor/src/features/unity-test-runner/stores/test-store.exec.ts"
+      ],
+      "verification": []
+    },
+    {
+      "id": "F.coverage",
+      "track": "F",
+      "title": "Unity Code Coverage reports tied to run and revision",
+      "required": true,
+      "status": "incomplete",
+      "requiredEnvironments": [
+        "windows-x64/6000.3",
+        "windows-x64/6000.0",
+        "windows-x64/2022.3",
+        "macos-arm64/6000.3",
+        "macos-arm64/6000.0",
+        "macos-arm64/2022.3"
+      ],
+      "requiredFixtures": [
+        "editmode",
+        "playmode",
+        "line-highlights",
+        "filters",
+        "stale-report",
+        "import-export"
+      ],
+      "reference": "https://docs.unity3d.com/Packages/com.unity.test-framework@1.1/api/UnityEditor.TestTools.TestRunner.Api.TestRunnerApi.html",
+      "implementationEvidence": [],
+      "verification": []
+    },
+    {
+      "id": "G.cpu-analysis",
+      "track": "G",
+      "title": "Complete capture/range CPU analysis and source navigation",
+      "required": true,
+      "status": "implemented",
+      "requiredEnvironments": [
+        "windows-x64/6000.3",
+        "windows-x64/6000.0",
+        "windows-x64/2022.3",
+        "macos-arm64/6000.3",
+        "macos-arm64/6000.0",
+        "macos-arm64/2022.3"
+      ],
+      "requiredFixtures": [
+        "sample-beyond-page",
+        "frame-beyond-2000",
+        "range-statistics",
+        "capture-ingest-query-source-export-import",
+        "interruption",
+        "units-unavailable-metrics",
+        "profiling-configurations"
+      ],
+      "reference": "https://www.jetbrains.com/help/rider/Unity_Profiler_Assistance.html",
+      "implementationEvidence": [
+        "editor/src-tauri/src/unity_profiler.rs"
+      ],
+      "verification": []
+    },
+    {
+      "id": "G.memory",
+      "track": "G",
+      "title": "Versioned Unity player memory snapshots and reference analysis",
+      "required": true,
+      "status": "incomplete",
+      "requiredEnvironments": [
+        "windows-x64/6000.3",
+        "windows-x64/6000.0",
+        "windows-x64/2022.3",
+        "macos-arm64/6000.3",
+        "macos-arm64/6000.0",
+        "macos-arm64/2022.3"
+      ],
+      "requiredFixtures": [
+        "capture",
+        "parse-supported-versions",
+        "managed-native",
+        "reference-exploration",
+        "retained-object-comparison"
+      ],
+      "reference": "https://www.jetbrains.com/help/rider/Unity_Profiler_Assistance.html",
+      "implementationEvidence": [],
+      "verification": []
+    },
+    {
+      "id": "G.dottrace-comparison",
+      "track": "G",
+      "title": "Explicitly recorded dotTrace-specific CPU/native comparison track",
+      "required": true,
+      "status": "incomplete",
+      "requiredEnvironments": [
+        "windows-x64/6000.3",
+        "windows-x64/6000.0",
+        "windows-x64/2022.3",
+        "macos-arm64/6000.3",
+        "macos-arm64/6000.0",
+        "macos-arm64/2022.3"
+      ],
+      "requiredFixtures": [
+        "capture-mode-inventory",
+        "overhead-disclosure",
+        "unsupported-distinctions"
+      ],
+      "reference": "https://www.jetbrains.com/help/rider/Unity_Profiler_Assistance.html",
+      "implementationEvidence": [],
+      "verification": []
+    },
+    {
+      "id": "H.shader-semantics",
+      "track": "H",
+      "title": "DXC semantic service with Unity ShaderLab contexts and source maps",
+      "required": true,
+      "status": "incomplete",
+      "requiredEnvironments": [
+        "windows-x64/6000.3",
+        "windows-x64/6000.0",
+        "windows-x64/2022.3",
+        "macos-arm64/6000.3",
+        "macos-arm64/6000.0",
+        "macos-arm64/2022.3"
+      ],
+      "requiredFixtures": [
+        "windows-backend",
+        "macos-backend",
+        "pipeline-pass-stage-api-keywords",
+        "includes",
+        "completion-diagnostics-definition-usages",
+        "mapped-rename",
+        "unity-compiler-validation",
+        "variant-cancellation"
+      ],
+      "reference": "https://www.jetbrains.com/help/rider/Enabling-shader-keywords.html",
+      "implementationEvidence": [],
+      "verification": []
+    },
+    {
+      "id": "H.frame-viewer",
+      "track": "H",
+      "title": "Pinned Windows graphics capture and vertex/fragment debugging",
+      "required": true,
+      "status": "incomplete",
+      "requiredEnvironments": [
+        "windows-x64/6000.3",
+        "windows-x64/6000.0",
+        "windows-x64/2022.3"
+      ],
+      "requiredFixtures": [
+        "capture-compatibility",
+        "draw-events",
+        "textures-vertices",
+        "vertex-debug",
+        "fragment-debug"
+      ],
+      "reference": "https://www.jetbrains.com/help/rider/Enabling-shader-keywords.html",
+      "implementationEvidence": [],
+      "verification": []
+    },
+    {
+      "id": "H.dots-burst",
+      "track": "H",
+      "title": "Actual package generators and semantic DOTS/Burst support",
+      "required": true,
+      "status": "incomplete",
+      "requiredEnvironments": [
+        "windows-x64/6000.3",
+        "windows-x64/6000.0",
+        "windows-x64/2022.3",
+        "macos-arm64/6000.3",
+        "macos-arm64/6000.0",
+        "macos-arm64/2022.3"
+      ],
+      "requiredFixtures": [
+        "isystem-systembase-systemapi",
+        "ijobentity-aspects",
+        "baking-native-containers",
+        "generated-navigation",
+        "transitive-burst",
+        "real-burst-compilation",
+        "package-version-matrix"
+      ],
+      "reference": "https://www.jetbrains.com/help/rider/Enabling-shader-keywords.html",
+      "implementationEvidence": [],
+      "verification": []
+    },
+    {
+      "id": "I.migration",
+      "track": "I",
+      "title": "Reversible inherited Rider keymaps and behavior-correct mappings",
+      "required": true,
+      "status": "incomplete",
+      "requiredEnvironments": [
+        "windows-x64/6000.3",
+        "windows-x64/6000.0",
+        "windows-x64/2022.3",
+        "macos-arm64/6000.3",
+        "macos-arm64/6000.0",
+        "macos-arm64/2022.3"
+      ],
+      "requiredFixtures": [
+        "parent-custom-removals",
+        "save-all",
+        "action-names",
+        "search-everywhere",
+        "recent-locations",
+        "bookmarks-todo",
+        "unsupported-settings-report"
+      ],
+      "reference": "https://www.jetbrains.com/help/rider/Configuring_Keyboard_and_Mouse_Shortcuts.html",
+      "implementationEvidence": [
+        "editor/src-tauri/src/editor_experience/imports.rs"
+      ],
+      "verification": []
+    },
+    {
+      "id": "I.editor-groups",
+      "track": "I",
+      "title": "Splits with independent views and shared document models",
+      "required": true,
+      "status": "incomplete",
+      "requiredEnvironments": [
+        "windows-x64/6000.3",
+        "windows-x64/6000.0",
+        "windows-x64/2022.3",
+        "macos-arm64/6000.3",
+        "macos-arm64/6000.0",
+        "macos-arm64/2022.3"
+      ],
+      "requiredFixtures": [
+        "split-focus-navigation",
+        "shared-editing",
+        "per-group-view-state",
+        "restore-layout"
+      ],
+      "reference": "https://www.jetbrains.com/help/rider/Configuring_Keyboard_and_Mouse_Shortcuts.html",
+      "implementationEvidence": [],
+      "verification": []
+    },
+    {
+      "id": "I.formatting",
+      "track": "I",
+      "title": "Standard/.NET EditorConfig and explicit Rider setting mappings",
+      "required": true,
+      "status": "incomplete",
+      "requiredEnvironments": [
+        "windows-x64/6000.3",
+        "windows-x64/6000.0",
+        "windows-x64/2022.3",
+        "macos-arm64/6000.3",
+        "macos-arm64/6000.0",
+        "macos-arm64/2022.3"
+      ],
+      "requiredFixtures": [
+        "scopes-precedence",
+        "dotnet-options",
+        "supported-rider-settings",
+        "unsupported-report"
+      ],
+      "reference": "https://www.jetbrains.com/help/rider/Configuring_Keyboard_and_Mouse_Shortcuts.html",
+      "implementationEvidence": [],
+      "verification": []
+    },
+    {
+      "id": "I.git-history",
+      "track": "I",
+      "title": "Hunk/line staging, conflict resolution and independent local history",
+      "required": true,
+      "status": "incomplete",
+      "requiredEnvironments": [
+        "windows-x64/6000.3",
+        "windows-x64/6000.0",
+        "windows-x64/2022.3",
+        "macos-arm64/6000.3",
+        "macos-arm64/6000.0",
+        "macos-arm64/2022.3"
+      ],
+      "requiredFixtures": [
+        "hunk-stage",
+        "line-stage",
+        "conflict",
+        "meta-pairing",
+        "recover-local-history"
+      ],
+      "reference": "https://www.jetbrains.com/help/rider/Configuring_Keyboard_and_Mouse_Shortcuts.html",
+      "implementationEvidence": [],
+      "verification": []
+    },
+    {
+      "id": "I.installation",
+      "track": "I",
+      "title": "Clean signed installation, registration, updates and recovery",
+      "required": true,
+      "status": "incomplete",
+      "requiredEnvironments": [
+        "windows-x64/6000.3",
+        "windows-x64/6000.0",
+        "windows-x64/2022.3",
+        "macos-arm64/6000.3",
+        "macos-arm64/6000.0",
+        "macos-arm64/2022.3"
+      ],
+      "requiredFixtures": [
+        "fresh-install",
+        "upgrade",
+        "signing-notarization",
+        "runtime-diagnosis",
+        "unity-registration",
+        "update-rollback"
+      ],
+      "reference": "https://www.jetbrains.com/help/rider/Configuring_Keyboard_and_Mouse_Shortcuts.html",
+      "implementationEvidence": [],
+      "verification": []
+    },
+    {
+      "id": "I.offline",
+      "track": "I",
+      "title": "Core coding/debugging/testing independent of AI availability",
+      "required": true,
+      "status": "incomplete",
+      "requiredEnvironments": [
+        "windows-x64/6000.3",
+        "windows-x64/6000.0",
+        "windows-x64/2022.3",
+        "macos-arm64/6000.3",
+        "macos-arm64/6000.0",
+        "macos-arm64/2022.3"
+      ],
+      "requiredFixtures": [
+        "no-ai",
+        "offline-initialized-project",
+        "stale-service-visible",
+        "recover-service"
+      ],
+      "reference": "https://www.jetbrains.com/help/rider/Configuring_Keyboard_and_Mouse_Shortcuts.html",
+      "implementationEvidence": [],
+      "verification": []
+    },
+    {
+      "id": "R.performance",
+      "track": "R",
+      "title": "Measured latency and small/medium/large project benchmarks",
+      "required": true,
+      "status": "incomplete",
+      "requiredEnvironments": [
+        "windows-x64/6000.3",
+        "windows-x64/6000.0",
+        "windows-x64/2022.3",
+        "macos-arm64/6000.3",
+        "macos-arm64/6000.0",
+        "macos-arm64/2022.3"
+      ],
+      "requiredFixtures": [
+        "warm-completion-p95-300ms",
+        "navigation-p95-500ms",
+        "diagnostics-p95-2s",
+        "typing-scrolling",
+        "10000-csharp-50000-assets",
+        "same-machine-rider-baseline",
+        "whole-process-tree"
+      ],
+      "reference": "docs/implementation/unityide-040-rider-migration.md",
+      "implementationEvidence": [],
+      "verification": []
+    },
+    {
+      "id": "R.soak",
+      "track": "R",
+      "title": "200 edit/compile/play/reload cycles per core fixture",
+      "required": true,
+      "status": "incomplete",
+      "requiredEnvironments": [
+        "windows-x64/6000.3",
+        "windows-x64/6000.0",
+        "windows-x64/2022.3",
+        "macos-arm64/6000.3",
+        "macos-arm64/6000.0",
+        "macos-arm64/2022.3"
+      ],
+      "requiredFixtures": [
+        "200-cycles-no-data-loss-no-orphan-no-false-success"
+      ],
+      "reference": "docs/implementation/unityide-040-rider-migration.md",
+      "implementationEvidence": [],
+      "verification": []
+    },
+    {
+      "id": "R.pilot",
+      "track": "R",
+      "title": "Ten Rider users complete two working weeks without blockers",
+      "required": true,
+      "status": "incomplete",
+      "requiredEnvironments": [
+        "pilot-cohort"
+      ],
+      "requiredFixtures": [
+        "gameplay",
+        "tooling",
+        "graphics-dots",
+        "device-debugging",
+        "ten-users-two-weeks",
+        "no-unresolved-return-to-rider"
+      ],
+      "reference": "docs/implementation/unityide-040-rider-migration.md",
+      "implementationEvidence": [],
+      "verification": []
+    },
+    {
+      "id": "X.macos-frame-viewer",
+      "track": "X",
+      "title": "macOS Rider Frame Viewer is outside its documented platform support",
+      "required": false,
+      "status": "reference-unsupported",
+      "requiredEnvironments": [],
+      "requiredFixtures": [],
+      "reference": "https://www.jetbrains.com/help/rider/Frame_Viewer.html",
+      "implementationEvidence": [],
+      "verification": []
+    },
+    {
+      "id": "X.macos-mixed-mode",
+      "track": "X",
+      "title": "macOS Unity mixed managed/native debugging is outside the frozen reference support",
+      "required": false,
+      "status": "reference-unsupported",
+      "requiredEnvironments": [],
+      "requiredFixtures": [],
+      "reference": "https://youtrack.jetbrains.com/articles/SUPPORT-A-1957/How-to-use-mix-mode-debugger-for-Unity-Mono-process",
+      "implementationEvidence": [],
+      "verification": []
+    },
+    {
+      "id": "X.dotcover-mono",
+      "track": "X",
+      "title": "Current dotCover Unity/Mono support was removed; Unity Code Coverage remains required",
+      "required": false,
+      "status": "reference-unsupported",
+      "requiredEnvironments": [],
+      "requiredFixtures": [],
+      "reference": "https://www.jetbrains.com/help/dotcover/Whats_New.html",
+      "implementationEvidence": [],
+      "verification": []
+    }
+  ]
+}

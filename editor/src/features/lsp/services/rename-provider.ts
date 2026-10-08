@@ -7,7 +7,7 @@ import {
   buildTextDocumentPositionParams,
   type LspRange,
 } from './model-context';
-import { applyLspWorkspaceEdit, type LspWorkspaceEdit } from './workspace-edit';
+import { applyLspWorkspaceEdit, captureWorkspaceEditVersions, type LspWorkspaceEdit } from './workspace-edit';
 import { LSP_BACKED_MONACO_LANGUAGES } from '../../../utils/language-detect';
 
 // ── LSP rename types (structural, not imported) ─────────────────
@@ -29,6 +29,8 @@ export interface RenamePostProcessContext {
   newName: string;
   /** The (possibly already post-processed) LSP WorkspaceEdit. */
   workspaceEdit: LspWorkspaceEdit;
+  /** Post-processors record text they used to derive additional edits. */
+  documentTextPreconditions: Map<string, string>;
 }
 
 export type RenamePostProcessor = (
@@ -58,11 +60,9 @@ async function runRenamePostProcessors(
 ): Promise<LspWorkspaceEdit> {
   let edit = initial;
   for (const fn of renamePostProcessors) {
-    try {
-      edit = await fn({ ...ctx, workspaceEdit: edit });
-    } catch (err) {
-      console.warn('[LSP] Rename post-processor failed (skipping):', err);
-    }
+    // A serialization safeguard failing is a failed rename, never permission
+    // to apply the unprotected result.
+    edit = await fn({ ...ctx, workspaceEdit: edit });
   }
   return edit;
 }
@@ -91,6 +91,7 @@ export function registerLspRenameProviders(monaco: Monaco): () => void {
           }
 
           try {
+            const expectedBuffers = captureWorkspaceEditVersions();
             const params = {
               ...buildTextDocumentPositionParams(model, position),
               newName,
@@ -107,8 +108,9 @@ export function registerLspRenameProviders(monaco: Monaco): () => void {
             }
 
             const oldName = model.getWordAtPosition(position)?.word ?? '';
+            const documentTextPreconditions = new Map<string, string>();
             const finalEdit = await runRenamePostProcessors(
-              { model, position, oldName, newName },
+              { model, position, oldName, newName, documentTextPreconditions },
               result,
             );
 
@@ -116,10 +118,12 @@ export function registerLspRenameProviders(monaco: Monaco): () => void {
             // models that are currently open, silently dropping rename
             // edits in closed files. So we apply the full WorkspaceEdit
             // ourselves (open models get undo-friendly pushEditOperations;
-            // closed files are rewritten on disk) and return an empty edit
-            // to Monaco. Tradeoff: cross-file undo is per-file — Cmd+Z in
-            // the active editor won't revert the other touched files.
-            const summary = await applyLspWorkspaceEdit(finalEdit);
+            // closed files use the recovery journal) and return an empty
+            // edit to Monaco. Undo Last Workspace Change reverts the complete
+            // operation; Cmd+Z still belongs to the active document.
+            const summary = await applyLspWorkspaceEdit(finalEdit, { preview: true, expectedBuffers, expectedTexts: documentTextPreconditions });
+            if (summary.cancelled) return { edits: [] };
+            if (summary.failedFiles.length) return { edits: [], rejectReason: summary.failedFiles[0].error };
             console.info('[LSP] Rename applied', { newName, ...summary });
             return { edits: [] };
           } catch (err) {

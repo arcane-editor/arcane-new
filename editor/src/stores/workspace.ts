@@ -927,6 +927,7 @@ interface WorkspaceState {
   popRecentlyClosed: () => string | null;
   updateFileContent: (path: string, content: string) => void;
   saveFile: (path: string) => Promise<void>;
+  saveAll: () => Promise<{ saved: string[]; unsaved: string[] }>;
   reloadFileFromDisk: (path: string, opts?: { skipIfDirty?: boolean }) => Promise<void>;
   /**
    * `filePath` is repo-root-relative. `origPath` is the pre-rename path for a
@@ -971,6 +972,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   recentFiles: [],
 
   setWorkspace: async (path: string) => {
+    if (get().workspacePath && get().workspacePath !== path) {
+      // Native completion precedes teardown of the previous project's UI.
+      // A failed detach leaves the old workspace available for recovery.
+      await invoke('dap_stop');
+    }
     useUiStore.getState().setLspStatus('idle');
 
     // Clean up previous workspace
@@ -1588,6 +1594,23 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     })();
     pendingSaves.set(path, work);
     try { await work; } finally { if (pendingSaves.get(path) === work) pendingSaves.delete(path); }
+  },
+
+  saveAll: async () => {
+    const paths = get().openFiles.filter((f) => f.isDirty && !isVirtualPath(f.path)).map((f) => f.path);
+    const saved: string[] = [];
+    const unsaved: string[] = [];
+    for (const path of paths) {
+      try {
+        await get().saveFile(path);
+        const file = get().openFiles.find((f) => f.path === path);
+        // A conflict, a closed tab, or typing during a save is not success.
+        (file && !file.isDirty && !file.saveConflict ? saved : unsaved).push(path);
+      } catch {
+        unsaved.push(path);
+      }
+    }
+    return { saved, unsaved };
   },
 
   reloadFileFromDisk: async (path: string, opts?: { skipIfDirty?: boolean }) => {

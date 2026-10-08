@@ -88,7 +88,8 @@ import { useRegisterCommands } from './hooks/useRegisterCommands';
 import { useAutoSave } from './hooks/useAutoSave';
 import { useCloseGuard } from './hooks/useCloseGuard';
 import { notify, useNotificationsStore } from './stores/notifications';
-import { runWorkspaceDiagnostics, resetWorkspaceDiagnostics } from './features/lsp';
+import { runWorkspaceDiagnostics, resetWorkspaceDiagnostics, undoLastWorkspaceEdit, reviewWorkspaceRecovery } from './features/lsp';
+import { WorkspaceChangePreview } from './features/workspace-changes';
 import { checkReleaseChannel } from './config/api';
 import { useCommandsStore } from './stores/commands';
 import { listenScoped } from './utils/tauri-listener';
@@ -1097,6 +1098,37 @@ function App() {
         if (activePath) void useWorkspaceStore.getState().saveFile(activePath);
       },
       when: () => !!useWorkspaceStore.getState().activeFilePath,
+    },
+    {
+      id: 'workspace.reviewRecovery',
+      label: 'Review Interrupted Workspace Changes',
+      category: 'Edit',
+      handler: async () => {
+        try { await reviewWorkspaceRecovery(); }
+        catch (error) { notify.error(`Workspace recovery stopped: ${String(error)}`); }
+      },
+      when: () => !!useWorkspaceStore.getState().workspacePath,
+    },
+    {
+      id: 'workspace.undoChange',
+      label: 'Undo Last Workspace Change',
+      category: 'Edit',
+      handler: async () => {
+        try { await undoLastWorkspaceEdit(); }
+        catch (error) { notify.error(`Workspace undo stopped: ${String(error)}`); }
+      },
+      when: () => !!useWorkspaceStore.getState().workspacePath,
+    },
+    {
+      id: 'file.saveAll',
+      label: 'Save All',
+      category: 'File',
+      keybinding: 'mod+shift+s',
+      handler: async () => {
+        const { unsaved } = await useWorkspaceStore.getState().saveAll();
+        if (unsaved.length) notify.warning(`${unsaved.length} file(s) remain unsaved. Check conflicts and save errors.`);
+      },
+      when: () => useWorkspaceStore.getState().openFiles.some((f) => f.isDirty),
     },
     {
       id: 'file.closeTab',
@@ -2304,6 +2336,7 @@ function App() {
       {/* Mounted at the app root, not inside the editor pane: it overlays the
           workspace instead of displacing it. Gates itself on `settingsOpen`. */}
       <SettingsModal />
+      <WorkspaceChangePreview />
       {showShortcutsHelp && (
         <ShortcutsHelpModal onClose={() => setShowShortcutsHelp(false)} />
       )}

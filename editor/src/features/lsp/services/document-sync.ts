@@ -53,6 +53,11 @@ export function getOpenDocumentUris(): Set<string> {
   return uris;
 }
 
+/** The version sent on didOpen/didChange, not Monaco's independent counter. */
+export function getDocumentVersion(filePath: string): number | undefined {
+  return documentVersions.get(filePath);
+}
+
 // ── Public API ──────────────────────────────────────────────────
 
 /**

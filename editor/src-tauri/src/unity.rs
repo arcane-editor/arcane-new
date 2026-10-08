@@ -2505,9 +2505,25 @@ mod tests {
     /// That is the precise failure this module's own comments warn about: a
     /// skipped test and a passing test looked identical, and a total
     /// IntelliSense outage rode through a full green suite because of it.
-    fn smoke_workspace_or_skip(test: &str) -> Option<PathBuf> {
+    struct SmokeWorkspace { path: PathBuf, _fixture: Option<tempfile::TempDir> }
+    impl std::ops::Deref for SmokeWorkspace {
+        type Target = Path;
+        fn deref(&self) -> &Path { &self.path }
+    }
+
+    fn smoke_workspace_or_skip(test: &str) -> Option<SmokeWorkspace> {
         match smoke_workspace() {
-            Some(w) => Some(w),
+            Some(path) => {
+                if env::var_os("UNITYIDE_SMOKE_UNITY_PROJECT").is_some() {
+                    return Some(SmokeWorkspace { path, _fixture: None });
+                }
+                let fixture = tempfile::tempdir().expect("disposable smoke fixture");
+                fs::create_dir_all(fixture.path().join("Assets")).unwrap();
+                fs::create_dir_all(fixture.path().join("ProjectSettings")).unwrap();
+                fs::copy(path.join("ProjectSettings/ProjectVersion.txt"), fixture.path().join("ProjectSettings/ProjectVersion.txt")).unwrap();
+                fs::write(fixture.path().join("Assets/Probe.cs"), "public class Probe {}").unwrap();
+                Some(SmokeWorkspace { path: fixture.path().to_path_buf(), _fixture: Some(fixture) })
+            }
             None => {
                 eprintln!(
                     "SKIPPED {test}: no Unity project found. \

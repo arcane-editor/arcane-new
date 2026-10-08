@@ -93,10 +93,12 @@ interface UnityIndexState {
 // Forward guid → path map cache. Module-level (not store state) so resolving a
 // reference doesn't subscribe components to a large map. Invalidated on a fresh
 // build and on each incremental delta.
+let guidMapGeneration = 0;
 let guidMapCache: Record<string, string> | null = null;
 let guidMapInflight: Promise<Record<string, string>> | null = null;
 
 function invalidateGuidMap(): void {
+  guidMapGeneration += 1;
   guidMapCache = null;
   guidMapInflight = null;
 }
@@ -115,15 +117,17 @@ async function loadGuidMap(): Promise<Record<string, string>> {
   if (guidMapInflight) return guidMapInflight;
   const ws = useWorkspaceStore.getState().workspacePath;
   if (!ws) return {};
+  const generation = guidMapGeneration;
   guidMapInflight = invoke<Record<string, string>>('unity_index_guid_map', { workspacePath: ws })
     .then((m) => {
+      if (generation !== guidMapGeneration || useWorkspaceStore.getState().workspacePath !== ws) return {};
       guidMapCache = m;
       guidMapInflight = null;
       return m;
     })
     .catch((err) => {
       console.warn('[UnityIndex] guid_map failed:', err);
-      guidMapInflight = null;
+      if (generation === guidMapGeneration) guidMapInflight = null;
       return {};
     });
   return guidMapInflight;
@@ -146,10 +150,12 @@ export const useUnityIndexStore = create<UnityIndexState>((set) => ({
         unityVersion: unityVersion ?? '',
         force,
       });
+      if (useWorkspaceStore.getState().workspacePath !== workspacePath) return;
       invalidateGuidMap();
       set({ status: 'ready', summary, progress: null });
     } catch (err) {
       console.warn('[UnityIndex] build failed:', err);
+      if (useWorkspaceStore.getState().workspacePath !== workspacePath) return;
       set({ status: 'error', error: String(err), progress: null });
     }
   },
@@ -255,6 +261,65 @@ function indexEnabled(): boolean {
   );
 }
 
+let queuedWorkspace: string | null = null;
+
+function queueIndexDelta(added: string[], removed: string[]): void {
+  const workspace = useWorkspaceStore.getState().workspacePath;
+  if (workspace !== queuedWorkspace) { pendingChanged.clear(); pendingRemoved.clear(); }
+  queuedWorkspace = workspace;
+  for (const p of added) { pendingRemoved.delete(p); pendingChanged.add(p); }
+  for (const p of removed) {
+    pendingRemoved.add(p);
+    // A path can't be both changed and removed in the same flush.
+    pendingChanged.delete(p);
+  }
+
+  if (deltaDebounce) clearTimeout(deltaDebounce);
+  deltaDebounce = setTimeout(() => {
+    deltaDebounce = null;
+    if (useWorkspaceStore.getState().workspacePath !== queuedWorkspace) return;
+    const workspacePath = queuedWorkspace;
+    const changed = [...pendingChanged];
+    const removedList = [...pendingRemoved];
+    pendingChanged = new Set();
+    pendingRemoved = new Set();
+    if (!workspacePath || !indexEnabled()) return;
+    if (changed.length === 0 && removedList.length === 0) return;
+
+    // Bumped separately below so a prefab save does not trigger the
+    // analyzers' `.inputactions` rescan (see `inputActionsRevision`).
+    const inputTouched = [...changed, ...removedList].some((p) =>
+      p.toLowerCase().endsWith('.inputactions'),
+    );
+    const uiTouched = [...changed, ...removedList].some((p) => {
+      const lower = p.toLowerCase();
+      return lower.endsWith('.uxml') || lower.endsWith('.uss');
+    });
+
+    void invoke('unity_index_apply_delta', {
+      workspacePath,
+      changed,
+      removed: removedList,
+    })
+      .then(() => {
+        if (useWorkspaceStore.getState().workspacePath !== workspacePath) return;
+        invalidateGuidMap();
+        useUnityIndexStore.setState((s) => ({
+          indexRevision: s.indexRevision + 1,
+          inputActionsRevision: s.inputActionsRevision + (inputTouched ? 1 : 0),
+          uiToolkitRevision: s.uiToolkitRevision + (uiTouched ? 1 : 0),
+        }));
+      })
+      .catch((err) => {
+        console.warn('[UnityIndex] apply_delta failed:', err);
+        if (useWorkspaceStore.getState().workspacePath === workspacePath) {
+          invalidateGuidMap();
+          useUnityIndexStore.setState({ status: 'error', error: `Asset references could not be refreshed: ${String(err)}` });
+        }
+      });
+  }, DELTA_DEBOUNCE_MS);
+}
+
 function initDeltaListener(): void {
   if (deltaListenerInitialized) return;
   deltaListenerInitialized = true;
@@ -265,77 +330,15 @@ function initDeltaListener(): void {
     const removed = (event.payload.removed ?? []).filter(isIndexRelevant);
     if (added.length === 0 && removed.length === 0) return;
 
-    for (const p of added) pendingChanged.add(p);
-    for (const p of removed) {
-      pendingRemoved.add(p);
-      // A path can't be both changed and removed in the same flush.
-      pendingChanged.delete(p);
-    }
-
-    if (deltaDebounce) clearTimeout(deltaDebounce);
-    deltaDebounce = setTimeout(() => {
-      deltaDebounce = null;
-      const workspacePath = useWorkspaceStore.getState().workspacePath;
-      const changed = [...pendingChanged];
-      const removedList = [...pendingRemoved];
-      pendingChanged = new Set();
-      pendingRemoved = new Set();
-      if (!workspacePath || !indexEnabled()) return;
-      if (changed.length === 0 && removedList.length === 0) return;
-
-      // Bumped separately below so a prefab save does not trigger the
-      // analyzers' `.inputactions` rescan (see `inputActionsRevision`).
-      const inputTouched = [...changed, ...removedList].some((p) =>
-        p.toLowerCase().endsWith('.inputactions'),
-      );
-      const uiTouched = [...changed, ...removedList].some((p) => {
-        const lower = p.toLowerCase();
-        return lower.endsWith('.uxml') || lower.endsWith('.uss');
-      });
-
-      void invoke('unity_index_apply_delta', {
-        workspacePath,
-        changed,
-        removed: removedList,
-      })
-        .then(() => {
-          invalidateGuidMap();
-          useUnityIndexStore.setState((s) => ({
-            indexRevision: s.indexRevision + 1,
-            inputActionsRevision: s.inputActionsRevision + (inputTouched ? 1 : 0),
-            uiToolkitRevision: s.uiToolkitRevision + (uiTouched ? 1 : 0),
-          }));
-        })
-        .catch((err) => {
-          console.warn('[UnityIndex] apply_delta failed:', err);
-        });
-    }, DELTA_DEBOUNCE_MS);
+    queueIndexDelta(added, removed);
   }).catch(() => {
     deltaListenerInitialized = false;
   });
 }
 
-// ── file-content-changed → uiToolkitRevision ────────────────────────────
-//
-// The OTHER half of "a `.uxml`/`.uss` changed on disk", and the half that was
-// missing.
-//
-// `file-index-changed` carries only what `file_scanner.rs` puts in its
-// `added`/`removed` lists, and those are populated from `Create` and
-// `Modify(Name)` — creations and renames. A plain in-place rewrite of an
-// existing file arrives as `Modify(Data)`, which the scanner reports on a
-// SEPARATE event, `file-content-changed`. So the delta listener above sees a
-// stylesheet the first time it is written and never again.
-//
-// That gap is the whole difference between the design dock's render and the
-// `.uxml` preview: `layout-gate.ts` re-reads every file from disk on every
-// probe, while every consumer of `uiToolkitRevision` waits for a signal that
-// only fired on creation. Iterating on a screen — the AI rewriting a `.uss` it
-// already wrote, or a human editing one in Unity — changed the file and
-// notified nobody.
-//
-// Gated the same way as the delta listener so the two signals cannot disagree
-// about whether this project is being indexed at all.
+// In-place content changes must re-ingest scene/prefab references too.
+// Both watcher streams share a debounce so a rename followed by a save has
+// one ordered delta and the specialized analyzer revisions stay consistent.
 
 let contentListenerInitialized = false;
 
@@ -344,18 +347,8 @@ function initUiContentListener(): void {
   contentListenerInitialized = true;
   listenScoped<string[]>('file-content-changed', (event) => {
     if (!indexEnabled()) return;
-    // Rust already dedups and settles each burst before emitting, so one bump
-    // per event is one bump per burst — no debounce needed here.
-    const uiTouched = (event.payload ?? []).some((p) => {
-      const lower = p.toLowerCase();
-      return lower.endsWith('.uxml') || lower.endsWith('.uss');
-    });
-    if (!uiTouched) return;
-    // Only `uiToolkitRevision`: an in-place edit changes a document's CONTENT,
-    // never its guid, so neither the guid map nor the reverse-reference index
-    // has gone stale. (This is the same reasoning that keeps `.uxml`/`.uss` out
-    // of the Rust reingest — see `INDEX_RELEVANT`.)
-    useUnityIndexStore.setState((s) => ({ uiToolkitRevision: s.uiToolkitRevision + 1 }));
+    const changed = (event.payload ?? []).filter(isIndexRelevant);
+    if (changed.length) queueIndexDelta(changed, []);
   }).catch(() => {
     contentListenerInitialized = false;
   });

@@ -62,11 +62,16 @@ export {
 } from './services/model-context';
 export {
   applyLspWorkspaceEdit,
+  undoLastWorkspaceEdit,
+  settleWorkspaceChanges,
+  captureWorkspaceEditVersions,
+  reviewWorkspaceRecovery,
   type AppliedWorkspaceEditSummary,
   type LspWorkspaceEdit,
   type LspTextDocumentEdit,
   type LspTextEdit,
 } from './services/workspace-edit';
+export { normalizeWorkspaceEdit as workspaceTextEdits, documentIdentity } from './services/workspace-edit-plan';
 export {
   registerLocalCodeActionSource,
   type LocalCodeActionSource,

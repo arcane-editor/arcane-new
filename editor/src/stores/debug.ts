@@ -84,6 +84,7 @@ export interface DebugTarget {
 }
 
 interface DebugState {
+  configurationReady: boolean;
   capabilities: DapCapabilities;
   status: DebugStatus;
   /** Attach targets discovered for this project. */
@@ -173,6 +174,7 @@ function persistBreakpoints(workspace: string, bps: Map<string, Breakpoint[]>): 
 let handlersBound = false;
 
 export const useDebugStore = create<DebugState>((set, get) => ({
+  configurationReady: false,
   capabilities: {},
   status: 'inactive',
   targets: [],
@@ -337,7 +339,7 @@ export const useDebugStore = create<DebugState>((set, get) => ({
       }
     }
 
-    set({ status: 'attaching' });
+    set({ status: 'attaching', configurationReady: false });
     try {
       bindDapHandlers(set, get);
       await dapClient.start(workspacePath);
@@ -353,9 +355,19 @@ export const useDebugStore = create<DebugState>((set, get) => ({
         supportsVariableType: true,
       });
       set({ capabilities: caps ?? {} });
-      // attach kicks the session; the 'initialized' event handler then sends
-      // breakpoints + configurationDone.
+      // Configuration is awaited here so callers cannot start Play or a test
+      // before the adapter finishes the initial loaded-type binding scans.
       await dapClient.request('attach', { host, port });
+      for (const [file, list] of get().breakpoints) {
+        await syncBreakpointsForFile(file, list, true);
+      }
+      const offered = get().capabilities.exceptionBreakpointFilters ?? [];
+      await dapClient.request('setExceptionBreakpoints', {
+        filters: get().exceptionFilters.filter(id => offered.some(f => f.filter === id)),
+      });
+      await dapClient.request('configurationDone', undefined, 45_000);
+      if (get().status === 'terminated' || get().status === 'inactive') throw new Error('The debugger disconnected during configuration');
+      set({ configurationReady: true });
       if (play) {
         await useUnityStore.getState().sendPlay();
       }
@@ -363,7 +375,7 @@ export const useDebugStore = create<DebugState>((set, get) => ({
       void warnIfEditorIsOptimized();
     } catch (err) {
       notify({ type: 'error', message: `Attach failed: ${String(err)}` });
-      set({ status: 'inactive' });
+      set({ status: 'inactive', configurationReady: false });
       await dapClient.stop().catch(() => {});
     }
   },
@@ -389,8 +401,9 @@ export const useDebugStore = create<DebugState>((set, get) => ({
     await dapClient.request('stepOut', { threadId: get().currentThreadId ?? 0 }).catch(e => notify.error(`Debugger operation failed: ${String(e)}`));
   },
   stop: async () => {
-    await dapClient.stop().catch(() => {});
-    set({ status: 'terminated', frames: [], scopes: [], variables: new Map(), threads: [] });
+    try { await dapClient.stop(); }
+    catch (error) { notify.error(`Debugger shutdown was not confirmed: ${String(error)}`); return; }
+    set({ status: 'terminated', configurationReady: false, frames: [], scopes: [], variables: new Map(), threads: [] });
   },
 
   selectFrame: async (frameId) => {
@@ -508,7 +521,7 @@ queueMicrotask(() => {
 });
 
 /** Push the breakpoints for one file to the adapter (if a session is live). */
-async function syncBreakpointsForFile(file: string, list: Breakpoint[]): Promise<void> {
+async function syncBreakpointsForFile(file: string, list: Breakpoint[], strict = false): Promise<void> {
   if (!dapClient.isRunning()) return;
   try {
     await dapClient.request('setBreakpoints', {
@@ -528,6 +541,7 @@ async function syncBreakpointsForFile(file: string, list: Breakpoint[]): Promise
       `Could not set breakpoints in ${file.split('/').pop() ?? file}: ` +
         (err instanceof Error ? err.message : String(err)),
     );
+    if (strict) throw err;
   }
 }
 
@@ -619,26 +633,6 @@ function bindDapHandlers(
   if (handlersBound) return;
   handlersBound = true;
 
-  // On 'initialized', push breakpoints + exception filters, then configurationDone.
-  dapClient.on('initialized', () => {
-    void (async () => {
-      for (const [file, list] of get().breakpoints) {
-        await syncBreakpointsForFile(file, list);
-      }
-      // Use the filters the session actually offers rather than a hardcoded
-      // name. The old code always sent `user-unhandled`, which meant the
-      // exception-filter capability was reported and then ignored.
-      const offered = get().capabilities.exceptionBreakpointFilters ?? [];
-      const enabled = get().exceptionFilters.filter(id => offered.some(f => f.filter === id));
-      await dapClient
-        .request('setExceptionBreakpoints', {
-          filters: enabled,
-        })
-        .catch(() => {});
-      await dapClient.request('configurationDone').catch(() => {});
-    })();
-  });
-
   dapClient.on('stopped', (body) => {
     const b = body as { threadId?: number; reason?: string; description?: string };
     const threadId = b.threadId ?? get().currentThreadId ?? 0;
@@ -699,7 +693,7 @@ function bindDapHandlers(
     set({ breakpoints: map });
   });
 
-  const onEnd = () => set({ status: 'terminated', frames: [], scopes: [], variables: new Map(), threads: [], currentFrameId: null, currentThreadId: null, stopReason: null, watchVariables: new Map(), watchResults: new Map() });
+  const onEnd = () => set({ status: 'terminated', configurationReady: false, frames: [], scopes: [], variables: new Map(), threads: [], currentFrameId: null, currentThreadId: null, stopReason: null, watchVariables: new Map(), watchResults: new Map() });
   dapClient.on('terminated', onEnd);
   dapClient.on('exited', onEnd);
   dapClient.on('__exited', onEnd);

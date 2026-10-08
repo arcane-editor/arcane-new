@@ -26,7 +26,7 @@ use tauri::{Emitter, Window};
 use walkdir::WalkDir;
 
 /// Persisted schema version. Bump when the on-disk shape changes.
-const SCHEMA_VERSION: u32 = 1;
+const SCHEMA_VERSION: u32 = 2;
 
 /// Directories never worth scanning. We DO descend into `Assets/` and
 /// `Packages/`; everything else Unity-generated or VCS noise is skipped.
@@ -41,14 +41,7 @@ const SKIP_DIRS: &[&str] = &[
 ];
 
 /// Asset extensions whose contents we scan for `guid:` references.
-const REF_EXTENSIONS: &[&str] = &[
-    "unity",
-    "prefab",
-    "asset",
-    "mat",
-    "controller",
-    "anim",
-];
+const REF_EXTENSIONS: &[&str] = &["unity", "prefab", "asset", "mat", "controller", "anim"];
 
 // ── Serializable types ──────────────────────────────────────────────────────
 
@@ -108,6 +101,31 @@ struct PersistedIndex {
     project_path: String,
     unity_version: String,
     state: IndexState,
+    source_manifest: std::collections::BTreeMap<String, String>,
+}
+
+/// Content fingerprints for indexed sources plus the complete path set for
+/// hygiene. Timestamps alone miss external writes that preserve size/mtime.
+fn source_manifest(workspace: &Path) -> Option<std::collections::BTreeMap<String, String>> {
+    use sha1::{Digest, Sha1};
+    collect_files(workspace)
+        .into_iter()
+        .map(|path| {
+            let fingerprint =
+                if is_ref_asset(&path) || path.extension().is_some_and(|e| e == "meta") {
+                    format!("{:x}", Sha1::digest(std::fs::read(&path).ok()?))
+                } else {
+                    String::new()
+                };
+            Some((
+                path.strip_prefix(workspace)
+                    .ok()?
+                    .to_string_lossy()
+                    .into_owned(),
+                fingerprint,
+            ))
+        })
+        .collect()
 }
 
 impl IndexState {
@@ -141,6 +159,14 @@ impl IndexState {
 fn index_cache() -> &'static Mutex<Option<IndexState>> {
     static CACHE: OnceLock<Mutex<Option<IndexState>>> = OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(None))
+}
+
+// A delta clones the current index before publishing its replacement. Hold
+// this separately from the short-lived cache lock so concurrent builds and
+// deltas cannot publish replacements based on the same obsolete snapshot.
+fn index_mutations() -> &'static Mutex<()> {
+    static MUTATIONS: Mutex<()> = Mutex::new(());
+    &MUTATIONS
 }
 
 /// Compiled `guid:` regex shared across the module.
@@ -278,11 +304,10 @@ fn record_refs(asset_path: &Path, state: &mut IndexState) {
 
     for guid in distinct {
         let count = counts.get(guid.as_str()).copied().unwrap_or(1);
-        state
-            .reverse
-            .entry(guid)
-            .or_default()
-            .push(RefHit { path: path_str.clone(), count });
+        state.reverse.entry(guid).or_default().push(RefHit {
+            path: path_str.clone(),
+            count,
+        });
     }
 }
 
@@ -346,6 +371,7 @@ fn build_state(workspace: &Path, unity_version: &str, window: Option<&Window>) -
     };
 
     emit_progress(window, "scanning", 0, 0);
+    let manifest = source_manifest(workspace);
     let files = collect_files(workspace);
     let total = files.len();
 
@@ -386,7 +412,7 @@ fn build_state(workspace: &Path, unity_version: &str, window: Option<&Window>) -
     compute_hygiene(workspace, &files, &mut state);
 
     emit_progress(window, "persisting", total, total);
-    persist(workspace, unity_version, &state);
+    persist(workspace, unity_version, &state, manifest);
 
     emit_progress(window, "done", total, total);
     state
@@ -394,7 +420,15 @@ fn build_state(workspace: &Path, unity_version: &str, window: Option<&Window>) -
 
 // ── Persistence ─────────────────────────────────────────────────────────────
 
-fn persist(workspace: &Path, unity_version: &str, state: &IndexState) {
+fn persist(
+    workspace: &Path,
+    unity_version: &str,
+    state: &IndexState,
+    manifest: Option<std::collections::BTreeMap<String, String>>,
+) {
+    let Some(source_manifest) = manifest else {
+        return;
+    };
     let dir = index_dir(workspace);
     if std::fs::create_dir_all(&dir).is_err() {
         return; // best-effort; in-memory cache still serves this session
@@ -404,6 +438,7 @@ fn persist(workspace: &Path, unity_version: &str, state: &IndexState) {
         project_path: workspace.to_string_lossy().to_string(),
         unity_version: unity_version.to_string(),
         state: state.clone(),
+        source_manifest,
     };
     if let Ok(json) = serde_json::to_string(&wrapper) {
         let _ = std::fs::write(index_file(workspace), json);
@@ -419,6 +454,7 @@ fn load_fresh(workspace: &Path, unity_version: &str) -> Option<IndexState> {
     if wrapper.schema_version == SCHEMA_VERSION
         && wrapper.project_path == ws
         && wrapper.unity_version == unity_version
+        && source_manifest(workspace).as_ref() == Some(&wrapper.source_manifest)
     {
         Some(wrapper.state)
     } else {
@@ -473,6 +509,11 @@ fn ensure_index(
 /// `pub(crate)` so `unity_diff.rs` can resolve guid → asset path without a
 /// second, competing index implementation.
 pub(crate) fn get_or_build(workspace_path: &str) -> IndexState {
+    let _mutation = lock_recover(index_mutations());
+    get_or_build_locked(workspace_path)
+}
+
+fn get_or_build_locked(workspace_path: &str) -> IndexState {
     let workspace = Path::new(workspace_path);
     let ws_str = workspace.to_string_lossy().to_string();
 
@@ -492,7 +533,10 @@ pub(crate) fn get_or_build(workspace_path: &str) -> IndexState {
     // for queries; an explicit rebuild via unity_index_build refreshes it.
     if let Ok(content) = std::fs::read_to_string(index_file(workspace)) {
         if let Ok(wrapper) = serde_json::from_str::<PersistedIndex>(&content) {
-            if wrapper.schema_version == SCHEMA_VERSION && wrapper.project_path == ws_str {
+            if wrapper.schema_version == SCHEMA_VERSION
+                && wrapper.project_path == ws_str
+                && source_manifest(workspace).as_ref() == Some(&wrapper.source_manifest)
+            {
                 let mut cache = lock_recover(index_cache());
                 *cache = Some(wrapper.state.clone());
                 drop(cache);
@@ -535,6 +579,10 @@ fn reingest_path(state: &mut IndexState, path: &str) {
 
     if p.extension().map(|e| e == "meta").unwrap_or(false) {
         record_meta(p, state);
+    } else {
+        // drop_path cleared the asset's own GUID as well as its outgoing
+        // references. Restore its sidecar mapping on an in-place content edit.
+        record_meta(Path::new(&format!("{path}.meta")), state);
     }
     if is_ref_asset(p) {
         record_refs(p, state);
@@ -554,6 +602,7 @@ pub fn unity_index_build(
     unity_version: String,
     force: bool,
 ) -> Result<IndexSummary, String> {
+    let _mutation = lock_recover(index_mutations());
     let workspace = Path::new(&workspace_path);
     if !workspace.is_dir() {
         return Err(format!("Workspace not found: {}", workspace_path));
@@ -563,9 +612,7 @@ pub fn unity_index_build(
 }
 
 #[tauri::command]
-pub fn unity_index_guid_map(
-    workspace_path: String,
-) -> Result<HashMap<String, String>, String> {
+pub fn unity_index_guid_map(workspace_path: String) -> Result<HashMap<String, String>, String> {
     Ok(get_or_build(&workspace_path).guid_to_path)
 }
 
@@ -612,7 +659,9 @@ pub fn unity_method_usages(workspace_path: String, guid: String) -> Vec<MethodUs
         let mut owner_of: HashMap<i64, i64> = HashMap::new();
         let mut go_name: HashMap<i64, String> = HashMap::new();
         for (doc, _) in &docs {
-            let Ok(fid) = doc.file_id.parse::<i64>() else { continue };
+            let Ok(fid) = doc.file_id.parse::<i64>() else {
+                continue;
+            };
             if let Some(g) = &doc.script_guid {
                 script_of.insert(fid, g.clone());
             }
@@ -676,12 +725,22 @@ pub fn unity_index_apply_delta(
     changed: Vec<String>,
     removed: Vec<String>,
 ) -> Result<(), String> {
+    let _mutation = lock_recover(index_mutations());
     let workspace = Path::new(&workspace_path);
     let ws_str = workspace.to_string_lossy().to_string();
 
     // Operate on the cached state; if absent, build it first so the delta has
     // something consistent to mutate.
-    let mut state = get_or_build(&workspace_path);
+    let mut state = get_or_build_locked(&workspace_path);
+    // Other changed paths may still be queued in a different watcher batch.
+    // A full on-disk manifest here would falsely certify those paths as
+    // indexed too. Invalidate persistence before publishing any partial delta;
+    // the next startup performs a full build with its own source snapshot.
+    match std::fs::remove_file(index_file(workspace)) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(format!("Cannot invalidate the persisted asset index: {e}")),
+    }
     if state.workspace != ws_str {
         // Defensive: get_or_build always sets workspace, but guard anyway.
         state.workspace = ws_str.clone();
@@ -696,9 +755,8 @@ pub fn unity_index_apply_delta(
 
     state.reverse.retain(|_, hits| !hits.is_empty());
 
-    // Persist + cache the updated state (preserve its unity_version).
-    let version = state.unity_version.clone();
-    persist(workspace, &version, &state);
+    // Keep incremental updates in memory. Only a full build may certify and
+    // persist a complete source manifest.
     let mut cache = lock_recover(index_cache());
     *cache = Some(state);
     drop(cache);
@@ -740,7 +798,10 @@ mod tests {
 
     fn make_project(ws: &Path) {
         // A C# script + its .meta declaring SCRIPT_GUID.
-        write(&ws.join("Assets/Scripts/Player.cs"), "public class Player {}");
+        write(
+            &ws.join("Assets/Scripts/Player.cs"),
+            "public class Player {}",
+        );
         write(
             &ws.join("Assets/Scripts/Player.cs.meta"),
             &format!("fileFormatVersion: 2\nguid: {}\n", SCRIPT_GUID),
@@ -795,7 +856,10 @@ mod tests {
         let (state, _) = ensure_index(&ws, "2022.3.10f1", true, None);
         let report = state.hygiene();
         assert!(
-            report.assets_without_meta.iter().any(|p| p.ends_with("orphan.png")),
+            report
+                .assets_without_meta
+                .iter()
+                .any(|p| p.ends_with("orphan.png")),
             "orphan.png should be flagged as missing-meta"
         );
 
@@ -817,7 +881,10 @@ mod tests {
         let (state, _) = ensure_index(&ws, "x", true, None);
         let report = state.hygiene();
         assert!(
-            report.orphan_metas.iter().any(|p| p.ends_with("Gone.cs.meta")),
+            report
+                .orphan_metas
+                .iter()
+                .any(|p| p.ends_with("Gone.cs.meta")),
             "Gone.cs.meta should be flagged as orphan"
         );
 
@@ -851,6 +918,114 @@ mod tests {
     }
 
     #[test]
+    fn offline_asset_changes_invalidate_persisted_results() {
+        let ws = tempfile::tempdir().unwrap();
+        make_project(ws.path());
+        build_state(ws.path(), "6000.3", None);
+        assert!(load_fresh(ws.path(), "6000.3").is_some());
+        fs::write(
+            ws.path().join("Assets/New.prefab"),
+            "guid: 11111111111111111111111111111111",
+        )
+        .unwrap();
+        assert!(load_fresh(ws.path(), "6000.3").is_none());
+        build_state(ws.path(), "6000.3", None);
+        // Same-length replacement must still invalidate the cache.
+        fs::write(
+            ws.path().join("Assets/New.prefab"),
+            "guid: 22222222222222222222222222222222",
+        )
+        .unwrap();
+        assert!(load_fresh(ws.path(), "6000.3").is_none());
+    }
+
+    #[test]
+    fn content_reingest_preserves_own_guid_and_replaces_outgoing_references() {
+        let ws = tempfile::tempdir().unwrap();
+        let asset = ws.path().join("Assets/P.prefab");
+        fs::create_dir_all(asset.parent().unwrap()).unwrap();
+        fs::write(&asset, "guid: 11111111111111111111111111111111").unwrap();
+        fs::write(
+            ws.path().join("Assets/P.prefab.meta"),
+            "guid: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        )
+        .unwrap();
+        let mut state = build_state(ws.path(), "6000.3", None);
+        fs::write(&asset, "guid: 22222222222222222222222222222222").unwrap();
+        reingest_path(&mut state, &asset.to_string_lossy());
+        assert!(state
+            .guid_to_path
+            .contains_key("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
+        assert!(!state
+            .reverse
+            .contains_key("11111111111111111111111111111111"));
+        assert!(state
+            .reverse
+            .contains_key("22222222222222222222222222222222"));
+    }
+
+    #[test]
+    fn incremental_batches_do_not_certify_unprocessed_disk_changes_as_fresh() {
+        let ws = tempfile::tempdir().unwrap();
+        make_project(ws.path());
+        build_state(ws.path(), "6000.3", None);
+        let queued = ws.path().join("Assets/Queued.prefab");
+        write(&queued, "guid: 11111111111111111111111111111111");
+        unity_index_apply_delta(
+            ws.path().to_string_lossy().into(),
+            vec![crate::path_util::to_ui_path(
+                &ws.path().join("Assets/Scenes/Main.unity"),
+            )],
+            vec![],
+        )
+        .unwrap();
+        // A crash before Queued.prefab's watcher batch cannot leave a persisted
+        // manifest claiming that every new on-disk source was indexed.
+        assert!(!index_file(ws.path()).exists());
+        assert!(load_fresh(ws.path(), "6000.3").is_none());
+    }
+
+    #[test]
+    fn concurrent_content_deltas_preserve_every_updated_asset() {
+        let ws = tempfile::tempdir().unwrap();
+        let mut paths = Vec::new();
+        for i in 0..8 {
+            let path = ws.path().join(format!("Assets/P{i}.prefab"));
+            write(&path, &format!("guid: {:032x}", i + 100));
+            paths.push(path);
+        }
+        get_or_build(&ws.path().to_string_lossy());
+        for (i, path) in paths.iter().enumerate() {
+            write(path, &format!("guid: {:032x}", i + 200));
+        }
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(paths.len()));
+        let threads: Vec<_> = paths
+            .into_iter()
+            .map(|path| {
+                let barrier = barrier.clone();
+                let workspace = ws.path().to_string_lossy().into_owned();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    unity_index_apply_delta(
+                        workspace,
+                        vec![crate::path_util::to_ui_path(&path)],
+                        vec![],
+                    )
+                    .unwrap();
+                })
+            })
+            .collect();
+        for thread in threads {
+            thread.join().unwrap();
+        }
+        let state = get_or_build(&ws.path().to_string_lossy());
+        for i in 0..8 {
+            assert!(state.reverse.contains_key(&format!("{:032x}", i + 200)));
+            assert!(!state.reverse.contains_key(&format!("{:032x}", i + 100)));
+        }
+    }
+
+    #[test]
     fn apply_delta_keeps_maps_consistent() {
         clear_cache();
         let ws = temp_dir("delta");
@@ -870,11 +1045,9 @@ mod tests {
             vec![scene_str.clone()],
         )
         .unwrap();
-        let hits = unity_index_find_references(
-            ws.to_string_lossy().to_string(),
-            SCRIPT_GUID.to_string(),
-        )
-        .unwrap();
+        let hits =
+            unity_index_find_references(ws.to_string_lossy().to_string(), SCRIPT_GUID.to_string())
+                .unwrap();
         assert!(hits.is_empty(), "ref dropped after scene removal");
 
         // Recreate the scene on disk and re-ingest via changed → ref returns.
@@ -891,11 +1064,9 @@ mod tests {
             vec![],
         )
         .unwrap();
-        let hits = unity_index_find_references(
-            ws.to_string_lossy().to_string(),
-            SCRIPT_GUID.to_string(),
-        )
-        .unwrap();
+        let hits =
+            unity_index_find_references(ws.to_string_lossy().to_string(), SCRIPT_GUID.to_string())
+                .unwrap();
         assert_eq!(hits.len(), 1, "ref restored after re-ingest");
         assert!(hits[0].path.ends_with("Main.unity"));
 
@@ -906,11 +1077,9 @@ mod tests {
             vec![],
         )
         .unwrap();
-        let hits = unity_index_find_references(
-            ws.to_string_lossy().to_string(),
-            SCRIPT_GUID.to_string(),
-        )
-        .unwrap();
+        let hits =
+            unity_index_find_references(ws.to_string_lossy().to_string(), SCRIPT_GUID.to_string())
+                .unwrap();
         assert_eq!(hits.len(), 1, "re-ingest is idempotent (no dup hits)");
 
         clear_cache();

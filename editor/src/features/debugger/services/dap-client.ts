@@ -124,7 +124,7 @@ class DapClient {
   }
 
   /** Send a DAP request and await its response body. */
-  async request<T = unknown>(command: string, args?: unknown): Promise<T> {
+  async request<T = unknown>(command: string, args?: unknown, timeoutMs = REQUEST_TIMEOUT_MS): Promise<T> {
     if (!this.running) throw new Error('Debug session is not running');
     const seq = this.nextSeq++;
     const payload = JSON.stringify({ seq, type: 'request', command, arguments: args });
@@ -132,10 +132,14 @@ class DapClient {
       const timer = setTimeout(() => {
         this.pending.delete(seq);
         reject(new Error(`DAP request '${command}' timed out`));
-      }, REQUEST_TIMEOUT_MS);
+      }, timeoutMs);
       this.pending.set(seq, { resolve, reject, timer });
     });
-    await invoke('dap_send', { message: payload });
+    try { await invoke('dap_send', { message: payload }); }
+    catch (error) {
+      const pending = this.pending.get(seq);
+      if (pending) { clearTimeout(pending.timer); this.pending.delete(seq); pending.reject(error instanceof Error ? error : new Error(String(error))); }
+    }
     return result as Promise<T>;
   }
 
@@ -147,11 +151,9 @@ class DapClient {
         /* the session may already be gone */
       }
     }
-    try {
-      await invoke('dap_stop');
-    } catch {
-      /* ignore */
-    }
+    // Native completion acknowledges resume/dispose and background cleanup.
+    // A failed command does not establish that the runtime detached safely.
+    await invoke('dap_stop');
     this.handleExit();
     await this.cleanupListeners();
   }

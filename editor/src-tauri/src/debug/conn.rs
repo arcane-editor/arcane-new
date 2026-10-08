@@ -67,7 +67,10 @@ pub enum ConnError {
     /// The peer did not answer the handshake with the same magic.
     Handshake(String),
     /// No reply within the deadline. The socket is deliberately left open.
-    Timeout { command_set: u8, command: u8 },
+    Timeout {
+        command_set: u8,
+        command: u8,
+    },
     /// The reader task ended: the agent went away or the session was disposed.
     Closed,
     Protocol(WireError),
@@ -89,11 +92,7 @@ impl std::fmt::Display for ConnError {
             ConnError::Timeout {
                 command_set,
                 command,
-            } => write!(
-                f,
-                "debugger command {}/{} timed out",
-                command_set, command
-            ),
+            } => write!(f, "debugger command {}/{} timed out", command_set, command),
             ConnError::Closed => write!(f, "debugger connection closed"),
             ConnError::Protocol(e) => write!(f, "debugger protocol error: {}", e),
             ConnError::Agent {
@@ -188,7 +187,9 @@ impl Conn {
                         Err(_) => break,
                     };
                     let body_len = match parsed {
-                        Header::Command { body_len, .. } | Header::Reply { body_len, .. } => body_len,
+                        Header::Command { body_len, .. } | Header::Reply { body_len, .. } => {
+                            body_len
+                        }
                     };
                     let mut body = vec![0u8; body_len];
                     if body_len > 0 && rd.read_exact(&mut body).await.is_err() {
@@ -369,20 +370,36 @@ impl Conn {
     /// continue. Closing the socket without it is the abrupt disconnect that
     /// kills the process.
     pub async fn dispose(&self) {
-        // Best effort: if the agent has already gone, there is nothing to
-        // detach from and nothing to report.
-        let _ = self
+        let _ = self.try_dispose().await;
+        self.closed.store(true, Ordering::SeqCst);
+    }
+
+    /// Interactive shutdown keeps an unacknowledged connection owned by the
+    /// session so Stop can be retried, rather than abandoning the agent.
+    pub async fn try_dispose(&self) -> Result<(), ConnError> {
+        if self.is_closed() {
+            return Ok(());
+        }
+        let reply = self
             .request_within(
                 protocol::CMD_SET_VM,
                 protocol::CMD_VM_DISPOSE,
                 Vec::new(),
                 Duration::from_secs(3),
             )
-            .await;
+            .await?;
+        if !reply.is_ok() {
+            return Err(ConnError::Agent {
+                command_set: protocol::CMD_SET_VM,
+                command: protocol::CMD_VM_DISPOSE,
+                error: reply.error,
+            });
+        }
         self.closed.store(true, Ordering::SeqCst);
         // The socket itself closes when the last clone of this `Conn` drops and
         // the writer task's channel ends. The dispose above is what makes that
         // drop safe.
+        Ok(())
     }
 }
 
@@ -440,7 +457,10 @@ mod tests {
 
         let request = {
             let conn = conn.clone();
-            tokio::spawn(async move { conn.request(protocol::CMD_SET_VM, protocol::CMD_VM_VERSION, Vec::new()).await })
+            tokio::spawn(async move {
+                conn.request(protocol::CMD_SET_VM, protocol::CMD_VM_VERSION, Vec::new())
+                    .await
+            })
         };
         let (id, _, _, _) = agent.next().await;
         agent.event(vm_start_composite());
@@ -496,7 +516,14 @@ mod tests {
 
         let req = {
             let c = conn.clone();
-            tokio::spawn(async move { c.request(protocol::CMD_SET_TYPE, protocol::CMD_TYPE_GET_INFO, Vec::new()).await })
+            tokio::spawn(async move {
+                c.request(
+                    protocol::CMD_SET_TYPE,
+                    protocol::CMD_TYPE_GET_INFO,
+                    Vec::new(),
+                )
+                .await
+            })
         };
         let (id, _, _, _) = agent.next().await;
         agent.reply(id, 2, Vec::new()); // ERR_INVALID_OBJECT
@@ -536,7 +563,10 @@ mod tests {
 
         let next = {
             let c = conn.clone();
-            tokio::spawn(async move { c.request(protocol::CMD_SET_VM, protocol::CMD_VM_VERSION, Vec::new()).await })
+            tokio::spawn(async move {
+                c.request(protocol::CMD_SET_VM, protocol::CMD_VM_VERSION, Vec::new())
+                    .await
+            })
         };
         let (id, _, _, _) = agent.next().await;
         agent.reply(id, 0, vec![0x11]);
@@ -565,6 +595,36 @@ mod tests {
         assert_eq!((cs, c), (protocol::CMD_SET_VM, protocol::CMD_VM_DISPOSE));
         agent.reply(id, 0, Vec::new());
         disposing.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn refused_strict_dispose_keeps_the_connection_for_a_successful_retry() {
+        let mut agent = FakeAgent::start().await;
+        let addr = agent.addr;
+        let connecting = tokio::spawn(async move { Conn::connect(addr).await });
+        let (id, _, _, _) = agent.next().await;
+        agent.reply(id, 0, Vec::new());
+        let conn = connecting.await.unwrap().unwrap();
+        let disposing = {
+            let conn = conn.clone();
+            tokio::spawn(async move { conn.try_dispose().await })
+        };
+        let (id, _, _, _) = agent.next().await;
+        agent.reply(id, 100, Vec::new());
+        assert!(disposing.await.unwrap().is_err());
+        assert!(!conn.is_closed());
+        let retry = {
+            let conn = conn.clone();
+            tokio::spawn(async move { conn.try_dispose().await })
+        };
+        let (id, cs, command, _) = agent.next().await;
+        assert_eq!(
+            (cs, command),
+            (protocol::CMD_SET_VM, protocol::CMD_VM_DISPOSE)
+        );
+        agent.reply(id, 0, Vec::new());
+        retry.await.unwrap().unwrap();
+        assert!(conn.is_closed());
     }
 
     #[tokio::test]

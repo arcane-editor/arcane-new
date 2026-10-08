@@ -10,6 +10,7 @@ import {
 } from './model-context';
 import {
   applyLspWorkspaceEdit,
+  captureWorkspaceEditVersions,
   type LspWorkspaceEdit,
 } from './workspace-edit';
 import {
@@ -42,6 +43,7 @@ interface LspCodeAction {
   command?: LspCommand;
   data?: unknown;
 }
+const actionVersions = new WeakMap<LspCodeAction, ReturnType<typeof captureWorkspaceEditVersions>>();
 
 // ── Local (non-LSP) quick-fix source registry ───────────────────
 
@@ -192,18 +194,21 @@ function isBareCommand(item: LspCodeAction | LspCommand): item is LspCommand {
 async function executeLspCodeAction(action: LspCodeAction, serverKey: string): Promise<void> {
   const client = lspManager.client(serverKey);
   let resolved = action;
+  let expectedBuffers = actionVersions.get(action);
 
   if (!resolved.edit && resolved.data !== undefined && client.isRunning()) {
     try {
+      const beforeResolve = captureWorkspaceEditVersions();
       const r = await client.request<LspCodeAction | null>('codeAction/resolve', resolved);
-      if (r) resolved = r;
+      if (r) { resolved = r; expectedBuffers = beforeResolve; }
     } catch (err) {
       console.warn('[LSP] codeAction/resolve failed:', err);
     }
   }
 
   if (resolved.edit) {
-    await applyLspWorkspaceEdit(resolved.edit);
+    const result = await applyLspWorkspaceEdit(resolved.edit, { expectedBuffers, preview: resolved.kind?.startsWith('refactor') });
+    if (result.failedFiles.length || result.cancelled) return;
   }
 
   if (resolved.command) {
@@ -313,6 +318,7 @@ export function registerLspCodeActionProviders(monaco: Monaco): () => void {
 
     // Never block the lightbulb: a slow/failed server yields [] and the
     // local actions still show.
+    const expectedBuffers = captureWorkspaceEditVersions();
     const result = await withTimeout(
       ctx.client.request<Array<LspCodeAction | LspCommand> | null>(
         'textDocument/codeAction',
@@ -330,6 +336,7 @@ export function registerLspCodeActionProviders(monaco: Monaco): () => void {
       const action: LspCodeAction = isBareCommand(item)
         ? { title: item.title, command: item }
         : item;
+      actionVersions.set(action, expectedBuffers);
 
       const diagnostics = (action.diagnostics ?? []).map((d) => ({
         severity:

@@ -222,7 +222,16 @@ const projects = discoverUnityProjects({ env: process.env, platform: process.pla
 if (projects.length === 0) {
   skip('no Unity project found (open one in Unity, or set UNITYIDE_SMOKE_UNITY_PROJECT)');
 }
-const project = projects[0];
+// Discovery selects Unity's version/install. Never regenerate a user's project.
+const sourceProject = projects[0];
+const project = fs.mkdtempSync(path.join(os.tmpdir(), 'unityide-csharp-check-'));
+fs.mkdirSync(path.join(project, 'ProjectSettings'));
+fs.mkdirSync(path.join(project, 'Assets'));
+fs.mkdirSync(path.join(project, 'Packages'));
+fs.copyFileSync(path.join(sourceProject, 'ProjectSettings/ProjectVersion.txt'), path.join(project, 'ProjectSettings/ProjectVersion.txt'));
+fs.writeFileSync(path.join(project, 'Packages/manifest.json'), '{"dependencies":{}}');
+fs.writeFileSync(path.join(project, 'Assets/Probe.cs'), 'public class Probe {}');
+process.on('exit', () => fs.rmSync(project, { recursive: true, force: true }));
 
 const pinnedVersion = readPinnedCsharpLsVersion(
   fs.readFileSync(path.join(EDITOR_DIR, 'src-tauri', 'src', 'csharp_ls.rs'), 'utf8'),

@@ -277,10 +277,62 @@ pub async fn profiler_list() -> Result<Vec<Value>, String> {
 pub async fn profiler_frames(capture_id: String) -> Result<Vec<Value>, String> {
     background(move|| {
         let db=open(&capture_id)?;
-        let mut stmt=db.prepare("SELECT frame,MAX(duration),MAX(gpu),COUNT(*) FROM frames GROUP BY frame ORDER BY frame DESC LIMIT 2000").map_err(|e|e.to_string())?;
+        let mut stmt=db.prepare("SELECT frame,MAX(duration),MAX(gpu),COUNT(*) FROM frames GROUP BY frame ORDER BY frame DESC").map_err(|e|e.to_string())?;
         let rows=stmt.query_map([],|r|Ok(json!({"frame":r.get::<_,i64>(0)?,"durationMs":r.get::<_,f64>(1)?,"gpuMs":r.get::<_,Option<f64>>(2)?,"threads":r.get::<_,i64>(3)?}))).map_err(|e|e.to_string())?;
         rows.collect::<Result<Vec<_>,_>>().map_err(|e|e.to_string())
     }).await
+}
+
+fn hotspots(
+    db: &Connection,
+    first: i64,
+    last: i64,
+    thread: i64,
+    search: &str,
+) -> Result<Vec<Value>, String> {
+    if first > last {
+        return Err("The first frame must not follow the last frame".into());
+    }
+    let mut stmt = db.prepare(
+        "SELECT s.name, SUM(s.duration),
+         SUM(MAX(0,s.duration-COALESCE((SELECT SUM(c.duration) FROM samples c WHERE c.frame=s.frame AND c.thread=s.thread AND c.parent=s.id),0))),
+         COUNT(*), CASE WHEN COUNT(s.allocation)=COUNT(*) THEN SUM(s.allocation) ELSE NULL END
+         FROM samples s WHERE s.frame BETWEEN ?1 AND ?2 AND s.thread=?3
+         AND instr(lower(s.name),lower(?4))>0
+         GROUP BY s.name ORDER BY 3 DESC, s.name"
+    ).map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params![first, last, thread, search], |r| {
+            Ok(json!({
+                "name": r.get::<_,String>(0)?, "durationMs": r.get::<_,f64>(1)?,
+                "selfMs": r.get::<_,f64>(2)?, "calls": r.get::<_,i64>(3)?,
+                "allocationBytes": r.get::<_,Option<f64>>(4)?
+            }))
+        })
+        .map_err(|e| e.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
+}
+
+/// Aggregate the complete selected range, independently of sample pagination.
+#[tauri::command]
+pub async fn profiler_hotspots(
+    capture_id: String,
+    first_frame: i64,
+    last_frame: i64,
+    thread: i64,
+    search: String,
+) -> Result<Vec<Value>, String> {
+    background(move || {
+        hotspots(
+            &open(&capture_id)?,
+            first_frame,
+            last_frame,
+            thread,
+            &search,
+        )
+    })
+    .await
 }
 #[tauri::command]
 pub async fn profiler_query(
@@ -346,6 +398,43 @@ pub async fn profiler_import(source: String) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn hotspot_analysis_includes_samples_beyond_the_first_page_and_all_selected_frames() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("capture");
+        create_at(&file, &json!({})).unwrap();
+        let db = Connection::open(file).unwrap();
+        for id in 0..1001 {
+            db.execute(
+                "INSERT INTO samples VALUES(1,0,?1,-1,0,?2,0,?3,0,NULL,'[]')",
+                params![
+                    id,
+                    if id == 1000 { "Expensive" } else { "Small" },
+                    if id == 1000 { 5000.0 } else { 1.0 }
+                ],
+            )
+            .unwrap();
+        }
+        db.execute(
+            "INSERT INTO samples VALUES(3000,0,0,-1,0,'Older range',0,9000,0,128,'[]')",
+            [],
+        )
+        .unwrap();
+        let frame = hotspots(&db, 1, 1, 0, "").unwrap();
+        assert_eq!(frame[0]["name"], "Expensive");
+        assert_eq!(frame[0]["selfMs"], 5000.0);
+        assert!(frame[0]["allocationBytes"].is_null());
+        let capture = hotspots(&db, 1, 3000, 0, "").unwrap();
+        assert_eq!(capture[0]["name"], "Older range");
+        assert_eq!(capture[0]["allocationBytes"], 128.0);
+        db.execute(
+            "INSERT INTO samples VALUES(3000,0,1,-1,0,'Older range',0,1,0,NULL,'[]')",
+            [],
+        )
+        .unwrap();
+        assert!(hotspots(&db, 1, 3000, 0, "Older range").unwrap()[0]["allocationBytes"].is_null());
+        assert!(hotspots(&db, 3000, 1, 0, "").is_err());
+    }
     #[test]
     fn nested_sample_costs_and_duplicate_chunks() {
         let dir = tempfile::tempdir().unwrap();

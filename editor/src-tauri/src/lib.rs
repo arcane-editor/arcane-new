@@ -27,6 +27,7 @@ mod install_id;
 mod activation;
 mod graphify;
 mod fs_atomic;
+mod workspace_edit;
 mod fs_copy;
 mod cli;
 mod window_registry;
@@ -1172,6 +1173,11 @@ pub fn run() {
             write_file_bytes,
             write_file,
             write_file_if_unchanged,
+            workspace_edit::workspace_edit_apply,
+            workspace_edit::workspace_edit_identities,
+            workspace_edit::workspace_edit_undo,
+            workspace_edit::workspace_edit_pending,
+            workspace_edit::workspace_edit_complete,
             path_exists,
             dir_exists,
             canonicalize_path,
@@ -1325,6 +1331,7 @@ pub fn run() {
             unity_profiler::profiler_list,
             unity_profiler::profiler_frames,
             unity_profiler::profiler_query,
+            unity_profiler::profiler_hotspots,
             unity_profiler::profiler_export,
             unity_profiler::profiler_import,
             debug::host::debug_targets,

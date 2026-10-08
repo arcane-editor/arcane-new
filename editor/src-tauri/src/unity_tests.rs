@@ -168,7 +168,11 @@ pub fn discover(workspace: &Path) -> Vec<TestAssemblyDTO> {
 
     let mut out = Vec::new();
     for node in graph.iter().filter(|n| is_test_assembly(n)) {
-        let mode = if node.is_editor_only { "EditMode" } else { "PlayMode" };
+        let mode = if node.is_editor_only {
+            "EditMode"
+        } else {
+            "PlayMode"
+        };
         let root = PathBuf::from(&node.root_folder);
 
         // class FQN -> (file_path, Vec<TestNode>)
@@ -365,6 +369,125 @@ fn editor_executable(install_path: &str) -> PathBuf {
     }
 }
 
+/// Atomically reserve a run directory. Never read another execution's XML,
+/// including after a failed launch, a crash, or two simultaneous runs.
+fn reserve_run_dir(workspace: &Path) -> Result<PathBuf, String> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let root = workspace.join("Library/UnityIDE/test-runs");
+    std::fs::create_dir_all(&root).map_err(|e| e.to_string())?;
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| e.to_string())?
+        .as_nanos();
+    let dir = root.join(format!(
+        "{stamp}-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
+    std::fs::create_dir(&dir).map_err(|e| format!("Cannot reserve test run: {e}"))?;
+    Ok(dir)
+}
+
+fn checked_headless_results(
+    exit_code: Option<i32>,
+    xml: &str,
+) -> Result<TestRunSummaryDTO, String> {
+    // UTF uses 2 for completed runs with failing tests. A process error or a
+    // killed Editor must never be presented as a passed (possibly empty) run.
+    if !matches!(exit_code, Some(0 | 2)) {
+        return Err(format!(
+            "Unity test process did not complete successfully ({exit_code:?})"
+        ));
+    }
+    let mut reader = quick_xml::Reader::from_str(xml);
+    let mut depth = 0usize;
+    let mut completed = false;
+    let mut cases = 0usize;
+    let mut root_result = None;
+    loop {
+        use quick_xml::events::Event;
+        match reader
+            .read_event()
+            .map_err(|e| format!("Invalid test results XML: {e}"))?
+        {
+            Event::Start(e) | Event::Empty(e) if depth == 0 => {
+                if completed || e.name().as_ref() != b"test-run" {
+                    return Err("Expected an NUnit test-run document".into());
+                }
+                for attribute in e.attributes() {
+                    let attribute =
+                        attribute.map_err(|e| format!("Invalid test-run attribute: {e}"))?;
+                    if attribute.key.as_ref() == b"result" {
+                        root_result = Some(
+                            attribute
+                                .decode_and_unescape_value(reader.decoder())
+                                .map_err(|e| e.to_string())?
+                                .into_owned(),
+                        );
+                    }
+                }
+                // The NUnit root is not self-closing, even for zero tests.
+                depth = 1;
+            }
+            Event::Start(e) => {
+                if e.name().as_ref() == b"test-case" {
+                    cases += 1;
+                }
+                depth += 1;
+            }
+            Event::Empty(e) => {
+                if e.name().as_ref() == b"test-case" {
+                    cases += 1;
+                }
+            }
+            Event::End(_) => {
+                if depth == 0 {
+                    return Err("Unexpected closing XML element".into());
+                }
+                depth -= 1;
+                if depth == 0 {
+                    completed = true;
+                }
+            }
+            Event::Eof => break,
+            Event::Text(e) if depth == 0 && !e.iter().all(u8::is_ascii_whitespace) => {
+                return Err("Unexpected text outside test-run".into());
+            }
+            _ => {}
+        }
+    }
+    if !completed || depth != 0 {
+        return Err("Incomplete test results XML".into());
+    }
+    let summary = parse_nunit_xml(xml);
+    if summary.results.len() != cases {
+        return Err("Incomplete test case results".into());
+    }
+    if summary.results.iter().any(|case| {
+        case.full_name.is_empty()
+            || !matches!(
+                case.status.as_str(),
+                "Passed" | "Failed" | "Skipped" | "Inconclusive"
+            )
+    }) {
+        return Err("Test cases have missing identities or unsupported result states".into());
+    }
+    if root_result
+        .as_deref()
+        .is_some_and(|result| !matches!(result, "Passed" | "Failed" | "Skipped" | "Inconclusive"))
+    {
+        return Err("Unity did not report a completed test-run outcome".into());
+    }
+    if root_result.as_deref() == Some("Failed") && summary.failed == 0 {
+        return Err("Unity reported a failed run without individual test failures; check compilation and runner errors".into());
+    }
+    if exit_code == Some(2) && summary.failed == 0 {
+        return Err("Unity reported failing tests but the XML contains no failures".into());
+    }
+    Ok(summary)
+}
+
 /// Run tests headlessly via `Unity -batchmode -runTests`. Requires the Editor to
 /// be CLOSED on this project (Unity locks the project). Long-running.
 #[tauri::command]
@@ -378,13 +501,9 @@ pub fn unity_tests_run_headless(
         .ok_or_else(|| "Unity editor install not found for this version".to_string())?;
     let exe = editor_executable(&install.path);
 
-    let results_path = Path::new(&workspace_path)
-        .join("Library/UnityIDE")
-        .join("test-results.xml");
-    if let Some(parent) = results_path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    let log_path = Path::new(&workspace_path).join("Library/UnityIDE/test-run.log");
+    let run_dir = reserve_run_dir(Path::new(&workspace_path))?;
+    let results_path = run_dir.join("test-results.xml");
+    let log_path = run_dir.join("test-run.log");
 
     let test_platform = if mode.eq_ignore_ascii_case("PlayMode") {
         "PlayMode"
@@ -420,13 +539,64 @@ pub fn unity_tests_run_headless(
             log_path.to_string_lossy()
         )
     })?;
-    Ok(parse_nunit_xml(&xml))
+    checked_headless_results(status.code(), &xml)
+        .map_err(|e| format!("{e}. See {}", log_path.display()))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn each_execution_reserves_empty_results_directory() {
+        let tmp = tempfile::tempdir().unwrap();
+        let first = reserve_run_dir(tmp.path()).unwrap();
+        fs::write(first.join("test-results.xml"), "old success").unwrap();
+        let second = reserve_run_dir(tmp.path()).unwrap();
+        assert_ne!(first, second);
+        assert!(!second.join("test-results.xml").exists());
+    }
+
+    #[test]
+    fn incomplete_or_failed_launch_cannot_report_success() {
+        let success = r#"<test-run><test-case fullname="T.A" result="Passed"/></test-run>"#;
+        assert_eq!(
+            checked_headless_results(Some(0), success).unwrap().passed,
+            1
+        );
+        for code in [None, Some(1), Some(3), Some(2)] {
+            assert!(checked_headless_results(code, success).is_err());
+        }
+        for invalid in [
+            "",
+            "<test-run>",
+            "<test-run><test-case",
+            "<other/>",
+            "<test-run><bad></test-run>",
+        ] {
+            assert!(
+                checked_headless_results(Some(0), invalid).is_err(),
+                "{invalid}"
+            );
+        }
+        for invalid in [
+            r#"<test-run result="Failed"></test-run>"#,
+            r#"<test-run result="Cancelled"></test-run>"#,
+            r#"<test-run><test-case result="Passed"/></test-run>"#,
+            r#"<test-run><test-case fullname="T.A" result="Unknown"/></test-run>"#,
+        ] {
+            assert!(
+                checked_headless_results(Some(0), invalid).is_err(),
+                "{invalid}"
+            );
+        }
+        let failure = r#"<test-run><test-case fullname="T.A" result="Failed"/></test-run>"#;
+        assert_eq!(
+            checked_headless_results(Some(2), failure).unwrap().failed,
+            1
+        );
+    }
 
     fn write(dir: &Path, rel: &str, content: &str) {
         let p = dir.join(rel);

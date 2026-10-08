@@ -37,7 +37,7 @@ export function isSerializedFieldDecl(field: FieldDecl): boolean {
   // public => serialized (unless [NonSerialized], handled above).
   // private/protected/internal => only serialized with [SerializeField].
   if (field.modifiers.includes('public')) return true;
-  return field.attributes.includes('SerializeField');
+  return field.attributes.includes('SerializeField') || field.attributes.includes('SerializeReference');
 }
 
 /** Is the given scanned field one Unity will serialize? */

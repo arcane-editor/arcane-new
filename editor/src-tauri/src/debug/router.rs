@@ -51,7 +51,11 @@ pub enum Msg {
     /// The runtime's socket ended.
     SdbClosed,
     /// A background catch-up scan finished.
-    TypesFound { path: String, types: Vec<u32> },
+    TypesFound {
+        path: String,
+        generation: u64,
+        result: Result<Vec<u32>, String>,
+    },
 }
 
 /// A breakpoint the editor asked for.
@@ -116,6 +120,12 @@ pub struct Router {
     /// Unity object at all. Cached because finding it means walking the whole
     /// base-type chain, and the answer never changes for a given type.
     unity_ptr_field: HashMap<u32, Option<u32>>,
+    scan_generation: u64,
+    pending_scans: HashMap<String, u64>,
+    scan_errors: HashMap<String, String>,
+    pending_configuration: Vec<Json>,
+    background_tasks: Vec<tokio::task::JoinHandle<()>>,
+    event_task: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl Router {
@@ -143,6 +153,12 @@ impl Router {
             handles: Handles::new(),
             write_locations: HashMap::new(),
             unity_ptr_field: HashMap::new(),
+            scan_generation: 0,
+            pending_scans: HashMap::new(),
+            scan_errors: HashMap::new(),
+            pending_configuration: Vec::new(),
+            background_tasks: Vec::new(),
+            event_task: None,
         }
     }
 
@@ -157,11 +173,27 @@ impl Router {
                 self.write_locations.clear();
                 self.event("terminated", json!({}));
             }
-            Msg::TypesFound { path, types } => {
-                for type_id in &types {
-                    self.remember_type(*type_id);
+            Msg::TypesFound {
+                path,
+                generation,
+                result,
+            } => {
+                if self.pending_scans.get(&path) != Some(&generation) {
+                    return;
                 }
-                self.bind_against(&types, Some(&path)).await;
+                self.pending_scans.remove(&path);
+                match result {
+                    Ok(types) => {
+                        for type_id in &types {
+                            self.remember_type(*type_id);
+                        }
+                        self.bind_against(&types, Some(&path)).await;
+                    }
+                    Err(error) => {
+                        self.scan_errors.insert(path, error);
+                    }
+                }
+                self.finish_configuration();
             }
         }
     }
@@ -245,7 +277,14 @@ impl Router {
             "attach" => self.attach(&request).await,
             "setBreakpoints" => self.set_breakpoints(&request).await,
             "setExceptionBreakpoints" => self.set_exception_breakpoints(&request).await,
-            "configurationDone" => self.respond(&request, json!({})),
+            "configurationDone" => {
+                if self.conn.is_none() {
+                    self.refuse(&request, "No attached runtime");
+                } else {
+                    self.pending_configuration.push(request);
+                    self.finish_configuration();
+                }
+            }
             "threads" => self.threads(&request).await,
             "stackTrace" => self.stack_trace(&request).await,
             "scopes" => self.scopes(&request).await,
@@ -266,6 +305,10 @@ impl Router {
     }
 
     async fn attach(&mut self, request: &Json) {
+        if self.conn.is_some() {
+            self.refuse(request, "Detach the current runtime before attaching again");
+            return;
+        }
         let args = request.get("arguments").cloned().unwrap_or(json!({}));
         let explicit = args.get("port").and_then(|p| p.as_u64()).map(|port| {
             let host = args
@@ -317,7 +360,7 @@ impl Router {
         {
             let mut events = conn.subscribe();
             let tx = self.self_tx.clone();
-            tokio::spawn(async move {
+            self.event_task = Some(tokio::spawn(async move {
                 use tokio::sync::broadcast::error::RecvError;
                 loop {
                     match events.recv().await {
@@ -333,7 +376,7 @@ impl Router {
                         }
                     }
                 }
-            });
+            }));
         }
 
         self.conn = Some(conn);
@@ -416,27 +459,29 @@ impl Router {
         self.wanted.insert(path.clone(), requested);
         self.rewatch().await;
 
-        // Try the types we already know about, so the common case answers
-        // verified straight away...
-        let known: Vec<u32> = Vec::new();
-        self.bind_against(&known, Some(&path)).await;
-
-        // ...and look for types that loaded before we attached, off the
-        // request path. This is the command that stalled a real editor.
+        // Resolve against a fresh catch-up scan rather than type IDs retained
+        // across a Unity domain reload. Keep the scan off the request path.
+        self.scan_errors.remove(&path);
+        self.pending_scans.remove(&path);
         if let Some(conn) = &self.conn {
             let conn = conn.clone();
             let tx = self.self_tx.clone();
             let scan_path = path.clone();
-            tokio::spawn(async move {
-                if let Ok(types) =
-                    symbols::types_for_source_file(&conn, &scan_path, symbols::SCAN_TIMEOUT).await
-                {
-                    let _ = tx.send(Msg::TypesFound {
-                        path: scan_path,
-                        types,
-                    });
-                }
-            });
+            self.scan_generation += 1;
+            let generation = self.scan_generation;
+            self.pending_scans.insert(path.clone(), generation);
+            self.background_tasks.retain(|task| !task.is_finished());
+            self.background_tasks.push(tokio::spawn(async move {
+                let result =
+                    symbols::types_for_source_file(&conn, &scan_path, symbols::SCAN_TIMEOUT)
+                        .await
+                        .map_err(|e| e.to_string());
+                let _ = tx.send(Msg::TypesFound {
+                    path: scan_path,
+                    generation,
+                    result,
+                });
+            }));
         }
 
         let body = json!({
@@ -446,6 +491,30 @@ impl Router {
                 .collect::<Vec<_>>(),
         });
         self.respond(request, body);
+    }
+
+    /// Acknowledging configuration means all initial catch-up scans and their
+    /// bindings finished. Keep processing the queue while scans run.
+    fn finish_configuration(&mut self) {
+        if !self.pending_scans.is_empty() {
+            return;
+        }
+        let error = self
+            .scan_errors
+            .iter()
+            .map(|(path, e)| format!("{path}: {e}"))
+            .collect::<Vec<_>>()
+            .join("; ");
+        for request in std::mem::take(&mut self.pending_configuration) {
+            if error.is_empty() {
+                self.respond(&request, json!({}));
+            } else {
+                self.refuse(
+                    &request,
+                    format!("Initial breakpoint binding could not complete: {error}"),
+                );
+            }
+        }
     }
 
     fn breakpoint_status(&self, path: &str, line: u32) -> Json {
@@ -531,8 +600,15 @@ impl Router {
         if files.is_empty() {
             return;
         }
-        if let Ok(id) = symbols::watch_source_files(&conn, &files).await {
-            self.watch_request = Some(id);
+        match symbols::watch_source_files(&conn, &files).await {
+            Ok(id) => {
+                self.watch_request = Some(id);
+                self.scan_errors.remove("type-load subscription");
+            }
+            Err(e) => {
+                self.scan_errors
+                    .insert("type-load subscription".into(), e.to_string());
+            }
         }
     }
 
@@ -559,9 +635,13 @@ impl Router {
         for (path, lines) in targets {
             for line in lines {
                 let key = (path.clone(), line);
-                let Ok(Some(location)) = symbols::locate_in_types(&conn, types, &path, line).await
-                else {
-                    continue;
+                let location = match symbols::locate_in_types(&conn, types, &path, line).await {
+                    Ok(Some(location)) => location,
+                    Ok(None) => continue,
+                    Err(e) => {
+                        self.scan_errors.insert(path.clone(), e.to_string());
+                        continue;
+                    }
                 };
 
                 // Already armed at exactly this spot: nothing to do. Armed
@@ -580,26 +660,31 @@ impl Router {
                     .await;
                 }
 
-                if let Ok(request_id) = symbols::arm_breakpoint(&conn, location).await {
-                    self.by_request.insert(request_id, key.clone());
-                    self.bound.insert(
-                        key,
-                        Bound {
-                            request_id,
-                            location,
-                        },
-                    );
-                    self.event(
-                        "breakpoint",
-                        json!({
-                            "reason": "changed",
-                            "breakpoint": {
-                                "verified": true,
-                                "line": location.line,
-                                "source": { "path": path },
-                            }
-                        }),
-                    );
+                match symbols::arm_breakpoint(&conn, location).await {
+                    Ok(request_id) => {
+                        self.by_request.insert(request_id, key.clone());
+                        self.bound.insert(
+                            key,
+                            Bound {
+                                request_id,
+                                location,
+                            },
+                        );
+                        self.event(
+                            "breakpoint",
+                            json!({
+                                "reason": "changed",
+                                "breakpoint": {
+                                    "verified": true,
+                                    "line": location.line,
+                                    "source": { "path": path },
+                                }
+                            }),
+                        );
+                    }
+                    Err(e) => {
+                        self.scan_errors.insert(path.clone(), e.to_string());
+                    }
                 }
             }
         }
@@ -1368,16 +1453,26 @@ impl Router {
     }
 
     async fn disconnect(&mut self, request: &Json) {
-        if let Some(conn) = self.conn.take() {
+        self.stop_background_tasks().await;
+        if let Some(conn) = self.conn.clone() {
             // Resume first: leaving the runtime suspended after a detach freezes
             // the editor with no debugger left to release it.
             let _ = session::resume(&conn).await;
-            conn.dispose().await;
+            if let Err(error) = conn.try_dispose().await {
+                self.refuse(
+                    request,
+                    format!("Runtime detach was not acknowledged: {error}; retry Stop"),
+                );
+                return;
+            }
+            self.conn = None;
         }
+        self.stop_event_task().await;
         self.stopped_thread = None;
         self.handles.invalidate();
         self.write_locations.clear();
         self.bound.clear();
+        self.by_request.clear();
         self.watch_request = None;
         self.respond(request, json!({}));
         self.event("terminated", json!({}));
@@ -1388,10 +1483,42 @@ impl Router {
     ///
     /// The resume matters as much as the dispose: abandoning a suspended
     /// runtime leaves the editor frozen with no debugger left to release it.
-    pub async fn shutdown(&mut self) {
-        if let Some(conn) = self.conn.take() {
+    pub async fn shutdown(&mut self) -> Result<(), String> {
+        self.stop_background_tasks().await;
+        if let Some(conn) = self.conn.clone() {
             let _ = session::resume(&conn).await;
-            conn.dispose().await;
+            conn.try_dispose()
+                .await
+                .map_err(|e| format!("Runtime detach was not acknowledged: {e}; retry Stop"))?;
+            self.conn = None;
+        }
+        self.stop_event_task().await;
+        Ok(())
+    }
+
+    async fn stop_event_task(&mut self) {
+        if let Some(task) = self.event_task.take() {
+            task.abort();
+            let _ = task.await;
+        }
+    }
+
+    async fn stop_background_tasks(&mut self) {
+        // Stop scans issuing commands before disposal. Conn's reader still
+        // drains replies to requests whose waiting callers were aborted.
+        let tasks = std::mem::take(&mut self.background_tasks);
+        for task in &tasks {
+            task.abort();
+        }
+        for task in tasks {
+            let _ = task.await;
+        }
+        self.pending_scans.clear();
+        for request in std::mem::take(&mut self.pending_configuration) {
+            self.refuse(
+                &request,
+                "Debugger stopped before initial configuration completed",
+            );
         }
     }
 
@@ -1639,3 +1766,77 @@ impl Router {
 
 /// How many array elements to show before the user has to ask for more.
 const MAX_ARRAY_PREVIEW: u32 = 100;
+
+#[cfg(test)]
+mod readiness_tests {
+    use super::*;
+
+    fn router() -> (Router, mpsc::UnboundedReceiver<Json>) {
+        let (out, rx) = mpsc::unbounded_channel();
+        let (self_tx, _) = mpsc::unbounded_channel();
+        (Router::new(out, self_tx, PathBuf::new()), rx)
+    }
+
+    #[tokio::test]
+    async fn configuration_waits_for_every_current_scan_and_ignores_obsolete_results() {
+        let (mut router, mut responses) = router();
+        router.pending_scans.insert("A.cs".into(), 2);
+        router.pending_scans.insert("B.cs".into(), 3);
+        router
+            .pending_configuration
+            .push(json!({"seq": 7, "command": "configurationDone"}));
+        router.finish_configuration();
+        assert!(responses.try_recv().is_err());
+        router
+            .on(Msg::TypesFound {
+                path: "A.cs".into(),
+                generation: 1,
+                result: Err("obsolete failure".into()),
+            })
+            .await;
+        assert_eq!(router.pending_scans.get("A.cs"), Some(&2));
+        assert!(router.scan_errors.is_empty());
+        router
+            .on(Msg::TypesFound {
+                path: "A.cs".into(),
+                generation: 2,
+                result: Ok(vec![]),
+            })
+            .await;
+        assert!(responses.try_recv().is_err());
+        router
+            .on(Msg::TypesFound {
+                path: "B.cs".into(),
+                generation: 3,
+                result: Ok(vec![]),
+            })
+            .await;
+        let response = responses.try_recv().unwrap();
+        assert_eq!(response["request_seq"], 7);
+        assert_eq!(response["success"], true);
+        assert!(responses.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn failed_initial_scan_refuses_configuration_instead_of_claiming_readiness() {
+        let (mut router, mut responses) = router();
+        router.pending_scans.insert("A.cs".into(), 1);
+        router
+            .pending_configuration
+            .push(json!({"seq": 8, "command": "configurationDone"}));
+        router
+            .on(Msg::TypesFound {
+                path: "A.cs".into(),
+                generation: 1,
+                result: Err("scan timed out".into()),
+            })
+            .await;
+        let response = responses.try_recv().unwrap();
+        assert_eq!(response["success"], false);
+        assert!(response["message"]
+            .as_str()
+            .unwrap()
+            .contains("scan timed out"));
+        assert!(router.pending_configuration.is_empty());
+    }
+}

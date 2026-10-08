@@ -2,11 +2,12 @@
 import { mkdtemp, mkdir, writeFile, cp, readFile, readdir, access } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { tmpdir, homedir } from 'node:os';
+import { compareVerificationVersions } from './unity-verification-versions';
 const root = resolve(import.meta.dir, '..');
 let executable = process.env.UNITYIDE_PROFILER_EDITOR;
 if (!executable) {
   const hub = process.platform === 'darwin' ? '/Applications/Unity/Hub/Editor' : process.platform === 'win32' ? 'C:/Program Files/Unity/Hub/Editor' : join(homedir(), 'Unity/Hub/Editor');
-  for (const version of (await readdir(hub).catch(() => [] as string[])).sort().reverse()) {
+  for (const version of (await readdir(hub).catch(() => [] as string[])).sort(compareVerificationVersions)) {
     const candidate = join(hub, version, process.platform === 'darwin' ? 'Unity.app/Contents/MacOS/Unity' : process.platform === 'win32' ? 'Editor/Unity.exe' : 'Editor/Unity');
     if (await access(candidate).then(() => true, () => false)) { executable = candidate; break; }
   }
@@ -24,7 +25,7 @@ await cp(join(root, 'tooling/unity-profiler/ProfilerVerification.cs'), join(proj
 await writeFile(join(project, 'Packages/manifest.json'), JSON.stringify({ dependencies: {} }));
 console.log(`Unity profiler fixture: ${project}`);
 const log = join(project, 'unity.log');
-const child = Bun.spawn([executable, '-batchmode', '-nographics', '-projectPath', project, '-executeMethod', 'UnityIDE.Bridge.ProfilerVerification.Run', '-logFile', log], { stdout: 'ignore', stderr: 'ignore' });
+const child = Bun.spawn([executable, '-batchmode', '-nographics', '-profiler-enable', '-projectPath', project, '-executeMethod', 'UnityIDE.Bridge.ProfilerVerification.Run', '-logFile', log], { stdout: 'ignore', stderr: 'ignore' });
 const timeout = setTimeout(() => child.kill(), 180_000);
 const progress = setInterval(() => console.log('Unity profiler fixture is compiling or collecting frames…'), 30_000);
 const code = await child.exited;
